@@ -69,3 +69,20 @@
 4. Click "Commit to New Spine".
 5. Observe the Spine versions increment and the branch disappear from the active view.
 6. Check the History tab to see the "Consolidated" event.
+
+---
+
+## S5: Version Sidebar + Constraints
+**PRD Sections Satisfied:**
+- **Invariants:**
+  - "Immutable Spines" verified via read-only state. Only latest un-branched spines can be regenerated. Past spines cannot be branched.
+- **E5: Time-Travel & Version Navigation:**
+  - Sidebar timeline navigation. View historical spine states.
+  - Diff snippet visualization.
+
+**QA Steps (S5):**
+1. After consolidating a branch, click the newly created "Consolidated" event in the right sidebar.
+2. Observe the mini diff preview embedded in the event UI.
+3. The main workspace now displays a yellow "Read-Only" banner.
+4. Attempt to highlight text in the spine column. The branch popup should NOT appear.
+5. Click "Return to Latest" in the yellow banner to return to the active spine.

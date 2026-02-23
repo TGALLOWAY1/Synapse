@@ -32,3 +32,10 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] Two patches are shown: Local and Doc-Wide.
 - [x] Committing a patch creates a new Spine version and closes the modal.
 - [x] The new Spine is set as active, and the Branch is marked as merged.
+
+### S5: Version Sidebar + Constraints
+- [x] Consolidated events in the right sidebar show a small diff preview of what changed.
+- [x] Clicking a past spine version in the right sidebar switches the workspace to view it.
+- [x] A yellow warning banner explains the view is Read-Only.
+- [x] Text highlighting to spawn new branches is disabled while viewing historical spines.
+- [x] Clicking "Return to Latest" restores the active latest spine.

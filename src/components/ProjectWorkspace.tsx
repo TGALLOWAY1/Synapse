@@ -11,16 +11,22 @@ import type { Branch } from '../types';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine, getSpineVersions } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
+    const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
 
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
     const latestSpine = getLatestSpine(projectId);
     const historyEvents = getHistoryEvents(projectId);
-    const branches = latestSpine ? getBranchesForSpine(projectId, latestSpine.id) : [];
+    const allSpines = getSpineVersions(projectId);
+
+    const activeSpine = viewedSpineId ? allSpines.find(s => s.id === viewedSpineId) || latestSpine : latestSpine;
+    const isOldVersion = activeSpine?.id !== latestSpine?.id;
+
+    const branches = activeSpine ? getBranchesForSpine(projectId, activeSpine.id) : [];
     const hasBranches = branches.length > 0;
 
     if (!project) return <div>Project Not Found</div>;
@@ -86,20 +92,33 @@ export function ProjectWorkspace() {
             <div className="flex-1 flex mt-14 overflow-hidden w-full">
 
                 {/* Left: Spine Column */}
-                <div className="flex-1 bg-white text-black overflow-y-auto p-12 shadow-2xl z-0">
-                    <div className="max-w-2xl mx-auto">
-                        {latestSpine ? (
+                <div className="flex-1 bg-white text-black overflow-y-auto p-12 shadow-2xl z-0 relative">
+                    {isOldVersion && (
+                        <div className="absolute top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex justify-between items-center z-10">
+                            <span>You are viewing a historical spine version (Read-Only). Branches cannot be added here.</span>
+                            <button
+                                onClick={() => setViewedSpineId(null)}
+                                className="font-semibold underline hover:text-yellow-900"
+                            >
+                                Return to Latest
+                            </button>
+                        </div>
+                    )}
+
+                    <div className="max-w-2xl mx-auto mt-4">
+                        {activeSpine ? (
                             <>
                                 <div className="mb-8 p-4 bg-neutral-100 rounded-md border border-neutral-200">
                                     <h3 className="text-sm font-semibold text-neutral-500 mb-2 uppercase tracking-wider">Initial Prompt</h3>
-                                    <p className="whitespace-pre-wrap text-neutral-700">{latestSpine.promptText}</p>
+                                    <p className="whitespace-pre-wrap text-neutral-700">{activeSpine.promptText}</p>
                                 </div>
 
                                 <div className="prose prose-neutral max-w-none">
                                     <SelectableSpine
                                         projectId={projectId}
-                                        spineVersionId={latestSpine.id}
-                                        text={latestSpine.responseText}
+                                        spineVersionId={activeSpine.id}
+                                        text={activeSpine.responseText}
+                                        readOnly={isOldVersion}
                                     />
                                 </div>
                             </>
@@ -136,15 +155,32 @@ export function ProjectWorkspace() {
                         <h3 className="font-semibold text-neutral-300">Versions</h3>
                     </div>
                     <div className="p-4 flex-1 overflow-y-auto flex flex-col gap-4">
-                        {historyEvents.slice().reverse().map(event => (
-                            <div key={event.id} className="p-3 bg-neutral-800 rounded-md border border-neutral-700">
-                                <div className="flex justify-between items-start mb-1">
-                                    <span className="text-sm font-medium text-blue-400">Spine {event.spineVersionId}</span>
-                                    <span className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                </div>
-                                <p className="text-sm text-neutral-300">{event.description}</p>
-                            </div>
-                        ))}
+                        {historyEvents.slice().reverse().map(event => {
+                            const isSelected = activeSpine?.id === event.spineVersionId;
+                            return (
+                                <button
+                                    key={event.id}
+                                    onClick={() => setViewedSpineId(event.spineVersionId)}
+                                    className={`p-3 rounded-md border text-left transition ${isSelected ? 'bg-neutral-800 border-blue-500 ring-1 ring-blue-500' : 'bg-neutral-800/50 border-neutral-700 hover:bg-neutral-800'}`}
+                                >
+                                    <div className="flex justify-between items-start mb-1">
+                                        <span className={`text-sm font-medium ${isSelected ? 'text-blue-400' : 'text-neutral-400'}`}>Spine {event.spineVersionId}</span>
+                                        <span className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                    </div>
+                                    <p className={`text-sm ${isSelected ? 'text-neutral-200' : 'text-neutral-400'}`}>{event.description}</p>
+
+                                    {event.diff && event.diff.matches && isSelected && (
+                                        <div className="mt-3 pt-3 border-t border-neutral-700">
+                                            <p className="text-xs text-neutral-500 mb-1 tracking-wide uppercase">Diff Preview</p>
+                                            <div className="bg-neutral-900 rounded p-2 overflow-hidden">
+                                                <p className="text-xs text-red-400 line-through truncate opacity-80">- {event.diff.matches[0].before}</p>
+                                                <p className="text-xs text-green-400 truncate mt-1">+ {event.diff.matches[0].after}</p>
+                                            </div>
+                                        </div>
+                                    )}
+                                </button>
+                            );
+                        })}
                     </div>
                 </div>
 

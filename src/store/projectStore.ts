@@ -218,6 +218,12 @@ export const useProjectStore = create<ProjectState>()(
                     type: "Consolidated",
                     description: `Merged branch for "${branch.anchorText.substring(0, 30)}..."`,
                     createdAt: now,
+                    diff: {
+                        matches: [{
+                            before: branch.anchorText,
+                            after: "(Consolidated changes)" // Mapped roughly for the visualization
+                        }]
+                    }
                 };
 
                 set((state) => ({

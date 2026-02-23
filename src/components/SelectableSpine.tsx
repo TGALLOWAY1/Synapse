@@ -6,15 +6,17 @@ interface SelectableSpineProps {
     projectId: string;
     spineVersionId: string;
     text: string;
+    readOnly?: boolean;
 }
 
-export function SelectableSpine({ projectId, spineVersionId, text }: SelectableSpineProps) {
+export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: SelectableSpineProps) {
     const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(null);
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const { createBranch, addBranchMessage } = useProjectStore();
 
     const handleMouseUp = () => {
+        if (readOnly) return;
         // Small delay to allow double-click selections to resolve
         setTimeout(() => {
             const sel = window.getSelection();
