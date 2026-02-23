@@ -1,4 +1,6 @@
 import { useState } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
 import { replyInBranch } from '../lib/llmProvider';
 
@@ -63,10 +65,10 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
 
     return (
         <div className="relative" onMouseUp={handleMouseUp}>
-            <div className="prose prose-neutral max-w-none">
-                {text.split('\n').map((para: string, i: number) => (
-                    <p key={i} className="mb-4 whitespace-pre-wrap">{para}</p>
-                ))}
+            <div className="prose prose-neutral prose-invert max-w-none prose-headings:font-bold prose-a:text-blue-400 prose-p:leading-relaxed">
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {text}
+                </ReactMarkdown>
             </div>
 
             {selection && (
