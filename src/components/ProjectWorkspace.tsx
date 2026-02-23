@@ -3,11 +3,13 @@ import { useProjectStore } from '../store/projectStore';
 import { ChevronLeft, RefreshCcw, LogOut } from 'lucide-react';
 import { generatePRD } from '../lib/llmProvider';
 import { useState } from 'react';
+import { SelectableSpine } from './SelectableSpine';
+import { BranchList } from './BranchList';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
 
     if (!projectId) return <div>Invalid Project</div>;
@@ -15,15 +17,18 @@ export function ProjectWorkspace() {
     const project = getProject(projectId);
     const latestSpine = getLatestSpine(projectId);
     const historyEvents = getHistoryEvents(projectId);
+    const branches = latestSpine ? getBranchesForSpine(projectId, latestSpine.id) : [];
+    const hasBranches = branches.length > 0;
 
     if (!project) return <div>Project Not Found</div>;
+
 
     const handleAbandon = () => {
         navigate('/');
     };
 
     const handleRegenerate = async () => {
-        if (!projectId || !latestSpine || isGenerating) return;
+        if (!projectId || !latestSpine || isGenerating || hasBranches) return;
         try {
             setIsGenerating(true);
             const { newSpineId } = regenerateSpine(projectId);
@@ -52,16 +57,16 @@ export function ProjectWorkspace() {
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
-                    {/* Branch count check will be implemented in S3, hardcoded to 0 constraint for S2 */}
                     <button
                         onClick={handleRegenerate}
-                        disabled={isGenerating}
+                        disabled={isGenerating || hasBranches}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition disabled:opacity-50"
-                        title="Retry / Regenerate (Latest un-branched only)"
+                        title={hasBranches ? "Cannot regenerate spine with active branches" : "Retry / Regenerate (Latest un-branched only)"}
                     >
                         <RefreshCcw size={14} className={isGenerating ? 'animate-spin' : ''} />
                         Regenerate
                     </button>
+
 
                     <button
                         onClick={handleAbandon}
@@ -88,9 +93,11 @@ export function ProjectWorkspace() {
                                 </div>
 
                                 <div className="prose prose-neutral max-w-none">
-                                    {latestSpine.responseText.split('\n').map((para: string, i: number) => (
-                                        <p key={i} className="mb-4 whitespace-pre-wrap">{para}</p>
-                                    ))}
+                                    <SelectableSpine
+                                        projectId={projectId}
+                                        spineVersionId={latestSpine.id}
+                                        text={latestSpine.responseText}
+                                    />
                                 </div>
                             </>
                         ) : (
@@ -107,9 +114,13 @@ export function ProjectWorkspace() {
                 <div className="w-96 bg-neutral-50 text-black border-l border-neutral-200 overflow-y-auto p-4 flex flex-col gap-4">
                     <h3 className="font-semibold text-neutral-400 uppercase tracking-wider text-xs mb-2">Branches</h3>
 
-                    <div className="text-sm text-neutral-500 italic p-4 text-center border border-dashed border-neutral-300 rounded-md">
-                        Highlight text in the spine to create a branch.
-                    </div>
+                    {latestSpine ? (
+                        <BranchList projectId={projectId} spineVersionId={latestSpine.id} />
+                    ) : (
+                        <div className="text-sm text-neutral-500 italic p-4 text-center border border-dashed border-neutral-300 rounded-md">
+                            Loading...
+                        </div>
+                    )}
                 </div>
 
                 {/* Far Right: Sidebar (History) */}

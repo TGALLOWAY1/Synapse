@@ -4,6 +4,22 @@ export type Project = {
     createdAt: number;
 };
 
+export type BranchMessage = {
+    id: string;
+    role: 'user' | 'assistant';
+    content: string;
+    createdAt: number;
+};
+
+export type Branch = {
+    id: string;
+    projectId: string;
+    spineVersionId: string;
+    anchorText: string;
+    status: 'active' | 'resolved' | 'rejected' | 'merged';
+    createdAt: number;
+    messages: BranchMessage[];
+};
 export type SpineVersion = {
     id: string; // e.g. "v1", "v2"
     projectId: string;

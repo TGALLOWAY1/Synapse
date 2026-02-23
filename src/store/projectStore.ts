@@ -1,19 +1,23 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import type { Project, SpineVersion, HistoryEvent } from '../types';
+import type { Project, SpineVersion, HistoryEvent, Branch } from '../types';
 
 interface ProjectState {
     projects: Record<string, Project>;
     spineVersions: Record<string, SpineVersion[]>;
     historyEvents: Record<string, HistoryEvent[]>;
+    branches: Record<string, Branch[]>; // projectId -> Branch[]
     createProject: (name: string, promptText: string) => { projectId: string, spineId: string };
     updateSpineText: (projectId: string, spineId: string, text: string) => void;
     regenerateSpine: (projectId: string) => { newSpineId: string };
+    createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
+    addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
     getProject: (projectId: string) => Project | undefined;
     getSpineVersions: (projectId: string) => SpineVersion[];
     getLatestSpine: (projectId: string) => SpineVersion | undefined;
     getHistoryEvents: (projectId: string) => HistoryEvent[];
+    getBranchesForSpine: (projectId: string, spineVersionId: string) => Branch[];
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -22,6 +26,7 @@ export const useProjectStore = create<ProjectState>()(
             projects: {},
             spineVersions: {},
             historyEvents: {},
+            branches: {},
 
             createProject: (name: string, promptText: string) => {
                 const projectId = uuidv4();
@@ -124,6 +129,60 @@ export const useProjectStore = create<ProjectState>()(
             getHistoryEvents: (projectId: string) => {
                 return get().historyEvents[projectId] || [];
             },
+
+            createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => {
+                const branchId = uuidv4();
+                const now = Date.now();
+                const newBranch: Branch = {
+                    id: branchId,
+                    projectId,
+                    spineVersionId,
+                    anchorText,
+                    status: 'active',
+                    createdAt: now,
+                    messages: [
+                        { id: uuidv4(), role: 'user', content: initialIntent, createdAt: now }
+                    ]
+                };
+
+                set((state) => {
+                    const projectBranches = state.branches[projectId] || [];
+                    return {
+                        branches: {
+                            ...state.branches,
+                            [projectId]: [...projectBranches, newBranch]
+                        }
+                    };
+                });
+                return { branchId };
+            },
+
+            addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => {
+                set((state) => {
+                    const projectBranches = state.branches[projectId] || [];
+                    const updatedBranches = projectBranches.map(b => {
+                        if (b.id === branchId) {
+                            return {
+                                ...b,
+                                messages: [...b.messages, { id: uuidv4(), role, content, createdAt: Date.now() }]
+                            };
+                        }
+                        return b;
+                    });
+                    return {
+                        branches: {
+                            ...state.branches,
+                            [projectId]: updatedBranches
+                        }
+                    };
+                });
+            },
+
+            getBranchesForSpine: (projectId: string, spineVersionId: string) => {
+                const projectBranches = get().branches[projectId] || [];
+                return projectBranches.filter(b => b.spineVersionId === spineVersionId);
+            },
+
         }),
         {
             name: 'synapse-projects-storage',

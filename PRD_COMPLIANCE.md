@@ -30,3 +30,24 @@
 3. View the sidebar History tab to see "Spine v1 created" event.
 4. Click "Regenerate" and observe generating state -> new mock response -> "Spine v2" history event.
 5. Click "Abandon Session" and observe redirect to Home page.
+
+---
+
+## S3: Anchors + Branch Creation
+**PRD Sections Satisfied:**
+- **Invariants:** 
+  - "Thread Topology" established (Branches are threaded conversations anchored to text).
+  - Version-scoped Branches (Branches are tied to `spineVersionId` in state).
+- **E2 Anchors & Local Adjustments:**
+  - Users can highlight text in the spine to create a branch.
+  - Branch data model implemented with messages.
+  - Sidebar rendering of branch cards with mock LLM replies.
+
+**QA Steps (S3):**
+1. Open a generated PRD.
+2. Highlight a word or sentence.
+3. In the popover, type an instruction (e.g. "make this sound like a pirate") and click "Branch".
+4. Observe the new Branch card in the middle column.
+5. Wait for the mock LLM assistant to reply.
+6. Type a follow-up reply in the Branch card input and submit.
+7. Attempt to click "Regenerate" in the top bar - it should be disabled because a branch exists.

@@ -19,3 +19,9 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] "Regenerate" button creates a new Spine version and records a history event.
 - [x] "Abandon Session" returns user to the Home page.
 - [x] Side "Versions" panel lists initialized and regenerated spine events.
+
+### S3: Anchors and Branches
+- [x] Users can highlight text in the spine to summon a popover.
+- [x] Users can type an intent in the popover and hit 'Branch' to create a new branch.
+- [x] Branches appear in the middle column, and users can reply to them in a thread.
+- [x] Regenerating the spine is disabled if there are active branches on the latest spine.
