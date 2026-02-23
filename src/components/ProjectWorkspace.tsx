@@ -39,12 +39,24 @@ export function ProjectWorkspace() {
     };
 
     const handleRegenerate = async () => {
-        if (!projectId || !latestSpine || isGenerating || hasBranches) return;
+        if (!projectId || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
+        let activeNewSpineId: string | null = null;
         try {
             setIsGenerating(true);
             const { newSpineId } = regenerateSpine(projectId);
+            activeNewSpineId = newSpineId;
             const newText = await generatePRD(latestSpine.promptText);
             updateSpineText(projectId, newSpineId, newText);
+        } catch (e) {
+            console.error(e);
+            if (activeNewSpineId) {
+                const errorMsg = e instanceof Error ? e.message : String(e);
+                updateSpineText(
+                    projectId,
+                    activeNewSpineId,
+                    `**Error regenerating PRD:**\n${errorMsg}\n\nPlease verify your API Key in Settings or check your network connection.`
+                );
+            }
         } finally {
             setIsGenerating(false);
         }

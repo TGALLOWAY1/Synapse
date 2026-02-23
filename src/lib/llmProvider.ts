@@ -1,4 +1,4 @@
-const GEMINI_MODEL = 'gemini-1.5-flash';
+const GEMINI_MODEL = 'gemini-2.5-flash';
 
 const getApiKey = () => {
     const key = localStorage.getItem('GEMINI_API_KEY');

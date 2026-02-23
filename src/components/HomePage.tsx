@@ -22,9 +22,18 @@ export function HomePage() {
 
         // Trigger generation asynchronously
         import('../lib/llmProvider').then(({ generatePRD }) => {
-            generatePRD(promptText.trim()).then((prdText) => {
-                useProjectStore.getState().updateSpineText(projectId, spineId, prdText);
-            });
+            generatePRD(promptText.trim())
+                .then((prdText) => {
+                    useProjectStore.getState().updateSpineText(projectId, spineId, prdText);
+                })
+                .catch((e) => {
+                    const errorMsg = e instanceof Error ? e.message : String(e);
+                    useProjectStore.getState().updateSpineText(
+                        projectId,
+                        spineId,
+                        `**Error generating PRD:**\n${errorMsg}\n\nPlease verify your API Key in Settings or check your network connection.`
+                    );
+                });
         });
     };
 
