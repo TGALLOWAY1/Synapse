@@ -13,3 +13,9 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] Can create a new project with title and initial prompt.
 - [x] Workspace page loads with Spine (left), Branches (right), and History sidebar.
 - [x] Projects persist across browser refreshes (LocalStorage).
+
+### S2: Spine Generation & Controls
+- [x] Creating a project triggers a mock LLM generation delay.
+- [x] "Regenerate" button creates a new Spine version and records a history event.
+- [x] "Abandon Session" returns user to the Home page.
+- [x] Side "Versions" panel lists initialized and regenerated spine events.

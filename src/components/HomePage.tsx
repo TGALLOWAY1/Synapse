@@ -11,12 +11,19 @@ export function HomePage() {
     const [projectName, setProjectName] = useState('');
     const [promptText, setPromptText] = useState('');
 
-    const handleCreateProject = (e: React.FormEvent) => {
+    const handleCreateProject = async (e: React.FormEvent) => {
         e.preventDefault();
         if (!projectName.trim() || !promptText.trim()) return;
 
-        const { projectId } = createProject(projectName.trim(), promptText.trim());
+        const { projectId, spineId } = createProject(projectName.trim(), promptText.trim());
         navigate(`/p/${projectId}`);
+
+        // Trigger generation asynchronously
+        import('../lib/llmProvider').then(({ generatePRD }) => {
+            generatePRD(promptText.trim()).then((prdText) => {
+                useProjectStore.getState().updateSpineText(projectId, spineId, prdText);
+            });
+        });
     };
 
     return (

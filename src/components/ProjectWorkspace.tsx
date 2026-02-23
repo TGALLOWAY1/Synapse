@@ -1,18 +1,38 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut } from 'lucide-react';
+import { generatePRD } from '../lib/llmProvider';
+import { useState } from 'react';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents } = useProjectStore();
+    const [isGenerating, setIsGenerating] = useState(false);
 
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
     const latestSpine = getLatestSpine(projectId);
+    const historyEvents = getHistoryEvents(projectId);
 
     if (!project) return <div>Project Not Found</div>;
+
+    const handleAbandon = () => {
+        navigate('/');
+    };
+
+    const handleRegenerate = async () => {
+        if (!projectId || !latestSpine || isGenerating) return;
+        try {
+            setIsGenerating(true);
+            const { newSpineId } = regenerateSpine(projectId);
+            const newText = await generatePRD(latestSpine.promptText);
+            updateSpineText(projectId, newSpineId, newText);
+        } finally {
+            setIsGenerating(false);
+        }
+    };
 
     return (
         <div className="flex h-screen bg-neutral-900 border-t border-neutral-800 text-neutral-100">
@@ -31,6 +51,27 @@ export function ProjectWorkspace() {
                         {latestSpine ? `Spine ${latestSpine.id}` : 'Loading...'}
                     </span>
                 </div>
+                <div className="flex items-center gap-2">
+                    {/* Branch count check will be implemented in S3, hardcoded to 0 constraint for S2 */}
+                    <button
+                        onClick={handleRegenerate}
+                        disabled={isGenerating}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition disabled:opacity-50"
+                        title="Retry / Regenerate (Latest un-branched only)"
+                    >
+                        <RefreshCcw size={14} className={isGenerating ? 'animate-spin' : ''} />
+                        Regenerate
+                    </button>
+
+                    <button
+                        onClick={handleAbandon}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded transition"
+                        title="Abandon Session / Start New"
+                    >
+                        <LogOut size={14} />
+                        Abandon Session
+                    </button>
+                </div>
             </div>
 
             {/* Main Workspace Area (below navbar) */}
@@ -48,7 +89,7 @@ export function ProjectWorkspace() {
 
                                 <div className="prose prose-neutral max-w-none">
                                     {latestSpine.responseText.split('\n').map((para: string, i: number) => (
-                                        <p key={i} className="mb-4">{para}</p>
+                                        <p key={i} className="mb-4 whitespace-pre-wrap">{para}</p>
                                     ))}
                                 </div>
                             </>
@@ -73,13 +114,19 @@ export function ProjectWorkspace() {
 
                 {/* Far Right: Sidebar (History) */}
                 <div className="w-64 bg-neutral-900 border-l border-neutral-800 flex flex-col relative top-0 right-0 h-full text-neutral-300">
-                    <div className="p-4 border-b border-neutral-800">
-                        <h3 className="font-semibold text-neutral-300">History</h3>
+                    <div className="p-4 border-b border-neutral-800 flex justify-between items-center">
+                        <h3 className="font-semibold text-neutral-300">Versions</h3>
                     </div>
-                    <div className="p-4 flex-1 overflow-y-auto">
-                        <div className="text-sm text-neutral-500">
-                            Timeline will appear here...
-                        </div>
+                    <div className="p-4 flex-1 overflow-y-auto flex flex-col gap-4">
+                        {historyEvents.slice().reverse().map(event => (
+                            <div key={event.id} className="p-3 bg-neutral-800 rounded-md border border-neutral-700">
+                                <div className="flex justify-between items-start mb-1">
+                                    <span className="text-sm font-medium text-blue-400">Spine {event.spineVersionId}</span>
+                                    <span className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                </div>
+                                <p className="text-sm text-neutral-300">{event.description}</p>
+                            </div>
+                        ))}
                     </div>
                 </div>
 
@@ -87,3 +134,4 @@ export function ProjectWorkspace() {
         </div>
     );
 }
+
