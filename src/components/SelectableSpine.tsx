@@ -65,7 +65,19 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
 
     return (
         <div className="relative" onMouseUp={handleMouseUp}>
-            <div className="prose prose-neutral prose-invert max-w-none prose-headings:font-bold prose-a:text-blue-400 prose-p:leading-relaxed">
+            <div className="
+                prose prose-neutral max-w-none 
+                prose-h1:text-3xl prose-h1:font-extrabold prose-h1:mb-8 prose-h1:mt-2
+                prose-h2:text-2xl prose-h2:font-bold prose-h2:mt-10 prose-h2:mb-4
+                prose-h3:text-xl prose-h3:font-semibold prose-h3:mt-8 prose-h3:mb-3
+                prose-p:leading-relaxed prose-p:mb-6
+                prose-ul:list-disc prose-ul:pl-6 prose-ul:mb-6
+                prose-ol:list-decimal prose-ol:pl-6 prose-ol:mb-6
+                prose-li:mb-2
+                prose-strong:font-bold
+                prose-a:text-blue-600 hover:prose-a:text-blue-500
+                prose-code:text-pink-600 prose-code:bg-neutral-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
+            ">
                 <ReactMarkdown remarkPlugins={[remarkGfm]}>
                     {text}
                 </ReactMarkdown>
