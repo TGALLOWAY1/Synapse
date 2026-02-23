@@ -25,3 +25,10 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] Users can type an intent in the popover and hit 'Branch' to create a new branch.
 - [x] Branches appear in the middle column, and users can reply to them in a thread.
 - [x] Regenerating the spine is disabled if there are active branches on the latest spine.
+
+### S4: Consolidation Engine
+- [x] Click "Consolidate" on an active branch to open the modal.
+- [x] Modal shows loading state while "synthesizing patches".
+- [x] Two patches are shown: Local and Doc-Wide.
+- [x] Committing a patch creates a new Spine version and closes the modal.
+- [x] The new Spine is set as active, and the Branch is marked as merged.

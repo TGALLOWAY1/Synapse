@@ -51,3 +51,21 @@
 5. Wait for the mock LLM assistant to reply.
 6. Type a follow-up reply in the Branch card input and submit.
 7. Attempt to click "Regenerate" in the top bar - it should be disabled because a branch exists.
+
+---
+
+## S4: Consolidation Engine
+**PRD Sections Satisfied:**
+- **Invariants:**
+  - "Spine Authority" verified (consolidation mints a new authoritative Spine).
+- **E3 Synthesis Engine:**
+  - Implementation of local vs doc-wide patch generation concepts (mocked).
+  - Merging branch state back into project spine hierarchy.
+
+**QA Steps (S4):**
+1. In an active branch, click the "Consolidate" button.
+2. Wait for the mock LLM to generate patches.
+3. Toggle between "Local Scope" and "Doc-Wide Scope" previews.
+4. Click "Commit to New Spine".
+5. Observe the Spine versions increment and the branch disappear from the active view.
+6. Check the History tab to see the "Consolidated" event.

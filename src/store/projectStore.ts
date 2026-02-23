@@ -13,6 +13,7 @@ interface ProjectState {
     regenerateSpine: (projectId: string) => { newSpineId: string };
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
+    mergeBranch: (projectId: string, branchId: string, newSpineText: string) => { newSpineId: string };
     getProject: (projectId: string) => Project | undefined;
     getSpineVersions: (projectId: string) => SpineVersion[];
     getLatestSpine: (projectId: string) => SpineVersion | undefined;
@@ -176,6 +177,56 @@ export const useProjectStore = create<ProjectState>()(
                         }
                     };
                 });
+            },
+
+            mergeBranch: (projectId: string, branchId: string, newSpineText: string) => {
+                const state = get();
+                const projectBranches = state.branches[projectId] || [];
+                const branch = projectBranches.find(b => b.id === branchId);
+
+                if (!branch) throw new Error("Branch not found");
+
+                const currentVersions = state.spineVersions[projectId] || [];
+                const oldSpine = currentVersions.find(v => v.id === branch.spineVersionId);
+                if (!oldSpine) throw new Error("Spine not found");
+
+                // Mark branch as merged
+                const updatedBranches = projectBranches.map(b =>
+                    b.id === branchId ? { ...b, status: 'merged' as const } : b
+                );
+
+                // Create new Spine Version
+                const nextVersionNum = currentVersions.length + 1;
+                const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
+
+                const now = Date.now();
+                const newSpine: SpineVersion = {
+                    id: `v${nextVersionNum}`,
+                    projectId,
+                    promptText: oldSpine.promptText, // inherit prompt
+                    responseText: newSpineText,
+                    createdAt: now,
+                    isLatest: true,
+                    isFinal: false,
+                };
+
+                // Add History Event
+                const mergeEvent: HistoryEvent = {
+                    id: uuidv4(),
+                    projectId,
+                    spineVersionId: newSpine.id,
+                    type: "Consolidated",
+                    description: `Merged branch for "${branch.anchorText.substring(0, 30)}..."`,
+                    createdAt: now,
+                };
+
+                set((state) => ({
+                    branches: { ...state.branches, [projectId]: updatedBranches },
+                    spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
+                    historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), mergeEvent] },
+                }));
+
+                return { newSpineId: newSpine.id };
             },
 
             getBranchesForSpine: (projectId: string, spineVersionId: string) => {

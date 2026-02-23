@@ -7,9 +7,10 @@ import type { Branch, BranchMessage } from '../types';
 interface BranchListProps {
     projectId: string;
     spineVersionId: string;
+    onConsolidate: (branch: Branch) => void;
 }
 
-export function BranchList({ projectId, spineVersionId }: BranchListProps) {
+export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchListProps) {
     const { getBranchesForSpine, addBranchMessage } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
@@ -58,8 +59,18 @@ export function BranchList({ projectId, spineVersionId }: BranchListProps) {
                             <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Anchor</span>
                             <p className="text-sm text-neutral-700 truncate italic">"{branch.anchorText}"</p>
                         </div>
-                        <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
-                            {branch.status}
+                        <div className="flex items-center gap-2">
+                            <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
+                                {branch.status}
+                            </div>
+                            {branch.status === 'active' && (
+                                <button
+                                    onClick={() => onConsolidate(branch)}
+                                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded transition"
+                                >
+                                    Consolidate
+                                </button>
+                            )}
                         </div>
                     </div>
 

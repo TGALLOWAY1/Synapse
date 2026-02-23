@@ -1,16 +1,19 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { ChevronLeft, RefreshCcw, LogOut } from 'lucide-react';
-import { generatePRD } from '../lib/llmProvider';
 import { useState } from 'react';
+import { generatePRD } from '../lib/llmProvider';
 import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
+import { ConsolidationModal } from './ConsolidationModal';
+import type { Branch } from '../types';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
     const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
+    const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -115,7 +118,11 @@ export function ProjectWorkspace() {
                     <h3 className="font-semibold text-neutral-400 uppercase tracking-wider text-xs mb-2">Branches</h3>
 
                     {latestSpine ? (
-                        <BranchList projectId={projectId} spineVersionId={latestSpine.id} />
+                        <BranchList
+                            projectId={projectId}
+                            spineVersionId={latestSpine.id}
+                            onConsolidate={(branch) => setConsolidatingBranch(branch)}
+                        />
                     ) : (
                         <div className="text-sm text-neutral-500 italic p-4 text-center border border-dashed border-neutral-300 rounded-md">
                             Loading...
@@ -142,6 +149,16 @@ export function ProjectWorkspace() {
                 </div>
 
             </div>
+
+            {consolidatingBranch && latestSpine && (
+                <ConsolidationModal
+                    projectId={projectId}
+                    spineVersionId={latestSpine.id}
+                    branch={consolidatingBranch}
+                    spineText={latestSpine.responseText}
+                    onClose={() => setConsolidatingBranch(null)}
+                />
+            )}
         </div>
     );
 }
