@@ -91,13 +91,13 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                     {/* Header */}
                     <div className="bg-neutral-50 border-b border-neutral-200 p-3 flex justify-between items-start">
                         <div className="flex-1 min-w-0 pr-4">
-                            <div className="truncate">
-                                <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Anchor</span>
-                                <p className="text-sm text-neutral-700 truncate italic">"{branch.anchorText}"</p>
+                            <div>
+                                <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider block mb-1">Anchor</span>
+                                <p className="text-sm text-neutral-700 italic break-words line-clamp-4">"{branch.anchorText}"</p>
                             </div>
                             {getIntentHelper(branch.messages[0]?.content)}
                         </div>
-                        <div className="flex flex-col items-end gap-2">
+                        <div className="flex flex-col items-end gap-2 shrink-0">
                             <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
                                 {branch.status}
                             </div>
