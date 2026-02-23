@@ -98,6 +98,7 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
 
             {selection && (
                 <div
+                    onMouseUp={(e) => e.stopPropagation()}
                     className="fixed z-50 bg-neutral-900 border border-neutral-700 shadow-xl rounded-lg p-3 w-80 -translate-x-1/2 flex flex-col gap-3"
                     style={{ top: selection.top, left: selection.left }}
                 >
