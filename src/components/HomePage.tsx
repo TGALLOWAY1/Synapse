@@ -2,12 +2,14 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import type { Project } from '../types';
-import { Plus } from 'lucide-react';
+import { Plus, Settings } from 'lucide-react';
+import { SettingsModal } from './SettingsModal';
 
 export function HomePage() {
     const { projects, createProject } = useProjectStore();
     const navigate = useNavigate();
     const [isModalOpen, setIsModalOpen] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [projectName, setProjectName] = useState('');
     const [promptText, setPromptText] = useState('');
 
@@ -30,13 +32,22 @@ export function HomePage() {
         <div className="min-h-screen p-8 max-w-4xl mx-auto">
             <div className="flex items-center justify-between mb-8">
                 <h1 className="text-3xl font-bold">Synapse PRD</h1>
-                <button
-                    onClick={() => setIsModalOpen(true)}
-                    className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
-                >
-                    <Plus size={18} />
-                    New Project
-                </button>
+                <div className="flex items-center gap-3">
+                    <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
+                        title="API Settings"
+                    >
+                        <Settings size={20} />
+                    </button>
+                    <button
+                        onClick={() => setIsModalOpen(true)}
+                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                    >
+                        <Plus size={18} />
+                        New Project
+                    </button>
+                </div>
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -118,6 +129,8 @@ export function HomePage() {
                     </div>
                 </div>
             )}
+
+            {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
         </div>
     );
 }

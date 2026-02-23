@@ -1,11 +1,12 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings } from 'lucide-react';
 import { useState } from 'react';
 import { generatePRD } from '../lib/llmProvider';
 import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
+import { SettingsModal } from './SettingsModal';
 import type { Branch } from '../types';
 
 export function ProjectWorkspace() {
@@ -13,6 +14,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
+    const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
 
@@ -115,26 +117,33 @@ export function ProjectWorkspace() {
                         </button>
                     )}
                     <button
+                        onClick={() => setIsSettingsOpen(true)}
+                        className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
+                        title="API Settings"
+                    >
+                        <Settings size={18} />
+                    </button>
+                    <button
                         onClick={handleRegenerate}
-                        disabled={isGenerating || hasBranches}
+                        disabled={isGenerating || hasBranches || isOldVersion}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition disabled:opacity-50"
                         title={hasBranches ? "Cannot regenerate spine with active branches" : "Retry / Regenerate (Latest un-branched only)"}
                     >
                         <RefreshCcw size={14} className={isGenerating ? 'animate-spin' : ''} />
                         Regenerate
                     </button>
-
-
                     <button
                         onClick={handleAbandon}
-                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-900/30 hover:bg-red-900/50 text-red-400 rounded transition"
-                        title="Abandon Session / Start New"
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-red-900/30 hover:bg-red-900/50 text-red-400 border border-red-800/50 rounded transition"
+                        title="Abandon Session"
                     >
                         <LogOut size={14} />
-                        Abandon Session
+                        Abandon
                     </button>
                 </div>
             </div>
+
+            {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
 
             {/* Main Workspace Area (below navbar) */}
             <div className="flex-1 flex mt-14 overflow-hidden w-full">
