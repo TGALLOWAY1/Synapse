@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings, ChevronDown, ChevronRight } from 'lucide-react';
 import { useState } from 'react';
 import { generatePRD } from '../lib/llmProvider';
 import { SelectableSpine } from './SelectableSpine';
@@ -17,6 +17,7 @@ export function ProjectWorkspace() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
+    const [isPromptCollapsed, setIsPromptCollapsed] = useState(false);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -177,9 +178,21 @@ export function ProjectWorkspace() {
                     <div className="max-w-2xl mx-auto mt-4">
                         {activeSpine ? (
                             <>
-                                <div className="mb-8 p-4 bg-neutral-100 rounded-md border border-neutral-200">
-                                    <h3 className="text-sm font-semibold text-neutral-500 mb-2 uppercase tracking-wider">Initial Prompt</h3>
-                                    <p className="whitespace-pre-wrap text-neutral-700">{activeSpine.promptText}</p>
+                                <div className="mb-8 bg-neutral-100 rounded-md border border-neutral-200 transition-all overflow-hidden flex flex-col">
+                                    <div
+                                        className="flex items-center justify-between cursor-pointer p-4 select-none hover:bg-neutral-200/50 transition"
+                                        onClick={() => setIsPromptCollapsed(!isPromptCollapsed)}
+                                    >
+                                        <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Initial Prompt</h3>
+                                        <button className="text-neutral-400 hover:text-neutral-600 transition">
+                                            {isPromptCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
+                                        </button>
+                                    </div>
+                                    {!isPromptCollapsed && (
+                                        <div className="px-4 pb-4 border-t border-neutral-200/50 pt-2 bg-neutral-50/50">
+                                            <p className="whitespace-pre-wrap text-neutral-700 text-sm">{activeSpine.promptText}</p>
+                                        </div>
+                                    )}
                                 </div>
 
                                 <div className="prose prose-neutral max-w-none">
