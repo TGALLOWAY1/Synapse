@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
@@ -16,6 +16,19 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const { createBranch, addBranchMessage } = useProjectStore();
+
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape' && selection) {
+                setSelection(null);
+                setIntent('');
+                window.getSelection()?.removeAllRanges();
+            }
+        };
+
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [selection]);
 
     const handleMouseUp = () => {
         if (readOnly) return;
