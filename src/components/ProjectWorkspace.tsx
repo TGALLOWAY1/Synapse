@@ -18,6 +18,7 @@ export function ProjectWorkspace() {
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
     const [isPromptCollapsed, setIsPromptCollapsed] = useState(false);
+    const [isVersionsCollapsed, setIsVersionsCollapsed] = useState(false);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -232,38 +233,47 @@ export function ProjectWorkspace() {
                 </div>
 
                 {/* Far Right: Sidebar (History) */}
-                <div className="w-64 bg-neutral-900 border-l border-neutral-800 flex flex-col relative top-0 right-0 h-full text-neutral-300">
-                    <div className="p-4 border-b border-neutral-800 flex justify-between items-center">
-                        <h3 className="font-semibold text-neutral-300">Versions</h3>
+                <div className={`${isVersionsCollapsed ? 'w-14' : 'w-64'} shrink-0 bg-neutral-900 border-l border-neutral-800 flex flex-col relative top-0 right-0 h-full text-neutral-300 transition-all duration-300`}>
+                    <div
+                        className={`p-4 border-b border-neutral-800 flex items-center cursor-pointer hover:bg-neutral-800 transition ${isVersionsCollapsed ? 'justify-center' : 'justify-between'}`}
+                        onClick={() => setIsVersionsCollapsed(!isVersionsCollapsed)}
+                        title={isVersionsCollapsed ? "Expand Versions" : "Collapse Versions"}
+                    >
+                        {!isVersionsCollapsed && <h3 className="font-semibold text-neutral-300 select-none">Versions</h3>}
+                        <button className="text-neutral-400 hover:text-white transition">
+                            {isVersionsCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
+                        </button>
                     </div>
-                    <div className="p-4 flex-1 overflow-y-auto flex flex-col gap-4">
-                        {historyEvents.slice().reverse().map(event => {
-                            const isSelected = activeSpine?.id === event.spineVersionId;
-                            return (
-                                <button
-                                    key={event.id}
-                                    onClick={() => setViewedSpineId(event.spineVersionId)}
-                                    className={`p-3 rounded-md border text-left transition ${isSelected ? 'bg-neutral-800 border-blue-500 ring-1 ring-blue-500' : 'bg-neutral-800/50 border-neutral-700 hover:bg-neutral-800'}`}
-                                >
-                                    <div className="flex justify-between items-start mb-1">
-                                        <span className={`text-sm font-medium ${isSelected ? 'text-blue-400' : 'text-neutral-400'}`}>Spine {event.spineVersionId}</span>
-                                        <span className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                    </div>
-                                    <p className={`text-sm ${isSelected ? 'text-neutral-200' : 'text-neutral-400'}`}>{event.description}</p>
-
-                                    {event.diff && event.diff.matches && isSelected && (
-                                        <div className="mt-3 pt-3 border-t border-neutral-700">
-                                            <p className="text-xs text-neutral-500 mb-1 tracking-wide uppercase">Diff Preview</p>
-                                            <div className="bg-neutral-900 rounded p-2 overflow-hidden">
-                                                <p className="text-xs text-red-400 line-through truncate opacity-80">- {event.diff.matches[0].before}</p>
-                                                <p className="text-xs text-green-400 truncate mt-1">+ {event.diff.matches[0].after}</p>
-                                            </div>
+                    {!isVersionsCollapsed && (
+                        <div className="p-4 flex-1 overflow-y-auto flex flex-col gap-4">
+                            {historyEvents.slice().reverse().map(event => {
+                                const isSelected = activeSpine?.id === event.spineVersionId;
+                                return (
+                                    <button
+                                        key={event.id}
+                                        onClick={() => setViewedSpineId(event.spineVersionId)}
+                                        className={`p-3 rounded-md border text-left transition ${isSelected ? 'bg-neutral-800 border-blue-500 ring-1 ring-blue-500' : 'bg-neutral-800/50 border-neutral-700 hover:bg-neutral-800'}`}
+                                    >
+                                        <div className="flex justify-between items-start mb-1">
+                                            <span className={`text-sm font-medium ${isSelected ? 'text-blue-400' : 'text-neutral-400'}`}>Spine {event.spineVersionId}</span>
+                                            <span className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                         </div>
-                                    )}
-                                </button>
-                            );
-                        })}
-                    </div>
+                                        <p className={`text-sm ${isSelected ? 'text-neutral-200' : 'text-neutral-400'}`}>{event.description}</p>
+
+                                        {event.diff && event.diff.matches && isSelected && (
+                                            <div className="mt-3 pt-3 border-t border-neutral-700">
+                                                <p className="text-xs text-neutral-500 mb-1 tracking-wide uppercase">Diff Preview</p>
+                                                <div className="bg-neutral-900 rounded p-2 overflow-hidden">
+                                                    <p className="text-xs text-red-400 line-through truncate opacity-80">- {event.diff.matches[0].before}</p>
+                                                    <p className="text-xs text-green-400 truncate mt-1">+ {event.diff.matches[0].after}</p>
+                                                </div>
+                                            </div>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    )}
                 </div>
 
             </div>

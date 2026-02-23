@@ -90,7 +90,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                 <div key={branch.id} className="bg-white border border-neutral-200 shadow-sm rounded-lg overflow-hidden flex flex-col">
                     {/* Header */}
                     <div className="bg-neutral-50 border-b border-neutral-200 p-3 flex justify-between items-start">
-                        <div className="flex-1 pr-4">
+                        <div className="flex-1 min-w-0 pr-4">
                             <div className="truncate">
                                 <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider">Anchor</span>
                                 <p className="text-sm text-neutral-700 truncate italic">"{branch.anchorText}"</p>
@@ -137,7 +137,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                         {branch.messages.map((msg: BranchMessage) => (
                             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
                                 <div className={`max-w-[85%] rounded-lg p-2.5 text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border border-neutral-200 text-neutral-800'}`}>
-                                    <p className="whitespace-pre-wrap">{msg.content}</p>
+                                    <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                                 </div>
                             </div>
                         ))}
