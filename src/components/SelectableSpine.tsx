@@ -1,6 +1,7 @@
 import { useState, useEffect } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
+import rehypeRaw from 'rehype-raw';
 import { useProjectStore } from '../store/projectStore';
 import { replyInBranch } from '../lib/llmProvider';
 
@@ -15,7 +16,19 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
     const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(null);
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
-    const { createBranch, addBranchMessage } = useProjectStore();
+    const { createBranch, addBranchMessage, branches } = useProjectStore();
+
+    // Get active branches for this spine to highlight their anchors
+    const activeBranches = (branches[projectId] || []).filter(b => b.spineVersionId === spineVersionId && b.status === 'active');
+
+    let highlightedText = text;
+    activeBranches.forEach(b => {
+        if (!b.anchorText) return;
+        const escapedAnchor = b.anchorText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+        const regex = new RegExp(`(${escapedAnchor})`, 'g');
+        // Inject a <mark> tag that rehype-raw will render
+        highlightedText = highlightedText.replace(regex, `<mark class="bg-blue-500/20 text-inherit border-l-2 border-blue-500 pl-1 py-0.5 rounded-r">$&</mark>`);
+    });
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -91,8 +104,8 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                 prose-a:text-blue-600 hover:prose-a:text-blue-500
                 prose-code:text-pink-600 prose-code:bg-neutral-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
             ">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
-                    {text}
+                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
+                    {highlightedText}
                 </ReactMarkdown>
             </div>
 
