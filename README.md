@@ -1,6 +1,8 @@
-# Synapse v1
+# Synapse 
 
 Synapse v1 is a spec-driven PRD generation and refinement canvas.
+
+<img width="1430" height="837" alt="image" src="https://github.com/user-attachments/assets/5448db70-e98d-4571-81c1-112a1cb14986" />
 
 ## Run Instructions
 1. Install dependencies: `npm install`
