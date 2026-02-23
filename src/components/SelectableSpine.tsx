@@ -105,6 +105,19 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                         <span className="font-semibold text-neutral-300">Anchor:</span> "{selection.text.length > 50 ? selection.text.substring(0, 50) + '...' : selection.text}"
                     </div>
 
+                    <div className="flex flex-wrap gap-1.5 mt-1 mb-2">
+                        {['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace'].map(tag => (
+                            <button
+                                key={tag}
+                                type="button"
+                                onClick={() => setIntent(tag + ": ")}
+                                className="text-xs px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded border border-neutral-700 transition"
+                            >
+                                {tag}
+                            </button>
+                        ))}
+                    </div>
+
                     <form onSubmit={handleCreateBranch} className="flex gap-2">
                         <input
                             autoFocus
