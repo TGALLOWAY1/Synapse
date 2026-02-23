@@ -11,9 +11,11 @@
   },
   "dependencies": {
     "@tailwindcss/typography": "^0.5.19",
+    "@types/mark.js": "^8.11.12",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.575.0",
+    "mark.js": "^8.11.1",
     "react": "^19.2.0",
     "react-dom": "^19.2.0",
     "react-markdown": "^10.1.0",

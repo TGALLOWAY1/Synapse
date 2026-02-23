@@ -1,7 +1,7 @@
-import { useState, useEffect } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
+import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { replyInBranch } from '../lib/llmProvider';
 
@@ -16,19 +16,34 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
     const [selection, setSelection] = useState<{ text: string; top: number; left: number } | null>(null);
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const spineRef = useRef<HTMLDivElement>(null);
     const { createBranch, addBranchMessage, branches } = useProjectStore();
 
     // Get active branches for this spine to highlight their anchors
     const activeBranches = (branches[projectId] || []).filter(b => b.spineVersionId === spineVersionId && b.status === 'active');
 
-    let highlightedText = text;
-    activeBranches.forEach(b => {
-        if (!b.anchorText) return;
-        const escapedAnchor = b.anchorText.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-        const regex = new RegExp(`(${escapedAnchor})`, 'g');
-        // Inject a <mark> tag that rehype-raw will render
-        highlightedText = highlightedText.replace(regex, `<mark class="bg-blue-500/20 text-inherit border-l-2 border-blue-500 pl-1 py-0.5 rounded-r">$&</mark>`);
-    });
+    useEffect(() => {
+        if (!spineRef.current) return;
+
+        // Use mark.js to highlight actual rendered text, 
+        // bypassing ReactMarkdown AST and matching across HTML tags
+        const instance = new Mark(spineRef.current);
+        instance.unmark();
+
+        activeBranches.forEach(b => {
+            if (!b.anchorText) return;
+            instance.mark(b.anchorText, {
+                className: '!bg-blue-500/20 !text-inherit !border-l-2 !border-blue-500 !p-0.5 !rounded',
+                accuracy: 'partially',
+                separateWordSearch: false,
+                diacritics: false,
+                acrossElements: true
+            });
+        });
+
+        // Cleanup on unmount or updates
+        return () => instance.unmark();
+    }, [text, activeBranches]);
 
     useEffect(() => {
         const handleKeyDown = (e: KeyboardEvent) => {
@@ -42,6 +57,32 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
         window.addEventListener('keydown', handleKeyDown);
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [selection]);
+
+    const getIntentHelper = (intentStr: string) => {
+        if (!intentStr) return null;
+        const lowerMsg = intentStr.toLowerCase();
+        let helper = '';
+
+        if (lowerMsg.startsWith('clarify')) {
+            helper = 'Ask for precision, fix ambiguity, or correct a specific detail tied to this text.';
+        } else if (lowerMsg.startsWith('expand')) {
+            helper = 'Add depth or options. Generate UX ideas, NB3 prompts, or elaborations.';
+        } else if (lowerMsg.startsWith('specify')) {
+            helper = 'Turn this into implementable requirements: constraints, acceptance criteria, data/API details.';
+        } else if (lowerMsg.startsWith('alternative')) {
+            helper = 'Propose a different approach or architecture and explain tradeoffs.';
+        } else if (lowerMsg.startsWith('replace')) {
+            helper = 'Suggest a concrete change. The system will apply locally or across the document during consolidation.';
+        }
+
+        if (!helper) return null;
+
+        return (
+            <div className="text-xs text-neutral-400 italic leading-snug bg-neutral-800/50 p-2 rounded border border-neutral-700/50 mb-2">
+                {helper}
+            </div>
+        );
+    };
 
     const handleMouseUp = () => {
         if (readOnly) return;
@@ -91,21 +132,24 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
 
     return (
         <div className="relative" onMouseUp={handleMouseUp}>
-            <div className="
-                prose prose-neutral max-w-none 
-                prose-h1:text-3xl prose-h1:font-extrabold prose-h1:mb-8 prose-h1:mt-2
-                prose-h2:text-2xl prose-h2:font-bold prose-h2:mt-10 prose-h2:mb-4
-                prose-h3:text-xl prose-h3:font-semibold prose-h3:mt-8 prose-h3:mb-3
-                prose-p:leading-relaxed prose-p:mb-6
-                prose-ul:list-disc prose-ul:pl-6 prose-ul:mb-6
-                prose-ol:list-decimal prose-ol:pl-6 prose-ol:mb-6
-                prose-li:mb-2
-                prose-strong:font-bold
-                prose-a:text-blue-600 hover:prose-a:text-blue-500
-                prose-code:text-pink-600 prose-code:bg-neutral-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
-            ">
-                <ReactMarkdown remarkPlugins={[remarkGfm]} rehypePlugins={[rehypeRaw]}>
-                    {highlightedText}
+            <div
+                ref={spineRef}
+                className="
+                    prose prose-neutral max-w-none 
+                    prose-h1:text-3xl prose-h1:font-extrabold prose-h1:mb-8 prose-h1:mt-2
+                    prose-h2:text-2xl prose-h2:font-bold prose-h2:mt-10 prose-h2:mb-4
+                    prose-h3:text-xl prose-h3:font-semibold prose-h3:mt-8 prose-h3:mb-3
+                    prose-p:leading-relaxed prose-p:mb-6
+                    prose-ul:list-disc prose-ul:pl-6 prose-ul:mb-6
+                    prose-ol:list-decimal prose-ol:pl-6 prose-ol:mb-6
+                    prose-li:mb-2
+                    prose-strong:font-bold
+                    prose-a:text-blue-600 hover:prose-a:text-blue-500
+                    prose-code:text-pink-600 prose-code:bg-neutral-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
+                "
+            >
+                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                    {text}
                 </ReactMarkdown>
             </div>
 
@@ -131,6 +175,8 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                             </button>
                         ))}
                     </div>
+
+                    {getIntentHelper(intent)}
 
                     <form onSubmit={handleCreateBranch} className="flex gap-2">
                         <input
