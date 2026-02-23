@@ -104,3 +104,21 @@
 4. Observe the mock approaches rendered side-by-side.
 5. Select an approach and click "Apply to Spine" in the top bar.
 6. Verify you are returned to the main project workspace and the merged branch disappeared from the active list.
+
+---
+
+## S7: Export & Final Polish
+**PRD Sections Satisfied:**
+- **Export:**
+  - Export Markdown `.md`
+  - Export header includes version/final/timestamp.
+  - Filename matches `project-name-prd-vX.md`.
+- **Final Labeling:**
+  - "Mark as Final" labels a spine version as FINAL.
+
+**QA Steps (S7):**
+1. In the workspace, click the "Mark Final" button in the top right.
+2. Note the spine label turns green and indicates "(FINAL)".
+3. Click the "Export" button.
+4. Verify a file downloads with the name format `myproject-prd-vX.md`.
+5. Open the downloaded file to verify the header includes the `FINAL` status, the date, and the PRD text below the separator.

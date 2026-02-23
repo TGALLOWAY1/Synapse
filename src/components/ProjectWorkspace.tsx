@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, RefreshCcw, LogOut } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download } from 'lucide-react';
 import { useState } from 'react';
 import { generatePRD } from '../lib/llmProvider';
 import { SelectableSpine } from './SelectableSpine';
@@ -11,7 +11,7 @@ import type { Branch } from '../types';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine, getSpineVersions } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
@@ -48,6 +48,36 @@ export function ProjectWorkspace() {
         }
     };
 
+    const handleToggleFinal = () => {
+        if (!projectId || !activeSpine) return;
+        markSpineFinal(projectId, activeSpine.id, !activeSpine.isFinal);
+    };
+
+    const handleExport = () => {
+        if (!project || !activeSpine) return;
+
+        const timestamp = new Date().toISOString().split('T')[0];
+        const status = activeSpine.isFinal ? 'FINAL' : 'DRAFT';
+        const header = `# ${project.name} PRD
+**Version:** ${activeSpine.id}
+**Status:** ${status}
+**Exported:** ${timestamp}
+
+---
+
+`;
+        const markdownContent = header + activeSpine.responseText;
+        const blob = new Blob([markdownContent], { type: 'text/markdown' });
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement('a');
+        a.href = url;
+        a.download = `${project.name.toLowerCase().replace(/\s+/g, '-')}-prd-${activeSpine.id}.md`;
+        document.body.appendChild(a);
+        a.click();
+        document.body.removeChild(a);
+        URL.revokeObjectURL(url);
+    };
+
     return (
         <div className="flex h-screen bg-neutral-900 border-t border-neutral-800 text-neutral-100">
 
@@ -61,11 +91,29 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold">{project.name}</span>
-                    <span className="text-xs px-2 py-0.5 bg-neutral-800 text-neutral-400 rounded">
-                        {latestSpine ? `Spine ${latestSpine.id}` : 'Loading...'}
+                    <span className={`text-xs px-2 py-0.5 rounded ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                        {activeSpine ? `Spine ${activeSpine.id} ${activeSpine.isFinal ? '(FINAL)' : ''}` : 'Loading...'}
                     </span>
                 </div>
                 <div className="flex items-center gap-2">
+                    <button
+                        onClick={handleExport}
+                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition"
+                        title="Export as Markdown"
+                    >
+                        <Download size={14} />
+                        Export
+                    </button>
+                    {!isOldVersion && (
+                        <button
+                            onClick={handleToggleFinal}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${activeSpine?.isFinal ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
+                            title={activeSpine?.isFinal ? "Unmark Final" : "Mark as Final"}
+                        >
+                            <CheckCircle size={14} />
+                            {activeSpine?.isFinal ? 'Final' : 'Mark Final'}
+                        </button>
+                    )}
                     <button
                         onClick={handleRegenerate}
                         disabled={isGenerating || hasBranches}

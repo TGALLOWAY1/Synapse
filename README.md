@@ -46,3 +46,10 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] Clicking "Generate Approaches" synthesizes multiple mock Drafts.
 - [x] Clicking a Draft selects it.
 - [x] Clicking "Apply to Spine" merges the selected draft into the Spine, creating a new authoritative version and returning the user to the workspace.
+
+### S7: Export & Final Polish
+- [x] Click "Mark Final" inside the workspace top bar (for active spine only). It highlights green.
+- [x] Viewing historical spines hides the "Mark Final" button.
+- [x] Click "Export" to download a Markdown file of the currently viewed spine.
+- [x] The downloaded file is named `projectname-prd-vX.md`.
+- [x] The exported file includes a header with the version number, date, and FINAL/DRAFT status.

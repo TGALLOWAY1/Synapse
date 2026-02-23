@@ -11,6 +11,7 @@ interface ProjectState {
     createProject: (name: string, promptText: string) => { projectId: string, spineId: string };
     updateSpineText: (projectId: string, spineId: string, text: string) => void;
     regenerateSpine: (projectId: string) => { newSpineId: string };
+    markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => void;
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
     mergeBranch: (projectId: string, branchId: string, newSpineText: string) => { newSpineId: string };
@@ -129,6 +130,21 @@ export const useProjectStore = create<ProjectState>()(
 
             getHistoryEvents: (projectId: string) => {
                 return get().historyEvents[projectId] || [];
+            },
+
+            markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => {
+                set((state) => {
+                    const projectSpines = state.spineVersions[projectId] || [];
+                    const updatedSpines = projectSpines.map(s =>
+                        s.id === spineId ? { ...s, isFinal } : s
+                    );
+                    return {
+                        spineVersions: {
+                            ...state.spineVersions,
+                            [projectId]: updatedSpines
+                        }
+                    };
+                });
             },
 
             createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => {
