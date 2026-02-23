@@ -2,11 +2,11 @@ import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import type { Project } from '../types';
-import { Plus, Settings } from 'lucide-react';
+import { Plus, Settings, Trash2 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 
 export function HomePage() {
-    const { projects, createProject } = useProjectStore();
+    const { projects, createProject, deleteProject } = useProjectStore();
     const navigate = useNavigate();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -57,7 +57,7 @@ export function HomePage() {
                         <div
                             key={p.id}
                             onClick={() => navigate(`/p/${p.id}`)}
-                            className="p-6 bg-neutral-800 rounded-lg border border-neutral-700 hover:border-blue-500 cursor-pointer transition group"
+                            className="p-6 relative bg-neutral-800 rounded-lg border border-neutral-700 hover:border-blue-500 cursor-pointer transition group"
                         >
                             <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400">
                                 {p.name}
@@ -65,6 +65,18 @@ export function HomePage() {
                             <p className="text-sm text-neutral-400">
                                 {new Date(p.createdAt).toLocaleDateString()}
                             </p>
+                            <button
+                                onClick={(e) => {
+                                    e.stopPropagation();
+                                    if (window.confirm(`Are you sure you want to delete "${p.name}"?`)) {
+                                        deleteProject(p.id);
+                                    }
+                                }}
+                                className="absolute top-4 right-4 p-2 text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
+                                title="Delete Project"
+                            >
+                                <Trash2 size={18} />
+                            </button>
                         </div>
                     );
                 })}

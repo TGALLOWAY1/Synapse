@@ -15,6 +15,8 @@ interface ProjectState {
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
     mergeBranch: (projectId: string, branchId: string, newSpineText: string) => { newSpineId: string };
+    deleteProject: (projectId: string) => void;
+    deleteBranch: (projectId: string, branchId: string) => void;
     getProject: (projectId: string) => Project | undefined;
     getSpineVersions: (projectId: string) => SpineVersion[];
     getLatestSpine: (projectId: string) => SpineVersion | undefined;
@@ -249,6 +251,37 @@ export const useProjectStore = create<ProjectState>()(
                 }));
 
                 return { newSpineId: newSpine.id };
+            },
+
+            deleteProject: (projectId: string) => {
+                set((state) => {
+                    const newProjects = { ...state.projects };
+                    delete newProjects[projectId];
+                    const newSpines = { ...state.spineVersions };
+                    delete newSpines[projectId];
+                    const newHistory = { ...state.historyEvents };
+                    delete newHistory[projectId];
+                    const newBranches = { ...state.branches };
+                    delete newBranches[projectId];
+                    return {
+                        projects: newProjects,
+                        spineVersions: newSpines,
+                        historyEvents: newHistory,
+                        branches: newBranches
+                    };
+                });
+            },
+
+            deleteBranch: (projectId: string, branchId: string) => {
+                set((state) => {
+                    const projectBranches = state.branches[projectId] || [];
+                    return {
+                        branches: {
+                            ...state.branches,
+                            [projectId]: projectBranches.filter(b => b.id !== branchId)
+                        }
+                    };
+                });
             },
 
             getBranchesForSpine: (projectId: string, spineVersionId: string) => {

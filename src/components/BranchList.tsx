@@ -2,7 +2,7 @@ import { useProjectStore } from '../store/projectStore';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { replyInBranch } from '../lib/llmProvider';
-import { Send, Maximize2 } from 'lucide-react';
+import { Send, Maximize2, Trash2 } from 'lucide-react';
 import type { Branch, BranchMessage } from '../types';
 
 interface BranchListProps {
@@ -13,7 +13,7 @@ interface BranchListProps {
 
 export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchListProps) {
     const navigate = useNavigate();
-    const { getBranchesForSpine, addBranchMessage } = useProjectStore();
+    const { getBranchesForSpine, addBranchMessage, deleteBranch } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
     const [isReplying, setIsReplying] = useState<Record<string, boolean>>({});
@@ -73,6 +73,17 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                                         title="Dive Into Canvas"
                                     >
                                         <Maximize2 size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => {
+                                            if (window.confirm("Are you sure you want to delete this branch?")) {
+                                                deleteBranch(projectId, branch.id);
+                                            }
+                                        }}
+                                        className="p-1.5 text-neutral-400 hover:text-red-500 hover:bg-red-50 rounded transition"
+                                        title="Delete Branch"
+                                    >
+                                        <Trash2 size={16} />
                                     </button>
                                     <button
                                         onClick={() => onConsolidate(branch)}
