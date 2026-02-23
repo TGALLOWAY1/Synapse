@@ -86,3 +86,21 @@
 3. The main workspace now displays a yellow "Read-Only" banner.
 4. Attempt to highlight text in the spine column. The branch popup should NOT appear.
 5. Click "Return to Latest" in the yellow banner to return to the active spine.
+
+---
+
+## S6: Exploration Canvases
+**PRD Sections Satisfied:**
+- **Navigation:**
+  - Branch dive-in route.
+- **E6 Exploration Canvas:**
+  - Dedicated full-screen space for resolving heavily-discussed branches via synthesis.
+  - "Apply to Spine" mapping to establish decision artifacts.
+
+**QA Steps (S6):**
+1. On an active branch, click the Expand (Maximize) icon to enter the Exploration Canvas.
+2. Verify the URL updates and the left pane shows the entire thread history for that branch.
+3. Click "Generate Approaches" in the center Canvas.
+4. Observe the mock approaches rendered side-by-side.
+5. Select an approach and click "Apply to Spine" in the top bar.
+6. Verify you are returned to the main project workspace and the merged branch disappeared from the active list.

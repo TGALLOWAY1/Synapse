@@ -39,3 +39,10 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] A yellow warning banner explains the view is Read-Only.
 - [x] Text highlighting to spawn new branches is disabled while viewing historical spines.
 - [x] Clicking "Return to Latest" restores the active latest spine.
+
+### S6: Exploration Canvases
+- [x] Click the Expand (Maximize) icon on an active branch to dive into the Canvas view.
+- [x] A dedicated route `/p/:projectId/branch/:branchId` loads the Branch context.
+- [x] Clicking "Generate Approaches" synthesizes multiple mock Drafts.
+- [x] Clicking a Draft selects it.
+- [x] Clicking "Apply to Spine" merges the selected draft into the Spine, creating a new authoritative version and returning the user to the workspace.

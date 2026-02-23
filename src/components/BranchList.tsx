@@ -1,7 +1,8 @@
 import { useProjectStore } from '../store/projectStore';
 import { useState } from 'react';
+import { useNavigate } from 'react-router-dom';
 import { replyInBranch } from '../lib/llmProvider';
-import { Send } from 'lucide-react';
+import { Send, Maximize2 } from 'lucide-react';
 import type { Branch, BranchMessage } from '../types';
 
 interface BranchListProps {
@@ -11,6 +12,7 @@ interface BranchListProps {
 }
 
 export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchListProps) {
+    const navigate = useNavigate();
     const { getBranchesForSpine, addBranchMessage } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
@@ -64,12 +66,21 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                                 {branch.status}
                             </div>
                             {branch.status === 'active' && (
-                                <button
-                                    onClick={() => onConsolidate(branch)}
-                                    className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded transition"
-                                >
-                                    Consolidate
-                                </button>
+                                <>
+                                    <button
+                                        onClick={() => navigate(`/p/${projectId}/branch/${branch.id}`)}
+                                        className="p-1.5 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded transition"
+                                        title="Dive Into Canvas"
+                                    >
+                                        <Maximize2 size={16} />
+                                    </button>
+                                    <button
+                                        onClick={() => onConsolidate(branch)}
+                                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded transition"
+                                    >
+                                        Consolidate
+                                    </button>
+                                </>
                             )}
                         </div>
                     </div>
