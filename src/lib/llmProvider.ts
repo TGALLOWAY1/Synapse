@@ -53,13 +53,18 @@ export interface ConsolidationResult {
 
 export const consolidateBranch = async (
     spineText: string,
-    branch: { anchorText: string }
+    branch: { anchorText: string, messages?: { role: string, content: string }[] }
 ): Promise<ConsolidationResult> => {
+    let threadContext = '';
+    if (branch.messages && branch.messages.length > 0) {
+        threadContext = '\n\nConversation Context:\n' + branch.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
+    }
+
     const localSystem = "You are a helpful assistant. You need to rewrite a specific excerpt from a PRD based on a thread of feedback. Only provide the rewritten excerpt, nothing else.";
-    const localPrompt = `Original Excerpt: "${branch.anchorText}"\nFeedback Context: The user wants to consolidate the changes discussed in the branch.\n\nPlease provide ONLY the rewritten excerpt.`;
+    const localPrompt = `Original Excerpt: "${branch.anchorText}"\nFeedback Context: The user wants to consolidate the changes discussed in the branch.${threadContext}\n\nPlease provide ONLY the rewritten excerpt.`;
 
     const docSystem = "You are a helpful assistant. Please rewrite the entire PRD document to incorporate the following change requested.";
-    const docPrompt = `Requested change for excerpt: "${branch.anchorText}".\nMake sure the entire document reflects this change coherently. Provide ONLY the new Markdown document without any introductory or concluding text.\n\nOriginal Document:\n${spineText}`;
+    const docPrompt = `Requested change for excerpt: "${branch.anchorText}".${threadContext}\nMake sure the entire document reflects this change coherently. Provide ONLY the new Markdown document without any introductory or concluding text.\n\nOriginal Document:\n${spineText}`;
 
     try {
         const [localPatch, docWidePatch] = await Promise.all([
