@@ -11,6 +11,27 @@ export function BranchCanvas() {
     const [isGenerating, setIsGenerating] = useState(false);
     const [drafts, setDrafts] = useState<{ id: string, title: string, content: string }[]>([]);
     const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+    const [leftWidth, setLeftWidth] = useState(320);
+
+    const handleMouseDown = (e: React.MouseEvent) => {
+        e.preventDefault();
+        const startX = e.pageX;
+        const startWidth = leftWidth;
+
+        const handleMouseMove = (mouseEvent: MouseEvent) => {
+            // Constrain width between 200px and 800px
+            const newWidth = Math.max(200, Math.min(800, startWidth + mouseEvent.pageX - startX));
+            setLeftWidth(newWidth);
+        };
+
+        const handleMouseUp = () => {
+            document.removeEventListener('mousemove', handleMouseMove);
+            document.removeEventListener('mouseup', handleMouseUp);
+        };
+
+        document.addEventListener('mousemove', handleMouseMove);
+        document.addEventListener('mouseup', handleMouseUp);
+    };
 
     const project = projectId ? getProject(projectId) : undefined;
     const projectBranches = projectId ? branches[projectId] || [] : [];
@@ -77,7 +98,15 @@ export function BranchCanvas() {
             <div className="flex flex-1 overflow-hidden">
 
                 {/* Left: Branch Context */}
-                <div className="w-80 bg-neutral-800/30 border-r border-neutral-800 flex flex-col pt-6 pb-6 overflow-y-auto">
+                <div
+                    className="bg-neutral-800/30 border-r border-neutral-800 flex flex-col pt-6 pb-6 overflow-y-auto relative shrink-0"
+                    style={{ width: leftWidth }}
+                >
+                    {/* Drag Handle */}
+                    <div
+                        className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/50 transition-colors z-20"
+                        onMouseDown={handleMouseDown}
+                    />
                     <div className="px-6 mb-4">
                         <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 mb-2">Branch Context</h3>
                         <div className="bg-neutral-800 p-3 rounded-md text-sm text-neutral-300 italic border border-neutral-700">
