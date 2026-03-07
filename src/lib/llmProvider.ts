@@ -63,13 +63,16 @@ export const generatePRD = async (promptText: string, options?: ProviderOptions)
 };
 
 export interface ConsolidationResult {
-    localPatch: string;
-    docWidePatch: string;
+    localPatch?: string;
+    docWidePatch?: string;
 }
+
+export type ConsolidationScope = 'local' | 'doc-wide';
 
 export const consolidateBranch = async (
     spineText: string,
-    branch: { anchorText: string, messages?: { role: string, content: string }[] }
+    branch: { anchorText: string, messages?: { role: string, content: string }[] },
+    scope?: ConsolidationScope
 ): Promise<ConsolidationResult> => {
     let threadContext = '';
     if (branch.messages && branch.messages.length > 0) {
@@ -83,22 +86,26 @@ export const consolidateBranch = async (
     const docPrompt = `Requested change for excerpt: "${branch.anchorText}".${threadContext}\nMake sure the entire document reflects this change coherently. Provide ONLY the new Markdown document without any introductory or concluding text.\n\nOriginal Document:\n${spineText}`;
 
     try {
-        const [localPatch, docWidePatch] = await Promise.all([
-            callGemini(localSystem, localPrompt),
-            callGemini(docSystem, docPrompt)
-        ]);
-
-        return {
-            localPatch: localPatch.trim(),
-            docWidePatch: docWidePatch.trim()
-        };
+        if (scope === 'local') {
+            const localPatch = await callGemini(localSystem, localPrompt);
+            return { localPatch: localPatch.trim() };
+        } else if (scope === 'doc-wide') {
+            const docWidePatch = await callGemini(docSystem, docPrompt);
+            return { docWidePatch: docWidePatch.trim() };
+        } else {
+            // Default to both for backward compatibility or if not specified
+            const [localPatch, docWidePatch] = await Promise.all([
+                callGemini(localSystem, localPrompt),
+                callGemini(docSystem, docPrompt)
+            ]);
+            return {
+                localPatch: localPatch.trim(),
+                docWidePatch: docWidePatch.trim()
+            };
+        }
     } catch (e: unknown) {
         console.error(e);
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        return {
-            localPatch: `[Error generating local patch: ${errorMsg}]`,
-            docWidePatch: spineText
-        };
+        throw e;
     }
 };
 

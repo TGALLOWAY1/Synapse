@@ -1,6 +1,6 @@
 import { useState } from 'react';
 import { useProjectStore } from '../store/projectStore';
-import { consolidateBranch, type ConsolidationResult } from '../lib/llmProvider';
+import { consolidateBranch, type ConsolidationResult, type ConsolidationScope } from '../lib/llmProvider';
 import { X, ArrowRight, Check, RefreshCcw } from 'lucide-react';
 import type { Branch } from '../types';
 
@@ -16,15 +16,18 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
     const { mergeBranch } = useProjectStore();
     const [isConsolidating, setIsConsolidating] = useState(false);
     const [result, setResult] = useState<ConsolidationResult | null>(null);
-    const [selectedPatch, setSelectedPatch] = useState<'local' | 'doc-wide'>('local');
+    const [selectedScope, setSelectedScope] = useState<ConsolidationScope>('local');
     const [isCommitting, setIsCommitting] = useState(false);
+    const [error, setError] = useState<string | null>(null);
 
     const handleGenerate = async () => {
         setIsConsolidating(true);
+        setError(null);
         try {
-            const res = await consolidateBranch(spineText, branch);
+            const res = await consolidateBranch(spineText, branch, selectedScope);
             setResult(res);
-            setSelectedPatch('local'); // Default
+        } catch (err: any) {
+            setError(err.message || 'Failed to generate patch. Please check your API key and connection.');
         } finally {
             setIsConsolidating(false);
         }
@@ -33,14 +36,28 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
     const handleCommit = async () => {
         if (!result) return;
         setIsCommitting(true);
+        setError(null);
         try {
-            // For S4 MVP, local patch just appends to the old text (mock behavior).
-            // docWidePatch is a full text replacement.
             let finalSpineText = spineText;
-            if (selectedPatch === 'doc-wide') {
+            if (selectedScope === 'doc-wide' && result.docWidePatch) {
                 finalSpineText = result.docWidePatch;
-            } else {
-                finalSpineText = spineText.replace(branch.anchorText, result.localPatch);
+            } else if (selectedScope === 'local' && result.localPatch) {
+                // Precise replacement
+                const newText = spineText.replace(branch.anchorText, result.localPatch);
+
+                if (newText === spineText) {
+                    // Mismatch warning
+                    setError("Could not locate the exact anchor text in the document. This can happen if the text contains markdown formatting. Try a Doc-Wide Rewrite instead.");
+                    setIsCommitting(false);
+                    return;
+                }
+                finalSpineText = newText;
+            }
+
+            if (finalSpineText === spineText && selectedScope === 'doc-wide') {
+                setError("The generated document is identical to the current one. No changes were applied.");
+                setIsCommitting(false);
+                return;
             }
 
             mergeBranch(projectId, branch.id, finalSpineText);
@@ -49,6 +66,8 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
             setIsCommitting(false);
         }
     };
+
+    const hasActivePatch = (selectedScope === 'local' && result?.localPatch) || (selectedScope === 'doc-wide' && result?.docWidePatch);
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center overflow-y-auto p-4 md:p-8" onClick={onClose}>
@@ -65,6 +84,13 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                     </button>
                 </div>
 
+                {/* Error Banner */}
+                {error && (
+                    <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-center gap-2">
+                        <span className="font-bold">Error:</span> {error}
+                    </div>
+                )}
+
                 {/* Body */}
                 <div className="flex-1 overflow-hidden flex flex-col">
                     {!result ? (
@@ -73,42 +99,58 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                                 <RefreshCcw size={32} className={`text-blue-500 ${isConsolidating ? 'animate-spin' : ''}`} />
                             </div>
                             <h3 className="text-xl font-medium text-neutral-800 mb-2">
-                                {isConsolidating ? 'Synthesizing Patches...' : 'Ready to Consolidate'}
+                                {isConsolidating ? 'Synthesizing Patch...' : 'Select Consolidation Scope'}
                             </h3>
                             <p className="text-neutral-500 max-w-md mb-8">
                                 {isConsolidating
-                                    ? 'Our AI is generating both a localized edit and a document-wide rewrite based on the branch discussion.'
-                                    : 'Generate patches to safely merge this branch\'s intent into the main spine.'}
+                                    ? `Generating a ${selectedScope === 'local' ? 'localized edit' : 'document-wide rewrite'} based on the branch discussion.`
+                                    : 'Choose how you want to merge this branch\'s intent into the main spine.'}
                             </p>
+
                             {!isConsolidating && (
-                                <button
-                                    onClick={handleGenerate}
-                                    className="bg-blue-600 hover:bg-blue-700 text-white px-6 py-2.5 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
-                                >
-                                    Generate Patches <ArrowRight size={18} />
-                                </button>
+                                <>
+                                    <div className="flex gap-4 mb-8 w-full max-w-lg">
+                                        <button
+                                            onClick={() => { setSelectedScope('local'); setError(null); }}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'local' ? 'border-blue-500 bg-blue-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                        >
+                                            <div className="font-semibold text-neutral-800 mb-1">Local Patch</div>
+                                            <div className="text-xs text-neutral-500">Replace only the selected anchor text. Safe and predictable.</div>
+                                        </button>
+                                        <button
+                                            onClick={() => { setSelectedScope('doc-wide'); setError(null); }}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-blue-500 bg-blue-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                        >
+                                            <div className="font-semibold text-neutral-800 mb-1">Doc-Wide Rewrite</div>
+                                            <div className="text-xs text-neutral-500">Rewrite the entire PRD to incorporate the intent contextually.</div>
+                                        </button>
+                                    </div>
+                                    <button
+                                        onClick={handleGenerate}
+                                        className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
+                                    >
+                                        Generate {selectedScope === 'local' ? 'Local' : 'Global'} Patch <ArrowRight size={18} />
+                                    </button>
+                                </>
                             )}
                         </div>
                     ) : (
                         <div className="flex flex-1 overflow-hidden h-full">
                             {/* Left Column: Output Preview */}
                             <div className="flex-1 border-r border-neutral-200 flex flex-col overflow-hidden">
-                                <div className="p-3 bg-neutral-100 border-b border-neutral-200 flex gap-2">
+                                <div className="p-3 bg-neutral-100 border-b border-neutral-200 flex items-center justify-between">
+                                    <span className="text-sm font-semibold text-neutral-700 uppercase tracking-wider pl-2">
+                                        {selectedScope === 'local' ? 'Local Scope Preview' : 'Doc-Wide Scope Preview'}
+                                    </span>
                                     <button
-                                        onClick={() => setSelectedPatch('local')}
-                                        className={`flex-1 py-2 text-sm font-medium rounded-md transition ${selectedPatch === 'local' ? 'bg-white shadow-sm border border-neutral-200 text-neutral-800' : 'text-neutral-500 hover:bg-neutral-200'}`}
+                                        onClick={() => { setResult(null); setError(null); }}
+                                        className="text-xs text-blue-600 hover:underline font-medium pr-2"
                                     >
-                                        Local Scope Patch
-                                    </button>
-                                    <button
-                                        onClick={() => setSelectedPatch('doc-wide')}
-                                        className={`flex-1 py-2 text-sm font-medium rounded-md transition ${selectedPatch === 'doc-wide' ? 'bg-white shadow-sm border border-neutral-200 text-neutral-800' : 'text-neutral-500 hover:bg-neutral-200'}`}
-                                    >
-                                        Doc-Wide Scope Patch
+                                        Change Scope
                                     </button>
                                 </div>
                                 <div className="flex-1 p-6 overflow-y-auto bg-neutral-50 text-neutral-800 font-mono text-sm whitespace-pre-wrap">
-                                    {selectedPatch === 'local' ? result.localPatch : result.docWidePatch}
+                                    {selectedScope === 'local' ? result.localPatch : result.docWidePatch}
                                 </div>
                             </div>
 
@@ -117,9 +159,9 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                                 <div>
                                     <h3 className="font-semibold text-neutral-800 mb-2">Patch Analysis</h3>
                                     <div className="text-sm text-neutral-600 p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                                        {selectedPatch === 'local'
-                                            ? 'Replaces the specific anchor text with a rewritten block. Safe, localized change that leaves the rest of the PRD untouched.'
-                                            : 'Rewrites the entire PRD to incorporate the branch intent contextually throughout the document. May alter tone or structure.'}
+                                        {selectedScope === 'local'
+                                            ? 'Replaces the specific anchor text with the rewritten block shown. Safe, localized change.'
+                                            : 'This is a document-wide rewrite. The entire PRD will be replaced with the content shown on the left.'}
                                     </div>
                                 </div>
 
