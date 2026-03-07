@@ -6,7 +6,7 @@ import { Plus, Settings, Trash2 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 
 export function HomePage() {
-    const { projects, createProject, deleteProject } = useProjectStore();
+    const { projects, createProject, deleteProject, getLatestSpine, getLatestDevPlan, getAgentPrompts } = useProjectStore();
     const navigate = useNavigate();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -20,11 +20,12 @@ export function HomePage() {
         const { projectId, spineId } = createProject(projectName.trim(), promptText.trim());
         navigate(`/p/${projectId}`);
 
-        // Trigger generation asynchronously
-        import('../lib/llmProvider').then(({ generatePRD }) => {
-            generatePRD(promptText.trim())
-                .then((prdText) => {
-                    useProjectStore.getState().updateSpineText(projectId, spineId, prdText);
+        // Generate structured PRD asynchronously
+        import('../lib/llmProvider').then(({ generateStructuredPRD, structuredPRDToMarkdown }) => {
+            generateStructuredPRD(promptText.trim())
+                .then((structuredPRD) => {
+                    const markdown = structuredPRDToMarkdown(structuredPRD);
+                    useProjectStore.getState().updateSpineStructuredPRD(projectId, spineId, structuredPRD, markdown);
                 })
                 .catch((e) => {
                     const errorMsg = e instanceof Error ? e.message : String(e);
@@ -62,6 +63,18 @@ export function HomePage() {
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
                 {Object.values(projects).map((project: unknown) => {
                     const p = project as Project;
+                    const spine = getLatestSpine(p.id);
+                    const hasDevPlan = !!getLatestDevPlan(p.id);
+                    const hasPrompts = getAgentPrompts(p.id).length > 0;
+                    const stageBadge = hasPrompts ? 'Prompts' : hasDevPlan ? 'Dev Plan' : spine?.isFinal ? 'PRD Final' : 'PRD';
+                    const stageColor = hasPrompts
+                        ? 'bg-purple-900/30 text-purple-400 border-purple-800'
+                        : hasDevPlan
+                            ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800'
+                            : spine?.isFinal
+                                ? 'bg-green-900/30 text-green-400 border-green-800'
+                                : 'bg-neutral-700 text-neutral-400 border-neutral-600';
+
                     return (
                         <div
                             key={p.id}
@@ -71,9 +84,14 @@ export function HomePage() {
                             <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400">
                                 {p.name}
                             </h2>
-                            <p className="text-sm text-neutral-400">
-                                {new Date(p.createdAt).toLocaleDateString()}
-                            </p>
+                            <div className="flex items-center gap-2">
+                                <p className="text-sm text-neutral-400">
+                                    {new Date(p.createdAt).toLocaleDateString()}
+                                </p>
+                                <span className={`text-xs px-2 py-0.5 rounded border ${stageColor}`}>
+                                    {stageBadge}
+                                </span>
+                            </div>
                             <button
                                 onClick={(e) => {
                                     e.stopPropagation();
@@ -83,6 +101,7 @@ export function HomePage() {
                                 }}
                                 className="absolute top-4 right-4 p-2 text-neutral-500 hover:text-red-400 opacity-0 group-hover:opacity-100 transition-opacity"
                                 title="Delete Project"
+                                aria-label="Delete project"
                             >
                                 <Trash2 size={18} />
                             </button>
@@ -97,8 +116,8 @@ export function HomePage() {
             </div>
 
             {isModalOpen && (
-                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4">
-                    <div className="bg-neutral-800 rounded-lg w-full max-w-xl shadow-2xl overflow-hidden border border-neutral-700">
+                <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={() => setIsModalOpen(false)}>
+                    <div className="bg-neutral-800 rounded-lg w-full max-w-xl shadow-2xl overflow-hidden border border-neutral-700" onClick={e => e.stopPropagation()}>
                         <div className="px-6 py-4 border-b border-neutral-700">
                             <h2 className="text-xl font-semibold">Start New Session</h2>
                         </div>

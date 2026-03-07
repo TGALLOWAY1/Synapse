@@ -1,13 +1,17 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import type { Project, SpineVersion, HistoryEvent, Branch } from '../types';
+import type { Project, SpineVersion, HistoryEvent, Branch, StructuredPRD, DevPlan, Milestone, AgentPrompt, PipelineStage } from '../types';
 
 interface ProjectState {
     projects: Record<string, Project>;
     spineVersions: Record<string, SpineVersion[]>;
     historyEvents: Record<string, HistoryEvent[]>;
-    branches: Record<string, Branch[]>; // projectId -> Branch[]
+    branches: Record<string, Branch[]>;
+    devPlans: Record<string, DevPlan[]>;
+    agentPrompts: Record<string, AgentPrompt[]>;
+
+    // Existing actions
     createProject: (name: string, promptText: string) => { projectId: string, spineId: string };
     updateSpineText: (projectId: string, spineId: string, text: string) => void;
     regenerateSpine: (projectId: string) => { newSpineId: string };
@@ -22,6 +26,24 @@ interface ProjectState {
     getLatestSpine: (projectId: string) => SpineVersion | undefined;
     getHistoryEvents: (projectId: string) => HistoryEvent[];
     getBranchesForSpine: (projectId: string, spineVersionId: string) => Branch[];
+
+    // Pipeline stage
+    setProjectStage: (projectId: string, stage: PipelineStage) => void;
+
+    // Structured PRD
+    updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
+    updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => void;
+
+    // Dev Plan
+    createDevPlan: (projectId: string, spineVersionId: string, milestones: Milestone[]) => { devPlanId: string };
+    deleteDevPlan: (projectId: string, devPlanId: string) => void;
+    getDevPlans: (projectId: string) => DevPlan[];
+    getLatestDevPlan: (projectId: string) => DevPlan | undefined;
+
+    // Agent Prompts
+    createAgentPrompt: (projectId: string, prompt: Omit<AgentPrompt, 'id' | 'createdAt'>) => { promptId: string };
+    deleteAgentPrompt: (projectId: string, promptId: string) => void;
+    getAgentPrompts: (projectId: string, milestoneId?: string) => AgentPrompt[];
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -31,6 +53,8 @@ export const useProjectStore = create<ProjectState>()(
             spineVersions: {},
             historyEvents: {},
             branches: {},
+            devPlans: {},
+            agentPrompts: {},
 
             createProject: (name: string, promptText: string) => {
                 const projectId = uuidv4();
@@ -263,11 +287,17 @@ export const useProjectStore = create<ProjectState>()(
                     delete newHistory[projectId];
                     const newBranches = { ...state.branches };
                     delete newBranches[projectId];
+                    const newDevPlans = { ...state.devPlans };
+                    delete newDevPlans[projectId];
+                    const newAgentPrompts = { ...state.agentPrompts };
+                    delete newAgentPrompts[projectId];
                     return {
                         projects: newProjects,
                         spineVersions: newSpines,
                         historyEvents: newHistory,
-                        branches: newBranches
+                        branches: newBranches,
+                        devPlans: newDevPlans,
+                        agentPrompts: newAgentPrompts
                     };
                 });
             },
@@ -287,6 +317,107 @@ export const useProjectStore = create<ProjectState>()(
             getBranchesForSpine: (projectId: string, spineVersionId: string) => {
                 const projectBranches = get().branches[projectId] || [];
                 return projectBranches.filter(b => b.spineVersionId === spineVersionId);
+            },
+
+            // Pipeline stage
+            setProjectStage: (projectId: string, stage: PipelineStage) => {
+                set((state) => ({
+                    projects: {
+                        ...state.projects,
+                        [projectId]: { ...state.projects[projectId], currentStage: stage }
+                    }
+                }));
+            },
+
+            // Structured PRD
+            updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => {
+                set((state) => {
+                    const projectSpines = state.spineVersions[projectId] || [];
+                    const updatedSpines = projectSpines.map(s =>
+                        s.id === spineId ? { ...s, structuredPRD } : s
+                    );
+                    return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+                });
+            },
+
+            updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => {
+                set((state) => {
+                    const projectSpines = state.spineVersions[projectId] || [];
+                    const updatedSpines = projectSpines.map(s =>
+                        s.id === spineId ? { ...s, structuredPRD, responseText } : s
+                    );
+                    return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+                });
+            },
+
+            // Dev Plan
+            createDevPlan: (projectId: string, spineVersionId: string, milestones: Milestone[]) => {
+                const devPlanId = uuidv4();
+                const now = Date.now();
+                const existing = get().devPlans[projectId] || [];
+                const mappedOld = existing.map(d => ({ ...d, isLatest: false }));
+                const newPlan: DevPlan = {
+                    id: devPlanId,
+                    projectId,
+                    spineVersionId,
+                    milestones,
+                    createdAt: now,
+                    isLatest: true,
+                };
+                set((state) => ({
+                    devPlans: { ...state.devPlans, [projectId]: [...mappedOld, newPlan] }
+                }));
+                return { devPlanId };
+            },
+
+            deleteDevPlan: (projectId: string, devPlanId: string) => {
+                set((state) => ({
+                    devPlans: {
+                        ...state.devPlans,
+                        [projectId]: (state.devPlans[projectId] || []).filter(d => d.id !== devPlanId)
+                    }
+                }));
+            },
+
+            getDevPlans: (projectId: string) => {
+                return get().devPlans[projectId] || [];
+            },
+
+            getLatestDevPlan: (projectId: string) => {
+                const plans = get().devPlans[projectId] || [];
+                return plans.find(p => p.isLatest);
+            },
+
+            // Agent Prompts
+            createAgentPrompt: (projectId: string, prompt: Omit<AgentPrompt, 'id' | 'createdAt'>) => {
+                const promptId = uuidv4();
+                const newPrompt: AgentPrompt = {
+                    ...prompt,
+                    id: promptId,
+                    createdAt: Date.now(),
+                };
+                set((state) => ({
+                    agentPrompts: {
+                        ...state.agentPrompts,
+                        [projectId]: [...(state.agentPrompts[projectId] || []), newPrompt]
+                    }
+                }));
+                return { promptId };
+            },
+
+            deleteAgentPrompt: (projectId: string, promptId: string) => {
+                set((state) => ({
+                    agentPrompts: {
+                        ...state.agentPrompts,
+                        [projectId]: (state.agentPrompts[projectId] || []).filter(p => p.id !== promptId)
+                    }
+                }));
+            },
+
+            getAgentPrompts: (projectId: string, milestoneId?: string) => {
+                const prompts = get().agentPrompts[projectId] || [];
+                if (milestoneId) return prompts.filter(p => p.milestoneId === milestoneId);
+                return prompts;
             },
 
         }),

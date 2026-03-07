@@ -15,8 +15,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     };
 
     return (
-        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50">
-            <div className="bg-neutral-800 rounded-lg w-full max-w-md shadow-2xl overflow-hidden border border-neutral-700">
+        <div className="fixed inset-0 bg-black/60 flex items-center justify-center p-4 z-50" onClick={onClose}>
+            <div className="bg-neutral-800 rounded-lg w-full max-w-md shadow-2xl overflow-hidden border border-neutral-700" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-neutral-700 flex items-center justify-between">
                     <h2 className="text-xl font-semibold flex items-center gap-2">
                         <Key size={20} className="text-blue-400" />
