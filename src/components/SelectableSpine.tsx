@@ -93,11 +93,21 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                 const range = sel.getRangeAt(0);
                 const rect = range.getBoundingClientRect();
 
-                // Ensure we only show the popover if the selection is within this element
+                // Clamp popover to viewport bounds (320px = w-80 popover width)
+                const popoverWidth = 320;
+                const popoverHeight = 220;
+                const rawLeft = rect.left + (rect.width / 2);
+                const rawTop = rect.bottom + 8;
+
+                const clampedLeft = Math.max(popoverWidth / 2 + 8, Math.min(rawLeft, window.innerWidth - popoverWidth / 2 - 8));
+                const clampedTop = rawTop + popoverHeight > window.innerHeight
+                    ? rect.top - popoverHeight - 8  // Flip above if overflowing bottom
+                    : rawTop;
+
                 setSelection({
                     text: sel.toString().trim(),
-                    top: rect.bottom + 8, // Offset slightly below the text
-                    left: rect.left + (rect.width / 2), // Center under selection
+                    top: Math.max(8, clampedTop),
+                    left: clampedLeft,
                 });
             } else if (!isSubmitting) { // Don't hide if interacting with the form
                 setSelection(null);
