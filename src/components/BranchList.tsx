@@ -165,6 +165,8 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                                 type="submit"
                                 disabled={!replyInputs[branch.id]?.trim() || isReplying[branch.id]}
                                 className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition disabled:opacity-50"
+                                title="Send reply"
+                                aria-label="Send reply"
                             >
                                 <Send size={18} />
                             </button>

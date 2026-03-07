@@ -12,7 +12,7 @@ interface ConsolidationModalProps {
     onClose: () => void;
 }
 
-export function ConsolidationModal({ projectId, spineVersionId, branch, spineText, onClose }: ConsolidationModalProps) {
+export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId, branch, spineText, onClose }: ConsolidationModalProps) {
     const { mergeBranch } = useProjectStore();
     const [isConsolidating, setIsConsolidating] = useState(false);
     const [result, setResult] = useState<ConsolidationResult | null>(null);
@@ -51,8 +51,8 @@ export function ConsolidationModal({ projectId, spineVersionId, branch, spineTex
     };
 
     return (
-        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center overflow-y-auto p-8">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]">
+        <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center overflow-y-auto p-4 md:p-8" onClick={onClose}>
+            <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
 
                 {/* Header */}
                 <div className="p-4 border-b border-neutral-200 flex justify-between items-center bg-neutral-50 rounded-t-xl">
@@ -68,7 +68,7 @@ export function ConsolidationModal({ projectId, spineVersionId, branch, spineTex
                 {/* Body */}
                 <div className="flex-1 overflow-hidden flex flex-col">
                     {!result ? (
-                        <div className="p-12 flex flex-col items-center justify-center text-center h-[400px]">
+                        <div className="p-8 md:p-12 flex flex-col items-center justify-center text-center flex-1 min-h-[300px]">
                             <div className="bg-blue-50 p-4 rounded-full mb-6">
                                 <RefreshCcw size={32} className={`text-blue-500 ${isConsolidating ? 'animate-spin' : ''}`} />
                             </div>
@@ -133,7 +133,7 @@ export function ConsolidationModal({ projectId, spineVersionId, branch, spineTex
                                         {!isCommitting && <Check size={18} />}
                                     </button>
                                     <p className="text-xs text-neutral-400 text-center mt-3">
-                                        This will close the branch and spawn Spine version v{Number(spineVersionId.replace('v', '')) + 1}.
+                                        This will close the branch and create a new version of the spine.
                                     </p>
                                 </div>
                             </div>
