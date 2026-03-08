@@ -28,6 +28,18 @@ export function ProjectWorkspace() {
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
 
+    // Close overflow menu on outside click
+    useEffect(() => {
+        if (!showNavOverflow) return;
+        const handleClick = (e: MouseEvent) => {
+            if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+                setShowNavOverflow(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [showNavOverflow]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -51,18 +63,6 @@ export function ProjectWorkspace() {
         const idx = allSpines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : spineId;
     };
-
-    // Close overflow menu on outside click
-    useEffect(() => {
-        if (!showNavOverflow) return;
-        const handleClick = (e: MouseEvent) => {
-            if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
-                setShowNavOverflow(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
-    }, [showNavOverflow]);
 
     if (!project) return <div>Project Not Found</div>;
 
@@ -405,7 +405,6 @@ export function ProjectWorkspace() {
             {consolidatingBranch && latestSpine && (
                 <ConsolidationModal
                     projectId={projectId}
-                    spineVersionId={latestSpine.id}
                     branch={consolidatingBranch}
                     spineText={latestSpine.responseText}
                     onClose={() => setConsolidatingBranch(null)}

@@ -41,7 +41,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             autoFocus
                         />
                         <p className="mt-2 text-xs text-neutral-400">
-                            Synapse uses Google's free Gemini 1.5 Flash model for lightning-fast PRD generation.
+                            Synapse uses Google's Gemini 2.5 Flash model for lightning-fast PRD generation.
                             <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline ml-1">
                                 Get your free key here.
                             </a>

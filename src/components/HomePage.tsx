@@ -17,6 +17,9 @@ export function HomePage() {
         e.preventDefault();
         if (!projectName.trim() || !promptText.trim()) return;
 
+        const apiKey = localStorage.getItem('GEMINI_API_KEY');
+        if (!apiKey) { setIsSettingsOpen(true); return; }
+
         const { projectId, spineId } = createProject(projectName.trim(), promptText.trim());
         navigate(`/p/${projectId}`);
 
