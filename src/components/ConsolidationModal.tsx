@@ -6,13 +6,12 @@ import type { Branch } from '../types';
 
 interface ConsolidationModalProps {
     projectId: string;
-    spineVersionId: string;
     branch: Branch;
     spineText: string;
     onClose: () => void;
 }
 
-export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId, branch, spineText, onClose }: ConsolidationModalProps) {
+export function ConsolidationModal({ projectId, branch, spineText, onClose }: ConsolidationModalProps) {
     const { mergeBranch } = useProjectStore();
     const [isConsolidating, setIsConsolidating] = useState(false);
     const [result, setResult] = useState<ConsolidationResult | null>(null);
@@ -26,8 +25,9 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
         try {
             const res = await consolidateBranch(spineText, branch, selectedScope);
             setResult(res);
-        } catch (err: any) {
-            setError(err.message || 'Failed to generate patch. Please check your API key and connection.');
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Failed to generate patch. Please check your API key and connection.';
+            setError(message);
         } finally {
             setIsConsolidating(false);
         }
@@ -66,8 +66,6 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
             setIsCommitting(false);
         }
     };
-
-    const hasActivePatch = (selectedScope === 'local' && result?.localPatch) || (selectedScope === 'doc-wide' && result?.docWidePatch);
 
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center overflow-y-auto p-4 md:p-8" onClick={onClose}>
