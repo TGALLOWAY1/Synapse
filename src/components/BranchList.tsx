@@ -1,6 +1,7 @@
 import { useProjectStore } from '../store/projectStore';
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { replyInBranch } from '../lib/llmProvider';
 import { Send, Maximize2, Trash2 } from 'lucide-react';
 import type { Branch, BranchMessage } from '../types';
@@ -9,9 +10,11 @@ interface BranchListProps {
     projectId: string;
     spineVersionId: string;
     onConsolidate: (branch: Branch) => void;
+    onCanvasOpen?: (branchId: string) => void;
 }
 
-export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchListProps) {
+export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasOpen }: BranchListProps) {
+    const [animationParent] = useAutoAnimate();
     const navigate = useNavigate();
     const { getBranchesForSpine, addBranchMessage, deleteBranch } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
@@ -85,7 +88,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
     };
 
     return (
-        <div className="flex flex-col gap-6">
+        <div ref={animationParent} className="flex flex-col gap-6">
             {branches.slice().reverse().map(branch => (
                 <div key={branch.id} className="bg-white border border-neutral-200 shadow-sm rounded-lg overflow-hidden flex flex-col">
                     {/* Header */}
@@ -98,14 +101,14 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                             {getIntentHelper(branch.messages[0]?.content)}
                         </div>
                         <div className="flex flex-col items-end gap-2 shrink-0">
-                            <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-blue-50 border-blue-200 text-blue-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
+                            <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
                                 {branch.status}
                             </div>
                             {branch.status === 'active' && (
-                                <>
+                                <div className="flex items-center gap-1 mt-1">
                                     <button
-                                        onClick={() => navigate(`/p/${projectId}/branch/${branch.id}`)}
-                                        className="p-1.5 text-neutral-400 hover:text-blue-500 hover:bg-blue-50 rounded transition"
+                                        onClick={() => onCanvasOpen ? onCanvasOpen(branch.id) : navigate(`/p/${projectId}/branch/${branch.id}`)}
+                                        className="p-1.5 text-neutral-400 hover:text-indigo-500 hover:bg-indigo-50 rounded transition"
                                         title="Dive Into Canvas"
                                     >
                                         <Maximize2 size={16} />
@@ -121,22 +124,28 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                                     >
                                         <Trash2 size={16} />
                                     </button>
-                                    <button
-                                        onClick={() => onConsolidate(branch)}
-                                        className="px-3 py-1 bg-green-600 hover:bg-green-700 text-white text-xs font-medium rounded transition"
-                                    >
-                                        Consolidate
-                                    </button>
-                                </>
+                                </div>
                             )}
                         </div>
                     </div>
+
+                    {/* Consolidate Bar */}
+                    {branch.status === 'active' && (
+                        <div className="px-3 pb-3 bg-neutral-50 flex justify-end">
+                             <button
+                                onClick={() => onConsolidate(branch)}
+                                className="px-4 py-1.5 bg-green-600 hover:bg-green-700 text-white text-xs font-semibold rounded-md transition shadow-sm w-full"
+                            >
+                                Consolidate to Document
+                            </button>
+                        </div>
+                    )}
 
                     {/* Messages */}
                     <div className="p-3 flex flex-col gap-3 max-h-96 overflow-y-auto bg-neutral-50/50">
                         {branch.messages.map((msg: BranchMessage) => (
                             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[85%] rounded-lg p-2.5 text-sm ${msg.role === 'user' ? 'bg-blue-600 text-white' : 'bg-white border border-neutral-200 text-neutral-800'}`}>
+                                <div className={`max-w-[85%] rounded-lg p-2.5 text-sm ${msg.role === 'user' ? 'bg-indigo-600 text-white' : 'bg-white border border-neutral-200 text-neutral-800'}`}>
                                     <p className="whitespace-pre-wrap break-words">{msg.content}</p>
                                 </div>
                             </div>
@@ -158,13 +167,13 @@ export function BranchList({ projectId, spineVersionId, onConsolidate }: BranchL
                                 value={replyInputs[branch.id] || ''}
                                 onChange={e => setReplyInputs(prev => ({ ...prev, [branch.id]: e.target.value }))}
                                 placeholder="Reply..."
-                                className="flex-1 bg-neutral-100 border-transparent focus:bg-white focus:border-blue-500 focus:ring-1 focus:ring-blue-500 text-sm rounded-md px-3 py-1.5 outline-none transition"
+                                className="flex-1 bg-neutral-100 border-transparent focus:bg-white focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 text-sm rounded-md px-3 py-1.5 outline-none transition"
                                 disabled={isReplying[branch.id]}
                             />
                             <button
                                 type="submit"
                                 disabled={!replyInputs[branch.id]?.trim() || isReplying[branch.id]}
-                                className="p-1.5 text-blue-600 hover:bg-blue-50 rounded-md transition disabled:opacity-50"
+                                className="p-1.5 text-indigo-600 hover:bg-indigo-50 rounded-md transition disabled:opacity-50"
                                 title="Send reply"
                                 aria-label="Send reply"
                             >

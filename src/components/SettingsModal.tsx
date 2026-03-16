@@ -19,7 +19,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             <div className="bg-neutral-800 rounded-lg w-full max-w-md shadow-2xl overflow-hidden border border-neutral-700" onClick={e => e.stopPropagation()}>
                 <div className="px-6 py-4 border-b border-neutral-700 flex items-center justify-between">
                     <h2 className="text-xl font-semibold flex items-center gap-2">
-                        <Key size={20} className="text-blue-400" />
+                        <Key size={20} className="text-indigo-400" />
                         API Settings
                     </h2>
                     <button onClick={onClose} className="p-1 text-neutral-400 hover:text-white transition">
@@ -36,13 +36,13 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             type="password"
                             value={apiKey}
                             onChange={(e) => setApiKey(e.target.value)}
-                            className="w-full bg-neutral-900 border border-neutral-600 rounded-md px-4 py-2 focus:outline-none focus:border-blue-500 text-neutral-100"
+                            className="w-full bg-neutral-900 border border-neutral-600 rounded-md px-4 py-2 focus:outline-none focus:border-indigo-500 text-neutral-100"
                             placeholder="AIzaSy..."
                             autoFocus
                         />
                         <p className="mt-2 text-xs text-neutral-400">
                             Synapse uses Google's Gemini 2.5 Flash model for lightning-fast PRD generation.
-                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-blue-400 hover:underline ml-1">
+                            <a href="https://aistudio.google.com/app/apikey" target="_blank" rel="noreferrer" className="text-indigo-400 hover:underline ml-1">
                                 Get your free key here.
                             </a>
                         </p>
@@ -58,7 +58,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         </button>
                         <button
                             type="submit"
-                            className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                            className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
                         >
                             Save Key
                         </button>

@@ -93,8 +93,8 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                 <div className="flex-1 overflow-hidden flex flex-col">
                     {!result ? (
                         <div className="p-8 md:p-12 flex flex-col items-center justify-center text-center flex-1 min-h-[300px]">
-                            <div className="bg-blue-50 p-4 rounded-full mb-6">
-                                <RefreshCcw size={32} className={`text-blue-500 ${isConsolidating ? 'animate-spin' : ''}`} />
+                            <div className="bg-indigo-50 p-4 rounded-full mb-6">
+                                <RefreshCcw size={32} className={`text-indigo-500 ${isConsolidating ? 'animate-spin' : ''}`} />
                             </div>
                             <h3 className="text-xl font-medium text-neutral-800 mb-2">
                                 {isConsolidating ? 'Synthesizing Patch...' : 'Select Consolidation Scope'}
@@ -110,14 +110,14 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                                     <div className="flex gap-4 mb-8 w-full max-w-lg">
                                         <button
                                             onClick={() => { setSelectedScope('local'); setError(null); }}
-                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'local' ? 'border-blue-500 bg-blue-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'local' ? 'border-indigo-500 bg-indigo-50' : 'border-neutral-200 hover:border-neutral-300'}`}
                                         >
                                             <div className="font-semibold text-neutral-800 mb-1">Local Patch</div>
                                             <div className="text-xs text-neutral-500">Replace only the selected anchor text. Safe and predictable.</div>
                                         </button>
                                         <button
                                             onClick={() => { setSelectedScope('doc-wide'); setError(null); }}
-                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-blue-500 bg-blue-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-indigo-500 bg-indigo-50' : 'border-neutral-200 hover:border-neutral-300'}`}
                                         >
                                             <div className="font-semibold text-neutral-800 mb-1">Doc-Wide Rewrite</div>
                                             <div className="text-xs text-neutral-500">Rewrite the entire PRD to incorporate the intent contextually.</div>
@@ -125,7 +125,7 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                                     </div>
                                     <button
                                         onClick={handleGenerate}
-                                        className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
                                     >
                                         Generate {selectedScope === 'local' ? 'Local' : 'Global'} Patch <ArrowRight size={18} />
                                     </button>
@@ -142,7 +142,7 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                                     </span>
                                     <button
                                         onClick={() => { setResult(null); setError(null); }}
-                                        className="text-xs text-blue-600 hover:underline font-medium pr-2"
+                                        className="text-xs text-indigo-600 hover:underline font-medium pr-2"
                                     >
                                         Change Scope
                                     </button>
@@ -167,7 +167,7 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                                     <button
                                         onClick={handleCommit}
                                         disabled={isCommitting}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium shadow-sm transition flex justify-center items-center gap-2 disabled:opacity-50"
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-medium shadow-sm transition flex justify-center items-center gap-2 disabled:opacity-50"
                                     >
                                         {isCommitting ? 'Committing...' : 'Commit to New Spine'}
                                         {!isCommitting && <Check size={18} />}
