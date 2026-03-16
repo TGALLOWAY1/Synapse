@@ -1,11 +1,14 @@
-import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { ChevronLeft, Maximize2, Check, ArrowRight } from 'lucide-react';
-import { useState } from 'react';
+import { useState, useEffect } from 'react';
 
-export function BranchCanvas() {
-    const { projectId, branchId } = useParams<{ projectId: string, branchId: string }>();
-    const navigate = useNavigate();
+interface BranchCanvasProps {
+    projectId: string;
+    branchId: string;
+    onClose: () => void;
+}
+
+export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps) {
     const { getProject, getLatestSpine, branches, mergeBranch } = useProjectStore();
 
     const [isGenerating, setIsGenerating] = useState(false);
@@ -38,6 +41,13 @@ export function BranchCanvas() {
     const branch = projectBranches.find(b => b.id === branchId);
     const latestSpine = projectId ? getLatestSpine(projectId) : undefined;
 
+    useEffect(() => {
+        if (drafts.length === 0 && !isGenerating && project && branch && latestSpine) {
+            handleGenerateDrafts();
+        }
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, []);
+
     if (!project || !branch || !latestSpine) {
         return <div className="p-8 text-neutral-400">Branch or Project not found.</div>;
     }
@@ -62,23 +72,24 @@ export function BranchCanvas() {
         const newText = latestSpine.responseText.replace(branch.anchorText, draft.content);
         mergeBranch(projectId, branch.id, newText);
 
-        // Return to workspace
-        navigate(`/p/${projectId}`);
+        // Return to workspace overlay close
+        onClose();
     };
 
     return (
-        <div className="flex flex-col h-screen bg-neutral-900 border-t border-neutral-800 text-neutral-100">
-            {/* Top Bar */}
+        <div className="fixed inset-0 z-50 flex justify-end bg-black/60 backdrop-blur-sm shadow-2xl animate-in fade-in duration-200">
+            <div className="w-[95vw] md:w-[85vw] max-w-7xl h-full bg-neutral-900 border-l border-neutral-800 text-neutral-100 flex flex-col shadow-2xl animate-in slide-in-from-right duration-300">
+                {/* Top Bar */}
             <div className="h-14 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-10 shrink-0">
                 <div className="flex items-center gap-4">
                     <button
-                        onClick={() => navigate(`/p/${projectId}`)}
-                        className="p-1 hover:bg-neutral-800 rounded-md transition text-neutral-400 flex items-center gap-1 text-sm font-medium pr-3"
+                        onClick={onClose}
+                        className="p-1.5 hover:bg-neutral-800 rounded-md transition text-neutral-400 flex items-center gap-1.5 text-sm font-medium pr-3"
                     >
-                        <ChevronLeft size={20} /> Back to Spine
+                        <ChevronLeft size={18} /> Close Canvas
                     </button>
-                    <span className="text-neutral-600">|</span>
-                    <span className="font-semibold text-blue-400">Exploration Canvas</span>
+                    <span className="text-neutral-700">|</span>
+                    <span className="font-semibold text-indigo-400">Exploration Canvas</span>
                     <span className="text-sm text-neutral-400 italic hidden sm:inline-block">"{branch.anchorText.substring(0, 40)}..."</span>
                 </div>
                 <div className="flex items-center gap-3">
@@ -104,7 +115,7 @@ export function BranchCanvas() {
                 >
                     {/* Drag Handle */}
                     <div
-                        className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-blue-500/50 transition-colors z-20"
+                        className="absolute top-0 right-0 w-1.5 h-full cursor-col-resize hover:bg-indigo-500/50 transition-colors z-20"
                         onMouseDown={handleMouseDown}
                     />
                     <div className="px-6 mb-4">
@@ -117,7 +128,7 @@ export function BranchCanvas() {
                     <div className="flex-1 px-4 flex flex-col gap-3">
                         {branch.messages.map(msg => (
                             <div key={msg.id} className={`flex flex-col ${msg.role === 'user' ? 'items-end' : 'items-start'}`}>
-                                <div className={`max-w-[90%] rounded-lg p-3 text-sm ${msg.role === 'user' ? 'bg-blue-600/20 text-blue-100 border border-blue-500/30' : 'bg-neutral-800 text-neutral-300 border border-neutral-700'}`}>
+                                <div className={`max-w-[90%] rounded-lg p-3 text-sm ${msg.role === 'user' ? 'bg-indigo-600/20 text-indigo-100 border border-indigo-500/30' : 'bg-neutral-800 text-neutral-300 border border-neutral-700'}`}>
                                     <p className="whitespace-pre-wrap">{msg.content}</p>
                                 </div>
                             </div>
@@ -141,7 +152,7 @@ export function BranchCanvas() {
                                 <button
                                     onClick={handleGenerateDrafts}
                                     disabled={isGenerating}
-                                    className="bg-blue-600 hover:bg-blue-700 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium transition flex items-center gap-2 mx-auto"
+                                    className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium transition flex items-center gap-2 mx-auto"
                                 >
                                     {isGenerating ? 'Synthesizing...' : 'Generate Approaches'}
                                     {!isGenerating && <ArrowRight size={18} />}
@@ -155,15 +166,15 @@ export function BranchCanvas() {
                                         <button
                                             key={draft.id}
                                             onClick={() => setSelectedDraftId(draft.id)}
-                                            className={`text-left p-6 rounded-xl border-2 transition-all flex flex-col h-64 ${selectedDraftId === draft.id ? 'bg-blue-900/20 border-blue-500 shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'bg-neutral-800 border-neutral-700 hover:border-neutral-500'}`}
+                                            className={`text-left p-6 rounded-xl border-2 transition-all flex flex-col h-64 ${selectedDraftId === draft.id ? 'bg-indigo-900/20 border-indigo-500 shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'bg-neutral-800 border-neutral-700 hover:border-neutral-500'}`}
                                         >
-                                            <h4 className={`font-semibold mb-3 ${selectedDraftId === draft.id ? 'text-blue-400' : 'text-neutral-200'}`}>{draft.title}</h4>
+                                            <h4 className={`font-semibold mb-3 ${selectedDraftId === draft.id ? 'text-indigo-400' : 'text-neutral-200'}`}>{draft.title}</h4>
                                             <div className="flex-1 bg-neutral-900/50 rounded p-4 border border-black/20 overflow-y-auto font-mono text-sm text-neutral-400 whitespace-pre-wrap">
                                                 {draft.content}
                                             </div>
 
                                             {selectedDraftId === draft.id && (
-                                                <div className="mt-4 flex items-center justify-center gap-2 text-blue-400 font-medium text-sm">
+                                                <div className="mt-4 flex items-center justify-center gap-2 text-indigo-400 font-medium text-sm">
                                                     <Check size={16} /> Selected
                                                 </div>
                                             )}
@@ -174,6 +185,7 @@ export function BranchCanvas() {
                         )}
                     </div>
 
+                </div>
                 </div>
             </div>
         </div>

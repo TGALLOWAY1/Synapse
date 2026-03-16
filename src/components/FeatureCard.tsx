@@ -42,32 +42,32 @@ export function FeatureCard({ feature, onUpdate, readOnly }: FeatureCardProps) {
 
     if (isEditing) {
         return (
-            <div className="p-4 bg-white border border-blue-200 rounded-lg shadow-sm">
+            <div className="p-4 bg-white border border-indigo-200 rounded-lg shadow-sm">
                 <input
                     type="text"
                     value={editName}
                     onChange={(e) => setEditName(e.target.value)}
-                    className="w-full font-semibold text-neutral-800 bg-neutral-50 border border-neutral-200 rounded px-3 py-1.5 mb-3 focus:outline-none focus:border-blue-400"
+                    className="w-full font-semibold text-neutral-800 bg-neutral-50 border border-neutral-200 rounded px-3 py-1.5 mb-3 focus:outline-none focus:border-indigo-400"
                     placeholder="Feature name"
                 />
                 <textarea
                     value={editDescription}
                     onChange={(e) => setEditDescription(e.target.value)}
-                    className="w-full text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-1.5 mb-3 min-h-[60px] focus:outline-none focus:border-blue-400"
+                    className="w-full text-sm text-neutral-700 bg-neutral-50 border border-neutral-200 rounded px-3 py-1.5 mb-3 min-h-[60px] focus:outline-none focus:border-indigo-400"
                     placeholder="Description"
                 />
                 <input
                     type="text"
                     value={editUserValue}
                     onChange={(e) => setEditUserValue(e.target.value)}
-                    className="w-full text-sm text-neutral-600 bg-neutral-50 border border-neutral-200 rounded px-3 py-1.5 mb-3 focus:outline-none focus:border-blue-400"
+                    className="w-full text-sm text-neutral-600 bg-neutral-50 border border-neutral-200 rounded px-3 py-1.5 mb-3 focus:outline-none focus:border-indigo-400"
                     placeholder="User value"
                 />
                 <div className="flex items-center justify-between">
                     <select
                         value={editComplexity}
                         onChange={(e) => setEditComplexity(e.target.value as Feature['complexity'])}
-                        className="text-xs bg-neutral-50 border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-blue-400"
+                        className="text-xs bg-neutral-50 border border-neutral-200 rounded px-2 py-1 focus:outline-none focus:border-indigo-400"
                     >
                         <option value="low">Low</option>
                         <option value="medium">Medium</option>
@@ -77,7 +77,7 @@ export function FeatureCard({ feature, onUpdate, readOnly }: FeatureCardProps) {
                         <button onClick={handleCancel} className="p-1.5 text-neutral-400 hover:text-neutral-600 transition" title="Cancel" aria-label="Cancel editing">
                             <X size={16} />
                         </button>
-                        <button onClick={handleSave} className="p-1.5 text-blue-500 hover:text-blue-700 transition" title="Save" aria-label="Save changes">
+                        <button onClick={handleSave} className="p-1.5 text-indigo-500 hover:text-indigo-700 transition" title="Save" aria-label="Save changes">
                             <Check size={16} />
                         </button>
                     </div>

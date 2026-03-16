@@ -10,7 +10,7 @@ interface MilestoneCardProps {
 
 const statusConfig: Record<DevTask['status'], { icon: typeof Circle; color: string }> = {
     'pending': { icon: Circle, color: 'text-neutral-400' },
-    'in-progress': { icon: PlayCircle, color: 'text-blue-500' },
+    'in-progress': { icon: PlayCircle, color: 'text-indigo-500' },
     'done': { icon: CheckCircle2, color: 'text-green-500' },
 };
 
@@ -25,7 +25,7 @@ export function MilestoneCard({ milestone, isGeneratingPrompt, onGeneratePrompts
                 onClick={() => setIsExpanded(!isExpanded)}
             >
                 <div className="flex items-center gap-3">
-                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-blue-100 text-blue-600 font-bold text-sm">
+                    <div className="flex items-center justify-center w-8 h-8 rounded-full bg-indigo-100 text-indigo-600 font-bold text-sm">
                         {milestone.order}
                     </div>
                     <div>

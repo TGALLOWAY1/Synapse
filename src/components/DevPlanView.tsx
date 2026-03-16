@@ -77,8 +77,8 @@ export function DevPlanView({ projectId, structuredPRD, spineVersionId, onStageC
     if (!latestPlan) {
         return (
             <div className="flex flex-col items-center justify-center text-center py-20">
-                <div className="bg-blue-50 p-4 rounded-full mb-6">
-                    <ListChecks size={32} className={`text-blue-500 ${isGenerating ? 'animate-pulse' : ''}`} />
+                <div className="bg-indigo-50 p-4 rounded-full mb-6">
+                    <ListChecks size={32} className={`text-indigo-500 ${isGenerating ? 'animate-pulse' : ''}`} />
                 </div>
                 <h3 className="text-xl font-medium text-neutral-800 mb-2">
                     {isGenerating ? 'Generating Development Plan...' : 'Generate Development Plan'}
@@ -98,7 +98,7 @@ export function DevPlanView({ projectId, structuredPRD, spineVersionId, onStageC
                 {!isGenerating && (
                     <button
                         onClick={handleGenerate}
-                        className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
+                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
                     >
                         Generate Dev Plan
                         <RefreshCcw size={16} />
@@ -117,7 +117,7 @@ export function DevPlanView({ projectId, structuredPRD, spineVersionId, onStageC
                 <button
                     onClick={handleGenerate}
                     disabled={isGenerating}
-                    className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition disabled:opacity-50"
+                    className="flex items-center gap-1.5 text-xs text-indigo-500 hover:text-indigo-700 transition disabled:opacity-50"
                 >
                     <RefreshCcw size={12} className={isGenerating ? 'animate-spin' : ''} />
                     Regenerate
