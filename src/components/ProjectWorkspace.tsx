@@ -172,14 +172,6 @@ export function ProjectWorkspace() {
                             <span className="hidden md:inline">{activeSpine?.isFinal ? 'Final' : 'Mark Final'}</span>
                         </button>
                     )}
-                    <button
-                        onClick={() => setIsSettingsOpen(true)}
-                        className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
-                        title="API Settings"
-                        aria-label="API Settings"
-                    >
-                        <Settings size={18} />
-                    </button>
 
                     {/* Overflow menu for secondary actions */}
                     <div className="relative" ref={overflowRef}>
@@ -194,27 +186,34 @@ export function ProjectWorkspace() {
                         {showNavOverflow && (
                             <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl py-1 z-50 min-w-[180px]">
                                 <button
+                                    onClick={() => { setIsSettingsOpen(true); setShowNavOverflow(false); }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                >
+                                    <Settings size={14} className="text-indigo-400" />
+                                    Project Settings
+                                </button>
+                                <button
                                     onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}
                                     disabled={isGenerating || hasBranches || isOldVersion}
-                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition disabled:opacity-50 disabled:hover:bg-transparent"
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
                                 >
-                                    <RefreshCcw size={14} className={isGenerating ? 'animate-spin' : ''} />
-                                    Regenerate
+                                    <RefreshCcw size={14} className={`text-neutral-500 ${isGenerating ? 'animate-spin' : ''}`} />
+                                    Regenerate Draft
                                 </button>
                                 <button
                                     onClick={() => { setIsBranchesVisible(!isBranchesVisible); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition"
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition"
                                 >
-                                    {isBranchesVisible ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-                                    {isBranchesVisible ? 'Hide Branches' : 'Show Branches'}
+                                    {isBranchesVisible ? <PanelRightClose size={14} className="text-neutral-500" /> : <PanelRightOpen size={14} className="text-neutral-500" />}
+                                    {isBranchesVisible ? 'Hide Sidebar' : 'Show Sidebar'}
                                 </button>
-                                <div className="border-t border-neutral-700 my-1" />
+                                <div className="border-t border-white/5 my-1" />
                                 <button
                                     onClick={() => { handleAbandon(); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-neutral-700 transition"
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition"
                                 >
                                     <LogOut size={14} />
-                                    Abandon
+                                    Abandon Session
                                 </button>
                             </div>
                         )}

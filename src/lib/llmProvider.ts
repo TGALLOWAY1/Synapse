@@ -1,13 +1,15 @@
 import type { StructuredPRD, Milestone, AgentTarget } from '../types';
 
-const GEMINI_MODEL = 'gemini-2.5-flash';
-
 const getApiKey = () => {
     const key = localStorage.getItem('GEMINI_API_KEY');
     if (!key) {
         throw new Error('Missing Gemini API Key. Please click the Settings gear icon in the top right to add your key.');
     }
     return key;
+};
+
+const getModel = () => {
+    return localStorage.getItem('GEMINI_MODEL') || 'gemini-2.5-flash';
 };
 
 interface JsonModeConfig {
@@ -17,7 +19,8 @@ interface JsonModeConfig {
 
 const callGemini = async (systemInstruction: string, promptText: string, jsonMode?: JsonModeConfig) => {
     const apiKey = getApiKey();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${GEMINI_MODEL}:generateContent?key=${apiKey}`;
+    const model = getModel();
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
 
     const body: Record<string, unknown> = {
         systemInstruction: {
