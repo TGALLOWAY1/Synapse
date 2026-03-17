@@ -33,7 +33,7 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
         activeBranches.forEach(b => {
             if (!b.anchorText) return;
             instance.mark(b.anchorText, {
-                className: '!bg-blue-500/20 !text-inherit !border-l-2 !border-blue-500 !p-0.5 !rounded',
+                className: '!bg-indigo-500/20 !text-inherit !border-l-2 !border-indigo-500 !p-0.5 !rounded',
                 accuracy: 'partially',
                 separateWordSearch: false,
                 diacritics: false,
@@ -146,15 +146,15 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                 ref={spineRef}
                 className="
                     prose prose-neutral max-w-none 
-                    prose-h1:text-3xl prose-h1:font-extrabold prose-h1:mb-8 prose-h1:mt-2
-                    prose-h2:text-2xl prose-h2:font-bold prose-h2:mt-10 prose-h2:mb-4
-                    prose-h3:text-xl prose-h3:font-semibold prose-h3:mt-8 prose-h3:mb-3
+                    prose-h1:text-3xl prose-h1:font-extrabold prose-h1:text-neutral-900 prose-h1:mb-8 prose-h1:mt-2
+                    prose-h2:text-2xl prose-h2:font-bold prose-h2:text-neutral-900 prose-h2:mt-10 prose-h2:mb-4
+                    prose-h3:text-xl prose-h3:font-bold prose-h3:text-neutral-900 prose-h3:mt-8 prose-h3:mb-3
                     prose-p:leading-relaxed prose-p:mb-6
                     prose-ul:list-disc prose-ul:pl-6 prose-ul:mb-6
                     prose-ol:list-decimal prose-ol:pl-6 prose-ol:mb-6
                     prose-li:mb-2
                     prose-strong:font-bold
-                    prose-a:text-blue-600 hover:prose-a:text-blue-500
+                    prose-a:text-indigo-600 hover:prose-a:text-indigo-500
                     prose-code:text-pink-600 prose-code:bg-neutral-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
                 "
             >
@@ -165,8 +165,9 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
 
             {selection && (
                 <div
+                    onMouseDown={(e) => e.preventDefault()}
                     onMouseUp={(e) => e.stopPropagation()}
-                    className="fixed z-50 bg-neutral-900 border border-neutral-700 shadow-xl rounded-lg p-3 w-80 -translate-x-1/2 flex flex-col gap-3"
+                    className="fixed z-50 bg-neutral-900 border border-neutral-700 shadow-2xl rounded-xl p-4 w-[340px] -translate-x-1/2 flex flex-col gap-3"
                     style={{ top: selection.top, left: selection.left }}
                 >
                     <div className="text-xs text-neutral-400">
@@ -179,7 +180,7 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                                 key={tag}
                                 type="button"
                                 onClick={() => setIntent(tag + ": ")}
-                                className="text-xs px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded border border-neutral-700 transition"
+                                className="text-xs px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-full border border-neutral-700 hover:border-neutral-500 transition shadow-sm"
                             >
                                 {tag}
                             </button>
@@ -195,13 +196,13 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                             value={intent}
                             onChange={e => setIntent(e.target.value)}
                             placeholder="How should this change?"
-                            className="flex-1 bg-neutral-800 border border-neutral-700 text-sm text-neutral-100 rounded px-2 py-1.5 outline-none focus:border-blue-500 transition"
+                            className="flex-1 bg-neutral-800 border border-neutral-700 text-sm text-neutral-100 rounded px-2 py-1.5 outline-none focus:border-indigo-500 transition"
                             disabled={isSubmitting}
                         />
                         <button
                             type="submit"
                             disabled={isSubmitting || !intent.trim()}
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded transition disabled:opacity-50"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded transition disabled:opacity-50"
                         >
                             {isSubmitting ? '...' : 'Branch'}
                         </button>

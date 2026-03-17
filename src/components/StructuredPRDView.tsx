@@ -37,7 +37,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         activeBranches.forEach(b => {
             if (!b.anchorText) return;
             instance.mark(b.anchorText, {
-                className: '!bg-blue-500/20 !text-inherit !border-l-2 !border-blue-500 !p-0.5 !rounded',
+                className: '!bg-indigo-500/20 !text-inherit !border-l-2 !border-indigo-500 !p-0.5 !rounded',
                 accuracy: 'partially',
                 separateWordSearch: false,
                 diacritics: false,
@@ -188,9 +188,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         section: 'vision' | 'coreProblem' | 'architecture',
         content: string,
     ) => (
-        <div className="mb-6">
-            <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">{title}</h3>
+        <div className="mb-8">
+            <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">{title}</h3>
                 {!readOnly && editingSection !== section && (
                     <button
                         onClick={() => startEditing(section, content)}
@@ -207,14 +207,14 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     <textarea
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        className="w-full bg-neutral-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-neutral-700 focus:outline-none focus:border-blue-400 min-h-[80px]"
+                        className="w-full bg-neutral-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-neutral-700 focus:outline-none focus:border-indigo-400 min-h-[80px]"
                         autoFocus
                     />
                     <div className="flex justify-end gap-2">
                         <button onClick={cancelEditing} className="p-1.5 text-neutral-400 hover:text-neutral-600" title="Cancel" aria-label="Cancel editing">
                             <X size={16} />
                         </button>
-                        <button onClick={() => saveTextSection(section)} className="p-1.5 text-blue-500 hover:text-blue-700" title="Save" aria-label="Save changes">
+                        <button onClick={() => saveTextSection(section)} className="p-1.5 text-indigo-500 hover:text-indigo-700" title="Save" aria-label="Save changes">
                             <Check size={16} />
                         </button>
                     </div>
@@ -232,9 +232,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         section: 'targetUsers' | 'risks',
         items: string[],
     ) => (
-        <div className="mb-6">
-            <div className="flex items-center justify-between mb-2">
-                <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">{title}</h3>
+        <div className="mb-8">
+            <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">{title}</h3>
                 {!readOnly && editingSection !== section && (
                     <button
                         onClick={() => startEditing(section, items.join('\n'))}
@@ -251,7 +251,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     <textarea
                         value={editValue}
                         onChange={(e) => setEditValue(e.target.value)}
-                        className="w-full bg-neutral-50 border border-blue-200 rounded-lg px-4 py-3 text-sm text-neutral-700 focus:outline-none focus:border-blue-400 min-h-[80px]"
+                        className="w-full bg-neutral-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-neutral-700 focus:outline-none focus:border-indigo-400 min-h-[80px]"
                         placeholder="One item per line"
                         autoFocus
                     />
@@ -259,7 +259,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                         <button onClick={cancelEditing} className="p-1.5 text-neutral-400 hover:text-neutral-600" title="Cancel" aria-label="Cancel editing">
                             <X size={16} />
                         </button>
-                        <button onClick={() => saveListSection(section)} className="p-1.5 text-blue-500 hover:text-blue-700" title="Save" aria-label="Save changes">
+                        <button onClick={() => saveListSection(section)} className="p-1.5 text-indigo-500 hover:text-indigo-700" title="Save" aria-label="Save changes">
                             <Check size={16} />
                         </button>
                     </div>
@@ -287,13 +287,13 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                 {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
 
                 {/* Features */}
-                <div className="mb-6">
-                    <div className="flex items-center justify-between mb-3">
-                        <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Features</h3>
+                <div className="mb-8">
+                    <div className="flex items-center justify-between mb-4 border-b border-neutral-200 pb-2">
+                        <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Features</h3>
                         {!readOnly && (
                             <button
                                 onClick={handleAddFeature}
-                                className="flex items-center gap-1 text-xs text-blue-500 hover:text-blue-700 transition"
+                                className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 transition"
                             >
                                 <Plus size={14} />
                                 Add Feature
@@ -333,8 +333,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
 
             {selection && (
                 <div
+                    onMouseDown={(e) => e.preventDefault()}
                     onMouseUp={(e) => e.stopPropagation()}
-                    className="fixed z-50 bg-neutral-900 border border-neutral-700 shadow-xl rounded-lg p-3 w-80 -translate-x-1/2 flex flex-col gap-3"
+                    className="fixed z-50 bg-neutral-900 border border-neutral-700 shadow-2xl rounded-xl p-4 w-[340px] -translate-x-1/2 flex flex-col gap-3"
                     style={{ top: selection.top, left: selection.left }}
                 >
                     <div className="text-xs text-neutral-400">
@@ -347,7 +348,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                                 key={tag}
                                 type="button"
                                 onClick={() => setIntent(tag + ": ")}
-                                className="text-xs px-2 py-1 bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded border border-neutral-700 transition"
+                                className="text-xs px-2.5 py-1.5 bg-neutral-800 hover:bg-neutral-700 text-neutral-200 rounded-full border border-neutral-700 hover:border-neutral-500 transition shadow-sm"
                             >
                                 {tag}
                             </button>
@@ -363,13 +364,13 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                             value={intent}
                             onChange={e => setIntent(e.target.value)}
                             placeholder="How should this change?"
-                            className="flex-1 bg-neutral-800 border border-neutral-700 text-sm text-neutral-100 rounded px-2 py-1.5 outline-none focus:border-blue-500 transition"
+                            className="flex-1 bg-neutral-800 border border-neutral-700 text-sm text-neutral-100 rounded px-2 py-1.5 outline-none focus:border-indigo-500 transition"
                             disabled={isSubmitting}
                         />
                         <button
                             type="submit"
                             disabled={isSubmitting || !intent.trim()}
-                            className="bg-blue-600 hover:bg-blue-700 text-white text-sm px-3 py-1.5 rounded transition disabled:opacity-50"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded transition disabled:opacity-50"
                         >
                             {isSubmitting ? '...' : 'Branch'}
                         </button>

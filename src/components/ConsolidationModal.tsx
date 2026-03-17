@@ -6,13 +6,12 @@ import type { Branch } from '../types';
 
 interface ConsolidationModalProps {
     projectId: string;
-    spineVersionId: string;
     branch: Branch;
     spineText: string;
     onClose: () => void;
 }
 
-export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId, branch, spineText, onClose }: ConsolidationModalProps) {
+export function ConsolidationModal({ projectId, branch, spineText, onClose }: ConsolidationModalProps) {
     const { mergeBranch } = useProjectStore();
     const [isConsolidating, setIsConsolidating] = useState(false);
     const [result, setResult] = useState<ConsolidationResult | null>(null);
@@ -26,8 +25,9 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
         try {
             const res = await consolidateBranch(spineText, branch, selectedScope);
             setResult(res);
-        } catch (err: any) {
-            setError(err.message || 'Failed to generate patch. Please check your API key and connection.');
+        } catch (err: unknown) {
+            const message = err instanceof Error ? err.message : 'Failed to generate patch. Please check your API key and connection.';
+            setError(message);
         } finally {
             setIsConsolidating(false);
         }
@@ -67,8 +67,6 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
         }
     };
 
-    const hasActivePatch = (selectedScope === 'local' && result?.localPatch) || (selectedScope === 'doc-wide' && result?.docWidePatch);
-
     return (
         <div className="fixed inset-0 bg-black/60 backdrop-blur-sm z-50 flex justify-center items-center overflow-y-auto p-4 md:p-8" onClick={onClose}>
             <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl flex flex-col max-h-[90vh]" onClick={e => e.stopPropagation()}>
@@ -95,8 +93,8 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                 <div className="flex-1 overflow-hidden flex flex-col">
                     {!result ? (
                         <div className="p-8 md:p-12 flex flex-col items-center justify-center text-center flex-1 min-h-[300px]">
-                            <div className="bg-blue-50 p-4 rounded-full mb-6">
-                                <RefreshCcw size={32} className={`text-blue-500 ${isConsolidating ? 'animate-spin' : ''}`} />
+                            <div className="bg-indigo-50 p-4 rounded-full mb-6">
+                                <RefreshCcw size={32} className={`text-indigo-500 ${isConsolidating ? 'animate-spin' : ''}`} />
                             </div>
                             <h3 className="text-xl font-medium text-neutral-800 mb-2">
                                 {isConsolidating ? 'Synthesizing Patch...' : 'Select Consolidation Scope'}
@@ -112,14 +110,14 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                                     <div className="flex gap-4 mb-8 w-full max-w-lg">
                                         <button
                                             onClick={() => { setSelectedScope('local'); setError(null); }}
-                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'local' ? 'border-blue-500 bg-blue-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'local' ? 'border-indigo-500 bg-indigo-50' : 'border-neutral-200 hover:border-neutral-300'}`}
                                         >
                                             <div className="font-semibold text-neutral-800 mb-1">Local Patch</div>
                                             <div className="text-xs text-neutral-500">Replace only the selected anchor text. Safe and predictable.</div>
                                         </button>
                                         <button
                                             onClick={() => { setSelectedScope('doc-wide'); setError(null); }}
-                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-blue-500 bg-blue-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-indigo-500 bg-indigo-50' : 'border-neutral-200 hover:border-neutral-300'}`}
                                         >
                                             <div className="font-semibold text-neutral-800 mb-1">Doc-Wide Rewrite</div>
                                             <div className="text-xs text-neutral-500">Rewrite the entire PRD to incorporate the intent contextually.</div>
@@ -127,7 +125,7 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                                     </div>
                                     <button
                                         onClick={handleGenerate}
-                                        className="bg-blue-600 hover:bg-blue-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
+                                        className="bg-indigo-600 hover:bg-indigo-700 text-white px-8 py-3 rounded-lg font-medium shadow-sm transition flex items-center gap-2"
                                     >
                                         Generate {selectedScope === 'local' ? 'Local' : 'Global'} Patch <ArrowRight size={18} />
                                     </button>
@@ -144,7 +142,7 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                                     </span>
                                     <button
                                         onClick={() => { setResult(null); setError(null); }}
-                                        className="text-xs text-blue-600 hover:underline font-medium pr-2"
+                                        className="text-xs text-indigo-600 hover:underline font-medium pr-2"
                                     >
                                         Change Scope
                                     </button>
@@ -169,7 +167,7 @@ export function ConsolidationModal({ projectId, spineVersionId: _spineVersionId,
                                     <button
                                         onClick={handleCommit}
                                         disabled={isCommitting}
-                                        className="w-full bg-blue-600 hover:bg-blue-700 text-white py-3 rounded-lg font-medium shadow-sm transition flex justify-center items-center gap-2 disabled:opacity-50"
+                                        className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-medium shadow-sm transition flex justify-center items-center gap-2 disabled:opacity-50"
                                     >
                                         {isCommitting ? 'Committing...' : 'Commit to New Spine'}
                                         {!isCommitting && <Check size={18} />}

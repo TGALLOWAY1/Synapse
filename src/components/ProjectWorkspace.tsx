@@ -2,6 +2,7 @@ import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal } from 'lucide-react';
 import { useState, useRef, useEffect } from 'react';
+import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD, structuredPRDToMarkdown } from '../lib/llmProvider';
 import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
@@ -11,6 +12,7 @@ import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
 import { DevPlanView } from './DevPlanView';
 import { AgentPromptView } from './AgentPromptView';
+import { BranchCanvas } from './BranchCanvas';
 import type { Branch, PipelineStage } from '../types';
 
 export function ProjectWorkspace() {
@@ -21,12 +23,26 @@ export function ProjectWorkspace() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
-    const [isPromptCollapsed, setIsPromptCollapsed] = useState(false);
-    const [isVersionsCollapsed, setIsVersionsCollapsed] = useState(false);
+    const [isPromptCollapsed, setIsPromptCollapsed] = useState(true);
     const [isBranchesVisible, setIsBranchesVisible] = useState(true);
+    const [activeRightTab, setActiveRightTab] = useState<'branches' | 'history'>('branches');
+    const [activeCanvasBranchId, setActiveCanvasBranchId] = useState<string | null>(null);
     const [showStructuredView, setShowStructuredView] = useState(true);
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
+    const [animationParent] = useAutoAnimate();
+
+    // Close overflow menu on outside click
+    useEffect(() => {
+        if (!showNavOverflow) return;
+        const handleClick = (e: MouseEvent) => {
+            if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+                setShowNavOverflow(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [showNavOverflow]);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -51,18 +67,6 @@ export function ProjectWorkspace() {
         const idx = allSpines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : spineId;
     };
-
-    // Close overflow menu on outside click
-    useEffect(() => {
-        if (!showNavOverflow) return;
-        const handleClick = (e: MouseEvent) => {
-            if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
-                setShowNavOverflow(false);
-            }
-        };
-        document.addEventListener('mousedown', handleClick);
-        return () => document.removeEventListener('mousedown', handleClick);
-    }, [showNavOverflow]);
 
     if (!project) return <div>Project Not Found</div>;
 
@@ -168,14 +172,6 @@ export function ProjectWorkspace() {
                             <span className="hidden md:inline">{activeSpine?.isFinal ? 'Final' : 'Mark Final'}</span>
                         </button>
                     )}
-                    <button
-                        onClick={() => setIsSettingsOpen(true)}
-                        className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
-                        title="API Settings"
-                        aria-label="API Settings"
-                    >
-                        <Settings size={18} />
-                    </button>
 
                     {/* Overflow menu for secondary actions */}
                     <div className="relative" ref={overflowRef}>
@@ -190,27 +186,34 @@ export function ProjectWorkspace() {
                         {showNavOverflow && (
                             <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl py-1 z-50 min-w-[180px]">
                                 <button
+                                    onClick={() => { setIsSettingsOpen(true); setShowNavOverflow(false); }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                >
+                                    <Settings size={14} className="text-indigo-400" />
+                                    Project Settings
+                                </button>
+                                <button
                                     onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}
                                     disabled={isGenerating || hasBranches || isOldVersion}
-                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition disabled:opacity-50 disabled:hover:bg-transparent"
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
                                 >
-                                    <RefreshCcw size={14} className={isGenerating ? 'animate-spin' : ''} />
-                                    Regenerate
+                                    <RefreshCcw size={14} className={`text-neutral-500 ${isGenerating ? 'animate-spin' : ''}`} />
+                                    Regenerate Draft
                                 </button>
                                 <button
                                     onClick={() => { setIsBranchesVisible(!isBranchesVisible); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-neutral-300 hover:bg-neutral-700 transition"
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition"
                                 >
-                                    {isBranchesVisible ? <PanelRightClose size={14} /> : <PanelRightOpen size={14} />}
-                                    {isBranchesVisible ? 'Hide Branches' : 'Show Branches'}
+                                    {isBranchesVisible ? <PanelRightClose size={14} className="text-neutral-500" /> : <PanelRightOpen size={14} className="text-neutral-500" />}
+                                    {isBranchesVisible ? 'Hide Sidebar' : 'Show Sidebar'}
                                 </button>
-                                <div className="border-t border-neutral-700 my-1" />
+                                <div className="border-t border-white/5 my-1" />
                                 <button
                                     onClick={() => { handleAbandon(); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2 text-sm text-red-400 hover:bg-neutral-700 transition"
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-red-400 hover:bg-red-500/10 transition"
                                 >
                                     <LogOut size={14} />
-                                    Abandon
+                                    Abandon Session
                                 </button>
                             </div>
                         )}
@@ -234,7 +237,7 @@ export function ProjectWorkspace() {
             <div className="flex-1 flex overflow-hidden">
 
                 {/* Left: Main Content Column */}
-                <div className="flex-1 min-w-0 bg-white text-black overflow-y-auto p-4 md:p-8 lg:p-12 shadow-2xl z-0 relative">
+                <div className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 lg:p-12 shadow-inner z-0 relative">
                     {isOldVersion && pipelineStage === 'prd' && (
                         <div className="sticky top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex justify-between items-center z-10 -mx-4 md:-mx-8 lg:-mx-12 -mt-4 md:-mt-8 lg:-mt-12 mb-4">
                             <span>You are viewing a historical version (Read-Only).</span>
@@ -252,36 +255,36 @@ export function ProjectWorkspace() {
                         {pipelineStage === 'prd' && (
                             <>
                                 {activeSpine ? (
-                                    <>
-                                        <div className="mb-8 bg-neutral-100 rounded-md border border-neutral-200 transition-all overflow-hidden flex flex-col">
+                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
+                                        <div className="mb-8 bg-neutral-50/80 rounded-xl border border-neutral-200 transition-all overflow-hidden flex flex-col">
                                             <div
-                                                className="flex items-center justify-between cursor-pointer p-4 select-none hover:bg-neutral-200/50 transition"
+                                                className="flex items-center justify-between cursor-pointer p-3 select-none hover:bg-neutral-100 transition"
                                                 onClick={() => setIsPromptCollapsed(!isPromptCollapsed)}
                                             >
-                                                <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Initial Prompt</h3>
+                                                <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Initial Prompt</h3>
                                                 <button className="text-neutral-400 hover:text-neutral-600 transition">
                                                     {isPromptCollapsed ? <ChevronRight size={16} /> : <ChevronDown size={16} />}
                                                 </button>
                                             </div>
                                             {!isPromptCollapsed && (
-                                                <div className="px-4 pb-4 border-t border-neutral-200/50 pt-2 bg-neutral-50/50">
-                                                    <p className="whitespace-pre-wrap text-neutral-700 text-sm">{activeSpine.promptText}</p>
+                                                <div className="px-4 pb-4 border-t border-neutral-200/50 pt-3">
+                                                    <p className="whitespace-pre-wrap text-neutral-600 text-sm leading-relaxed">{activeSpine.promptText}</p>
                                                 </div>
                                             )}
                                         </div>
 
                                         {/* View toggle when structured PRD exists */}
                                         {activeSpine.structuredPRD && (
-                                            <div className="flex items-center gap-2 mb-4">
+                                            <div className="flex items-center gap-2 mb-6">
                                                 <button
                                                     onClick={() => setShowStructuredView(true)}
-                                                    className={`px-3 py-1 text-sm rounded-md transition ${showStructuredView ? 'bg-blue-100 text-blue-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
+                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
                                                 >
                                                     Structured View
                                                 </button>
                                                 <button
                                                     onClick={() => setShowStructuredView(false)}
-                                                    className={`px-3 py-1 text-sm rounded-md transition ${!showStructuredView ? 'bg-blue-100 text-blue-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
+                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
                                                 >
                                                     Markdown View
                                                 </button>
@@ -305,12 +308,27 @@ export function ProjectWorkspace() {
                                                 />
                                             </div>
                                         )}
-                                    </>
+                                    </div>
                                 ) : (
-                                    <div className="animate-pulse flex flex-col gap-4">
-                                        <div className="h-4 bg-neutral-200 rounded w-3/4"></div>
-                                        <div className="h-4 bg-neutral-200 rounded w-full"></div>
-                                        <div className="h-4 bg-neutral-200 rounded w-5/6"></div>
+                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8 animate-pulse">
+                                        <div className="h-8 bg-neutral-200 rounded w-1/3 mb-10"></div>
+                                        <div className="space-y-6">
+                                            <div>
+                                                <div className="h-6 bg-neutral-200 rounded w-1/4 mb-4"></div>
+                                                <div className="space-y-3">
+                                                    <div className="h-4 bg-neutral-100 rounded w-full"></div>
+                                                    <div className="h-4 bg-neutral-100 rounded w-11/12"></div>
+                                                    <div className="h-4 bg-neutral-100 rounded w-5/6"></div>
+                                                </div>
+                                            </div>
+                                            <div className="pt-6">
+                                                <div className="h-6 bg-neutral-200 rounded w-1/5 mb-4"></div>
+                                                <div className="space-y-3">
+                                                    <div className="h-4 bg-neutral-100 rounded w-full"></div>
+                                                    <div className="h-4 bg-neutral-100 rounded w-4/5"></div>
+                                                </div>
+                                            </div>
+                                        </div>
                                     </div>
                                 )}
                             </>
@@ -336,79 +354,93 @@ export function ProjectWorkspace() {
                     </div>
                 </div>
 
-                {/* Right: Margin Branches — hidden on small screens, toggle-able */}
+                {/* Right Column: Combined Branches and History */}
                 {isBranchesVisible && (
-                    <div className="hidden lg:flex w-80 xl:w-96 shrink-0 bg-neutral-50 text-black border-l border-neutral-200 overflow-y-auto p-4 flex-col gap-4">
-                        <h3 className="font-semibold text-neutral-400 uppercase tracking-wider text-xs mb-2">Branches</h3>
+                    <div className="hidden lg:flex w-80 xl:w-96 shrink-0 bg-neutral-50 border-l border-neutral-200 flex-col shadow-sm z-10">
+                        {/* Tabs */}
+                        <div className="flex items-center border-b border-neutral-200 bg-white shadow-sm shrink-0">
+                            <button
+                                onClick={() => setActiveRightTab('branches')}
+                                className={`flex-1 py-3 text-sm font-semibold transition flex items-center justify-center gap-2 ${activeRightTab === 'branches' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-neutral-500 hover:text-neutral-800'}`}
+                            >
+                                Active Branches {hasBranches && <span className="bg-indigo-100 text-indigo-700 py-0.5 px-1.5 rounded-full text-xs">{branches.length}</span>}
+                            </button>
+                            <button
+                                onClick={() => setActiveRightTab('history')}
+                                className={`flex-1 py-3 text-sm font-semibold transition ${activeRightTab === 'history' ? 'text-indigo-600 border-b-2 border-indigo-600' : 'text-neutral-500 hover:text-neutral-800'}`}
+                            >
+                                History Mode
+                            </button>
+                        </div>
 
-                        {latestSpine ? (
-                            <BranchList
-                                projectId={projectId}
-                                spineVersionId={latestSpine.id}
-                                onConsolidate={(branch) => setConsolidatingBranch(branch)}
-                            />
-                        ) : (
-                            <div className="text-sm text-neutral-500 italic p-4 text-center border border-dashed border-neutral-300 rounded-md">
-                                Loading...
-                            </div>
-                        )}
+                        {/* Tab Content */}
+                        <div className="flex-1 overflow-y-auto p-5 flex flex-col gap-4 relative">
+                            {activeRightTab === 'branches' ? (
+                                latestSpine ? (
+                                    <BranchList
+                                        projectId={projectId}
+                                        spineVersionId={latestSpine.id}
+                                        onConsolidate={(branch) => setConsolidatingBranch(branch)}
+                                        onCanvasOpen={(branchId) => setActiveCanvasBranchId(branchId)}
+                                    />
+                                ) : (
+                                    <div className="text-sm text-neutral-500 italic p-4 text-center border border-dashed border-neutral-300 rounded-lg bg-white shadow-sm mt-4">
+                                        Loading...
+                                    </div>
+                                )
+                            ) : (
+                                <div ref={animationParent} className="flex flex-col gap-3">
+                                    <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1">Timeline</h4>
+                                    {historyEvents.slice().reverse().map(event => {
+                                        const isSelected = activeSpine?.id === event.spineVersionId;
+                                        const versionLabel = getVersionLabel(event.spineVersionId);
+                                        return (
+                                            <button
+                                                key={event.id}
+                                                onClick={() => setViewedSpineId(event.spineVersionId)}
+                                                className={`p-3.5 rounded-xl border text-left transition relative overflow-hidden ${isSelected ? 'bg-indigo-50/50 border-indigo-300 ring-1 ring-indigo-500 shadow-sm' : 'bg-white border-neutral-200 hover:border-neutral-300 hover:shadow-sm'}`}
+                                            >
+                                                {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500" />}
+                                                <div className="flex justify-between items-start mb-1.5">
+                                                    <span className={`text-sm font-bold ${isSelected ? 'text-indigo-700' : 'text-neutral-800'}`}>{versionLabel}</span>
+                                                    <span className={`text-xs ${isSelected ? 'text-indigo-500/80 font-medium' : 'text-neutral-400'}`}>{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
+                                                </div>
+                                                <p className={`text-sm leading-snug ${isSelected ? 'text-neutral-800 font-medium' : 'text-neutral-500'}`}>{event.description}</p>
+
+                                                {event.diff && event.diff.matches && isSelected && (
+                                                    <div className="mt-3 pt-3 border-t border-indigo-100">
+                                                        <p className="text-[10px] text-indigo-600 mb-1.5 font-bold tracking-wider uppercase opacity-80">Diff Preview</p>
+                                                        <div className="bg-white border border-neutral-100 rounded-md p-2 shadow-inner font-mono">
+                                                            <p className="text-xs text-red-500 line-through truncate mb-0.5">- {event.diff.matches[0].before}</p>
+                                                            <p className="text-xs text-green-600 truncate">+ {event.diff.matches[0].after}</p>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            )}
+                        </div>
                     </div>
                 )}
-
-                {/* Far Right: Sidebar (History) — hidden on small screens */}
-                <div className={`hidden xl:flex ${isVersionsCollapsed ? 'w-14' : 'w-64'} shrink-0 bg-neutral-900 border-l border-neutral-800 flex-col text-neutral-300 transition-all duration-300`}>
-                    <div
-                        className={`p-4 border-b border-neutral-800 flex items-center cursor-pointer hover:bg-neutral-800 transition ${isVersionsCollapsed ? 'justify-center' : 'justify-between'}`}
-                        onClick={() => setIsVersionsCollapsed(!isVersionsCollapsed)}
-                        title={isVersionsCollapsed ? "Expand Versions" : "Collapse Versions"}
-                    >
-                        {!isVersionsCollapsed && <h3 className="font-semibold text-neutral-300 select-none">Versions</h3>}
-                        <button className="text-neutral-400 hover:text-white transition">
-                            {isVersionsCollapsed ? <ChevronLeft size={16} /> : <ChevronRight size={16} />}
-                        </button>
-                    </div>
-                    {!isVersionsCollapsed && (
-                        <div className="p-4 flex-1 overflow-y-auto flex flex-col gap-4">
-                            {historyEvents.slice().reverse().map(event => {
-                                const isSelected = activeSpine?.id === event.spineVersionId;
-                                const versionLabel = getVersionLabel(event.spineVersionId);
-                                return (
-                                    <button
-                                        key={event.id}
-                                        onClick={() => setViewedSpineId(event.spineVersionId)}
-                                        className={`p-3 rounded-md border text-left transition ${isSelected ? 'bg-neutral-800 border-blue-500 ring-1 ring-blue-500' : 'bg-neutral-800/50 border-neutral-700 hover:bg-neutral-800'}`}
-                                    >
-                                        <div className="flex justify-between items-start mb-1">
-                                            <span className={`text-sm font-medium ${isSelected ? 'text-blue-400' : 'text-neutral-400'}`}>{versionLabel}</span>
-                                            <span className="text-xs text-neutral-500">{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                        </div>
-                                        <p className={`text-sm ${isSelected ? 'text-neutral-200' : 'text-neutral-400'}`}>{event.description}</p>
-
-                                        {event.diff && event.diff.matches && isSelected && (
-                                            <div className="mt-3 pt-3 border-t border-neutral-700">
-                                                <p className="text-xs text-neutral-500 mb-1 tracking-wide uppercase">Diff Preview</p>
-                                                <div className="bg-neutral-900 rounded p-2 overflow-hidden">
-                                                    <p className="text-xs text-red-400 line-through truncate opacity-80">- {event.diff.matches[0].before}</p>
-                                                    <p className="text-xs text-green-400 truncate mt-1">+ {event.diff.matches[0].after}</p>
-                                                </div>
-                                            </div>
-                                        )}
-                                    </button>
-                                );
-                            })}
-                        </div>
-                    )}
-                </div>
 
             </div>
 
             {consolidatingBranch && latestSpine && (
                 <ConsolidationModal
                     projectId={projectId}
-                    spineVersionId={latestSpine.id}
                     branch={consolidatingBranch}
                     spineText={latestSpine.responseText}
                     onClose={() => setConsolidatingBranch(null)}
+                />
+            )}
+
+            {activeCanvasBranchId && (
+                <BranchCanvas
+                    projectId={projectId}
+                    branchId={activeCanvasBranchId}
+                    onClose={() => setActiveCanvasBranchId(null)}
                 />
             )}
         </div>

@@ -17,6 +17,9 @@ export function HomePage() {
         e.preventDefault();
         if (!projectName.trim() || !promptText.trim()) return;
 
+        const apiKey = localStorage.getItem('GEMINI_API_KEY');
+        if (!apiKey) { setIsSettingsOpen(true); return; }
+
         const { projectId, spineId } = createProject(projectName.trim(), promptText.trim());
         navigate(`/p/${projectId}`);
 
@@ -45,14 +48,14 @@ export function HomePage() {
                 <div className="flex items-center gap-3">
                     <button
                         onClick={() => setIsSettingsOpen(true)}
-                        className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
+                        className="p-2.5 text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
                         title="API Settings"
                     >
-                        <Settings size={20} />
+                        <Settings size={18} />
                     </button>
                     <button
                         onClick={() => setIsModalOpen(true)}
-                        className="flex items-center gap-2 px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition"
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition"
                     >
                         <Plus size={18} />
                         New Project
@@ -79,9 +82,9 @@ export function HomePage() {
                         <div
                             key={p.id}
                             onClick={() => navigate(`/p/${p.id}`)}
-                            className="p-6 relative bg-neutral-800 rounded-lg border border-neutral-700 hover:border-blue-500 cursor-pointer transition group"
+                            className="p-6 relative bg-neutral-800 rounded-lg border border-neutral-700 hover:border-indigo-500 cursor-pointer transition group"
                         >
-                            <h2 className="text-xl font-semibold mb-2 group-hover:text-blue-400">
+                            <h2 className="text-xl font-semibold mb-2 group-hover:text-indigo-400">
                                 {p.name}
                             </h2>
                             <div className="flex items-center gap-2">
@@ -131,7 +134,7 @@ export function HomePage() {
                                     type="text"
                                     value={projectName}
                                     onChange={(e) => setProjectName(e.target.value)}
-                                    className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-4 py-2 focus:outline-none focus:border-blue-500"
+                                    className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-4 py-2 focus:outline-none focus:border-indigo-500"
                                     placeholder="e.g., E-commerce Mobile App"
                                     autoFocus
                                 />
@@ -144,7 +147,7 @@ export function HomePage() {
                                 <textarea
                                     value={promptText}
                                     onChange={(e) => setPromptText(e.target.value)}
-                                    className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-4 py-2 min-h-32 focus:outline-none focus:border-blue-500"
+                                    className="w-full bg-neutral-900 border border-neutral-700 rounded-md px-4 py-2 min-h-32 focus:outline-none focus:border-indigo-500"
                                     placeholder="Describe the product you want to build..."
                                 />
                             </div>
@@ -160,7 +163,7 @@ export function HomePage() {
                                 <button
                                     type="submit"
                                     disabled={!projectName.trim() || !promptText.trim()}
-                                    className="px-4 py-2 bg-blue-600 text-white rounded-md hover:bg-blue-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
+                                    className="px-4 py-2 bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
                                 >
                                     Generate First Draft
                                 </button>

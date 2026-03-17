@@ -39,7 +39,7 @@ export function PipelineStageBar({ currentStage, onStageChange, hasPRD, hasDevPl
                             disabled={!enabled}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition ${
                                 active
-                                    ? 'bg-blue-600 text-white'
+                                    ? 'bg-indigo-600 text-white'
                                     : enabled
                                         ? 'text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200'
                                         : 'text-neutral-600 cursor-not-allowed'

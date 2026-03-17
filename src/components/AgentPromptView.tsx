@@ -76,7 +76,7 @@ export function AgentPromptView({ projectId, projectName }: AgentPromptViewProps
                 <h3 className="text-sm font-semibold text-neutral-500 uppercase tracking-wider">Agent Prompts</h3>
                 <button
                     onClick={handleExportAll}
-                    className="flex items-center gap-1.5 text-xs text-blue-500 hover:text-blue-700 transition"
+                    className="flex items-center gap-1.5 text-xs text-indigo-500 hover:text-indigo-700 transition"
                 >
                     <Download size={12} />
                     Export All
@@ -104,7 +104,7 @@ export function AgentPromptView({ projectId, projectName }: AgentPromptViewProps
             {Array.from(milestoneGroups.entries()).map(([milestoneId, prompts]) => (
                 <div key={milestoneId}>
                     <h4 className="text-sm font-medium text-neutral-700 mb-2 flex items-center gap-2">
-                        <span className="w-2 h-2 rounded-full bg-blue-400" />
+                        <span className="w-2 h-2 rounded-full bg-indigo-400" />
                         {getMilestoneName(milestoneId)}
                     </h4>
                     <div className="space-y-3 ml-4">
