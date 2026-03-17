@@ -48,10 +48,10 @@ export function HomePage() {
                 <div className="flex items-center gap-3">
                     <button
                         onClick={() => setIsSettingsOpen(true)}
-                        className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
+                        className="p-2.5 text-neutral-400 hover:text-white bg-white/5 hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
                         title="API Settings"
                     >
-                        <Settings size={20} />
+                        <Settings size={18} />
                     </button>
                     <button
                         onClick={() => setIsModalOpen(true)}
