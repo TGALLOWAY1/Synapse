@@ -1,7 +1,12 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
-import type { Project, SpineVersion, HistoryEvent, Branch, StructuredPRD, DevPlan, Milestone, AgentPrompt, PipelineStage } from '../types';
+import type {
+    Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
+    DevPlan, Milestone, AgentPrompt, PipelineStage,
+    Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
+    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState
+} from '../types';
 
 interface ProjectState {
     projects: Record<string, Project>;
@@ -10,6 +15,11 @@ interface ProjectState {
     branches: Record<string, Branch[]>;
     devPlans: Record<string, DevPlan[]>;
     agentPrompts: Record<string, AgentPrompt[]>;
+
+    // Artifact system
+    artifacts: Record<string, Artifact[]>;
+    artifactVersions: Record<string, ArtifactVersion[]>;
+    feedbackItems: Record<string, FeedbackItem[]>;
 
     // Existing actions
     createProject: (name: string, promptText: string) => { projectId: string, spineId: string };
@@ -34,16 +44,53 @@ interface ProjectState {
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => void;
 
-    // Dev Plan
+    // Dev Plan (legacy — kept for backward compat)
     createDevPlan: (projectId: string, spineVersionId: string, milestones: Milestone[]) => { devPlanId: string };
     deleteDevPlan: (projectId: string, devPlanId: string) => void;
     getDevPlans: (projectId: string) => DevPlan[];
     getLatestDevPlan: (projectId: string) => DevPlan | undefined;
 
-    // Agent Prompts
+    // Agent Prompts (legacy — kept for backward compat)
     createAgentPrompt: (projectId: string, prompt: Omit<AgentPrompt, 'id' | 'createdAt'>) => { promptId: string };
     deleteAgentPrompt: (projectId: string, promptId: string) => void;
     getAgentPrompts: (projectId: string, milestoneId?: string) => AgentPrompt[];
+
+    // --- Artifact System Actions ---
+    createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => { artifactId: string };
+    updateArtifact: (projectId: string, artifactId: string, updates: Partial<Pick<Artifact, 'title' | 'status'>>) => void;
+    deleteArtifact: (projectId: string, artifactId: string) => void;
+    getArtifacts: (projectId: string, type?: ArtifactType) => Artifact[];
+    getArtifact: (projectId: string, artifactId: string) => Artifact | undefined;
+
+    // ArtifactVersion actions
+    createArtifactVersion: (
+        projectId: string,
+        artifactId: string,
+        content: string,
+        metadata: Record<string, unknown>,
+        sourceRefs: SourceRef[],
+        generationPrompt: string,
+        parentVersionId?: string | null
+    ) => { versionId: string };
+    setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => void;
+    getArtifactVersions: (projectId: string, artifactId: string) => ArtifactVersion[];
+    getPreferredVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
+    getLatestArtifactVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
+
+    // Feedback actions
+    createFeedbackItem: (
+        projectId: string,
+        sourceArtifactVersionId: string,
+        type: FeedbackType,
+        title: string,
+        description: string,
+        targetArtifactType: ArtifactType
+    ) => { feedbackId: string };
+    updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => void;
+    getFeedbackItems: (projectId: string, status?: FeedbackStatus) => FeedbackItem[];
+
+    // Staleness
+    getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;
 }
 
 export const useProjectStore = create<ProjectState>()(
@@ -55,6 +102,9 @@ export const useProjectStore = create<ProjectState>()(
             branches: {},
             devPlans: {},
             agentPrompts: {},
+            artifacts: {},
+            artifactVersions: {},
+            feedbackItems: {},
 
             createProject: (name: string, promptText: string) => {
                 const projectId = uuidv4();
@@ -263,7 +313,7 @@ export const useProjectStore = create<ProjectState>()(
                     diff: {
                         matches: [{
                             before: branch.anchorText,
-                            after: "(Consolidated changes)" // Mapped roughly for the visualization
+                            after: "(Consolidated changes)"
                         }]
                     }
                 };
@@ -291,13 +341,22 @@ export const useProjectStore = create<ProjectState>()(
                     delete newDevPlans[projectId];
                     const newAgentPrompts = { ...state.agentPrompts };
                     delete newAgentPrompts[projectId];
+                    const newArtifacts = { ...state.artifacts };
+                    delete newArtifacts[projectId];
+                    const newArtifactVersions = { ...state.artifactVersions };
+                    delete newArtifactVersions[projectId];
+                    const newFeedbackItems = { ...state.feedbackItems };
+                    delete newFeedbackItems[projectId];
                     return {
                         projects: newProjects,
                         spineVersions: newSpines,
                         historyEvents: newHistory,
                         branches: newBranches,
                         devPlans: newDevPlans,
-                        agentPrompts: newAgentPrompts
+                        agentPrompts: newAgentPrompts,
+                        artifacts: newArtifacts,
+                        artifactVersions: newArtifactVersions,
+                        feedbackItems: newFeedbackItems,
                     };
                 });
             },
@@ -350,7 +409,7 @@ export const useProjectStore = create<ProjectState>()(
                 });
             },
 
-            // Dev Plan
+            // Dev Plan (legacy)
             createDevPlan: (projectId: string, spineVersionId: string, milestones: Milestone[]) => {
                 const devPlanId = uuidv4();
                 const now = Date.now();
@@ -388,7 +447,7 @@ export const useProjectStore = create<ProjectState>()(
                 return plans.find(p => p.isLatest);
             },
 
-            // Agent Prompts
+            // Agent Prompts (legacy)
             createAgentPrompt: (projectId: string, prompt: Omit<AgentPrompt, 'id' | 'createdAt'>) => {
                 const promptId = uuidv4();
                 const newPrompt: AgentPrompt = {
@@ -418,6 +477,288 @@ export const useProjectStore = create<ProjectState>()(
                 const prompts = get().agentPrompts[projectId] || [];
                 if (milestoneId) return prompts.filter(p => p.milestoneId === milestoneId);
                 return prompts;
+            },
+
+            // --- Artifact System ---
+
+            createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => {
+                const artifactId = uuidv4();
+                const now = Date.now();
+                const newArtifact: Artifact = {
+                    id: artifactId,
+                    projectId,
+                    type,
+                    subtype,
+                    title,
+                    status: 'draft',
+                    currentVersionId: null,
+                    createdAt: now,
+                    updatedAt: now,
+                };
+
+                set((state) => ({
+                    artifacts: {
+                        ...state.artifacts,
+                        [projectId]: [...(state.artifacts[projectId] || []), newArtifact]
+                    }
+                }));
+
+                return { artifactId };
+            },
+
+            updateArtifact: (projectId: string, artifactId: string, updates: Partial<Pick<Artifact, 'title' | 'status'>>) => {
+                set((state) => {
+                    const projectArtifacts = state.artifacts[projectId] || [];
+                    const updatedArtifacts = projectArtifacts.map(a =>
+                        a.id === artifactId ? { ...a, ...updates, updatedAt: Date.now() } : a
+                    );
+                    return {
+                        artifacts: { ...state.artifacts, [projectId]: updatedArtifacts }
+                    };
+                });
+            },
+
+            deleteArtifact: (projectId: string, artifactId: string) => {
+                set((state) => ({
+                    artifacts: {
+                        ...state.artifacts,
+                        [projectId]: (state.artifacts[projectId] || []).filter(a => a.id !== artifactId)
+                    },
+                    artifactVersions: {
+                        ...state.artifactVersions,
+                        [projectId]: (state.artifactVersions[projectId] || []).filter(v => v.artifactId !== artifactId)
+                    },
+                }));
+            },
+
+            getArtifacts: (projectId: string, type?: ArtifactType) => {
+                const artifacts = get().artifacts[projectId] || [];
+                if (type) return artifacts.filter(a => a.type === type);
+                return artifacts;
+            },
+
+            getArtifact: (projectId: string, artifactId: string) => {
+                const artifacts = get().artifacts[projectId] || [];
+                return artifacts.find(a => a.id === artifactId);
+            },
+
+            // ArtifactVersion actions
+            createArtifactVersion: (
+                projectId: string,
+                artifactId: string,
+                content: string,
+                metadata: Record<string, unknown>,
+                sourceRefs: SourceRef[],
+                generationPrompt: string,
+                parentVersionId?: string | null
+            ) => {
+                const versionId = uuidv4();
+                const now = Date.now();
+
+                // Determine version number
+                const existingVersions = (get().artifactVersions[projectId] || [])
+                    .filter(v => v.artifactId === artifactId);
+                const versionNumber = existingVersions.length + 1;
+
+                // Unmark previous preferred versions
+                const allVersions = get().artifactVersions[projectId] || [];
+                const updatedVersions = allVersions.map(v =>
+                    v.artifactId === artifactId ? { ...v, isPreferred: false } : v
+                );
+
+                const newVersion: ArtifactVersion = {
+                    id: versionId,
+                    artifactId,
+                    versionNumber,
+                    parentVersionId: parentVersionId ?? null,
+                    content,
+                    metadata,
+                    sourceRefs,
+                    generationPrompt,
+                    isPreferred: true,
+                    createdAt: now,
+                };
+
+                // Update artifact's currentVersionId
+                const projectArtifacts = get().artifacts[projectId] || [];
+                const updatedArtifacts = projectArtifacts.map(a =>
+                    a.id === artifactId ? { ...a, currentVersionId: versionId, status: 'active' as const, updatedAt: now } : a
+                );
+
+                // Create history event
+                const artifact = projectArtifacts.find(a => a.id === artifactId);
+                const historyEvent: HistoryEvent = {
+                    id: uuidv4(),
+                    projectId,
+                    artifactId,
+                    artifactVersionId: versionId,
+                    type: versionNumber === 1 ? "ArtifactGenerated" : "ArtifactRegenerated",
+                    description: `${artifact?.title || 'Artifact'} v${versionNumber} generated`,
+                    createdAt: now,
+                };
+
+                set((state) => ({
+                    artifactVersions: {
+                        ...state.artifactVersions,
+                        [projectId]: [...updatedVersions, newVersion]
+                    },
+                    artifacts: {
+                        ...state.artifacts,
+                        [projectId]: updatedArtifacts
+                    },
+                    historyEvents: {
+                        ...state.historyEvents,
+                        [projectId]: [...(state.historyEvents[projectId] || []), historyEvent]
+                    },
+                }));
+
+                return { versionId };
+            },
+
+            setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => {
+                set((state) => {
+                    const allVersions = state.artifactVersions[projectId] || [];
+                    const updatedVersions = allVersions.map(v => {
+                        if (v.artifactId === artifactId) {
+                            return { ...v, isPreferred: v.id === versionId };
+                        }
+                        return v;
+                    });
+
+                    const projectArtifacts = state.artifacts[projectId] || [];
+                    const updatedArtifacts = projectArtifacts.map(a =>
+                        a.id === artifactId ? { ...a, currentVersionId: versionId, updatedAt: Date.now() } : a
+                    );
+
+                    return {
+                        artifactVersions: { ...state.artifactVersions, [projectId]: updatedVersions },
+                        artifacts: { ...state.artifacts, [projectId]: updatedArtifacts },
+                    };
+                });
+            },
+
+            getArtifactVersions: (projectId: string, artifactId: string) => {
+                const allVersions = get().artifactVersions[projectId] || [];
+                return allVersions.filter(v => v.artifactId === artifactId);
+            },
+
+            getPreferredVersion: (projectId: string, artifactId: string) => {
+                const versions = get().artifactVersions[projectId] || [];
+                return versions.find(v => v.artifactId === artifactId && v.isPreferred);
+            },
+
+            getLatestArtifactVersion: (projectId: string, artifactId: string) => {
+                const versions = (get().artifactVersions[projectId] || [])
+                    .filter(v => v.artifactId === artifactId);
+                if (versions.length === 0) return undefined;
+                return versions.reduce((latest, v) => v.versionNumber > latest.versionNumber ? v : latest);
+            },
+
+            // Feedback actions
+            createFeedbackItem: (
+                projectId: string,
+                sourceArtifactVersionId: string,
+                type: FeedbackType,
+                title: string,
+                description: string,
+                targetArtifactType: ArtifactType
+            ) => {
+                const feedbackId = uuidv4();
+                const now = Date.now();
+                const newFeedback: FeedbackItem = {
+                    id: feedbackId,
+                    projectId,
+                    sourceArtifactVersionId,
+                    type,
+                    title,
+                    description,
+                    status: 'open',
+                    targetArtifactType,
+                    createdAt: now,
+                    updatedAt: now,
+                };
+
+                // Create history event
+                const historyEvent: HistoryEvent = {
+                    id: uuidv4(),
+                    projectId,
+                    type: "FeedbackCreated",
+                    description: `Feedback: "${title}"`,
+                    createdAt: now,
+                };
+
+                set((state) => ({
+                    feedbackItems: {
+                        ...state.feedbackItems,
+                        [projectId]: [...(state.feedbackItems[projectId] || []), newFeedback]
+                    },
+                    historyEvents: {
+                        ...state.historyEvents,
+                        [projectId]: [...(state.historyEvents[projectId] || []), historyEvent]
+                    },
+                }));
+
+                return { feedbackId };
+            },
+
+            updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => {
+                set((state) => {
+                    const items = state.feedbackItems[projectId] || [];
+                    const updatedItems = items.map(f =>
+                        f.id === feedbackId ? { ...f, status, updatedAt: Date.now() } : f
+                    );
+
+                    const updates: Record<string, unknown> = {
+                        feedbackItems: { ...state.feedbackItems, [projectId]: updatedItems }
+                    };
+
+                    // Add history event if incorporated
+                    if (status === 'incorporated') {
+                        const feedback = items.find(f => f.id === feedbackId);
+                        const historyEvent: HistoryEvent = {
+                            id: uuidv4(),
+                            projectId,
+                            type: "FeedbackApplied",
+                            description: `Feedback applied: "${feedback?.title || ''}"`,
+                            createdAt: Date.now(),
+                        };
+                        updates.historyEvents = {
+                            ...state.historyEvents,
+                            [projectId]: [...(state.historyEvents[projectId] || []), historyEvent]
+                        };
+                    }
+
+                    return updates as Partial<ProjectState>;
+                });
+            },
+
+            getFeedbackItems: (projectId: string, status?: FeedbackStatus) => {
+                const items = get().feedbackItems[projectId] || [];
+                if (status) return items.filter(f => f.status === status);
+                return items;
+            },
+
+            // Staleness detection
+            getArtifactStaleness: (projectId: string, artifactId: string): StalenessState => {
+                const state = get();
+                const artifact = (state.artifacts[projectId] || []).find(a => a.id === artifactId);
+                if (!artifact || !artifact.currentVersionId) return 'outdated';
+
+                const preferredVersion = (state.artifactVersions[projectId] || [])
+                    .find(v => v.id === artifact.currentVersionId);
+                if (!preferredVersion) return 'outdated';
+
+                // Find the source spine version reference
+                const spineRef = preferredVersion.sourceRefs.find(r => r.sourceType === 'spine');
+                if (!spineRef) return 'possibly_outdated';
+
+                // Compare against latest spine
+                const latestSpine = (state.spineVersions[projectId] || []).find(v => v.isLatest);
+                if (!latestSpine) return 'possibly_outdated';
+
+                if (spineRef.sourceArtifactVersionId === latestSpine.id) return 'current';
+
+                return 'possibly_outdated';
             },
 
         }),
