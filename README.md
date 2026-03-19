@@ -1,15 +1,71 @@
-# Synapse 
+# Synapse
 
-Synapse v1 is a spec-driven PRD generation and refinement canvas.
+Synapse is a spec-driven PRD generation, mockup, and artifact pipeline — powered by LLM generation at every stage.
 
 <img width="1430" height="837" alt="image" src="https://github.com/user-attachments/assets/5448db70-e98d-4571-81c1-112a1cb14986" />
 
+## Features
+
+### PRD Canvas
+- Create projects with an initial prompt and generate structured PRDs via LLM
+- Spine versioning with full history tracking
+- Branch-based refinement: highlight text, create branches, discuss in threads
+- Consolidation engine merges branch insights back into the PRD
+- Mark PRD as Final, export as Markdown
+
+### Mockups
+- Generate text-based UI mockups from the finalized PRD
+- Configurable settings: platform (desktop/mobile/responsive), fidelity (low/mid/high), scope (single screen/multi-screen/key workflow)
+- Optional style direction and emphasis notes
+- Version management with side-by-side comparison
+- Preferred version selection
+- Staleness detection when the source PRD changes
+
+### Core Artifacts
+- Generate 7 structured artifacts derived from the PRD:
+  - **Screen Inventory** — all screens and views implied by the PRD
+  - **User Flows** — primary user journeys and flow sequences
+  - **Component Inventory** — reusable UI components
+  - **Implementation Plan** — milestone-oriented build sequence
+  - **Data Model Draft** — entities, relationships, and data needs
+  - **Prompt Pack** — downstream prompts for coding, critique, testing
+  - **Design System Starter** — foundational UI system draft
+- Generate individually or all at once ("Generate All" bundle)
+- Regenerate any artifact when the PRD evolves
+- Staleness badges show which artifacts may need regeneration
+
+### Feedback Loop
+- Extract structured feedback from any mockup or artifact version
+- 8 feedback categories: Feature Addition, Workflow Refinement, IA/Navigation, Missing State, Visual System, Ambiguous Requirement, Implementation Consideration, Naming/Wording
+- Open feedback items appear on the PRD stage with one-click "Apply to PRD" (creates a branch)
+- Mark feedback as incorporated or dismissed
+
+### Project History
+- Full-page timeline of all project events grouped by date
+- Tracks PRD creation, regeneration, consolidation, artifact generation, feedback creation, and feedback application
+- Diff previews for consolidation events
+
 ## Run Instructions
+
 1. Install dependencies: `npm install`
-2. Run development server: `npm run dev`
-3. Build for production: `npm run build`
+2. Set your Gemini API key (see **Setup Checklist** below)
+3. Run development server: `npm run dev`
+4. Build for production: `npm run build`
+
+## Setup Checklist
+
+> **Manual steps you need to complete before using Synapse:**
+
+- [ ] **Get a Gemini API key** — Go to [Google AI Studio](https://aistudio.google.com/apikey) and create an API key
+- [ ] **Configure the API key** — Open the Settings modal (gear icon in the workspace header) and paste your Gemini API key
+- [ ] **Verify LLM generation works** — Create a test project and confirm the PRD generates successfully
+- [ ] **Test Mockup generation** — Navigate to the Mockups tab, configure settings, and generate a mockup
+- [ ] **Test Core Artifacts** — Navigate to the Artifacts tab and generate at least one artifact (or use "Generate All")
+- [ ] **Test Feedback loop** — Extract feedback from a mockup, then check it appears on the PRD stage with the "Apply" action
+- [ ] **Clear legacy localStorage** (if upgrading from a previous version) — Old `devplan`/`prompts` stage data will auto-migrate, but you may want to clear browser storage for a clean start
 
 ## QA Checklist
+
 ### S1: Project Setup & Shell
 - [x] Home page loads and shows project list.
 - [x] Can create a new project with title and initial prompt.
@@ -55,3 +111,16 @@ Synapse v1 is a spec-driven PRD generation and refinement canvas.
 - [x] Click "Export" to download a Markdown file of the currently viewed spine.
 - [x] The downloaded file is named `projectname-prd-vX.md`.
 - [x] The exported file includes a header with the version number, date, and FINAL/DRAFT status.
+
+### S8: Mockups & Artifacts (New)
+- [ ] Pipeline navigation shows 4 tabs: PRD, Mockups, Artifacts, History.
+- [ ] Mockups tab generates text-based mockups with configurable settings.
+- [ ] Generated mockups display in expandable cards with version info.
+- [ ] Side-by-side comparison works when 2+ versions exist.
+- [ ] "Extract Feedback" opens the feedback modal with category selection.
+- [ ] Artifacts tab shows 7 core artifact types with generate/regenerate buttons.
+- [ ] "Generate All" creates all 7 artifacts sequentially.
+- [ ] Staleness badges appear when the source PRD has been updated since generation.
+- [ ] History tab shows a full timeline of all events grouped by date.
+- [ ] Feedback items appear on the PRD stage with Apply/Incorporate/Dismiss actions.
+- [ ] "Apply to PRD" creates a branch from the feedback content and opens the branches panel.
