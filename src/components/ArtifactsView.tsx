@@ -1,0 +1,227 @@
+import { useState } from 'react';
+import { Package, Plus, RefreshCcw, Sparkles } from 'lucide-react';
+import { useProjectStore } from '../store/projectStore';
+import { generateCoreArtifact } from '../lib/llmProvider';
+import { StalenessBadge } from './StalenessBadge';
+import { FeedbackModal } from './FeedbackModal';
+import type { StructuredPRD, CoreArtifactSubtype } from '../types';
+import { v4 as uuidv4 } from 'uuid';
+
+interface ArtifactsViewProps {
+    projectId: string;
+    spineVersionId: string;
+    prdContent: string;
+    structuredPRD?: StructuredPRD;
+}
+
+const CORE_ARTIFACTS: { subtype: CoreArtifactSubtype; title: string; description: string }[] = [
+    { subtype: 'screen_inventory', title: 'Screen Inventory', description: 'Structured list of screens and views implied by the PRD' },
+    { subtype: 'user_flows', title: 'User Flows', description: 'Primary user journeys and key flow sequences' },
+    { subtype: 'component_inventory', title: 'Component Inventory', description: 'Reusable components implied by the product design' },
+    { subtype: 'implementation_plan', title: 'Implementation Plan', description: 'High-level build sequence and milestone-oriented dev plan' },
+    { subtype: 'data_model', title: 'Data Model Draft', description: 'Primary entities, relationships, and data needs' },
+    { subtype: 'prompt_pack', title: 'Prompt Pack', description: 'Downstream prompts for design, coding, critique, and testing' },
+    { subtype: 'design_system', title: 'Design System Starter', description: 'Foundational UI system draft with patterns and components' },
+];
+
+export function ArtifactsView({ projectId, spineVersionId, prdContent, structuredPRD }: ArtifactsViewProps) {
+    const {
+        createArtifact, createArtifactVersion,
+        getArtifacts, getArtifactVersions,
+        getArtifactStaleness,
+    } = useProjectStore();
+
+    const [generatingSubtype, setGeneratingSubtype] = useState<CoreArtifactSubtype | 'bundle' | null>(null);
+    const [expandedId, setExpandedId] = useState<string | null>(null);
+    const [feedbackVersionId, setFeedbackVersionId] = useState<string | null>(null);
+    const [error, setError] = useState<string | null>(null);
+
+    const coreArtifacts = getArtifacts(projectId, 'core_artifact');
+
+    const getExistingArtifact = (subtype: CoreArtifactSubtype) =>
+        coreArtifacts.find(a => a.subtype === subtype);
+
+    const handleGenerateOne = async (subtype: CoreArtifactSubtype) => {
+        if (!structuredPRD) return;
+        setError(null);
+        setGeneratingSubtype(subtype);
+        try {
+            const meta = CORE_ARTIFACTS.find(a => a.subtype === subtype)!;
+            const content = await generateCoreArtifact(subtype, prdContent, structuredPRD);
+
+            const existing = getExistingArtifact(subtype);
+            let artifactId: string;
+            if (existing) {
+                artifactId = existing.id;
+            } else {
+                const result = createArtifact(projectId, 'core_artifact', meta.title, subtype);
+                artifactId = result.artifactId;
+            }
+
+            const versions = getArtifactVersions(projectId, artifactId);
+            const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+
+            createArtifactVersion(
+                projectId, artifactId, content,
+                { subtype },
+                [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+                `Generate ${meta.title} from PRD`,
+                parentVersionId,
+            );
+
+            setExpandedId(artifactId);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setGeneratingSubtype(null);
+        }
+    };
+
+    const handleGenerateBundle = async () => {
+        if (!structuredPRD) return;
+        setError(null);
+        setGeneratingSubtype('bundle');
+        try {
+            for (const meta of CORE_ARTIFACTS) {
+                const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
+
+                const existing = getExistingArtifact(meta.subtype);
+                let artifactId: string;
+                if (existing) {
+                    artifactId = existing.id;
+                } else {
+                    const result = createArtifact(projectId, 'core_artifact', meta.title, meta.subtype);
+                    artifactId = result.artifactId;
+                }
+
+                const versions = getArtifactVersions(projectId, artifactId);
+                const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+
+                createArtifactVersion(
+                    projectId, artifactId, content,
+                    { subtype: meta.subtype },
+                    [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+                    `Generate ${meta.title} from PRD (bundle)`,
+                    parentVersionId,
+                );
+            }
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setGeneratingSubtype(null);
+        }
+    };
+
+    return (
+        <div className="space-y-6">
+            {/* Header */}
+            <div className="flex items-center justify-between">
+                <div className="flex items-center gap-3">
+                    <Package size={24} className="text-indigo-600" />
+                    <h2 className="text-xl font-bold text-neutral-900">Core Artifacts</h2>
+                </div>
+                <button
+                    onClick={handleGenerateBundle}
+                    disabled={!!generatingSubtype || !structuredPRD}
+                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
+                >
+                    <Sparkles size={16} />
+                    {generatingSubtype === 'bundle' ? 'Generating Bundle...' : 'Generate All'}
+                </button>
+            </div>
+
+            {!structuredPRD && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700">
+                    Mark your PRD as Final to generate core artifacts.
+                </div>
+            )}
+
+            {error && (
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
+                    {error}
+                </div>
+            )}
+
+            {/* Artifact Grid */}
+            <div className="space-y-3">
+                {CORE_ARTIFACTS.map(meta => {
+                    const existing = getExistingArtifact(meta.subtype);
+                    const versions = existing ? getArtifactVersions(projectId, existing.id) : [];
+                    const preferredVersion = versions.find(v => v.isPreferred);
+                    const staleness = existing ? getArtifactStaleness(projectId, existing.id) : null;
+                    const isExpanded = expandedId === existing?.id;
+                    const isGenerating = generatingSubtype === meta.subtype || generatingSubtype === 'bundle';
+
+                    return (
+                        <div key={meta.subtype} className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
+                            <div className="flex items-center justify-between p-4">
+                                <button
+                                    onClick={() => existing && setExpandedId(isExpanded ? null : existing.id)}
+                                    className="flex items-center gap-3 min-w-0 text-left flex-1"
+                                    disabled={!existing}
+                                >
+                                    <div className={`w-2 h-2 rounded-full shrink-0 ${existing ? 'bg-green-400' : 'bg-neutral-300'}`} />
+                                    <div className="min-w-0">
+                                        <div className="flex items-center gap-2">
+                                            <span className="font-medium text-neutral-800">{meta.title}</span>
+                                            {staleness && <StalenessBadge staleness={staleness} />}
+                                            {versions.length > 0 && (
+                                                <span className="text-xs text-neutral-400">v{versions.length}</span>
+                                            )}
+                                        </div>
+                                        <p className="text-xs text-neutral-500 mt-0.5">{meta.description}</p>
+                                    </div>
+                                </button>
+                                <button
+                                    onClick={() => handleGenerateOne(meta.subtype)}
+                                    disabled={isGenerating || !structuredPRD}
+                                    className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition shrink-0 disabled:opacity-50"
+                                >
+                                    {existing ? <RefreshCcw size={12} /> : <Plus size={12} />}
+                                    {isGenerating ? 'Generating...' : existing ? 'Regenerate' : 'Generate'}
+                                </button>
+                            </div>
+
+                            {isExpanded && preferredVersion && (
+                                <div className="border-t border-neutral-100 p-4 space-y-3">
+                                    <div className="bg-neutral-50 rounded-lg border border-neutral-200 p-5 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[500px]">
+                                        <pre className="whitespace-pre-wrap text-sm text-neutral-800 font-sans">{preferredVersion.content}</pre>
+                                    </div>
+
+                                    <div className="flex items-center gap-2">
+                                        <button
+                                            onClick={() => setFeedbackVersionId(preferredVersion.id)}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md transition"
+                                        >
+                                            Extract Feedback
+                                        </button>
+
+                                        {versions.length > 1 && (
+                                            <span className="text-xs text-neutral-400 ml-auto">
+                                                {versions.length} versions available
+                                            </span>
+                                        )}
+                                    </div>
+
+                                    <div className="text-xs text-neutral-400 pt-2 border-t border-neutral-100">
+                                        Generated from PRD {preferredVersion.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId || 'unknown'}
+                                        {' · '}v{preferredVersion.versionNumber}
+                                        {' · '}{new Date(preferredVersion.createdAt).toLocaleString()}
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    );
+                })}
+            </div>
+
+            {feedbackVersionId && (
+                <FeedbackModal
+                    projectId={projectId}
+                    sourceArtifactVersionId={feedbackVersionId}
+                    onClose={() => setFeedbackVersionId(null)}
+                />
+            )}
+        </div>
+    );
+}

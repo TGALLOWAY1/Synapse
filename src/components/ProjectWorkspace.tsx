@@ -10,15 +10,16 @@ import { ConsolidationModal } from './ConsolidationModal';
 import { SettingsModal } from './SettingsModal';
 import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
-import { DevPlanView } from './DevPlanView';
-import { AgentPromptView } from './AgentPromptView';
+import { MockupsView } from './MockupsView';
+import { ArtifactsView } from './ArtifactsView';
+import { HistoryView } from './HistoryView';
 import { BranchCanvas } from './BranchCanvas';
 import type { Branch, PipelineStage } from '../types';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, updateSpineStructuredPRD, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, getLatestDevPlan, setProjectStage } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, updateSpineStructuredPRD, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -229,7 +230,6 @@ export function ProjectWorkspace() {
                     currentStage={pipelineStage}
                     onStageChange={setPipelineStage}
                     hasPRD={!!activeSpine?.isFinal}
-                    hasDevPlan={!!getLatestDevPlan(projectId)}
                 />
             </div>
 
@@ -334,22 +334,29 @@ export function ProjectWorkspace() {
                             </>
                         )}
 
-                        {/* Dev Plan Stage */}
-                        {pipelineStage === 'devplan' && activeSpine?.structuredPRD && (
-                            <DevPlanView
+                        {/* Mockups Stage */}
+                        {pipelineStage === 'mockups' && activeSpine && (
+                            <MockupsView
                                 projectId={projectId}
-                                structuredPRD={activeSpine.structuredPRD}
                                 spineVersionId={activeSpine.id}
-                                onStageChange={setPipelineStage}
+                                prdContent={activeSpine.responseText}
+                                structuredPRD={activeSpine.structuredPRD}
                             />
                         )}
 
-                        {/* Agent Prompts Stage */}
-                        {pipelineStage === 'prompts' && (
-                            <AgentPromptView
+                        {/* Artifacts Stage */}
+                        {pipelineStage === 'artifacts' && activeSpine && (
+                            <ArtifactsView
                                 projectId={projectId}
-                                projectName={project.name}
+                                spineVersionId={activeSpine.id}
+                                prdContent={activeSpine.responseText}
+                                structuredPRD={activeSpine.structuredPRD}
                             />
+                        )}
+
+                        {/* History Stage */}
+                        {pipelineStage === 'history' && (
+                            <HistoryView projectId={projectId} />
                         )}
                     </div>
                 </div>
