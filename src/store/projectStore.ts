@@ -764,6 +764,19 @@ export const useProjectStore = create<ProjectState>()(
         }),
         {
             name: 'synapse-projects-storage',
+            onRehydrateStorage: () => {
+                return (state) => {
+                    if (!state) return;
+                    // Migrate legacy currentStage values
+                    for (const projectId of Object.keys(state.projects)) {
+                        const project = state.projects[projectId];
+                        const stage = project.currentStage as string | undefined;
+                        if (stage === 'devplan' || stage === 'prompts') {
+                            state.projects[projectId] = { ...project, currentStage: 'artifacts' };
+                        }
+                    }
+                };
+            },
         }
     )
 );
