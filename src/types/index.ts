@@ -1,4 +1,5 @@
-export type PipelineStage = 'prd' | 'devplan' | 'prompts';
+// Navigation stages
+export type PipelineStage = 'prd' | 'mockups' | 'artifacts' | 'history';
 
 export type Project = {
     id: string;
@@ -23,6 +24,7 @@ export type Branch = {
     createdAt: number;
     messages: BranchMessage[];
 };
+
 // Structured PRD types
 export type Feature = {
     id: string;
@@ -52,7 +54,7 @@ export type SpineVersion = {
     structuredPRD?: StructuredPRD;
 };
 
-// Dev Plan types
+// Legacy types — kept for migration compatibility
 export type DevTask = {
     id: string;
     name: string;
@@ -77,7 +79,6 @@ export type DevPlan = {
     isLatest: boolean;
 };
 
-// Agent Prompt types
 export type AgentTarget = 'cursor' | 'codex' | 'claude' | 'copilot';
 
 export type AgentPrompt = {
@@ -96,16 +97,126 @@ export type AgentPrompt = {
     createdAt: number;
 };
 
+// --- Artifact System ---
+
+export type ArtifactType = 'prd' | 'mockup' | 'prompt' | 'core_artifact';
+
+export type CoreArtifactSubtype =
+    | 'screen_inventory'
+    | 'user_flows'
+    | 'component_inventory'
+    | 'implementation_plan'
+    | 'data_model'
+    | 'prompt_pack'
+    | 'design_system';
+
+export type StalenessState = 'current' | 'possibly_outdated' | 'outdated';
+
+export type SourceRef = {
+    id: string;
+    sourceArtifactId: string;
+    sourceArtifactVersionId: string;
+    sourceType: ArtifactType | 'spine';
+    anchorInfo?: string;
+};
+
+export type Artifact = {
+    id: string;
+    projectId: string;
+    type: ArtifactType;
+    subtype?: CoreArtifactSubtype;
+    title: string;
+    status: 'draft' | 'active' | 'archived';
+    currentVersionId: string | null;
+    createdAt: number;
+    updatedAt: number;
+};
+
+export type ArtifactVersion = {
+    id: string;
+    artifactId: string;
+    versionNumber: number;
+    parentVersionId: string | null;
+    content: string;
+    metadata: Record<string, unknown>;
+    sourceRefs: SourceRef[];
+    generationPrompt: string;
+    isPreferred: boolean;
+    createdAt: number;
+};
+
+// Feedback types
+export type FeedbackType =
+    | 'feature_addition'
+    | 'workflow_refinement'
+    | 'ia_navigation'
+    | 'missing_state'
+    | 'visual_system'
+    | 'ambiguous_requirement'
+    | 'implementation_consideration'
+    | 'naming_wording';
+
+export type FeedbackStatus = 'open' | 'accepted' | 'rejected' | 'incorporated';
+
+export type FeedbackItem = {
+    id: string;
+    projectId: string;
+    sourceArtifactVersionId: string;
+    type: FeedbackType;
+    title: string;
+    description: string;
+    status: FeedbackStatus;
+    targetArtifactType: ArtifactType;
+    createdAt: number;
+    updatedAt: number;
+};
+
+// Mockup generation settings
+export type MockupPlatform = 'mobile' | 'desktop' | 'responsive';
+export type MockupFidelity = 'low' | 'mid' | 'high';
+export type MockupScope = 'single_screen' | 'multi_screen' | 'key_workflow';
+
+export type MockupSettings = {
+    platform: MockupPlatform;
+    fidelity: MockupFidelity;
+    style?: string;
+    scope: MockupScope;
+    notes?: string;
+    selectedSections?: string[];
+};
+
+// Prompt artifact settings
+export type PromptTarget =
+    | 'mockup'
+    | 'coding'
+    | 'ux_critique'
+    | 'implementation'
+    | 'user_flow'
+    | 'testing'
+    | 'launch_copy';
+
+// History event types (expanded)
+export type HistoryEventType =
+    | 'Init'
+    | 'Regenerated'
+    | 'Consolidated'
+    | 'ArtifactGenerated'
+    | 'ArtifactRegenerated'
+    | 'FeedbackCreated'
+    | 'FeedbackApplied';
+
 export type HistoryEvent = {
     id: string;
     projectId: string;
-    spineVersionId: string;
-    type: "Init" | "Regenerated" | "Consolidated";
+    spineVersionId?: string;
+    artifactId?: string;
+    artifactVersionId?: string;
+    type: HistoryEventType;
     description: string;
     diff?: {
         matchMode?: "exact" | "word";
         matchCount?: number;
-        matches: { before: string, after: string }[];
+        matches: { before: string; after: string }[];
         sampleText?: string;
     };
     createdAt: number;

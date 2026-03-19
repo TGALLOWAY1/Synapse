@@ -1,4 +1,4 @@
-import type { StructuredPRD, Milestone, AgentTarget } from '../types';
+import type { StructuredPRD, Milestone, AgentTarget, MockupSettings, CoreArtifactSubtype } from '../types';
 
 const getApiKey = () => {
     const key = localStorage.getItem('GEMINI_API_KEY');
@@ -343,4 +343,172 @@ export const structuredPRDToMarkdown = (prd: StructuredPRD): string => {
     lines.push('');
 
     return lines.join('\n');
+};
+
+// --- Mockup Generation ---
+
+const FIDELITY_INSTRUCTIONS: Record<string, string> = {
+    low: 'Use simple ASCII wireframes with boxes, lines, and placeholder text. Focus on layout and content hierarchy, not visual detail.',
+    mid: 'Use structured text descriptions with clear component names, layout specifications, and content placeholders. Include navigation and interaction notes.',
+    high: 'Provide detailed, polished descriptions including typography, spacing, color suggestions, hover states, and micro-interactions.',
+};
+
+const PLATFORM_INSTRUCTIONS: Record<string, string> = {
+    desktop: 'Design for a desktop/laptop viewport (1280px+ width). Use appropriate navigation patterns like sidebars, top bars, and multi-column layouts.',
+    mobile: 'Design for mobile viewport (375px width). Use mobile patterns like bottom navigation, hamburger menus, and single-column layouts.',
+    responsive: 'Describe both desktop and mobile layouts, noting how the design adapts across breakpoints.',
+};
+
+const SCOPE_INSTRUCTIONS: Record<string, string> = {
+    single_screen: 'Generate a single, detailed screen mockup.',
+    multi_screen: 'Generate mockups for 3-5 key screens that represent the core experience.',
+    key_workflow: 'Generate mockups for a complete key user workflow, showing each step and transition.',
+};
+
+export const generateMockup = async (
+    prdContent: string,
+    settings: MockupSettings,
+    options?: ProviderOptions
+): Promise<string> => {
+    options?.onStatus?.('Generating mockup...');
+
+    const system = `You are an expert UI/UX designer. Generate text-based mockups for a product based on its PRD.
+
+${FIDELITY_INSTRUCTIONS[settings.fidelity]}
+${PLATFORM_INSTRUCTIONS[settings.platform]}
+${SCOPE_INSTRUCTIONS[settings.scope]}
+
+${settings.style ? `Style direction: ${settings.style}` : ''}
+${settings.notes ? `Additional notes: ${settings.notes}` : ''}
+
+For each screen, provide:
+1. Screen name and purpose
+2. Visual layout using ASCII art or structured description
+3. Component list with descriptions
+4. Navigation and interaction notes
+5. Content/copy placeholders
+
+Use clear section headers and consistent formatting throughout.`;
+
+    return callGemini(system, `Generate mockups based on this PRD:\n\n${prdContent}`);
+};
+
+// --- Core Artifact Generation ---
+
+const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
+    screen_inventory: {
+        system: `You are an expert product designer. Create a comprehensive Screen Inventory — a structured list of all screens and views implied by the PRD.
+
+For each screen, include:
+- Screen name
+- Purpose/description
+- Key components present
+- Navigation context (what leads here, where users go next)
+- Priority (core/secondary/supporting)
+
+Group screens by functional area. Use markdown formatting.`,
+        userPrefix: 'Create a Screen Inventory from this PRD:',
+    },
+    user_flows: {
+        system: `You are an expert UX designer. Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD.
+
+For each flow:
+- Flow name and goal
+- Step-by-step sequence with screen references
+- Decision points and branches
+- Success and error paths
+- Entry and exit points
+
+Use numbered steps and markdown formatting. Include both happy paths and edge cases.`,
+        userPrefix: 'Create User Flows from this PRD:',
+    },
+    component_inventory: {
+        system: `You are an expert frontend architect. Create a Component Inventory — a starter list of reusable UI components implied by the product design.
+
+For each component:
+- Component name
+- Description and purpose
+- Props/variants it needs
+- Where it appears (screen references)
+- Complexity estimate (simple/moderate/complex)
+
+Group by category (navigation, forms, display, feedback, layout). Use markdown formatting.`,
+        userPrefix: 'Create a Component Inventory from this PRD:',
+    },
+    implementation_plan: {
+        system: `You are an expert software architect. Create a high-level Implementation Plan — a milestone-oriented development plan.
+
+Include:
+- 4-6 milestones in logical build order
+- For each milestone: name, description, key deliverables, estimated scope
+- Dependencies between milestones
+- Suggested technical approach notes
+- Risk areas per milestone
+
+Use markdown formatting with clear milestone headers.`,
+        userPrefix: 'Create an Implementation Plan from this PRD:',
+    },
+    data_model: {
+        system: `You are an expert backend architect. Create a Data Model Draft — the primary entities, relationships, and state/data needs.
+
+Include:
+- Entity definitions with key fields and types
+- Relationships between entities (one-to-many, many-to-many, etc.)
+- Key indexes and constraints
+- State management considerations
+- API surface implications
+
+Use markdown formatting. Present entities in a clear, structured format.`,
+        userPrefix: 'Create a Data Model Draft from this PRD:',
+    },
+    prompt_pack: {
+        system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of downstream prompts for design, coding, critique, and testing tasks.
+
+Include prompts for:
+1. UI Implementation (for coding agents)
+2. UX Critique (for design review)
+3. Testing Strategy (for QA)
+4. API Design (for backend work)
+5. Copy/Content Writing
+6. Accessibility Audit
+
+Each prompt should be self-contained, specific, and ready to use. Include the context needed.`,
+        userPrefix: 'Create a Prompt Pack from this PRD:',
+    },
+    design_system: {
+        system: `You are an expert design systems architect. Create a Design System Starter — a foundational UI system draft.
+
+Include:
+- Color palette suggestions (primary, secondary, neutral, semantic)
+- Typography scale (headings, body, captions)
+- Spacing system
+- Component patterns (buttons, inputs, cards, modals, etc.)
+- Interaction patterns (hover, focus, loading, transitions)
+- Layout grid recommendations
+- Iconography direction
+
+Use markdown formatting. Be specific enough to guide implementation.`,
+        userPrefix: 'Create a Design System Starter from this PRD:',
+    },
+};
+
+export const generateCoreArtifact = async (
+    subtype: CoreArtifactSubtype,
+    prdContent: string,
+    structuredPRD: StructuredPRD,
+    options?: ProviderOptions
+): Promise<string> => {
+    const config = CORE_ARTIFACT_PROMPTS[subtype];
+    options?.onStatus?.(`Generating ${subtype.replace(/_/g, ' ')}...`);
+
+    const prdSummary = `Vision: ${structuredPRD.vision}
+Core Problem: ${structuredPRD.coreProblem}
+Target Users: ${structuredPRD.targetUsers.join(', ')}
+Features: ${structuredPRD.features.map(f => `${f.name} (${f.complexity}): ${f.description}`).join('\n')}
+Architecture: ${structuredPRD.architecture}`;
+
+    return callGemini(
+        config.system,
+        `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}`
+    );
 };
