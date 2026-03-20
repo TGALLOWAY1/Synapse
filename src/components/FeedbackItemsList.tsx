@@ -18,12 +18,7 @@ const TYPE_LABELS: Record<FeedbackType, string> = {
     naming_wording: 'Naming',
 };
 
-const STATUS_COLORS: Record<string, string> = {
-    open: 'bg-amber-50 text-amber-700 border-amber-200',
-    accepted: 'bg-blue-50 text-blue-700 border-blue-200',
-    rejected: 'bg-neutral-50 text-neutral-500 border-neutral-200',
-    incorporated: 'bg-green-50 text-green-700 border-green-200',
-};
+
 
 export function FeedbackItemsList({ projectId, onApplyToPRD }: FeedbackItemsListProps) {
     const { getFeedbackItems, updateFeedbackStatus } = useProjectStore();

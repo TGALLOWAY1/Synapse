@@ -1,126 +1,100 @@
-# Synapse
+# Synapse PRD 🧠
 
-Synapse is a spec-driven PRD generation, mockup, and artifact pipeline — powered by LLM generation at every stage.
+Synapse is an AI-native product definition environment. It transforms the traditional Product Requirements Document (PRD) from a static text file into a **dynamic, spec-driven pipeline** spanning mockups, architecture, artifact extraction, and branching feedback loops.
 
-<img width="1430" height="837" alt="image" src="https://github.com/user-attachments/assets/5448db70-e98d-4571-81c1-112a1cb14986" />
+<img width="100%" alt="Synapse Workspace Preview" src="public/screenshots/prd-view.png" />
 
-## Features
+## 🌟 Core Features
 
-### PRD Canvas
-- Create projects with an initial prompt and generate structured PRDs via LLM
-- Spine versioning with full history tracking
-- Branch-based refinement: highlight text, create branches, discuss in threads
-- Consolidation engine merges branch insights back into the PRD
-- Mark PRD as Final, export as Markdown
+### 1. Intelligent PRD Canvas
+Start with a raw brain-dump prompt and watch Synapse generate a highly structured, comprehensive product specification.
+- **Spine Versioning:** Full history tracking of every structural change to your primary document (the "Spine").
+- **Branch-based Refinement:** Highlight any text to spawn an active workspace branch. Discuss and debate specific approaches within isolated threads.
+- **Consolidation Engine:** Ready to merge? The engine synthesizes individual branch decisions back into a new unified PRD iteration.
 
-### Mockups
-- Generate text-based UI mockups from the finalized PRD
-- Configurable settings: platform (desktop/mobile/responsive), fidelity (low/mid/high), scope (single screen/multi-screen/key workflow)
-- Optional style direction and emphasis notes
-- Version management with side-by-side comparison
-- Preferred version selection
-- Staleness detection when the source PRD changes
+### 2. Multi-Fidelity UI Mockups
+Bring your specs to life instantly without touching Figma.
+- **Insta-Mockups:** Generate text and structural-based UI mockups directly from the finalized PRD.
+- **Deep Configuration:** Tweak platforms (Mobile/Desktop), fidelity levels (Wireframe, Mid-Fi, High-Fi), and scopes (Single Screen vs Workflow).
+- **A/B Comparison:** Evolve mockups over time and compare distinct iterations side-by-side using the built-in diff viewer.
 
-### Core Artifacts
-- Generate 7 structured artifacts derived from the PRD:
-  - **Screen Inventory** — all screens and views implied by the PRD
-  - **User Flows** — primary user journeys and flow sequences
-  - **Component Inventory** — reusable UI components
-  - **Implementation Plan** — milestone-oriented build sequence
-  - **Data Model Draft** — entities, relationships, and data needs
-  - **Prompt Pack** — downstream prompts for coding, critique, testing
-  - **Design System Starter** — foundational UI system draft
-- Generate individually or all at once ("Generate All" bundle)
-- Regenerate any artifact when the PRD evolves
-- Staleness badges show which artifacts may need regeneration
+<img width="100%" alt="Mockups Comparison View" src="public/screenshots/mockups-compare.png" />
 
-### Feedback Loop
-- Extract structured feedback from any mockup or artifact version
-- 8 feedback categories: Feature Addition, Workflow Refinement, IA/Navigation, Missing State, Visual System, Ambiguous Requirement, Implementation Consideration, Naming/Wording
-- Open feedback items appear on the PRD stage with one-click "Apply to PRD" (creates a branch)
-- Mark feedback as incorporated or dismissed
+### 3. Integrated Feedback Loop
+Close the gap between design reviews and product specs.
+- Extract structured feedback directly from generated Mockups.
+- Feedback surfaces into the core PRD stage as an actionable "Apply" card.
+- Automatically spin up a localized PRD branch to address the visual critique.
 
-### Project History
-- Full-page timeline of all project events grouped by date
-- Tracks PRD creation, regeneration, consolidation, artifact generation, feedback creation, and feedback application
-- Diff previews for consolidation events
+<img width="100%" alt="Feedback UI" src="public/screenshots/prd-feedback.png" />
 
-## Run Instructions
+### 4. Downstream Artifact Generation
+Don't write boilerplates. Synapse extracts the exact context into developer-ready output files. 
+- Automatically spool up 7 dynamic derivatives from the PRD:
+  - 🎨 **Screen Inventory** & **User Flows**
+  - 🧩 **Component Library** & **Design System**
+  - 🗄️ **Data Model Schemas**
+  - 🚀 **Implementation Roadmaps** & **Prompt Packs**
+- **Staleness Tracking:** Visual indicators alert you when an Artifact is out-of-sync with an updated PRD.
 
-1. Install dependencies: `npm install`
-2. Set your Gemini API key (see **Setup Checklist** below)
-3. Run development server: `npm run dev`
-4. Build for production: `npm run build`
+### 5. Architectural Timeline (History)
+Your product's evolution, visualized chronologically. From initial spawn, to branched decision-making, to artifact derivations.
 
-## Setup Checklist
+<img width="100%" alt="History View" src="public/screenshots/history-view.png" />
 
-> **Manual steps you need to complete before using Synapse:**
+---
 
-- [ ] **Get a Gemini API key** — Go to [Google AI Studio](https://aistudio.google.com/apikey) and create an API key
-- [ ] **Configure the API key** — Open the Settings modal (gear icon in the workspace header) and paste your Gemini API key
-- [ ] **Verify LLM generation works** — Create a test project and confirm the PRD generates successfully
-- [ ] **Test Mockup generation** — Navigate to the Mockups tab, configure settings, and generate a mockup
-- [ ] **Test Core Artifacts** — Navigate to the Artifacts tab and generate at least one artifact (or use "Generate All")
-- [ ] **Test Feedback loop** — Extract feedback from a mockup, then check it appears on the PRD stage with the "Apply" action
-- [ ] **Clear legacy localStorage** (if upgrading from a previous version) — Old `devplan`/`prompts` stage data will auto-migrate, but you may want to clear browser storage for a clean start
+## 🛠️ Data Architecture & UX Flow
 
-## QA Checklist
+```mermaid
+graph TD
+    A[Initial Prompt] -->|LLM Synthesis| B(Core PRD Spine)
+    B --> C{Active Canvas}
+    C -->|Highlight & Ask| D[Threaded Branch]
+    D -->|AI Consolidation| B
+    
+    B -->|Mark Final| E{Pipeline Stages}
+    E -->|Mockups View| F[UI Generators]
+    F -->|Compare Versions| G[UX Verification]
+    G -->|Extract Feedback| D
+    
+    E -->|Artifacts View| H[Derived Doc Extracts]
+    H --> I(Data Models)
+    H --> J(User Flows)
+    H --> K(Implementation Plans)
+```
 
-### S1: Project Setup & Shell
-- [x] Home page loads and shows project list.
-- [x] Can create a new project with title and initial prompt.
-- [x] Workspace page loads with Spine (left), Branches (right), and History sidebar.
-- [x] Projects persist across browser refreshes (LocalStorage).
+### Tech Stack
+- **Frontend:** React 19, Vite, Tailwind CSS (Tailwind Merge, CLSX)
+- **State Management:** Zustand (with fast LocalStorage persistence)
+- **AI/LLM Backing:** Google Gemini 2.5 Pro Pipeline
+- **Markdown Processing:** React-Markdown, Remark GFM, Rehype-Raw
+- **Routing:** React Router DOM v7
+- **UI System:** Lucide React Icons, Auto-animate
 
-### S2: Spine Generation & Controls
-- [x] Creating a project triggers a mock LLM generation delay.
-- [x] "Regenerate" button creates a new Spine version and records a history event.
-- [x] "Abandon Session" returns user to the Home page.
-- [x] Side "Versions" panel lists initialized and regenerated spine events.
+---
 
-### S3: Anchors and Branches
-- [x] Users can highlight text in the spine to summon a popover.
-- [x] Users can type an intent in the popover and hit 'Branch' to create a new branch.
-- [x] Branches appear in the middle column, and users can reply to them in a thread.
-- [x] Regenerating the spine is disabled if there are active branches on the latest spine.
+## 🚀 Getting Started
 
-### S4: Consolidation Engine
-- [x] Click "Consolidate" on an active branch to open the modal.
-- [x] Modal shows loading state while "synthesizing patches".
-- [x] Two patches are shown: Local and Doc-Wide.
-- [x] Committing a patch creates a new Spine version and closes the modal.
-- [x] The new Spine is set as active, and the Branch is marked as merged.
+### Prerequisites
 
-### S5: Version Sidebar + Constraints
-- [x] Consolidated events in the right sidebar show a small diff preview of what changed.
-- [x] Clicking a past spine version in the right sidebar switches the workspace to view it.
-- [x] A yellow warning banner explains the view is Read-Only.
-- [x] Text highlighting to spawn new branches is disabled while viewing historical spines.
-- [x] Clicking "Return to Latest" restores the active latest spine.
+To execute language modeling loops, you'll need an active **Gemini API Key**. 
+1. Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
+2. Pass it into the UI via the top-right Settings wheel inside Synapse.
 
-### S6: Exploration Canvases
-- [x] Click the Expand (Maximize) icon on an active branch to dive into the Canvas view.
-- [x] A dedicated route `/p/:projectId/branch/:branchId` loads the Branch context.
-- [x] Clicking "Generate Approaches" synthesizes multiple mock Drafts.
-- [x] Clicking a Draft selects it.
-- [x] Clicking "Apply to Spine" merges the selected draft into the Spine, creating a new authoritative version and returning the user to the workspace.
+### Quick Run
 
-### S7: Export & Final Polish
-- [x] Click "Mark Final" inside the workspace top bar (for active spine only). It highlights green.
-- [x] Viewing historical spines hides the "Mark Final" button.
-- [x] Click "Export" to download a Markdown file of the currently viewed spine.
-- [x] The downloaded file is named `projectname-prd-vX.md`.
-- [x] The exported file includes a header with the version number, date, and FINAL/DRAFT status.
+```bash
+# Install specific package locks
+npm install
 
-### S8: Mockups & Artifacts (New)
-- [ ] Pipeline navigation shows 4 tabs: PRD, Mockups, Artifacts, History.
-- [ ] Mockups tab generates text-based mockups with configurable settings.
-- [ ] Generated mockups display in expandable cards with version info.
-- [ ] Side-by-side comparison works when 2+ versions exist.
-- [ ] "Extract Feedback" opens the feedback modal with category selection.
-- [ ] Artifacts tab shows 7 core artifact types with generate/regenerate buttons.
-- [ ] "Generate All" creates all 7 artifacts sequentially.
-- [ ] Staleness badges appear when the source PRD has been updated since generation.
-- [ ] History tab shows a full timeline of all events grouped by date.
-- [ ] Feedback items appear on the PRD stage with Apply/Incorporate/Dismiss actions.
-- [ ] "Apply to PRD" creates a branch from the feedback content and opens the branches panel.
+# Start the local Vite server
+npm run dev
+```
+
+Navigate to `http://localhost:5173` to initialize your first project. All workspace sessions are cached locally allowing you to pick up exactly where you left off. 
+
+### Build for Production
+```bash
+npm run build
+```

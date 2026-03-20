@@ -1,10 +1,10 @@
 import { useState } from 'react';
-import { Image, Plus, Star, GitCompare, MessageSquarePlus } from 'lucide-react';
+import { Image, Plus, GitCompare, MessageSquarePlus } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import { generateMockup } from '../lib/llmProvider';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
-import type { StructuredPRD, MockupSettings, MockupPlatform, MockupFidelity, MockupScope, ArtifactVersion } from '../types';
+import type { StructuredPRD, MockupSettings, MockupPlatform, MockupFidelity, MockupScope } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface MockupsViewProps {
@@ -32,7 +32,7 @@ const SCOPE_OPTIONS: { value: MockupScope; label: string }[] = [
     { value: 'single_screen', label: 'Single Screen' },
 ];
 
-export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD }: MockupsViewProps) {
+export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsViewProps) {
     const {
         createArtifact, createArtifactVersion,
         getArtifacts, getArtifactVersions, setPreferredVersion,
@@ -55,8 +55,6 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     const [notes, setNotes] = useState('');
 
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
-    const selectedArtifact = mockupArtifacts.find(a => a.id === selectedArtifactId);
-    const selectedVersions = selectedArtifactId ? getArtifactVersions(projectId, selectedArtifactId) : [];
 
     const handleGenerate = async () => {
         setError(null);
