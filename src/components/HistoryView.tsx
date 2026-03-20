@@ -1,4 +1,4 @@
-import { Clock, FileText, Image, Package, MessageSquare, CheckCircle } from 'lucide-react';
+import { Clock, FileText, Package, MessageSquare, CheckCircle } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import type { HistoryEventType } from '../types';
 

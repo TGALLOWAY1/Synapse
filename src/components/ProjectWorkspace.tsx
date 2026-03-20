@@ -416,11 +416,11 @@ export function ProjectWorkspace() {
                                     <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1">Timeline</h4>
                                     {historyEvents.slice().reverse().map(event => {
                                         const isSelected = activeSpine?.id === event.spineVersionId;
-                                        const versionLabel = getVersionLabel(event.spineVersionId);
+                                        const versionLabel = event.spineVersionId ? getVersionLabel(event.spineVersionId) : 'N/A';
                                         return (
                                             <button
                                                 key={event.id}
-                                                onClick={() => setViewedSpineId(event.spineVersionId)}
+                                                onClick={() => setViewedSpineId(event.spineVersionId || null)}
                                                 className={`p-3.5 rounded-xl border text-left transition relative overflow-hidden ${isSelected ? 'bg-indigo-50/50 border-indigo-300 ring-1 ring-indigo-500 shadow-sm' : 'bg-white border-neutral-200 hover:border-neutral-300 hover:shadow-sm'}`}
                                             >
                                                 {isSelected && <div className="absolute left-0 top-0 bottom-0 w-1 bg-indigo-500" />}
