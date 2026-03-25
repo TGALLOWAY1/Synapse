@@ -1,7 +1,6 @@
 import { useState } from 'react';
 import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
-import ReactMarkdown from 'react-markdown';
-import remarkGfm from 'remark-gfm';
+import { ArtifactContentRenderer } from './renderers';
 import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
 import { validateArtifactContent } from '../lib/artifactValidation';
@@ -72,6 +71,14 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
     const bundleDoneCount = Object.values(bundleStatus).filter(s => s === 'done').length;
     const bundleErrorCount = Object.values(bundleStatus).filter(s => s === 'error').length;
+
+    // Count stale artifacts
+    const staleCount = CORE_ARTIFACTS.reduce((count, meta) => {
+        const existing = coreArtifacts.find(a => a.subtype === meta.subtype);
+        if (!existing) return count;
+        const staleness = getArtifactStaleness(projectId, existing.id);
+        return staleness === 'possibly_outdated' || staleness === 'outdated' ? count + 1 : count;
+    }, 0);
 
     const getExistingArtifact = (subtype: CoreArtifactSubtype) =>
         coreArtifacts.find(a => a.subtype === subtype);
@@ -158,6 +165,59 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         }
     };
 
+    const handleRefreshStale = async () => {
+        if (!structuredPRD) return;
+        setError(null);
+        setGeneratingSubtype('bundle');
+
+        const staleArtifacts = CORE_ARTIFACTS.filter(meta => {
+            const existing = coreArtifacts.find(a => a.subtype === meta.subtype);
+            if (!existing) return false;
+            const staleness = getArtifactStaleness(projectId, existing.id);
+            return staleness === 'possibly_outdated' || staleness === 'outdated';
+        });
+
+        const initialStatus = {} as Record<CoreArtifactSubtype, ArtifactGenStatus>;
+        staleArtifacts.forEach(meta => { initialStatus[meta.subtype] = 'pending'; });
+        setBundleStatus(initialStatus);
+
+        const tasks = staleArtifacts.map(meta => async () => {
+            setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'generating' }));
+            const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
+
+            const existing = getExistingArtifact(meta.subtype)!;
+            const versions = getArtifactVersions(projectId, existing.id);
+            const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+
+            createArtifactVersion(
+                projectId, existing.id, content,
+                { subtype: meta.subtype },
+                [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+                `Refresh stale ${meta.title} from updated PRD`,
+                parentVersionId,
+            );
+
+            setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'done' }));
+            return meta.subtype;
+        });
+
+        const results = await withConcurrency(tasks, 3);
+        const errors = results
+            .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+            .map(r => r.reason instanceof Error ? r.reason.message : String(r.reason));
+
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+                setBundleStatus(prev => ({ ...prev, [staleArtifacts[i].subtype]: 'error' }));
+            }
+        });
+
+        if (errors.length > 0) {
+            setError(`${errors.length} artifact(s) failed: ${errors.join('; ')}`);
+        }
+        setGeneratingSubtype(null);
+    };
+
     const handleGenerateBundle = async () => {
         if (!structuredPRD) return;
         setError(null);
@@ -228,16 +288,28 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                     <Package size={24} className="text-indigo-600" />
                     <h2 className="text-xl font-bold text-neutral-900">Core Artifacts</h2>
                 </div>
-                <button
-                    onClick={handleGenerateBundle}
-                    disabled={!!generatingSubtype || !structuredPRD}
-                    className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
-                >
-                    <Sparkles size={16} />
-                    {generatingSubtype === 'bundle'
-                        ? `Generating ${bundleDoneCount} of ${CORE_ARTIFACTS.length}...`
-                        : 'Generate All'}
-                </button>
+                <div className="flex items-center gap-2">
+                    {staleCount > 0 && (
+                        <button
+                            onClick={handleRefreshStale}
+                            disabled={!!generatingSubtype || !structuredPRD}
+                            className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition text-sm font-medium disabled:opacity-50"
+                        >
+                            <RefreshCcw size={14} />
+                            Refresh {staleCount} Stale
+                        </button>
+                    )}
+                    <button
+                        onClick={handleGenerateBundle}
+                        disabled={!!generatingSubtype || !structuredPRD}
+                        className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
+                    >
+                        <Sparkles size={16} />
+                        {generatingSubtype === 'bundle'
+                            ? `Generating ${bundleDoneCount} of ${CORE_ARTIFACTS.length}...`
+                            : 'Generate All'}
+                    </button>
+                </div>
             </div>
 
             {!structuredPRD && (
@@ -324,7 +396,7 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                             {isExpanded && preferredVersion && (
                                 <div className="border-t border-neutral-100 p-4 space-y-3">
                                     <div className="bg-neutral-50 rounded-lg border border-neutral-200 p-5 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[500px]">
-                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{preferredVersion.content}</ReactMarkdown>
+                                        <ArtifactContentRenderer subtype={meta.subtype} content={preferredVersion.content} />
                                     </div>
 
                                     <div className="flex items-center gap-2 flex-wrap">

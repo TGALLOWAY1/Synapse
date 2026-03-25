@@ -14,6 +14,7 @@ import { MockupsView } from './MockupsView';
 import { ArtifactsView } from './ArtifactsView';
 import { MarkupImageView } from './MarkupImageView';
 import { HistoryView } from './HistoryView';
+import { ExportModal } from './ExportModal';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
@@ -118,30 +119,10 @@ export function ProjectWorkspace() {
         markSpineFinal(projectId, activeSpine.id, !activeSpine.isFinal);
     };
 
+    const [isExportOpen, setIsExportOpen] = useState(false);
+
     const handleExport = () => {
-        if (!project || !activeSpine) return;
-
-        const timestamp = new Date().toISOString().split('T')[0];
-        const status = activeSpine.isFinal ? 'FINAL' : 'DRAFT';
-        const versionLabel = getVersionLabel(activeSpine.id);
-        const header = `# ${project.name} PRD
-**Version:** ${versionLabel}
-**Status:** ${status}
-**Exported:** ${timestamp}
-
----
-
-`;
-        const markdownContent = header + activeSpine.responseText;
-        const blob = new Blob([markdownContent], { type: 'text/markdown' });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = `${project.name.toLowerCase().replace(/\s+/g, '-')}-prd-${versionLabel.toLowerCase().replace(/\s+/g, '-')}.md`;
-        document.body.appendChild(a);
-        a.click();
-        document.body.removeChild(a);
-        URL.revokeObjectURL(url);
+        setIsExportOpen(true);
     };
 
     return (
@@ -234,6 +215,7 @@ export function ProjectWorkspace() {
             </div>
 
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
+            {isExportOpen && projectId && <ExportModal projectId={projectId} onClose={() => setIsExportOpen(false)} />}
 
             {/* Pipeline Stage Bar — shrink-0, no absolute */}
             <div className="shrink-0 z-10">

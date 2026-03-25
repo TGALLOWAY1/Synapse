@@ -679,7 +679,7 @@ export const generateCoreArtifact = async (
     subtype: CoreArtifactSubtype,
     prdContent: string,
     structuredPRD: StructuredPRD,
-    options?: ProviderOptions
+    options?: ProviderOptions & { mockupContext?: string },
 ): Promise<string> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     options?.onStatus?.(`Generating ${subtype.replace(/_/g, ' ')}...`);
@@ -712,6 +712,10 @@ Architecture: ${structuredPRD.architecture}${
         : ''
 }`;
 
+    const mockupSection = options?.mockupContext
+        ? `\n\n---\n\nMockup Context (reference for screens, components, and layout):\n${options.mockupContext.slice(0, 3000)}`
+        : '';
+
     // Use JSON mode for supported artifact types
     const jsonSchemas: Partial<Record<CoreArtifactSubtype, object>> = {
         screen_inventory: screenInventorySchema,
@@ -724,7 +728,7 @@ Architecture: ${structuredPRD.architecture}${
         const jsonSystem = config.system + '\n\nReturn the result as structured JSON according to the provided schema.';
         const result = await callGemini(
             jsonSystem,
-            `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}`,
+            `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
             { responseMimeType: 'application/json', responseSchema: schema }
         );
 
@@ -740,7 +744,7 @@ Architecture: ${structuredPRD.architecture}${
 
     return callGemini(
         config.system,
-        `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}`
+        `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`
     );
 };
 
