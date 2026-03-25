@@ -158,9 +158,70 @@ export interface ComponentInventoryContent {
     categories: { name: string; components: ComponentItem[] }[];
 }
 
+// --- Markup Image Types ---
+
+export type MarkupImageSubtype =
+    | 'screenshot_annotation'
+    | 'critique_board'
+    | 'wireframe_callout'
+    | 'flow_annotation'
+    | 'design_feedback';
+
+export interface MarkupImageSpec {
+    version: 'markup_v1';
+    canvas: {
+        width: number;
+        height: number;
+        backgroundColor: string;
+    };
+    source?: {
+        type: 'url' | 'data_uri' | 'artifact_ref';
+        value: string;
+        fit: 'contain' | 'cover' | 'fill';
+    };
+    layers: AnnotationLayer[];
+    exportSettings: {
+        format: 'png' | 'svg';
+        scale: number;
+        includeCaption: boolean;
+    };
+}
+
+export interface AnnotationLayer {
+    id: string;
+    type: 'box' | 'arrow' | 'callout' | 'label' | 'connector'
+        | 'highlight' | 'number_marker' | 'text_block' | 'divider';
+    position: { x: number; y: number };
+    size?: { width: number; height: number };
+    style: {
+        color: string;
+        borderColor?: string;
+        borderWidth?: number;
+        borderRadius?: number;
+        opacity?: number;
+        fontSize?: number;
+        fontWeight?: 'normal' | 'bold';
+    };
+    content?: string;
+    arrow?: {
+        from: { x: number; y: number };
+        to: { x: number; y: number };
+        headStyle: 'filled' | 'open' | 'none';
+    };
+    connector?: {
+        fromLayerId: string;
+        toLayerId: string;
+        style: 'straight' | 'elbow' | 'curved';
+    };
+    numberMarker?: {
+        number: number;
+        description: string;
+    };
+}
+
 // --- Artifact System ---
 
-export type ArtifactType = 'prd' | 'mockup' | 'prompt' | 'core_artifact';
+export type ArtifactType = 'prd' | 'mockup' | 'prompt' | 'core_artifact' | 'markup_image';
 
 export type CoreArtifactSubtype =
     | 'screen_inventory'

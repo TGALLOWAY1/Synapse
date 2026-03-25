@@ -12,6 +12,7 @@ import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
 import { MockupsView } from './MockupsView';
 import { ArtifactsView } from './ArtifactsView';
+import { MarkupImageView } from './MarkupImageView';
 import { HistoryView } from './HistoryView';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
@@ -362,12 +363,20 @@ export function ProjectWorkspace() {
 
                         {/* Artifacts Stage */}
                         {pipelineStage === 'artifacts' && activeSpine && (
-                            <ArtifactsView
-                                projectId={projectId}
-                                spineVersionId={activeSpine.id}
-                                prdContent={activeSpine.responseText}
-                                structuredPRD={activeSpine.structuredPRD}
-                            />
+                            <div className="space-y-8">
+                                <ArtifactsView
+                                    projectId={projectId}
+                                    spineVersionId={activeSpine.id}
+                                    prdContent={activeSpine.responseText}
+                                    structuredPRD={activeSpine.structuredPRD}
+                                />
+                                <MarkupImageView
+                                    projectId={projectId}
+                                    spineVersionId={activeSpine.id}
+                                    prdContent={activeSpine.responseText}
+                                    structuredPRD={activeSpine.structuredPRD}
+                                />
+                            </div>
                         )}
 
                         {/* History Stage */}
