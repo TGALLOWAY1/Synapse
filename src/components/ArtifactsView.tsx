@@ -6,6 +6,7 @@ import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
 import { validateArtifactContent } from '../lib/artifactValidation';
 import { StalenessBadge } from './StalenessBadge';
+import { SkeletonLoader } from './SkeletonLoader';
 import { FeedbackModal } from './FeedbackModal';
 import type { StructuredPRD, CoreArtifactSubtype } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -312,6 +313,13 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                     {isGenerating ? 'Generating...' : existing ? 'Regenerate' : 'Generate'}
                                 </button>
                             </div>
+
+                            {/* Skeleton during individual generation */}
+                            {generatingSubtype === meta.subtype && !existing && (
+                                <div className="border-t border-neutral-100 p-4">
+                                    <SkeletonLoader lines={6} />
+                                </div>
+                            )}
 
                             {isExpanded && preferredVersion && (
                                 <div className="border-t border-neutral-100 p-4 space-y-3">
