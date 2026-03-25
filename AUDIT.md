@@ -168,3 +168,246 @@ The artifact system already supports typed artifacts with versioned content and 
 - **Structured content**: Instead of a markdown string, `ArtifactVersion.content` would hold a JSON annotation spec
 - **New renderer**: A dedicated component replacing the `<pre>` tag, using SVG overlays or HTML-to-image
 - **New generation flow**: LLM generates structured annotation spec → deterministic renderer produces visual output
+
+---
+
+## 3. Artifact Quality Audit
+
+### Issue AQ-1: All Artifacts Render as Plain Text
+
+**Symptom:** Every generated artifact — screen inventories, data models, design systems, user flows — looks like a ChatGPT text dump. There is no visual differentiation between artifact types.
+
+**Root Cause:** The rendering layer uses a single `<pre>` element for all artifact content.
+
+**Evidence:**
+- `ArtifactsView.tsx:188-189`:
+  ```tsx
+  <pre className="whitespace-pre-wrap text-sm text-neutral-800 font-sans">
+      {preferredVersion.content}
+  </pre>
+  ```
+- `MockupsView.tsx:131`:
+  ```tsx
+  <div className="bg-white rounded-xl border border-neutral-200 p-6 font-mono text-sm
+       whitespace-pre-wrap leading-relaxed text-neutral-800 overflow-auto max-h-[600px]">
+      {content}
+  </div>
+  ```
+- There is no markdown rendering for artifacts (unlike the PRD view which uses `ReactMarkdown` in `SelectableSpine.tsx:161`).
+
+**Category:** Rendering limitation
+
+**Severity:** **Critical** — This single issue is the largest contributor to artifacts feeling weak. A well-structured data model rendered in monospace looks indistinguishable from an unstructured brain dump.
+
+**Recommendation:**
+1. At minimum, render artifact content through `ReactMarkdown` with `remark-gfm` (already a dependency) instead of `<pre>`.
+2. Better: introduce type-specific renderers. A screen inventory should render as a card grid. A data model should render as an entity-relationship table. A design system should render color swatches and typography samples.
+
+---
+
+### Issue AQ-2: PRD Generation Prompt Is Too Generic
+
+**Symptom:** Generated PRDs are structurally sound but lack specificity, actionable detail, and opinionated product thinking.
+
+**Root Cause:** The system prompt for initial PRD generation is a single sentence with no examples, constraints, or quality criteria.
+
+**Evidence:**
+- `llmProvider.ts:64`:
+  ```typescript
+  const system = "You are an expert product manager. Write a comprehensive Product
+  Requirements Document (PRD) based on the following user prompt. Use Markdown formatting.
+  Include sections for Overview, Goals, Scope, and Technical Approach.";
+  ```
+- Compare with the structured PRD prompt at `llmProvider.ts:167-170` which is significantly more detailed and produces better output. But the initial `generatePRD()` function (line 62) is what runs first on project creation, and it uses the weaker prompt.
+
+**Category:** Prompt design
+
+**Severity:** **High** — First impressions matter. The initial PRD sets the quality bar for everything downstream.
+
+**Recommendation:**
+- The `generatePRD()` function at line 62 appears to be a legacy path — `HomePage.tsx:27-31` actually calls `generateStructuredPRD()` directly. Verify that `generatePRD()` is dead code and remove it, or upgrade its prompt to match the structured version's quality.
+- Add few-shot examples or quality criteria to the structured PRD prompt (e.g., "Each feature must include at least one acceptance criterion", "Architecture should specify specific technology choices, not generic patterns").
+
+---
+
+### Issue AQ-3: Core Artifact Prompts Lack Output Structure Enforcement
+
+**Symptom:** Core artifacts (screen inventory, user flows, component inventory, etc.) vary wildly in structure and quality between generations. Some runs produce well-organized markdown; others produce stream-of-consciousness text.
+
+**Root Cause:** The prompts in `CORE_ARTIFACT_PROMPTS` specify what to include but don't enforce output structure. None use JSON mode. There are no examples of good output.
+
+**Evidence:**
+- `llmProvider.ts:398-493` — All 7 artifact prompts follow the pattern:
+  ```typescript
+  system: "You are an expert [role]. Create a [artifact type]...\n\nFor each [item], include:\n- Field 1\n- Field 2\n..."
+  ```
+- None provide a template or example output
+- None use `jsonMode` — they all return free-form markdown via `callGemini(config.system, ...)` at line 510-513
+- The `generateCoreArtifact` function at `llmProvider.ts:495-514` has no output validation
+
+**Category:** Prompt design + missing validation
+
+**Severity:** **High** — Without structural enforcement, artifact quality is entirely dependent on LLM mood. Some runs are excellent; others are mediocre.
+
+**Recommendation:**
+1. **Short-term:** Add explicit output templates to each prompt. For example, the screen inventory prompt should include: "Format each screen as: `### [Screen Name]\n**Purpose:** ...\n**Components:** ...\n**Navigation:** ...`"
+2. **Medium-term:** Switch core artifacts to JSON mode with schemas (like `generateStructuredPRD` and `generateDevPlan` already do). This guarantees structure.
+3. **Long-term:** Introduce an Artifact IR (intermediate representation) — see AQ-6.
+
+---
+
+### Issue AQ-4: No Post-Processing or Validation Pipeline
+
+**Symptom:** LLM output goes directly to storage and rendering with zero transformation. Malformed output, truncated responses, or off-topic content is stored and displayed as-is.
+
+**Root Cause:** The generation flow is: `callGemini()` → return string → `createArtifactVersion(content)` → render. There is no validation step.
+
+**Evidence:**
+- `ArtifactsView.tsx:50,86` — raw LLM output stored directly:
+  ```typescript
+  const content = await generateCoreArtifact(subtype, prdContent, structuredPRD);
+  // ... no validation ...
+  createArtifactVersion(projectId, artifactId, content, ...);
+  ```
+- JSON-mode functions (`generateStructuredPRD`, `generateDevPlan`, `generateAgentPrompt`) do have `JSON.parse()` with error handling, but only catch parse failures — not semantic quality issues.
+- Text-mode functions (`generateMockup`, `generateCoreArtifact`) have zero validation.
+
+**Category:** Missing validation + missing post-processing
+
+**Severity:** **Medium-High** — Doesn't cause crashes, but silently stores low-quality output that the user then has to manually evaluate.
+
+**Recommendation:**
+1. Add a lightweight validation step: check response length (too short = likely truncated), check for expected section headers, check for markdown structure.
+2. For JSON-mode artifacts, validate required fields exist and have non-empty values.
+3. Add a "quality score" to artifact metadata so the UI can flag potentially weak outputs.
+
+---
+
+### Issue AQ-5: Structured PRD Schema Is Too Shallow
+
+**Symptom:** The structured PRD captures high-level vision and features but lacks the depth needed to drive high-quality downstream artifacts. Missing: acceptance criteria, user stories, feature dependencies, priority ranking, technical constraints, non-functional requirements.
+
+**Root Cause:** The schema is minimal.
+
+**Evidence:**
+- `llmProvider.ts:138-162` — `structuredPRDSchema`:
+  ```typescript
+  features: {
+      type: "ARRAY",
+      items: {
+          properties: {
+              id, name, description, userValue, complexity
+          }
+      }
+  }
+  ```
+- The `Feature` type in `types/index.ts:29-35` only has: `id, name, description, userValue, complexity`
+- No fields for: acceptance criteria, dependencies, priority, user stories, edge cases, technical constraints
+
+**Category:** Schema design
+
+**Severity:** **Medium** — The shallow PRD limits the quality ceiling of all downstream artifacts. Screen inventories can't reference user stories. Implementation plans can't express dependencies.
+
+**Recommendation:**
+- Extend `Feature` with: `priority: 'must' | 'should' | 'could'`, `acceptanceCriteria: string[]`, `dependencies: string[]` (feature IDs)
+- Add to `StructuredPRD`: `nonFunctionalRequirements: string[]`, `constraints: string[]`, `userStories: { persona: string, action: string, benefit: string }[]`
+- This enriches the context passed to downstream artifact generators
+
+---
+
+### Issue AQ-6: No Artifact Intermediate Representation (IR)
+
+**Symptom:** Artifacts are opaque markdown strings. They can't be programmatically queried, validated, transformed, or richly rendered. You can't ask "which screens reference the login feature" because the screen inventory is just text.
+
+**Root Cause:** `ArtifactVersion.content` is typed as `string` (`types/index.ts:140`). There is no structured representation for any artifact type except PRD.
+
+**Evidence:**
+- `types/index.ts:140`: `content: string`
+- `ArtifactVersion.metadata` is `Record<string, unknown>` — used only for mockup settings, not for structured artifact data
+- Only `StructuredPRD` has a dedicated type and schema. The other 7 artifact types have no structured form.
+
+**Category:** Schema design (architectural)
+
+**Severity:** **High** — This is the architectural blocker for: rich rendering, cross-artifact references, markup image generation, structured editing, and export to multiple formats.
+
+**Recommendation:**
+Introduce typed artifact content. For example:
+
+```typescript
+type ScreenInventoryItem = {
+    name: string;
+    purpose: string;
+    components: string[];
+    navigation: { from: string[]; to: string[] };
+    priority: 'core' | 'secondary' | 'supporting';
+    featureRefs: string[]; // links to StructuredPRD feature IDs
+};
+
+type ScreenInventoryContent = {
+    format: 'screen_inventory_v1';
+    groups: { name: string; screens: ScreenInventoryItem[] }[];
+};
+```
+
+Store structured content in `ArtifactVersion.content` as JSON (parsed at render time), and generate a markdown view from it for display/export. This inverts the current model: instead of storing markdown and trying to extract structure, store structure and render markdown from it.
+
+---
+
+### Issue AQ-7: Mockup Generation Produces Text, Not Visuals
+
+**Symptom:** "Mockups" are ASCII wireframes or structured text descriptions. They don't look or feel like mockups.
+
+**Root Cause:** The generation prompt asks for text-based mockups, and there is no visual rendering pipeline.
+
+**Evidence:**
+- `llmProvider.ts:351-354` — Fidelity instructions:
+  ```typescript
+  low: 'Use simple ASCII wireframes with boxes, lines, and placeholder text...',
+  mid: 'Use structured text descriptions with clear component names...',
+  high: 'Provide detailed, polished descriptions including typography, spacing...'
+  ```
+- Even "high fidelity" mockups are text descriptions, not visual outputs
+- `MockupsView.tsx:131` renders mockup content in `font-mono whitespace-pre-wrap`
+
+**Category:** Rendering limitation + generation approach
+
+**Severity:** **High** — For a product that aspires to be a "compelling artifact-generation product," text mockups are a fundamental gap.
+
+**Recommendation:**
+1. **Short-term:** Render high-fidelity mockup descriptions as styled HTML components rather than monospace text. Parse section headers, component lists, and layout descriptions into visual blocks.
+2. **Medium-term:** Generate mockups as structured layout specs (JSON) that a deterministic renderer turns into visual HTML. Then use html-to-image for export.
+3. **Long-term:** Integrate with a design tool API or visual generation model.
+
+---
+
+### Issue AQ-8: No Artifact Iteration/Refinement Controls
+
+**Symptom:** Users can only "Generate" or "Regenerate" an artifact. There's no way to say "make the data model more detailed" or "add authentication to the screen inventory." Regeneration starts from scratch.
+
+**Root Cause:** The generation functions don't accept refinement instructions. `generateCoreArtifact()` at `llmProvider.ts:495-514` takes only `(subtype, prdContent, structuredPRD)` — no previous version content, no user feedback.
+
+**Evidence:**
+- `ArtifactsView.tsx:44-78` (`handleGenerateOne`) — regeneration calls the same function with the same inputs; previous version content is never passed to the LLM
+- No "refine" or "edit instruction" UI element exists in `ArtifactsView.tsx`
+- Contrast with branches (`BranchList.tsx`) which support iterative conversation — artifacts have no equivalent
+
+**Category:** UX workflow gap + generation limitation
+
+**Severity:** **Medium-High** — Without refinement, users are stuck in a generate-and-hope loop. This is one of the biggest product gaps.
+
+**Recommendation:**
+1. Add a "Refine" action that sends the current artifact content + user instruction to the LLM
+2. Include the previous version's content in the prompt context for regeneration
+3. Support inline editing of artifact content (already exists for PRD via `StructuredPRDView`; extend to other types)
+
+---
+
+### Summary: Root Cause Breakdown
+
+| Root Cause Category | Issues | Combined Severity |
+|---------------------|--------|-------------------|
+| **Rendering limitations** | AQ-1, AQ-7 | Critical |
+| **Prompt design** | AQ-2, AQ-3 | High |
+| **Schema/IR design** | AQ-5, AQ-6 | High |
+| **Missing validation** | AQ-4 | Medium-High |
+| **UX workflow gaps** | AQ-8 | Medium-High |
