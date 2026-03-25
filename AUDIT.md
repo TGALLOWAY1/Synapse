@@ -411,3 +411,228 @@ Store structured content in `ArtifactVersion.content` as JSON (parsed at render 
 | **Schema/IR design** | AQ-5, AQ-6 | High |
 | **Missing validation** | AQ-4 | Medium-High |
 | **UX workflow gaps** | AQ-8 | Medium-High |
+
+---
+
+## 4. Speed / Performance Audit
+
+### Latency Budget (Target vs Actual)
+
+```
+Flow: "Generate All" Artifacts (7 subtypes)
+─────────────────────────────────────────────
+                           CURRENT         TARGET
+User clicks button         0ms              0ms
+Show optimistic UI         N/A              0ms     ← add skeleton/progress
+API call #1 (Gemini)       ~3s              ~3s     (stream first tokens at ~200ms)
+API call #2                ~6s              ~3s     ← parallelize
+API call #3                ~9s              ~3s
+API call #4                ~12s             ~3s
+API call #5                ~15s             ~3s
+API call #6                ~18s             ~3s
+API call #7                ~21s             ~3s
+Store + persist            ~200ms           ~50ms   ← batch writes
+UI render                  ~100ms           ~50ms   ← memoize
+─────────────────────────────────────────────
+TOTAL                      ~21-25s          ~3-5s
+Perceived (with streaming) ~21-25s          ~0.5s   (first content visible)
+```
+
+---
+
+### Quick Wins (< 1 day each)
+
+#### PERF-1: Parallelize Bundle Artifact Generation
+
+**What is slow:** Generating all 7 core artifacts takes ~21 seconds.
+
+**Where:** `ArtifactsView.tsx:80-113`
+```typescript
+// CURRENT — sequential
+for (const meta of CORE_ARTIFACTS) {
+    const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
+    // ... store result ...
+}
+```
+
+**Why it's slow:** Each Gemini API call takes ~3s. Running 7 in sequence = ~21s. These calls are completely independent.
+
+**Impact:** Actual latency (7x improvement). Perceived latency (significant — progress shown per-artifact).
+
+**Fix:**
+```typescript
+// RECOMMENDED — parallel with progressive UI updates
+const promises = CORE_ARTIFACTS.map(async (meta) => {
+    const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
+    // Store immediately when each completes (progressive)
+    const existing = getExistingArtifact(meta.subtype);
+    let artifactId = existing?.id;
+    if (!existing) {
+        artifactId = createArtifact(projectId, 'core_artifact', meta.title, meta.subtype).artifactId;
+    }
+    createArtifactVersion(projectId, artifactId!, content, ...);
+    return { subtype: meta.subtype, success: true };
+});
+const results = await Promise.allSettled(promises);
+```
+
+**Expected impact:** ~21s → ~3-4s (limited by slowest single call + Gemini rate limits)
+
+**Implementation complexity:** Low — ~30 minutes
+
+---
+
+#### PERF-2: Render Artifacts with ReactMarkdown Instead of `<pre>`
+
+**What is slow:** Not a latency issue per se, but monospace `<pre>` rendering makes large artifacts feel like a wall of undifferentiated text, which makes the app feel "heavy" and unresponsive — a perceived performance issue.
+
+**Where:**
+- `ArtifactsView.tsx:188-189` — `<pre>` for core artifacts
+- `MockupsView.tsx:131` — `<div className="font-mono whitespace-pre-wrap">` for mockups
+
+**Why:** ReactMarkdown with remark-gfm is already a dependency and used in `SelectableSpine.tsx:161`. Markdown rendering adds visual hierarchy (headers, lists, code blocks, tables) that makes scanning fast.
+
+**Fix:** Replace `<pre>{content}</pre>` with `<ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>`.
+
+**Expected impact:** Significant perceived speed improvement. Users can scan structured markdown 3-5x faster than monospace text.
+
+**Implementation complexity:** Low — ~15 minutes
+
+---
+
+#### PERF-3: Add Optimistic UI and Progress Indicators for Generation
+
+**What is slow:** During generation, the only feedback is a "Generating..." button label. For bundle generation, there's no per-artifact progress.
+
+**Where:** `ArtifactsView.tsx:129` — single "Generating Bundle..." label for the entire operation
+
+**Why it's slow:** Without progress feedback, 3 seconds feels like 10 seconds. With progress feedback, 10 seconds feels like 5.
+
+**Fix:**
+1. Show a skeleton/placeholder for each artifact being generated
+2. For bundle generation, update each artifact card as it completes (already possible with parallel approach from PERF-1)
+3. Add a progress counter: "Generating 3 of 7..."
+
+**Expected impact:** Large perceived speed improvement
+
+**Implementation complexity:** Low — ~1 hour
+
+---
+
+### Medium-Effort Improvements (1-3 days each)
+
+#### PERF-4: Add Streaming Support to LLM Calls
+
+**What is slow:** Users see zero output until the complete LLM response returns (~2-5 seconds per call).
+
+**Where:** `llmProvider.ts:20-56` — `callGemini()` uses a single `fetch()` → `response.json()` pattern. No streaming.
+
+**Why it's slow:** The Gemini API supports streaming via `streamGenerateContent`. The current implementation waits for the full response body before returning any text.
+
+**Fix:**
+1. Add a `callGeminiStream()` function that uses `streamGenerateContent` endpoint
+2. Accept an `onChunk(text: string)` callback
+3. For text-mode generations (mockups, core artifacts, branch replies), stream tokens to the UI
+4. For JSON-mode generations, streaming is less useful (partial JSON can't be displayed), but the response can still start faster
+
+**Expected impact:** Perceived latency drops from ~3s to ~200ms (time to first token). This is the single highest-impact perceived speed improvement.
+
+**Implementation complexity:** Medium — ~4 hours. Requires new streaming UI components (token-by-token text display).
+
+---
+
+#### PERF-5: Memoize Zustand Store Selectors
+
+**What is slow:** Every component that calls `getArtifacts()`, `getArtifactVersions()`, `getBranchesForSpine()`, etc. triggers array filtering on every render. In `ArtifactsView.tsx`, the render function calls `getExistingArtifact()` (line 41-42), `getArtifactVersions()` (line 149), and `getArtifactStaleness()` (line 151) — **for every artifact card, on every render**.
+
+**Where:**
+- `projectStore.ts:534-537` — `getArtifacts` filters full array
+- `projectStore.ts:640-643` — `getArtifactVersions` filters full array
+- `projectStore.ts:376-379` — `getBranchesForSpine` filters full array
+- `projectStore.ts:742-762` — `getArtifactStaleness` does multiple lookups + filters per call
+
+**Why it's slow:** These are O(n) scans called redundantly. With 7 artifacts × multiple versions, this is noticeable during state updates. Each `set()` call triggers re-render of all subscribed components.
+
+**Fix:**
+1. Use Zustand's `useShallow` selector or manual `useMemo` in components
+2. Consider indexing artifacts by type/subtype in the store instead of filtering
+3. For `getArtifactStaleness`, cache the result and invalidate only when spine or artifact versions change
+
+**Expected impact:** Eliminates unnecessary re-renders and re-computations. Most noticeable in the artifacts grid.
+
+**Implementation complexity:** Medium — ~3 hours
+
+---
+
+#### PERF-6: Debounce/Batch localStorage Persistence
+
+**What is slow:** Every `set()` call in the Zustand store triggers full state serialization to localStorage via the `persist` middleware. During bundle generation, this means 14+ serialization cycles (7 `createArtifact` + 7 `createArtifactVersion`).
+
+**Where:** `projectStore.ts:96-782` — every `set()` call. The persist middleware at line 766 wraps the entire store.
+
+**Why it's slow:** `JSON.stringify` on the full state tree (all projects, all versions, all artifacts) runs synchronously on the main thread. As data grows, this becomes a measurable frame drop.
+
+**Fix:**
+1. Use `partialize` option in Zustand persist to exclude computed/derivable data
+2. Debounce persistence (e.g., persist at most once every 500ms)
+3. Consider IndexedDB (via `idb-keyval`) for larger data — no 5-10MB limit, async writes
+
+**Expected impact:** Eliminates main-thread jank during rapid state updates
+
+**Implementation complexity:** Medium — ~2 hours for debounce, ~4 hours for IndexedDB migration
+
+---
+
+### Major Architectural Improvements (1+ weeks)
+
+#### PERF-7: Move LLM Calls to a Backend with Request Queuing
+
+**What is slow:** Direct browser-to-Gemini calls expose the API key client-side and don't support server-side optimizations (caching, request deduplication, rate limit management).
+
+**Where:** `llmProvider.ts:20-56` — API key read from localStorage, sent in URL query string
+
+**Why it matters:** Beyond security (API key in URL is logged in browser history, network inspector, and any proxy), a backend enables: response caching for identical prompts, request queuing to respect rate limits, background generation with webhook notifications, and shared generation across devices.
+
+**Fix:**
+1. Route all LLM calls through the existing Vercel serverless functions (already set up in `api/`)
+2. Add response caching (content-hash of prompt → cached response)
+3. Add request queuing for bundle generation (server controls parallelism within rate limits)
+
+**Expected impact:** Enables caching (~instant for repeated prompts), better rate limit handling, and removes API key from client
+
+**Implementation complexity:** High — ~1 week. The `api/` directory already has 3 endpoint stubs that could be expanded.
+
+---
+
+#### PERF-8: Implement Progressive/Partial Rendering for Large Artifacts
+
+**What is slow:** Large artifacts (especially "Doc-Wide Rewrite" in consolidation and multi-screen mockups) can be 5,000+ characters. Rendering the full content at once causes a layout shift and feels slow.
+
+**Where:**
+- `ConsolidationModal.tsx:150-152` — renders full doc-wide patch
+- `MockupsView.tsx:131-133` — renders full mockup content
+- `ArtifactsView.tsx:187-189` — renders full artifact content
+
+**Fix:**
+1. For streaming (PERF-4), render incrementally as tokens arrive
+2. For stored content, use virtualization for very long artifacts (react-window or similar)
+3. Add collapsible sections within artifacts (e.g., each screen in a screen inventory is collapsible)
+
+**Expected impact:** Smooth rendering of large content without layout jank
+
+**Implementation complexity:** Medium-High — ~2 days
+
+---
+
+### Performance Issue Priority Matrix
+
+| ID | Issue | Actual Latency | Perceived Latency | Impact | Effort | Priority |
+|----|-------|---------------|-------------------|--------|--------|----------|
+| PERF-1 | Parallelize bundle gen | **7x improvement** | High | Critical | Low | **#1** |
+| PERF-2 | Markdown rendering | None | High | High | Low | **#2** |
+| PERF-3 | Progress indicators | None | High | High | Low | **#3** |
+| PERF-4 | Streaming | Moderate | **Transformative** | Critical | Medium | **#4** |
+| PERF-5 | Memoize selectors | Moderate | Moderate | Medium | Medium | **#5** |
+| PERF-6 | Batch persistence | Moderate | Low | Medium | Medium | **#6** |
+| PERF-7 | Backend LLM proxy | Low | Low (enables caching) | Medium | High | **#7** |
+| PERF-8 | Progressive rendering | Low | Moderate | Low-Med | Med-High | **#8** |
