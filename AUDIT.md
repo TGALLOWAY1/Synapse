@@ -636,3 +636,284 @@ const results = await Promise.allSettled(promises);
 | PERF-6 | Batch persistence | Moderate | Low | Medium | Medium | **#6** |
 | PERF-7 | Backend LLM proxy | Low | Low (enables caching) | Medium | High | **#7** |
 | PERF-8 | Progressive rendering | Low | Moderate | Low-Med | Med-High | **#8** |
+
+---
+
+## 5. Markup Image Capability Audit
+
+### Current State: Nothing Exists
+
+The codebase has **zero image generation, processing, or rendering capability**:
+
+- **No image libraries** in `package.json` — no canvas, sharp, jimp, html-to-image, dom-to-image, or SVG manipulation libraries
+- **No `<canvas>` elements** anywhere in the component tree
+- **No SVG generation** — no programmatic SVG construction in any file
+- **No file upload** — no image input mechanism in the UI
+- **No image storage** — localStorage stores only JSON text; no blob/binary support
+- **Mockups are text** — `MockupsView.tsx` renders ASCII art / structured descriptions in monospace font
+- **No export to image** — only export is markdown download (`ProjectWorkspace.tsx:120-143`)
+
+### What Pieces Already Exist That Could Support Markup Images
+
+Despite the lack of image capability, several existing patterns are leverageable:
+
+| Existing Piece | How It Helps |
+|----------------|-------------|
+| **Artifact versioning system** (`types/index.ts:135-146`) | Markup images can be versioned artifacts with the same lineage tracking |
+| **`ArtifactVersion.metadata`** (`types/index.ts:141`) | Can store annotation data, source image references, render settings |
+| **`ArtifactVersion.content`** as JSON string | Already used for structured PRD; can hold annotation spec |
+| **`CoreArtifactSubtype` union** (`types/index.ts:104-111`) | Easily extended with markup image subtypes |
+| **`ArtifactType` union** (`types/index.ts:102`) | Can add `'markup_image'` as a new type |
+| **Feedback system** (`FeedbackModal.tsx`) | Users can extract feedback from markup images back to PRD |
+| **Staleness tracking** (`projectStore.ts:742-762`) | Markup images would be stale when source PRD changes |
+| **ReactMarkdown** (already a dependency) | Can render captions and labels within annotation layouts |
+| **Lucide icons** (already a dependency) | Can supply annotation icons (arrows, circles, etc.) |
+
+### What Is Missing
+
+1. **A rendering engine** — Something that takes a structured annotation spec and produces a visual output (SVG, canvas, or HTML composition)
+2. **An annotation data model** — Typed definitions for overlays, callouts, arrows, boxes, labels, connectors
+3. **An image input mechanism** — File upload, URL reference, or screenshot capture
+4. **An annotation editor** — Interactive UI for placing/editing overlays on a source image
+5. **An image export pipeline** — Converting the rendered annotation to a downloadable PNG/SVG
+6. **LLM-to-annotation generation** — Prompts and schemas for generating annotation specs from PRD context
+
+### Recommended Technical Design
+
+#### Rendering Approach Analysis
+
+| Approach | Pros | Cons | Fit for Synapse |
+|----------|------|------|----------------|
+| **SVG composition** | Resolution-independent, precise positioning, CSS-stylable, exportable | Complex for raster image backgrounds, limited text wrapping | **Best for V1** — clean, exportable, no dependencies |
+| **Canvas-based** | Pixel-perfect, good for raster, fast rendering | Not resolution-independent, harder to make interactive, no CSS | Overkill for annotation overlays |
+| **HTML-to-image** (html-to-image / html2canvas) | Use existing React components, natural styling | Quality issues, font rendering problems, CORS for external images | **Best for V2** — leverages existing component system |
+| **Server-side composition** (sharp / canvas on Node) | High quality, no browser limitations | Requires backend, adds latency, more infrastructure | **V3** — for production-grade export |
+| **LLM-generated layout spec + deterministic renderer** | AI does the creative work, renderer is predictable | Requires good schema design, LLM may generate invalid specs | **Core approach** — pairs with any renderer |
+
+**Recommendation:** Use **LLM-generated layout spec + SVG composition** for V1. The LLM generates a structured JSON annotation spec. A deterministic React/SVG component renders it. For export, use `html-to-image` to capture the rendered output as PNG.
+
+#### Should Markup Images Be a First-Class Artifact Type?
+
+**Yes.** Markup images should be a new `ArtifactType = 'markup_image'` with their own subtypes:
+
+```typescript
+type MarkupImageSubtype =
+    | 'screenshot_annotation'    // Annotated UI screenshot
+    | 'comparison_board'         // Before/after with highlights
+    | 'wireframe_callout'        // Labeled wireframe
+    | 'critique_board'           // Product critique with callouts
+    | 'flow_annotation'          // User flow with numbered steps
+    | 'design_feedback';         // Visual feedback with arrows/notes
+```
+
+This means markup images get: versioning, staleness tracking, feedback extraction, and history events — all for free from the existing artifact system.
+
+#### Annotation Data Model
+
+```typescript
+// The structured content stored in ArtifactVersion.content (as JSON string)
+interface MarkupImageSpec {
+    version: 'markup_v1';
+    canvas: {
+        width: number;
+        height: number;
+        backgroundColor: string;
+    };
+    source?: {
+        type: 'url' | 'data_uri' | 'artifact_ref';
+        value: string;              // URL, base64, or artifact ID
+        fit: 'contain' | 'cover' | 'fill';
+    };
+    layers: AnnotationLayer[];
+    exportSettings: {
+        format: 'png' | 'svg';
+        scale: number;              // 1x, 2x, 3x
+        includeCaption: boolean;
+    };
+}
+
+interface AnnotationLayer {
+    id: string;
+    type: 'box' | 'arrow' | 'callout' | 'label' | 'connector'
+        | 'highlight' | 'number_marker' | 'text_block' | 'divider';
+    position: { x: number; y: number };
+    size?: { width: number; height: number };
+    style: {
+        color: string;
+        borderColor?: string;
+        borderWidth?: number;
+        borderRadius?: number;
+        opacity?: number;
+        fontSize?: number;
+        fontWeight?: 'normal' | 'bold';
+    };
+    content?: string;               // Text content for labels/callouts
+    // Type-specific properties
+    arrow?: {
+        from: { x: number; y: number };
+        to: { x: number; y: number };
+        headStyle: 'filled' | 'open' | 'none';
+    };
+    connector?: {
+        fromLayerId: string;
+        toLayerId: string;
+        style: 'straight' | 'elbow' | 'curved';
+    };
+    numberMarker?: {
+        number: number;
+        description: string;         // Shown in caption/legend
+    };
+}
+```
+
+#### How This Integrates with Current Artifact Generation Flows
+
+```
+User clicks "Generate Critique Board" (new action in MockupsView or ArtifactsView)
+  │
+  ▼
+generateMarkupImage(subtype, prdContent, sourceArtifact?)   [NEW in llmProvider.ts]
+  │
+  ├─ System prompt: "Generate a structured annotation spec..."
+  ├─ JSON mode with MarkupImageSpec schema
+  ├─ Context: PRD content + optional source artifact content
+  │
+  ▼
+LLM returns MarkupImageSpec JSON
+  │
+  ▼
+createArtifact(projectId, 'markup_image', title, subtype)
+createArtifactVersion(projectId, artifactId, JSON.stringify(spec), ...)
+  │
+  ▼
+MarkupImageRenderer component parses spec and renders SVG
+  │
+  ▼
+User can: export as PNG, refine annotations, extract feedback
+```
+
+### Proposed Architecture
+
+#### V1: Minimal (1-2 weeks)
+
+**Goal:** Generate and display annotation-based visual artifacts from PRD context.
+
+**Components:**
+1. **`MarkupImageSpec` type** — annotation data model (in `types/index.ts`)
+2. **`generateMarkupImage()`** — LLM generation function with JSON schema (in `llmProvider.ts`)
+3. **`MarkupImageRenderer.tsx`** — SVG-based renderer that takes a `MarkupImageSpec` and produces visual output
+4. **`MarkupImageView.tsx`** — Wrapper with generate/regenerate/export actions
+5. **Export** — `html-to-image` library to capture SVG as PNG download
+
+**V1 Limitations:** No image upload (source images referenced by URL only). No interactive annotation editor. LLM-generated layouts only.
+
+**New dependencies:** `html-to-image` (~15KB)
+
+#### V2: Stronger (3-4 weeks additional)
+
+**Goal:** Interactive annotation editing, image upload, comparison boards.
+
+**Components added:**
+1. **Interactive annotation editor** — drag-to-place overlays on a canvas, resize/reposition
+2. **Image upload** — file input → base64 data URI → stored in `ArtifactVersion.metadata`
+3. **Comparison boards** — side-by-side before/after with synced annotation layers
+4. **Template library** — pre-built annotation layouts for common patterns (critique, feedback, wireframe review)
+5. **Rich export** — SVG download, PNG at multiple scales, copy-to-clipboard
+
+**New dependencies:** `@dnd-kit/core` (drag-and-drop), potentially `react-resizable` for overlay sizing
+
+### Markup Image Artifact Spec Example
+
+```json
+{
+    "version": "markup_v1",
+    "canvas": {
+        "width": 1280,
+        "height": 800,
+        "backgroundColor": "#f5f5f5"
+    },
+    "source": {
+        "type": "url",
+        "value": "https://example.com/screenshot-dashboard.png",
+        "fit": "contain"
+    },
+    "layers": [
+        {
+            "id": "box-1",
+            "type": "highlight",
+            "position": { "x": 50, "y": 120 },
+            "size": { "width": 300, "height": 60 },
+            "style": {
+                "color": "rgba(239, 68, 68, 0.15)",
+                "borderColor": "#ef4444",
+                "borderWidth": 2,
+                "borderRadius": 8
+            }
+        },
+        {
+            "id": "callout-1",
+            "type": "callout",
+            "position": { "x": 380, "y": 100 },
+            "size": { "width": 240, "height": 80 },
+            "style": {
+                "color": "#ffffff",
+                "borderColor": "#ef4444",
+                "borderWidth": 1,
+                "borderRadius": 8,
+                "fontSize": 13
+            },
+            "content": "Navigation bar lacks breadcrumbs. Users will lose context in nested views.",
+            "connector": {
+                "fromLayerId": "callout-1",
+                "toLayerId": "box-1",
+                "style": "elbow"
+            }
+        },
+        {
+            "id": "number-1",
+            "type": "number_marker",
+            "position": { "x": 45, "y": 115 },
+            "style": {
+                "color": "#ef4444",
+                "fontSize": 14,
+                "fontWeight": "bold"
+            },
+            "numberMarker": {
+                "number": 1,
+                "description": "Missing breadcrumb navigation"
+            }
+        },
+        {
+            "id": "arrow-1",
+            "type": "arrow",
+            "position": { "x": 700, "y": 400 },
+            "style": {
+                "color": "#3b82f6",
+                "borderWidth": 2
+            },
+            "arrow": {
+                "from": { "x": 700, "y": 400 },
+                "to": { "x": 700, "y": 300 },
+                "headStyle": "filled"
+            },
+            "content": "CTA should be above the fold"
+        },
+        {
+            "id": "caption-1",
+            "type": "text_block",
+            "position": { "x": 50, "y": 750 },
+            "size": { "width": 1180, "height": 40 },
+            "style": {
+                "color": "#525252",
+                "fontSize": 12
+            },
+            "content": "Dashboard v2 critique — Generated from PRD v3 | 3 issues identified | Priority: Navigation, CTA placement, Data density"
+        }
+    ],
+    "exportSettings": {
+        "format": "png",
+        "scale": 2,
+        "includeCaption": true
+    }
+}
+```
