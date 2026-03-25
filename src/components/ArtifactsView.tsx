@@ -3,7 +3,8 @@ import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, Al
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
-import { generateCoreArtifact } from '../lib/llmProvider';
+import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
+import { validateArtifactContent } from '../lib/artifactValidation';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import type { StructuredPRD, CoreArtifactSubtype } from '../types';
@@ -62,6 +63,9 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [feedbackVersionId, setFeedbackVersionId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [refineSubtype, setRefineSubtype] = useState<CoreArtifactSubtype | null>(null);
+    const [refineInstruction, setRefineInstruction] = useState('');
+    const [validationWarnings, setValidationWarnings] = useState<Record<string, string[]>>({});
 
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
 
@@ -78,6 +82,14 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         try {
             const meta = CORE_ARTIFACTS.find(a => a.subtype === subtype)!;
             const content = await generateCoreArtifact(subtype, prdContent, structuredPRD);
+
+            // Validate output quality
+            const validation = validateArtifactContent(subtype, content);
+            if (validation.warnings.length > 0) {
+                setValidationWarnings(prev => ({ ...prev, [subtype]: validation.warnings }));
+            } else {
+                setValidationWarnings(prev => { const next = { ...prev }; delete next[subtype]; return next; });
+            }
 
             const existing = getExistingArtifact(subtype);
             let artifactId: string;
@@ -100,6 +112,44 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
             );
 
             setExpandedId(artifactId);
+        } catch (e) {
+            setError(e instanceof Error ? e.message : String(e));
+        } finally {
+            setGeneratingSubtype(null);
+        }
+    };
+
+    const handleRefine = async (subtype: CoreArtifactSubtype) => {
+        if (!structuredPRD || !refineInstruction.trim()) return;
+        const existing = getExistingArtifact(subtype);
+        if (!existing) return;
+
+        const versions = getArtifactVersions(projectId, existing.id);
+        const preferredVersion = versions.find(v => v.isPreferred);
+        if (!preferredVersion) return;
+
+        setError(null);
+        setGeneratingSubtype(subtype);
+        try {
+            const content = await refineCoreArtifact(
+                subtype,
+                preferredVersion.content,
+                refineInstruction.trim(),
+                prdContent,
+                structuredPRD,
+            );
+
+            const meta = CORE_ARTIFACTS.find(a => a.subtype === subtype)!;
+            createArtifactVersion(
+                projectId, existing.id, content,
+                { subtype },
+                [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+                `Refine ${meta.title}: ${refineInstruction.trim().slice(0, 80)}`,
+                preferredVersion.id,
+            );
+
+            setRefineSubtype(null);
+            setRefineInstruction('');
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
         } finally {
@@ -241,6 +291,11 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                         <div className="flex items-center gap-2">
                                             <span className="font-medium text-neutral-800">{meta.title}</span>
                                             {staleness && <StalenessBadge staleness={staleness} />}
+                                            {validationWarnings[meta.subtype] && (
+                                                <span className="text-xs text-amber-600 flex items-center gap-1" title={validationWarnings[meta.subtype].join('\n')}>
+                                                    <AlertTriangle size={12} />
+                                                </span>
+                                            )}
                                             {versions.length > 0 && (
                                                 <span className="text-xs text-neutral-400">v{versions.length}</span>
                                             )}
@@ -264,12 +319,19 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{preferredVersion.content}</ReactMarkdown>
                                     </div>
 
-                                    <div className="flex items-center gap-2">
+                                    <div className="flex items-center gap-2 flex-wrap">
                                         <button
                                             onClick={() => setFeedbackVersionId(preferredVersion.id)}
                                             className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md transition"
                                         >
                                             Extract Feedback
+                                        </button>
+                                        <button
+                                            onClick={() => setRefineSubtype(refineSubtype === meta.subtype ? null : meta.subtype)}
+                                            disabled={isGenerating}
+                                            className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-50 hover:bg-indigo-100 text-indigo-700 border border-indigo-200 rounded-md transition disabled:opacity-50"
+                                        >
+                                            Refine
                                         </button>
 
                                         {versions.length > 1 && (
@@ -278,6 +340,27 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                             </span>
                                         )}
                                     </div>
+
+                                    {refineSubtype === meta.subtype && (
+                                        <div className="flex gap-2 items-start">
+                                            <input
+                                                type="text"
+                                                value={refineInstruction}
+                                                onChange={e => setRefineInstruction(e.target.value)}
+                                                onKeyDown={e => { if (e.key === 'Enter' && refineInstruction.trim()) handleRefine(meta.subtype); }}
+                                                placeholder="e.g. Add error states to each screen, make the data model more detailed..."
+                                                className="flex-1 px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
+                                                autoFocus
+                                            />
+                                            <button
+                                                onClick={() => handleRefine(meta.subtype)}
+                                                disabled={!refineInstruction.trim() || isGenerating}
+                                                className="px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50 shrink-0"
+                                            >
+                                                Apply
+                                            </button>
+                                        </div>
+                                    )}
 
                                     <div className="text-xs text-neutral-400 pt-2 border-t border-neutral-100">
                                         Generated from PRD {preferredVersion.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId || 'unknown'}

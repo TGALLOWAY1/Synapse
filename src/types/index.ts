@@ -32,6 +32,9 @@ export type Feature = {
     description: string;
     userValue: string;
     complexity: 'low' | 'medium' | 'high';
+    priority?: 'must' | 'should' | 'could';
+    acceptanceCriteria?: string[];
+    dependencies?: string[]; // feature IDs
 };
 
 export type StructuredPRD = {
@@ -41,6 +44,8 @@ export type StructuredPRD = {
     features: Feature[];
     architecture: string;
     risks: string[];
+    nonFunctionalRequirements?: string[];
+    constraints?: string[];
 };
 
 export type SpineVersion = {
@@ -96,6 +101,62 @@ export type AgentPrompt = {
     rawPromptText: string;
     createdAt: number;
 };
+
+// --- Structured Artifact Content Types ---
+
+export interface ScreenItem {
+    name: string;
+    purpose: string;
+    components: string[];
+    navigationFrom?: string[];
+    navigationTo?: string[];
+    priority: 'core' | 'secondary' | 'supporting';
+    featureRefs?: string[];
+}
+
+export interface ScreenInventoryContent {
+    groups: { name: string; screens: ScreenItem[] }[];
+}
+
+export interface DataField {
+    name: string;
+    type: string;
+    required: boolean;
+    description: string;
+}
+
+export interface DataRelationship {
+    type: 'has_many' | 'belongs_to' | 'has_one' | 'many_to_many';
+    target: string;
+    description?: string;
+}
+
+export interface DataEntity {
+    name: string;
+    description: string;
+    fields: DataField[];
+    relationships: DataRelationship[];
+    indexes?: string[];
+    constraints?: string[];
+}
+
+export interface DataModelContent {
+    entities: DataEntity[];
+    apiEndpoints?: { method: string; path: string; description: string; entity: string }[];
+}
+
+export interface ComponentItem {
+    name: string;
+    purpose: string;
+    props?: { name: string; type: string; description?: string }[];
+    usedIn?: string[];
+    complexity: 'simple' | 'moderate' | 'complex';
+    notes?: string;
+}
+
+export interface ComponentInventoryContent {
+    categories: { name: string; components: ComponentItem[] }[];
+}
 
 // --- Artifact System ---
 
