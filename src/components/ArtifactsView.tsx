@@ -70,7 +70,6 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
 
     const bundleDoneCount = Object.values(bundleStatus).filter(s => s === 'done').length;
-    const bundleErrorCount = Object.values(bundleStatus).filter(s => s === 'error').length;
 
     // Count stale artifacts
     const staleCount = CORE_ARTIFACTS.reduce((count, meta) => {

@@ -93,7 +93,7 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
         }
     };
 
-    const handleExportSVG = (spec: MarkupImageSpec, title: string) => {
+    const handleExportSVG = (title: string) => {
         const svgEl = document.querySelector(`[data-markup-id="${title}"] svg`);
         if (!svgEl) return;
         const svgData = new XMLSerializer().serializeToString(svgEl);
@@ -201,7 +201,7 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
                                         Regenerate
                                     </button>
                                     <button
-                                        onClick={() => handleExportSVG(spec, artifact.title)}
+                                        onClick={() => handleExportSVG(artifact.title)}
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
                                     >
                                         <Download size={12} />

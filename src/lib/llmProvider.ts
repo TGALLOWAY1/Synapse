@@ -862,9 +862,11 @@ Rules:
 4. If the user asks to modify content, change only what's requested — don't rewrite everything.
 5. Return the complete updated artifact (not just the changes).`;
 
+    const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
+
     return callGemini(
         system,
-        `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}`
+        `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`
     );
 };
 

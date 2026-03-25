@@ -3,7 +3,7 @@ import { useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { replyInBranch } from '../lib/llmProvider';
 import { Send, Maximize2, Trash2 } from 'lucide-react';
-import type { Branch } from '../types';
+import type { Branch, BranchMessage } from '../types';
 import { IntentHelperLabel } from '../lib/intentHelper';
 
 interface BranchListProps {
