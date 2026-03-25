@@ -1130,3 +1130,382 @@ User can: export as PNG, refine annotations, extract feedback
 **Risks:** Interactive annotation editing is a significant UX challenge. Start with simple move/resize and iterate. Cross-artifact references require a graph data structure — may need to extend the store.
 
 **Success criteria:** Users can edit markup image annotations interactively. All artifact types have visually distinct rendering. Export produces professional-grade output. Cross-artifact navigation works for at least PRD features → screen inventory.
+
+---
+
+## 7. Specific Code-Level Recommendations
+
+### 7.1 Files/Modules to Split
+
+| Current File | Problem | Recommended Split |
+|-------------|---------|-------------------|
+| `llmProvider.ts` (514 lines) | Mixes API transport, prompt templates, schemas, and generation logic | Split into: `src/lib/geminiClient.ts` (API transport + streaming), `src/lib/prompts/` directory (one file per artifact type), `src/lib/schemas/` directory (JSON schemas), `src/lib/generators.ts` (orchestration) |
+| `projectStore.ts` (782 lines) | Single monolithic store with 30+ actions | Split by domain: `src/store/projectStore.ts` (projects, spines), `src/store/artifactStore.ts` (artifacts, versions), `src/store/feedbackStore.ts` (feedback items), `src/store/historyStore.ts` (events). Use Zustand slices pattern. |
+| `ProjectWorkspace.tsx` (471 lines) | Orchestrates all stages, manages 12+ state variables | Extract stage-specific state into custom hooks: `useSpineState()`, `useBranchState()`, `usePipelineState()` |
+| `types/index.ts` (224 lines) | All types in one file | Split into: `types/project.ts`, `types/artifact.ts`, `types/feedback.ts`, `types/markup.ts` (new) |
+
+### 7.2 Interfaces/Types to Introduce
+
+```typescript
+// src/types/artifact-content.ts — Typed artifact content (replaces opaque strings)
+
+interface ScreenInventoryContent {
+    format: 'screen_inventory_v1';
+    groups: { name: string; screens: ScreenItem[] }[];
+}
+
+interface DataModelContent {
+    format: 'data_model_v1';
+    entities: DataEntity[];
+    relationships: DataRelationship[];
+}
+
+interface ComponentInventoryContent {
+    format: 'component_inventory_v1';
+    categories: { name: string; components: ComponentItem[] }[];
+}
+
+interface DesignSystemContent {
+    format: 'design_system_v1';
+    colors: ColorPalette;
+    typography: TypographyScale;
+    spacing: SpacingSystem;
+    components: ComponentPattern[];
+}
+
+// Union type for all structured content
+type ArtifactContent =
+    | ScreenInventoryContent
+    | DataModelContent
+    | ComponentInventoryContent
+    | DesignSystemContent
+    | MarkupImageSpec
+    | string; // fallback for unstructured content
+```
+
+```typescript
+// src/types/generation.ts — Generation pipeline types
+
+interface GenerationRequest {
+    type: ArtifactType;
+    subtype?: CoreArtifactSubtype;
+    prdContent: string;
+    structuredPRD: StructuredPRD;
+    previousContent?: string;          // For refinement
+    userInstruction?: string;           // For refinement
+    mockupContext?: string;             // Cross-artifact reference
+}
+
+interface GenerationResult {
+    content: string;
+    contentType: 'markdown' | 'json';
+    qualityScore?: number;             // 0-100 based on validation
+    warnings?: string[];               // Validation warnings
+    generationTimeMs: number;
+}
+
+interface StreamingGenerationCallbacks {
+    onChunk: (text: string) => void;
+    onComplete: (result: GenerationResult) => void;
+    onError: (error: Error) => void;
+}
+```
+
+### 7.3 Abstractions to Add
+
+**1. Artifact Renderer Registry**
+
+Instead of a single `<pre>` tag for all artifacts, create a registry of type-specific renderers:
+
+```typescript
+// src/lib/artifactRenderers.ts
+const RENDERERS: Record<CoreArtifactSubtype, React.FC<{ content: string }>> = {
+    screen_inventory: ScreenInventoryRenderer,
+    data_model: DataModelRenderer,
+    component_inventory: ComponentInventoryRenderer,
+    implementation_plan: ImplementationPlanRenderer,
+    user_flows: UserFlowsRenderer,
+    prompt_pack: PromptPackRenderer,
+    design_system: DesignSystemRenderer,
+};
+```
+
+**2. Generation Pipeline Abstraction**
+
+Wrap the generate → validate → store → render flow in a reusable pipeline:
+
+```typescript
+// src/lib/generationPipeline.ts
+async function generateAndStore(request: GenerationRequest): Promise<GenerationResult> {
+    const startTime = performance.now();
+    const raw = await callGemini(buildPrompt(request));
+    const validated = validate(request.subtype, raw);
+    const result = { content: validated, generationTimeMs: performance.now() - startTime };
+    storeArtifactVersion(request, result);
+    return result;
+}
+```
+
+### 7.4 Dead Code and Coupling to Remove
+
+| Item | Location | Action |
+|------|----------|--------|
+| `generatePRD()` function | `llmProvider.ts:62-66` | Appears unused — `HomePage.tsx` calls `generateStructuredPRD()` directly. Verify and remove. |
+| `DevPlan` / `AgentPrompt` legacy types | `types/index.ts:57-98` | Marked as "legacy — kept for backward compat." If migration is complete, remove along with store actions at `projectStore.ts:412-480`. |
+| `api/generate-prd.ts`, `api/generate-milestones.ts`, `api/generate-agent-prompts.ts` | `api/` directory | Not called by the frontend SPA. Either integrate as the backend proxy (PERF-7) or remove. |
+| Duplicated `getIntentHelper()` | `SelectableSpine.tsx:61-85` and `BranchList.tsx:57-88` | Extract to shared utility `src/lib/intentHelper.ts` |
+| `useNavigate` in `BranchList.tsx:3` | `BranchList.tsx:18` | Imported but the navigate call at line 110 goes to a route (`/p/${projectId}/branch/${branch.id}`) that doesn't exist in `App.tsx`. Dead code path. |
+
+### 7.5 Rendering Boundaries to Clean Up
+
+The current rendering is tangled — `ProjectWorkspace.tsx` manages state for all stages and passes props down. Each stage should own its state:
+
+```
+CURRENT:
+  ProjectWorkspace (manages all state)
+    ├─ StructuredPRDView (receives structuredPRD, readOnly)
+    ├─ MockupsView (receives prdContent, structuredPRD)
+    └─ ArtifactsView (receives prdContent, structuredPRD)
+
+RECOMMENDED:
+  ProjectWorkspace (manages only navigation + spine state)
+    ├─ PRDStage (owns branch, consolidation, feedback state)
+    │   ├─ StructuredPRDView
+    │   ├─ BranchList
+    │   └─ ConsolidationModal
+    ├─ MockupsStage (owns mockup generation, comparison state)
+    │   └─ MockupsView
+    └─ ArtifactsStage (owns artifact generation, expansion state)
+        ├─ ArtifactsView
+        └─ MarkupImageView (new)
+```
+
+### 7.6 Caching and Concurrency Changes
+
+1. **Prompt-hash caching:** Before calling Gemini, hash `(systemPrompt + userPrompt)`. Check an in-memory `Map<string, string>` for cached responses. This prevents identical regenerations from hitting the API.
+
+2. **Concurrent generation limiter:** When parallelizing bundle generation, add a concurrency limit (e.g., 3 simultaneous Gemini calls) to avoid rate limiting:
+   ```typescript
+   // Simple concurrency limiter
+   async function withConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<T[]> {
+       const results: T[] = [];
+       const executing: Promise<void>[] = [];
+       for (const task of tasks) {
+           const p = task().then(r => { results.push(r); });
+           executing.push(p);
+           if (executing.length >= limit) await Promise.race(executing);
+       }
+       await Promise.all(executing);
+       return results;
+   }
+   ```
+
+3. **Generation abort controller:** Pass an `AbortController` signal to `fetch()` calls so users can cancel in-flight generations:
+   ```typescript
+   const callGemini = async (system, prompt, jsonMode?, signal?: AbortSignal) => {
+       const response = await fetch(url, { method: 'POST', ..., signal });
+       // ...
+   };
+   ```
+
+### 7.7 Instrumentation/Logging to Add
+
+```typescript
+// src/lib/telemetry.ts
+const telemetry = {
+    generation: (subtype: string, durationMs: number, tokenCount?: number) => {
+        console.log(`[GEN] ${subtype}: ${durationMs}ms${tokenCount ? ` (${tokenCount} tokens)` : ''}`);
+        // In production: send to analytics
+    },
+    storeWrite: (action: string, durationMs: number, stateSize: number) => {
+        console.log(`[STORE] ${action}: ${durationMs}ms (${(stateSize / 1024).toFixed(1)}KB)`);
+    },
+    render: (component: string, durationMs: number) => {
+        if (durationMs > 16) { // Frame budget exceeded
+            console.warn(`[RENDER] ${component}: ${durationMs}ms (slow)`);
+        }
+    },
+};
+```
+
+### 7.8 Schema Validation Improvements
+
+Add runtime validation for JSON-mode LLM responses:
+
+```typescript
+// src/lib/validation.ts
+function validateScreenInventory(raw: unknown): ScreenInventoryContent | null {
+    if (!raw || typeof raw !== 'object') return null;
+    const obj = raw as Record<string, unknown>;
+    if (obj.format !== 'screen_inventory_v1') return null;
+    if (!Array.isArray(obj.groups)) return null;
+    // Validate each group has name + screens array
+    // Validate each screen has required fields
+    return obj as ScreenInventoryContent;
+}
+```
+
+Consider using `zod` for runtime validation if schemas grow complex. Current dependencies don't include it, but it's lightweight (~14KB) and eliminates manual validation code.
+
+---
+
+## 8. Highest-Leverage Next Steps (Top 10)
+
+These are ordered by impact — the first few items alone would transform the product experience.
+
+### 1. Parallelize bundle artifact generation
+**File:** `ArtifactsView.tsx:80-113`
+**Effort:** 30 minutes | **Impact:** 7x speed improvement on the most-used heavy operation
+**Why first:** This is the single highest-ROI change in the codebase. One `for` loop → `Promise.allSettled`.
+
+### 2. Replace `<pre>` rendering with ReactMarkdown for all artifacts
+**Files:** `ArtifactsView.tsx:188`, `MockupsView.tsx:131`
+**Effort:** 15 minutes | **Impact:** Artifacts immediately look 3x more professional
+**Why second:** Zero-risk change that transforms visual quality using an existing dependency.
+
+### 3. Add streaming support to LLM calls
+**Files:** `llmProvider.ts` (new `callGeminiStream`), new `StreamingText.tsx` component
+**Effort:** 4 hours | **Impact:** Perceived latency drops from seconds to milliseconds
+**Why third:** This is the change that makes the app *feel* fast. Users see content appear instantly instead of waiting for a spinner.
+
+### 4. Add artifact refinement capability
+**Files:** `llmProvider.ts` (new `refineCoreArtifact`), `ArtifactsView.tsx` (add refine UI)
+**Effort:** 3 hours | **Impact:** Transforms artifacts from one-shot generation to iterative refinement
+**Why fourth:** This is the biggest product gap. Without refinement, users are stuck in generate-and-hope loops.
+
+### 5. Upgrade core artifact prompts with output templates
+**File:** `llmProvider.ts:398-493` (rewrite `CORE_ARTIFACT_PROMPTS`)
+**Effort:** 2 hours | **Impact:** Consistent artifact structure across generations
+**Why fifth:** Better prompts + the markdown rendering from step 2 = dramatically better artifact output with zero architectural changes.
+
+### 6. Switch core artifacts to JSON mode with schemas
+**Files:** `llmProvider.ts`, new `src/lib/schemas/`, `types/index.ts`
+**Effort:** 1-2 days | **Impact:** Enables structured rendering, validation, and cross-referencing
+**Why sixth:** This is the architectural foundation for type-specific renderers (step 8) and markup images (step 9).
+
+### 7. Add per-artifact progress indicators
+**File:** `ArtifactsView.tsx`
+**Effort:** 1 hour | **Impact:** Bundle generation feels responsive even before streaming
+**Why seventh:** Cheap win that complements the parallelization from step 1.
+
+### 8. Build type-specific artifact renderers
+**Files:** New `src/components/renderers/` directory
+**Effort:** 1 week | **Impact:** Each artifact type gets visual treatment appropriate to its content
+**Why eighth:** Depends on JSON mode (step 6). Screen inventories as card grids, data models as tables, design systems as swatches.
+
+### 9. Implement markup image V1 (LLM spec → SVG renderer)
+**Files:** New types, new `MarkupImageRenderer.tsx`, `llmProvider.ts` extension
+**Effort:** 1-2 weeks | **Impact:** Introduces visual annotation artifacts — a fundamentally new capability
+**Why ninth:** Depends on JSON mode infrastructure (step 6) and renderer architecture (step 8).
+
+### 10. Add comprehensive export (markdown, PNG, ZIP bundle)
+**Files:** New `ExportModal.tsx`, `package.json` (add `html-to-image`, `file-saver`)
+**Effort:** 3 days | **Impact:** Makes Synapse output usable in external workflows
+**Why tenth:** Export is the bridge between generation and real-world use. Without it, artifacts are trapped in the app.
+
+---
+
+## 9. Appendix: Evidence
+
+### Files Inspected
+
+| File | Lines | Purpose | Key Findings |
+|------|-------|---------|-------------|
+| `src/App.tsx` | ~15 | Router | 2 routes: `/` (HomePage), `/p/:id` (ProjectWorkspace) |
+| `src/main.tsx` | ~10 | Entry | React 19, StrictMode |
+| `src/types/index.ts` | 224 | Type definitions | All core types; Feature type lacks priority/criteria |
+| `src/lib/llmProvider.ts` | 514 | LLM integration | All Gemini calls; no streaming; sequential bundle gen; generic prompts |
+| `src/store/projectStore.ts` | 782 | State management | Zustand + localStorage; full serialization on every set(); no memoization |
+| `src/components/ProjectWorkspace.tsx` | 471 | Main workspace | 12+ state vars; all stage orchestration; only export is markdown |
+| `src/components/ArtifactsView.tsx` | 228 | Artifact grid | Sequential for-loop bundle gen (line 85); `<pre>` rendering (line 188) |
+| `src/components/MockupsView.tsx` | 416 | Mockup generation | Text-only mockups; monospace rendering (line 131); good settings UI |
+| `src/components/SelectableSpine.tsx` | 214 | PRD text selection | mark.js re-runs every render (line 25-45); duplicated getIntentHelper |
+| `src/components/BranchList.tsx` | 188 | Branch threads | Duplicated getIntentHelper; dead navigate route (line 110) |
+| `src/components/ConsolidationModal.tsx` | 186 | Branch merge | Scope selection (local/doc-wide); string.replace for local patch |
+| `src/components/HomePage.tsx` | 179 | Project list | Calls generateStructuredPRD directly (not generatePRD) |
+| `src/components/StructuredPRDView.tsx` | ~300 | Structured PRD display | Inline editing; feature cards; good structured rendering |
+| `src/components/HistoryView.tsx` | ~150 | Timeline | Groups events; shows diffs; no pagination |
+| `src/components/FeedbackModal.tsx` | 130 | Feedback extraction | 8 feedback types; targets PRD/mockup/artifact |
+| `src/components/FeedbackItemsList.tsx` | 84 | Feedback list | Apply/dismiss actions; color-coded types |
+| `src/components/StalenessBadge.tsx` | ~30 | Staleness indicator | Green/amber/red badges |
+| `src/components/PipelineStageBar.tsx` | ~60 | Stage navigation | 4 stages with active state |
+| `src/components/SettingsModal.tsx` | ~80 | Settings | API key + model only |
+| `src/components/FeatureCard.tsx` | ~60 | Feature display | Inline editing; complexity badge |
+| `src/components/BranchCanvas.tsx` | ~200 | Full-screen branch | Resizable split view |
+| `api/generate-prd.ts` | 60 | Vercel function | Unused by frontend |
+| `api/generate-milestones.ts` | 63 | Vercel function | Unused by frontend |
+| `api/generate-agent-prompts.ts` | 69 | Vercel function | Unused by frontend |
+| `package.json` | ~40 | Dependencies | React 19, Vite 7, Zustand 5, no image libs |
+| `vite.config.ts` | ~10 | Build config | Basic React plugin |
+| `tailwind.config.js` | ~10 | Styling | Minimal config + typography plugin |
+| `vercel.json` | ~15 | Deployment | SPA rewrites |
+
+### Target Architecture (Text Diagram)
+
+```
+┌─────────────────────────────────────────────────────────────────────┐
+│                        BROWSER (Client-Side SPA)                     │
+│                                                                       │
+│  ┌────────────┐    ┌──────────────┐    ┌──────────────────────────┐  │
+│  │  React     │    │  Zustand     │    │  IndexedDB               │  │
+│  │  Router    │    │  Store       │    │  (async, no size limit)  │  │
+│  │            │    │  (sliced)    │    │                          │  │
+│  └──────┬─────┘    └──────┬───────┘    └──────────────────────────┘  │
+│         │                 │                                           │
+│  ┌──────▼─────────────────▼─────────────────────────────────────┐    │
+│  │              Stage Components (lazy-loaded)                    │    │
+│  │                                                                │    │
+│  │  PRDStage          MockupsStage        ArtifactsStage         │    │
+│  │  MarkupImageStage  HistoryStage        ExportModal            │    │
+│  └──────────┬───────────────────────────────────────────────────┘    │
+│             │                                                         │
+│  ┌──────────▼───────────────────────────────────────────────────┐    │
+│  │           Renderer Registry                                    │    │
+│  │  ScreenInventoryRenderer  │  DataModelRenderer                │    │
+│  │  ComponentRenderer        │  DesignSystemRenderer             │    │
+│  │  MarkupImageRenderer      │  MarkdownFallbackRenderer         │    │
+│  └──────────┬───────────────────────────────────────────────────┘    │
+│             │                                                         │
+│  ┌──────────▼───────────────────────────────────────────────────┐    │
+│  │           Generation Pipeline                                  │    │
+│  │  ┌─────────────┐  ┌──────────┐  ┌───────────┐  ┌──────────┐ │    │
+│  │  │ Prompt      │→ │ Gemini   │→ │ Validate  │→ │ Store +  │ │    │
+│  │  │ Builder     │  │ Stream   │  │ + Score   │  │ Render   │ │    │
+│  │  └─────────────┘  └──────────┘  └───────────┘  └──────────┘ │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│             │                                                         │
+│  ┌──────────▼───────────────────────────────────────────────────┐    │
+│  │           Export Pipeline                                      │    │
+│  │  Markdown  │  JSON  │  PNG (html-to-image)  │  ZIP Bundle    │    │
+│  └──────────────────────────────────────────────────────────────┘    │
+│                                                                       │
+└───────────────────────────┬───────────────────────────────────────────┘
+                            │ HTTPS (fetch + streaming)
+                            ▼
+              ┌──────────────────────────┐
+              │  Vercel Edge Functions    │
+              │  (proxy + cache + queue)  │
+              └──────────┬───────────────┘
+                         ▼
+              ┌──────────────────────────┐
+              │  Google Gemini API        │
+              │  (streaming endpoint)     │
+              └──────────────────────────┘
+```
+
+### Key Metrics to Track Post-Implementation
+
+| Metric | Current (Estimated) | Target |
+|--------|-------------------|--------|
+| Bundle generation time | ~21s | <5s |
+| Time to first visible content | ~3s | <500ms |
+| Artifact re-render time | ~100ms | <16ms |
+| localStorage write time | ~50ms (growing) | <10ms (debounced) |
+| Max stored data size | ~5MB (localStorage limit) | Unlimited (IndexedDB) |
+| Artifact types with structured rendering | 0 of 7 | 7 of 7 |
+| Image/visual artifact types | 0 | 3+ |
+| Export formats | 1 (markdown) | 4 (md, json, png, zip) |
+
+---
+
+*End of Audit*
