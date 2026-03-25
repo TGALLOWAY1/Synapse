@@ -18,6 +18,7 @@ interface JsonModeConfig {
 }
 
 const callGemini = async (systemInstruction: string, promptText: string, jsonMode?: JsonModeConfig) => {
+    const startTime = performance.now();
     const apiKey = getApiKey();
     const model = getModel();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
@@ -52,17 +53,10 @@ const callGemini = async (systemInstruction: string, promptText: string, jsonMod
     }
 
     const data = await response.json();
-    return data.candidates[0].content.parts[0].text;
-};
-
-export interface ProviderOptions {
-    onStatus?: (status: string) => void;
-}
-
-export const generatePRD = async (promptText: string, options?: ProviderOptions): Promise<string> => {
-    options?.onStatus?.("Generating PRD with Gemini...");
-    const system = "You are an expert product manager. Write a comprehensive Product Requirements Document (PRD) based on the following user prompt. Use Markdown formatting. Include sections for Overview, Goals, Scope, and Technical Approach.";
-    return callGemini(system, `User Prompt: ${promptText}`);
+    const text = data.candidates[0].content.parts[0].text;
+    const durationMs = performance.now() - startTime;
+    console.log(`[GEN] callGemini: ${durationMs.toFixed(0)}ms (${text.length} chars)`);
+    return text;
 };
 
 export interface ConsolidationResult {

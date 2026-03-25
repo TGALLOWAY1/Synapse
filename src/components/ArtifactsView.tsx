@@ -1,5 +1,7 @@
 import { useState } from 'react';
-import { Package, Plus, RefreshCcw, Sparkles } from 'lucide-react';
+import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact } from '../lib/llmProvider';
 import { StalenessBadge } from './StalenessBadge';
@@ -24,6 +26,30 @@ const CORE_ARTIFACTS: { subtype: CoreArtifactSubtype; title: string; description
     { subtype: 'design_system', title: 'Design System Starter', description: 'Foundational UI system draft with patterns and components' },
 ];
 
+// Run async tasks with a concurrency limit
+async function withConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> {
+    const results: PromiseSettledResult<T>[] = new Array(tasks.length);
+    let nextIndex = 0;
+
+    async function runNext(): Promise<void> {
+        while (nextIndex < tasks.length) {
+            const index = nextIndex++;
+            try {
+                const value = await tasks[index]();
+                results[index] = { status: 'fulfilled', value };
+            } catch (reason) {
+                results[index] = { status: 'rejected', reason };
+            }
+        }
+    }
+
+    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runNext());
+    await Promise.all(workers);
+    return results;
+}
+
+type ArtifactGenStatus = 'pending' | 'generating' | 'done' | 'error';
+
 export function ArtifactsView({ projectId, spineVersionId, prdContent, structuredPRD }: ArtifactsViewProps) {
     const {
         createArtifact, createArtifactVersion,
@@ -32,11 +58,15 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
     } = useProjectStore();
 
     const [generatingSubtype, setGeneratingSubtype] = useState<CoreArtifactSubtype | 'bundle' | null>(null);
+    const [bundleStatus, setBundleStatus] = useState<Record<CoreArtifactSubtype, ArtifactGenStatus>>({} as Record<CoreArtifactSubtype, ArtifactGenStatus>);
     const [expandedId, setExpandedId] = useState<string | null>(null);
     const [feedbackVersionId, setFeedbackVersionId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
 
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
+
+    const bundleDoneCount = Object.values(bundleStatus).filter(s => s === 'done').length;
+    const bundleErrorCount = Object.values(bundleStatus).filter(s => s === 'error').length;
 
     const getExistingArtifact = (subtype: CoreArtifactSubtype) =>
         coreArtifacts.find(a => a.subtype === subtype);
@@ -81,35 +111,62 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         if (!structuredPRD) return;
         setError(null);
         setGeneratingSubtype('bundle');
-        try {
-            for (const meta of CORE_ARTIFACTS) {
-                const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
 
-                const existing = getExistingArtifact(meta.subtype);
-                let artifactId: string;
-                if (existing) {
-                    artifactId = existing.id;
-                } else {
-                    const result = createArtifact(projectId, 'core_artifact', meta.title, meta.subtype);
-                    artifactId = result.artifactId;
-                }
+        // Initialize all statuses to pending
+        const initialStatus = {} as Record<CoreArtifactSubtype, ArtifactGenStatus>;
+        CORE_ARTIFACTS.forEach(meta => { initialStatus[meta.subtype] = 'pending'; });
+        setBundleStatus(initialStatus);
 
-                const versions = getArtifactVersions(projectId, artifactId);
-                const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+        const tasks = CORE_ARTIFACTS.map(meta => async () => {
+            setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'generating' }));
 
-                createArtifactVersion(
-                    projectId, artifactId, content,
-                    { subtype: meta.subtype },
-                    [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
-                    `Generate ${meta.title} from PRD (bundle)`,
-                    parentVersionId,
-                );
+            const startTime = performance.now();
+            const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
+            console.log(`[GEN] ${meta.subtype}: ${(performance.now() - startTime).toFixed(0)}ms`);
+
+            const existing = getExistingArtifact(meta.subtype);
+            let artifactId: string;
+            if (existing) {
+                artifactId = existing.id;
+            } else {
+                const result = createArtifact(projectId, 'core_artifact', meta.title, meta.subtype);
+                artifactId = result.artifactId;
             }
-        } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
-        } finally {
-            setGeneratingSubtype(null);
+
+            const versions = getArtifactVersions(projectId, artifactId);
+            const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+
+            createArtifactVersion(
+                projectId, artifactId, content,
+                { subtype: meta.subtype },
+                [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+                `Generate ${meta.title} from PRD (bundle)`,
+                parentVersionId,
+            );
+
+            setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'done' }));
+            return meta.subtype;
+        });
+
+        // Run with concurrency limit of 3 to avoid Gemini rate limits
+        const results = await withConcurrency(tasks, 3);
+
+        const errors = results
+            .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
+            .map(r => r.reason instanceof Error ? r.reason.message : String(r.reason));
+
+        // Mark failed ones
+        results.forEach((r, i) => {
+            if (r.status === 'rejected') {
+                setBundleStatus(prev => ({ ...prev, [CORE_ARTIFACTS[i].subtype]: 'error' }));
+            }
+        });
+
+        if (errors.length > 0) {
+            setError(`${errors.length} artifact(s) failed: ${errors.join('; ')}`);
         }
+
+        setGeneratingSubtype(null);
     };
 
     return (
@@ -126,7 +183,9 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
                 >
                     <Sparkles size={16} />
-                    {generatingSubtype === 'bundle' ? 'Generating Bundle...' : 'Generate All'}
+                    {generatingSubtype === 'bundle'
+                        ? `Generating ${bundleDoneCount} of ${CORE_ARTIFACTS.length}...`
+                        : 'Generate All'}
                 </button>
             </div>
 
@@ -151,6 +210,15 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                     const staleness = existing ? getArtifactStaleness(projectId, existing.id) : null;
                     const isExpanded = expandedId === existing?.id;
                     const isGenerating = generatingSubtype === meta.subtype || generatingSubtype === 'bundle';
+                    const artifactBundleStatus = bundleStatus[meta.subtype];
+
+                    const statusDotClass = artifactBundleStatus === 'generating'
+                        ? 'text-indigo-500 animate-spin'
+                        : artifactBundleStatus === 'done'
+                        ? 'text-green-500'
+                        : artifactBundleStatus === 'error'
+                        ? 'text-red-500'
+                        : existing ? 'text-green-400' : 'text-neutral-300';
 
                     return (
                         <div key={meta.subtype} className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
@@ -160,7 +228,15 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                     className="flex items-center gap-3 min-w-0 text-left flex-1"
                                     disabled={!existing}
                                 >
-                                    <div className={`w-2 h-2 rounded-full shrink-0 ${existing ? 'bg-green-400' : 'bg-neutral-300'}`} />
+                                    {artifactBundleStatus === 'generating' ? (
+                                        <Loader2 size={12} className={statusDotClass} />
+                                    ) : artifactBundleStatus === 'done' ? (
+                                        <CheckCircle2 size={12} className={statusDotClass} />
+                                    ) : artifactBundleStatus === 'error' ? (
+                                        <XCircle size={12} className={statusDotClass} />
+                                    ) : (
+                                        <div className={`w-2 h-2 rounded-full shrink-0 ${existing ? 'bg-green-400' : 'bg-neutral-300'}`} />
+                                    )}
                                     <div className="min-w-0">
                                         <div className="flex items-center gap-2">
                                             <span className="font-medium text-neutral-800">{meta.title}</span>
@@ -185,7 +261,7 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                             {isExpanded && preferredVersion && (
                                 <div className="border-t border-neutral-100 p-4 space-y-3">
                                     <div className="bg-neutral-50 rounded-lg border border-neutral-200 p-5 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[500px]">
-                                        <pre className="whitespace-pre-wrap text-sm text-neutral-800 font-sans">{preferredVersion.content}</pre>
+                                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{preferredVersion.content}</ReactMarkdown>
                                     </div>
 
                                     <div className="flex items-center gap-2">

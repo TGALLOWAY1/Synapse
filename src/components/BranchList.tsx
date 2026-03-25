@@ -1,10 +1,10 @@
 import { useProjectStore } from '../store/projectStore';
 import { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { replyInBranch } from '../lib/llmProvider';
 import { Send, Maximize2, Trash2 } from 'lucide-react';
-import type { Branch, BranchMessage } from '../types';
+import type { Branch } from '../types';
+import { IntentHelperLabel } from '../lib/intentHelper';
 
 interface BranchListProps {
     projectId: string;
@@ -15,7 +15,6 @@ interface BranchListProps {
 
 export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasOpen }: BranchListProps) {
     const [animationParent] = useAutoAnimate();
-    const navigate = useNavigate();
     const { getBranchesForSpine, addBranchMessage, deleteBranch } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
     const [replyInputs, setReplyInputs] = useState<Record<string, string>>({});
@@ -54,38 +53,6 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
         }
     };
 
-    const getIntentHelper = (firstMessage?: string) => {
-        if (!firstMessage) return null;
-        const lowerMsg = firstMessage.toLowerCase();
-        let intent = '';
-        let helper = '';
-
-        if (lowerMsg.startsWith('clarify')) {
-            intent = 'Clarify';
-            helper = 'Ask for precision, fix ambiguity, or correct a specific detail tied to this text.';
-        } else if (lowerMsg.startsWith('expand')) {
-            intent = 'Expand';
-            helper = 'Add depth or options. Generate UX ideas, NB3 prompts, or elaborations.';
-        } else if (lowerMsg.startsWith('specify')) {
-            intent = 'Specify';
-            helper = 'Turn this into implementable requirements: constraints, acceptance criteria, data/API details.';
-        } else if (lowerMsg.startsWith('alternative')) {
-            intent = 'Alternative';
-            helper = 'Propose a different approach or architecture and explain tradeoffs.';
-        } else if (lowerMsg.startsWith('replace')) {
-            intent = 'Replace';
-            helper = 'Suggest a concrete change. The system will apply locally or across the document during consolidation.';
-        }
-
-        if (!intent) return null;
-
-        return (
-            <div className="mt-2 text-xs">
-                <span className="font-semibold text-neutral-500 uppercase tracking-wider">Intent: {intent}</span>
-                <p className="text-neutral-400 italic mt-0.5 leading-snug">{helper}</p>
-            </div>
-        );
-    };
 
     return (
         <div ref={animationParent} className="flex flex-col gap-6">
@@ -98,7 +65,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                                 <span className="text-xs font-semibold text-neutral-500 uppercase tracking-wider block mb-1">Anchor</span>
                                 <p className="text-sm text-neutral-700 italic break-words line-clamp-4">"{branch.anchorText}"</p>
                             </div>
-                            {getIntentHelper(branch.messages[0]?.content)}
+                            <IntentHelperLabel text={branch.messages[0]?.content || ''} />
                         </div>
                         <div className="flex flex-col items-end gap-2 shrink-0">
                             <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
@@ -107,7 +74,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                             {branch.status === 'active' && (
                                 <div className="flex items-center gap-1 mt-1">
                                     <button
-                                        onClick={() => onCanvasOpen ? onCanvasOpen(branch.id) : navigate(`/p/${projectId}/branch/${branch.id}`)}
+                                        onClick={() => onCanvasOpen?.(branch.id)}
                                         className="p-1.5 text-neutral-400 hover:text-indigo-500 hover:bg-indigo-50 rounded transition"
                                         title="Dive Into Canvas"
                                     >

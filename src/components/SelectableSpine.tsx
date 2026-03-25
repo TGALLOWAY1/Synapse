@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { replyInBranch } from '../lib/llmProvider';
+import { IntentHelperInline } from '../lib/intentHelper';
 
 interface SelectableSpineProps {
     projectId: string;
@@ -58,31 +59,6 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
         return () => window.removeEventListener('keydown', handleKeyDown);
     }, [selection]);
 
-    const getIntentHelper = (intentStr: string) => {
-        if (!intentStr) return null;
-        const lowerMsg = intentStr.toLowerCase();
-        let helper = '';
-
-        if (lowerMsg.startsWith('clarify')) {
-            helper = 'Ask for precision, fix ambiguity, or correct a specific detail tied to this text.';
-        } else if (lowerMsg.startsWith('expand')) {
-            helper = 'Add depth or options. Generate UX ideas, NB3 prompts, or elaborations.';
-        } else if (lowerMsg.startsWith('specify')) {
-            helper = 'Turn this into implementable requirements: constraints, acceptance criteria, data/API details.';
-        } else if (lowerMsg.startsWith('alternative')) {
-            helper = 'Propose a different approach or architecture and explain tradeoffs.';
-        } else if (lowerMsg.startsWith('replace')) {
-            helper = 'Suggest a concrete change. The system will apply locally or across the document during consolidation.';
-        }
-
-        if (!helper) return null;
-
-        return (
-            <div className="text-xs text-neutral-400 italic leading-snug bg-neutral-800/50 p-2 rounded border border-neutral-700/50 mb-2">
-                {helper}
-            </div>
-        );
-    };
 
     const handleMouseUp = () => {
         if (readOnly) return;
@@ -187,7 +163,7 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                         ))}
                     </div>
 
-                    {getIntentHelper(intent)}
+                    <IntentHelperInline text={intent} />
 
                     <form onSubmit={handleCreateBranch} className="flex gap-2">
                         <input
