@@ -1,6 +1,41 @@
 import { create } from 'zustand';
-import { persist } from 'zustand/middleware';
+import { persist, type StorageValue } from 'zustand/middleware';
 import { v4 as uuidv4 } from 'uuid';
+
+// Debounced localStorage storage adapter
+function createDebouncedStorage<S>(delayMs: number = 500) {
+    let timeoutId: ReturnType<typeof setTimeout> | null = null;
+    let pendingValue: string | null = null;
+
+    return {
+        getItem: (name: string): StorageValue<S> | null => {
+            const raw = localStorage.getItem(name);
+            if (raw === null) return null;
+            try {
+                return JSON.parse(raw) as StorageValue<S>;
+            } catch {
+                return null;
+            }
+        },
+        setItem: (name: string, value: StorageValue<S>): void => {
+            const serialized = JSON.stringify(value);
+            pendingValue = serialized;
+            if (timeoutId) clearTimeout(timeoutId);
+            timeoutId = setTimeout(() => {
+                const startTime = performance.now();
+                localStorage.setItem(name, pendingValue!);
+                const durationMs = performance.now() - startTime;
+                console.log(`[STORE] persist: ${durationMs.toFixed(0)}ms (${(pendingValue!.length / 1024).toFixed(1)}KB)`);
+                pendingValue = null;
+                timeoutId = null;
+            }, delayMs);
+        },
+        removeItem: (name: string): void => {
+            if (timeoutId) clearTimeout(timeoutId);
+            localStorage.removeItem(name);
+        },
+    };
+}
 import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
     DevPlan, Milestone, AgentPrompt, PipelineStage,
@@ -764,6 +799,7 @@ export const useProjectStore = create<ProjectState>()(
         }),
         {
             name: 'synapse-projects-storage',
+            storage: createDebouncedStorage(500),
             onRehydrateStorage: () => {
                 return (state) => {
                     if (!state) return;

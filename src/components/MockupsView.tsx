@@ -1,5 +1,7 @@
 import { useState } from 'react';
 import { Image, Plus, GitCompare, MessageSquarePlus } from 'lucide-react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
 import { generateMockup } from '../lib/llmProvider';
 import { StalenessBadge } from './StalenessBadge';
@@ -128,8 +130,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
     };
 
     const renderMockupContent = (content: string) => (
-        <div className="bg-white rounded-xl border border-neutral-200 p-6 font-mono text-sm whitespace-pre-wrap leading-relaxed text-neutral-800 overflow-auto max-h-[600px]">
-            {content}
+        <div className="bg-white rounded-xl border border-neutral-200 p-6 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[600px]">
+            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
         </div>
     );
 
