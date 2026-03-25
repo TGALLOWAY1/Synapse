@@ -917,3 +917,216 @@ User can: export as PNG, refine annotations, extract feedback
     }
 }
 ```
+
+---
+
+## 5b. UX / Product Gaps
+
+### UX-1: Artifact Stage Feels Like a Text Dump, Not a Design Engine
+
+**What's incomplete:** The artifacts stage (`ArtifactsView.tsx`) presents 7 artifact types in a flat list of expandable cards. Each expands to show a monospace text block. There is no visual differentiation between a "Screen Inventory" and a "Data Model" — both look like the same wall of text.
+
+**What it should feel like:** A professional artifact workspace where each type has its own visual treatment. Screen inventories render as card grids. Data models render as entity-relationship tables. Design systems render color palettes and typography specimens. Implementation plans render as Gantt-like timelines.
+
+**Files affected:** `ArtifactsView.tsx`, new type-specific renderer components
+
+---
+
+### UX-2: No Artifact Editing or Refinement Workflow
+
+**What's incomplete:** Users can generate or regenerate artifacts but cannot refine them. There is no way to say "make the data model more detailed" or "add error states to the screen inventory." Regeneration discards the previous output and starts from scratch.
+
+**Evidence:** `ArtifactsView.tsx:44-78` — `handleGenerateOne()` calls `generateCoreArtifact()` with only PRD context, never passing the current artifact content or user refinement instructions.
+
+**What it should feel like:** A generation → inspection → refinement loop. Users should be able to: (1) generate, (2) review, (3) annotate specific issues, (4) refine with instructions, (5) compare before/after, (6) export.
+
+**Files affected:** `ArtifactsView.tsx`, `llmProvider.ts` (add `refineCoreArtifact()` function)
+
+---
+
+### UX-3: Mockup-to-Artifact Pipeline Is Disconnected
+
+**What's incomplete:** Mockups and core artifacts are separate stages with no direct connection. There's no flow for "I like this mockup — now generate a screen inventory that matches it" or "This data model doesn't align with the mockup screens."
+
+**Evidence:** `ArtifactsView.tsx:365-370` and `MockupsView.tsx:354-361` — each stage receives `prdContent` and `structuredPRD` but neither references the other stage's outputs.
+
+**What it should feel like:** Artifacts should optionally reference mockups as additional context. The screen inventory generator should know about the screens in the mockups. The component inventory should reference components visible in mockups.
+
+**Files affected:** `llmProvider.ts` (artifact generation functions should accept optional mockup content), `ArtifactsView.tsx` (UI to select mockup as context)
+
+---
+
+### UX-4: Export Is PRD-Only and Markdown-Only
+
+**What's incomplete:** The only export function is markdown download of the PRD (`ProjectWorkspace.tsx:120-143`). There is no export for mockups, core artifacts, feedback items, or history.
+
+**What it should feel like:** A comprehensive export workflow that can produce: individual artifact markdown, full project bundle (ZIP with all artifacts), structured JSON export (for integration with other tools), and eventually image exports for markup images.
+
+**Files affected:** `ProjectWorkspace.tsx`, new `ExportModal.tsx` component
+
+---
+
+### UX-5: No Cross-Artifact Navigation or References
+
+**What's incomplete:** Artifacts exist in isolation. There's no way to navigate from a feature in the PRD to its corresponding screens in the screen inventory, or from a component in the component inventory to where it appears in mockups.
+
+**Evidence:** `ArtifactVersion.sourceRefs` (`types/index.ts:115-121`) tracks which spine version an artifact was generated from, but never links artifacts to each other.
+
+**What it should feel like:** Clickable cross-references. "This screen was generated from Feature F3" links to the feature card. "Component Button appears in 4 screens" links to those screens.
+
+**Files affected:** `types/index.ts` (extend `SourceRef`), artifact renderers, `ArtifactsView.tsx`
+
+---
+
+### UX-6: No Bulk Operations or Workflow Automation
+
+**What's incomplete:** Each artifact must be generated individually or via "Generate All." There's no: batch export, batch refresh (update all stale artifacts), template-based generation, or workflow presets.
+
+**Evidence:** `ArtifactsView.tsx:80-113` — `handleGenerateBundle` is the only bulk operation. No bulk export, no bulk staleness refresh.
+
+**What it should feel like:** A "Refresh Stale" button that regenerates only `possibly_outdated` or `outdated` artifacts. A "Export All" that bundles everything. Workflow templates that generate a specific set of artifacts for a given project type.
+
+**Files affected:** `ArtifactsView.tsx`, `ProjectWorkspace.tsx`
+
+---
+
+### UX-7: Settings/Configuration Is Minimal
+
+**What's incomplete:** `SettingsModal.tsx` only handles API key and model selection. There are no project-level settings, no generation preferences, no template management, no user preferences for default mockup settings.
+
+**What it should feel like:** Project settings (default platform, fidelity, style direction), generation preferences (temperature, response length), export preferences (format, quality), and workspace preferences (layout, theme).
+
+**Files affected:** `SettingsModal.tsx`, `types/index.ts` (add project settings type), `projectStore.ts`
+
+---
+
+## 6. Concrete Implementation Plan
+
+### Phase 1: Stabilize and Diagnose (Week 1)
+
+**Goals:** Fix the most painful issues, add instrumentation, establish baselines.
+
+**Files/systems affected:**
+- `ArtifactsView.tsx` — parallelize bundle generation
+- `ArtifactsView.tsx`, `MockupsView.tsx` — switch to ReactMarkdown rendering
+- `llmProvider.ts` — add timing instrumentation
+- `projectStore.ts` — add console timing for persistence
+
+**Key tasks:**
+1. ✅ Parallelize `handleGenerateBundle` with `Promise.allSettled` (PERF-1)
+2. ✅ Replace `<pre>` with `<ReactMarkdown>` in `ArtifactsView.tsx` and `MockupsView.tsx` (PERF-2)
+3. ✅ Add per-artifact progress indicators during bundle generation (PERF-3)
+4. ✅ Add `console.time` / `performance.mark` around LLM calls and state updates
+5. ✅ Verify `generatePRD()` in `llmProvider.ts:62-66` is dead code and remove it if so
+6. ✅ Clean up unused Vercel serverless functions in `api/` or mark them for future use
+
+**Risks:** Gemini API rate limits may throttle parallel calls. Use `Promise.allSettled` to handle partial failures.
+
+**Success criteria:** Bundle generation completes in <5s. All artifacts render with markdown formatting. Generation shows per-artifact progress.
+
+---
+
+### Phase 2: Improve Artifact Quality (Weeks 2-3)
+
+**Goals:** Make artifacts consistently strong through better prompts, structured output, and validation.
+
+**Files/systems affected:**
+- `llmProvider.ts` — rewrite artifact prompts, add JSON schemas for core artifacts
+- `types/index.ts` — add typed content interfaces for each artifact subtype
+- New `src/lib/artifactSchemas.ts` — JSON schemas for core artifact types
+- New `src/lib/artifactValidation.ts` — validation + quality scoring
+- `ArtifactsView.tsx` — add refinement UI
+
+**Key tasks:**
+1. ✅ Extend `StructuredPRD` schema with priority, acceptance criteria, dependencies (AQ-5)
+2. ✅ Rewrite `CORE_ARTIFACT_PROMPTS` with explicit output templates and examples (AQ-3)
+3. ✅ Add JSON-mode schemas for at least: screen_inventory, data_model, component_inventory (AQ-3/AQ-6)
+4. ✅ Add `refineCoreArtifact(subtype, currentContent, instruction, prdContent)` to `llmProvider.ts` (AQ-8)
+5. ✅ Add "Refine" button + instruction input in `ArtifactsView.tsx` (AQ-8)
+6. ✅ Add basic validation: response length check, expected section headers, JSON schema validation (AQ-4)
+7. ✅ Pass previous version content to regeneration prompts (AQ-8)
+
+**Risks:** JSON schemas for complex artifacts (user flows, implementation plan) may over-constrain LLM output. Start with simpler types (screen_inventory, data_model).
+
+**Success criteria:** Core artifacts have consistent structure across generations. Users can refine artifacts with instructions. Invalid/truncated output is caught and flagged.
+
+---
+
+### Phase 3: Improve Speed / Perceived Speed (Weeks 3-4)
+
+**Goals:** Make the app feel fast through streaming, optimistic UI, and efficient state management.
+
+**Files/systems affected:**
+- `llmProvider.ts` — add `callGeminiStream()` function
+- New `src/components/StreamingText.tsx` — token-by-token rendering component
+- `projectStore.ts` — add debounced persistence, memoized selectors
+- `ArtifactsView.tsx`, `MockupsView.tsx`, `BranchList.tsx` — integrate streaming
+- `package.json` — no new dependencies needed (fetch streaming is native)
+
+**Key tasks:**
+1. ✅ Implement `callGeminiStream()` using Gemini `streamGenerateContent` endpoint (PERF-4)
+2. ✅ Create `StreamingText` component that displays tokens as they arrive
+3. ✅ Integrate streaming into mockup generation, core artifact generation, and branch replies
+4. ✅ Add `useShallow` selectors for Zustand subscriptions (PERF-5)
+5. ✅ Debounce localStorage persistence to max 1 write per 500ms (PERF-6)
+6. ✅ Add skeleton screens for all loading states
+7. ✅ Memoize `MarkupImageRenderer` and artifact card components
+
+**Risks:** Streaming requires managing partial state (content arriving in chunks). Need to handle: connection drops mid-stream, user navigating away during stream, store updates during stream.
+
+**Success criteria:** First content visible within 500ms of generation start. No visible jank during state updates. localStorage writes don't block rendering.
+
+---
+
+### Phase 4: Add Markup Image Artifacts (Weeks 5-7)
+
+**Goals:** Introduce visual annotation artifacts as a first-class type.
+
+**Files/systems affected:**
+- `types/index.ts` — add `MarkupImageSpec`, `AnnotationLayer`, `MarkupImageSubtype`
+- `llmProvider.ts` — add `generateMarkupImage()` with JSON schema
+- New `src/components/MarkupImageRenderer.tsx` — SVG-based annotation renderer
+- New `src/components/MarkupImageView.tsx` — generation/display/export wrapper
+- `ArtifactsView.tsx` or `ProjectWorkspace.tsx` — integrate markup image stage
+- `PipelineStageBar.tsx` — optionally add markup images as a substage
+- `package.json` — add `html-to-image`
+
+**Key tasks:**
+1. ✅ Define `MarkupImageSpec` and `AnnotationLayer` types
+2. ✅ Build `MarkupImageRenderer` — renders SVG from spec (supports: boxes, arrows, callouts, labels, number markers, connectors, highlight regions, text blocks)
+3. ✅ Add `generateMarkupImage()` to `llmProvider.ts` with JSON schema
+4. ✅ Build `MarkupImageView` with generate/regenerate/export actions
+5. ✅ Implement PNG export via `html-to-image`
+6. ✅ Add 3 markup image subtypes: `screenshot_annotation`, `critique_board`, `wireframe_callout`
+7. ✅ Test with various PRD inputs and source artifacts
+
+**Risks:** LLM-generated layout specs may have positioning issues (overlapping elements, off-canvas placements). Add post-processing to clamp positions and detect overlaps. Gemini JSON mode may not handle the complex nested schema well — may need to simplify schema or add a two-pass approach (generate content first, then layout).
+
+**Success criteria:** Users can generate visual annotation artifacts from PRD context. Annotations render correctly in SVG. Export to PNG works at 2x resolution.
+
+---
+
+### Phase 5: Polish / Export / Editing Workflows (Weeks 8-10)
+
+**Goals:** Complete the product experience with editing, cross-references, comprehensive export, and interactive annotation editing.
+
+**Files/systems affected:**
+- New `src/components/AnnotationEditor.tsx` — interactive drag-and-drop editor
+- New `src/components/ExportModal.tsx` — comprehensive export workflow
+- Type-specific renderers for each core artifact subtype
+- `types/index.ts` — extend `SourceRef` for cross-artifact references
+- `ArtifactsView.tsx` — type-specific rendering
+- `package.json` — add `@dnd-kit/core`, `file-saver`
+
+**Key tasks:**
+1. ✅ Build type-specific renderers (screen inventory → card grid, data model → table, design system → swatches)
+2. ✅ Build interactive annotation editor for markup images (drag-to-place, resize, edit text)
+3. ✅ Build export modal with: individual markdown, individual PNG, full project ZIP, JSON export
+4. ✅ Add image upload for markup image source (file input → data URI)
+5. ✅ Add cross-artifact navigation (feature → screens → components)
+6. ✅ Add "Refresh Stale" bulk operation
+7. ✅ Add project-level settings (defaults for platform, fidelity, style)
+
+**Risks:** Interactive annotation editing is a significant UX challenge. Start with simple move/resize and iterate. Cross-artifact references require a graph data structure — may need to extend the store.
+
+**Success criteria:** Users can edit markup image annotations interactively. All artifact types have visually distinct rendering. Export produces professional-grade output. Cross-artifact navigation works for at least PRD features → screen inventory.
