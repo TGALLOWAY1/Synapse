@@ -640,12 +640,12 @@ Project
 
 ### 5.12 Destructive Actions
 
-- [ ] Deleting a project requires confirmation before executing **(critical)**
-- [ ] Deleting a project actually removes it from the list and localStorage
-- [ ] "Mark as Final" warns or confirms if it will lock editing
+- [ ] Deleting a project removes it from the list and localStorage **(critical)**
+- [ ] **Known gap:** Project deletion currently has NO confirmation dialog — verify this is still the case and flag if not yet fixed
+- [ ] "Mark as Final" behavior is clear (is it reversible? what does it lock?)
 - [ ] Overwriting an artifact version does not silently discard the previous version
-- [ ] Clearing the API key from settings warns if projects exist
-- [ ] No destructive action is reachable with a single unintentional click
+- [ ] Branch deletion removes the branch without orphaning data
+- [ ] No destructive action causes silent data loss without the user's awareness
 
 ---
 
@@ -1043,6 +1043,9 @@ OVERALL
 **Manual test:** Set API key, then open DevTools → Application → Local Storage → check `GEMINI_API_KEY` is visible in plaintext. Note: the settings modal labels this "stored locally" but doesn't mention plaintext.
 
 **Severity:** Medium (acceptable for MVP, should be documented)
+
+---
+
 ## 8. What Should Be Automated Later
 
 > **Purpose:** A prioritized roadmap of test automation investments. Each recommendation includes what to automate, why it matters, the class of bugs it catches, and a suggested priority level (P0 = must-have before launch, P1 = next sprint, P2 = soon after, P3 = nice-to-have).
@@ -1055,8 +1058,8 @@ Vitest is the recommended runner for Vite-based projects — zero additional bun
 
 | # | What to Automate | Why It Matters | Bugs It Catches | Priority |
 |---|------------------|----------------|-----------------|----------|
-| U-1 | **Zustand store CRUD actions** — `addProject`, `updateProject`, `deleteProject`, `setActiveProject`, etc. | The store is 819 lines with 50+ actions; manual coverage is infeasible. | State not updating, stale references, missing fields on create/update. | P0 |
-| U-2 | **Versioning logic** — `addPrdVersion`, `setPreferredPrdVersion`, `addArtifactVersion`, `setPreferredArtifactVersion`. | Version management is a core user-facing feature; regressions silently corrupt data. | Wrong version marked preferred, version list order bugs, version metadata loss. | P0 |
+| U-1 | **Zustand store CRUD actions** — `createProject`, `deleteProject`, `createArtifact`, `createArtifactVersion`, etc. | The store is 819 lines with 50+ actions; manual coverage is infeasible. | State not updating, stale references, missing fields on create/update. | P0 |
+| U-2 | **Versioning logic** — `createArtifactVersion`, `setPreferredVersion`, `getLatestArtifactVersion`, spine versioning via `regenerateSpine`. | Version management is a core user-facing feature; regressions silently corrupt data. | Wrong version marked preferred, version list order bugs, version metadata loss. | P0 |
 | U-3 | **Staleness detection** — any action that marks downstream content stale when the PRD changes. | Staleness flags control pipeline progression; false negatives let users proceed on outdated content. | Stale flag not set after PRD edit, stale flag not cleared after regeneration. | P0 |
 | U-4 | **Storage migration / schema evolution** — roundtrip serialize → deserialize with older localStorage payloads. | Without migration tests, any type change risks bricking returning users' data. | Crash on load after app update, silent data loss during migration. | P1 |
 | U-5 | **LLM response parsing — JSON mode** — feed `generateStructuredPRD`, `generateCoreArtifact`, `generateDevPlan` known JSON strings and assert parsed output. | Gemini's structured output may drift or include wrapper text; parsing must be resilient. | JSON parse failures, missing required fields, incorrect type coercion. | P0 |
@@ -1241,10 +1244,13 @@ The Zustand store persists its entire state tree to localStorage as JSON. To ins
 3. The value is a JSON object. Copy it into a JSON formatter (or use DevTools' built-in preview) to explore.
 
 Key things to look for:
-- `state.projects` — array of all projects.
-- `state.activeProjectId` — which project is currently selected.
-- Each project contains `prdVersions`, `branches`, `artifacts`, `mockups`, and `feedback`.
-- `state.version` — the store schema version (relevant for migration testing).
+- `state.projects` — map of all projects keyed by project ID.
+- Active project is determined by the URL route parameter (`/p/:projectId`), not a stored field.
+- `state.spineVersions` — PRD versions keyed by project ID.
+- `state.branches` — discussion branches keyed by project ID.
+- `state.artifacts` — artifact containers keyed by project ID.
+- `state.artifactVersions` — versioned content keyed by project ID.
+- `state.feedbackItems` — feedback items keyed by project ID.
 
 ---
 
@@ -1280,7 +1286,6 @@ Synapse does not ship with seed data or example projects. Every test run starts 
 | **API calls are client-side** | Gemini API calls go directly from the browser to Google's API. There is no backend proxy. This means the API key is visible in the Network tab — this is expected for a client-side tool. |
 | **Vercel deployment** | Production and preview deploys are hosted on Vercel. Each PR gets a unique preview URL. Test preview deployments the same way you test locally — the only difference is the URL. |
 | **No environment variables at build time** | The app does not read from `.env` or process environment variables. All configuration (API key, model selection) is entered at runtime via the Settings modal. |
-# Synapse QA Testing Guide — Sections 10-12
 
 ---
 
@@ -1371,13 +1376,13 @@ A prioritized action plan based on the QA analysis of Synapse.
 
 ### 1. Immediate (before sharing with users)
 
-- Run the 30-minute smoke test (Section 5) end to end and document any failures.
+- Run the 30-minute smoke test (Section 4) end to end and document any failures.
 - Fix any critical bugs found during the smoke test before proceeding.
 - Verify the API key flow works correctly: entering a key, persisting it in localStorage, and using it for generation calls to Gemini.
 
 ### 2. Short-term (first week)
 
-- Run the full manual QA test plan (Sections 3-8) across Chrome, Firefox, and Safari.
+- Run the full manual QA test plan (Section 3) and pre-release checklist (Section 5) across Chrome, Firefox, and Safari.
 - Conduct 3-5 user verification sessions using the Tester Feedback Template (Section 11) with people unfamiliar with the app.
 - Set up a Playwright config and write the first 5 automated smoke tests covering: app load, project creation, PRD generation trigger, navigation between sections, and export.
 - Add a confirmation dialog for project deletion to prevent accidental data loss.
