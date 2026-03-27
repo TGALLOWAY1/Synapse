@@ -102,7 +102,7 @@ Project
 |--------|--------|
 | **Goal** | Generate text-based UI mockups from the PRD |
 | **Happy path** | Navigate to Mockups stage → configure settings (platform/fidelity/scope) → click Generate → mockup appears → compare versions side by side |
-| **What could go wrong** | Generation takes long with no progress indicator; settings don't affect output meaningfully; version comparison layout broken on small screens; mockup content quality varies wildly; regeneration doesn't clearly differ from original |
+| **What could go wrong** | Generation takes long with no progress indicator; settings don't affect output meaningfully; version comparison layout broken; mockup content quality varies wildly; regeneration doesn't clearly differ from original |
 | **Why it matters** | Visual artifact that users will evaluate and share; quality here affects perceived product value |
 | **Key files** | `src/components/MockupsView.tsx`, `src/lib/llmProvider.ts` (generateMockup) |
 
@@ -321,18 +321,7 @@ Project
 | PERSIST-005 | Corrupted state recovery | N/A | 1. Manually corrupt localStorage JSON 2. Reload app | App handles gracefully (empty state or error message) | White screen, infinite loop, console errors | Medium |
 | PERSIST-006 | Navigate to nonexistent project | No project with given ID | 1. Navigate to `/p/fake-id-123` | Graceful handling (redirect to home or error) | Blank workspace, console errors | Medium |
 
-### 3.13 Mobile and Responsive (MOB)
-
-| Test ID | Scenario | Preconditions | Steps | Expected Result | Watch For | Priority |
-|---------|----------|---------------|-------|-----------------|-----------|----------|
-| MOB-001 | Home page on mobile | Mobile viewport (375px) | 1. View home page | Project cards stack, create button accessible | Overflow, text truncation, button off-screen | High |
-| MOB-002 | Workspace sidebar hidden | Mobile viewport | 1. Open project workspace | Right sidebar (branches/history) hidden per `hidden lg:flex` | Sidebar overlaps content, no way to access branches | High |
-| MOB-003 | Pipeline stage bar mobile | Mobile viewport | 1. Check stage navigation | Labels may hide (`hidden sm:inline`), icons remain | Buttons too small to tap, bar overflows | Medium |
-| MOB-004 | Modal display on mobile | Mobile viewport | 1. Open Settings/Export/Feedback modal | Modal fits screen, scrollable if needed | Modal extends beyond viewport, buttons unreachable | Medium |
-| MOB-005 | Text selection on touch | Mobile, PRD view | 1. Try to select text for branch creation | Touch selection triggers popover | Popover doesn't appear, interferes with scroll | Medium |
-| MOB-006 | SVG markup on mobile | Mobile, markup image | 1. View generated markup image | SVG scales or scrolls appropriately | SVG overflows, tiny unreadable text | Medium |
-
-### 3.14 Edge Cases (EDGE)
+### 3.13 Edge Cases (EDGE)
 
 | Test ID | Scenario | Preconditions | Steps | Expected Result | Watch For | Priority |
 |---------|----------|---------------|-------|-----------------|-----------|----------|
@@ -576,19 +565,7 @@ Project
 
 ---
 
-### 5.8 Mobile & Responsive
-
-- [ ] HomePage renders without horizontal scroll at 375px width
-- [ ] Project workspace is usable at 768px width (tablet)
-- [ ] Settings modal is fully visible and interactive on mobile
-- [ ] Export modal is fully visible and interactive on mobile
-- [ ] Text in structured PRD view does not overflow its container on small screens
-- [ ] Pipeline stage tabs/navigation is accessible on narrow viewports
-- [ ] Touch targets (buttons, links) are at least 44x44px on mobile
-
----
-
-### 5.9 Browser Compatibility
+### 5.8 Browser Compatibility
 
 **Chrome (latest):**
 - [ ] All core flows pass
@@ -612,7 +589,7 @@ Project
 
 ---
 
-### 5.10 Performance Feel
+### 5.9 Performance Feel
 
 - [ ] HomePage loads and is interactive within 2 seconds
 - [ ] Project workspace loads and shows content within 2 seconds
@@ -625,7 +602,7 @@ Project
 
 ---
 
-### 5.11 Visual Consistency
+### 5.10 Visual Consistency
 
 - [ ] Dark theme is applied consistently across all views and modals
 - [ ] No light-background "flash" elements that break the dark theme
@@ -638,7 +615,7 @@ Project
 
 ---
 
-### 5.12 Destructive Actions
+### 5.11 Destructive Actions
 
 - [ ] Deleting a project removes it from the list and localStorage **(critical)**
 - [ ] **Known gap:** Project deletion currently has NO confirmation dialog — verify this is still the case and flag if not yet fixed
@@ -649,7 +626,7 @@ Project
 
 ---
 
-### 5.13 Accessibility Basics
+### 5.12 Accessibility Basics
 
 - [ ] All interactive elements are reachable via keyboard Tab navigation
 - [ ] Focused elements have a visible focus ring/outline
@@ -662,7 +639,7 @@ Project
 
 ---
 
-### 5.14 Export & Output Quality
+### 5.13 Export & Output Quality
 
 - [ ] Exported PRD markdown opens correctly in GitHub, VS Code, or any markdown viewer
 - [ ] Exported markdown preserves headings, lists, bold/italic formatting
@@ -675,7 +652,7 @@ Project
 
 ---
 
-### 5.15 State Consistency
+### 5.14 State Consistency
 
 - [ ] Editing the PRD in markdown view updates the structured view after save/consolidation **(critical)**
 - [ ] Structured view sections match the raw markdown content exactly
@@ -695,7 +672,6 @@ Project
 | **Developer** | Will use generated artifacts to build | Artifact quality issues, missing technical detail, export problems |
 | **Designer** | Evaluates visual output quality | Mockup quality, markup image usefulness, visual polish |
 | **Non-technical friend** | Tests discoverability and clarity | Confusing UX, unclear terminology, broken onboarding |
-| **Someone on mobile** | Tests responsive experience | Layout breaks, touch issues, inaccessible features |
 
 ### Specific Tasks to Assign
 
@@ -774,7 +750,6 @@ Copy-paste this to send to testers:
 > 2. Click the settings gear icon and paste this API key: [KEY]
 > 3. Try to create a project for any app idea you have
 > 4. Explore — generate a spec, try to improve it, generate artifacts, export your work
-> 5. Try it on your phone too if you can
 >
 > **After you're done**, please answer these quick questions:
 > - What did you think the tool was for?
@@ -994,25 +969,7 @@ OVERALL
 
 ---
 
-### Risk 10: Mobile Layout — Hidden Sidebar and Dense UIs
-
-**Location:** `src/components/ProjectWorkspace.tsx` — right sidebar uses `hidden lg:flex`
-
-**Risk:** On screens below the `lg` breakpoint (1024px), the entire right sidebar (branches, history tabs) is hidden. There's no hamburger menu or alternative access. Branch-related workflows are completely inaccessible on mobile.
-
-**Symptoms:**
-- No way to view, create, or manage branches on mobile
-- No access to history sidebar on mobile
-- Dense artifact views difficult to read on small screens
-- Modals may extend beyond viewport
-
-**Manual test:** Use Chrome DevTools device emulation (iPhone 14, iPad). Navigate through all stages. Verify branches can or cannot be accessed. Check modal positioning.
-
-**Severity:** High
-
----
-
-### Risk 11: Staleness Detection Logic
+### Risk 10: Staleness Detection Logic
 
 **Location:** `src/store/projectStore.ts` — `getArtifactStaleness()` method
 
@@ -1030,7 +987,7 @@ OVERALL
 
 ---
 
-### Risk 12: API Key in Plaintext localStorage
+### Risk 11: API Key in Plaintext localStorage
 
 **Location:** `src/components/SettingsModal.tsx`, `src/lib/llmProvider.ts` — `localStorage.getItem('GEMINI_API_KEY')`
 
@@ -1107,7 +1064,6 @@ Pixel-level comparisons catch CSS regressions that functional tests miss. Playwr
 | V-1 | **MarkupImageRenderer SVG output.** Screenshot the rendered SVG for a known mockup payload. | SVG rendering is sensitive to viewBox, font metrics, and stroke widths — invisible to DOM-based assertions. | Clipped SVG, wrong colors, missing text labels, broken gradients. | P2 |
 | V-2 | **Structured renderers** — `ScreenInventoryRenderer`, `DataModelRenderer`, `ComponentInventoryRenderer`. | These renderers display complex tabular/graph-like data; layout shifts are common after Tailwind changes. | Overlapping columns, truncated cell content, missing rows, broken responsive layout. | P2 |
 | V-3 | **Empty / loading / error states.** Screenshot each major view in its empty, loading, and error variants. | These states are seen frequently (first launch, slow API, invalid key) but rarely tested visually. | Spinner misaligned, empty state text overlapping CTA button, error banner hidden behind other elements. | P2 |
-| V-4 | **Mobile responsive breakpoints.** Screenshot at 375px (iPhone SE), 768px (iPad), and 1024px (small laptop). | Tailwind breakpoint changes can silently break mobile layout. | Horizontal scroll on mobile, touch targets too small, hidden navigation. | P3 |
 
 ---
 
@@ -1200,21 +1156,7 @@ Settings are persisted in localStorage alongside project data.
 
 ---
 
-### 9.6 Mobile Testing
-
-Synapse uses Tailwind responsive breakpoints. Test mobile layouts using:
-
-1. **Chrome DevTools Device Mode** — Toggle the device toolbar (`Ctrl+Shift+M` / `Cmd+Shift+M`). Test at these presets:
-   - iPhone SE (375 x 667)
-   - iPhone 14 Pro (393 x 852)
-   - iPad (768 x 1024)
-2. **Real Devices** — If available, test on a physical iPhone (Safari) and Android phone (Chrome). Focus on touch interactions: tap targets, scroll behavior, and modal dismissal.
-
-> **Note:** Synapse is a desktop-first productivity tool. Mobile is a secondary concern, but the app should remain usable (no horizontal scroll, no overlapping elements, all controls reachable).
-
----
-
-### 9.7 How to Reset Application State
+### 9.6 How to Reset Application State
 
 All Synapse data lives in a single localStorage entry. To reset to a clean slate:
 
@@ -1235,7 +1177,7 @@ localStorage.removeItem('synapse-projects-storage'); location.reload();
 
 ---
 
-### 9.8 How to Inspect Application State
+### 9.7 How to Inspect Application State
 
 The Zustand store persists its entire state tree to localStorage as JSON. To inspect it:
 
@@ -1254,18 +1196,18 @@ Key things to look for:
 
 ---
 
-### 9.9 Debug Tooling
+### 9.8 Debug Tooling
 
 | Tool | What It Shows | How to Access |
 |------|---------------|---------------|
 | **Browser Console** | Debounced storage writes log when the store persists to localStorage. Uncaught errors and React warnings also appear here. | DevTools → Console. Filter by `[store]` or `[persist]` if log noise is high. |
 | **Network Tab** | All Gemini API calls (`generativelanguage.googleapis.com`). Inspect request payloads (prompt, generation config) and response bodies (generated JSON/text). | DevTools → Network. Filter by `generativelanguage` to isolate API traffic. |
 | **React DevTools** (optional) | Component tree, props, and Zustand hook values. Useful for debugging why a component is not re-rendering. | Install the React DevTools browser extension. |
-| **Application Tab** | localStorage contents (see Section 9.8). Also shows service workers, cache storage, and cookies (Synapse uses none of these). | DevTools → Application. |
+| **Application Tab** | localStorage contents (see Section 9.7). Also shows service workers, cache storage, and cookies (Synapse uses none of these). | DevTools → Application. |
 
 ---
 
-### 9.10 Seed Data and Example Projects
+### 9.9 Seed Data and Example Projects
 
 Synapse does not ship with seed data or example projects. Every test run starts from an empty state (after a localStorage reset). To create test data:
 
@@ -1276,13 +1218,13 @@ Synapse does not ship with seed data or example projects. Every test run starts 
 
 ---
 
-### 9.11 Architecture Notes for Testers
+### 9.10 Architecture Notes for Testers
 
 | Aspect | Detail |
 |--------|--------|
 | **No backend / no database** | Synapse is a pure client-side SPA. There is no server, no database, and no authentication. All data lives in the browser's localStorage. |
 | **No feature flags** | Every feature is always on. There are no toggles, A/B tests, or staged rollouts to worry about. |
-| **No database reset needed** | Since there is no database, the only "reset" is clearing localStorage (Section 9.7). |
+| **No database reset needed** | Since there is no database, the only "reset" is clearing localStorage (Section 9.6). |
 | **API calls are client-side** | Gemini API calls go directly from the browser to Google's API. There is no backend proxy. This means the API key is visible in the Network tab — this is expected for a client-side tool. |
 | **Vercel deployment** | Production and preview deploys are hosted on Vercel. Each PR gets a unique preview URL. Test preview deployments the same way you test locally — the only difference is the URL. |
 | **No environment variables at build time** | The app does not read from `.env` or process environment variables. All configuration (API key, model selection) is entered at runtime via the Settings modal. |
@@ -1299,7 +1241,7 @@ Copy and paste the template below for each bug found during testing.
 - **Bug ID:** BUG-___
 - **Title:** [Short description of the issue]
 - **Severity:** [ ] Critical / [ ] High / [ ] Medium / [ ] Low
-- **Area:** [ ] HomePage / [ ] PRD / [ ] Branches / [ ] Mockups / [ ] Artifacts / [ ] Markup Images / [ ] Export / [ ] Settings / [ ] History / [ ] Persistence / [ ] Mobile
+- **Area:** [ ] HomePage / [ ] PRD / [ ] Branches / [ ] Mockups / [ ] Artifacts / [ ] Markup Images / [ ] Export / [ ] Settings / [ ] History / [ ] Persistence
 
 **Steps to Reproduce:**
 1.
@@ -1319,7 +1261,6 @@ Copy and paste the template below for each bug found during testing.
 - Browser:
 - Version:
 - OS:
-- Device (if mobile):
 
 **Console Errors (if any):**
 ```
