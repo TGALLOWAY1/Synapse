@@ -7,10 +7,14 @@ Synapse is an AI-native product definition environment. It transforms the tradit
 ## 🌟 Core Features
 
 ### 1. Intelligent PRD Canvas
+ <img width="1045" height="1102" alt="image" src="https://github.com/user-attachments/assets/ed691a28-3228-4322-a9cc-11f0d671eada" />
+
 Start with a raw brain-dump prompt and watch Synapse generate a highly structured, comprehensive product specification.
 - **Spine Versioning:** Full history tracking of every structural change to your primary document (the "Spine").
 - **Branch-based Refinement:** Highlight any text to spawn an active workspace branch. Discuss and debate specific approaches within isolated threads.
 - **Consolidation Engine:** Ready to merge? The engine synthesizes individual branch decisions back into a new unified PRD iteration.
+
+<img width="1046" height="445" alt="image" src="https://github.com/user-attachments/assets/0afed4ad-edf5-4aa0-924a-d4402cf70051" />
 
 ### 2. Multi-Fidelity UI Mockups
 Bring your specs to life instantly without touching Figma.
@@ -19,16 +23,22 @@ Bring your specs to life instantly without touching Figma.
 - **A/B Comparison:** Evolve mockups over time and compare distinct iterations side-by-side using the built-in diff viewer.
 
 <img width="100%" alt="Mockups Comparison View" src="public/screenshots/mockups-compare.png" />
+<img width="1267" height="1021" alt="image" src="https://github.com/user-attachments/assets/b75a52c2-5f95-4a0c-b45a-55aba19c30b3" />
+
 
 ### 3. Integrated Feedback Loop
 Close the gap between design reviews and product specs.
 - Extract structured feedback directly from generated Mockups.
 - Feedback surfaces into the core PRD stage as an actionable "Apply" card.
 - Automatically spin up a localized PRD branch to address the visual critique.
+<img width="1042" height="856" alt="image" src="https://github.com/user-attachments/assets/6e05657a-715d-45c5-8aa2-c76e5640312d" />
 
 <img width="100%" alt="Feedback UI" src="public/screenshots/prd-feedback.png" />
 
 ### 4. Downstream Artifact Generation
+<img width="1036" height="1159" alt="image" src="https://github.com/user-attachments/assets/cf5eb59f-cbd2-48f2-89c2-0a8aba54f2c1" />
+
+
 Don't write boilerplates. Synapse extracts the exact context into developer-ready output files.
 - Automatically spool up 7 dynamic derivatives from the PRD:
   - 🎨 **Screen Inventory** & **User Flows**
