@@ -3,7 +3,6 @@ import { useProjectStore } from '../projectStore';
 
 // Reset store state before each test
 beforeEach(() => {
-    const store = useProjectStore.getState();
     useProjectStore.setState({
         projects: {},
         spineVersions: {},
@@ -22,7 +21,7 @@ describe('projectStore', () => {
     describe('createProject', () => {
         it('creates a project with initial spine and history event', () => {
             const store = useProjectStore.getState();
-            const { projectId, spineId } = store.createProject('Test Project', 'Build a todo app');
+            const { projectId } = store.createProject('Test Project', 'Build a todo app');
 
             const project = useProjectStore.getState().projects[projectId];
             expect(project).toBeDefined();
@@ -43,8 +42,7 @@ describe('projectStore', () => {
 
     describe('getLatestSpine', () => {
         it('returns the latest spine version', () => {
-            const store = useProjectStore.getState();
-            const { projectId } = store.createProject('Test', 'prompt');
+            const { projectId } = useProjectStore.getState().createProject('Test', 'prompt');
             const spine = useProjectStore.getState().getLatestSpine(projectId);
             expect(spine).toBeDefined();
             expect(spine?.isLatest).toBe(true);
@@ -134,9 +132,9 @@ describe('projectStore', () => {
                 projectId, 'core_artifact', 'Screen Inventory', 'screen_inventory'
             );
 
-            const { versionId: v1 } = useProjectStore.getState().createArtifactVersion(
+            useProjectStore.getState().createArtifactVersion(
                 projectId, artifactId, '# Screen Inventory v1', {},
-                [{ type: 'spine', artifactId: projectId, versionId: spineId }],
+                [{ id: 'ref1', sourceArtifactId: projectId, sourceArtifactVersionId: spineId, sourceType: 'spine' }],
                 'Generate screen inventory'
             );
 
@@ -148,7 +146,7 @@ describe('projectStore', () => {
             // Create second version
             const { versionId: v2 } = useProjectStore.getState().createArtifactVersion(
                 projectId, artifactId, '# Screen Inventory v2', {},
-                [{ type: 'spine', artifactId: projectId, versionId: spineId }],
+                [{ id: 'ref1', sourceArtifactId: projectId, sourceArtifactVersionId: spineId, sourceType: 'spine' }],
                 'Regenerate screen inventory'
             );
 
@@ -166,7 +164,7 @@ describe('projectStore', () => {
             const store = useProjectStore.getState();
             const { projectId, spineId } = store.createProject('Test', 'prompt');
 
-            const { branchId } = useProjectStore.getState().createBranch(
+            useProjectStore.getState().createBranch(
                 projectId, spineId, 'selected text snippet', 'Clarify this section'
             );
 
