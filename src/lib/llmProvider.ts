@@ -23,7 +23,7 @@ const callGemini = async (systemInstruction: string, promptText: string, jsonMod
     const startTime = performance.now();
     const apiKey = getApiKey();
     const model = getModel();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
     const body: Record<string, unknown> = {
         systemInstruction: {
@@ -45,6 +45,7 @@ const callGemini = async (systemInstruction: string, promptText: string, jsonMod
         method: 'POST',
         headers: {
             'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
         },
         body: JSON.stringify(body),
         signal,
@@ -77,7 +78,7 @@ const callGeminiStream = async (
     const startTime = performance.now();
     const apiKey = getApiKey();
     const model = getModel();
-    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse&key=${apiKey}`;
+    const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
 
     const body = {
         systemInstruction: { parts: [{ text: systemInstruction }] },
@@ -86,7 +87,10 @@ const callGeminiStream = async (
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
+        headers: {
+            'Content-Type': 'application/json',
+            'x-goog-api-key': apiKey,
+        },
         body: JSON.stringify(body),
         signal,
     });

@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useEffect, useRef } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -31,35 +31,3 @@ export function StreamingText({ content, isStreaming, className }: StreamingText
     );
 }
 
-/** Hook to accumulate streaming text chunks */
-export function useStreamingText() {
-    const [streamingContent, setStreamingContent] = useState('');
-    const [isStreaming, setIsStreaming] = useState(false);
-
-    const startStream = () => {
-        setStreamingContent('');
-        setIsStreaming(true);
-    };
-
-    const appendChunk = (chunk: string) => {
-        setStreamingContent(prev => prev + chunk);
-    };
-
-    const endStream = () => {
-        setIsStreaming(false);
-    };
-
-    const resetStream = () => {
-        setStreamingContent('');
-        setIsStreaming(false);
-    };
-
-    return {
-        streamingContent,
-        isStreaming,
-        startStream,
-        appendChunk,
-        endStream,
-        resetStream,
-    };
-}

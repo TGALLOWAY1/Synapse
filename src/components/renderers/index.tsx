@@ -20,16 +20,26 @@ const STRUCTURED_RENDERERS: Partial<Record<CoreArtifactSubtype, RendererComponen
 /**
  * Render artifact content using a type-specific renderer if available,
  * falling back to ReactMarkdown for markdown content.
+ *
+ * Structured renderers expect JSON content. Since generateCoreArtifact()
+ * converts JSON responses to markdown via structuredArtifactToMarkdown()
+ * before storage, content is typically markdown. We check if the content
+ * is valid JSON before attempting the structured renderer path.
  */
+function isJsonString(str: string): boolean {
+    try {
+        JSON.parse(str);
+        return true;
+    } catch {
+        return false;
+    }
+}
+
 export function ArtifactContentRenderer({ subtype, content }: { subtype: CoreArtifactSubtype; content: string }) {
-    // Try structured renderer first
     const StructuredRenderer = STRUCTURED_RENDERERS[subtype];
-    if (StructuredRenderer) {
-        const rendered = <StructuredRenderer content={content} />;
-        // If the structured renderer returns null (couldn't parse), fall back to markdown
-        if (rendered !== null) return rendered;
+    if (StructuredRenderer && isJsonString(content)) {
+        return <StructuredRenderer content={content} />;
     }
 
-    // Default: markdown rendering
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
 }

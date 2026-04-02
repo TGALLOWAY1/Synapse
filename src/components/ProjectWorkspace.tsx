@@ -33,6 +33,7 @@ export function ProjectWorkspace() {
     const [activeCanvasBranchId, setActiveCanvasBranchId] = useState<string | null>(null);
     const [showStructuredView, setShowStructuredView] = useState(true);
     const [showNavOverflow, setShowNavOverflow] = useState(false);
+    const [isExportOpen, setIsExportOpen] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
     const [animationParent] = useAutoAnimate();
 
@@ -118,8 +119,6 @@ export function ProjectWorkspace() {
         if (!projectId || !activeSpine) return;
         markSpineFinal(projectId, activeSpine.id, !activeSpine.isFinal);
     };
-
-    const [isExportOpen, setIsExportOpen] = useState(false);
 
     const handleExport = () => {
         setIsExportOpen(true);
