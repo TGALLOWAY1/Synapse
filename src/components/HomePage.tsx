@@ -1,12 +1,11 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import type { Project } from '../types';
 import { Plus, Settings, Trash2 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 
 export function HomePage() {
-    const { projects, createProject, deleteProject, getLatestSpine, getLatestDevPlan, getAgentPrompts } = useProjectStore();
+    const { projects, createProject, deleteProject, getLatestSpine } = useProjectStore();
     const navigate = useNavigate();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
@@ -38,6 +37,13 @@ export function HomePage() {
                         `**Error generating PRD:**\n${errorMsg}\n\nPlease verify your API Key in Settings or check your network connection.`
                     );
                 });
+        }).catch((e) => {
+            const errorMsg = e instanceof Error ? e.message : String(e);
+            useProjectStore.getState().updateSpineText(
+                projectId,
+                spineId,
+                `**Error loading generation module:**\n${errorMsg}\n\nPlease try refreshing the page.`
+            );
         });
     };
 
@@ -64,19 +70,17 @@ export function HomePage() {
             </div>
 
             <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-                {Object.values(projects).map((project: unknown) => {
-                    const p = project as Project;
+                {Object.values(projects).map((p) => {
                     const spine = getLatestSpine(p.id);
-                    const hasDevPlan = !!getLatestDevPlan(p.id);
-                    const hasPrompts = getAgentPrompts(p.id).length > 0;
-                    const stageBadge = hasPrompts ? 'Prompts' : hasDevPlan ? 'Dev Plan' : spine?.isFinal ? 'PRD Final' : 'PRD';
-                    const stageColor = hasPrompts
-                        ? 'bg-purple-900/30 text-purple-400 border-purple-800'
-                        : hasDevPlan
-                            ? 'bg-emerald-900/30 text-emerald-400 border-emerald-800'
-                            : spine?.isFinal
-                                ? 'bg-green-900/30 text-green-400 border-green-800'
-                                : 'bg-neutral-700 text-neutral-400 border-neutral-600';
+                    const stage = p.currentStage || 'prd';
+                    const stageBadges: Record<string, { label: string; color: string }> = {
+                        history: { label: 'History', color: 'bg-purple-900/30 text-purple-400 border-purple-800' },
+                        artifacts: { label: 'Artifacts', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800' },
+                        mockups: { label: 'Mockups', color: 'bg-blue-900/30 text-blue-400 border-blue-800' },
+                    };
+                    const badge = stageBadges[stage] || (spine?.isFinal
+                        ? { label: 'PRD Final', color: 'bg-green-900/30 text-green-400 border-green-800' }
+                        : { label: 'PRD', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' });
 
                     return (
                         <div
@@ -91,8 +95,8 @@ export function HomePage() {
                                 <p className="text-sm text-neutral-400">
                                     {new Date(p.createdAt).toLocaleDateString()}
                                 </p>
-                                <span className={`text-xs px-2 py-0.5 rounded border ${stageColor}`}>
-                                    {stageBadge}
+                                <span className={`text-xs px-2 py-0.5 rounded border ${badge.color}`}>
+                                    {badge.label}
                                 </span>
                             </div>
                             <button
