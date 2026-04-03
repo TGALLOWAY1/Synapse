@@ -137,11 +137,11 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
                 </div>
 
                 {/* Right: Canvas Area */}
-                <div className="flex-1 bg-neutral-900 overflow-y-auto p-12 relative flex items-center justify-center dashboard-grid">
+                <div className="flex-1 bg-neutral-900 overflow-y-auto p-6 relative flex items-center justify-center dashboard-grid">
                     {/* Dashboard grid background class (assume tailwind or simple inline defined later, using rough inline bg for now) */}
                     <div className="absolute inset-0 opacity-10 pointer-events-none" style={{ backgroundImage: 'radial-gradient(circle at 1px 1px, white 1px, transparent 0)', backgroundSize: '24px 24px' }}></div>
 
-                    <div className="relative z-10 w-full max-w-4xl flex flex-col items-center">
+                    <div className="relative z-10 w-full max-w-6xl flex flex-col items-center h-full">
                         {drafts.length === 0 ? (
                             <div className="text-center">
                                 <Maximize2 size={48} className="mx-auto text-neutral-600 mb-6" />
@@ -159,14 +159,14 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
                                 </button>
                             </div>
                         ) : (
-                            <div className="w-full">
-                                <h3 className="text-lg font-medium text-neutral-200 mb-6 text-center">Select an Approach Artifact</h3>
-                                <div className="grid grid-cols-2 gap-6 w-full">
+                            <div className="w-full flex flex-col flex-1 min-h-0">
+                                <h3 className="text-lg font-medium text-neutral-200 mb-6 text-center shrink-0">Select an Approach Artifact</h3>
+                                <div className="grid grid-cols-2 gap-6 w-full flex-1 min-h-0">
                                     {drafts.map(draft => (
                                         <button
                                             key={draft.id}
                                             onClick={() => setSelectedDraftId(draft.id)}
-                                            className={`text-left p-6 rounded-xl border-2 transition-all flex flex-col h-64 ${selectedDraftId === draft.id ? 'bg-indigo-900/20 border-indigo-500 shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'bg-neutral-800 border-neutral-700 hover:border-neutral-500'}`}
+                                            className={`text-left p-6 rounded-xl border-2 transition-all flex flex-col min-h-[60vh] ${selectedDraftId === draft.id ? 'bg-indigo-900/20 border-indigo-500 shadow-[0_0_30px_rgba(59,130,246,0.15)]' : 'bg-neutral-800 border-neutral-700 hover:border-neutral-500'}`}
                                         >
                                             <h4 className={`font-semibold mb-3 ${selectedDraftId === draft.id ? 'text-indigo-400' : 'text-neutral-200'}`}>{draft.title}</h4>
                                             <div className="flex-1 bg-neutral-900/50 rounded p-4 border border-black/20 overflow-y-auto font-mono text-sm text-neutral-400 whitespace-pre-wrap">
