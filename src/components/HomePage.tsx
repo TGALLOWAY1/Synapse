@@ -142,9 +142,6 @@ export function HomePage() {
             <div className="flex items-center justify-between px-6 py-4">
                 <div className="flex items-center gap-3">
                     <h1 className="text-2xl font-bold tracking-tight">Synapse</h1>
-                    <span className="text-[10px] font-medium tracking-wider uppercase px-2 py-0.5 rounded-full border border-neutral-600 text-neutral-400">
-                        Beta
-                    </span>
                 </div>
                 <div className="flex items-center gap-2">
                     <button
@@ -172,9 +169,9 @@ export function HomePage() {
                         <div className="flex justify-center mb-8">
                             <div
                                 onClick={() => navigate('/about')}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-neutral-600 bg-neutral-800/60 text-sm text-neutral-300 hover:border-neutral-500 hover:text-white cursor-pointer transition"
+                                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 cursor-pointer transition"
                             >
-                                <span>Meet the new Synapse</span>
+                                <span>Meet Synapse</span>
                                 <button
                                     onClick={dismissMeet}
                                     className="p-0.5 hover:bg-white/10 rounded transition"
