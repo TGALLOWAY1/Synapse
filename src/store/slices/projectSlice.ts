@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Project, HistoryEvent, PipelineStage } from '../../types';
+import type { Project, HistoryEvent, PipelineStage, ProjectPlatform } from '../../types';
 import type { ProjectState } from '../types';
 
 export type ProjectSlice = {
@@ -17,13 +17,14 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     projects: {},
     historyEvents: {},
 
-    createProject: (name: string, promptText: string) => {
+    createProject: (name: string, promptText: string, platform?: ProjectPlatform) => {
         const projectId = uuidv4();
         const now = Date.now();
         const newProject: Project = {
             id: projectId,
             name,
             createdAt: now,
+            ...(platform && { platform }),
         };
 
         const initialSpine = {

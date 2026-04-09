@@ -1,6 +1,6 @@
 import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
-    DevPlan, Milestone, AgentPrompt, PipelineStage,
+    DevPlan, Milestone, AgentPrompt, PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
     SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState
 } from '../types';
@@ -19,7 +19,7 @@ export interface ProjectState {
     feedbackItems: Record<string, FeedbackItem[]>;
 
     // Existing actions
-    createProject: (name: string, promptText: string) => { projectId: string, spineId: string };
+    createProject: (name: string, promptText: string, platform?: ProjectPlatform) => { projectId: string, spineId: string };
     updateSpineText: (projectId: string, spineId: string, text: string) => void;
     regenerateSpine: (projectId: string) => { newSpineId: string };
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => void;

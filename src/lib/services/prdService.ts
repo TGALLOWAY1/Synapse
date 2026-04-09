@@ -1,7 +1,26 @@
-import type { StructuredPRD, Milestone, AgentTarget } from '../../types';
+import type { StructuredPRD, Milestone, AgentTarget, ProjectPlatform } from '../../types';
 import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { structuredPRDSchema, devPlanSchema, agentPromptSchema, targetLabels } from '../schemas/prdSchemas';
+
+const PLATFORM_CONTEXT: Record<ProjectPlatform, string> = {
+    app: 'The user is building a native mobile application (iOS/Android). Focus on mobile-specific patterns: touch interactions, offline support, push notifications, device APIs, responsive mobile layouts, and app store distribution.',
+    web: 'The user is building a web application. Focus on web-specific patterns: responsive design, browser compatibility, SEO, progressive enhancement, URL routing, and web deployment.',
+};
+
+export const enhancePrompt = async (rawPrompt: string): Promise<string> => {
+    const system = `You are an expert product consultant. The user has written a rough product idea. Your job is to expand it into a clear, detailed product description that will produce an excellent PRD.
+
+Rules:
+- Keep the user's core idea and intent intact
+- Add specificity: target users, key features, differentiators, and technical considerations
+- Keep it to 2-3 paragraphs maximum
+- Write in a natural, descriptive style (not bullet points)
+- Do NOT add markdown formatting
+- Return ONLY the enhanced prompt text, nothing else`;
+
+    return await callGemini(system, rawPrompt);
+};
 
 export interface GeneratedAgentPrompt {
     branchName: string;
@@ -12,8 +31,10 @@ export interface GeneratedAgentPrompt {
     rawPromptText: string;
 }
 
-export const generateStructuredPRD = async (promptText: string, options?: ProviderOptions): Promise<StructuredPRD> => {
+export const generateStructuredPRD = async (promptText: string, options?: ProviderOptions, platform?: ProjectPlatform): Promise<StructuredPRD> => {
     options?.onStatus?.("Generating structured PRD with Gemini...");
+
+    const platformNote = platform ? `\n\n${PLATFORM_CONTEXT[platform]}` : '';
 
     const system = `You are an expert product manager. Generate a structured Product Requirements Document based on the user's idea.
 
@@ -27,7 +48,7 @@ Provide:
 - Non-functional requirements (performance, security, accessibility, etc.)
 - Constraints (budget, timeline, technical, regulatory)
 
-Each acceptance criterion must be testable and specific. Prioritize features using MoSCoW: "must" for launch-critical, "should" for important, "could" for nice-to-have.`;
+Each acceptance criterion must be testable and specific. Prioritize features using MoSCoW: "must" for launch-critical, "should" for important, "could" for nice-to-have.${platformNote}`;
 
     const result = await callGemini(
         system,
