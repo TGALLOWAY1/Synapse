@@ -1,11 +1,14 @@
 // Navigation stages
 export type PipelineStage = 'prd' | 'mockups' | 'artifacts' | 'history';
 
+export type ProjectPlatform = 'app' | 'web';
+
 export type Project = {
     id: string;
     name: string;
     createdAt: number;
     currentStage?: PipelineStage;
+    platform?: ProjectPlatform;
 };
 
 export type BranchMessage = {

@@ -7,3 +7,12 @@
     @apply bg-neutral-900 text-neutral-100 antialiased;
   }
 }
+
+/* Hide scrollbar for horizontal scroll areas */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
