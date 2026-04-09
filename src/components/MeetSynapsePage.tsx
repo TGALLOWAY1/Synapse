@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
-import { ArrowLeft, ArrowRight, AlertTriangle } from 'lucide-react';
+import { ArrowLeft, ArrowRight } from 'lucide-react';
+import { InfographicGallery } from './infographics';
 
 export function MeetSynapsePage() {
     const navigate = useNavigate();
@@ -28,22 +29,8 @@ export function MeetSynapsePage() {
                         An AI-native product definition environment that transforms your ideas into complete product specifications.
                     </p>
 
-                    {/* Placeholder banner */}
-                    <div className="flex items-center gap-3 px-4 py-3 mb-6 rounded-xl border border-amber-500/30 bg-amber-500/10 text-amber-300 text-sm">
-                        <AlertTriangle size={18} className="shrink-0" />
-                        <span>
-                            This infographic is a placeholder — the final version is in progress.
-                        </span>
-                    </div>
-
                     {/* Pipeline infographic */}
-                    <div className="rounded-2xl border border-neutral-700/50 bg-neutral-800/30 overflow-hidden">
-                        <img
-                            src="/synapse-pipeline.png"
-                            alt="Synapse Pipeline — AI-Native Product Definition System infographic showing the four stages: PRD Generation, UI Mockups, Artifacts, and History & Iteration"
-                            className="w-full h-auto"
-                        />
-                    </div>
+                    <InfographicGallery />
 
                     {/* CTA */}
                     <div className="mt-10 text-center">
