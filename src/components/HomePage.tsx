@@ -135,6 +135,12 @@ export function HomePage() {
     };
 
     const canSubmit = projectName.trim() && promptText.trim();
+    const needsProjectName = promptText.trim() && !projectName.trim();
+    const submitTitle = !promptText.trim()
+        ? 'Enter a prompt to generate a PRD'
+        : !projectName.trim()
+            ? 'Enter a project name to continue'
+            : 'Generate PRD';
 
     return (
         <div className="min-h-screen flex flex-col">
@@ -209,13 +215,27 @@ export function HomePage() {
                                     type="text"
                                     value={projectName}
                                     onChange={(e) => setProjectName(e.target.value)}
-                                    className="w-full bg-transparent text-sm text-neutral-300 placeholder-neutral-600 focus:outline-none"
-                                    placeholder="Project name..."
+                                    className={`w-full bg-transparent text-sm text-neutral-300 focus:outline-none ${
+                                        needsProjectName
+                                            ? 'placeholder-amber-400/80'
+                                            : 'placeholder-neutral-600'
+                                    }`}
+                                    placeholder={
+                                        needsProjectName
+                                            ? 'Project name required to continue...'
+                                            : 'Project name...'
+                                    }
+                                    aria-required="true"
+                                    aria-invalid={needsProjectName ? 'true' : 'false'}
                                 />
                             </div>
 
                             {/* Divider */}
-                            <div className="mx-5 my-2 border-t border-neutral-700/50" />
+                            <div
+                                className={`mx-5 my-2 border-t transition-colors ${
+                                    needsProjectName ? 'border-amber-500/40' : 'border-neutral-700/50'
+                                }`}
+                            />
 
                             {/* Textarea */}
                             <div className="px-5">
@@ -279,6 +299,13 @@ export function HomePage() {
                                 </div>
 
                                 <div className="flex items-center gap-2">
+                                    {/* Inline hint when prompt is ready but name is missing */}
+                                    {needsProjectName && (
+                                        <span className="text-xs text-amber-400/90 hidden sm:inline">
+                                            Add a project name to continue
+                                        </span>
+                                    )}
+
                                     {/* Enhance prompt */}
                                     <button
                                         type="button"
@@ -296,7 +323,8 @@ export function HomePage() {
                                         type="submit"
                                         disabled={!canSubmit}
                                         className="p-2.5 bg-indigo-600 text-white rounded-xl hover:bg-indigo-700 transition disabled:opacity-30 disabled:cursor-not-allowed"
-                                        title="Generate PRD"
+                                        title={submitTitle}
+                                        aria-label={submitTitle}
                                     >
                                         <ArrowUp size={18} />
                                     </button>
