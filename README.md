@@ -1,164 +1,158 @@
-# Synapse PRD 🧠
+# Synapse
 
-Synapse is an AI-native product definition environment. It transforms the traditional Product Requirements Document (PRD) from a static text file into a **dynamic, spec-driven pipeline** spanning mockups, architecture, artifact extraction, and branching feedback loops.
+**Turn a brain-dump into a versioned PRD, UI mockups, and developer-ready artifacts — all from one prompt.**
 
 <img width="100%" alt="Synapse Workspace Preview" src="public/screenshots/prd-view.png" />
 
-## 🌟 Core Features
-
-### 1. Intelligent PRD Canvas
- <img width="1045" height="1102" alt="image" src="https://github.com/user-attachments/assets/ed691a28-3228-4322-a9cc-11f0d671eada" />
-
-Start with a raw brain-dump prompt and watch Synapse generate a highly structured, comprehensive product specification.
-- **Spine Versioning:** Full history tracking of every structural change to your primary document (the "Spine").
-- **Branch-based Refinement:** Highlight any text to spawn an active workspace branch. Discuss and debate specific approaches within isolated threads.
-- **Consolidation Engine:** Ready to merge? The engine synthesizes individual branch decisions back into a new unified PRD iteration.
-
-<img width="1046" height="445" alt="image" src="https://github.com/user-attachments/assets/0afed4ad-edf5-4aa0-924a-d4402cf70051" />
-
-### 2. Multi-Fidelity UI Mockups
-Bring your specs to life instantly without touching Figma.
-- **Insta-Mockups:** Generate text and structural-based UI mockups directly from the finalized PRD.
-- **Deep Configuration:** Tweak platforms (Mobile/Desktop), fidelity levels (Wireframe, Mid-Fi, High-Fi), and scopes (Single Screen vs Workflow).
-- **A/B Comparison:** Evolve mockups over time and compare distinct iterations side-by-side using the built-in diff viewer.
-
-<img width="100%" alt="Mockups Comparison View" src="public/screenshots/mockups-compare.png" />
-<img width="1267" height="1021" alt="image" src="https://github.com/user-attachments/assets/b75a52c2-5f95-4a0c-b45a-55aba19c30b3" />
-
-
-### 3. Integrated Feedback Loop
-Close the gap between design reviews and product specs.
-- Extract structured feedback directly from generated Mockups.
-- Feedback surfaces into the core PRD stage as an actionable "Apply" card.
-- Automatically spin up a localized PRD branch to address the visual critique.
-<img width="1042" height="856" alt="image" src="https://github.com/user-attachments/assets/6e05657a-715d-45c5-8aa2-c76e5640312d" />
-
-<img width="100%" alt="Feedback UI" src="public/screenshots/prd-feedback.png" />
-
-### 4. Downstream Artifact Generation
-<img width="1036" height="1159" alt="image" src="https://github.com/user-attachments/assets/cf5eb59f-cbd2-48f2-89c2-0a8aba54f2c1" />
-
-
-Don't write boilerplates. Synapse extracts the exact context into developer-ready output files.
-- Automatically spool up 7 dynamic derivatives from the PRD:
-  - 🎨 **Screen Inventory** & **User Flows**
-  - 🧩 **Component Library** & **Design System**
-  - 🗄️ **Data Model Schemas**
-  - 🚀 **Implementation Roadmaps** & **Prompt Packs**
-- **Staleness Tracking:** Visual indicators alert you when an Artifact is out-of-sync with an updated PRD.
-- **Artifact Refinement:** Refine any generated artifact with natural language instructions instead of regenerating from scratch.
-- **Type-Specific Rendering:** Screen inventories display as card grids, data models as entity tables, component inventories as categorized cards.
-- **Output Validation:** Automatic quality checks flag truncated or malformed output with warning indicators.
-
-### 5. Markup Image Artifacts
-Generate visual annotation artifacts directly from your PRD context.
-- **5 Annotation Types:** Screenshot annotations, critique boards, wireframe callouts, flow annotations, and design feedback boards.
-- **SVG Rendering:** Annotations render as resolution-independent SVG with highlights, callouts, arrows, numbered markers, and text blocks.
-- **Export:** Download annotations as SVG files.
-
-### 6. Architectural Timeline (History)
-Your product's evolution, visualized chronologically. From initial spawn, to branched decision-making, to artifact derivations.
-
-<img width="100%" alt="History View" src="public/screenshots/history-view.png" />
+<!-- TODO: Replace the static screenshot above with a short demo GIF showing: prompt → PRD generation → highlight-to-branch → mockups → artifacts. -->
 
 ---
 
-## 🛠️ Data Architecture & UX Flow
+## Why this project exists
 
-```mermaid
-graph TD
-    A[Initial Prompt] -->|LLM Synthesis| B(Core PRD Spine)
-    B --> C{Active Canvas}
-    C -->|Highlight & Ask| D[Threaded Branch]
-    D -->|AI Consolidation| B
-    
-    B -->|Mark Final| E{Pipeline Stages}
-    E -->|Mockups View| F[UI Generators]
-    F -->|Compare Versions| G[UX Verification]
-    G -->|Extract Feedback| D
-    
-    E -->|Artifacts View| H[Derived Doc Extracts]
-    H --> I(Data Models)
-    H --> J(User Flows)
-    H --> K(Implementation Plans)
+PRDs are usually static Google Docs that go stale the moment engineering starts. Designers re-describe the same flows in Figma, engineers re-derive schemas in Notion, and feedback from mockup reviews rarely makes it back to the spec. Synapse collapses that loop: the PRD is the source of truth, and everything downstream (mockups, schemas, roadmaps, annotations) is generated and kept in sync from it.
+
+## What it does
+
+- Generates a structured PRD from a single prompt.
+- Lets you **highlight any sentence** in the PRD to spawn a focused AI branch, then consolidates the decision back into a new spine version.
+- Generates multi-fidelity UI mockups (wireframe / mid-fi / high-fi) and compares versions side-by-side.
+- Derives 7 developer-ready artifacts from the PRD: screen inventory, user flows, component library, design system, data models, implementation roadmap, and prompt packs.
+- Surfaces mockup feedback back into the PRD as actionable "apply" cards.
+- Produces SVG markup images (critique boards, flow annotations, wireframe callouts) from PRD context.
+- Tracks the whole evolution on a chronological history timeline.
+
+## Why it is technically interesting
+
+- **Two LLM call modes** — `callGemini()` for structured JSON responses (using Gemini's `responseMimeType: "application/json"` + `responseSchema`) and `callGeminiStream()` for streaming SSE output. Three artifact types use strict JSON-mode schemas and are then rendered back as typed card grids and entity tables.
+- **Parallel artifact generation** — "Generate All" fires 7 concurrent LLM calls and streams per-card status (spinner → checkmark / red X), cutting bundle generation from ~21s to ~3–5s.
+- **Spine versioning with branching** — PRDs evolve through `SpineVersion` records with `isLatest`/`isFinal` flags; highlighted text forks a `Branch` that runs its own AI conversation and merges back via `consolidateBranch()`.
+- **Staleness tracking** — Every artifact stores source refs against the spine, so edits upstream visually flag downstream artifacts as stale and allow selective refresh.
+- **Fully client-side** — No backend DB. All state (projects, versions, branches, artifacts, history) lives in a single Zustand store persisted to `localStorage` with debounced writes. Gemini is called directly from the browser.
+
+## Architecture overview
+
+```
+User prompt
+    │
+    ▼
+generateStructuredPRD()  ──►  SpineVersion (v1, v2, v3…)
+    │                              │
+    │                              ├─► Branches  ──► consolidateBranch() ──► new SpineVersion
+    │                              │
+    │                              ├─► Mockups   (platform × fidelity × scope)
+    │                              │       └─► Feedback extraction ──► PRD branches
+    │                              │
+    │                              ├─► 7 Core Artifacts (parallel bundle gen)
+    │                              │       └─► Refinement / validation / staleness
+    │                              │
+    │                              └─► Markup Images (SVG annotations)
+    │
+    └─► HistoryView (chronological timeline of all of the above)
 ```
 
-### Tech Stack
-- **Frontend:** React 19, Vite, Tailwind CSS (Tailwind Merge, CLSX)
-- **State Management:** Zustand (with debounced LocalStorage persistence)
-- **AI/LLM Backing:** Google Gemini 2.5 Pro/Flash Pipeline (with streaming support)
-- **Markdown Processing:** React-Markdown, Remark GFM, Rehype-Raw
-- **Routing:** React Router DOM v7
-- **UI System:** Lucide React Icons, Auto-animate
+Two files carry most of the weight:
 
----
+- `src/lib/llmProvider.ts` (~950 lines) — every LLM call in the app, streaming + JSON modes, schemas for structured artifacts, markup image generation, branch consolidation.
+- `src/store/projectStore.ts` (~820 lines) — single Zustand store for Projects, SpineVersions, Branches, Artifacts, ArtifactVersions, FeedbackItems, HistoryEvents, plus legacy-data migration.
 
-## 🚀 Getting Started
+See `ARCHITECTURE.md` for a deeper dive.
 
-### Prerequisites
+### Tech stack
 
-To execute language modeling loops, you'll need an active **Gemini API Key**. 
-1. Get a key at [Google AI Studio](https://aistudio.google.com/apikey).
-2. Pass it into the UI via the top-right Settings wheel inside Synapse.
+React 19 · TypeScript · Vite 7 · Tailwind CSS 3 · Zustand 5 (persist middleware) · React Router v7 · Google Gemini API · React Markdown + Remark GFM · Lucide icons
 
-### Quick Run
+## Key features
+
+- **Intelligent PRD canvas** — prompt → structured spec with priorities, acceptance criteria, non-functional requirements.
+- **Highlight-to-branch** — select any text to open an isolated AI thread, then consolidate locally or doc-wide.
+- **Multi-fidelity mockups** — mobile/desktop × wireframe/mid-fi/high-fi × single-screen/workflow, with A/B diff viewer.
+- **7 downstream artifacts** — screen inventory, user flows, component library, design system, data models, roadmap, prompt packs.
+- **Type-specific renderers** — structured artifacts render as card grids, entity tables, and categorized components — not raw markdown.
+- **Artifact refinement** — tweak an artifact with a natural-language instruction instead of regenerating from scratch.
+- **Staleness detection** — visual warnings when the PRD has moved on beneath an artifact.
+- **Markup images** — SVG annotation boards (critique, wireframe callouts, flow annotations) generated from PRD context, exportable as SVG.
+- **History timeline** — chronological view of every spine version, branch, mockup, and artifact event.
+- **Export** — markdown and structured JSON for the PRD, individual artifacts, or the full bundle.
+
+## Demo / live link
+
+<!-- TODO: Add the Vercel deployment URL here, e.g. https://synapse-prd.vercel.app -->
+
+## Local setup
 
 ```bash
-# Install specific package locks
+git clone https://github.com/tgalloway1/synapse.git
+cd synapse
 npm install
-
-# Start the local Vite server
 npm run dev
 ```
 
-Navigate to `http://localhost:5173` to initialize your first project. All workspace sessions are cached locally allowing you to pick up exactly where you left off. 
+Then open `http://localhost:5173`, click the Settings gear in the top-right, and paste a Gemini API key.
 
-### Build for Production
+Get a free key at [Google AI Studio](https://aistudio.google.com/apikey).
+
+### Other commands
+
 ```bash
-npm run build
+npm run build       # tsc -b && vite build
+npm run lint        # ESLint (flat config)
+npm run preview     # preview the production build
+npx tsc --noEmit    # type-check without emitting
 ```
 
----
+No test script is wired up yet (Vitest and Playwright are installed but there are no test files).
 
-## ✅ Manual Verification Guide
+## Environment variables
 
-After pulling the latest changes, use this checklist to verify that everything works correctly.
+Synapse runs entirely in the browser and does **not** use `.env` files for the Gemini key. The key is entered via the in-app Settings panel and stored in `localStorage`.
 
-### Prerequisites
-1. Run `npm install` to ensure all dependencies are installed
-2. Run `npx tsc --noEmit` to verify TypeScript compiles cleanly (should produce no errors)
-3. Run `npm run dev` and open `http://localhost:5173`
-4. Add your Gemini API key via the Settings gear icon
+| Where | Name | Purpose |
+|---|---|---|
+| Browser `localStorage` | `synapse-gemini-api-key` | Google Gemini API key, set via the Settings gear in the UI |
 
-### Phase 1: Performance & Rendering
-- [ ] **Parallel bundle generation:** Create a project, mark PRD as Final, go to Artifacts, click "Generate All". Verify all 7 artifacts generate concurrently (not sequentially) — should complete in ~3-5s, not ~21s.
-- [ ] **Progress indicators:** During bundle generation, verify each artifact card shows a spinning loader icon while generating, a green checkmark when done, or a red X on error. The button should show "Generating 3 of 7..." progress.
-- [ ] **Markdown rendering:** Expand any generated artifact — verify it renders with proper markdown formatting (headers, bold, lists, tables) instead of raw monospace text.
-- [ ] **Mockup markdown:** Go to Mockups, generate a mockup — verify it renders with markdown formatting instead of monospace font.
+The `api/` directory contains three Vercel serverless functions (`generate-prd.ts`, `generate-milestones.ts`, `generate-agent-prompts.ts`) that are **legacy / unused** — the client calls Gemini directly.
 
-### Phase 2: Artifact Quality
-- [ ] **Enriched PRD:** Create a new project — verify the generated PRD includes priority levels (must/should/could), acceptance criteria per feature, and non-functional requirements sections.
-- [ ] **Structured prompts:** Generate individual artifacts — verify screen inventories use the format `### [Screen Name]` with Purpose/Components/Navigation/Priority sections. Data models should include field tables.
-- [ ] **Artifact refinement:** Expand a generated artifact, click "Refine", type an instruction (e.g., "Add error states to each screen"), click Apply. Verify a new version is created with the requested changes.
-- [ ] **Validation warnings:** If an artifact appears truncated or poorly structured, verify an amber warning triangle icon appears next to the artifact title (hover to see details).
+## Deployment overview
 
-### Phase 3: Speed & Perceived Performance
-- [ ] **Skeleton loading:** Click Generate on an artifact that doesn't exist yet — verify a skeleton placeholder appears while loading.
-- [ ] **Timing logs:** Open browser DevTools console — verify `[GEN]` log messages show timing for each LLM call and `[STORE]` messages show persistence timing.
-- [ ] **No UI jank:** During bundle generation, verify the UI remains responsive (you can scroll, expand/collapse other sections).
+- Deployed to **Vercel** as an SPA.
+- `vercel.json` rewrites everything under `/api/*` to the (unused) serverless functions and all other routes to `index.html`.
+- Build command: `npm run build` → output in `dist/`.
+- Because state lives in the user's browser, there is no database to provision and no backend key management — each user brings their own Gemini key.
 
-### Phase 4: Markup Images
-- [ ] **Markup image section:** Go to Artifacts stage — verify a "Markup Images" section appears below Core Artifacts.
-- [ ] **Generate markup image:** Click any markup image type (e.g., "Critique Board") — verify it generates and displays an SVG annotation with highlights, callouts, and/or numbered markers.
-- [ ] **Legend display:** If the annotation has numbered markers, verify a legend section appears below the SVG showing each number and its description.
-- [ ] **SVG export:** Click "Export SVG" on a markup image — verify an SVG file downloads.
+## Screenshots
 
-### Phase 5: Polish Features
-- [ ] **Type-specific renderers:** Generate screen_inventory, data_model, or component_inventory artifacts. If the LLM returns structured JSON, verify they render as card grids / entity tables / categorized cards (not raw JSON or plain markdown).
-- [ ] **Export modal:** Click the Export/Download button in the top bar — verify the export modal shows options for: Export PRD, individual artifact exports, Export Full Bundle, and Export Structured JSON.
-- [ ] **Refresh Stale:** After generating artifacts, go back to PRD stage, edit the PRD, return to Artifacts — verify a "Refresh N Stale" button appears. Click it and verify only stale artifacts regenerate.
+### PRD canvas with highlight-to-branch
+<img width="100%" alt="Synapse PRD view" src="public/screenshots/prd-view.png" />
 
-### Dead Code Removal
-- [ ] **No generatePRD:** Search the codebase — `generatePRD` should not exist in `llmProvider.ts` (only `generateStructuredPRD`).
-- [ ] **No useNavigate in BranchList:** `BranchList.tsx` should not import `useNavigate` from react-router-dom.
-- [ ] **Shared intentHelper:** `SelectableSpine.tsx` and `BranchList.tsx` should both import from `../lib/intentHelper` instead of defining inline `getIntentHelper` functions.
+### Mockup A/B comparison
+<img width="100%" alt="Mockups comparison view" src="public/screenshots/mockups-compare.png" />
+
+### Feedback surfaced back into the PRD
+<img width="100%" alt="PRD feedback" src="public/screenshots/prd-feedback.png" />
+
+### Downstream artifacts
+<img width="100%" alt="Artifacts view" src="public/screenshots/artifacts-view.png" />
+
+### History timeline
+<img width="100%" alt="History view" src="public/screenshots/history-view.png" />
+
+<!-- TODO: Re-capture screenshots if the UI has drifted since the last snapshot. Consider adding a short GIF of the highlight-to-branch flow and one of parallel artifact generation. -->
+
+## Limitations
+
+- **Client-side only.** All data lives in `localStorage`. Clearing browser storage wipes every project; there's no multi-device sync or collaboration.
+- **Bring your own key.** No managed Gemini proxy — the API key sits in the user's browser and requests go directly to Google.
+- **No tests.** Vitest and Playwright are installed but no test files or CI checks exist yet.
+- **Single LLM provider.** Gemini only; no abstraction for swapping models.
+- **No auth.** Anyone with the URL can use their own key; projects aren't tied to accounts.
+- **Artifact quality depends on PRD quality.** Garbage in, garbage out — structured output is enforced where possible but hallucinations still happen.
+
+## Future work
+
+- Replace `localStorage` persistence with a real backend (Postgres + row-level security) to unlock multi-device sync and sharing.
+- Add a provider abstraction so Claude / GPT-4 / local models can slot in behind `llmProvider.ts`.
+- Wire up the installed Playwright + Vitest into a real test suite and CI.
+- Real-time multi-user editing on the PRD spine with branch merging.
+- Export to Figma / Jira / Linear instead of just markdown + JSON.
+- Proxy Gemini calls through the existing (currently unused) Vercel serverless functions so API keys don't live in the browser.
