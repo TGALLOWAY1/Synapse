@@ -267,6 +267,25 @@ export type MockupSettings = {
     selectedSections?: string[];
 };
 
+// Rendered HTML/Tailwind mockup payload (stored as JSON string in
+// ArtifactVersion.content; distinguished by metadata.format === 'mockup_html_v1').
+export type MockupScreen = {
+    id: string;       // stable per-screen id (uuid, assigned client-side)
+    name: string;     // screen title, e.g. "Editor Dashboard"
+    purpose: string;  // one-sentence rationale grounded in the PRD
+    html: string;     // static body fragment — no <html>/<head>/<script>
+    notes?: string;   // optional assumptions / callouts
+};
+
+export type MockupPayload = {
+    version: 'mockup_html_v1';
+    title: string;              // overall title, e.g. "Editor Workspace Concept"
+    summary: string;            // 1–2 sentence product framing
+    screens: MockupScreen[];    // always >= 1
+};
+
+export const MOCKUP_HTML_V1 = 'mockup_html_v1' as const;
+
 // Prompt artifact settings
 export type PromptTarget =
     | 'mockup'
