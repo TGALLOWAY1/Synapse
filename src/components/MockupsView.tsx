@@ -6,7 +6,18 @@ import { useProjectStore } from '../store/projectStore';
 import { generateMockup } from '../lib/llmProvider';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
-import type { StructuredPRD, MockupSettings, MockupPlatform, MockupFidelity, MockupScope } from '../types';
+import { MockupViewer } from './mockups/MockupViewer';
+import type {
+    StructuredPRD,
+    MockupSettings,
+    MockupPlatform,
+    MockupFidelity,
+    MockupScope,
+    MockupPayload,
+    ArtifactVersion,
+    StalenessState,
+} from '../types';
+import { MOCKUP_HTML_V1 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
 interface MockupsViewProps {
@@ -34,7 +45,22 @@ const SCOPE_OPTIONS: { value: MockupScope; label: string }[] = [
     { value: 'single_screen', label: 'Single Screen' },
 ];
 
-export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsViewProps) {
+// Safely extract a MockupPayload from an ArtifactVersion. Returns null for
+// legacy markdown versions or unparseable content — callers fall back to the
+// legacy markdown renderer.
+const tryParsePayload = (version: ArtifactVersion): MockupPayload | null => {
+    const format = (version.metadata as { format?: string } | undefined)?.format;
+    if (format !== MOCKUP_HTML_V1) return null;
+    try {
+        const parsed = JSON.parse(version.content) as MockupPayload;
+        if (!parsed?.screens?.length) return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+};
+
+export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD }: MockupsViewProps) {
     const {
         createArtifact, createArtifactVersion,
         getArtifacts, getArtifactVersions, setPreferredVersion,
@@ -68,16 +94,17 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                 notes: notes || undefined,
             };
 
-            const content = await generateMockup(prdContent, settings);
+            const payload = await generateMockup(prdContent, settings, structuredPRD);
 
-            const title = `Mockup — ${platform} / ${fidelity} / ${scope.replace('_', ' ')}`;
+            const title = payload.title?.trim()
+                || `Mockup — ${platform} / ${fidelity} / ${scope.replace('_', ' ')}`;
             const { artifactId } = createArtifact(projectId, 'mockup', title);
 
             createArtifactVersion(
                 projectId,
                 artifactId,
-                content,
-                { settings },
+                JSON.stringify(payload),
+                { settings, format: MOCKUP_HTML_V1 },
                 [{
                     id: uuidv4(),
                     sourceArtifactId: projectId,
@@ -106,13 +133,13 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                 platform: 'desktop', fidelity: 'mid', scope: 'key_workflow'
             };
 
-            const content = await generateMockup(prdContent, settings);
+            const payload = await generateMockup(prdContent, settings, structuredPRD);
 
             createArtifactVersion(
                 projectId,
                 artifactId,
-                content,
-                { settings },
+                JSON.stringify(payload),
+                { settings, format: MOCKUP_HTML_V1 },
                 [{
                     id: uuidv4(),
                     sourceArtifactId: projectId,
@@ -129,17 +156,133 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
         }
     };
 
-    const renderMockupContent = (content: string) => (
-        <div className="bg-white rounded-xl border border-neutral-200 p-6 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[600px]">
-            <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
-        </div>
+    // --- Rendering helpers ---
+
+    const renderVersionActions = (
+        artifactId: string,
+        preferred: ArtifactVersion,
+        allVersions: ArtifactVersion[],
+    ) => (
+        <>
+            <button
+                type="button"
+                onClick={() => handleRegenerate(artifactId)}
+                disabled={isGenerating}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
+            >
+                {isGenerating ? 'Regenerating…' : 'Regenerate'}
+            </button>
+            <button
+                type="button"
+                onClick={() => { setCompareMode(!compareMode); setCompareVersions([null, null]); }}
+                disabled={allVersions.length < 2}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
+            >
+                <GitCompare size={12} />
+                Compare
+            </button>
+            <button
+                type="button"
+                onClick={() => setFeedbackVersionId(preferred.id)}
+                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md transition"
+            >
+                <MessageSquarePlus size={12} />
+                Extract Feedback
+            </button>
+            {allVersions.length > 1 && (
+                <select
+                    value={preferred.id}
+                    onChange={e => setPreferredVersion(projectId, artifactId, e.target.value)}
+                    className="ml-auto px-2 py-1 text-xs border border-neutral-200 rounded-md bg-white"
+                >
+                    {allVersions.map(v => (
+                        <option key={v.id} value={v.id}>
+                            v{v.versionNumber}{v.isPreferred ? ' (preferred)' : ''}
+                        </option>
+                    ))}
+                </select>
+            )}
+        </>
     );
+
+    const renderVersionBody = (
+        version: ArtifactVersion,
+        staleness: StalenessState,
+        actions: React.ReactNode,
+    ) => {
+        const payload = tryParsePayload(version);
+        if (payload) {
+            const settings = (version.metadata?.settings as MockupSettings) || {
+                platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
+            };
+            const sourceSpineVersionId = version.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
+            return (
+                <MockupViewer
+                    payload={payload}
+                    settings={settings}
+                    staleness={staleness}
+                    versionNumber={version.versionNumber}
+                    createdAt={version.createdAt}
+                    sourceSpineVersionId={sourceSpineVersionId}
+                    actions={actions}
+                />
+            );
+        }
+
+        // Legacy markdown fallback — renders old ASCII mockups so existing
+        // projects continue to work until they are regenerated.
+        return (
+            <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
+                <div className="px-5 pt-4 flex items-center gap-2">
+                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded border border-amber-200 bg-amber-50 text-amber-700 font-medium">
+                        Legacy mockup
+                    </span>
+                    <StalenessBadge staleness={staleness} />
+                    <span className="text-[10px] text-neutral-400 ml-auto">
+                        v{version.versionNumber}
+                    </span>
+                </div>
+                <div className="px-5 py-4 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[600px]">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{version.content}</ReactMarkdown>
+                </div>
+                <div className="px-5 py-3 border-t border-neutral-100 bg-neutral-50/40 flex items-center gap-2 flex-wrap">
+                    {actions}
+                </div>
+            </div>
+        );
+    };
 
     const renderCompareView = () => {
         if (!selectedArtifactId) return null;
         const versions = getArtifactVersions(projectId, selectedArtifactId);
+        const staleness = getArtifactStaleness(projectId, selectedArtifactId);
         const vA = versions.find(v => v.id === compareVersions[0]);
         const vB = versions.find(v => v.id === compareVersions[1]);
+
+        const renderSide = (v: ArtifactVersion | undefined) => {
+            if (!v) return <div className="text-neutral-400 text-sm italic">Select a version</div>;
+            const payload = tryParsePayload(v);
+            if (payload) {
+                const settings = (v.metadata?.settings as MockupSettings) || {
+                    platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
+                };
+                return (
+                    <MockupViewer
+                        payload={payload}
+                        settings={settings}
+                        staleness={staleness}
+                        versionNumber={v.versionNumber}
+                        createdAt={v.createdAt}
+                        sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
+                    />
+                );
+            }
+            return (
+                <div className="bg-white rounded-xl border border-neutral-200 p-5 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[600px]">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{v.content}</ReactMarkdown>
+                </div>
+            );
+        };
 
         return (
             <div className="space-y-4">
@@ -169,16 +312,32 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                 <div className="grid grid-cols-2 gap-4">
                     <div>
                         <h4 className="text-xs font-bold text-neutral-500 uppercase mb-2">Version A {vA ? `(v${vA.versionNumber})` : ''}</h4>
-                        {vA ? renderMockupContent(vA.content) : <div className="text-neutral-400 text-sm italic">Select a version</div>}
+                        {renderSide(vA)}
                     </div>
                     <div>
                         <h4 className="text-xs font-bold text-neutral-500 uppercase mb-2">Version B {vB ? `(v${vB.versionNumber})` : ''}</h4>
-                        {vB ? renderMockupContent(vB.content) : <div className="text-neutral-400 text-sm italic">Select a version</div>}
+                        {renderSide(vB)}
                     </div>
                 </div>
             </div>
         );
     };
+
+    const renderGeneratingSkeleton = () => (
+        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden animate-pulse">
+            <div className="px-5 pt-5 pb-4 border-b border-neutral-100">
+                <div className="h-5 bg-neutral-200 rounded w-1/3 mb-2" />
+                <div className="h-3 bg-neutral-100 rounded w-2/3" />
+            </div>
+            <div className="px-5 pt-4 pb-2 flex items-center gap-2">
+                <div className="h-6 w-24 bg-neutral-100 rounded-full" />
+                <div className="h-6 w-24 bg-neutral-100 rounded-full" />
+            </div>
+            <div className="px-5 pb-5">
+                <div className="h-[480px] bg-neutral-100 rounded-lg" />
+            </div>
+        </div>
+    );
 
     return (
         <div className="space-y-6">
@@ -194,6 +353,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                     )}
                 </div>
                 <button
+                    type="button"
                     onClick={() => setShowGeneratePanel(!showGeneratePanel)}
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
                 >
@@ -219,6 +379,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                             {PLATFORM_OPTIONS.map(opt => (
                                 <button
                                     key={opt.value}
+                                    type="button"
                                     onClick={() => setPlatform(opt.value)}
                                     className={`block w-full text-left px-3 py-2 text-sm rounded-md mb-1 transition ${
                                         platform === opt.value
@@ -235,6 +396,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                             {FIDELITY_OPTIONS.map(opt => (
                                 <button
                                     key={opt.value}
+                                    type="button"
                                     onClick={() => setFidelity(opt.value)}
                                     className={`block w-full text-left px-3 py-2 text-sm rounded-md mb-1 transition ${
                                         fidelity === opt.value
@@ -251,6 +413,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                             {SCOPE_OPTIONS.map(opt => (
                                 <button
                                     key={opt.value}
+                                    type="button"
                                     onClick={() => setScope(opt.value)}
                                     className={`block w-full text-left px-3 py-2 text-sm rounded-md mb-1 transition ${
                                         scope === opt.value
@@ -288,6 +451,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
 
                     <div className="flex items-center gap-3 pt-2">
                         <button
+                            type="button"
                             onClick={handleGenerate}
                             disabled={isGenerating}
                             className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
@@ -295,6 +459,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                             {isGenerating ? 'Generating...' : 'Generate'}
                         </button>
                         <button
+                            type="button"
                             onClick={() => setShowGeneratePanel(false)}
                             className="px-4 py-2 text-neutral-500 hover:text-neutral-700 text-sm transition"
                         >
@@ -304,12 +469,17 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                 </div>
             )}
 
+            {/* Loading skeleton when generating the first mockup */}
+            {isGenerating && mockupArtifacts.length === 0 && renderGeneratingSkeleton()}
+
             {/* Mockup List */}
-            {mockupArtifacts.length === 0 && !showGeneratePanel ? (
+            {mockupArtifacts.length === 0 && !showGeneratePanel && !isGenerating ? (
                 <div className="text-center py-16 text-neutral-400">
                     <Image size={48} className="mx-auto mb-4 opacity-30" />
                     <p className="text-lg font-medium text-neutral-500 mb-2">No mockups yet</p>
-                    <p className="text-sm">Generate mockups from your PRD to explore visual directions.</p>
+                    <p className="text-sm max-w-md mx-auto">
+                        Generate polished UI concepts grounded in your PRD. Each run produces a rendered HTML preview you can navigate screen-by-screen.
+                    </p>
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -323,6 +493,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
                             <div key={artifact.id} className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
                                 {/* Card Header */}
                                 <button
+                                    type="button"
                                     onClick={() => setSelectedArtifactId(isSelected ? null : artifact.id)}
                                     className="w-full flex items-center justify-between p-4 hover:bg-neutral-50/50 transition text-left"
                                 >
@@ -341,61 +512,16 @@ export function MockupsView({ projectId, spineVersionId, prdContent }: MockupsVi
 
                                 {/* Expanded Detail */}
                                 {isSelected && preferredVersion && (
-                                    <div className="border-t border-neutral-100 p-4 space-y-4">
-                                        {/* Action Bar */}
-                                        <div className="flex items-center gap-2 flex-wrap">
-                                            <button
-                                                onClick={() => handleRegenerate(artifact.id)}
-                                                disabled={isGenerating}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
-                                            >
-                                                Regenerate
-                                            </button>
-                                            <button
-                                                onClick={() => { setCompareMode(!compareMode); setCompareVersions([null, null]); }}
-                                                disabled={versions.length < 2}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
-                                            >
-                                                <GitCompare size={12} />
-                                                Compare
-                                            </button>
-                                            <button
-                                                onClick={() => setFeedbackVersionId(preferredVersion.id)}
-                                                className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md transition"
-                                            >
-                                                <MessageSquarePlus size={12} />
-                                                Extract Feedback
-                                            </button>
-
-                                            {/* Version selector */}
-                                            {versions.length > 1 && (
-                                                <select
-                                                    value={preferredVersion.id}
-                                                    onChange={e => setPreferredVersion(projectId, artifact.id, e.target.value)}
-                                                    className="ml-auto px-2 py-1 text-xs border border-neutral-200 rounded-md bg-white"
-                                                >
-                                                    {versions.map(v => (
-                                                        <option key={v.id} value={v.id}>
-                                                            v{v.versionNumber}{v.isPreferred ? ' (preferred)' : ''}
-                                                        </option>
-                                                    ))}
-                                                </select>
-                                            )}
-                                        </div>
-
-                                        {/* Content */}
-                                        {compareMode && isSelected ? (
+                                    <div className="border-t border-neutral-100 p-4">
+                                        {compareMode ? (
                                             renderCompareView()
                                         ) : (
-                                            renderMockupContent(preferredVersion.content)
+                                            renderVersionBody(
+                                                preferredVersion,
+                                                staleness,
+                                                renderVersionActions(artifact.id, preferredVersion, versions),
+                                            )
                                         )}
-
-                                        {/* Provenance */}
-                                        <div className="text-xs text-neutral-400 pt-2 border-t border-neutral-100">
-                                            Generated from PRD {preferredVersion.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId || 'unknown'}
-                                            {' · '}v{preferredVersion.versionNumber}
-                                            {' · '}{new Date(preferredVersion.createdAt).toLocaleString()}
-                                        </div>
                                     </div>
                                 )}
                             </div>
