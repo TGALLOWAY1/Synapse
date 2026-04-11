@@ -1,7 +1,7 @@
-import type { StructuredPRD, Milestone, AgentTarget, ProjectPlatform } from '../../types';
+import type { StructuredPRD, ProjectPlatform } from '../../types';
 import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
-import { structuredPRDSchema, devPlanSchema, agentPromptSchema, targetLabels } from '../schemas/prdSchemas';
+import { structuredPRDSchema } from '../schemas/prdSchemas';
 
 const PLATFORM_CONTEXT: Record<ProjectPlatform, string> = {
     app: 'The user is building a native mobile application (iOS/Android). Focus on mobile-specific patterns: touch interactions, offline support, push notifications, device APIs, responsive mobile layouts, and app store distribution.',
@@ -21,15 +21,6 @@ Rules:
 
     return await callGemini(system, rawPrompt);
 };
-
-export interface GeneratedAgentPrompt {
-    branchName: string;
-    objective: string;
-    tasks: string[];
-    constraints: string[];
-    verificationSteps: string[];
-    rawPromptText: string;
-}
 
 export const generateStructuredPRD = async (promptText: string, options?: ProviderOptions, platform?: ProjectPlatform): Promise<StructuredPRD> => {
     options?.onStatus?.("Generating structured PRD with Gemini...");
@@ -60,70 +51,6 @@ Each acceptance criterion must be testable and specific. Prioritize features usi
         return JSON.parse(result) as StructuredPRD;
     } catch {
         throw new Error('Failed to parse structured PRD response from LLM. Please try again.');
-    }
-};
-
-export const generateDevPlan = async (structuredPRD: StructuredPRD, options?: ProviderOptions): Promise<Milestone[]> => {
-    options?.onStatus?.("Generating development plan...");
-
-    const system = `You are an expert software architect and project planner. Given a structured PRD, create a milestone-based development roadmap.
-Each milestone should represent a logical phase of development (e.g., "Core Architecture", "Core Features", "UX & Polish", "Testing & Launch").
-Each milestone should contain specific, actionable tasks.
-Use unique IDs like "m1", "m2" for milestones and "t1", "t2" for tasks.
-All tasks should start with status "pending".
-Order milestones sequentially (order: 1, 2, 3...).
-Be practical and specific to the product described.`;
-
-    const prdSummary = `Vision: ${structuredPRD.vision}
-Core Problem: ${structuredPRD.coreProblem}
-Target Users: ${structuredPRD.targetUsers.join(', ')}
-Features: ${structuredPRD.features.map(f => `${f.name} (${f.complexity})`).join(', ')}
-Architecture: ${structuredPRD.architecture}`;
-
-    const result = await callGemini(
-        system,
-        `Create a development plan for this product:\n\n${prdSummary}`,
-        { responseMimeType: "application/json", responseSchema: devPlanSchema }
-    );
-
-    try {
-        const parsed = JSON.parse(result);
-        return parsed.milestones as Milestone[];
-    } catch {
-        throw new Error('Failed to parse development plan response from LLM. Please try again.');
-    }
-};
-
-export const generateAgentPrompt = async (
-    milestone: { name: string; description: string; tasks: { name: string; description: string }[] },
-    target: AgentTarget,
-    prdContext: string,
-    options?: ProviderOptions
-): Promise<GeneratedAgentPrompt> => {
-    options?.onStatus?.(`Generating ${targetLabels[target]} prompt...`);
-
-    const system = `You are an expert at writing prompts for AI coding agents. Generate a structured, ready-to-use coding prompt for ${targetLabels[target]}.
-The prompt should be specific, actionable, and include a git branch name, clear objective, task breakdown, technical constraints, and verification steps.
-The rawPromptText field should be the full, copy-pasteable prompt that a developer can give directly to ${targetLabels[target]}.
-Make the rawPromptText comprehensive but focused — it should be a self-contained instruction that the coding agent can execute.`;
-
-    const milestoneContext = `Milestone: ${milestone.name}
-Description: ${milestone.description}
-Tasks: ${milestone.tasks.map(t => `- ${t.name}: ${t.description}`).join('\n')}
-
-PRD Context:
-${prdContext}`;
-
-    const result = await callGemini(
-        system,
-        `Generate a ${targetLabels[target]} coding prompt for this milestone:\n\n${milestoneContext}`,
-        { responseMimeType: "application/json", responseSchema: agentPromptSchema }
-    );
-
-    try {
-        return JSON.parse(result) as GeneratedAgentPrompt;
-    } catch {
-        throw new Error('Failed to parse agent prompt response from LLM. Please try again.');
     }
 };
 

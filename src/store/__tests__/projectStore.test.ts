@@ -8,8 +8,6 @@ beforeEach(() => {
         spineVersions: {},
         historyEvents: {},
         branches: {},
-        devPlans: {},
-        agentPrompts: {},
         artifacts: {},
         artifactVersions: {},
         feedbackItems: {},

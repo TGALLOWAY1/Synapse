@@ -5,7 +5,6 @@ import { createDebouncedStorage } from './storage';
 import { createProjectSlice } from './slices/projectSlice';
 import { createSpineSlice } from './slices/spineSlice';
 import { createBranchSlice } from './slices/branchSlice';
-import { createLegacyPlanSlice } from './slices/legacyPlanSlice';
 import { createArtifactSlice } from './slices/artifactSlice';
 import { createFeedbackSlice } from './slices/feedbackSlice';
 import { createStalenessSlice } from './slices/stalenessSlice';
@@ -18,7 +17,6 @@ export const useProjectStore = create<ProjectState>()(
             ...createProjectSlice(...a),
             ...createSpineSlice(...a),
             ...createBranchSlice(...a),
-            ...createLegacyPlanSlice(...a),
             ...createArtifactSlice(...a),
             ...createFeedbackSlice(...a),
             ...createStalenessSlice(...a),

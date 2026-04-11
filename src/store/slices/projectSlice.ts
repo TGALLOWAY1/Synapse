@@ -65,10 +65,6 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newHistory[projectId];
             const newBranches = { ...state.branches };
             delete newBranches[projectId];
-            const newDevPlans = { ...state.devPlans };
-            delete newDevPlans[projectId];
-            const newAgentPrompts = { ...state.agentPrompts };
-            delete newAgentPrompts[projectId];
             const newArtifacts = { ...state.artifacts };
             delete newArtifacts[projectId];
             const newArtifactVersions = { ...state.artifactVersions };
@@ -80,8 +76,6 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 spineVersions: newSpines,
                 historyEvents: newHistory,
                 branches: newBranches,
-                devPlans: newDevPlans,
-                agentPrompts: newAgentPrompts,
                 artifacts: newArtifacts,
                 artifactVersions: newArtifactVersions,
                 feedbackItems: newFeedbackItems,
