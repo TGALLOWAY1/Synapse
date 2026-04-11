@@ -62,49 +62,6 @@ export type SpineVersion = {
     structuredPRD?: StructuredPRD;
 };
 
-// Legacy types — kept for migration compatibility
-export type DevTask = {
-    id: string;
-    name: string;
-    description: string;
-    status: 'pending' | 'in-progress' | 'done';
-};
-
-export type Milestone = {
-    id: string;
-    name: string;
-    description: string;
-    tasks: DevTask[];
-    order: number;
-};
-
-export type DevPlan = {
-    id: string;
-    projectId: string;
-    spineVersionId: string;
-    milestones: Milestone[];
-    createdAt: number;
-    isLatest: boolean;
-};
-
-export type AgentTarget = 'cursor' | 'codex' | 'claude' | 'copilot';
-
-export type AgentPrompt = {
-    id: string;
-    projectId: string;
-    devPlanId: string;
-    milestoneId: string;
-    taskId?: string;
-    target: AgentTarget;
-    branchName: string;
-    objective: string;
-    tasks: string[];
-    constraints: string[];
-    verificationSteps: string[];
-    rawPromptText: string;
-    createdAt: number;
-};
-
 // --- Structured Artifact Content Types ---
 
 export interface ScreenItem {

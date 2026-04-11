@@ -1,6 +1,6 @@
 import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
-    DevPlan, Milestone, AgentPrompt, PipelineStage, ProjectPlatform,
+    PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
     SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState
 } from '../types';
@@ -10,8 +10,6 @@ export interface ProjectState {
     spineVersions: Record<string, SpineVersion[]>;
     historyEvents: Record<string, HistoryEvent[]>;
     branches: Record<string, Branch[]>;
-    devPlans: Record<string, DevPlan[]>;
-    agentPrompts: Record<string, AgentPrompt[]>;
 
     // Artifact system
     artifacts: Record<string, Artifact[]>;
@@ -40,17 +38,6 @@ export interface ProjectState {
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => void;
-
-    // Dev Plan (legacy — kept for backward compat)
-    createDevPlan: (projectId: string, spineVersionId: string, milestones: Milestone[]) => { devPlanId: string };
-    deleteDevPlan: (projectId: string, devPlanId: string) => void;
-    getDevPlans: (projectId: string) => DevPlan[];
-    getLatestDevPlan: (projectId: string) => DevPlan | undefined;
-
-    // Agent Prompts (legacy — kept for backward compat)
-    createAgentPrompt: (projectId: string, prompt: Omit<AgentPrompt, 'id' | 'createdAt'>) => { promptId: string };
-    deleteAgentPrompt: (projectId: string, promptId: string) => void;
-    getAgentPrompts: (projectId: string, milestoneId?: string) => AgentPrompt[];
 
     // --- Artifact System Actions ---
     createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => { artifactId: string };
