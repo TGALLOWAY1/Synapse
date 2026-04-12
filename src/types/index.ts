@@ -60,6 +60,11 @@ export type SpineVersion = {
     isLatest: boolean;
     isFinal: boolean;
     structuredPRD?: StructuredPRD;
+    generationError?: {
+        message: string;
+        category: string;
+        timestamp: number;
+    };
 };
 
 // --- Structured Artifact Content Types ---
@@ -304,7 +309,8 @@ export type HistoryEventType =
     | 'ArtifactGenerated'
     | 'ArtifactRegenerated'
     | 'FeedbackCreated'
-    | 'FeedbackApplied';
+    | 'FeedbackApplied'
+    | 'GenerationFailed';
 
 export type HistoryEvent = {
     id: string;

@@ -4,6 +4,7 @@ import { useProjectStore } from '../store/projectStore';
 import { Settings, List, Plus, ArrowUp, Sparkles, X, Smartphone, Monitor, Loader2 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
+import { normalizeError, userMessage } from '../lib/errors';
 import type { ProjectPlatform } from '../types';
 
 const EXAMPLE_PROMPTS = [
@@ -69,18 +70,22 @@ export function HomePage() {
                     useProjectStore.getState().updateSpineStructuredPRD(projectId, spineId, structuredPRD, markdown);
                 })
                 .catch((e) => {
-                    const errorMsg = e instanceof Error ? e.message : String(e);
-                    useProjectStore.getState().updateSpineText(
-                        projectId, spineId,
-                        `> **PRD generation encountered an error.** You can regenerate from the workspace menu.\n>\n> ${errorMsg}`
-                    );
+                    const err = normalizeError(e);
+                    console.error('[PRD generation failed]', err.raw);
+                    useProjectStore.getState().setSpineError(projectId, spineId, {
+                        message: userMessage(err),
+                        category: err.category,
+                        timestamp: err.timestamp,
+                    });
                 });
         }).catch((e) => {
-            const errorMsg = e instanceof Error ? e.message : String(e);
-            useProjectStore.getState().updateSpineText(
-                projectId, spineId,
-                `> **Failed to load generation module.** Try refreshing the page.\n>\n> ${errorMsg}`
-            );
+            const err = normalizeError(e);
+            console.error('[Module load failed]', err.raw);
+            useProjectStore.getState().setSpineError(projectId, spineId, {
+                message: 'Failed to load generation module. Try refreshing the page.',
+                category: err.category,
+                timestamp: err.timestamp,
+            });
         });
     };
 
@@ -95,8 +100,17 @@ export function HomePage() {
             const { enhancePrompt } = await import('../lib/llmProvider');
             const enhanced = await enhancePrompt(promptText.trim());
             setPromptText(enhanced);
-        } catch {
-            // Silently fail — user can retry
+        } catch (e) {
+            const err = normalizeError(e);
+            console.error('[Enhance prompt failed]', err.raw);
+            // Toast integration added in Phase 5 — for now uses toastStore directly
+            import('../store/toastStore').then(({ useToastStore }) => {
+                useToastStore.getState().addToast({
+                    type: 'warning',
+                    title: 'Prompt enhancement failed',
+                    message: 'Your original prompt was kept.',
+                });
+            }).catch(() => { /* toast store not yet available */ });
         } finally {
             setIsEnhancing(false);
         }

@@ -50,21 +50,15 @@ export const consolidateBranch = async (
 export const replyInBranch = async (
     context: { anchorText: string, intent: string, threadHistory: { role: string; content: string }[] }
 ): Promise<string> => {
-    try {
-        const system = `You are a product management assistant helping a user refine a PRD. The user has selected the text: "${context.anchorText}". Please respond to their intent concisely. If they ask for a change, provide a "Suggested replacement for selected text:" block.`;
+    const system = `You are a product management assistant helping a user refine a PRD. The user has selected the text: "${context.anchorText}". Please respond to their intent concisely. If they ask for a change, provide a "Suggested replacement for selected text:" block.`;
 
-        let promptText = `Thread History:\n`;
-        if (context.threadHistory && context.threadHistory.length > 0) {
-            context.threadHistory.forEach(msg => {
-                promptText += `${msg.role.toUpperCase()}: ${msg.content}\n\n`;
-            });
-        }
-        promptText += `USER INTENT: ${context.intent}`;
-
-        return await callGemini(system, promptText);
-    } catch (e: unknown) {
-        console.error(e);
-        const errorMsg = e instanceof Error ? e.message : String(e);
-        return `Error: ${errorMsg}`;
+    let promptText = `Thread History:\n`;
+    if (context.threadHistory && context.threadHistory.length > 0) {
+        context.threadHistory.forEach(msg => {
+            promptText += `${msg.role.toUpperCase()}: ${msg.content}\n\n`;
+        });
     }
+    promptText += `USER INTENT: ${context.intent}`;
+
+    return await callGemini(system, promptText);
 };

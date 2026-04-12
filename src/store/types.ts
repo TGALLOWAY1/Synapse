@@ -39,6 +39,9 @@ export interface ProjectState {
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => void;
 
+    // Error handling
+    setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number } | null) => void;
+
     // --- Artifact System Actions ---
     createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => { artifactId: string };
     updateArtifact: (projectId: string, artifactId: string, updates: Partial<Pick<Artifact, 'title' | 'status'>>) => void;

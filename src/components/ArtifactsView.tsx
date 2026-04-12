@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle, AlertCircle } from 'lucide-react';
+import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
 import { ArtifactContentRenderer } from './renderers';
 import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
 import { validateArtifactContent } from '../lib/artifactValidation';
+import { normalizeError, userMessage } from '../lib/errors';
+import { ErrorBanner } from './ErrorBanner';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import { GenerationProgress } from './GenerationProgress';
@@ -121,7 +123,9 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
             setExpandedId(artifactId);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            const err = normalizeError(e);
+            console.error('[Artifact generation failed]', err.raw);
+            setError(userMessage(err));
         } finally {
             setGeneratingSubtype(null);
         }
@@ -159,7 +163,9 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
             setRefineSubtype(null);
             setRefineInstruction('');
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            const err = normalizeError(e);
+            console.error('[Artifact refinement failed]', err.raw);
+            setError(userMessage(err));
         } finally {
             setGeneratingSubtype(null);
         }
@@ -202,18 +208,18 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         });
 
         const results = await withConcurrency(tasks, 3);
-        const errors = results
-            .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-            .map(r => r.reason instanceof Error ? r.reason.message : String(r.reason));
+        const failedCount = results.filter(r => r.status === 'rejected').length;
 
         results.forEach((r, i) => {
             if (r.status === 'rejected') {
+                console.error('[Stale artifact refresh failed]', r.reason);
                 setBundleStatus(prev => ({ ...prev, [staleArtifacts[i].subtype]: 'error' }));
             }
         });
 
-        if (errors.length > 0) {
-            setError(`${errors.length} artifact(s) failed: ${errors.join('; ')}`);
+        if (failedCount > 0) {
+            const succeeded = results.length - failedCount;
+            setError(`${failedCount} artifact(s) could not be refreshed.${succeeded > 0 ? ` ${succeeded} updated successfully.` : ''} You can retry the failed items individually.`);
         }
         setGeneratingSubtype(null);
     };
@@ -261,20 +267,19 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
         // Run with concurrency limit of 3 to avoid Gemini rate limits
         const results = await withConcurrency(tasks, 3);
-
-        const errors = results
-            .filter((r): r is PromiseRejectedResult => r.status === 'rejected')
-            .map(r => r.reason instanceof Error ? r.reason.message : String(r.reason));
+        const failedCount = results.filter(r => r.status === 'rejected').length;
 
         // Mark failed ones
         results.forEach((r, i) => {
             if (r.status === 'rejected') {
+                console.error('[Bundle artifact generation failed]', r.reason);
                 setBundleStatus(prev => ({ ...prev, [CORE_ARTIFACTS[i].subtype]: 'error' }));
             }
         });
 
-        if (errors.length > 0) {
-            setError(`${errors.length} artifact(s) failed: ${errors.join('; ')}`);
+        if (failedCount > 0) {
+            const succeeded = results.length - failedCount;
+            setError(`${failedCount} of ${results.length} artifact(s) could not be generated.${succeeded > 0 ? ` ${succeeded} completed successfully.` : ''} You can retry the failed items individually.`);
         }
 
         setGeneratingSubtype(null);
@@ -323,14 +328,11 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
             )}
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-3">
-                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                        <p className="font-medium mb-1">Generation failed</p>
-                        <p>{error}</p>
-                    </div>
-                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">&times;</button>
-                </div>
+                <ErrorBanner
+                    title="Generation failed"
+                    message={error}
+                    onDismiss={() => setError(null)}
+                />
             )}
 
             {/* Bundle / stale refresh progress */}

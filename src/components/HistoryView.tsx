@@ -1,4 +1,4 @@
-import { Clock, FileText, Package, MessageSquare, CheckCircle } from 'lucide-react';
+import { Clock, FileText, Package, MessageSquare, CheckCircle, XCircle } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import type { HistoryEventType } from '../types';
 
@@ -14,6 +14,7 @@ const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string
     ArtifactRegenerated: { icon: Package, color: 'text-purple-600', bgColor: 'bg-purple-50' },
     FeedbackCreated: { icon: MessageSquare, color: 'text-amber-600', bgColor: 'bg-amber-50' },
     FeedbackApplied: { icon: CheckCircle, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
+    GenerationFailed: { icon: XCircle, color: 'text-red-600', bgColor: 'bg-red-50' },
 };
 
 export function HistoryView({ projectId }: HistoryViewProps) {
