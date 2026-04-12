@@ -1,7 +1,9 @@
 import { useState } from 'react';
-import { Layers, Plus, RefreshCcw, Download, AlertCircle, Loader2 } from 'lucide-react';
+import { Layers, Plus, RefreshCcw, Download, Loader2 } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import { generateMarkupImage } from '../lib/llmProvider';
+import { normalizeError, userMessage } from '../lib/errors';
+import { ErrorBanner } from './ErrorBanner';
 import { MarkupImageRenderer } from './MarkupImageRenderer';
 import { GenerationProgress } from './GenerationProgress';
 import { getMarkupImageStages } from './generationStages';
@@ -55,7 +57,9 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
 
             setSelectedArtifactId(artifactId);
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            const err = normalizeError(e);
+            console.error('[Markup image generation failed]', err.raw);
+            setError(userMessage(err));
         } finally {
             setGeneratingSubtype(null);
         }
@@ -80,7 +84,9 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
                 parentVersionId,
             );
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            const err = normalizeError(e);
+            console.error('[Markup image generation failed]', err.raw);
+            setError(userMessage(err));
         } finally {
             setGeneratingSubtype(null);
         }
@@ -129,14 +135,11 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
             )}
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-3">
-                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                    <div className="flex-1">
-                        <p className="font-medium mb-1">Markup generation failed</p>
-                        <p>{error}</p>
-                    </div>
-                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">&times;</button>
-                </div>
+                <ErrorBanner
+                    title="Markup generation failed"
+                    message={error}
+                    onDismiss={() => setError(null)}
+                />
             )}
 
             {/* Generate Buttons */}

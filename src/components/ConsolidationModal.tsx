@@ -2,6 +2,8 @@ import { useState } from 'react';
 import { useProjectStore } from '../store/projectStore';
 import { consolidateBranch, type ConsolidationResult, type ConsolidationScope } from '../lib/llmProvider';
 import { X, ArrowRight, Check, Loader2 } from 'lucide-react';
+import { normalizeError, userMessage } from '../lib/errors';
+import { ErrorBanner } from './ErrorBanner';
 import { GenerationProgress } from './GenerationProgress';
 import { CONSOLIDATION_STAGES } from './generationStages';
 import type { Branch } from '../types';
@@ -28,8 +30,9 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
             const res = await consolidateBranch(spineText, branch, selectedScope);
             setResult(res);
         } catch (err: unknown) {
-            const message = err instanceof Error ? err.message : 'Failed to generate patch. Please check your API key and connection.';
-            setError(message);
+            const normalized = normalizeError(err);
+            console.error('[Consolidation failed]', normalized.raw);
+            setError(userMessage(normalized));
         } finally {
             setIsConsolidating(false);
         }
@@ -86,15 +89,11 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
 
                 {/* Error Banner */}
                 {error && (
-                    <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-start gap-2">
-                        <span className="font-semibold shrink-0">Failed:</span>
-                        <span className="flex-1">{error}</span>
-                        <button
-                            onClick={() => setError(null)}
-                            className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium"
-                        >
-                            &times;
-                        </button>
+                    <div className="mx-4 mt-4">
+                        <ErrorBanner
+                            message={error}
+                            onDismiss={() => setError(null)}
+                        />
                     </div>
                 )}
 

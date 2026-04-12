@@ -3,6 +3,8 @@ import { useState } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { replyInBranch } from '../lib/llmProvider';
 import { Send, Maximize2, Trash2 } from 'lucide-react';
+import { normalizeError, userMessage } from '../lib/errors';
+import { useToastStore } from '../store/toastStore';
 import type { Branch, BranchMessage } from '../types';
 import { IntentHelperLabel } from '../lib/intentHelper';
 
@@ -40,14 +42,20 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
             addBranchMessage(projectId, branch.id, 'user', replyText.trim());
             setReplyInputs(prev => ({ ...prev, [branch.id]: '' }));
 
-            // Assistant response mock
             const response = await replyInBranch({
                 anchorText: branch.anchorText,
                 intent: replyText.trim(),
                 threadHistory: branch.messages
             });
             addBranchMessage(projectId, branch.id, 'assistant', response);
-
+        } catch (e) {
+            const err = normalizeError(e);
+            console.error('[Branch reply failed]', err.raw);
+            useToastStore.getState().addToast({
+                type: 'error',
+                title: 'Reply failed',
+                message: userMessage(err),
+            });
         } finally {
             setIsReplying(prev => ({ ...prev, [branch.id]: false }));
         }

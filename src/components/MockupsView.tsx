@@ -1,9 +1,11 @@
 import { useState } from 'react';
-import { Image, Plus, GitCompare, MessageSquarePlus, AlertCircle, AlertTriangle, RefreshCw, Sparkles, Monitor, Smartphone, Columns3, Loader2 } from 'lucide-react';
+import { Image, Plus, GitCompare, MessageSquarePlus, RefreshCw, Sparkles, Monitor, Smartphone, Columns3, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
 import { generateMockup } from '../lib/llmProvider';
+import { normalizeError, userMessage } from '../lib/errors';
+import { ErrorBanner } from './ErrorBanner';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import { MockupViewer } from './mockups/MockupViewer';
@@ -168,7 +170,9 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 setWarning(`Generated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
             }
         } catch (e) {
-            setError(e instanceof Error ? e.message : String(e));
+            const err = normalizeError(e);
+            console.error('[Mockup generation failed]', err.raw);
+            setError(userMessage(err));
         } finally {
             setIsGenerating(false);
         }
@@ -205,7 +209,9 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
         } catch (e) {
             // On regeneration failure, the previous version is preserved — the
             // user still sees the last known good content.
-            setError(e instanceof Error ? e.message : String(e));
+            const err = normalizeError(e);
+            console.error('[Mockup regeneration failed]', err.raw);
+            setError(userMessage(err));
         } finally {
             setIsGenerating(false);
         }
@@ -428,18 +434,17 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             </div>
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-3">
-                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
-                    <span className="flex-1">{error}</span>
-                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">&times;</button>
-                </div>
+                <ErrorBanner
+                    message={error}
+                    onDismiss={() => setError(null)}
+                />
             )}
             {warning && (
-                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700 flex items-start gap-3">
-                    <AlertTriangle size={16} className="shrink-0 mt-0.5" />
-                    <span className="flex-1">{warning}</span>
-                    <button type="button" onClick={() => setWarning(null)} className="shrink-0 text-amber-400 hover:text-amber-600 text-xs font-medium">&times;</button>
-                </div>
+                <ErrorBanner
+                    message={warning}
+                    variant="warning"
+                    onDismiss={() => setWarning(null)}
+                />
             )}
 
             {/* Generate Panel */}

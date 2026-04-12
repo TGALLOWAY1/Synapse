@@ -12,6 +12,7 @@ export type SpineSlice = {
     getLatestSpine: ProjectState['getLatestSpine'];
     updateStructuredPRD: ProjectState['updateStructuredPRD'];
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
+    setSpineError: ProjectState['setSpineError'];
 };
 
 export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = (set, get) => ({
@@ -106,6 +107,46 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 s.id === spineId ? { ...s, structuredPRD, responseText } : s
             );
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
+    setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number } | null) => {
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const spine = projectSpines.find(s => s.id === spineId);
+            if (!spine) return state;
+
+            const updatedSpines = projectSpines.map(s =>
+                s.id === spineId
+                    ? {
+                        ...s,
+                        generationError: error ?? undefined,
+                        // Clear placeholder so isPRDGenerating stops being true
+                        responseText: error && s.responseText === 'Generating PRD...' ? '' : s.responseText,
+                    }
+                    : s
+            );
+
+            const historyEvents = { ...state.historyEvents };
+            if (error) {
+                const events = historyEvents[projectId] || [];
+                historyEvents[projectId] = [
+                    ...events,
+                    {
+                        id: uuidv4(),
+                        projectId,
+                        spineVersionId: spineId,
+                        type: 'GenerationFailed' as const,
+                        description: `Generation failed: ${error.message}`,
+                        createdAt: error.timestamp,
+                    },
+                ];
+            }
+
+            return {
+                spineVersions: { ...state.spineVersions, [projectId]: updatedSpines },
+                historyEvents,
+            };
         });
     },
 });

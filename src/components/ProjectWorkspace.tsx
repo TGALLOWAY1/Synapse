@@ -4,6 +4,7 @@ import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings, Chevr
 import { useState, useRef, useEffect } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD, structuredPRDToMarkdown } from '../lib/llmProvider';
+import { normalizeError, userMessage } from '../lib/errors';
 import { GenerationProgress } from './GenerationProgress';
 import { PRD_GENERATION_STAGES, PRD_REGENERATION_STAGES } from './generationStages';
 import { SelectableSpine } from './SelectableSpine';
@@ -24,7 +25,7 @@ import type { Branch, PipelineStage, FeedbackItem } from '../types';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineText, updateSpineStructuredPRD, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -70,7 +71,7 @@ export function ProjectWorkspace() {
     const hasBranches = branches.length > 0;
 
     // Detect if the current spine is still waiting for initial generation
-    const isPRDGenerating = !!activeSpine && activeSpine.responseText === 'Generating PRD...' && !activeSpine.structuredPRD;
+    const isPRDGenerating = !!activeSpine && activeSpine.responseText === 'Generating PRD...' && !activeSpine.structuredPRD && !activeSpine.generationError;
 
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
@@ -97,14 +98,14 @@ export function ProjectWorkspace() {
             const markdown = structuredPRDToMarkdown(structuredPRD);
             updateSpineStructuredPRD(projectId, newSpineId, structuredPRD, markdown);
         } catch (e) {
-            console.error(e);
+            const err = normalizeError(e);
+            console.error('[PRD regeneration failed]', err.raw);
             if (activeNewSpineId) {
-                const errorMsg = e instanceof Error ? e.message : String(e);
-                updateSpineText(
-                    projectId,
-                    activeNewSpineId,
-                    `> **Regeneration encountered an error.** You can try again from the workspace menu.\n>\n> ${errorMsg}`
-                );
+                setSpineError(projectId, activeNewSpineId, {
+                    message: userMessage(err),
+                    category: err.category,
+                    timestamp: err.timestamp,
+                });
             }
         } finally {
             setIsGenerating(false);
@@ -144,11 +145,13 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : isPRDGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine
-                            ? isPRDGenerating
-                                ? 'Generating...'
-                                : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
+                            ? activeSpine.generationError
+                                ? 'Generation Failed'
+                                : isPRDGenerating
+                                    ? 'Generating...'
+                                    : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
                             : 'Initializing...'}
                     </span>
                 </div>
@@ -325,7 +328,28 @@ export function ProjectWorkspace() {
                                         )}
 
                                         {/* Don't render SelectableSpine for the placeholder text */}
-                                        {isPRDGenerating ? (
+                                        {activeSpine.generationError ? (
+                                            <div className="rounded-xl border border-red-200 bg-red-50 p-6">
+                                                <div className="flex items-start gap-3">
+                                                    <div className="shrink-0 mt-0.5 w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">
+                                                        <RefreshCcw size={16} className="text-red-500" />
+                                                    </div>
+                                                    <div className="flex-1 min-w-0">
+                                                        <p className="font-semibold text-red-800 mb-1">PRD generation could not be completed</p>
+                                                        <p className="text-sm text-red-700 mb-4">{activeSpine.generationError.message}</p>
+                                                        <div className="flex items-center gap-3">
+                                                            <button
+                                                                onClick={handleRegenerate}
+                                                                disabled={isGenerating || hasBranches}
+                                                                className="px-4 py-2 bg-red-600 text-white text-sm font-medium rounded-lg hover:bg-red-700 transition disabled:opacity-40"
+                                                            >
+                                                                Try Again
+                                                            </button>
+                                                        </div>
+                                                    </div>
+                                                </div>
+                                            </div>
+                                        ) : isPRDGenerating ? (
                                             <div className="space-y-4 animate-pulse">
                                                 <div className="h-5 bg-neutral-100 rounded w-2/5" />
                                                 <div className="space-y-2.5">
