@@ -4,6 +4,8 @@ import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings, Chevr
 import { useState, useRef, useEffect } from 'react';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD, structuredPRDToMarkdown } from '../lib/llmProvider';
+import { GenerationProgress } from './GenerationProgress';
+import { PRD_GENERATION_STAGES, PRD_REGENERATION_STAGES } from './generationStages';
 import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
@@ -67,6 +69,9 @@ export function ProjectWorkspace() {
     const branches = activeSpine ? getBranchesForSpine(projectId, activeSpine.id) : [];
     const hasBranches = branches.length > 0;
 
+    // Detect if the current spine is still waiting for initial generation
+    const isPRDGenerating = !!activeSpine && activeSpine.responseText === 'Generating PRD...' && !activeSpine.structuredPRD;
+
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
         const idx = allSpines.findIndex(s => s.id === spineId);
@@ -98,7 +103,7 @@ export function ProjectWorkspace() {
                 updateSpineText(
                     projectId,
                     activeNewSpineId,
-                    `**Error regenerating PRD:**\n${errorMsg}\n\nPlease verify your API Key in Settings or check your network connection.`
+                    `> **Regeneration encountered an error.** You can try again from the workspace menu.\n>\n> ${errorMsg}`
                 );
             }
         } finally {
@@ -139,8 +144,12 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : 'bg-neutral-800 text-neutral-400'}`}>
-                        {activeSpine ? `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}` : 'Loading...'}
+                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : isPRDGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                        {activeSpine
+                            ? isPRDGenerating
+                                ? 'Generating...'
+                                : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
+                            : 'Initializing...'}
                     </span>
                 </div>
 
@@ -190,7 +199,7 @@ export function ProjectWorkspace() {
                                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
                                 >
                                     <RefreshCcw size={14} className={`text-neutral-500 ${isGenerating ? 'animate-spin' : ''}`} />
-                                    Regenerate Draft
+                                    {isGenerating ? 'Regenerating...' : 'Regenerate Draft'}
                                 </button>
                                 <button
                                     onClick={() => { setIsBranchesVisible(!isBranchesVisible); setShowNavOverflow(false); }}
@@ -254,6 +263,32 @@ export function ProjectWorkspace() {
 
                                 {activeSpine ? (
                                     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
+                                        {/* Regeneration progress overlay */}
+                                        {isGenerating && !isPRDGenerating && (
+                                            <div className="mb-6">
+                                                <GenerationProgress
+                                                    stages={PRD_REGENERATION_STAGES}
+
+                                                    variant="foundation"
+                                                    title="Regenerating PRD"
+                                                    subtitle="Creating a fresh draft from your original prompt"
+                                                />
+                                            </div>
+                                        )}
+
+                                        {/* Initial generation progress */}
+                                        {isPRDGenerating && (
+                                            <div className="mb-6">
+                                                <GenerationProgress
+                                                    stages={PRD_GENERATION_STAGES}
+
+                                                    variant="foundation"
+                                                    title="Building your PRD"
+                                                    subtitle="Transforming your product vision into a structured requirements document"
+                                                />
+                                            </div>
+                                        )}
+
                                         <div className="mb-8 bg-neutral-50/80 rounded-xl border border-neutral-200 transition-all overflow-hidden flex flex-col">
                                             <div
                                                 className="flex items-center justify-between cursor-pointer p-3 select-none hover:bg-neutral-100 transition"
@@ -289,7 +324,22 @@ export function ProjectWorkspace() {
                                             </div>
                                         )}
 
-                                        {activeSpine.structuredPRD && showStructuredView ? (
+                                        {/* Don't render SelectableSpine for the placeholder text */}
+                                        {isPRDGenerating ? (
+                                            <div className="space-y-4 animate-pulse">
+                                                <div className="h-5 bg-neutral-100 rounded w-2/5" />
+                                                <div className="space-y-2.5">
+                                                    <div className="h-3.5 bg-neutral-100 rounded w-full" />
+                                                    <div className="h-3.5 bg-neutral-100 rounded w-11/12" />
+                                                    <div className="h-3.5 bg-neutral-100 rounded w-4/5" />
+                                                </div>
+                                                <div className="h-5 bg-neutral-100 rounded w-1/3 mt-6" />
+                                                <div className="space-y-2.5">
+                                                    <div className="h-3.5 bg-neutral-100 rounded w-full" />
+                                                    <div className="h-3.5 bg-neutral-100 rounded w-5/6" />
+                                                </div>
+                                            </div>
+                                        ) : activeSpine.structuredPRD && showStructuredView ? (
                                             <StructuredPRDView
                                                 projectId={projectId}
                                                 spineId={activeSpine.id}
@@ -308,23 +358,20 @@ export function ProjectWorkspace() {
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8 animate-pulse">
-                                        <div className="h-8 bg-neutral-200 rounded w-1/3 mb-10"></div>
-                                        <div className="space-y-6">
-                                            <div>
-                                                <div className="h-6 bg-neutral-200 rounded w-1/4 mb-4"></div>
-                                                <div className="space-y-3">
-                                                    <div className="h-4 bg-neutral-100 rounded w-full"></div>
-                                                    <div className="h-4 bg-neutral-100 rounded w-11/12"></div>
-                                                    <div className="h-4 bg-neutral-100 rounded w-5/6"></div>
-                                                </div>
-                                            </div>
-                                            <div className="pt-6">
-                                                <div className="h-6 bg-neutral-200 rounded w-1/5 mb-4"></div>
-                                                <div className="space-y-3">
-                                                    <div className="h-4 bg-neutral-100 rounded w-full"></div>
-                                                    <div className="h-4 bg-neutral-100 rounded w-4/5"></div>
-                                                </div>
+                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
+                                        <GenerationProgress
+                                            stages={PRD_GENERATION_STAGES}
+
+                                            variant="foundation"
+                                            title="Building your PRD"
+                                            subtitle="Transforming your product vision into a structured requirements document"
+                                        />
+                                        <div className="mt-6 space-y-4 animate-pulse">
+                                            <div className="h-5 bg-neutral-100 rounded w-2/5" />
+                                            <div className="space-y-2.5">
+                                                <div className="h-3.5 bg-neutral-100 rounded w-full" />
+                                                <div className="h-3.5 bg-neutral-100 rounded w-11/12" />
+                                                <div className="h-3.5 bg-neutral-100 rounded w-4/5" />
                                             </div>
                                         </div>
                                     </div>
@@ -397,8 +444,12 @@ export function ProjectWorkspace() {
                                         onCanvasOpen={(branchId) => setActiveCanvasBranchId(branchId)}
                                     />
                                 ) : (
-                                    <div className="text-sm text-neutral-500 italic p-4 text-center border border-dashed border-neutral-300 rounded-lg bg-white shadow-sm mt-4">
-                                        Loading...
+                                    <div className="text-sm text-neutral-500 p-4 text-center border border-dashed border-neutral-300 rounded-lg bg-white shadow-sm mt-4 flex items-center justify-center gap-2">
+                                        <span className="relative flex h-1.5 w-1.5">
+                                            <span className="animate-ping absolute inline-flex h-full w-full rounded-full bg-indigo-400 opacity-75" />
+                                            <span className="relative inline-flex rounded-full h-1.5 w-1.5 bg-indigo-400" />
+                                        </span>
+                                        Preparing workspace...
                                     </div>
                                 )
                             ) : (

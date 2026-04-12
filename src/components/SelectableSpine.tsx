@@ -178,9 +178,9 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                         <button
                             type="submit"
                             disabled={isSubmitting || !intent.trim()}
-                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded transition disabled:opacity-50"
+                            className="bg-indigo-600 hover:bg-indigo-700 text-white text-sm px-3 py-1.5 rounded transition disabled:opacity-50 min-w-[60px]"
                         >
-                            {isSubmitting ? '...' : 'Branch'}
+                            {isSubmitting ? 'Creating...' : 'Branch'}
                         </button>
                     </form>
                 </div>

@@ -1,9 +1,10 @@
 import { useState } from 'react';
-import { Layers, Plus, RefreshCcw, Download } from 'lucide-react';
+import { Layers, Plus, RefreshCcw, Download, AlertCircle, Loader2 } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import { generateMarkupImage } from '../lib/llmProvider';
 import { MarkupImageRenderer } from './MarkupImageRenderer';
-import { SkeletonLoader } from './SkeletonLoader';
+import { GenerationProgress } from './GenerationProgress';
+import { getMarkupImageStages } from './generationStages';
 import type { StructuredPRD, MarkupImageSubtype, MarkupImageSpec } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -128,8 +129,13 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
             )}
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                    {error}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-3">
+                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                        <p className="font-medium mb-1">Markup generation failed</p>
+                        <p>{error}</p>
+                    </div>
+                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">&times;</button>
                 </div>
             )}
 
@@ -149,17 +155,25 @@ export function MarkupImageView({ projectId, spineVersionId, prdContent, structu
                             </div>
                             <p className="text-xs text-neutral-500">{meta.description}</p>
                             {generatingSubtype === meta.subtype && (
-                                <span className="text-xs text-indigo-500 animate-pulse">Generating...</span>
+                                <span className="text-xs text-indigo-500 flex items-center gap-1.5">
+                                    <Loader2 size={10} className="animate-spin" />
+                                    Working...
+                                </span>
                             )}
                         </button>
                     ))}
                 </div>
             )}
 
-            {/* Loading skeleton */}
+            {/* Generation progress */}
             {generatingSubtype && (
-                <div className="bg-white rounded-xl border border-neutral-200 p-6">
-                    <SkeletonLoader lines={8} />
+                <div className="bg-white rounded-xl border border-neutral-200 p-5">
+                    <GenerationProgress
+                        stages={getMarkupImageStages(generatingSubtype)}
+
+                        variant="creative"
+                        title={`Creating ${MARKUP_IMAGE_TYPES.find(t => t.subtype === generatingSubtype)?.title || 'markup image'}`}
+                    />
                 </div>
             )}
 

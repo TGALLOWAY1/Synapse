@@ -1,5 +1,5 @@
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, Maximize2, Check, ArrowRight } from 'lucide-react';
+import { ChevronLeft, Maximize2, Check, ArrowRight, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
 
 interface BranchCanvasProps {
@@ -154,8 +154,17 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
                                     disabled={isGenerating}
                                     className="bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white px-6 py-3 rounded-lg font-medium transition flex items-center gap-2 mx-auto"
                                 >
-                                    {isGenerating ? 'Synthesizing...' : 'Generate Approaches'}
-                                    {!isGenerating && <ArrowRight size={18} />}
+                                    {isGenerating ? (
+                                        <>
+                                            <Loader2 size={16} className="animate-spin" />
+                                            Exploring design approaches...
+                                        </>
+                                    ) : (
+                                        <>
+                                            Generate Approaches
+                                            <ArrowRight size={18} />
+                                        </>
+                                    )}
                                 </button>
                             </div>
                         ) : (
