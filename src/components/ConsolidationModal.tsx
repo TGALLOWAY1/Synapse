@@ -1,7 +1,9 @@
 import { useState } from 'react';
 import { useProjectStore } from '../store/projectStore';
 import { consolidateBranch, type ConsolidationResult, type ConsolidationScope } from '../lib/llmProvider';
-import { X, ArrowRight, Check, RefreshCcw } from 'lucide-react';
+import { X, ArrowRight, Check, Loader2 } from 'lucide-react';
+import { GenerationProgress } from './GenerationProgress';
+import { CONSOLIDATION_STAGES } from './generationStages';
 import type { Branch } from '../types';
 
 interface ConsolidationModalProps {
@@ -84,8 +86,15 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
 
                 {/* Error Banner */}
                 {error && (
-                    <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-center gap-2">
-                        <span className="font-bold">Error:</span> {error}
+                    <div className="mx-4 mt-4 p-3 bg-red-50 border border-red-100 rounded-lg text-sm text-red-600 flex items-start gap-2">
+                        <span className="font-semibold shrink-0">Failed:</span>
+                        <span className="flex-1">{error}</span>
+                        <button
+                            onClick={() => setError(null)}
+                            className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium"
+                        >
+                            &times;
+                        </button>
                     </div>
                 )}
 
@@ -93,20 +102,28 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                 <div className="flex-1 overflow-hidden flex flex-col">
                     {!result ? (
                         <div className="p-8 md:p-12 flex flex-col items-center justify-center text-center flex-1 min-h-[300px]">
-                            <div className="bg-indigo-50 p-4 rounded-full mb-6">
-                                <RefreshCcw size={32} className={`text-indigo-500 ${isConsolidating ? 'animate-spin' : ''}`} />
-                            </div>
-                            <h3 className="text-xl font-medium text-neutral-800 mb-2">
-                                {isConsolidating ? 'Synthesizing Patch...' : 'Select Consolidation Scope'}
-                            </h3>
-                            <p className="text-neutral-500 max-w-md mb-8">
-                                {isConsolidating
-                                    ? `Generating a ${selectedScope === 'local' ? 'localized edit' : 'document-wide rewrite'} based on the branch discussion.`
-                                    : 'Choose how you want to merge this branch\'s intent into the main spine.'}
-                            </p>
+                            {isConsolidating ? (
+                                <div className="w-full max-w-md">
+                                    <GenerationProgress
+                                        stages={CONSOLIDATION_STAGES}
 
-                            {!isConsolidating && (
+                                        variant="precise"
+                                        title={selectedScope === 'local' ? 'Generating Local Patch' : 'Generating Document Rewrite'}
+                                        subtitle={`Reconciling branch discussion into the ${selectedScope === 'local' ? 'anchor region' : 'full document'}`}
+                                    />
+                                    <p className="text-xs text-neutral-400 mt-4">
+                                        Analyzing {branch.messages.length} message{branch.messages.length !== 1 ? 's' : ''} from this branch
+                                    </p>
+                                </div>
+                            ) : (
                                 <>
+                                    <h3 className="text-xl font-medium text-neutral-800 mb-2">
+                                        Select Consolidation Scope
+                                    </h3>
+                                    <p className="text-neutral-500 max-w-md mb-8">
+                                        Choose how to merge this branch's intent into the main spine.
+                                    </p>
+
                                     <div className="flex gap-4 mb-8 w-full max-w-lg">
                                         <button
                                             onClick={() => { setSelectedScope('local'); setError(null); }}
@@ -169,8 +186,17 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                                         disabled={isCommitting}
                                         className="w-full bg-indigo-600 hover:bg-indigo-700 text-white py-3 rounded-lg font-medium shadow-sm transition flex justify-center items-center gap-2 disabled:opacity-50"
                                     >
-                                        {isCommitting ? 'Committing...' : 'Commit to New Spine'}
-                                        {!isCommitting && <Check size={18} />}
+                                        {isCommitting ? (
+                                            <>
+                                                <Loader2 size={16} className="animate-spin" />
+                                                Applying changes...
+                                            </>
+                                        ) : (
+                                            <>
+                                                Commit to New Spine
+                                                <Check size={18} />
+                                            </>
+                                        )}
                                     </button>
                                     <p className="text-xs text-neutral-400 text-center mt-3">
                                         This will close the branch and create a new version of the spine.

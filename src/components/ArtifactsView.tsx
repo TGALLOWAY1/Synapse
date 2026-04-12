@@ -1,12 +1,13 @@
 import { useState } from 'react';
-import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle, AlertCircle } from 'lucide-react';
 import { ArtifactContentRenderer } from './renderers';
 import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
 import { validateArtifactContent } from '../lib/artifactValidation';
 import { StalenessBadge } from './StalenessBadge';
-import { SkeletonLoader } from './SkeletonLoader';
 import { FeedbackModal } from './FeedbackModal';
+import { GenerationProgress } from './GenerationProgress';
+import { STALE_REFRESH_STAGES, getArtifactStages } from './generationStages';
 import type { StructuredPRD, CoreArtifactSubtype } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 
@@ -294,8 +295,8 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                             disabled={!!generatingSubtype || !structuredPRD}
                             className="flex items-center gap-2 px-3 py-2 bg-amber-50 text-amber-700 border border-amber-200 rounded-lg hover:bg-amber-100 transition text-sm font-medium disabled:opacity-50"
                         >
-                            <RefreshCcw size={14} />
-                            Refresh {staleCount} Stale
+                            {generatingSubtype === 'bundle' ? <Loader2 size={14} className="animate-spin" /> : <RefreshCcw size={14} />}
+                            {generatingSubtype === 'bundle' ? 'Refreshing...' : `Refresh ${staleCount} Stale`}
                         </button>
                     )}
                     <button
@@ -303,9 +304,13 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                         disabled={!!generatingSubtype || !structuredPRD}
                         className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
                     >
-                        <Sparkles size={16} />
+                        {generatingSubtype === 'bundle' ? (
+                            <Loader2 size={16} className="animate-spin" />
+                        ) : (
+                            <Sparkles size={16} />
+                        )}
                         {generatingSubtype === 'bundle'
-                            ? `Generating ${bundleDoneCount} of ${CORE_ARTIFACTS.length}...`
+                            ? `${bundleDoneCount} of ${CORE_ARTIFACTS.length} complete`
                             : 'Generate All'}
                     </button>
                 </div>
@@ -318,9 +323,30 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
             )}
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                    {error}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-3">
+                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                    <div className="flex-1">
+                        <p className="font-medium mb-1">Generation failed</p>
+                        <p>{error}</p>
+                    </div>
+                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">&times;</button>
                 </div>
+            )}
+
+            {/* Bundle / stale refresh progress */}
+            {generatingSubtype === 'bundle' && (
+                <GenerationProgress
+                    stages={staleCount > 0 ? STALE_REFRESH_STAGES : [
+                        { label: 'Preparing artifact pipeline...', minDuration: 2000 },
+                        { label: `Generating artifacts (${bundleDoneCount} of ${CORE_ARTIFACTS.length} complete)...`, minDuration: 3000 },
+                        { label: 'Structuring outputs...', minDuration: 4000 },
+                        { label: 'Validating artifact quality...', minDuration: 5000 },
+                    ]}
+
+                    variant="systematic"
+                    title={staleCount > 0 ? 'Refreshing Stale Artifacts' : 'Generating Artifact Bundle'}
+                    subtitle={`Processing ${staleCount > 0 ? staleCount : CORE_ARTIFACTS.length} artifacts with concurrency controls`}
+                />
             )}
 
             {/* Artifact Grid */}
@@ -335,7 +361,7 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                     const artifactBundleStatus = bundleStatus[meta.subtype];
 
                     const statusDotClass = artifactBundleStatus === 'generating'
-                        ? 'text-indigo-500 animate-spin'
+                        ? 'text-sky-500 animate-spin'
                         : artifactBundleStatus === 'done'
                         ? 'text-green-500'
                         : artifactBundleStatus === 'error'
@@ -380,15 +406,28 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                     disabled={isGenerating || !structuredPRD}
                                     className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition shrink-0 disabled:opacity-50"
                                 >
-                                    {existing ? <RefreshCcw size={12} /> : <Plus size={12} />}
-                                    {isGenerating ? 'Generating...' : existing ? 'Regenerate' : 'Generate'}
+                                    {generatingSubtype === meta.subtype ? (
+                                        <Loader2 size={12} className="animate-spin" />
+                                    ) : existing ? (
+                                        <RefreshCcw size={12} />
+                                    ) : (
+                                        <Plus size={12} />
+                                    )}
+                                    {generatingSubtype === meta.subtype
+                                        ? 'Working...'
+                                        : existing ? 'Regenerate' : 'Generate'}
                                 </button>
                             </div>
 
-                            {/* Skeleton during individual generation */}
-                            {generatingSubtype === meta.subtype && !existing && (
+                            {/* Per-artifact generation progress */}
+                            {generatingSubtype === meta.subtype && (
                                 <div className="border-t border-neutral-100 p-4">
-                                    <SkeletonLoader lines={6} />
+                                    <GenerationProgress
+                                        stages={getArtifactStages(meta.subtype)}
+
+                                        variant="systematic"
+                                        inline
+                                    />
                                 </div>
                             )}
 

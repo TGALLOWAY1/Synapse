@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Plus, GitCompare, MessageSquarePlus, AlertCircle, AlertTriangle, RefreshCw, Sparkles, Monitor, Smartphone, Columns3 } from 'lucide-react';
+import { Image, Plus, GitCompare, MessageSquarePlus, AlertCircle, AlertTriangle, RefreshCw, Sparkles, Monitor, Smartphone, Columns3, Loader2 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
@@ -8,6 +8,8 @@ import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import { MockupViewer } from './mockups/MockupViewer';
 import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
+import { GenerationProgress } from './GenerationProgress';
+import { MOCKUP_GENERATION_STAGES } from './generationStages';
 import type {
     StructuredPRD,
     MockupSettings,
@@ -223,8 +225,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 disabled={isGenerating}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
             >
-                <RefreshCw size={12} className={isGenerating ? 'animate-spin' : ''} />
-                {isGenerating ? 'Regenerating…' : 'Regenerate'}
+                {isGenerating ? <Loader2 size={12} className="animate-spin" /> : <RefreshCw size={12} />}
+                {isGenerating ? 'Regenerating...' : 'Regenerate'}
             </button>
             <button
                 type="button"
@@ -379,25 +381,25 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const renderGeneratingSkeleton = () => (
         <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
-            <div className="px-5 pt-5 pb-4 border-b border-neutral-100">
-                <div className="flex items-center gap-3 mb-3">
-                    <div className="h-5 w-5 rounded-full bg-indigo-100 flex items-center justify-center">
-                        <Sparkles size={12} className="text-indigo-500 animate-pulse" />
-                    </div>
-                    <span className="text-sm font-medium text-neutral-600">Generating your mockup…</span>
-                </div>
-                <div className="animate-pulse space-y-2">
-                    <div className="h-4 bg-neutral-200 rounded w-1/3" />
-                    <div className="h-3 bg-neutral-100 rounded w-2/3" />
-                </div>
+            <div className="p-5">
+                <GenerationProgress
+                    stages={MOCKUP_GENERATION_STAGES}
+
+                    variant="creative"
+                    title="Creating mockup"
+                    subtitle={`${platform} layout, ${fidelity} fidelity, ${scope.replace('_', ' ')} scope`}
+                />
             </div>
-            <div className="px-5 pt-4 pb-2 flex items-center gap-2 animate-pulse">
+            <div className="px-5 pt-2 pb-2 flex items-center gap-2 animate-pulse">
                 <div className="h-7 w-28 bg-neutral-100 rounded-full" />
                 <div className="h-7 w-28 bg-neutral-100 rounded-full" />
                 <div className="h-7 w-28 bg-neutral-100 rounded-full" />
             </div>
             <div className="px-5 pb-5 animate-pulse">
-                <div className="h-[480px] bg-neutral-100 rounded-lg" />
+                <div className="h-[480px] bg-neutral-100 rounded-lg relative overflow-hidden">
+                    {/* Shimmer effect */}
+                    <div className="absolute inset-0 -translate-x-full animate-[shimmer_2s_ease-in-out_infinite] bg-gradient-to-r from-transparent via-white/40 to-transparent" />
+                </div>
             </div>
         </div>
     );
@@ -547,8 +549,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                             disabled={isGenerating}
                             className="flex items-center gap-2 mt-4 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
                         >
-                            <Sparkles size={14} />
-                            {isGenerating ? 'Generating…' : 'Generate Mockup'}
+                            {isGenerating ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
+                            {isGenerating ? 'Generating mockup...' : 'Generate Mockup'}
                         </button>
                         <button
                             type="button"
@@ -626,9 +628,13 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                                 {isSelected && preferredVersion && (
                                     <div className="border-x border-b border-neutral-200 rounded-b-xl bg-neutral-50/30 overflow-hidden">
                                         {isGenerating && (
-                                            <div className="flex items-center gap-2 px-5 py-3 bg-indigo-50/50 border-b border-indigo-100">
-                                                <RefreshCw size={12} className="text-indigo-500 animate-spin" />
-                                                <span className="text-xs text-indigo-600 font-medium">Regenerating mockup…</span>
+                                            <div className="px-5 py-3 bg-violet-50/50 border-b border-violet-100">
+                                                <GenerationProgress
+                                                    stages={MOCKUP_GENERATION_STAGES}
+                                
+                                                    variant="creative"
+                                                    inline
+                                                />
                                             </div>
                                         )}
                                         {compareMode ? (

@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { Settings, List, Plus, ArrowUp, Sparkles, X, Smartphone, Monitor } from 'lucide-react';
+import { Settings, List, Plus, ArrowUp, Sparkles, X, Smartphone, Monitor, Loader2 } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
 import type { ProjectPlatform } from '../types';
@@ -72,14 +72,14 @@ export function HomePage() {
                     const errorMsg = e instanceof Error ? e.message : String(e);
                     useProjectStore.getState().updateSpineText(
                         projectId, spineId,
-                        `**Error generating PRD:**\n${errorMsg}\n\nPlease verify your API Key in Settings or check your network connection.`
+                        `> **PRD generation encountered an error.** You can regenerate from the workspace menu.\n>\n> ${errorMsg}`
                     );
                 });
         }).catch((e) => {
             const errorMsg = e instanceof Error ? e.message : String(e);
             useProjectStore.getState().updateSpineText(
                 projectId, spineId,
-                `**Error loading generation module:**\n${errorMsg}\n\nPlease try refreshing the page.`
+                `> **Failed to load generation module.** Try refreshing the page.\n>\n> ${errorMsg}`
             );
         });
     };
@@ -314,7 +314,7 @@ export function HomePage() {
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
                                         title="Enhance prompt with AI"
                                     >
-                                        <Sparkles size={14} className={isEnhancing ? 'animate-spin' : ''} />
+                                        {isEnhancing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
                                         {isEnhancing ? 'Enhancing...' : 'Enhance'}
                                     </button>
 
