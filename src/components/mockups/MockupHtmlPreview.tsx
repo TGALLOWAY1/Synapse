@@ -28,10 +28,11 @@ export function MockupHtmlPreview({ html, platform, className }: Props) {
     if (!srcDoc) {
         return (
             <div
-                className={`w-full bg-neutral-50 rounded-lg border border-neutral-200 flex items-center justify-center text-sm text-neutral-400 ${className ?? ''}`}
-                style={{ height }}
+                className={`w-full bg-neutral-50 rounded-lg border border-dashed border-neutral-300 flex flex-col items-center justify-center text-neutral-400 ${className ?? ''}`}
+                style={{ height: 240 }}
             >
-                No preview available — this screen's HTML is empty or invalid.
+                <p className="text-sm font-medium text-neutral-500">Preview unavailable</p>
+                <p className="text-xs mt-1">This screen's content could not be rendered. Try regenerating.</p>
             </div>
         );
     }
