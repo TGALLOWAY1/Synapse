@@ -3,23 +3,39 @@
 // file so `react-refresh/only-export-components` stays happy and so the
 // helper can be reused by the "Open in new tab" flow in MockupViewer.
 
-const sanitizeHtmlFragment = (html: string): string => {
-    let out = html;
+/** Maximum HTML size we'll render. Anything larger is almost certainly a
+ *  model hallucination or degenerate output and could lock up the browser. */
+const MAX_FRAGMENT_LENGTH = 200_000;
+
+export const sanitizeHtmlFragment = (html: string): string => {
+    // Hard cap — truncate absurdly large fragments before running regexes.
+    let out = html.length > MAX_FRAGMENT_LENGTH
+        ? html.slice(0, MAX_FRAGMENT_LENGTH) + '\n<!-- truncated: exceeded maximum safe length -->'
+        : html;
+
     // Strip any stray <!doctype>, <html>, <head>, <body> wrappers the model
     // may include despite instructions.
     out = out.replace(/<!doctype[^>]*>/gi, '');
     out = out.replace(/<\/?(html|head|body)\b[^>]*>/gi, '');
-    // Strip disallowed tags entirely.
+
+    // Strip disallowed tags entirely — both paired and self-closing forms.
     out = out.replace(/<script\b[\s\S]*?<\/script>/gi, '');
+    out = out.replace(/<script\b[^>]*\/?>/gi, '');                    // self-closing / unclosed
     out = out.replace(/<style\b[\s\S]*?<\/style>/gi, '');
-    out = out.replace(/<(link|meta|iframe|object|embed|base)\b[^>]*>/gi, '');
+    out = out.replace(/<style\b[^>]*\/?>/gi, '');
+    out = out.replace(/<(link|meta|iframe|object|embed|base|noscript|form)\b[^>]*>/gi, '');
+    out = out.replace(/<\/(iframe|object|embed|noscript|form)>/gi, '');
+
     // Strip inline event handlers: onclick="...", onLoad='...', etc.
     out = out.replace(/\son[a-z]+\s*=\s*"[^"]*"/gi, '');
     out = out.replace(/\son[a-z]+\s*=\s*'[^']*'/gi, '');
     out = out.replace(/\son[a-z]+\s*=\s*[^\s>]+/gi, '');
-    // Neutralize javascript: URLs.
-    out = out.replace(/(href|src)\s*=\s*"\s*javascript:[^"]*"/gi, '$1="#"');
-    out = out.replace(/(href|src)\s*=\s*'\s*javascript:[^']*'/gi, '$1="#"');
+
+    // Neutralize javascript: and data: URLs in href/src/action (quoted & unquoted).
+    out = out.replace(/(href|src|action)\s*=\s*"\s*(javascript|data):[^"]*"/gi, '$1="#"');
+    out = out.replace(/(href|src|action)\s*=\s*'\s*(javascript|data):[^']*'/gi, "$1='#'");
+    out = out.replace(/(href|src|action)\s*=\s*(javascript|data):[^\s>]*/gi, '$1="#"');
+
     return out;
 };
 

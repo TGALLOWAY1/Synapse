@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Plus, GitCompare, MessageSquarePlus } from 'lucide-react';
+import { Image, Plus, GitCompare, MessageSquarePlus, AlertCircle, AlertTriangle, RefreshCw, Sparkles, Monitor, Smartphone, Columns3 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
@@ -7,6 +7,7 @@ import { generateMockup } from '../lib/llmProvider';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import { MockupViewer } from './mockups/MockupViewer';
+import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import type {
     StructuredPRD,
     MockupSettings,
@@ -14,6 +15,7 @@ import type {
     MockupFidelity,
     MockupScope,
     MockupPayload,
+    MockupScreen,
     ArtifactVersion,
     StalenessState,
 } from '../types';
@@ -27,37 +29,79 @@ interface MockupsViewProps {
     structuredPRD?: StructuredPRD;
 }
 
-const PLATFORM_OPTIONS: { value: MockupPlatform; label: string }[] = [
-    { value: 'desktop', label: 'Desktop' },
-    { value: 'mobile', label: 'Mobile' },
-    { value: 'responsive', label: 'Responsive' },
+const PLATFORM_OPTIONS: { value: MockupPlatform; label: string; desc: string; icon: typeof Monitor }[] = [
+    { value: 'desktop', label: 'Desktop', desc: '1440px with sidebar', icon: Monitor },
+    { value: 'mobile', label: 'Mobile', desc: '390px single-column', icon: Smartphone },
+    { value: 'responsive', label: 'Responsive', desc: 'Desktop-first, adaptive', icon: Columns3 },
 ];
 
-const FIDELITY_OPTIONS: { value: MockupFidelity; label: string }[] = [
-    { value: 'low', label: 'Low-fi (Wireframe)' },
-    { value: 'mid', label: 'Mid-fi (Structured)' },
-    { value: 'high', label: 'High-fi (Polished)' },
+const FIDELITY_OPTIONS: { value: MockupFidelity; label: string; desc: string }[] = [
+    { value: 'low', label: 'Wireframe', desc: 'Structural layout with neutral palette' },
+    { value: 'mid', label: 'Structured', desc: 'Real copy, data tables, stat tiles' },
+    { value: 'high', label: 'Polished', desc: 'Production-ready visual fidelity' },
 ];
 
-const SCOPE_OPTIONS: { value: MockupScope; label: string }[] = [
-    { value: 'key_workflow', label: 'Key Workflow' },
-    { value: 'multi_screen', label: 'Multiple Screens' },
-    { value: 'single_screen', label: 'Single Screen' },
+const SCOPE_OPTIONS: { value: MockupScope; label: string; desc: string }[] = [
+    { value: 'key_workflow', label: 'Key Workflow', desc: '3–5 screens forming a user journey' },
+    { value: 'multi_screen', label: 'Multiple Screens', desc: '3–4 screens across the core experience' },
+    { value: 'single_screen', label: 'Single Screen', desc: 'One high-value screen in depth' },
 ];
 
 // Safely extract a MockupPayload from an ArtifactVersion. Returns null for
 // legacy markdown versions or unparseable content — callers fall back to the
-// legacy markdown renderer.
+// legacy markdown renderer. Validates field types so corrupted localStorage
+// data doesn't cause downstream crashes.
 const tryParsePayload = (version: ArtifactVersion): MockupPayload | null => {
     const format = (version.metadata as { format?: string } | undefined)?.format;
     if (format !== MOCKUP_HTML_V1) return null;
     try {
-        const parsed = JSON.parse(version.content) as MockupPayload;
-        if (!parsed?.screens?.length) return null;
-        return parsed;
+        const parsed = JSON.parse(version.content);
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (!Array.isArray(parsed.screens) || parsed.screens.length === 0) return null;
+
+        // Validate every screen has the minimum required string fields.
+        const validScreens = parsed.screens.filter(
+            (s: unknown): s is MockupScreen =>
+                !!s &&
+                typeof s === 'object' &&
+                typeof (s as Record<string, unknown>).id === 'string' &&
+                typeof (s as Record<string, unknown>).name === 'string' &&
+                typeof (s as Record<string, unknown>).html === 'string' &&
+                ((s as Record<string, unknown>).html as string).trim().length > 0
+        );
+        if (validScreens.length === 0) return null;
+
+        return {
+            version: 'mockup_html_v1',
+            title: typeof parsed.title === 'string' ? parsed.title : 'Mockup concept',
+            summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+            screens: validScreens,
+        };
     } catch {
         return null;
     }
+};
+
+const DEFAULT_SETTINGS: MockupSettings = {
+    platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
+};
+
+/** Safely extract MockupSettings from version metadata, falling back to
+ *  sensible defaults so a corrupted metadata blob never crashes the UI. */
+const extractSettings = (version: ArtifactVersion): MockupSettings => {
+    const raw = (version.metadata as Record<string, unknown> | undefined)?.settings;
+    if (!raw || typeof raw !== 'object') return DEFAULT_SETTINGS;
+    const s = raw as Record<string, unknown>;
+    return {
+        platform: (typeof s.platform === 'string' && ['mobile', 'desktop', 'responsive'].includes(s.platform)
+            ? s.platform : 'desktop') as MockupPlatform,
+        fidelity: (typeof s.fidelity === 'string' && ['low', 'mid', 'high'].includes(s.fidelity)
+            ? s.fidelity : 'mid') as MockupFidelity,
+        scope: (typeof s.scope === 'string' && ['single_screen', 'multi_screen', 'key_workflow'].includes(s.scope)
+            ? s.scope : 'key_workflow') as MockupScope,
+        style: typeof s.style === 'string' ? s.style : undefined,
+        notes: typeof s.notes === 'string' ? s.notes : undefined,
+    };
 };
 
 export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD }: MockupsViewProps) {
@@ -74,6 +118,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     const [compareVersions, setCompareVersions] = useState<[string | null, string | null]>([null, null]);
     const [feedbackVersionId, setFeedbackVersionId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [warning, setWarning] = useState<string | null>(null);
 
     // Settings
     const [platform, setPlatform] = useState<MockupPlatform>('desktop');
@@ -86,6 +131,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const handleGenerate = async () => {
         setError(null);
+        setWarning(null);
         setIsGenerating(true);
         try {
             const settings: MockupSettings = {
@@ -94,7 +140,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 notes: notes || undefined,
             };
 
-            const payload = await generateMockup(prdContent, settings, structuredPRD);
+            const { payload, warnings } = await generateMockup(prdContent, settings, structuredPRD);
 
             const title = payload.title?.trim()
                 || `Mockup — ${platform} / ${fidelity} / ${scope.replace('_', ' ')}`;
@@ -116,6 +162,9 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
             setSelectedArtifactId(artifactId);
             setShowGeneratePanel(false);
+            if (warnings.length > 0) {
+                setWarning(`Generated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
+            }
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
         } finally {
@@ -125,15 +174,14 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const handleRegenerate = async (artifactId: string) => {
         setError(null);
+        setWarning(null);
         setIsGenerating(true);
         try {
             const versions = getArtifactVersions(projectId, artifactId);
             const latestVersion = versions[versions.length - 1];
-            const settings = (latestVersion?.metadata?.settings as MockupSettings) || {
-                platform: 'desktop', fidelity: 'mid', scope: 'key_workflow'
-            };
+            const settings = latestVersion ? extractSettings(latestVersion) : DEFAULT_SETTINGS;
 
-            const payload = await generateMockup(prdContent, settings, structuredPRD);
+            const { payload, warnings } = await generateMockup(prdContent, settings, structuredPRD);
 
             createArtifactVersion(
                 projectId,
@@ -149,7 +197,12 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 `Regenerate mockup from updated PRD`,
                 latestVersion?.id,
             );
+            if (warnings.length > 0) {
+                setWarning(`Regenerated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
+            }
         } catch (e) {
+            // On regeneration failure, the previous version is preserved — the
+            // user still sees the last known good content.
             setError(e instanceof Error ? e.message : String(e));
         } finally {
             setIsGenerating(false);
@@ -170,6 +223,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 disabled={isGenerating}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
             >
+                <RefreshCw size={12} className={isGenerating ? 'animate-spin' : ''} />
                 {isGenerating ? 'Regenerating…' : 'Regenerate'}
             </button>
             <button
@@ -187,7 +241,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-50 hover:bg-amber-100 text-amber-700 border border-amber-200 rounded-md transition"
             >
                 <MessageSquarePlus size={12} />
-                Extract Feedback
+                Feedback
             </button>
             {allVersions.length > 1 && (
                 <select
@@ -212,20 +266,20 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     ) => {
         const payload = tryParsePayload(version);
         if (payload) {
-            const settings = (version.metadata?.settings as MockupSettings) || {
-                platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
-            };
+            const settings = extractSettings(version);
             const sourceSpineVersionId = version.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
             return (
-                <MockupViewer
-                    payload={payload}
-                    settings={settings}
-                    staleness={staleness}
-                    versionNumber={version.versionNumber}
-                    createdAt={version.createdAt}
-                    sourceSpineVersionId={sourceSpineVersionId}
-                    actions={actions}
-                />
+                <MockupErrorBoundary key={version.id}>
+                    <MockupViewer
+                        payload={payload}
+                        settings={settings}
+                        staleness={staleness}
+                        versionNumber={version.versionNumber}
+                        createdAt={version.createdAt}
+                        sourceSpineVersionId={sourceSpineVersionId}
+                        actions={actions}
+                    />
+                </MockupErrorBoundary>
             );
         }
 
@@ -263,18 +317,18 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             if (!v) return <div className="text-neutral-400 text-sm italic">Select a version</div>;
             const payload = tryParsePayload(v);
             if (payload) {
-                const settings = (v.metadata?.settings as MockupSettings) || {
-                    platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
-                };
+                const settings = extractSettings(v);
                 return (
-                    <MockupViewer
-                        payload={payload}
-                        settings={settings}
-                        staleness={staleness}
-                        versionNumber={v.versionNumber}
-                        createdAt={v.createdAt}
-                        sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
-                    />
+                    <MockupErrorBoundary key={v.id}>
+                        <MockupViewer
+                            payload={payload}
+                            settings={settings}
+                            staleness={staleness}
+                            versionNumber={v.versionNumber}
+                            createdAt={v.createdAt}
+                            sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
+                        />
+                    </MockupErrorBoundary>
                 );
             }
             return (
@@ -324,16 +378,25 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     };
 
     const renderGeneratingSkeleton = () => (
-        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden animate-pulse">
+        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
             <div className="px-5 pt-5 pb-4 border-b border-neutral-100">
-                <div className="h-5 bg-neutral-200 rounded w-1/3 mb-2" />
-                <div className="h-3 bg-neutral-100 rounded w-2/3" />
+                <div className="flex items-center gap-3 mb-3">
+                    <div className="h-5 w-5 rounded-full bg-indigo-100 flex items-center justify-center">
+                        <Sparkles size={12} className="text-indigo-500 animate-pulse" />
+                    </div>
+                    <span className="text-sm font-medium text-neutral-600">Generating your mockup…</span>
+                </div>
+                <div className="animate-pulse space-y-2">
+                    <div className="h-4 bg-neutral-200 rounded w-1/3" />
+                    <div className="h-3 bg-neutral-100 rounded w-2/3" />
+                </div>
             </div>
-            <div className="px-5 pt-4 pb-2 flex items-center gap-2">
-                <div className="h-6 w-24 bg-neutral-100 rounded-full" />
-                <div className="h-6 w-24 bg-neutral-100 rounded-full" />
+            <div className="px-5 pt-4 pb-2 flex items-center gap-2 animate-pulse">
+                <div className="h-7 w-28 bg-neutral-100 rounded-full" />
+                <div className="h-7 w-28 bg-neutral-100 rounded-full" />
+                <div className="h-7 w-28 bg-neutral-100 rounded-full" />
             </div>
-            <div className="px-5 pb-5">
+            <div className="px-5 pb-5 animate-pulse">
                 <div className="h-[480px] bg-neutral-100 rounded-lg" />
             </div>
         </div>
@@ -358,110 +421,139 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                     className="flex items-center gap-2 px-4 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
                 >
                     <Plus size={16} />
-                    Generate Mockup
+                    New Mockup
                 </button>
             </div>
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                    {error}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start gap-3">
+                    <AlertCircle size={16} className="shrink-0 mt-0.5" />
+                    <span className="flex-1">{error}</span>
+                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">&times;</button>
+                </div>
+            )}
+            {warning && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700 flex items-start gap-3">
+                    <AlertTriangle size={16} className="shrink-0 mt-0.5" />
+                    <span className="flex-1">{warning}</span>
+                    <button type="button" onClick={() => setWarning(null)} className="shrink-0 text-amber-400 hover:text-amber-600 text-xs font-medium">&times;</button>
                 </div>
             )}
 
             {/* Generate Panel */}
             {showGeneratePanel && (
                 <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 space-y-5">
-                    <h3 className="text-sm font-bold text-neutral-700 uppercase tracking-wider">Generation Settings</h3>
-
-                    <div className="grid grid-cols-3 gap-4">
-                        <div>
-                            <label className="block text-xs font-medium text-neutral-500 mb-1.5">Platform</label>
-                            {PLATFORM_OPTIONS.map(opt => (
-                                <button
-                                    key={opt.value}
-                                    type="button"
-                                    onClick={() => setPlatform(opt.value)}
-                                    className={`block w-full text-left px-3 py-2 text-sm rounded-md mb-1 transition ${
-                                        platform === opt.value
-                                            ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200'
-                                            : 'text-neutral-600 hover:bg-neutral-50 border border-transparent'
-                                    }`}
-                                >
-                                    {opt.label}
-                                </button>
-                            ))}
-                        </div>
-                        <div>
-                            <label className="block text-xs font-medium text-neutral-500 mb-1.5">Fidelity</label>
-                            {FIDELITY_OPTIONS.map(opt => (
-                                <button
-                                    key={opt.value}
-                                    type="button"
-                                    onClick={() => setFidelity(opt.value)}
-                                    className={`block w-full text-left px-3 py-2 text-sm rounded-md mb-1 transition ${
-                                        fidelity === opt.value
-                                            ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200'
-                                            : 'text-neutral-600 hover:bg-neutral-50 border border-transparent'
-                                    }`}
-                                >
-                                    {opt.label}
-                                </button>
-                            ))}
-                        </div>
-                        <div>
-                            <label className="block text-xs font-medium text-neutral-500 mb-1.5">Scope</label>
-                            {SCOPE_OPTIONS.map(opt => (
-                                <button
-                                    key={opt.value}
-                                    type="button"
-                                    onClick={() => setScope(opt.value)}
-                                    className={`block w-full text-left px-3 py-2 text-sm rounded-md mb-1 transition ${
-                                        scope === opt.value
-                                            ? 'bg-indigo-50 text-indigo-700 font-medium border border-indigo-200'
-                                            : 'text-neutral-600 hover:bg-neutral-50 border border-transparent'
-                                    }`}
-                                >
-                                    {opt.label}
-                                </button>
-                            ))}
-                        </div>
-                    </div>
-
                     <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">Style Direction (optional)</label>
-                        <input
-                            type="text"
-                            value={style}
-                            onChange={e => setStyle(e.target.value)}
-                            placeholder="e.g. minimal, dashboard-style, dark theme..."
-                            className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"
-                        />
+                        <h3 className="text-sm font-bold text-neutral-900">Configure Mockup</h3>
+                        <p className="text-xs text-neutral-500 mt-1">Choose how your UI concept should look. The AI will generate a rendered HTML preview based on your PRD.</p>
                     </div>
 
-                    <div>
-                        <label className="block text-xs font-medium text-neutral-500 mb-1.5">Notes / Emphasis (optional)</label>
-                        <textarea
-                            value={notes}
-                            onChange={e => setNotes(e.target.value)}
-                            placeholder="Any specific areas to emphasize or constraints..."
-                            rows={2}
-                            className="w-full px-3 py-2 border border-neutral-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"
-                        />
+                    <div className="grid grid-cols-3 gap-5">
+                        <div>
+                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Platform</label>
+                            <div className="space-y-1">
+                                {PLATFORM_OPTIONS.map(opt => {
+                                    const Icon = opt.icon;
+                                    return (
+                                        <button
+                                            key={opt.value}
+                                            type="button"
+                                            onClick={() => setPlatform(opt.value)}
+                                            className={`flex items-start gap-2.5 w-full text-left px-3 py-2 rounded-lg transition ${
+                                                platform === opt.value
+                                                    ? 'bg-indigo-50 border border-indigo-200'
+                                                    : 'hover:bg-neutral-50 border border-transparent'
+                                            }`}
+                                        >
+                                            <Icon size={14} className={`mt-0.5 shrink-0 ${platform === opt.value ? 'text-indigo-600' : 'text-neutral-400'}`} />
+                                            <div>
+                                                <div className={`text-sm ${platform === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
+                                                <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Fidelity</label>
+                            <div className="space-y-1">
+                                {FIDELITY_OPTIONS.map(opt => (
+                                    <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => setFidelity(opt.value)}
+                                        className={`block w-full text-left px-3 py-2 rounded-lg transition ${
+                                            fidelity === opt.value
+                                                ? 'bg-indigo-50 border border-indigo-200'
+                                                : 'hover:bg-neutral-50 border border-transparent'
+                                        }`}
+                                    >
+                                        <div className={`text-sm ${fidelity === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
+                                        <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Scope</label>
+                            <div className="space-y-1">
+                                {SCOPE_OPTIONS.map(opt => (
+                                    <button
+                                        key={opt.value}
+                                        type="button"
+                                        onClick={() => setScope(opt.value)}
+                                        className={`block w-full text-left px-3 py-2 rounded-lg transition ${
+                                            scope === opt.value
+                                                ? 'bg-indigo-50 border border-indigo-200'
+                                                : 'hover:bg-neutral-50 border border-transparent'
+                                        }`}
+                                    >
+                                        <div className={`text-sm ${scope === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
+                                        <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
                     </div>
 
-                    <div className="flex items-center gap-3 pt-2">
+                    <div className="grid grid-cols-2 gap-4">
+                        <div>
+                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Style Direction <span className="normal-case font-normal">(optional)</span></label>
+                            <input
+                                type="text"
+                                value={style}
+                                onChange={e => setStyle(e.target.value)}
+                                placeholder="e.g. minimal, dashboard-style, dark theme…"
+                                className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+                            />
+                        </div>
+                        <div>
+                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Notes <span className="normal-case font-normal">(optional)</span></label>
+                            <input
+                                type="text"
+                                value={notes}
+                                onChange={e => setNotes(e.target.value)}
+                                placeholder="Areas to emphasize or constraints…"
+                                className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+                            />
+                        </div>
+                    </div>
+
+                    <div className="flex items-center gap-3 pt-1 border-t border-neutral-100">
                         <button
                             type="button"
                             onClick={handleGenerate}
                             disabled={isGenerating}
-                            className="px-5 py-2 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
+                            className="flex items-center gap-2 mt-4 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium disabled:opacity-50"
                         >
-                            {isGenerating ? 'Generating...' : 'Generate'}
+                            <Sparkles size={14} />
+                            {isGenerating ? 'Generating…' : 'Generate Mockup'}
                         </button>
                         <button
                             type="button"
                             onClick={() => setShowGeneratePanel(false)}
-                            className="px-4 py-2 text-neutral-500 hover:text-neutral-700 text-sm transition"
+                            className="mt-4 px-4 py-2.5 text-neutral-500 hover:text-neutral-700 text-sm transition"
                         >
                             Cancel
                         </button>
@@ -474,12 +566,22 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
             {/* Mockup List */}
             {mockupArtifacts.length === 0 && !showGeneratePanel && !isGenerating ? (
-                <div className="text-center py-16 text-neutral-400">
-                    <Image size={48} className="mx-auto mb-4 opacity-30" />
-                    <p className="text-lg font-medium text-neutral-500 mb-2">No mockups yet</p>
-                    <p className="text-sm max-w-md mx-auto">
-                        Generate polished UI concepts grounded in your PRD. Each run produces a rendered HTML preview you can navigate screen-by-screen.
+                <div className="text-center py-16">
+                    <div className="mx-auto mb-5 w-12 h-12 rounded-xl bg-indigo-50 flex items-center justify-center">
+                        <Image size={24} className="text-indigo-400" />
+                    </div>
+                    <p className="text-lg font-semibold text-neutral-700 mb-2">Visualize your product</p>
+                    <p className="text-sm text-neutral-500 max-w-sm mx-auto mb-6">
+                        Turn your PRD into interactive UI concepts — rendered as real HTML you can click through, screen by screen.
                     </p>
+                    <button
+                        type="button"
+                        onClick={() => setShowGeneratePanel(true)}
+                        className="inline-flex items-center gap-2 px-5 py-2.5 bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition text-sm font-medium"
+                    >
+                        <Sparkles size={14} />
+                        Generate Your First Mockup
+                    </button>
                 </div>
             ) : (
                 <div className="space-y-4">
@@ -488,33 +590,51 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         const preferredVersion = versions.find(v => v.isPreferred);
                         const staleness = getArtifactStaleness(projectId, artifact.id);
                         const isSelected = selectedArtifactId === artifact.id;
+                        const previewSettings = preferredVersion ? extractSettings(preferredVersion) : null;
 
                         return (
-                            <div key={artifact.id} className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
-                                {/* Card Header */}
+                            <div key={artifact.id}>
+                                {/* Card Header — always visible */}
                                 <button
                                     type="button"
                                     onClick={() => setSelectedArtifactId(isSelected ? null : artifact.id)}
-                                    className="w-full flex items-center justify-between p-4 hover:bg-neutral-50/50 transition text-left"
+                                    className={`w-full flex items-center justify-between p-4 bg-white border border-neutral-200 shadow-sm transition text-left ${
+                                        isSelected ? 'rounded-t-xl border-b-0' : 'rounded-xl hover:bg-neutral-50/50'
+                                    }`}
                                 >
                                     <div className="flex items-center gap-3 min-w-0">
                                         <Image size={18} className="text-indigo-500 shrink-0" />
                                         <span className="font-medium text-neutral-800 truncate">{artifact.title}</span>
+                                        {previewSettings && (
+                                            <span className="hidden sm:inline text-[10px] text-neutral-400 uppercase tracking-wide">
+                                                {previewSettings.platform} · {previewSettings.fidelity}
+                                            </span>
+                                        )}
                                         <StalenessBadge staleness={staleness} />
+                                    </div>
+                                    <div className="flex items-center gap-3 shrink-0">
                                         <span className="text-xs text-neutral-400">
                                             {versions.length} version{versions.length !== 1 ? 's' : ''}
                                         </span>
+                                        <span className="text-xs text-neutral-400">
+                                            {new Date(artifact.updatedAt).toLocaleDateString()}
+                                        </span>
                                     </div>
-                                    <span className="text-xs text-neutral-400 shrink-0">
-                                        {new Date(artifact.updatedAt).toLocaleDateString()}
-                                    </span>
                                 </button>
 
-                                {/* Expanded Detail */}
+                                {/* Expanded Detail — renders directly, no nested card */}
                                 {isSelected && preferredVersion && (
-                                    <div className="border-t border-neutral-100 p-4">
+                                    <div className="border-x border-b border-neutral-200 rounded-b-xl bg-neutral-50/30 overflow-hidden">
+                                        {isGenerating && (
+                                            <div className="flex items-center gap-2 px-5 py-3 bg-indigo-50/50 border-b border-indigo-100">
+                                                <RefreshCw size={12} className="text-indigo-500 animate-spin" />
+                                                <span className="text-xs text-indigo-600 font-medium">Regenerating mockup…</span>
+                                            </div>
+                                        )}
                                         {compareMode ? (
-                                            renderCompareView()
+                                            <div className="p-4">
+                                                {renderCompareView()}
+                                            </div>
                                         ) : (
                                             renderVersionBody(
                                                 preferredVersion,

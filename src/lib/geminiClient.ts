@@ -63,7 +63,19 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     }
 
     const data = await response.json();
-    const text = data.candidates[0].content.parts[0].text;
+
+    // Safely extract text — Gemini may return no candidates (e.g. safety block)
+    // or candidates with no content/parts.
+    const candidate = data?.candidates?.[0];
+    const finishReason = candidate?.finishReason;
+    if (finishReason === 'SAFETY') {
+        throw new Error('Gemini refused to generate content due to safety filters. Try adjusting your prompt or PRD content.');
+    }
+    const text: string | undefined = candidate?.content?.parts?.[0]?.text;
+    if (!text) {
+        const reason = finishReason ? ` (finishReason: ${finishReason})` : '';
+        throw new Error(`Gemini returned an empty response${reason}. Please try again.`);
+    }
     const durationMs = performance.now() - startTime;
     console.log(`[GEN] callGemini: ${durationMs.toFixed(0)}ms (${text.length} chars)`);
     return text;
