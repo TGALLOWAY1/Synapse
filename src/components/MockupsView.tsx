@@ -7,6 +7,7 @@ import { generateMockup } from '../lib/llmProvider';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import { MockupViewer } from './mockups/MockupViewer';
+import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import type {
     StructuredPRD,
     MockupSettings,
@@ -14,6 +15,7 @@ import type {
     MockupFidelity,
     MockupScope,
     MockupPayload,
+    MockupScreen,
     ArtifactVersion,
     StalenessState,
 } from '../types';
@@ -47,17 +49,59 @@ const SCOPE_OPTIONS: { value: MockupScope; label: string }[] = [
 
 // Safely extract a MockupPayload from an ArtifactVersion. Returns null for
 // legacy markdown versions or unparseable content — callers fall back to the
-// legacy markdown renderer.
+// legacy markdown renderer. Validates field types so corrupted localStorage
+// data doesn't cause downstream crashes.
 const tryParsePayload = (version: ArtifactVersion): MockupPayload | null => {
     const format = (version.metadata as { format?: string } | undefined)?.format;
     if (format !== MOCKUP_HTML_V1) return null;
     try {
-        const parsed = JSON.parse(version.content) as MockupPayload;
-        if (!parsed?.screens?.length) return null;
-        return parsed;
+        const parsed = JSON.parse(version.content);
+        if (!parsed || typeof parsed !== 'object') return null;
+        if (!Array.isArray(parsed.screens) || parsed.screens.length === 0) return null;
+
+        // Validate every screen has the minimum required string fields.
+        const validScreens = parsed.screens.filter(
+            (s: unknown): s is MockupScreen =>
+                !!s &&
+                typeof s === 'object' &&
+                typeof (s as Record<string, unknown>).id === 'string' &&
+                typeof (s as Record<string, unknown>).name === 'string' &&
+                typeof (s as Record<string, unknown>).html === 'string' &&
+                ((s as Record<string, unknown>).html as string).trim().length > 0
+        );
+        if (validScreens.length === 0) return null;
+
+        return {
+            version: 'mockup_html_v1',
+            title: typeof parsed.title === 'string' ? parsed.title : 'Mockup concept',
+            summary: typeof parsed.summary === 'string' ? parsed.summary : '',
+            screens: validScreens,
+        };
     } catch {
         return null;
     }
+};
+
+const DEFAULT_SETTINGS: MockupSettings = {
+    platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
+};
+
+/** Safely extract MockupSettings from version metadata, falling back to
+ *  sensible defaults so a corrupted metadata blob never crashes the UI. */
+const extractSettings = (version: ArtifactVersion): MockupSettings => {
+    const raw = (version.metadata as Record<string, unknown> | undefined)?.settings;
+    if (!raw || typeof raw !== 'object') return DEFAULT_SETTINGS;
+    const s = raw as Record<string, unknown>;
+    return {
+        platform: (typeof s.platform === 'string' && ['mobile', 'desktop', 'responsive'].includes(s.platform)
+            ? s.platform : 'desktop') as MockupPlatform,
+        fidelity: (typeof s.fidelity === 'string' && ['low', 'mid', 'high'].includes(s.fidelity)
+            ? s.fidelity : 'mid') as MockupFidelity,
+        scope: (typeof s.scope === 'string' && ['single_screen', 'multi_screen', 'key_workflow'].includes(s.scope)
+            ? s.scope : 'key_workflow') as MockupScope,
+        style: typeof s.style === 'string' ? s.style : undefined,
+        notes: typeof s.notes === 'string' ? s.notes : undefined,
+    };
 };
 
 export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD }: MockupsViewProps) {
@@ -74,6 +118,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     const [compareVersions, setCompareVersions] = useState<[string | null, string | null]>([null, null]);
     const [feedbackVersionId, setFeedbackVersionId] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [warning, setWarning] = useState<string | null>(null);
 
     // Settings
     const [platform, setPlatform] = useState<MockupPlatform>('desktop');
@@ -86,6 +131,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const handleGenerate = async () => {
         setError(null);
+        setWarning(null);
         setIsGenerating(true);
         try {
             const settings: MockupSettings = {
@@ -94,7 +140,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 notes: notes || undefined,
             };
 
-            const payload = await generateMockup(prdContent, settings, structuredPRD);
+            const { payload, warnings } = await generateMockup(prdContent, settings, structuredPRD);
 
             const title = payload.title?.trim()
                 || `Mockup — ${platform} / ${fidelity} / ${scope.replace('_', ' ')}`;
@@ -116,6 +162,9 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
             setSelectedArtifactId(artifactId);
             setShowGeneratePanel(false);
+            if (warnings.length > 0) {
+                setWarning(`Generated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
+            }
         } catch (e) {
             setError(e instanceof Error ? e.message : String(e));
         } finally {
@@ -125,15 +174,14 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const handleRegenerate = async (artifactId: string) => {
         setError(null);
+        setWarning(null);
         setIsGenerating(true);
         try {
             const versions = getArtifactVersions(projectId, artifactId);
             const latestVersion = versions[versions.length - 1];
-            const settings = (latestVersion?.metadata?.settings as MockupSettings) || {
-                platform: 'desktop', fidelity: 'mid', scope: 'key_workflow'
-            };
+            const settings = latestVersion ? extractSettings(latestVersion) : DEFAULT_SETTINGS;
 
-            const payload = await generateMockup(prdContent, settings, structuredPRD);
+            const { payload, warnings } = await generateMockup(prdContent, settings, structuredPRD);
 
             createArtifactVersion(
                 projectId,
@@ -149,7 +197,12 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 `Regenerate mockup from updated PRD`,
                 latestVersion?.id,
             );
+            if (warnings.length > 0) {
+                setWarning(`Regenerated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
+            }
         } catch (e) {
+            // On regeneration failure, the previous version is preserved — the
+            // user still sees the last known good content.
             setError(e instanceof Error ? e.message : String(e));
         } finally {
             setIsGenerating(false);
@@ -212,20 +265,20 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     ) => {
         const payload = tryParsePayload(version);
         if (payload) {
-            const settings = (version.metadata?.settings as MockupSettings) || {
-                platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
-            };
+            const settings = extractSettings(version);
             const sourceSpineVersionId = version.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
             return (
-                <MockupViewer
-                    payload={payload}
-                    settings={settings}
-                    staleness={staleness}
-                    versionNumber={version.versionNumber}
-                    createdAt={version.createdAt}
-                    sourceSpineVersionId={sourceSpineVersionId}
-                    actions={actions}
-                />
+                <MockupErrorBoundary key={version.id}>
+                    <MockupViewer
+                        payload={payload}
+                        settings={settings}
+                        staleness={staleness}
+                        versionNumber={version.versionNumber}
+                        createdAt={version.createdAt}
+                        sourceSpineVersionId={sourceSpineVersionId}
+                        actions={actions}
+                    />
+                </MockupErrorBoundary>
             );
         }
 
@@ -263,18 +316,18 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             if (!v) return <div className="text-neutral-400 text-sm italic">Select a version</div>;
             const payload = tryParsePayload(v);
             if (payload) {
-                const settings = (v.metadata?.settings as MockupSettings) || {
-                    platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
-                };
+                const settings = extractSettings(v);
                 return (
-                    <MockupViewer
-                        payload={payload}
-                        settings={settings}
-                        staleness={staleness}
-                        versionNumber={v.versionNumber}
-                        createdAt={v.createdAt}
-                        sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
-                    />
+                    <MockupErrorBoundary key={v.id}>
+                        <MockupViewer
+                            payload={payload}
+                            settings={settings}
+                            staleness={staleness}
+                            versionNumber={v.versionNumber}
+                            createdAt={v.createdAt}
+                            sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
+                        />
+                    </MockupErrorBoundary>
                 );
             }
             return (
@@ -363,8 +416,15 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             </div>
 
             {error && (
-                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700">
-                    {error}
+                <div className="bg-red-50 border border-red-200 rounded-lg p-4 text-sm text-red-700 flex items-start justify-between gap-3">
+                    <span>{error}</span>
+                    <button type="button" onClick={() => setError(null)} className="shrink-0 text-red-400 hover:text-red-600 text-xs font-medium">Dismiss</button>
+                </div>
+            )}
+            {warning && (
+                <div className="bg-amber-50 border border-amber-200 rounded-lg p-4 text-sm text-amber-700 flex items-start justify-between gap-3">
+                    <span>{warning}</span>
+                    <button type="button" onClick={() => setWarning(null)} className="shrink-0 text-amber-400 hover:text-amber-600 text-xs font-medium">Dismiss</button>
                 </div>
             )}
 

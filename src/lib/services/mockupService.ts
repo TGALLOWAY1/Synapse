@@ -99,7 +99,23 @@ const buildUserPrompt = (prdContent: string, structuredPRD?: StructuredPRD): str
 
 // ---- Parsing / validation ----
 
-const parseMockupPayload = (raw: string): MockupPayload => {
+/** Minimum meaningful HTML length — anything shorter is almost certainly an
+ *  empty or broken fragment (e.g. "<div></div>"). */
+const MIN_HTML_LENGTH = 20;
+
+export interface ParseResult {
+    payload: MockupPayload;
+    /** Warnings for screens that were skipped (partial success). Empty when all
+     *  screens parsed cleanly. */
+    warnings: string[];
+}
+
+/**
+ * Parse raw JSON into a validated MockupPayload. Tolerant of individual bad
+ * screens — skips them and reports warnings rather than throwing.  Only throws
+ * when zero usable screens survive.
+ */
+const parseMockupPayload = (raw: string): ParseResult => {
     let parsed: unknown;
     try {
         parsed = JSON.parse(raw);
@@ -118,28 +134,44 @@ const parseMockupPayload = (raw: string): MockupPayload => {
         throw new Error('Mockup generation returned no screens.');
     }
 
-    const screens: MockupScreen[] = screensRaw.map((s, i) => {
+    const screens: MockupScreen[] = [];
+    const warnings: string[] = [];
+
+    for (let i = 0; i < screensRaw.length; i++) {
+        const s = screensRaw[i];
         if (!s || typeof s !== 'object') {
-            throw new Error(`Mockup screen ${i} is not an object.`);
+            warnings.push(`Screen ${i + 1}: skipped — not a valid object.`);
+            continue;
         }
         const sObj = s as Record<string, unknown>;
-        const name = typeof sObj.name === 'string' ? sObj.name : '';
-        const purpose = typeof sObj.purpose === 'string' ? sObj.purpose : '';
+        const name = typeof sObj.name === 'string' ? sObj.name.trim() : '';
+        const purpose = typeof sObj.purpose === 'string' ? sObj.purpose.trim() : '';
         const html = typeof sObj.html === 'string' ? sObj.html : '';
-        const notes = typeof sObj.notes === 'string' ? sObj.notes : undefined;
+        const notes = typeof sObj.notes === 'string' ? sObj.notes.trim() : undefined;
 
-        if (!name.trim() || !html.trim()) {
-            throw new Error(`Mockup screen ${i} is missing a name or html.`);
+        if (!name) {
+            warnings.push(`Screen ${i + 1}: skipped — missing name.`);
+            continue;
+        }
+        if (!html.trim() || html.trim().length < MIN_HTML_LENGTH) {
+            warnings.push(`Screen ${i + 1} ("${name}"): skipped — HTML too short or empty.`);
+            continue;
         }
 
-        return {
+        screens.push({
             id: uuidv4(),
-            name: name.trim(),
-            purpose: purpose.trim(),
+            name,
+            purpose,
             html,
-            notes: notes?.trim() || undefined,
-        };
-    });
+            notes: notes || undefined,
+        });
+    }
+
+    if (screens.length === 0) {
+        throw new Error(
+            `Mockup generation produced ${screensRaw.length} screen(s) but none were usable. ${warnings.join(' ')}`
+        );
+    }
 
     const title = typeof obj.title === 'string' && obj.title.trim()
         ? obj.title.trim()
@@ -147,10 +179,13 @@ const parseMockupPayload = (raw: string): MockupPayload => {
     const summary = typeof obj.summary === 'string' ? obj.summary.trim() : '';
 
     return {
-        version: 'mockup_html_v1',
-        title,
-        summary,
-        screens,
+        payload: {
+            version: 'mockup_html_v1',
+            title,
+            summary,
+            screens,
+        },
+        warnings,
     };
 };
 
@@ -161,7 +196,7 @@ export const generateMockup = async (
     settings: MockupSettings,
     structuredPRD?: StructuredPRD,
     options?: ProviderOptions,
-): Promise<MockupPayload> => {
+): Promise<ParseResult> => {
     options?.onStatus?.('Generating mockup...');
 
     const system = buildSystemPrompt(settings);
