@@ -10,6 +10,7 @@ import type { ProviderOptions } from '../geminiClient';
 import { mockupSchema } from '../schemas/mockupSchema';
 import { assessMockupHtmlQuality, normalizeMockupHtml } from '../mockupQuality';
 import { critiqueMockupAlignment, type MockupAlignmentCritique } from '../mockupAlignmentCritique';
+import { PLACEHOLDER_PROMPT_CATALOG } from '../mockupPlaceholders';
 
 // ---- Instruction tables (rewritten for polished HTML/Tailwind output) ----
 
@@ -45,7 +46,8 @@ const buildSystemPrompt = (settings: MockupSettings): string => {
 - Cards: rounded-xl or rounded-2xl, border border-neutral-200, shadow-sm, p-5 / p-6.
 - Type scale: text-xs / text-sm / text-base / text-lg / text-xl / text-2xl / text-3xl. Headings font-semibold or font-bold, tracking-tight for large headings.
 - Prefer real product patterns: topbar + sidebar shells, stat cards (label + large number + delta chip), data tables with zebra rows and hover states, kanban columns, timelines, split panes, chat sidebars, filter chips, breadcrumb trails, rich empty states, toast notifications, modal previews, activity feeds with avatars.
-- Use inline <svg> or CSS gradients for icons, avatars, charts, logos. NEVER reference external images or fonts.
+- Use inline <svg> or CSS gradients for icons. NEVER reference external images or fonts.
+- For avatars, hero banners, product images, logos, charts, and image thumbnails, emit a placeholder token (see catalog below) instead of an <img> tag or hand-rolled SVG. The render pipeline expands each token into a consistent inline SVG.
 - Copy MUST be realistic and grounded in the actual product — use real persona names, feature names, and entity names from the PRD. NO "Lorem ipsum", NO "Button 1 / Button 2", NO generic "Item A / Item B".
 
 ## Technical constraints (non-negotiable)
@@ -85,7 +87,10 @@ Also provide a top-level \`title\` (the overall concept name) and a \`summary\` 
 
 ${FIDELITY_INSTRUCTIONS[settings.fidelity]}
 ${PLATFORM_INSTRUCTIONS[settings.platform]}
-${SCOPE_INSTRUCTIONS[settings.scope]}${styleLine}${notesLine}`;
+${SCOPE_INSTRUCTIONS[settings.scope]}${styleLine}${notesLine}
+
+## Image & media placeholders
+${PLACEHOLDER_PROMPT_CATALOG}`;
 };
 
 const buildUserPrompt = (prdContent: string, structuredPRD?: StructuredPRD): string => {
