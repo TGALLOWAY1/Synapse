@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype, SourceRef, HistoryEvent } from '../../types';
 import type { ProjectState } from '../types';
+import { trackActivity } from '../../lib/recruiterApi';
 
 export type ArtifactSlice = {
     artifacts: Record<string, Artifact[]>;
@@ -151,6 +152,12 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 [projectId]: [...(state.historyEvents[projectId] || []), historyEvent]
             },
         }));
+        void trackActivity('generated_artifact', {
+            projectId,
+            artifactId,
+            versionId,
+            type: artifact?.type || 'unknown',
+        });
 
         return { versionId };
     },

@@ -120,14 +120,15 @@ graph TD
 ## Tech stack
 
 - **Frontend:** React 19, TypeScript, Vite 7, Tailwind CSS 3
+- **Backend:** Vercel serverless API routes + MongoDB (for recruiter auth analytics)
 - **State:** Zustand 5 with debounced `localStorage` persistence
 - **LLM:** Google Gemini 2.5 Pro / Flash (direct browser calls, streaming support)
 - **Markdown:** `react-markdown` + `remark-gfm` + `rehype-raw`
 - **Routing:** React Router v7
 - **Icons & animation:** `lucide-react`, `@formkit/auto-animate`
 
-No backend database, no serverless functions — everything runs in the
-browser against a user-supplied Gemini API key.
+The product workspace remains browser-first, while recruiter authentication
+and tracking run through API routes backed by MongoDB.
 
 ---
 
@@ -160,6 +161,8 @@ npm run build
   of one end-to-end pipeline run
 - [`docs/deployment.md`](docs/deployment.md) — commands, Vercel setup,
   self-hosting
+- [`docs/linkedin-auth.md`](docs/linkedin-auth.md) — LinkedIn OAuth setup,
+  recruiter capture fields, and compliance note
 - [`docs/archive/`](docs/archive/) — historical design notes and audits
   retained for context
 

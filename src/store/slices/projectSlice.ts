@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { Project, HistoryEvent, PipelineStage, ProjectPlatform } from '../../types';
 import type { ProjectState } from '../types';
+import { trackActivity } from '../../lib/recruiterApi';
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -51,6 +52,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             spineVersions: { ...state.spineVersions, [projectId]: [initialSpine] },
             historyEvents: { ...state.historyEvents, [projectId]: [initEvent] },
         }));
+        void trackActivity('clicked_section', { section: 'create_project', projectId });
 
         return { projectId, spineId: initialSpine.id };
     },
@@ -98,5 +100,6 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 [projectId]: { ...state.projects[projectId], currentStage: stage }
             }
         }));
+        void trackActivity(stage === 'mockups' ? 'viewed_mockups' : 'clicked_section', { section: stage, projectId });
     },
 });
