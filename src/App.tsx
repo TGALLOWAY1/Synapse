@@ -3,6 +3,7 @@ import { BrowserRouter, Routes, Route } from 'react-router-dom';
 import { HomePage } from './components/HomePage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { MeetSynapsePage } from './components/MeetSynapsePage';
+import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { ToastContainer } from './components/ToastContainer';
@@ -22,6 +23,7 @@ function App() {
           <Route path="/" element={<HomePage />} />
           <Route path="/about" element={<MeetSynapsePage />} />
           <Route path="/p/:projectId" element={<ProjectWorkspace />} />
+          <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
         </Routes>
         <ToastContainer />
