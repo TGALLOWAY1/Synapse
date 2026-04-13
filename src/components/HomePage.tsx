@@ -6,6 +6,7 @@ import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
 import { normalizeError, userMessage } from '../lib/errors';
 import type { ProjectPlatform } from '../types';
+import { useAuthStore } from '../store/authStore';
 
 const EXAMPLE_PROMPTS = [
     {
@@ -40,6 +41,7 @@ const MEET_DISMISSED_KEY = 'synapse-meet-dismissed';
 export function HomePage() {
     const { createProject } = useProjectStore();
     const navigate = useNavigate();
+    const user = useAuthStore((s) => s.user);
 
     const [projectName, setProjectName] = useState('');
     const [promptText, setPromptText] = useState('');
@@ -164,6 +166,18 @@ export function HomePage() {
                     <h1 className="text-2xl font-bold tracking-tight">Synapse</h1>
                 </div>
                 <div className="flex items-center gap-2">
+                    {user ? (
+                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm">
+                            Signed in as {user.name} via LinkedIn
+                        </div>
+                    ) : (
+                        <a
+                            href="/api/auth/linkedin"
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[#0a66c2]/50 bg-[#0a66c2]/15 text-[#9bc9f5] hover:bg-[#0a66c2]/25 transition text-sm font-medium"
+                        >
+                            Continue with LinkedIn
+                        </a>
+                    )}
                     <button
                         onClick={() => setIsSettingsOpen(true)}
                         className="p-2.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
@@ -206,6 +220,9 @@ export function HomePage() {
                     <h2 className="text-4xl md:text-5xl font-bold text-center mb-8">
                         Welcome to Synapse
                     </h2>
+                    <p className="text-center text-sm text-neutral-400 mb-6">
+                        LinkedIn sign-in is used to identify visitors and improve Synapse. No posting or outreach is done automatically.
+                    </p>
 
                     {/* Example prompt pills */}
                     <div className="flex gap-2 overflow-x-auto pb-3 mb-6 scrollbar-hide">
