@@ -39,7 +39,9 @@ For each flow, use this exact format:
 - [Error condition] → [How the system handles it]
 **Edge Cases:** Unusual but important scenarios.
 
-Cover at minimum: first-time user onboarding, the core value workflow, and one administrative/settings flow.`,
+Cover at minimum: first-time user onboarding, the core value workflow, and one administrative/settings flow.
+
+Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
         userPrefix: 'Create User Flows from this PRD:',
     },
     component_inventory: {
@@ -126,7 +128,9 @@ For each prompt, use this exact format:
 
 Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
 
-Every prompt must explicitly reference at least two canonical feature IDs and one named screen/entity.`,
+Every prompt must explicitly reference at least two canonical feature IDs and one named screen/entity.
+
+Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
         userPrefix: 'Create a Prompt Pack from this PRD:',
     },
     design_system: {
@@ -166,7 +170,9 @@ For each pattern (Button, Input, Card, Modal, Toast, Badge, Avatar):
 - Breakpoints
 - Container max-widths
 
-Be specific with hex values, pixel sizes, and font choices. This should be implementable directly.`,
+Be specific with hex values, pixel sizes, and font choices. This should be implementable directly.
+
+Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
         userPrefix: 'Create a Design System Starter from this PRD:',
     },
 };
@@ -267,7 +273,11 @@ export const generateCoreArtifact = async (
     subtype: CoreArtifactSubtype,
     prdContent: string,
     structuredPRD: StructuredPRD,
-    options?: ProviderOptions & { mockupContext?: string; generatedArtifacts?: Partial<Record<CoreArtifactSubtype, string>> },
+    options?: ProviderOptions & {
+        mockupContext?: string;
+        generatedArtifacts?: Partial<Record<CoreArtifactSubtype, string>>;
+        signal?: AbortSignal;
+    },
 ): Promise<string> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     options?.onStatus?.(`Generating ${subtype.replace(/_/g, ' ')}...`);
@@ -320,7 +330,8 @@ Architecture: ${structuredPRD.architecture}${
         const result = await callGemini(
             jsonSystem,
             `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
-            { responseMimeType: 'application/json', responseSchema: schema }
+            { responseMimeType: 'application/json', responseSchema: schema },
+            options?.signal,
         );
 
         try {
@@ -335,7 +346,9 @@ Architecture: ${structuredPRD.architecture}${
 
     const result = await callGemini(
         config.system,
-        `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`
+        `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
+        undefined,
+        options?.signal,
     );
     return normalizeArtifactMarkdown(result);
 };
@@ -346,7 +359,7 @@ export const refineCoreArtifact = async (
     instruction: string,
     prdContent: string,
     structuredPRD: StructuredPRD,
-    options?: ProviderOptions
+    options?: ProviderOptions & { signal?: AbortSignal },
 ): Promise<string> => {
     options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
 
@@ -363,6 +376,8 @@ Rules:
 
     return callGemini(
         system,
-        `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`
+        `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
+        undefined,
+        options?.signal,
     );
 };

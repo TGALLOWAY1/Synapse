@@ -1,7 +1,8 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal } from 'lucide-react';
-import { useState, useRef, useEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD, structuredPRDToMarkdown } from '../lib/llmProvider';
 import { normalizeError, userMessage } from '../lib/errors';
@@ -15,7 +16,6 @@ import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
 import { MockupsView } from './MockupsView';
 import { ArtifactsView } from './ArtifactsView';
-import { MarkupImageView } from './MarkupImageView';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
 import { FeedbackItemsList } from './FeedbackItemsList';
@@ -38,13 +38,43 @@ export function ProjectWorkspace() {
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
+    const overflowButtonRef = useRef<HTMLButtonElement>(null);
+    const overflowMenuRef = useRef<HTMLDivElement>(null);
+    const [overflowMenuPos, setOverflowMenuPos] = useState<{ top: number; right: number } | null>(null);
     const [animationParent] = useAutoAnimate();
 
-    // Close overflow menu on outside click
+    // Position the portaled overflow menu relative to its trigger button.
+    useLayoutEffect(() => {
+        if (!showNavOverflow) {
+            setOverflowMenuPos(null);
+            return;
+        }
+        const update = () => {
+            const btn = overflowButtonRef.current;
+            if (!btn) return;
+            const rect = btn.getBoundingClientRect();
+            setOverflowMenuPos({
+                top: rect.bottom + 4,
+                right: window.innerWidth - rect.right,
+            });
+        };
+        update();
+        window.addEventListener('resize', update);
+        window.addEventListener('scroll', update, true);
+        return () => {
+            window.removeEventListener('resize', update);
+            window.removeEventListener('scroll', update, true);
+        };
+    }, [showNavOverflow]);
+
+    // Close overflow menu on outside click (menu is portaled, so check both roots)
     useEffect(() => {
         if (!showNavOverflow) return;
         const handleClick = (e: MouseEvent) => {
-            if (overflowRef.current && !overflowRef.current.contains(e.target as Node)) {
+            const target = e.target as Node;
+            const insideTrigger = overflowRef.current?.contains(target);
+            const insideMenu = overflowMenuRef.current?.contains(target);
+            if (!insideTrigger && !insideMenu) {
                 setShowNavOverflow(false);
             }
         };
@@ -177,18 +207,27 @@ export function ProjectWorkspace() {
                         </button>
                     )}
 
-                    {/* Overflow menu for secondary actions */}
+                    {/* Overflow menu for secondary actions. The dropdown is portaled to
+                        document.body with fixed positioning so it can't be clipped by
+                        any ancestor's overflow or stacking-context rules. */}
                     <div className="relative" ref={overflowRef}>
                         <button
+                            ref={overflowButtonRef}
                             onClick={() => setShowNavOverflow(!showNavOverflow)}
                             className="p-2 text-neutral-400 hover:text-white bg-neutral-800 hover:bg-neutral-700 rounded-md transition"
                             title="More actions"
                             aria-label="More actions"
+                            aria-expanded={showNavOverflow}
                         >
                             <MoreHorizontal size={18} />
                         </button>
-                        {showNavOverflow && (
-                            <div className="absolute right-0 top-full mt-1 bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl py-1 z-50 min-w-[180px]">
+                        {showNavOverflow && overflowMenuPos && createPortal(
+                            <div
+                                ref={overflowMenuRef}
+                                role="menu"
+                                style={{ position: 'fixed', top: overflowMenuPos.top, right: overflowMenuPos.right }}
+                                className="bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl py-1 z-[1000] min-w-[180px]"
+                            >
                                 <button
                                     onClick={() => { setIsSettingsOpen(true); setShowNavOverflow(false); }}
                                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
@@ -219,7 +258,8 @@ export function ProjectWorkspace() {
                                     <LogOut size={14} />
                                     Abandon Session
                                 </button>
-                            </div>
+                            </div>,
+                            document.body,
                         )}
                     </div>
                 </div>
@@ -415,20 +455,12 @@ export function ProjectWorkspace() {
 
                         {/* Artifacts Stage */}
                         {pipelineStage === 'artifacts' && activeSpine && (
-                            <div className="space-y-8">
-                                <ArtifactsView
-                                    projectId={projectId}
-                                    spineVersionId={activeSpine.id}
-                                    prdContent={activeSpine.responseText}
-                                    structuredPRD={activeSpine.structuredPRD}
-                                />
-                                <MarkupImageView
-                                    projectId={projectId}
-                                    spineVersionId={activeSpine.id}
-                                    prdContent={activeSpine.responseText}
-                                    structuredPRD={activeSpine.structuredPRD}
-                                />
-                            </div>
+                            <ArtifactsView
+                                projectId={projectId}
+                                spineVersionId={activeSpine.id}
+                                prdContent={activeSpine.responseText}
+                                structuredPRD={activeSpine.structuredPRD}
+                            />
                         )}
 
                         {/* History Stage */}

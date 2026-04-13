@@ -97,31 +97,3 @@ export function getArtifactStages(subtype: string): ProgressStage[] {
     }
 }
 
-export function getMarkupImageStages(subtype: string): ProgressStage[] {
-    switch (subtype) {
-        case 'critique_board':
-            return [
-                { label: 'Reviewing design decisions...', minDuration: 2500 },
-                { label: 'Composing critique annotations...', minDuration: 3500 },
-                { label: 'Rendering visual board...', minDuration: 4000 },
-            ];
-        case 'wireframe_callout':
-            return [
-                { label: 'Drafting wireframe structure...', minDuration: 2500 },
-                { label: 'Placing component callouts...', minDuration: 3500 },
-                { label: 'Rendering annotated layout...', minDuration: 4000 },
-            ];
-        case 'flow_annotation':
-            return [
-                { label: 'Mapping user flow steps...', minDuration: 2500 },
-                { label: 'Annotating decision points...', minDuration: 3500 },
-                { label: 'Rendering flow diagram...', minDuration: 4000 },
-            ];
-        default:
-            return [
-                { label: 'Analyzing visual requirements...', minDuration: 2500 },
-                { label: 'Composing annotations...', minDuration: 3500 },
-                { label: 'Rendering markup image...', minDuration: 4000 },
-            ];
-    }
-}

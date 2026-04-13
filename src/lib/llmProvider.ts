@@ -4,4 +4,3 @@ export { consolidateBranch, replyInBranch, type ConsolidationResult, type Consol
 export { generateStructuredPRD, structuredPRDToMarkdown, enhancePrompt } from './services/prdService';
 export { generateMockup, type ParseResult as MockupParseResult } from './services/mockupService';
 export { generateCoreArtifact, refineCoreArtifact } from './services/coreArtifactService';
-export { generateMarkupImage } from './services/markupImageService';
