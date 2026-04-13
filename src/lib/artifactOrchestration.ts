@@ -44,11 +44,19 @@ export function buildNarrativeGuardrails(prd: StructuredPRD): string {
 }
 
 export function normalizeArtifactMarkdown(content: string): string {
-    const normalized = content
+    let normalized = content
         .replace(/\r\n/g, '\n')
         .replace(/[ \t]+$/gm, '')
         .replace(/\n{3,}/g, '\n\n')
         .trim();
+
+    // Strip any conversational preamble before the first markdown heading.
+    // All core artifact templates emit `#`/`##`/`###` headings as their first content line, so
+    // anything before that is an LLM lead-in ("Of course!", "Here are...", etc).
+    const firstHeadingMatch = normalized.match(/^#{1,6}\s.+/m);
+    if (firstHeadingMatch && firstHeadingMatch.index !== undefined && firstHeadingMatch.index > 0) {
+        normalized = normalized.slice(firstHeadingMatch.index).trim();
+    }
 
     return normalized.endsWith('\n') ? normalized : `${normalized}\n`;
 }

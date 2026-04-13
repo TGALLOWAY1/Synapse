@@ -1,3 +1,5 @@
+import { expandPlaceholders } from './mockupPlaceholders';
+
 export type MockupQualitySeverity = 'low' | 'medium' | 'high';
 
 export interface MockupQualityIssue {
@@ -72,7 +74,8 @@ export const sanitizeMockupHtmlForPreview = (html: string): string => {
 export const normalizeMockupHtml = (html: string): string => {
     const noFences = stripFences(html);
     const sanitized = sanitizeMockupHtmlForPreview(noFences);
-    return normalizeRootWrapper(sanitized).trim();
+    const withPlaceholders = expandPlaceholders(sanitized);
+    return normalizeRootWrapper(withPlaceholders).trim();
 };
 
 export const assessMockupHtmlQuality = (html: string): MockupQualityReport => {

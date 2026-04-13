@@ -1,5 +1,5 @@
-import { useState } from 'react';
-import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle } from 'lucide-react';
+import { useRef, useState } from 'react';
+import { Package, Plus, RefreshCcw, Sparkles, Loader2, CheckCircle2, XCircle, AlertTriangle, StopCircle } from 'lucide-react';
 import { ArtifactContentRenderer } from './renderers';
 import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
@@ -13,7 +13,12 @@ import { GenerationProgress } from './GenerationProgress';
 import { STALE_REFRESH_STAGES, getArtifactStages } from './generationStages';
 import type { StructuredPRD, CoreArtifactSubtype } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { CORE_ARTIFACT_PIPELINE, getArtifactMeta } from '../lib/coreArtifactPipeline';
+import {
+    CORE_ARTIFACT_PIPELINE,
+    CORE_ARTIFACT_DISPLAY_ORDER,
+    buildDependencyLayers,
+    getArtifactMeta,
+} from '../lib/coreArtifactPipeline';
 
 interface ArtifactsViewProps {
     projectId: string;
@@ -22,7 +27,13 @@ interface ArtifactsViewProps {
     structuredPRD?: StructuredPRD;
 }
 
-const CORE_ARTIFACTS = CORE_ARTIFACT_PIPELINE;
+// Display uses the user-facing order; generation uses dependency-layered order.
+const CORE_ARTIFACTS_DISPLAY = CORE_ARTIFACT_DISPLAY_ORDER;
+const TOTAL_CORE_ARTIFACTS = CORE_ARTIFACT_PIPELINE.length;
+
+function isAbortError(reason: unknown): boolean {
+    return reason instanceof DOMException && reason.name === 'AbortError';
+}
 
 // Run async tasks with a concurrency limit
 async function withConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> {
@@ -63,13 +74,16 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
     const [refineSubtype, setRefineSubtype] = useState<CoreArtifactSubtype | null>(null);
     const [refineInstruction, setRefineInstruction] = useState('');
     const [validationWarnings, setValidationWarnings] = useState<Record<string, string[]>>({});
+    const [warningsOpen, setWarningsOpen] = useState<Record<string, boolean>>({});
+
+    const abortRef = useRef<AbortController | null>(null);
 
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
 
     const bundleDoneCount = Object.values(bundleStatus).filter(s => s === 'done').length;
 
     // Count stale artifacts
-    const staleCount = CORE_ARTIFACTS.reduce((count, meta) => {
+    const staleCount = CORE_ARTIFACTS_DISPLAY.reduce((count, meta) => {
         const existing = coreArtifacts.find(a => a.subtype === meta.subtype);
         if (!existing) return count;
         const staleness = getArtifactStaleness(projectId, existing.id);
@@ -83,9 +97,11 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         if (!structuredPRD) return;
         setError(null);
         setGeneratingSubtype(subtype);
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
-            const meta = CORE_ARTIFACTS.find(a => a.subtype === subtype)!;
-            const content = await generateCoreArtifact(subtype, prdContent, structuredPRD);
+            const meta = getArtifactMeta(subtype);
+            const content = await generateCoreArtifact(subtype, prdContent, structuredPRD, { signal: controller.signal });
 
             // Validate output quality
             const validation = validateArtifactContent(subtype, content);
@@ -119,10 +135,15 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
             setExpandedId(artifactId);
         } catch (e) {
-            const err = normalizeError(e);
-            console.error('[Artifact generation failed]', err.raw);
-            setError(userMessage(err));
+            if (isAbortError(e)) {
+                // User-initiated cancel — don't surface as an error.
+            } else {
+                const err = normalizeError(e);
+                console.error('[Artifact generation failed]', err.raw);
+                setError(userMessage(err));
+            }
         } finally {
+            abortRef.current = null;
             setGeneratingSubtype(null);
         }
     };
@@ -138,6 +159,8 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
         setError(null);
         setGeneratingSubtype(subtype);
+        const controller = new AbortController();
+        abortRef.current = controller;
         try {
             const content = await refineCoreArtifact(
                 subtype,
@@ -145,9 +168,10 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                 refineInstruction.trim(),
                 prdContent,
                 structuredPRD,
+                { signal: controller.signal },
             );
 
-            const meta = CORE_ARTIFACTS.find(a => a.subtype === subtype)!;
+            const meta = getArtifactMeta(subtype);
             createArtifactVersion(
                 projectId, existing.id, content,
                 { subtype },
@@ -159,10 +183,15 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
             setRefineSubtype(null);
             setRefineInstruction('');
         } catch (e) {
-            const err = normalizeError(e);
-            console.error('[Artifact refinement failed]', err.raw);
-            setError(userMessage(err));
+            if (isAbortError(e)) {
+                // User cancelled — silent.
+            } else {
+                const err = normalizeError(e);
+                console.error('[Artifact refinement failed]', err.raw);
+                setError(userMessage(err));
+            }
         } finally {
+            abortRef.current = null;
             setGeneratingSubtype(null);
         }
     };
@@ -171,8 +200,10 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         if (!structuredPRD) return;
         setError(null);
         setGeneratingSubtype('bundle');
+        const controller = new AbortController();
+        abortRef.current = controller;
 
-        const staleArtifacts = CORE_ARTIFACTS.filter(meta => {
+        const staleArtifacts = CORE_ARTIFACT_PIPELINE.filter(meta => {
             const existing = coreArtifacts.find(a => a.subtype === meta.subtype);
             if (!existing) return false;
             const staleness = getArtifactStaleness(projectId, existing.id);
@@ -185,7 +216,7 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
         const tasks = staleArtifacts.map(meta => async () => {
             setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'generating' }));
-            const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
+            const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD, { signal: controller.signal });
 
             const existing = getExistingArtifact(meta.subtype)!;
             const versions = getArtifactVersions(projectId, existing.id);
@@ -204,39 +235,64 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         });
 
         const results = await withConcurrency(tasks, 3);
-        const failedCount = results.filter(r => r.status === 'rejected').length;
+        const aborted = controller.signal.aborted;
+        const nonAbortFailures = results.filter(r => r.status === 'rejected' && !isAbortError(r.reason));
 
         results.forEach((r, i) => {
             if (r.status === 'rejected') {
-                console.error('[Stale artifact refresh failed]', r.reason);
-                setBundleStatus(prev => ({ ...prev, [staleArtifacts[i].subtype]: 'error' }));
+                if (isAbortError(r.reason)) {
+                    setBundleStatus(prev => {
+                        const current = prev[staleArtifacts[i].subtype];
+                        // Keep 'done' if completed before abort; otherwise mark pending.
+                        return current === 'done' ? prev : { ...prev, [staleArtifacts[i].subtype]: 'pending' };
+                    });
+                } else {
+                    console.error('[Stale artifact refresh failed]', r.reason);
+                    setBundleStatus(prev => ({ ...prev, [staleArtifacts[i].subtype]: 'error' }));
+                }
             }
         });
 
-        if (failedCount > 0) {
-            const succeeded = results.length - failedCount;
-            setError(`${failedCount} artifact(s) could not be refreshed.${succeeded > 0 ? ` ${succeeded} updated successfully.` : ''} You can retry the failed items individually.`);
+        if (nonAbortFailures.length > 0) {
+            const succeeded = results.length - nonAbortFailures.length - (aborted ? results.filter(r => r.status === 'rejected' && isAbortError(r.reason)).length : 0);
+            setError(`${nonAbortFailures.length} artifact(s) could not be refreshed.${succeeded > 0 ? ` ${succeeded} updated successfully.` : ''} You can retry the failed items individually.`);
         }
+
+        abortRef.current = null;
         setGeneratingSubtype(null);
+    };
+
+    const handleStop = () => {
+        abortRef.current?.abort();
     };
 
     const handleGenerateBundle = async () => {
         if (!structuredPRD) return;
         setError(null);
         setGeneratingSubtype('bundle');
+        const controller = new AbortController();
+        abortRef.current = controller;
 
-        // Initialize all statuses to pending
+        // Initialize all statuses to pending (display order determines UI spinners,
+        // but layered dependency order drives actual generation below).
         const initialStatus = {} as Record<CoreArtifactSubtype, ArtifactGenStatus>;
-        CORE_ARTIFACTS.forEach(meta => { initialStatus[meta.subtype] = 'pending'; });
+        CORE_ARTIFACT_PIPELINE.forEach(meta => { initialStatus[meta.subtype] = 'pending'; });
         setBundleStatus(initialStatus);
         const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
+        const layers = buildDependencyLayers();
         let failedCount = 0;
+        let abortedCount = 0;
 
-        for (const meta of CORE_ARTIFACTS) {
-            try {
+        layers: for (const layer of layers) {
+            if (controller.signal.aborted) break;
+
+            const tasks = layer.map(meta => async () => {
                 setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'generating' }));
                 const startTime = performance.now();
-                const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD, { generatedArtifacts });
+                const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD, {
+                    generatedArtifacts,
+                    signal: controller.signal,
+                });
                 console.log(`[GEN] ${meta.subtype}: ${(performance.now() - startTime).toFixed(0)}ms`);
                 generatedArtifacts[meta.subtype] = content;
 
@@ -266,18 +322,38 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                     parentVersionId,
                 );
                 setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'done' }));
-            } catch (reason) {
-                failedCount += 1;
-                console.error('[Bundle artifact generation failed]', reason);
-                setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'error' }));
+            });
+
+            const results = await withConcurrency(tasks, layer.length);
+
+            for (let i = 0; i < results.length; i++) {
+                const r = results[i];
+                const meta = layer[i];
+                if (r.status === 'rejected') {
+                    if (isAbortError(r.reason)) {
+                        abortedCount += 1;
+                        setBundleStatus(prev => {
+                            const current = prev[meta.subtype];
+                            return current === 'done' ? prev : { ...prev, [meta.subtype]: 'pending' };
+                        });
+                    } else {
+                        failedCount += 1;
+                        console.error('[Bundle artifact generation failed]', r.reason);
+                        setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'error' }));
+                    }
+                }
             }
+
+            // If the user aborted mid-layer, stop queuing further layers.
+            if (controller.signal.aborted) break layers;
         }
 
         if (failedCount > 0) {
-            const succeeded = CORE_ARTIFACTS.length - failedCount;
-            setError(`${failedCount} of ${CORE_ARTIFACTS.length} artifact(s) could not be generated.${succeeded > 0 ? ` ${succeeded} completed successfully.` : ''} You can retry the failed items individually.`);
+            const succeeded = TOTAL_CORE_ARTIFACTS - failedCount - abortedCount;
+            setError(`${failedCount} of ${TOTAL_CORE_ARTIFACTS} artifact(s) could not be generated.${succeeded > 0 ? ` ${succeeded} completed successfully.` : ''} You can retry the failed items individually.`);
         }
 
+        abortRef.current = null;
         setGeneratingSubtype(null);
     };
 
@@ -311,9 +387,19 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                             <Sparkles size={16} />
                         )}
                         {generatingSubtype === 'bundle'
-                            ? `${bundleDoneCount} of ${CORE_ARTIFACTS.length} complete`
+                            ? `${bundleDoneCount} of ${TOTAL_CORE_ARTIFACTS} complete`
                             : 'Generate All'}
                     </button>
+                    {generatingSubtype && (
+                        <button
+                            onClick={handleStop}
+                            className="flex items-center gap-2 px-3 py-2 bg-red-50 text-red-700 border border-red-200 rounded-lg hover:bg-red-100 transition text-sm font-medium"
+                            title="Stop generation"
+                        >
+                            <StopCircle size={14} />
+                            Stop
+                        </button>
+                    )}
                 </div>
             </div>
 
@@ -336,20 +422,20 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                 <GenerationProgress
                     stages={staleCount > 0 ? STALE_REFRESH_STAGES : [
                         { label: 'Preparing artifact pipeline...', minDuration: 2000 },
-                        { label: `Generating artifacts (${bundleDoneCount} of ${CORE_ARTIFACTS.length} complete)...`, minDuration: 3000 },
+                        { label: `Generating artifacts (${bundleDoneCount} of ${TOTAL_CORE_ARTIFACTS} complete)...`, minDuration: 3000 },
                         { label: 'Structuring outputs...', minDuration: 4000 },
                         { label: 'Validating artifact quality...', minDuration: 5000 },
                     ]}
 
                     variant="systematic"
                     title={staleCount > 0 ? 'Refreshing Stale Artifacts' : 'Generating Artifact Bundle'}
-                    subtitle={`Processing ${staleCount > 0 ? staleCount : CORE_ARTIFACTS.length} artifacts with concurrency controls`}
+                    subtitle={`Processing ${staleCount > 0 ? staleCount : TOTAL_CORE_ARTIFACTS} artifacts concurrently (by dependency layer)`}
                 />
             )}
 
             {/* Artifact Grid */}
             <div className="space-y-3">
-                {CORE_ARTIFACTS.map(meta => {
+                {CORE_ARTIFACTS_DISPLAY.map(meta => {
                     const existing = getExistingArtifact(meta.subtype);
                     const versions = existing ? getArtifactVersions(projectId, existing.id) : [];
                     const preferredVersion = versions.find(v => v.isPreferred);
@@ -388,9 +474,19 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                             <span className="font-medium text-neutral-800">{meta.title}</span>
                                             {staleness && <StalenessBadge staleness={staleness} />}
                                             {validationWarnings[meta.subtype] && (
-                                                <span className="text-xs text-amber-600 flex items-center gap-1" title={validationWarnings[meta.subtype].join('\n')}>
+                                                <button
+                                                    type="button"
+                                                    onClick={(e) => {
+                                                        e.stopPropagation();
+                                                        setWarningsOpen(prev => ({ ...prev, [meta.subtype]: !prev[meta.subtype] }));
+                                                    }}
+                                                    className="text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-1.5 py-0.5 flex items-center gap-1 hover:bg-amber-100 transition"
+                                                    aria-label="Show validation warnings"
+                                                    aria-expanded={!!warningsOpen[meta.subtype]}
+                                                >
                                                     <AlertTriangle size={12} />
-                                                </span>
+                                                    {validationWarnings[meta.subtype].length} {validationWarnings[meta.subtype].length === 1 ? 'issue' : 'issues'}
+                                                </button>
                                             )}
                                             {versions.length > 0 && (
                                                 <span className="text-xs text-neutral-400">v{versions.length}</span>
@@ -416,6 +512,21 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
                                         : existing ? 'Regenerate' : 'Generate'}
                                 </button>
                             </div>
+
+                            {/* Inline validation warnings panel (toggled by the N issue(s) badge) */}
+                            {warningsOpen[meta.subtype] && validationWarnings[meta.subtype] && (
+                                <div className="border-t border-neutral-100 bg-amber-50/60 px-4 py-3">
+                                    <div className="text-xs font-semibold text-amber-800 mb-1 flex items-center gap-1.5">
+                                        <AlertTriangle size={12} />
+                                        Quality warnings for {meta.title}
+                                    </div>
+                                    <ul className="text-xs text-amber-800 list-disc pl-5 space-y-1">
+                                        {validationWarnings[meta.subtype].map((w, i) => (
+                                            <li key={i}>{w}</li>
+                                        ))}
+                                    </ul>
+                                </div>
+                            )}
 
                             {/* Per-artifact generation progress */}
                             {generatingSubtype === meta.subtype && (
