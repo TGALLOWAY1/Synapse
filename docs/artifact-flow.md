@@ -80,11 +80,23 @@ Seven core artifact types ship in the bundle:
 | `implementation_plan` | Markdown |
 | `prompt_pack` | Markdown |
 
-Clicking **Generate All** kicks off all seven in parallel via
-`Promise.all` over `generateCoreArtifact()` from
-`src/lib/services/coreArtifactService.ts`. Individual generate and
-**Refine** buttons call the same function with a targeted subtype or a
-refinement instruction.
+Clicking **Generate All** now executes a dependency-aware pipeline using
+`CORE_ARTIFACT_PIPELINE` from `src/lib/coreArtifactPipeline.ts`.
+Artifacts are generated in a deterministic order:
+
+1. `screen_inventory`
+2. `user_flows`
+3. `component_inventory`
+4. `data_model`
+5. `implementation_plan`
+6. `design_system`
+7. `prompt_pack`
+
+Each call to `generateCoreArtifact()` receives context from already
+generated dependencies (`generatedArtifacts`) so prompts are grounded in
+upstream artifacts rather than generated independently. Individual
+generate and **Refine** buttons still call the same service for targeted
+operations.
 
 **JSON mode:** The three structured subtypes
 (`screen_inventory`, `data_model`, `component_inventory`) request Gemini
@@ -92,16 +104,50 @@ JSON mode with schemas from `src/lib/schemas/artifactSchemas.ts` and
 convert the structured response to markdown via
 `structuredArtifactToMarkdown()` before storing.
 
-**Validation:** Every generation result passes through
-`src/lib/artifactValidation.ts`, which scores the output for truncation
-and required headings. Low scores surface as an amber warning icon on the
-artifact card.
+**Validation:** Every generation result passes through two validators:
+
+- `src/lib/artifactValidation.ts` for structural completeness
+- `validateCrossArtifactConsistency()` in
+  `src/lib/artifactOrchestration.ts` for PRD traceability, generic output
+  detection, and subtype-specific consistency checks
+
+Warnings surface as an amber icon on artifact cards.
 
 **Storage:** `src/store/slices/artifactSlice.ts`
 
 Each generation creates an `ArtifactVersion` linked to its source
 `SpineVersion` via a `SourceRef`. The newest version is marked
 `isPreferred: true` by default; users can pin an older version.
+
+### Pipeline map details (non-mockup artifacts)
+
+| Step | Artifact | Primary Inputs | Output Guarantees | Validation Gate |
+|---|---|---|---|---|
+| 1 | `screen_inventory` | Structured PRD, canonical feature glossary | Functional-area grouped screens, navigation, feature refs | Structural headers + markdown checks |
+| 2 | `user_flows` | PRD + `screen_inventory` excerpt | Goal/preconditions/steps/success/error paths | Cross-artifact check for feature propagation + error coverage |
+| 3 | `component_inventory` | PRD + `screen_inventory` + `user_flows` | Reusable component catalog with usage mapping | Structural + cross-artifact consistency warnings |
+| 4 | `data_model` | PRD + `user_flows` | Entities, fields, relationships, API endpoint implications | Structural + explicit API-surface check |
+| 5 | `implementation_plan` | PRD + `component_inventory` + `data_model` | Milestones, dependencies, DoD, feature traceability map | Feature-traceability coverage warning |
+| 6 | `design_system` | PRD + `component_inventory` | Tokens/patterns/states/layout guidance | Structural format checks |
+| 7 | `prompt_pack` | PRD + `implementation_plan` + `design_system` + `data_model` | Downstream prompts with canonical feature/entity references | Cross-artifact genericness + traceability warnings |
+
+### Audit-derived quality controls
+
+The non-mockup audit identified four main trust risks: independent
+generation feel, naming drift, missing feature propagation, and uneven
+formatting. The current controls directly target those risks:
+
+- **Dependency-ordered generation** (instead of independent bundle jobs)
+  to force artifact-to-artifact grounding.
+- **Canonical feature glossary + narrative guardrails** in every
+  generation prompt to reduce naming drift.
+- **Cross-artifact consistency validator** to flag weak propagation and
+  generic language before users treat artifacts as final.
+- **Normalization pass** to reduce markdown formatting variability across
+  generations.
+
+For the full audit report and rationale, see:
+`docs/non-mockup-artifact-audit-2026-04-13.md`.
 
 ## 5. Spine → Markup Images
 
