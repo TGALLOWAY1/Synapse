@@ -8,6 +8,7 @@ import type {
 import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { mockupSchema } from '../schemas/mockupSchema';
+import { assessMockupHtmlQuality, normalizeMockupHtml } from '../mockupQuality';
 
 // ---- Instruction tables (rewritten for polished HTML/Tailwind output) ----
 
@@ -55,6 +56,19 @@ const buildSystemPrompt = (settings: MockupSettings): string => {
 - Wrap EACH screen in a single top-level \`<div class="min-h-screen bg-neutral-50 text-neutral-900 font-sans antialiased">\` so the sandbox renders a full-bleed surface.
 - Output must be valid HTML — every opening tag closed, attributes quoted.
 
+## Required layout contract per screen
+- Every screen must include: (1) top-level app shell, (2) page header with title + primary action, (3) at least one primary content section, (4) at least one secondary/supporting section (filters, activity, details, etc.), and (5) at least one interactive control (button/input/select/tab).
+- Spacing rhythm must follow Tailwind scale 2/3/4/6/8. Avoid arbitrary values unless necessary for framing.
+- Keep line lengths realistic; avoid giant text blocks.
+- Avoid placeholder labels; every label should reflect the product domain.
+- If scope is workflow, each screen must represent a distinct step in that workflow with continuity in naming and entities.
+
+## Quality bar (fail these and regenerate internally before responding)
+- No malformed or partial tag structures.
+- No clipped/collapsed shells; content should fit inside intentional cards/sections.
+- No generic dashboard sludge detached from PRD intent.
+- No visual chaos: keep one consistent accent, spacing system, and typography scale.
+
 ## Multi-screen coherence
 If you generate multiple screens, they MUST feel like the same product:
 - same accent color, same type scale, same sidebar/topbar shell, same component vocabulary, same persona names, same entity names.
@@ -101,7 +115,7 @@ const buildUserPrompt = (prdContent: string, structuredPRD?: StructuredPRD): str
 
 /** Minimum meaningful HTML length — anything shorter is almost certainly an
  *  empty or broken fragment (e.g. "<div></div>"). */
-const MIN_HTML_LENGTH = 20;
+const MIN_HTML_LENGTH = 80;
 
 export interface ParseResult {
     payload: MockupPayload;
@@ -146,24 +160,40 @@ const parseMockupPayload = (raw: string): ParseResult => {
         const sObj = s as Record<string, unknown>;
         const name = typeof sObj.name === 'string' ? sObj.name.trim() : '';
         const purpose = typeof sObj.purpose === 'string' ? sObj.purpose.trim() : '';
-        const html = typeof sObj.html === 'string' ? sObj.html : '';
+        const rawHtml = typeof sObj.html === 'string' ? sObj.html : '';
         const notes = typeof sObj.notes === 'string' ? sObj.notes.trim() : undefined;
 
         if (!name) {
             warnings.push(`Screen ${i + 1}: skipped — missing name.`);
             continue;
         }
-        if (!html.trim() || html.trim().length < MIN_HTML_LENGTH) {
+        if (!rawHtml.trim() || rawHtml.trim().length < MIN_HTML_LENGTH) {
             warnings.push(`Screen ${i + 1} ("${name}"): skipped — HTML too short or empty.`);
             continue;
         }
+
+        const normalizedHtml = normalizeMockupHtml(rawHtml);
+        const quality = assessMockupHtmlQuality(normalizedHtml);
+        if (quality.reject) {
+            const reason = quality.issues.map(issue => issue.message).join(' ');
+            warnings.push(
+                `Screen ${i + 1} ("${name}"): skipped — failed quality gate (${quality.score}/100). ${reason}`
+            );
+            continue;
+        }
+
+        const qualityIssues = quality.issues.map(issue => issue.message).join(' ');
+        const composedNotes = [notes, qualityIssues ? `Quality notes: ${qualityIssues}` : undefined]
+            .filter(Boolean)
+            .join(' ')
+            .trim();
 
         screens.push({
             id: uuidv4(),
             name,
             purpose,
-            html,
-            notes: notes || undefined,
+            html: normalizedHtml,
+            notes: composedNotes || undefined,
         });
     }
 

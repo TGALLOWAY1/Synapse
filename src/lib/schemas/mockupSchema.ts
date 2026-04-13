@@ -3,24 +3,28 @@
 // each MockupScreen is assigned after parsing (via uuid) and is intentionally
 // not part of the model's output schema.
 export const mockupSchema = {
-    type: "OBJECT",
+    type: 'OBJECT',
     properties: {
-        version: { type: "STRING", enum: ["mockup_html_v1"] },
-        title: { type: "STRING" },
-        summary: { type: "STRING" },
+        version: { type: 'STRING', enum: ['mockup_html_v1'] },
+        title: { type: 'STRING' },
+        summary: { type: 'STRING' },
         screens: {
-            type: "ARRAY",
+            type: 'ARRAY',
+            minItems: 1,
+            maxItems: 5,
             items: {
-                type: "OBJECT",
+                type: 'OBJECT',
                 properties: {
-                    name: { type: "STRING" },
-                    purpose: { type: "STRING" },
-                    html: { type: "STRING" },
-                    notes: { type: "STRING" },
+                    name: { type: 'STRING' },
+                    purpose: { type: 'STRING' },
+                    html: { type: 'STRING' },
+                    notes: { type: 'STRING' },
                 },
-                required: ["name", "purpose", "html"],
+                required: ['name', 'purpose', 'html'],
+                propertyOrdering: ['name', 'purpose', 'html', 'notes'],
             },
         },
     },
-    required: ["version", "title", "summary", "screens"],
+    required: ['version', 'title', 'summary', 'screens'],
+    propertyOrdering: ['version', 'title', 'summary', 'screens'],
 };

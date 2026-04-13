@@ -23,7 +23,8 @@ export function MockupHtmlPreview({ html, platform, className }: Props) {
         }
     }, [html]);
 
-    const height = platform === 'mobile' ? 720 : 680;
+    const height = platform === 'mobile' ? 760 : platform === 'responsive' ? 720 : 760;
+    const maxWidth = platform === 'mobile' ? 430 : undefined;
 
     if (!srcDoc) {
         return (
@@ -38,14 +39,16 @@ export function MockupHtmlPreview({ html, platform, className }: Props) {
     }
 
     return (
-        <iframe
-            title="Mockup preview"
-            srcDoc={srcDoc}
-            sandbox="allow-scripts"
-            referrerPolicy="no-referrer"
-            loading="lazy"
-            className={`w-full bg-white rounded-lg border border-neutral-200 ${className ?? ''}`}
-            style={{ height }}
-        />
+        <div className="w-full rounded-xl border border-neutral-200 bg-gradient-to-b from-neutral-200 to-neutral-100 p-3">
+            <iframe
+                title="Mockup preview"
+                srcDoc={srcDoc}
+                sandbox="allow-scripts"
+                referrerPolicy="no-referrer"
+                loading="lazy"
+                className={`w-full bg-white rounded-lg border border-neutral-300 shadow-sm ${className ?? ''}`}
+                style={{ height, maxWidth, margin: '0 auto', display: 'block' }}
+            />
+        </div>
     );
 }
