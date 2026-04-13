@@ -2,6 +2,7 @@ import type { StructuredPRD, CoreArtifactSubtype, ScreenInventoryContent, DataMo
 import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema } from '../schemas/artifactSchemas';
+import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
@@ -21,7 +22,7 @@ End with a summary table listing all screens with their priority and functional 
         userPrefix: 'Create a Screen Inventory from this PRD:',
     },
     user_flows: {
-        system: `You are an expert UX designer. Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD.
+        system: `You are an expert UX designer. Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD and screen inventory context.
 
 For each flow, use this exact format:
 
@@ -61,7 +62,7 @@ End with a dependency summary showing which components compose other components.
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are an expert software architect. Create a high-level Implementation Plan — a milestone-oriented development roadmap.
+        system: `You are an expert software architect. Create a high-level Implementation Plan — a milestone-oriented development roadmap grounded in the other generated artifacts.
 
 Use this exact format for each milestone:
 
@@ -76,7 +77,10 @@ Use this exact format for each milestone:
 **Definition of Done:** How to verify this milestone is complete.
 
 Include 4-6 milestones. First milestone should be infrastructure/setup. Last milestone should include testing and launch prep.
-End with a critical path summary and team size recommendation.`,
+End with:
+- A critical path summary
+- Team size recommendation
+- Traceability map (milestone → PRD feature IDs)`,
         userPrefix: 'Create an Implementation Plan from this PRD:',
     },
     data_model: {
@@ -101,7 +105,9 @@ For each entity, use this exact format:
 After all entities, include:
 - An entity-relationship summary showing all connections
 - API surface implications (key endpoints each entity needs)
-- State management notes for the frontend`,
+- State management notes for the frontend
+
+Use stable names for entities and fields. Do not rename PRD concepts unless you provide an alias note.`,
         userPrefix: 'Create a Data Model Draft from this PRD:',
     },
     prompt_pack: {
@@ -118,7 +124,9 @@ For each prompt, use this exact format:
 \`\`\`
 **Expected Output:** What this prompt should produce.
 
-Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.`,
+Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
+
+Every prompt must explicitly reference at least two canonical feature IDs and one named screen/entity.`,
         userPrefix: 'Create a Prompt Pack from this PRD:',
     },
     design_system: {
@@ -259,7 +267,7 @@ export const generateCoreArtifact = async (
     subtype: CoreArtifactSubtype,
     prdContent: string,
     structuredPRD: StructuredPRD,
-    options?: ProviderOptions & { mockupContext?: string },
+    options?: ProviderOptions & { mockupContext?: string; generatedArtifacts?: Partial<Record<CoreArtifactSubtype, string>> },
 ): Promise<string> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     options?.onStatus?.(`Generating ${subtype.replace(/_/g, ' ')}...`);
@@ -275,7 +283,7 @@ export const generateCoreArtifact = async (
         return line;
     }).join('\n');
 
-    const prdSummary = `Vision: ${structuredPRD.vision}
+const prdSummary = `Vision: ${structuredPRD.vision}
 Core Problem: ${structuredPRD.coreProblem}
 Target Users: ${structuredPRD.targetUsers.join(', ')}
 
@@ -291,6 +299,9 @@ Architecture: ${structuredPRD.architecture}${
         ? `\n\nConstraints:\n${structuredPRD.constraints.map(c => `- ${c}`).join('\n')}`
         : ''
 }`;
+    const featureGlossary = buildFeatureGlossary(structuredPRD);
+    const dependencyContext = buildDependencyContext(subtype, options?.generatedArtifacts ?? {});
+    const guardrails = buildNarrativeGuardrails(structuredPRD);
 
     const mockupSection = options?.mockupContext
         ? `\n\n---\n\nMockup Context (reference for screens, components, and layout):\n${options.mockupContext.slice(0, 3000)}`
@@ -308,24 +319,25 @@ Architecture: ${structuredPRD.architecture}${
         const jsonSystem = config.system + '\n\nReturn the result as structured JSON according to the provided schema.';
         const result = await callGemini(
             jsonSystem,
-            `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
+            `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
             { responseMimeType: 'application/json', responseSchema: schema }
         );
 
         try {
             const parsed = JSON.parse(result);
             // Convert structured JSON to readable markdown for storage/display
-            return structuredArtifactToMarkdown(subtype, parsed);
+            return normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
         } catch {
             // Fallback: return raw result if JSON parse fails
-            return result;
+            return normalizeArtifactMarkdown(result);
         }
     }
 
-    return callGemini(
+    const result = await callGemini(
         config.system,
-        `${config.userPrefix}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`
+        `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`
     );
+    return normalizeArtifactMarkdown(result);
 };
 
 export const refineCoreArtifact = async (

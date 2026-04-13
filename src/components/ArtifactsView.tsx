@@ -4,6 +4,7 @@ import { ArtifactContentRenderer } from './renderers';
 import { useProjectStore } from '../store/projectStore';
 import { generateCoreArtifact, refineCoreArtifact } from '../lib/llmProvider';
 import { validateArtifactContent } from '../lib/artifactValidation';
+import { validateCrossArtifactConsistency } from '../lib/artifactOrchestration';
 import { normalizeError, userMessage } from '../lib/errors';
 import { ErrorBanner } from './ErrorBanner';
 import { StalenessBadge } from './StalenessBadge';
@@ -12,6 +13,7 @@ import { GenerationProgress } from './GenerationProgress';
 import { STALE_REFRESH_STAGES, getArtifactStages } from './generationStages';
 import type { StructuredPRD, CoreArtifactSubtype } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { CORE_ARTIFACT_PIPELINE, getArtifactMeta } from '../lib/coreArtifactPipeline';
 
 interface ArtifactsViewProps {
     projectId: string;
@@ -20,15 +22,7 @@ interface ArtifactsViewProps {
     structuredPRD?: StructuredPRD;
 }
 
-const CORE_ARTIFACTS: { subtype: CoreArtifactSubtype; title: string; description: string }[] = [
-    { subtype: 'screen_inventory', title: 'Screen Inventory', description: 'Structured list of screens and views implied by the PRD' },
-    { subtype: 'user_flows', title: 'User Flows', description: 'Primary user journeys and key flow sequences' },
-    { subtype: 'component_inventory', title: 'Component Inventory', description: 'Reusable components implied by the product design' },
-    { subtype: 'implementation_plan', title: 'Implementation Plan', description: 'High-level build sequence and milestone-oriented dev plan' },
-    { subtype: 'data_model', title: 'Data Model Draft', description: 'Primary entities, relationships, and data needs' },
-    { subtype: 'prompt_pack', title: 'Prompt Pack', description: 'Downstream prompts for design, coding, critique, and testing' },
-    { subtype: 'design_system', title: 'Design System Starter', description: 'Foundational UI system draft with patterns and components' },
-];
+const CORE_ARTIFACTS = CORE_ARTIFACT_PIPELINE;
 
 // Run async tasks with a concurrency limit
 async function withConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> {
@@ -95,8 +89,10 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
 
             // Validate output quality
             const validation = validateArtifactContent(subtype, content);
-            if (validation.warnings.length > 0) {
-                setValidationWarnings(prev => ({ ...prev, [subtype]: validation.warnings }));
+            const consistencyWarnings = validateCrossArtifactConsistency(subtype, content, structuredPRD);
+            const mergedWarnings = [...validation.warnings, ...consistencyWarnings];
+            if (mergedWarnings.length > 0) {
+                setValidationWarnings(prev => ({ ...prev, [subtype]: mergedWarnings }));
             } else {
                 setValidationWarnings(prev => { const next = { ...prev }; delete next[subtype]; return next; });
             }
@@ -233,53 +229,53 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
         const initialStatus = {} as Record<CoreArtifactSubtype, ArtifactGenStatus>;
         CORE_ARTIFACTS.forEach(meta => { initialStatus[meta.subtype] = 'pending'; });
         setBundleStatus(initialStatus);
+        const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
+        let failedCount = 0;
 
-        const tasks = CORE_ARTIFACTS.map(meta => async () => {
-            setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'generating' }));
+        for (const meta of CORE_ARTIFACTS) {
+            try {
+                setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'generating' }));
+                const startTime = performance.now();
+                const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD, { generatedArtifacts });
+                console.log(`[GEN] ${meta.subtype}: ${(performance.now() - startTime).toFixed(0)}ms`);
+                generatedArtifacts[meta.subtype] = content;
 
-            const startTime = performance.now();
-            const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD);
-            console.log(`[GEN] ${meta.subtype}: ${(performance.now() - startTime).toFixed(0)}ms`);
+                const consistencyWarnings = validateCrossArtifactConsistency(meta.subtype, content, structuredPRD);
+                if (consistencyWarnings.length > 0) {
+                    setValidationWarnings(prev => ({ ...prev, [meta.subtype]: consistencyWarnings }));
+                }
 
-            const existing = getExistingArtifact(meta.subtype);
-            let artifactId: string;
-            if (existing) {
-                artifactId = existing.id;
-            } else {
-                const result = createArtifact(projectId, 'core_artifact', meta.title, meta.subtype);
-                artifactId = result.artifactId;
+                const existing = getExistingArtifact(meta.subtype);
+                let artifactId: string;
+                if (existing) {
+                    artifactId = existing.id;
+                } else {
+                    const result = createArtifact(projectId, 'core_artifact', meta.title, meta.subtype);
+                    artifactId = result.artifactId;
+                }
+
+                const versions = getArtifactVersions(projectId, artifactId);
+                const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+                const dependencyTrace = getArtifactMeta(meta.subtype).dependsOn.join(', ');
+
+                createArtifactVersion(
+                    projectId, artifactId, content,
+                    { subtype: meta.subtype, dependencyTrace },
+                    [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+                    `Generate ${meta.title} from PRD (pipeline${dependencyTrace ? ` after: ${dependencyTrace}` : ''})`,
+                    parentVersionId,
+                );
+                setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'done' }));
+            } catch (reason) {
+                failedCount += 1;
+                console.error('[Bundle artifact generation failed]', reason);
+                setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'error' }));
             }
-
-            const versions = getArtifactVersions(projectId, artifactId);
-            const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
-
-            createArtifactVersion(
-                projectId, artifactId, content,
-                { subtype: meta.subtype },
-                [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
-                `Generate ${meta.title} from PRD (bundle)`,
-                parentVersionId,
-            );
-
-            setBundleStatus(prev => ({ ...prev, [meta.subtype]: 'done' }));
-            return meta.subtype;
-        });
-
-        // Run with concurrency limit of 3 to avoid Gemini rate limits
-        const results = await withConcurrency(tasks, 3);
-        const failedCount = results.filter(r => r.status === 'rejected').length;
-
-        // Mark failed ones
-        results.forEach((r, i) => {
-            if (r.status === 'rejected') {
-                console.error('[Bundle artifact generation failed]', r.reason);
-                setBundleStatus(prev => ({ ...prev, [CORE_ARTIFACTS[i].subtype]: 'error' }));
-            }
-        });
+        }
 
         if (failedCount > 0) {
-            const succeeded = results.length - failedCount;
-            setError(`${failedCount} of ${results.length} artifact(s) could not be generated.${succeeded > 0 ? ` ${succeeded} completed successfully.` : ''} You can retry the failed items individually.`);
+            const succeeded = CORE_ARTIFACTS.length - failedCount;
+            setError(`${failedCount} of ${CORE_ARTIFACTS.length} artifact(s) could not be generated.${succeeded > 0 ? ` ${succeeded} completed successfully.` : ''} You can retry the failed items individually.`);
         }
 
         setGeneratingSubtype(null);
