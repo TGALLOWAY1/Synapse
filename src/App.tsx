@@ -8,6 +8,7 @@ import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { ToastContainer } from './components/ToastContainer';
 import { useAuthStore } from './store/authStore';
+import { Analytics } from '@vercel/analytics/react';
 
 function App() {
   const refreshSession = useAuthStore((s) => s.refreshSession);
@@ -28,6 +29,7 @@ function App() {
         </Routes>
         <ToastContainer />
       </BrowserRouter>
+      <Analytics />
     </GlobalErrorBoundary>
   );
 }
