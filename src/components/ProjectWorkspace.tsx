@@ -25,7 +25,7 @@ import type { Branch, PipelineStage, FeedbackItem } from '../types';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -77,6 +77,24 @@ export function ProjectWorkspace() {
     const getVersionLabel = (spineId: string) => {
         const idx = allSpines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : spineId;
+    };
+
+    // Human-friendly label for artifact-based history events (e.g. mockups)
+    const ARTIFACT_TYPE_LABELS: Record<string, string> = {
+        prd: 'PRD',
+        mockup: 'Mockup',
+        prompt: 'Prompt',
+        core_artifact: 'Artifact',
+        markup_image: 'Markup',
+    };
+    const getArtifactEventLabel = (artifactId: string, artifactVersionId?: string) => {
+        const artifact = getArtifact(projectId, artifactId);
+        if (!artifact) return 'N/A';
+        const typeLabel = ARTIFACT_TYPE_LABELS[artifact.type] ?? 'Artifact';
+        if (!artifactVersionId) return typeLabel;
+        const versions = getArtifactVersions(projectId, artifactId);
+        const version = versions.find(v => v.id === artifactVersionId);
+        return version ? `${typeLabel} v${version.versionNumber}` : typeLabel;
     };
 
     if (!project) return <div>Project Not Found</div>;
@@ -481,7 +499,11 @@ export function ProjectWorkspace() {
                                     <h4 className="text-xs font-bold text-neutral-400 uppercase tracking-wider mb-1">Timeline</h4>
                                     {historyEvents.slice().reverse().map(event => {
                                         const isSelected = activeSpine?.id === event.spineVersionId;
-                                        const versionLabel = event.spineVersionId ? getVersionLabel(event.spineVersionId) : 'N/A';
+                                        const versionLabel = event.spineVersionId
+                                            ? getVersionLabel(event.spineVersionId)
+                                            : event.artifactId
+                                                ? getArtifactEventLabel(event.artifactId, event.artifactVersionId)
+                                                : 'N/A';
                                         return (
                                             <button
                                                 key={event.id}
