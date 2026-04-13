@@ -64,6 +64,31 @@ Once the user marks the spine `isFinal`, the Mockups stage unlocks.
 as a new `ArtifactVersion` of a mockup `Artifact`. `MockupsView` supports
 side-by-side version diffing.
 
+**Evaluation path:** `src/lib/mockupQuality.ts` + `src/lib/mockupAlignmentCritique.ts`
+
+Mockup outputs now pass two complementary gates before storage:
+
+1. **Heuristic quality gate** (`assessMockupHtmlQuality`) validates
+   structural HTML/UI integrity (unsafe tags, malformed shells,
+   placeholder copy, low semantic structure).
+2. **PRD-alignment critique** (`critiqueMockupAlignment`) scores each
+   surviving screen set against upstream product context (persona,
+   product purpose, entities, workflows, platform/scope/fidelity intent,
+   and product terminology).
+
+The critique returns a structured object optimized for downstream
+regeneration logic:
+
+- `alignmentScore` + `severity`
+- `missingConcepts`
+- `mismatchReasons`
+- `recommendations`
+- per-screen critique breakdown (`screens[]`)
+
+High-severity/low-score critique outcomes fail the generation run; medium
+or low issues are surfaced as warnings and persisted in mockup version
+metadata (`alignmentCritique`) for later refinement loops.
+
 ## 4. Spine → Core Artifacts (bundle or individual)
 
 **Entry:** `src/components/ArtifactsView.tsx`

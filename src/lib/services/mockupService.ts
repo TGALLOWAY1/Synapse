@@ -9,6 +9,7 @@ import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { mockupSchema } from '../schemas/mockupSchema';
 import { assessMockupHtmlQuality, normalizeMockupHtml } from '../mockupQuality';
+import { critiqueMockupAlignment, type MockupAlignmentCritique } from '../mockupAlignmentCritique';
 
 // ---- Instruction tables (rewritten for polished HTML/Tailwind output) ----
 
@@ -119,6 +120,7 @@ const MIN_HTML_LENGTH = 80;
 
 export interface ParseResult {
     payload: MockupPayload;
+    critique: MockupAlignmentCritique;
     /** Warnings for screens that were skipped (partial success). Empty when all
      *  screens parsed cleanly. */
     warnings: string[];
@@ -129,7 +131,12 @@ export interface ParseResult {
  * screens — skips them and reports warnings rather than throwing.  Only throws
  * when zero usable screens survive.
  */
-const parseMockupPayload = (raw: string): ParseResult => {
+const parseMockupPayload = (
+    raw: string,
+    prdContent: string,
+    settings: MockupSettings,
+    structuredPRD?: StructuredPRD,
+): ParseResult => {
     let parsed: unknown;
     try {
         parsed = JSON.parse(raw);
@@ -203,6 +210,29 @@ const parseMockupPayload = (raw: string): ParseResult => {
         );
     }
 
+    const critique = critiqueMockupAlignment(screens, settings, prdContent, structuredPRD);
+
+    if (critique.severity === 'high' && critique.alignmentScore < 45) {
+        const critiqueReason = critique.mismatchReasons.slice(0, 3).join(' ');
+        throw new Error(
+            `Mockup generation failed PRD alignment critique (${critique.alignmentScore}/100). ${critiqueReason}`
+        );
+    }
+
+    critique.screens
+        .filter(screen => screen.severity !== 'low')
+        .forEach(screen => {
+            warnings.push(
+                `Screen "${screen.screenName}": alignment ${screen.score}/100 (${screen.severity}). ${screen.mismatchReasons.slice(0, 2).join(' ')}`
+            );
+        });
+
+    if (critique.severity !== 'low') {
+        warnings.push(
+            `Set alignment ${critique.alignmentScore}/100 (${critique.severity}). Missing: ${critique.missingConcepts.join(', ') || 'none identified'}.`
+        );
+    }
+
     const title = typeof obj.title === 'string' && obj.title.trim()
         ? obj.title.trim()
         : 'Mockup concept';
@@ -215,6 +245,7 @@ const parseMockupPayload = (raw: string): ParseResult => {
             summary,
             screens,
         },
+        critique,
         warnings,
     };
 };
@@ -237,5 +268,5 @@ export const generateMockup = async (
         responseSchema: mockupSchema,
     });
 
-    return parseMockupPayload(raw);
+    return parseMockupPayload(raw, prdContent, settings, structuredPRD);
 };

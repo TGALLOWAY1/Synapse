@@ -144,7 +144,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 notes: notes || undefined,
             };
 
-            const { payload, warnings } = await generateMockup(prdContent, settings, structuredPRD);
+            const { payload, warnings, critique } = await generateMockup(prdContent, settings, structuredPRD);
 
             const title = payload.title?.trim()
                 || `Mockup — ${platform} / ${fidelity} / ${scope.replace('_', ' ')}`;
@@ -154,7 +154,15 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 projectId,
                 artifactId,
                 JSON.stringify(payload),
-                { settings, format: MOCKUP_HTML_V1 },
+                {
+                    settings,
+                    format: MOCKUP_HTML_V1,
+                    alignmentCritique: {
+                        score: critique.alignmentScore,
+                        severity: critique.severity,
+                        missingConcepts: critique.missingConcepts,
+                    },
+                },
                 [{
                     id: uuidv4(),
                     sourceArtifactId: projectId,
@@ -187,13 +195,21 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             const latestVersion = versions[versions.length - 1];
             const settings = latestVersion ? extractSettings(latestVersion) : DEFAULT_SETTINGS;
 
-            const { payload, warnings } = await generateMockup(prdContent, settings, structuredPRD);
+            const { payload, warnings, critique } = await generateMockup(prdContent, settings, structuredPRD);
 
             createArtifactVersion(
                 projectId,
                 artifactId,
                 JSON.stringify(payload),
-                { settings, format: MOCKUP_HTML_V1 },
+                {
+                    settings,
+                    format: MOCKUP_HTML_V1,
+                    alignmentCritique: {
+                        score: critique.alignmentScore,
+                        severity: critique.severity,
+                        missingConcepts: critique.missingConcepts,
+                    },
+                },
                 [{
                     id: uuidv4(),
                     sourceArtifactId: projectId,
