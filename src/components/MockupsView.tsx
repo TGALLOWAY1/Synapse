@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Plus, GitCompare, MessageSquarePlus, RefreshCw, Sparkles, Monitor, Smartphone, Columns3, Loader2 } from 'lucide-react';
+import { Image, Plus, GitCompare, MessageSquarePlus, RefreshCw, Sparkles, Monitor, Smartphone, Columns3, Loader2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
@@ -49,6 +49,15 @@ const SCOPE_OPTIONS: { value: MockupScope; label: string; desc: string }[] = [
     { value: 'key_workflow', label: 'Key Workflow', desc: '3–5 screens forming a user journey' },
     { value: 'multi_screen', label: 'Multiple Screens', desc: '3–4 screens across the core experience' },
     { value: 'single_screen', label: 'Single Screen', desc: 'One high-value screen in depth' },
+];
+
+const STYLE_PRESETS: { label: string; value: string }[] = [
+    { label: 'Minimal', value: 'minimal, clean whitespace, simple typography' },
+    { label: 'Dashboard', value: 'dashboard-style, data-dense, stat tiles and charts' },
+    { label: 'Dark Mode', value: 'dark theme, high contrast, muted accents' },
+    { label: 'Playful', value: 'playful, rounded corners, vibrant colors, friendly tone' },
+    { label: 'Enterprise', value: 'enterprise, dense information, professional, neutral palette' },
+    { label: 'Marketing', value: 'marketing site, hero sections, bold CTAs, lifestyle imagery' },
 ];
 
 // Safely extract a MockupPayload from an ArtifactVersion. Returns null for
@@ -252,7 +261,19 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             </button>
             <button
                 type="button"
-                onClick={() => { setCompareMode(!compareMode); setCompareVersions([null, null]); }}
+                onClick={() => {
+                    const entering = !compareMode;
+                    setCompareMode(entering);
+                    if (entering) {
+                        const preferred = allVersions.find(v => v.isPreferred);
+                        const sorted = [...allVersions].sort((a, b) => b.versionNumber - a.versionNumber);
+                        const vA = preferred || sorted[0];
+                        const vB = sorted.find(v => v.id !== vA?.id) || null;
+                        setCompareVersions([vA?.id || null, vB?.id || null]);
+                    } else {
+                        setCompareVersions([null, null]);
+                    }
+                }}
                 disabled={allVersions.length < 2}
                 className="flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition disabled:opacity-50"
             >
@@ -364,6 +385,13 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
         return (
             <div className="space-y-4">
+                <div className="flex items-center justify-between mb-3">
+                    <span className="text-xs font-bold text-neutral-500 uppercase">Compare Versions</span>
+                    <button type="button" onClick={() => { setCompareMode(false); setCompareVersions([null, null]); }}
+                        className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-500 hover:text-neutral-700 hover:bg-neutral-100 rounded transition">
+                        <X size={12} /> Exit Compare
+                    </button>
+                </div>
                 <div className="flex items-center gap-4">
                     <select
                         value={compareVersions[0] || ''}
@@ -543,11 +571,27 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                     <div className="grid grid-cols-2 gap-4">
                         <div>
                             <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Style Direction <span className="normal-case font-normal">(optional)</span></label>
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                                {STYLE_PRESETS.map(preset => (
+                                    <button
+                                        key={preset.label}
+                                        type="button"
+                                        onClick={() => setStyle(style === preset.value ? '' : preset.value)}
+                                        className={`px-2.5 py-1 rounded-full text-xs transition ${
+                                            style === preset.value
+                                                ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 font-medium'
+                                                : 'bg-neutral-50 text-neutral-600 border border-neutral-200 hover:bg-neutral-100'
+                                        }`}
+                                    >
+                                        {preset.label}
+                                    </button>
+                                ))}
+                            </div>
                             <input
                                 type="text"
                                 value={style}
                                 onChange={e => setStyle(e.target.value)}
-                                placeholder="e.g. minimal, dashboard-style, dark theme…"
+                                placeholder="Select a preset or type your own…"
                                 className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
                             />
                         </div>
@@ -620,7 +664,11 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                                 {/* Card Header — always visible */}
                                 <button
                                     type="button"
-                                    onClick={() => setSelectedArtifactId(isSelected ? null : artifact.id)}
+                                    onClick={() => {
+                                setSelectedArtifactId(isSelected ? null : artifact.id);
+                                setCompareMode(false);
+                                setCompareVersions([null, null]);
+                            }}
                                     className={`w-full flex items-center justify-between p-4 bg-white border border-neutral-200 shadow-sm transition text-left ${
                                         isSelected ? 'rounded-t-xl border-b-0' : 'rounded-xl hover:bg-neutral-50/50'
                                     }`}
