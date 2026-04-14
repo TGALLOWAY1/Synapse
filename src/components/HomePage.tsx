@@ -220,9 +220,6 @@ export function HomePage() {
                     <h2 className="text-4xl md:text-5xl font-bold text-center mb-8">
                         Welcome to Synapse
                     </h2>
-                    <p className="text-center text-sm text-neutral-400 mb-6">
-                        LinkedIn sign-in is used to identify visitors and improve Synapse. No posting or outreach is done automatically.
-                    </p>
 
                     {/* Example prompt pills */}
                     <div className="flex gap-2 overflow-x-auto pb-3 mb-6 scrollbar-hide">
