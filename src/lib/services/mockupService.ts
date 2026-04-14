@@ -36,7 +36,6 @@ const SCOPE_INSTRUCTIONS: Record<string, string> = {
 
 const buildSystemPrompt = (settings: MockupSettings): string => {
     const styleLine = settings.style ? `\nStyle direction from the user: ${settings.style}` : '';
-    const notesLine = settings.notes ? `\nEmphasis from the user: ${settings.notes}` : '';
 
     return `You are a senior product designer at a top-tier SaaS company (think Linear, Notion, Vercel, Stripe). You generate high-fidelity UI *concepts* — not production code — for new products, grounded in a provided PRD. Your output MUST be valid JSON matching the provided response schema.
 
@@ -87,7 +86,7 @@ Also provide a top-level \`title\` (the overall concept name) and a \`summary\` 
 
 ${FIDELITY_INSTRUCTIONS[settings.fidelity]}
 ${PLATFORM_INSTRUCTIONS[settings.platform]}
-${SCOPE_INSTRUCTIONS[settings.scope]}${styleLine}${notesLine}
+${SCOPE_INSTRUCTIONS[settings.scope]}${styleLine}
 
 ## Image & media placeholders
 ${PLACEHOLDER_PROMPT_CATALOG}`;

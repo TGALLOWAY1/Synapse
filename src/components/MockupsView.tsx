@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Image, Plus, GitCompare, MessageSquarePlus, RefreshCw, Sparkles, Monitor, Smartphone, Columns3, Loader2, X } from 'lucide-react';
+import { Image, Plus, GitCompare, MessageSquarePlus, RefreshCw, Sparkles, Loader2, X } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
@@ -22,6 +22,7 @@ import type {
     MockupScreen,
     ArtifactVersion,
     StalenessState,
+    ProjectPlatform,
 } from '../types';
 import { MOCKUP_HTML_V1 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
@@ -31,19 +32,26 @@ interface MockupsViewProps {
     spineVersionId: string;
     prdContent: string;
     structuredPRD?: StructuredPRD;
+    projectPlatform?: ProjectPlatform;
 }
 
-const PLATFORM_OPTIONS: { value: MockupPlatform; label: string; desc: string; icon: typeof Monitor }[] = [
-    { value: 'desktop', label: 'Desktop', desc: '1440px with sidebar', icon: Monitor },
-    { value: 'mobile', label: 'Mobile', desc: '390px single-column', icon: Smartphone },
-    { value: 'responsive', label: 'Responsive', desc: 'Desktop-first, adaptive', icon: Columns3 },
-];
+// Project-level platform ('app' / 'web') maps directly to the mockup shell.
+const mapProjectPlatform = (p?: ProjectPlatform): MockupPlatform =>
+    p === 'app' ? 'mobile' : 'desktop';
 
-const FIDELITY_OPTIONS: { value: MockupFidelity; label: string; desc: string }[] = [
-    { value: 'low', label: 'Wireframe', desc: 'Structural layout with neutral palette' },
-    { value: 'mid', label: 'Structured', desc: 'Real copy, data tables, stat tiles' },
-    { value: 'high', label: 'Polished', desc: 'Production-ready visual fidelity' },
-];
+// Choose fidelity between 'mid' (structured) and 'high' (polished) based on how
+// rich the PRD is. Sparse PRDs yield 'mid'; feature-heavy or long PRDs yield
+// 'high'. Wireframe ('low') is intentionally never auto-selected.
+const pickFidelity = (prd: string, structured?: StructuredPRD): MockupFidelity => {
+    const words = prd.trim().split(/\s+/).filter(Boolean).length;
+    if (structured) {
+        const feats = structured.features ?? [];
+        const highCt = feats.filter(f => f.complexity === 'high').length;
+        if (feats.length >= 6 || highCt >= 2 || words >= 1500) return 'high';
+        return 'mid';
+    }
+    return words >= 1500 ? 'high' : 'mid';
+};
 
 const SCOPE_OPTIONS: { value: MockupScope; label: string; desc: string }[] = [
     { value: 'key_workflow', label: 'Key Workflow', desc: '3–5 screens forming a user journey' },
@@ -113,11 +121,10 @@ const extractSettings = (version: ArtifactVersion): MockupSettings => {
         scope: (typeof s.scope === 'string' && ['single_screen', 'multi_screen', 'key_workflow'].includes(s.scope)
             ? s.scope : 'key_workflow') as MockupScope,
         style: typeof s.style === 'string' ? s.style : undefined,
-        notes: typeof s.notes === 'string' ? s.notes : undefined,
     };
 };
 
-export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD }: MockupsViewProps) {
+export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD, projectPlatform }: MockupsViewProps) {
     const {
         createArtifact, createArtifactVersion,
         getArtifacts, getArtifactVersions, setPreferredVersion,
@@ -133,12 +140,10 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     const [error, setError] = useState<string | null>(null);
     const [warning, setWarning] = useState<string | null>(null);
 
-    // Settings
-    const [platform, setPlatform] = useState<MockupPlatform>('desktop');
-    const [fidelity, setFidelity] = useState<MockupFidelity>('mid');
+    // Settings — platform and fidelity are now derived automatically at
+    // generation time from the project platform and PRD detail.
     const [scope, setScope] = useState<MockupScope>('key_workflow');
     const [style, setStyle] = useState('');
-    const [notes, setNotes] = useState('');
 
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
 
@@ -147,10 +152,11 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
         setWarning(null);
         setIsGenerating(true);
         try {
+            const platform = mapProjectPlatform(projectPlatform);
+            const fidelity = pickFidelity(prdContent, structuredPRD);
             const settings: MockupSettings = {
                 platform, fidelity, scope,
                 style: style || undefined,
-                notes: notes || undefined,
             };
 
             const { payload, warnings, critique } = await generateMockup(prdContent, settings, structuredPRD);
@@ -429,7 +435,10 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
         );
     };
 
-    const renderGeneratingSkeleton = () => (
+    const renderGeneratingSkeleton = () => {
+        const platform = mapProjectPlatform(projectPlatform);
+        const fidelity = pickFidelity(prdContent, structuredPRD);
+        return (
         <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
             <div className="p-5">
                 <GenerationProgress
@@ -452,7 +461,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 </div>
             </div>
         </div>
-    );
+        );
+    };
 
     return (
         <div className="space-y-6">
@@ -499,112 +509,52 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         <p className="text-xs text-neutral-500 mt-1">Choose how your UI concept should look. The AI will generate a rendered HTML preview based on your PRD.</p>
                     </div>
 
-                    <div className="grid grid-cols-3 gap-5">
-                        <div>
-                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Platform</label>
-                            <div className="space-y-1">
-                                {PLATFORM_OPTIONS.map(opt => {
-                                    const Icon = opt.icon;
-                                    return (
-                                        <button
-                                            key={opt.value}
-                                            type="button"
-                                            onClick={() => setPlatform(opt.value)}
-                                            className={`flex items-start gap-2.5 w-full text-left px-3 py-2 rounded-lg transition ${
-                                                platform === opt.value
-                                                    ? 'bg-indigo-50 border border-indigo-200'
-                                                    : 'hover:bg-neutral-50 border border-transparent'
-                                            }`}
-                                        >
-                                            <Icon size={14} className={`mt-0.5 shrink-0 ${platform === opt.value ? 'text-indigo-600' : 'text-neutral-400'}`} />
-                                            <div>
-                                                <div className={`text-sm ${platform === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
-                                                <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
-                                            </div>
-                                        </button>
-                                    );
-                                })}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Fidelity</label>
-                            <div className="space-y-1">
-                                {FIDELITY_OPTIONS.map(opt => (
-                                    <button
-                                        key={opt.value}
-                                        type="button"
-                                        onClick={() => setFidelity(opt.value)}
-                                        className={`block w-full text-left px-3 py-2 rounded-lg transition ${
-                                            fidelity === opt.value
-                                                ? 'bg-indigo-50 border border-indigo-200'
-                                                : 'hover:bg-neutral-50 border border-transparent'
-                                        }`}
-                                    >
-                                        <div className={`text-sm ${fidelity === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
-                                        <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                        <div>
-                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Scope</label>
-                            <div className="space-y-1">
-                                {SCOPE_OPTIONS.map(opt => (
-                                    <button
-                                        key={opt.value}
-                                        type="button"
-                                        onClick={() => setScope(opt.value)}
-                                        className={`block w-full text-left px-3 py-2 rounded-lg transition ${
-                                            scope === opt.value
-                                                ? 'bg-indigo-50 border border-indigo-200'
-                                                : 'hover:bg-neutral-50 border border-transparent'
-                                        }`}
-                                    >
-                                        <div className={`text-sm ${scope === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
-                                        <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
-                                    </button>
-                                ))}
-                            </div>
+                    <div className="max-w-sm">
+                        <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-2">Scope</label>
+                        <div className="space-y-1">
+                            {SCOPE_OPTIONS.map(opt => (
+                                <button
+                                    key={opt.value}
+                                    type="button"
+                                    onClick={() => setScope(opt.value)}
+                                    className={`block w-full text-left px-3 py-2 rounded-lg transition ${
+                                        scope === opt.value
+                                            ? 'bg-indigo-50 border border-indigo-200'
+                                            : 'hover:bg-neutral-50 border border-transparent'
+                                    }`}
+                                >
+                                    <div className={`text-sm ${scope === opt.value ? 'text-indigo-700 font-medium' : 'text-neutral-700'}`}>{opt.label}</div>
+                                    <div className="text-[11px] text-neutral-400 leading-tight">{opt.desc}</div>
+                                </button>
+                            ))}
                         </div>
                     </div>
 
-                    <div className="grid grid-cols-2 gap-4">
-                        <div>
-                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Style Direction <span className="normal-case font-normal">(optional)</span></label>
-                            <div className="flex flex-wrap gap-1.5 mb-2">
-                                {STYLE_PRESETS.map(preset => (
-                                    <button
-                                        key={preset.label}
-                                        type="button"
-                                        onClick={() => setStyle(style === preset.value ? '' : preset.value)}
-                                        className={`px-2.5 py-1 rounded-full text-xs transition ${
-                                            style === preset.value
-                                                ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 font-medium'
-                                                : 'bg-neutral-50 text-neutral-600 border border-neutral-200 hover:bg-neutral-100'
-                                        }`}
-                                    >
-                                        {preset.label}
-                                    </button>
-                                ))}
-                            </div>
-                            <input
-                                type="text"
-                                value={style}
-                                onChange={e => setStyle(e.target.value)}
-                                placeholder="Select a preset or type your own…"
-                                className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
-                            />
+                    <div>
+                        <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Style Direction <span className="normal-case font-normal">(optional)</span></label>
+                        <div className="flex flex-wrap gap-1.5 mb-2">
+                            {STYLE_PRESETS.map(preset => (
+                                <button
+                                    key={preset.label}
+                                    type="button"
+                                    onClick={() => setStyle(style === preset.value ? '' : preset.value)}
+                                    className={`px-2.5 py-1 rounded-full text-xs transition ${
+                                        style === preset.value
+                                            ? 'bg-indigo-100 text-indigo-700 border border-indigo-300 font-medium'
+                                            : 'bg-neutral-50 text-neutral-600 border border-neutral-200 hover:bg-neutral-100'
+                                    }`}
+                                >
+                                    {preset.label}
+                                </button>
+                            ))}
                         </div>
-                        <div>
-                            <label className="block text-[11px] font-semibold text-neutral-400 uppercase tracking-wider mb-1.5">Notes <span className="normal-case font-normal">(optional)</span></label>
-                            <input
-                                type="text"
-                                value={notes}
-                                onChange={e => setNotes(e.target.value)}
-                                placeholder="Areas to emphasize or constraints…"
-                                className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
-                            />
-                        </div>
+                        <input
+                            type="text"
+                            value={style}
+                            onChange={e => setStyle(e.target.value)}
+                            placeholder="Select a preset or type your own…"
+                            className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
+                        />
                     </div>
 
                     <div className="flex items-center gap-3 pt-1 border-t border-neutral-100">
