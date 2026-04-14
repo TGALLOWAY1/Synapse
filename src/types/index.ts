@@ -207,7 +207,6 @@ export type MockupSettings = {
     fidelity: MockupFidelity;
     style?: string;
     scope: MockupScope;
-    notes?: string;
     selectedSections?: string[];
 };
 

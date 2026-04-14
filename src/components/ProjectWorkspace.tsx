@@ -468,6 +468,7 @@ export function ProjectWorkspace() {
                                 spineVersionId={activeSpine.id}
                                 prdContent={activeSpine.responseText}
                                 structuredPRD={activeSpine.structuredPRD}
+                                projectPlatform={project?.platform}
                             />
                         )}
 
