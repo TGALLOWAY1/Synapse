@@ -4,7 +4,7 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 
 ## Project Overview
 
-Synapse is an AI-native product definition environment that transforms PRDs (Product Requirements Documents) into a dynamic pipeline: structured PRD generation, UI mockups, downstream artifacts, and visual annotations. It is a fully client-side React SPA with no backend database — all state persists in localStorage via Zustand.
+Synapse — "From plain-language to product blueprint" — is an AI-native product definition environment that transforms PRDs (Product Requirements Documents) into a dynamic pipeline: structured PRD generation, UI mockups, downstream artifacts, and visual annotations. It is a fully client-side React SPA with no backend database — all state persists in localStorage via Zustand.
 
 ## Commands
 

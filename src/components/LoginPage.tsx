@@ -134,15 +134,33 @@ export function LoginPage() {
     }
 
     return (
-        <div className="min-h-screen flex items-center justify-center px-6 py-12 bg-neutral-900">
-            <div className="w-full max-w-md">
-                {/* Logo + name + tagline */}
-                <div className="flex flex-col items-center mb-8">
-                    <img src="/icon.png" alt="Synapse" className="w-14 h-14 mb-4" />
+        <div className="min-h-screen flex flex-col items-center justify-center px-6 py-12 bg-neutral-900">
+            <div className="w-full max-w-sm space-y-6">
+                {/* Name + tagline */}
+                <div className="flex flex-col items-center">
                     <h1 className="text-3xl font-bold tracking-tight text-center">Synapse</h1>
                     <p className="text-sm text-neutral-400 text-center mt-2">
-                        AI-native product definition
+                        From plain-language to product blueprint
                     </p>
+                </div>
+
+                {/* Meet Synapse + Demo actions */}
+                <div className="flex items-center justify-center gap-3">
+                    <button
+                        type="button"
+                        onClick={() => navigate('/about')}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition"
+                    >
+                        Meet Synapse
+                    </button>
+                    <button
+                        type="button"
+                        disabled
+                        title="Coming soon"
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-sm text-neutral-400 cursor-not-allowed"
+                    >
+                        Demo project (coming soon)
+                    </button>
                 </div>
 
                 {/* Login card */}
@@ -329,25 +347,6 @@ export function LoginPage() {
                         Continue with LinkedIn
                     </a>
                 </form>
-
-                {/* Below-card actions */}
-                <div className="mt-6 flex flex-col items-center gap-2">
-                    <button
-                        type="button"
-                        onClick={() => navigate('/about')}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition"
-                    >
-                        Meet Synapse
-                    </button>
-                    <button
-                        type="button"
-                        disabled
-                        title="Coming soon"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-sm text-neutral-400 cursor-not-allowed"
-                    >
-                        Demo project (coming soon)
-                    </button>
-                </div>
             </div>
         </div>
     );
