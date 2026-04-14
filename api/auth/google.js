@@ -1,9 +1,12 @@
 import crypto from 'crypto';
 import { createGoogleAuthUrl, getGoogleConfig } from '../_lib/google.js';
 import { getBaseUrl, methodNotAllowed } from '../_lib/response.js';
+import { enforceRateLimit } from '../_lib/rateLimit.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'GET') return methodNotAllowed(res);
+
+  if (enforceRateLimit(req, res, { scope: 'oauth_init_google', limit: 20, windowMs: 60_000 })) return;
 
   try {
     const baseUrl = getBaseUrl(req);

@@ -1,6 +1,56 @@
 import { runMongoAction } from './_lib/db.js';
 import { json, methodNotAllowed } from './_lib/response.js';
 import { parseSessionCookie, verifySessionToken } from './_lib/session.js';
+import { parseJsonBody } from './_lib/validate.js';
+import { enforceRateLimit } from './_lib/rateLimit.js';
+
+// Activity events are structured analytics we log for our own UI — reject
+// anything that isn't on this allowlist so clients can't dump arbitrary
+// strings into our database.
+const ALLOWED_TYPES = new Set([
+  'generated_artifact',
+  'viewed_mockups',
+  'clicked_section',
+  'opened_project',
+  'exported_project',
+  'created_branch',
+  'consolidated_branch',
+  'regenerated_spine',
+]);
+
+const MAX_TYPE_LEN = 64;
+const MAX_METADATA_BYTES = 4 * 1024; // 4 KiB
+const MAX_METADATA_KEYS = 20;
+
+function validateMetadata(metadata) {
+  if (metadata === undefined || metadata === null) return {};
+  if (typeof metadata !== 'object' || Array.isArray(metadata)) return null;
+
+  const keys = Object.keys(metadata);
+  if (keys.length > MAX_METADATA_KEYS) return null;
+
+  // Only permit primitive leaf values one level deep — reject nested objects
+  // and large string payloads so the collection can't be abused as blob storage.
+  for (const key of keys) {
+    if (typeof key !== 'string' || key.length === 0 || key.length > 64) return null;
+    const v = metadata[key];
+    if (v === null) continue;
+    const t = typeof v;
+    if (t === 'string') {
+      if (v.length > 512) return null;
+    } else if (t === 'number') {
+      if (!Number.isFinite(v)) return null;
+    } else if (t === 'boolean') {
+      // ok
+    } else {
+      return null;
+    }
+  }
+
+  const serialized = JSON.stringify(metadata);
+  if (Buffer.byteLength(serialized, 'utf8') > MAX_METADATA_BYTES) return null;
+  return metadata;
+}
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
@@ -10,8 +60,32 @@ export default async function handler(req, res) {
   const subjectId = claims?.userId || claims?.recruiterId;
   if (!subjectId) return json(res, 401, { error: 'Unauthorized' });
 
-  const { type, metadata } = req.body || {};
-  if (!type) return json(res, 400, { error: 'Missing activity type' });
+  // Cap writes per authenticated client to prevent billing/DB abuse.
+  if (
+    enforceRateLimit(req, res, {
+      scope: 'activity_user',
+      limit: 120,
+      windowMs: 60_000,
+      keyFn: () => `u:${subjectId}`,
+      errorBody: { error: 'rate_limited' },
+    })
+  ) {
+    return;
+  }
+
+  const body = await parseJsonBody(req);
+  const rawType = body?.type;
+  if (typeof rawType !== 'string' || rawType.length === 0 || rawType.length > MAX_TYPE_LEN) {
+    return json(res, 400, { error: 'Missing activity type' });
+  }
+  if (!ALLOWED_TYPES.has(rawType)) {
+    return json(res, 400, { error: 'Invalid activity type' });
+  }
+
+  const metadata = validateMetadata(body?.metadata);
+  if (metadata === null) {
+    return json(res, 400, { error: 'Invalid metadata' });
+  }
 
   try {
     const now = new Date();
@@ -20,8 +94,8 @@ export default async function handler(req, res) {
       document: {
         userId: claims?.userId || null,
         recruiterId: claims?.recruiterId || subjectId,
-        type,
-        metadata: metadata || {},
+        type: rawType,
+        metadata,
         createdAt: now,
       },
     });

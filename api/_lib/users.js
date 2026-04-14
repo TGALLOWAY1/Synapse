@@ -32,6 +32,35 @@ function normalizeEmail(email) {
   return trimmed.length === 0 ? null : trimmed;
 }
 
+// OAuth providers hand us arbitrary URLs that end up rendered as <a href> and
+// <img src>. Only let http(s) URLs through so that even if a provider (or a
+// malicious actor via provider-side profile fields) tries to slip in a
+// javascript:/data: URL, it never reaches the DB or the DOM.
+const MAX_URL_LEN = 2048;
+export function sanitizeExternalUrl(value) {
+  if (typeof value !== 'string') return null;
+  const trimmed = value.trim();
+  if (trimmed.length === 0 || trimmed.length > MAX_URL_LEN) return null;
+  try {
+    const url = new URL(trimmed);
+    if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+    return url.toString();
+  } catch {
+    return null;
+  }
+}
+
+// Plain strings from OAuth providers (name, headline, company). Trims,
+// drops control characters that could affect log output, and caps length.
+const MAX_FIELD_LEN = 512;
+export function sanitizeProviderString(value) {
+  if (typeof value !== 'string') return '';
+  // Strip C0 control characters except tab/newline (the rendered text
+  // shouldn't contain them, and they confuse logs + some renderers).
+  const cleaned = value.replace(/[\x00-\x08\x0b\x0c\x0e-\x1f\x7f]/g, '').trim();
+  return cleaned.slice(0, MAX_FIELD_LEN);
+}
+
 function publicUserProjection() {
   return {
     _id: 0,
@@ -106,6 +135,7 @@ export async function createEmailUser({ email, name, passwordHash }) {
   const existing = await findAnyUserByEmail(normalized);
   if (existing) throw new EmailInUseError();
 
+  const safeName = sanitizeProviderString(name);
   const now = new Date();
   const userId = generateUserId();
   const doc = {
@@ -114,7 +144,7 @@ export async function createEmailUser({ email, name, passwordHash }) {
     providerUserId: normalized,
     email: normalized,
     emailVerified: false,
-    name,
+    name: safeName,
     passwordHash,
     profileUrl: null,
     headline: '',
@@ -137,7 +167,7 @@ export async function createEmailUser({ email, name, passwordHash }) {
     authProvider: 'email',
     email: normalized,
     emailVerified: false,
-    name,
+    name: safeName,
     profileUrl: null,
     headline: '',
     company: null,
@@ -166,6 +196,18 @@ export async function upsertOAuthUser({
   }
 
   const normalizedEmail = normalizeEmail(email);
+  // Sanitize anything provider-supplied that ends up on the client as markup.
+  // Only http(s) URLs survive; everything else stored as null.
+  const safeAvatarUrl = sanitizeExternalUrl(avatarUrl);
+  const safeProfileUrl = sanitizeExternalUrl(profileUrl);
+  const safeName = sanitizeProviderString(name);
+  const safeHeadline = sanitizeProviderString(headline);
+  const safeCompany = company ? sanitizeProviderString(company) : null;
+  avatarUrl = safeAvatarUrl;
+  profileUrl = safeProfileUrl;
+  name = safeName;
+  headline = safeHeadline;
+  company = safeCompany || null;
   const now = new Date();
 
   // Is there already a record for this provider + providerUserId?

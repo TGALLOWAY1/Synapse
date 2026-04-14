@@ -5,6 +5,22 @@ import { fetchRecruiters } from '../lib/recruiterApi';
 
 type SortMode = 'recency' | 'engagement';
 
+// Defense-in-depth: even though we sanitize provider URLs on write, still
+// only render http(s) URLs at render time so a legacy bad record in Mongo
+// can't turn into a javascript:/data: href at the browser.
+function safeHttpUrl(value: unknown): string | null {
+    if (typeof value !== 'string') return null;
+    const trimmed = value.trim();
+    if (!trimmed) return null;
+    try {
+        const url = new URL(trimmed);
+        if (url.protocol !== 'http:' && url.protocol !== 'https:') return null;
+        return url.toString();
+    } catch {
+        return null;
+    }
+}
+
 export function RecruiterAdminPage() {
   const [adminKey, setAdminKey] = useState('');
   const [loading, setLoading] = useState(false);
@@ -59,15 +75,20 @@ export function RecruiterAdminPage() {
         {sorted.map((r) => {
           const recentlyActive = r.lastActiveAt && (Date.now() - new Date(r.lastActiveAt).getTime()) < 1000 * 60 * 60 * 24;
           const highEngagement = r.artifactGenerations + r.clickedSections >= 5;
+          const safeProfileUrl = safeHttpUrl(r.profileUrl);
 
           return (
             <div key={r.linkedinId} className={`rounded-xl border p-4 ${recentlyActive ? 'border-emerald-500/50' : 'border-neutral-700'} ${highEngagement ? 'bg-indigo-500/10' : 'bg-neutral-900/50'}`}>
               <div className="flex items-start justify-between gap-3">
                 <div>
                   <p className="font-semibold">{r.name}</p>
-                  <a href={r.profileUrl || '#'} target="_blank" rel="noreferrer" className="text-sky-300 hover:underline text-sm">
-                    LinkedIn profile
-                  </a>
+                  {safeProfileUrl ? (
+                    <a href={safeProfileUrl} target="_blank" rel="noopener noreferrer" className="text-sky-300 hover:underline text-sm">
+                      LinkedIn profile
+                    </a>
+                  ) : (
+                    <span className="text-neutral-500 text-sm">No profile</span>
+                  )}
                   <p className="text-sm text-neutral-300 mt-1">{r.headline || 'No headline available'}</p>
                   <p className="text-sm text-neutral-400">{r.company || 'Company unavailable'}</p>
                 </div>
