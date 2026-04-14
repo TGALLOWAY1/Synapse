@@ -166,17 +166,10 @@ export function HomePage() {
                     <h1 className="text-2xl font-bold tracking-tight">Synapse</h1>
                 </div>
                 <div className="flex items-center gap-2">
-                    {user ? (
+                    {user && (
                         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm">
                             Signed in as {user.name} via LinkedIn
                         </div>
-                    ) : (
-                        <a
-                            href="/api/auth/linkedin"
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-[#0a66c2]/50 bg-[#0a66c2]/15 text-[#9bc9f5] hover:bg-[#0a66c2]/25 transition text-sm font-medium"
-                        >
-                            Continue with LinkedIn
-                        </a>
                     )}
                     <button
                         onClick={() => setIsSettingsOpen(true)}
