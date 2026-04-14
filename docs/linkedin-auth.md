@@ -1,5 +1,9 @@
 # LinkedIn recruiter auth and follow-up pipeline
 
+> See [`docs/auth.md`](auth.md) for the complete multi-provider auth overview
+> (email/password, Google, GitHub, LinkedIn). This document covers only the
+> LinkedIn-specific setup and the recruiter capture pipeline.
+
 ## What data Synapse collects
 
 After a recruiter signs in with LinkedIn, Synapse stores:

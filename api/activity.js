@@ -7,7 +7,8 @@ export default async function handler(req, res) {
 
   const token = parseSessionCookie(req);
   const claims = verifySessionToken(token);
-  if (!claims?.recruiterId) return json(res, 401, { error: 'Unauthorized' });
+  const subjectId = claims?.userId || claims?.recruiterId;
+  if (!subjectId) return json(res, 401, { error: 'Unauthorized' });
 
   const { type, metadata } = req.body || {};
   if (!type) return json(res, 400, { error: 'Missing activity type' });
@@ -17,16 +18,22 @@ export default async function handler(req, res) {
     await runMongoAction('insertOne', {
       collection: 'recruiter_activity',
       document: {
-        recruiterId: claims.recruiterId,
+        userId: claims?.userId || null,
+        recruiterId: claims?.recruiterId || subjectId,
         type,
         metadata: metadata || {},
         createdAt: now,
       },
     });
 
+    // Update lastActiveAt on the user record. Prefer userId (works for all
+    // providers); fall back to linkedinId for pre-migration tokens.
+    const userFilter = claims?.userId
+      ? { userId: claims.userId }
+      : { linkedinId: claims.recruiterId };
     await runMongoAction('updateOne', {
       collection: 'recruiters',
-      filter: { linkedinId: claims.recruiterId },
+      filter: userFilter,
       update: { $set: { lastActiveAt: now } },
     });
 
