@@ -12,6 +12,17 @@ interface GenerationProgressProps {
     subtitle?: string;
     /** Compact inline mode (no card wrapper) */
     inline?: boolean;
+    /**
+     * 0-100 real completion percent. When provided, the component is
+     * state-driven: the bar width tracks this value directly and the
+     * timer-based stage rotation is disabled.
+     */
+    progress?: number;
+    /**
+     * Live status string shown instead of the rotating stage label when
+     * the component is state-driven (paired with `progress`).
+     */
+    statusLabel?: string;
 }
 
 const VARIANT_STYLES = {
@@ -67,13 +78,19 @@ export function GenerationProgress({
     title,
     subtitle,
     inline = false,
+    progress,
+    statusLabel,
 }: GenerationProgressProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFading, setIsFading] = useState(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const style = VARIANT_STYLES[variant];
+    const isStateDriven = typeof progress === 'number';
 
     useEffect(() => {
+        // When a real progress value is supplied, skip time-based advancement
+        // entirely — the parent component owns stage progression.
+        if (isStateDriven) return;
         if (stages.length === 0) return;
 
         const advance = () => {
@@ -94,11 +111,26 @@ export function GenerationProgress({
             clearTimeout(id);
             if (timerRef.current) clearTimeout(timerRef.current);
         };
-    }, [currentIndex, stages]);
+    }, [currentIndex, stages, isStateDriven]);
 
     if (stages.length === 0) return null;
 
-    const currentLabel = stages[currentIndex]?.label ?? stages[stages.length - 1]?.label;
+    // Clamp/derive values for state-driven mode
+    const clampedProgress = isStateDriven ? Math.max(0, Math.min(100, progress!)) : 0;
+    const activeDotIndex = isStateDriven
+        ? Math.min(
+              stages.length - 1,
+              Math.floor((clampedProgress / 100) * stages.length),
+          )
+        : currentIndex;
+
+    const currentLabel = isStateDriven
+        ? (statusLabel ?? stages[activeDotIndex]?.label ?? stages[stages.length - 1]?.label)
+        : (stages[currentIndex]?.label ?? stages[stages.length - 1]?.label);
+
+    const barWidthPct = isStateDriven
+        ? clampedProgress
+        : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
 
     if (inline) {
         return (
@@ -122,9 +154,7 @@ export function GenerationProgress({
             <div className="h-0.5 bg-white/60 overflow-hidden">
                 <div
                     className={`h-full ${style.barColor} transition-all duration-[2500ms] ease-linear`}
-                    style={{
-                        width: `${Math.min(((currentIndex + 1) / stages.length) * 100, 95)}%`,
-                    }}
+                    style={{ width: `${barWidthPct}%` }}
                 />
             </div>
 
@@ -156,9 +186,9 @@ export function GenerationProgress({
                             <div
                                 key={i}
                                 className={`h-1 rounded-full transition-all duration-500 ${
-                                    i < currentIndex
+                                    i < activeDotIndex
                                         ? `${style.barColor} w-3`
-                                        : i === currentIndex
+                                        : i === activeDotIndex
                                         ? `${style.barColor} w-5 opacity-80`
                                         : 'bg-neutral-300 w-1.5'
                                 }`}

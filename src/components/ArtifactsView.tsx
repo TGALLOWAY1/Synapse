@@ -10,7 +10,7 @@ import { ErrorBanner } from './ErrorBanner';
 import { StalenessBadge } from './StalenessBadge';
 import { FeedbackModal } from './FeedbackModal';
 import { GenerationProgress } from './GenerationProgress';
-import { STALE_REFRESH_STAGES, getArtifactStages } from './generationStages';
+import { STALE_REFRESH_STAGES, BUNDLE_GENERATION_STAGES, getArtifactStages } from './generationStages';
 import type { StructuredPRD, CoreArtifactSubtype } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -30,6 +30,8 @@ interface ArtifactsViewProps {
 // Display uses the user-facing order; generation uses dependency-layered order.
 const CORE_ARTIFACTS_DISPLAY = CORE_ARTIFACT_DISPLAY_ORDER;
 const TOTAL_CORE_ARTIFACTS = CORE_ARTIFACT_PIPELINE.length;
+// Max artifacts that can run in parallel within a single dependency layer.
+const MAX_PARALLEL_PER_LAYER = Math.max(...buildDependencyLayers().map(layer => layer.length));
 
 function isAbortError(reason: unknown): boolean {
     return reason instanceof DOMException && reason.name === 'AbortError';
@@ -418,20 +420,37 @@ export function ArtifactsView({ projectId, spineVersionId, prdContent, structure
             )}
 
             {/* Bundle / stale refresh progress */}
-            {generatingSubtype === 'bundle' && (
-                <GenerationProgress
-                    stages={staleCount > 0 ? STALE_REFRESH_STAGES : [
-                        { label: 'Preparing artifact pipeline...', minDuration: 2000 },
-                        { label: `Generating artifacts (${bundleDoneCount} of ${TOTAL_CORE_ARTIFACTS} complete)...`, minDuration: 3000 },
-                        { label: 'Structuring outputs...', minDuration: 4000 },
-                        { label: 'Validating artifact quality...', minDuration: 5000 },
-                    ]}
-
-                    variant="systematic"
-                    title={staleCount > 0 ? 'Refreshing Stale Artifacts' : 'Generating Artifact Bundle'}
-                    subtitle={`Processing ${staleCount > 0 ? staleCount : TOTAL_CORE_ARTIFACTS} artifacts concurrently (by dependency layer)`}
-                />
-            )}
+            {generatingSubtype === 'bundle' && (() => {
+                // Derive real progress from bundleStatus. Only artifacts that
+                // we actually queued for this run (bundleStatus has an entry)
+                // count toward the total — works for both the full bundle and
+                // the "Refresh N Stale" path.
+                const tracked = (Object.keys(bundleStatus) as CoreArtifactSubtype[])
+                    .map(subtype => getArtifactMeta(subtype));
+                const total = tracked.length;
+                const done = tracked.filter(m => bundleStatus[m.subtype] === 'done');
+                const active = tracked.filter(m => bundleStatus[m.subtype] === 'generating');
+                // Give in-flight artifacts partial credit so the bar advances
+                // smoothly within a layer instead of only at layer boundaries.
+                const progressPct = total === 0
+                    ? 0
+                    : Math.min(100, ((done.length + active.length * 0.5) / total) * 100);
+                const statusLabel = active.length > 0
+                    ? `Generating ${active.map(m => m.title).join(', ')} — ${done.length} of ${total} complete`
+                    : done.length === total && total > 0
+                        ? `Finalizing… ${done.length} of ${total} complete`
+                        : `Preparing next dependency layer… ${done.length} of ${total} complete`;
+                return (
+                    <GenerationProgress
+                        stages={staleCount > 0 ? STALE_REFRESH_STAGES : BUNDLE_GENERATION_STAGES}
+                        variant="systematic"
+                        title={staleCount > 0 ? 'Refreshing Stale Artifacts' : 'Generating Artifact Bundle'}
+                        subtitle={`Dependency-aware pipeline · up to ${MAX_PARALLEL_PER_LAYER} in parallel per layer`}
+                        progress={progressPct}
+                        statusLabel={statusLabel}
+                    />
+                );
+            })()}
 
             {/* Artifact Grid */}
             <div className="space-y-3">

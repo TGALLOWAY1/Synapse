@@ -43,6 +43,17 @@ export const STALE_REFRESH_STAGES: ProgressStage[] = [
     { label: 'Validating updated outputs...', minDuration: 5000 },
 ];
 
+/**
+ * Visual scaffold for the artifact bundle progress panel.
+ * No `minDuration` — the panel is driven by real completion state, not timers.
+ */
+export const BUNDLE_GENERATION_STAGES: ProgressStage[] = [
+    { label: 'Preparing artifact pipeline...' },
+    { label: 'Generating foundational artifacts...' },
+    { label: 'Building dependent artifacts...' },
+    { label: 'Finalizing prompt pack...' },
+];
+
 /** Returns per-artifact-type stage labels for individual generation */
 export function getArtifactStages(subtype: string): ProgressStage[] {
     switch (subtype) {
