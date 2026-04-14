@@ -12,9 +12,22 @@ import {
   toPublicUser,
   EmailInUseError,
 } from '../_lib/users.js';
+import { enforceRateLimit } from '../_lib/rateLimit.js';
 
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
+
+  // Throttle account creation so a single host can't flood the user table.
+  if (
+    enforceRateLimit(req, res, {
+      scope: 'auth_signup_ip',
+      limit: 5,
+      windowMs: 10 * 60_000,
+      errorBody: { error: 'rate_limited' },
+    })
+  ) {
+    return;
+  }
 
   try {
     const body = await parseJsonBody(req);
