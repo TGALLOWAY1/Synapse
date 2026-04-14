@@ -161,6 +161,8 @@ npm run build
   of one end-to-end pipeline run
 - [`docs/deployment.md`](docs/deployment.md) — commands, Vercel setup,
   self-hosting
+- [`docs/auth.md`](docs/auth.md) — multi-provider auth (email/password,
+  Google, GitHub, LinkedIn), user record schema, env vars, error codes
 - [`docs/linkedin-auth.md`](docs/linkedin-auth.md) — LinkedIn OAuth setup,
   recruiter capture fields, and compliance note
 - [`docs/archive/`](docs/archive/) — historical design notes and audits
