@@ -58,6 +58,14 @@ const buildSystemPrompt = (settings: MockupSettings): string => {
 - Wrap EACH screen in a single top-level \`<div class="min-h-screen bg-neutral-50 text-neutral-900 font-sans antialiased">\` so the sandbox renders a full-bleed surface.
 - Output must be valid HTML — every opening tag closed, attributes quoted.
 
+## Layout & scrolling rules (critical — preview will be blank if violated)
+- The render sandbox is a scrollable iframe. DO NOT build your own scroll containers inside it.
+- Do NOT put \`overflow-hidden\` on the root \`min-h-screen\` shell, on \`<main>\`, or on any flex column container. These trap content above the iframe fold and the user sees a blank preview.
+- Do NOT use \`flex-1 overflow-y-auto\` to create an internal scrolling content area. Let the page flow naturally; the iframe scrolls.
+- For sidebar shells: put \`flex\` on the root, \`<aside class="w-64 ...">\`, and \`<main class="flex-1 ...">\` (no \`overflow-hidden\`, no \`flex flex-col\` with internal scroll). Content inside main flows top-to-bottom.
+- Avoid \`h-screen\` (use \`min-h-screen\` only on the root). Do not pin inner sections to viewport height.
+- Keep total content density realistic for a single screen — if a section has 6+ KPI tiles plus 4+ panels plus a hero plus a leaderboard, split across screens instead of stuffing one shell.
+
 ## Required layout contract per screen
 - Every screen must include: (1) top-level app shell, (2) page header with title + primary action, (3) at least one primary content section, (4) at least one secondary/supporting section (filters, activity, details, etc.), and (5) at least one interactive control (button/input/select/tab).
 - Spacing rhythm must follow Tailwind scale 2/3/4/6/8. Avoid arbitrary values unless necessary for framing.
