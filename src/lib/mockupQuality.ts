@@ -45,6 +45,59 @@ const normalizeRootWrapper = (html: string): string => {
     return `<div class="min-h-screen bg-neutral-50 text-neutral-900 font-sans antialiased">\n${trimmed}\n</div>`;
 };
 
+// Within a class="..." attribute, strip a specific Tailwind utility token
+// without disturbing surrounding classes.
+const stripClassToken = (classAttr: string, token: string): string =>
+    classAttr.replace(new RegExp(`(?:^|\\s)${token}(?=\\s|$)`, 'g'), ' ').replace(/\s+/g, ' ').trim();
+
+// Inject a Tailwind utility token into a class="..." attribute if it isn't
+// already present. Used to splice in `min-h-0` so flex children can actually
+// shrink and let `overflow-y-auto` activate inside the iframe.
+const ensureClassToken = (classAttr: string, token: string): string => {
+    if (new RegExp(`(?:^|\\s)${token}(?=\\s|$)`).test(classAttr)) return classAttr;
+    return `${classAttr.trim()} ${token}`.trim();
+};
+
+// Rewrite each class="..." attribute in the fragment so that:
+// 1. Shell containers don't trap their children with `overflow-hidden` — the
+//    sandbox iframe is already a scroll viewport, and nested `overflow-hidden`
+//    chains are how LLM-emitted dashboards end up showing nothing.
+// 2. Any `flex-1 overflow-y-auto` scroll container also carries `min-h-0` so
+//    the classic flexbox `min-height: auto` gotcha doesn't push content past
+//    the viewport.
+const fixOverflowScrollChains = (html: string): string => {
+    return html.replace(/class\s*=\s*("|')([^"']*)\1/gi, (match, quote, value) => {
+        let next = value as string;
+        const hasFlex = /(?:^|\s)flex(?=\s|$)/.test(next);
+        const hasFlexCol = /(?:^|\s)flex-col(?=\s|$)/.test(next);
+        const hasFlex1 = /(?:^|\s)flex-1(?=\s|$)/.test(next);
+        const hasOverflowHidden = /(?:^|\s)overflow-hidden(?=\s|$)/.test(next);
+        const hasOverflowYAuto = /(?:^|\s)overflow-y-auto(?=\s|$)/.test(next);
+
+        // Drop overflow-hidden from shell containers (anything that's also a
+        // flex container or already inside a flex-1 column). This is the
+        // pattern that traps content above the iframe fold.
+        if (hasOverflowHidden && (hasFlex || hasFlexCol || hasFlex1)) {
+            next = stripClassToken(next, 'overflow-hidden');
+        }
+
+        // Make sure flex-1 + overflow-y-auto chains can actually scroll.
+        if (hasFlex1 && hasOverflowYAuto) {
+            next = ensureClassToken(next, 'min-h-0');
+        }
+
+        // Make sure column-direction flex children can shrink so nested
+        // scroll containers behave correctly (`flex-col` parents need
+        // `min-h-0` for the same reason).
+        if (hasFlex1 && hasFlexCol) {
+            next = ensureClassToken(next, 'min-h-0');
+        }
+
+        if (next === value) return match;
+        return `class=${quote}${next}${quote}`;
+    });
+};
+
 export const sanitizeMockupHtmlForPreview = (html: string): string => {
     let out = html.length > MAX_FRAGMENT_LENGTH
         ? html.slice(0, MAX_FRAGMENT_LENGTH) + '\n<!-- truncated: exceeded maximum safe length -->'
@@ -67,6 +120,8 @@ export const sanitizeMockupHtmlForPreview = (html: string): string => {
     out = out.replace(/(href|src|action)\s*=\s*"\s*(javascript|data):[^"]*"/gi, '$1="#"');
     out = out.replace(/(href|src|action)\s*=\s*'\s*(javascript|data):[^']*'/gi, "$1='#'");
     out = out.replace(/(href|src|action)\s*=\s*(javascript|data):[^\s>]*/gi, '$1="#"');
+
+    out = fixOverflowScrollChains(out);
 
     return out;
 };
@@ -136,6 +191,21 @@ export const assessMockupHtmlQuality = (html: string): MockupQualityReport => {
             code: 'placeholder_copy',
             severity: 'high',
             message: 'Contains placeholder copy that reduces artifact credibility.',
+        });
+    }
+
+    // Layout-viability check: nested-scroll shells that don't fit the iframe
+    // viewport are the #1 cause of "preview is blank" reports. Both `flex-1
+    // overflow-y-auto` (without `min-h-0`) and `overflow-hidden` on a flex
+    // shell are normalized by `sanitizeMockupHtmlForPreview`, but we still
+    // surface a low-severity warning so authors can see what was rewritten.
+    const hasNestedScroll = /class\s*=\s*['"][^'"]*\bflex-1\b[^'"]*\boverflow-y-auto\b[^'"]*['"]|class\s*=\s*['"][^'"]*\boverflow-y-auto\b[^'"]*\bflex-1\b[^'"]*['"]/i.test(trimmed);
+    const hasShellOverflowHidden = /class\s*=\s*['"][^'"]*\b(?:flex|flex-col)\b[^'"]*\boverflow-hidden\b[^'"]*['"]|class\s*=\s*['"][^'"]*\boverflow-hidden\b[^'"]*\b(?:flex|flex-col)\b[^'"]*['"]/i.test(trimmed);
+    if (hasNestedScroll || hasShellOverflowHidden) {
+        issues.push({
+            code: 'fragile_scroll_shell',
+            severity: 'low',
+            message: 'Used a nested-scroll shell pattern (flex-1 overflow-y-auto / overflow-hidden); auto-rewritten for preview compatibility.',
         });
     }
 
