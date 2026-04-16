@@ -1,13 +1,103 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown } from 'lucide-react';
+import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 
 interface SettingsModalProps {
     onClose: () => void;
 }
 
+/**
+ * Model catalog. Order within each tier = display order in the UI. `current`
+ * models render expanded; `legacy` models render inside a collapsed section.
+ * The `id` is passed straight into the Gemini REST URL, so it must match what
+ * Google's API accepts (see https://ai.google.dev/gemini-api/docs/models).
+ */
+type ModelTier = 'current' | 'legacy';
+interface ModelOption {
+    id: string;
+    name: string;
+    description: string;
+    tier: ModelTier;
+}
+
+const MODEL_CATALOG: ModelOption[] = [
+    {
+        id: 'gemini-3-flash-preview',
+        name: 'Gemini 3 Flash',
+        description: 'Recommended default. Frontier-class quality with capacity to spare.',
+        tier: 'current',
+    },
+    {
+        id: 'gemini-3.1-pro-preview',
+        name: 'Gemini 3.1 Pro',
+        description: 'Maximum reasoning power for the most complex PRDs.',
+        tier: 'current',
+    },
+    {
+        id: 'gemini-3.1-flash-lite-preview',
+        name: 'Gemini 3.1 Flash-Lite',
+        description: 'Cheapest option. Good for quick drafts and iteration.',
+        tier: 'current',
+    },
+    {
+        id: 'gemini-2.5-pro',
+        name: 'Gemini 2.5 Pro',
+        description: 'Previous-generation high-reasoning model.',
+        tier: 'legacy',
+    },
+    {
+        id: 'gemini-2.5-flash',
+        name: 'Gemini 2.5 Flash',
+        description: 'Previous-generation fast model. Often hits capacity limits — prefer 3 Flash.',
+        tier: 'legacy',
+    },
+];
+
+const CURRENT_MODELS = MODEL_CATALOG.filter((m) => m.tier === 'current');
+const LEGACY_MODELS = MODEL_CATALOG.filter((m) => m.tier === 'legacy');
+
+function ModelRadio({
+    option,
+    selected,
+    onSelect,
+}: {
+    option: ModelOption;
+    selected: boolean;
+    onSelect: () => void;
+}) {
+    return (
+        <button
+            type="button"
+            onClick={onSelect}
+            className={`flex items-start gap-4 p-4 rounded-2xl border transition-all text-left ${
+                selected
+                    ? 'bg-indigo-500/10 border-indigo-500/50 ring-1 ring-indigo-500/50'
+                    : 'bg-white/5 border-white/5 hover:bg-white/10'
+            }`}
+        >
+            <div
+                className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${
+                    selected ? 'border-indigo-500' : 'border-neutral-600'
+                }`}
+            >
+                {selected && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+            </div>
+            <div>
+                <h4 className="text-sm font-bold text-white mb-0.5">{option.name}</h4>
+                <p className="text-xs text-neutral-400">{option.description}</p>
+            </div>
+        </button>
+    );
+}
+
 export function SettingsModal({ onClose }: SettingsModalProps) {
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
-    const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || 'gemini-2.5-flash');
+    const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
+
+    // Expand the legacy section automatically if the user is currently on a
+    // legacy model — otherwise keep it collapsed to reduce visual noise.
+    const currentIsLegacy = LEGACY_MODELS.some((m) => m.id === model);
+    const [legacyOpen, setLegacyOpen] = useState(currentIsLegacy);
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
@@ -18,8 +108,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
     return (
         <div className="fixed inset-0 bg-black/40 backdrop-blur-sm flex items-center justify-center p-4 z-50 animate-in fade-in duration-200" onClick={onClose}>
-            <div 
-                className="bg-neutral-900/90 backdrop-blur-xl rounded-3xl w-full max-w-lg shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 flex flex-col animate-in zoom-in-95 duration-200" 
+            <div
+                className="bg-neutral-900/90 backdrop-blur-xl rounded-3xl w-full max-w-lg shadow-[0_0_50px_-12px_rgba(0,0,0,0.5)] overflow-hidden border border-white/10 flex flex-col animate-in zoom-in-95 duration-200"
                 onClick={e => e.stopPropagation()}
             >
                 {/* Header */}
@@ -33,8 +123,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             <p className="text-xs text-neutral-400 font-medium">Configure your AI intelligence</p>
                         </div>
                     </div>
-                    <button 
-                        onClick={onClose} 
+                    <button
+                        onClick={onClose}
                         className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:text-white hover:bg-white/5 transition-all"
                     >
                         <X size={20} />
@@ -49,10 +139,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 <Shield size={14} className="text-indigo-400" />
                                 Google Gemini API Key
                             </label>
-                            <a 
-                                href="https://aistudio.google.com/app/apikey" 
-                                target="_blank" 
-                                rel="noreferrer" 
+                            <a
+                                href="https://aistudio.google.com/app/apikey"
+                                target="_blank"
+                                rel="noreferrer"
                                 className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
                             >
                                 Get Key <ExternalLink size={10} />
@@ -77,36 +167,45 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             <Cpu size={14} className="text-indigo-400" />
                             Intelligence Level
                         </label>
-                        
+
                         <div className="grid grid-cols-1 gap-3">
+                            {CURRENT_MODELS.map((option) => (
+                                <ModelRadio
+                                    key={option.id}
+                                    option={option}
+                                    selected={model === option.id}
+                                    onSelect={() => setModel(option.id)}
+                                />
+                            ))}
+                        </div>
+
+                        {/* Legacy section — collapsed by default unless the user
+                            is on a legacy model. */}
+                        <div className="pt-2">
                             <button
                                 type="button"
-                                onClick={() => setModel('gemini-2.5-flash')}
-                                className={`flex items-start gap-4 p-4 rounded-2xl border transition-all text-left ${model === 'gemini-2.5-flash' ? 'bg-indigo-500/10 border-indigo-500/50 ring-1 ring-indigo-500/50' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
+                                onClick={() => setLegacyOpen((v) => !v)}
+                                className="w-full flex items-center justify-between text-[11px] font-bold uppercase tracking-wider text-neutral-500 hover:text-neutral-300 transition py-1"
+                                aria-expanded={legacyOpen}
                             >
-                                <div className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${model === 'gemini-2.5-flash' ? 'border-indigo-500' : 'border-neutral-600'}`}>
-                                    {model === 'gemini-2.5-flash' && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
-                                </div>
-                                <div>
-                                    <h4 className="text-sm font-bold text-white mb-0.5">Gemini 2.5 Flash</h4>
-                                    <p className="text-xs text-neutral-400">Extreme speed. Best for rapid brainstorming.</p>
-                                </div>
+                                <span>Legacy models</span>
+                                <ChevronDown
+                                    size={14}
+                                    className={`transition-transform ${legacyOpen ? 'rotate-180' : ''}`}
+                                />
                             </button>
-
-                            <button
-                                type="button"
-                                onClick={() => setModel('gemini-2.5-pro')}
-                                className={`flex items-start gap-4 p-4 rounded-2xl border transition-all text-left ${model === 'gemini-2.5-pro' ? 'bg-indigo-500/10 border-indigo-500/50 ring-1 ring-indigo-500/50' : 'bg-white/5 border-white/5 hover:bg-white/10'}`}
-                            >
-                                <div className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${model === 'gemini-2.5-pro' ? 'border-indigo-500' : 'border-neutral-600'}`}>
-                                    {model === 'gemini-2.5-pro' && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
+                            {legacyOpen && (
+                                <div className="grid grid-cols-1 gap-3 mt-3">
+                                    {LEGACY_MODELS.map((option) => (
+                                        <ModelRadio
+                                            key={option.id}
+                                            option={option}
+                                            selected={model === option.id}
+                                            onSelect={() => setModel(option.id)}
+                                        />
+                                    ))}
                                 </div>
-                                <div>
-                                    <h4 className="text-sm font-bold text-white mb-0.5">Gemini 2.5 Pro</h4>
-                                    <p className="text-xs text-neutral-400">Max reasoning power. Best for complex PRDs.</p>
-                                </div>
-                            </button>
-
+                            )}
                         </div>
                     </div>
 

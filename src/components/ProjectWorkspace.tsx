@@ -21,6 +21,7 @@ import { ExportModal } from './ExportModal';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
+import { DEMO_PROJECT_ID } from '../data/demoProject';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
@@ -294,6 +295,17 @@ export function ProjectWorkspace() {
                     hasPRD={!!activeSpine?.isFinal}
                 />
             </div>
+
+            {/* Demo-mode banner: shown only for the prepopulated demo project.
+                Regenerate / refine buttons stay active; the existing no-key
+                error paths surface readable messages if the user clicks one. */}
+            {projectId === DEMO_PROJECT_ID && (
+                <div className="shrink-0 bg-indigo-500/10 border-b border-indigo-500/30 text-indigo-200 text-sm px-4 py-2 flex items-center justify-center gap-2 z-10">
+                    <span>
+                        You&apos;re viewing the demo project. Regenerating or refining requires your own Gemini API key — add one in Settings to customize.
+                    </span>
+                </div>
+            )}
 
             {/* Main Workspace Area — flex-1 fills remaining height */}
             <div className="flex-1 flex overflow-hidden">

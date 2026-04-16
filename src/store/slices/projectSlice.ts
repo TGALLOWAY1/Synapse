@@ -3,6 +3,15 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Project, HistoryEvent, PipelineStage, ProjectPlatform } from '../../types';
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
+import {
+    DEMO_PROJECT_ID,
+    DEMO_PROJECT_CAPTURED,
+    demoProject,
+    demoSpineVersions,
+    demoArtifacts,
+    demoArtifactVersions,
+    demoHistoryEvents,
+} from '../../data/demoProject';
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -12,6 +21,7 @@ export type ProjectSlice = {
     getProject: ProjectState['getProject'];
     getHistoryEvents: ProjectState['getHistoryEvents'];
     setProjectStage: ProjectState['setProjectStage'];
+    loadDemoProject: ProjectState['loadDemoProject'];
 };
 
 export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice> = (set, get) => ({
@@ -101,5 +111,53 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             }
         }));
         void trackActivity(stage === 'mockups' ? 'viewed_mockups' : 'clicked_section', { section: stage, projectId });
+    },
+
+    // Hydrates the store with the pre-captured demo project. Idempotent: if
+    // the demo project already exists, no records are mutated (so a user's
+    // in-progress edits to the demo copy are preserved on re-click).
+    loadDemoProject: () => {
+        const existing = get().projects[DEMO_PROJECT_ID];
+        if (existing) {
+            return { projectId: DEMO_PROJECT_ID, captured: DEMO_PROJECT_CAPTURED };
+        }
+
+        if (!DEMO_PROJECT_CAPTURED) {
+            // Placeholder fixture is still in place — don't hydrate a hollow
+            // project. The caller surfaces this to the user.
+            return { projectId: DEMO_PROJECT_ID, captured: false };
+        }
+
+        set((state) => ({
+            projects: { ...state.projects, [DEMO_PROJECT_ID]: demoProject },
+            spineVersions: {
+                ...state.spineVersions,
+                [DEMO_PROJECT_ID]: demoSpineVersions,
+            },
+            artifacts: {
+                ...state.artifacts,
+                [DEMO_PROJECT_ID]: demoArtifacts,
+            },
+            artifactVersions: {
+                ...state.artifactVersions,
+                [DEMO_PROJECT_ID]: demoArtifactVersions,
+            },
+            historyEvents: {
+                ...state.historyEvents,
+                [DEMO_PROJECT_ID]: demoHistoryEvents,
+            },
+            // Branches and feedbackItems intentionally left empty — demo has
+            // none. Keep the maps shaped the same as other projects.
+            branches: {
+                ...state.branches,
+                [DEMO_PROJECT_ID]: state.branches[DEMO_PROJECT_ID] ?? [],
+            },
+            feedbackItems: {
+                ...state.feedbackItems,
+                [DEMO_PROJECT_ID]: state.feedbackItems[DEMO_PROJECT_ID] ?? [],
+            },
+        }));
+
+        return { projectId: DEMO_PROJECT_ID, captured: true };
     },
 });

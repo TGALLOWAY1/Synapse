@@ -2,6 +2,9 @@ import { useEffect, useMemo, useState, type FormEvent } from 'react';
 import { useNavigate, useSearchParams } from 'react-router-dom';
 import { Github, Linkedin, Loader2, Lock, Mail, User as UserIcon } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
+import { useProjectStore } from '../store/projectStore';
+import { useToastStore } from '../store/toastStore';
+import { DEMO_PROJECT_ID } from '../data/demoProject';
 
 type Tab = 'signin' | 'signup';
 type FieldName = 'email' | 'password' | 'name';
@@ -155,11 +158,21 @@ export function LoginPage() {
                     </button>
                     <button
                         type="button"
-                        disabled
-                        title="Coming soon"
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-white/10 bg-white/5 text-sm text-neutral-400 cursor-not-allowed"
+                        onClick={() => {
+                            const { captured } = useProjectStore.getState().loadDemoProject();
+                            if (!captured) {
+                                useToastStore.getState().addToast({
+                                    type: 'warning',
+                                    title: 'Demo not available yet',
+                                    message: 'The demo fixture has not been captured. A developer needs to run /admin/capture-demo and commit the result.',
+                                });
+                                return;
+                            }
+                            navigate(`/p/${DEMO_PROJECT_ID}`);
+                        }}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition"
                     >
-                        Demo project (coming soon)
+                        Demo project
                     </button>
                 </div>
 

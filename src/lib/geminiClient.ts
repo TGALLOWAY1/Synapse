@@ -21,8 +21,16 @@ const getApiKey = () => {
     return key;
 };
 
+/**
+ * Default model. Gemini 3 Flash (preview) replaced 2.5 Flash as the recommended
+ * everyday model in early 2026 — it has more capacity headroom and better
+ * quality at a similar price. See SettingsModal for the full catalog + legacy
+ * migration flag.
+ */
+export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+
 const getModel = () => {
-    return localStorage.getItem('GEMINI_MODEL') || 'gemini-2.5-flash';
+    return localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
 };
 
 export const callGemini = async (systemInstruction: string, promptText: string, jsonMode?: JsonModeConfig, signal?: AbortSignal) => {
