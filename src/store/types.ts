@@ -35,6 +35,9 @@ export interface ProjectState {
     // Pipeline stage
     setProjectStage: (projectId: string, stage: PipelineStage) => void;
 
+    // Demo project hydration
+    loadDemoProject: () => { projectId: string; captured: boolean };
+
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => void;

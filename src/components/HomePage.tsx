@@ -7,6 +7,8 @@ import { ProjectDrawer } from './ProjectDrawer';
 import { normalizeError, userMessage } from '../lib/errors';
 import type { ProjectPlatform } from '../types';
 import { useAuthStore } from '../store/authStore';
+import { useToastStore } from '../store/toastStore';
+import { DEMO_PROJECT_ID } from '../data/demoProject';
 
 const EXAMPLE_PROMPTS = [
     {
@@ -39,9 +41,22 @@ const EXAMPLE_PROMPTS = [
 const MEET_DISMISSED_KEY = 'synapse-meet-dismissed';
 
 export function HomePage() {
-    const { createProject } = useProjectStore();
+    const { createProject, loadDemoProject } = useProjectStore();
     const navigate = useNavigate();
     const user = useAuthStore((s) => s.user);
+
+    const handleOpenDemo = () => {
+        const { captured } = loadDemoProject();
+        if (!captured) {
+            useToastStore.getState().addToast({
+                type: 'warning',
+                title: 'Demo not available yet',
+                message: 'The demo fixture has not been captured. Run /admin/capture-demo in dev to generate it.',
+            });
+            return;
+        }
+        navigate(`/p/${DEMO_PROJECT_ID}`);
+    };
 
     const [projectName, setProjectName] = useState('');
     const [promptText, setPromptText] = useState('');
@@ -216,6 +231,14 @@ export function HomePage() {
 
                     {/* Example prompt pills */}
                     <div className="flex gap-2 overflow-x-auto pb-3 mb-6 scrollbar-hide">
+                        <button
+                            type="button"
+                            onClick={handleOpenDemo}
+                            className="shrink-0 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition whitespace-nowrap"
+                            title="Open the prepopulated demo project — no API key required"
+                        >
+                            View demo project
+                        </button>
                         {EXAMPLE_PROMPTS.map((example) => (
                             <button
                                 key={example.label}
