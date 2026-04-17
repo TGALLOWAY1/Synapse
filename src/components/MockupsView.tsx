@@ -177,6 +177,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         severity: critique.severity,
                         missingConcepts: critique.missingConcepts,
                     },
+                    generationStrategy: 'mockup_strategy_v2',
+                    usedFallbackTemplate: warnings.some(w => w.includes('safe fallback')),
                 },
                 [{
                     id: uuidv4(),
@@ -190,7 +192,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             setSelectedArtifactId(artifactId);
             setShowGeneratePanel(false);
             if (warnings.length > 0) {
-                setWarning(`Generated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
+                setWarning(`Generated with safeguards (${warnings.length} notices): ${warnings.join(' ')}`);
             }
         } catch (e) {
             const err = normalizeError(e);
@@ -224,6 +226,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         severity: critique.severity,
                         missingConcepts: critique.missingConcepts,
                     },
+                    generationStrategy: 'mockup_strategy_v2',
+                    usedFallbackTemplate: warnings.some(w => w.includes('safe fallback')),
                 },
                 [{
                     id: uuidv4(),
@@ -235,14 +239,14 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 latestVersion?.id,
             );
             if (warnings.length > 0) {
-                setWarning(`Regenerated with ${warnings.length} skipped screen(s): ${warnings.join(' ')}`);
+                setWarning(`Regenerated with safeguards (${warnings.length} notices): ${warnings.join(' ')}`);
             }
         } catch (e) {
             // On regeneration failure, the previous version is preserved — the
             // user still sees the last known good content.
             const err = normalizeError(e);
             console.error('[Mockup regeneration failed]', err.raw);
-            setError(userMessage(err));
+            setError(`Regeneration failed on ${new Date().toLocaleString()}. Showing the previous version. ${userMessage(err)}`);
         } finally {
             setIsGenerating(false);
         }

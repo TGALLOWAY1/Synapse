@@ -1,6 +1,9 @@
 export interface JsonModeConfig {
     responseMimeType: string;
     responseSchema: object;
+    temperature?: number;
+    topP?: number;
+    topK?: number;
 }
 
 export interface StreamCallbacks {
@@ -52,6 +55,9 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
         body.generationConfig = {
             responseMimeType: jsonMode.responseMimeType,
             responseSchema: jsonMode.responseSchema,
+            ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
+            ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
+            ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
         };
     }
 

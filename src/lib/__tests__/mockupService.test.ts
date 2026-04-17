@@ -88,8 +88,28 @@ describe('mockupService alignment integration', () => {
             ],
         }));
 
-        await expect(generateMockup('Clinic triage PRD', settings, structuredPRD))
-            .rejects
-            .toThrow(/PRD alignment critique/);
+        const result = await generateMockup('Clinic triage PRD', settings, structuredPRD);
+        expect(result.usedFallback).toBe(true);
+        expect(result.payload.screens[0].name).toBe('Fallback Workspace');
+        expect(result.warnings.some(w => w.includes('safe fallback'))).toBe(true);
+    });
+
+    it('passes deterministic generation controls to Gemini JSON mode', async () => {
+        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
+            version: 'mockup_html_v1',
+            title: 'Clinic Triage Concept',
+            summary: 'Queue-first layout for care coordinators.',
+            screens: [
+                {
+                    name: 'Triage Queue',
+                    purpose: 'Care coordinator reviews urgent patient cases and assigns triage owner.',
+                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Triage Queue</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Assign case owner</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Patient case</td><td>Urgency</td></tr></tbody></table></section><section class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Triage actions</li></ul></section></main></div>',
+                },
+            ],
+        }));
+
+        await generateMockup('Clinic triage PRD', settings, structuredPRD);
+        const call = callGeminiMock.mock.calls[0];
+        expect(call[2]).toMatchObject({ temperature: 0.2, topP: 0.8, topK: 32 });
     });
 });

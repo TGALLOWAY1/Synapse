@@ -45,6 +45,13 @@ describe('mockupQuality', () => {
         </div>`;
         const report = assessMockupHtmlQuality(html);
         expect(report.reject).toBe(false);
-        expect(report.score).toBeGreaterThanOrEqual(55);
+        expect(report.score).toBeGreaterThanOrEqual(65);
+    });
+
+    it('rejects malformed structure missing required sections', () => {
+        const html = '<div class="min-h-screen"><section>Only one section</section></div>';
+        const report = assessMockupHtmlQuality(html);
+        expect(report.reject).toBe(true);
+        expect(report.issues.some(issue => issue.code === 'invalid_structure')).toBe(true);
     });
 });
