@@ -11,6 +11,7 @@ import { mockupSchema } from '../schemas/mockupSchema';
 import { assessMockupHtmlQuality, normalizeMockupHtml } from '../mockupQuality';
 import { critiqueMockupAlignment, type MockupAlignmentCritique } from '../mockupAlignmentCritique';
 import { PLACEHOLDER_PROMPT_CATALOG } from '../mockupPlaceholders';
+import { validateMockupHtmlStructure } from '../mockupValidation';
 
 // ---- Instruction tables (rewritten for polished HTML/Tailwind output) ----
 
@@ -32,12 +33,18 @@ const SCOPE_INSTRUCTIONS: Record<string, string> = {
     key_workflow: 'Scope: 3 to 5 screens forming a single linear workflow the primary persona would take end-to-end. Each screen should show the next logical step. Same shell, same style, same accent.',
 };
 
+const MOCKUP_PROMPT_TEMPLATE_VERSION = '2026-04-17.v2';
+const MOCKUP_GENERATION_STRATEGY_VERSION = 'mockup_strategy_v2';
+const MAX_GENERATION_ATTEMPTS = 3;
+const QUALITY_THRESHOLD = 70;
+
 // ---- Prompt construction ----
 
 const buildSystemPrompt = (settings: MockupSettings): string => {
     const styleLine = settings.style ? `\nStyle direction from the user: ${settings.style}` : '';
 
     return `You are a senior product designer at a top-tier SaaS company (think Linear, Notion, Vercel, Stripe). You generate high-fidelity UI *concepts* — not production code — for new products, grounded in a provided PRD. Your output MUST be valid JSON matching the provided response schema.
+Prompt template version: ${MOCKUP_PROMPT_TEMPLATE_VERSION}.
 
 ## Visual language
 - Modern SaaS aesthetic. Generous whitespace. Clear hierarchy. 8px spacing scale.
@@ -73,6 +80,22 @@ const buildSystemPrompt = (settings: MockupSettings): string => {
 - Avoid placeholder labels; every label should reflect the product domain.
 - If scope is workflow, each screen must represent a distinct step in that workflow with continuity in naming and entities.
 
+## Canonical output template (mandatory for each screen)
+Follow this section order in HTML:
+1) app shell root div with class min-h-screen
+2) header with title and one primary CTA button
+3) main containing:
+   - first section primary content panel
+   - second section supporting context (activity/filter/details)
+4) Optional aside for utilities; keep consistent placement across screens
+Do not emit additional root siblings. Keep exactly one app shell root.
+
+## Determinism contract (mandatory)
+- Use a single accent family throughout all screens.
+- Reuse the same shell and spacing scale unless the workflow step requires a clear state change.
+- Keep section names and entity labels consistent between screens.
+- Do not generate extra screens beyond the requested scope.
+
 ## Quality bar (fail these and regenerate internally before responding)
 - No malformed or partial tag structures.
 - No clipped/collapsed shells; content should fit inside intentional cards/sections.
@@ -91,6 +114,7 @@ If you generate multiple screens, they MUST feel like the same product:
 - \`notes\` (optional): 1–3 short assumptions or callouts the designer made.
 
 Also provide a top-level \`title\` (the overall concept name) and a \`summary\` (1–2 sentences framing the concept).
+Include \`version\` exactly as \`mockup_html_v1\`.
 
 ${FIDELITY_INSTRUCTIONS[settings.fidelity]}
 ${PLATFORM_INSTRUCTIONS[settings.platform]}
@@ -136,6 +160,8 @@ export interface ParseResult {
     /** Warnings for screens that were skipped (partial success). Empty when all
      *  screens parsed cleanly. */
     warnings: string[];
+    usedFallback?: boolean;
+    strategyVersion?: string;
 }
 
 /**
@@ -192,6 +218,11 @@ const parseMockupPayload = (
         }
 
         const normalizedHtml = normalizeMockupHtml(rawHtml);
+        const structure = validateMockupHtmlStructure(normalizedHtml);
+        if (!structure.isValid) {
+            warnings.push(`Screen ${i + 1} ("${name}"): skipped — failed structure validation (${structure.score}/100). ${structure.issues.slice(0, 2).join(' ')}`);
+            continue;
+        }
         const quality = assessMockupHtmlQuality(normalizedHtml);
         if (quality.reject) {
             const reason = quality.issues.map(issue => issue.message).join(' ');
@@ -259,6 +290,75 @@ const parseMockupPayload = (
         },
         critique,
         warnings,
+        usedFallback: false,
+        strategyVersion: MOCKUP_GENERATION_STRATEGY_VERSION,
+    };
+};
+
+const inferConceptName = (prdContent: string): string => {
+    const firstLine = prdContent.split('\n').map(line => line.trim()).find(Boolean) ?? 'Product';
+    return firstLine.replace(/[#*`]/g, '').slice(0, 56) || 'Product';
+};
+
+const buildSafeFallbackPayload = (
+    prdContent: string,
+    settings: MockupSettings,
+    warnings: string[],
+): ParseResult => {
+    const concept = inferConceptName(prdContent);
+    const action = settings.scope === 'key_workflow' ? 'Continue workflow' : 'Create item';
+    const html = normalizeMockupHtml(`
+<div class="min-h-screen bg-neutral-50 text-neutral-900 font-sans antialiased">
+  <header class="border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between">
+    <div>
+      <p class="text-xs uppercase tracking-wide text-neutral-500">Safe fallback</p>
+      <h1 class="text-xl font-semibold tracking-tight">${concept} Workspace</h1>
+    </div>
+    <button type="button" class="rounded-lg bg-indigo-600 text-white px-4 py-2 text-sm font-medium">${action}</button>
+  </header>
+  <main class="p-6 grid gap-4 md:grid-cols-3">
+    <section class="md:col-span-2 rounded-xl border border-neutral-200 bg-white p-5 space-y-3">
+      <h2 class="text-base font-semibold">Primary content</h2>
+      <p class="text-sm text-neutral-600">Generated fallback layout to keep the preview usable while regeneration is unavailable.</p>
+      <div class="rounded-lg border border-neutral-200 bg-neutral-50 p-4 text-sm text-neutral-600">Use regenerate to request a richer PRD-grounded screen.</div>
+    </section>
+    <section class="rounded-xl border border-neutral-200 bg-white p-5 space-y-2">
+      <h3 class="text-sm font-semibold">Supporting context</h3>
+      <ul class="text-sm text-neutral-600 space-y-1">
+        <li>Stable shell and spacing system</li>
+        <li>Consistent typography and accent</li>
+        <li>Always-renderable safe template</li>
+      </ul>
+    </section>
+  </main>
+</div>`);
+
+    warnings.push('Generation failed quality gates repeatedly; rendered a deterministic safe fallback template.');
+    return {
+        payload: {
+            version: 'mockup_html_v1',
+            title: `${concept} — Safe Fallback Mockup`,
+            summary: 'Fallback mockup rendered to avoid blank or broken output. Regenerate for a richer PRD-grounded concept.',
+            screens: [{
+                id: uuidv4(),
+                name: 'Fallback Workspace',
+                purpose: 'Provides a safe, usable baseline when model output fails validation.',
+                html,
+                notes: 'Fallback template was used after repeated validation failures.',
+            }],
+        },
+        critique: {
+            alignmentScore: 55,
+            severity: 'medium',
+            missingConcepts: ['full PRD grounding'],
+            mismatchReasons: ['Fallback template used due to validation failures.'],
+            recommendations: ['Regenerate to recover full PRD-specific content.'],
+            issues: [],
+            screens: [],
+        },
+        warnings,
+        usedFallback: true,
+        strategyVersion: MOCKUP_GENERATION_STRATEGY_VERSION,
     };
 };
 
@@ -274,11 +374,43 @@ export const generateMockup = async (
 
     const system = buildSystemPrompt(settings);
     const user = buildUserPrompt(prdContent, structuredPRD);
+    const warnings: string[] = [];
+    let lastError: Error | null = null;
 
-    const raw = await callGemini(system, user, {
-        responseMimeType: 'application/json',
-        responseSchema: mockupSchema,
-    });
+    for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+        options?.onStatus?.(`Generating mockup (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})...`);
+        try {
+            const raw = await callGemini(system, user, {
+                responseMimeType: 'application/json',
+                responseSchema: mockupSchema,
+                temperature: 0.2,
+                topP: 0.8,
+                topK: 32,
+            });
+            const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD);
+            const qualityAvg = parsed.payload.screens.length
+                ? Math.round(parsed.payload.screens
+                    .map(screen => assessMockupHtmlQuality(screen.html).score)
+                    .reduce((sum, score) => sum + score, 0) / parsed.payload.screens.length)
+                : 0;
+            if (qualityAvg < QUALITY_THRESHOLD) {
+                warnings.push(`Attempt ${attempt}: average quality ${qualityAvg}/100 below threshold ${QUALITY_THRESHOLD}.`);
+                lastError = new Error(`Quality threshold not met (${qualityAvg}/100).`);
+                continue;
+            }
+            return {
+                ...parsed,
+                warnings: [...warnings, ...parsed.warnings],
+                usedFallback: false,
+                strategyVersion: MOCKUP_GENERATION_STRATEGY_VERSION,
+            };
+        } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            lastError = err;
+            warnings.push(`Attempt ${attempt} failed: ${err.message}`);
+        }
+    }
 
-    return parseMockupPayload(raw, prdContent, settings, structuredPRD);
+    console.warn('[mockupService] returning safe fallback after repeated generation failures', lastError);
+    return buildSafeFallbackPayload(prdContent, settings, warnings);
 };

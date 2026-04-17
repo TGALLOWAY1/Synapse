@@ -1,4 +1,5 @@
 import { expandPlaceholders } from './mockupPlaceholders';
+import { validateMockupHtmlStructure } from './mockupValidation';
 
 export type MockupQualitySeverity = 'low' | 'medium' | 'high';
 
@@ -194,6 +195,15 @@ export const assessMockupHtmlQuality = (html: string): MockupQualityReport => {
         });
     }
 
+    const structure = validateMockupHtmlStructure(trimmed);
+    if (!structure.isValid) {
+        issues.push({
+            code: 'invalid_structure',
+            severity: 'high',
+            message: `Failed structure validation (${structure.score}/100): ${structure.issues.slice(0, 2).join(' ')}`,
+        });
+    }
+
     // Layout-viability check: nested-scroll shells that don't fit the iframe
     // viewport are the #1 cause of "preview is blank" reports. Both `flex-1
     // overflow-y-auto` (without `min-h-0`) and `overflow-hidden` on a flex
@@ -215,8 +225,8 @@ export const assessMockupHtmlQuality = (html: string): MockupQualityReport => {
         return sum + 8;
     }, 0);
 
-    const score = Math.max(0, 100 - penalties);
-    const reject = score < 55 || issues.some(issue => issue.severity === 'high');
+    const score = Math.max(0, Math.round((100 - penalties) * 0.7 + structure.score * 0.3));
+    const reject = score < 65 || issues.some(issue => issue.severity === 'high');
 
     return { score, issues, reject };
 };
