@@ -36,6 +36,51 @@ const getModel = () => {
     return localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
 };
 
+/**
+ * Optional Google Cloud project ID. When present, we forward it as the
+ * `x-goog-user-project` header so Gemini bills and meters the request against
+ * that project. This is the fix for the common case where a user has enabled
+ * billing on one project but their AI Studio API key is still tied to a
+ * different (free-tier) project — without this header Google falls back to
+ * the key's home project and applies free-tier quotas.
+ */
+const getProjectId = () => {
+    return localStorage.getItem('GEMINI_PROJECT_ID')?.trim() || '';
+};
+
+const buildHeaders = (apiKey: string): HeadersInit => {
+    const headers: Record<string, string> = {
+        'Content-Type': 'application/json',
+        'x-goog-api-key': apiKey,
+    };
+    const projectId = getProjectId();
+    if (projectId) headers['x-goog-user-project'] = projectId;
+    return headers;
+};
+
+/**
+ * Turn a raw Gemini error payload into a more specific message when the
+ * failure is a quota/rate-limit hit. We surface free-tier hits explicitly so
+ * users know to check their billing project configuration rather than
+ * assuming they just need to wait.
+ */
+const formatGeminiError = (status: string, errorData: unknown): string => {
+    const raw = (errorData as { error?: { message?: string; status?: string } })?.error;
+    const message = raw?.message || 'Unknown error';
+    const isQuota = raw?.status === 'RESOURCE_EXHAUSTED' || /quota|resource.exhausted|rate.limit/i.test(message);
+    if (isQuota && /free.?tier|freetier|-FreeTier/i.test(message)) {
+        return (
+            'Gemini quota error — your request hit the FREE-TIER quota even though you expect paid tier. ' +
+            'Likely causes: (1) your API key is tied to a Google Cloud project without billing enabled — ' +
+            'recreate the key in AI Studio on the project that has billing; (2) set your billing project ID ' +
+            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3 Flash Preview) ' +
+            'have reduced quotas even on paid tier — switch to a stable model like gemini-2.5-flash. ' +
+            `Raw: ${message}`
+        );
+    }
+    return `Gemini API Error: ${status} - ${message}`;
+};
+
 export const callGemini = async (systemInstruction: string, promptText: string, jsonMode?: JsonModeConfig, signal?: AbortSignal) => {
     const startTime = performance.now();
     const apiKey = getApiKey();
@@ -63,17 +108,14 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-        },
+        headers: buildHeaders(apiKey),
         body: JSON.stringify(body),
         signal,
     });
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(`Gemini API Error: ${response.statusText} - ${errorData?.error?.message || 'Unknown error'}`);
+        throw new Error(formatGeminiError(response.statusText, errorData));
     }
 
     const data = await response.json();
@@ -113,17 +155,14 @@ export const callGeminiStream = async (
 
     const response = await fetch(url, {
         method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'x-goog-api-key': apiKey,
-        },
+        headers: buildHeaders(apiKey),
         body: JSON.stringify(body),
         signal,
     });
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        const err = new Error(`Gemini API Error: ${response.statusText} - ${errorData?.error?.message || 'Unknown error'}`);
+        const err = new Error(formatGeminiError(response.statusText, errorData));
         callbacks.onError(err);
         throw err;
     }

@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 
 interface SettingsModalProps {
@@ -92,7 +92,9 @@ function ModelRadio({
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
+    const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
+    const selectedIsPreview = model.includes('preview');
 
     // Expand the legacy section automatically if the user is currently on a
     // legacy model — otherwise keep it collapsed to reduce visual noise.
@@ -103,6 +105,12 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         e.preventDefault();
         localStorage.setItem('GEMINI_API_KEY', apiKey.trim());
         localStorage.setItem('GEMINI_MODEL', model);
+        const trimmedProjectId = projectId.trim();
+        if (trimmedProjectId) {
+            localStorage.setItem('GEMINI_PROJECT_ID', trimmedProjectId);
+        } else {
+            localStorage.removeItem('GEMINI_PROJECT_ID');
+        }
         onClose();
     };
 
@@ -161,6 +169,28 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         </p>
                     </div>
 
+                    {/* Billing Project ID — forces paid-tier quota */}
+                    <div className="space-y-3">
+                        <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+                            <Briefcase size={14} className="text-indigo-400" />
+                            Billing Project ID
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
+                        </label>
+                        <input
+                            type="text"
+                            value={projectId}
+                            onChange={(e) => setProjectId(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
+                            placeholder="e.g. my-gcp-project-123"
+                        />
+                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
+                            If you enabled billing on a specific Google Cloud project, paste its ID here.
+                            Synapse sends it as <code className="text-neutral-400">x-goog-user-project</code> so
+                            Gemini meters requests against that project — fixes the case where a key defaults
+                            to free-tier quota even after billing is on.
+                        </p>
+                    </div>
+
                     {/* Model Selection */}
                     <div className="space-y-4">
                         <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
@@ -178,6 +208,17 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 />
                             ))}
                         </div>
+
+                        {selectedIsPreview && (
+                            <div className="flex items-start gap-3 p-3 rounded-xl bg-amber-500/10 border border-amber-500/30 text-amber-200/90">
+                                <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                                <p className="text-[11px] leading-relaxed">
+                                    Preview models have reduced per-project quotas <em>even on paid tier</em>.
+                                    If you see persistent rate-limit / free-tier errors, switch to a stable model
+                                    (e.g. Gemini 2.5 Flash in Legacy models) until the Gemini 3 series exits preview.
+                                </p>
+                            </div>
+                        )}
 
                         {/* Legacy section — collapsed by default unless the user
                             is on a legacy model. */}
