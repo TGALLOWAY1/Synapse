@@ -1,0 +1,74 @@
+[
+  {
+    "id": "simple_landing",
+    "complexity": "simple",
+    "title": "Basic landing page",
+    "prd": "Build a landing page for a productivity app called FocusFlow. Include hero, benefits, and signup CTA.",
+    "settings": { "platform": "desktop", "fidelity": "mid", "scope": "single_screen" },
+    "requiredSections": ["hero", "benefits", "cta"]
+  },
+  {
+    "id": "simple_minimal_feature",
+    "complexity": "simple",
+    "title": "Minimal feature set",
+    "prd": "Create a tiny to-do app with one screen showing task list and add task input.",
+    "settings": { "platform": "mobile", "fidelity": "low", "scope": "single_screen" },
+    "requiredSections": ["task", "input", "list"]
+  },
+  {
+    "id": "medium_dashboard",
+    "complexity": "medium",
+    "title": "Dashboard UI",
+    "prd": "Analytics dashboard for support team with ticket volume, SLA trends, queue table, and assignee activity.",
+    "settings": { "platform": "desktop", "fidelity": "high", "scope": "single_screen" },
+    "requiredSections": ["kpi", "table", "activity"]
+  },
+  {
+    "id": "medium_multisection",
+    "complexity": "medium",
+    "title": "Multi-section workspace",
+    "prd": "Project workspace with roadmap, sprint board, release checklist, and risks panel.",
+    "settings": { "platform": "responsive", "fidelity": "mid", "scope": "multi_screen" },
+    "requiredSections": ["roadmap", "board", "checklist"]
+  },
+  {
+    "id": "complex_product_flow",
+    "complexity": "complex",
+    "title": "Full onboarding and trial conversion",
+    "prd": "End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.",
+    "settings": { "platform": "responsive", "fidelity": "high", "scope": "key_workflow" },
+    "requiredSections": ["step", "integration", "upgrade"]
+  },
+  {
+    "id": "complex_dense_prd",
+    "complexity": "complex",
+    "title": "Dense enterprise PRD",
+    "prd": "Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, and audit trail reporting.",
+    "settings": { "platform": "desktop", "fidelity": "high", "scope": "multi_screen" },
+    "requiredSections": ["approval", "compliance", "audit"]
+  },
+  {
+    "id": "edge_ambiguous",
+    "complexity": "edge",
+    "title": "Ambiguous PRD",
+    "prd": "Make something cool for teams.",
+    "settings": { "platform": "desktop", "fidelity": "mid", "scope": "single_screen" },
+    "requiredSections": ["team", "workflow"]
+  },
+  {
+    "id": "edge_overloaded",
+    "complexity": "edge",
+    "title": "Overloaded input",
+    "prd": "One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every possible feature.",
+    "settings": { "platform": "responsive", "fidelity": "high", "scope": "multi_screen" },
+    "requiredSections": ["navigation", "modules", "controls"]
+  },
+  {
+    "id": "edge_minimal",
+    "complexity": "edge",
+    "title": "Minimal input",
+    "prd": "todo app",
+    "settings": { "platform": "mobile", "fidelity": "low", "scope": "single_screen" },
+    "requiredSections": ["task", "button"]
+  }
+]

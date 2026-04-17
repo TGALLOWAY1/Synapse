@@ -1,0 +1,28 @@
+{
+  "runId": "2026-04-17T13-50-59-125Z-c753832c3b46",
+  "createdAt": "2026-04-17T13:50:59.125Z",
+  "suitePath": "harness/mockup-test-suite.json",
+  "runs": 2,
+  "maxAttempts": 2,
+  "totalCasesPerRun": 9,
+  "totalEvaluations": 18,
+  "metrics": {
+    "renderSuccessRate": 100,
+    "structuralValidityRate": 100,
+    "retryRate": 11.11,
+    "fallbackRate": 11.11,
+    "visualQualityScore": 81.44,
+    "consistencyScore": 55.56
+  },
+  "failures": [],
+  "weakAreas": [
+    "Non-deterministic output variance observed across repeated runs."
+  ],
+  "recommendations": [
+    "Strengthen prompt contracts for ambiguous PRDs with mandatory domain assumptions.",
+    "Add stricter schema/structure validation before finalizing outputs in production.",
+    "Track screenshot diffs per case for visual regression detection in CI.",
+    "Prioritize deterministic seeds / temperature controls for consistency-sensitive cases."
+  ],
+  "regressions": []
+}

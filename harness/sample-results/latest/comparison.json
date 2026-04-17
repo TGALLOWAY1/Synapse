@@ -1,0 +1,58 @@
+{
+  "byCase": [
+    {
+      "caseId": "simple_landing",
+      "consistency": 50,
+      "averageQuality": 78,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "simple_minimal_feature",
+      "consistency": 50,
+      "averageQuality": 78,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "medium_dashboard",
+      "consistency": 50,
+      "averageQuality": 78,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "medium_multisection",
+      "consistency": 50,
+      "averageQuality": 100,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "complex_product_flow",
+      "consistency": 50,
+      "averageQuality": 100,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "complex_dense_prd",
+      "consistency": 50,
+      "averageQuality": 100,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "edge_ambiguous",
+      "consistency": 100,
+      "averageQuality": 21,
+      "fallbackCount": 2
+    },
+    {
+      "caseId": "edge_overloaded",
+      "consistency": 50,
+      "averageQuality": 100,
+      "fallbackCount": 0
+    },
+    {
+      "caseId": "edge_minimal",
+      "consistency": 50,
+      "averageQuality": 78,
+      "fallbackCount": 0
+    }
+  ]
+}
