@@ -8,7 +8,9 @@
     "build": "tsc -b && vite build",
     "lint": "eslint .",
     "test": "vitest run",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "mockup:harness": "node scripts/mockup-eval-harness.mjs",
+    "mockup:harness:sample": "node scripts/mockup-eval-harness.mjs --runs 2 --max-attempts 2 --outdir harness/sample-results"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",

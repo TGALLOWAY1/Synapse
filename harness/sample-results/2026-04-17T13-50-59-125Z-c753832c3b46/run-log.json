@@ -1,0 +1,806 @@
+[
+  {
+    "run": 1,
+    "caseId": "simple_landing",
+    "complexity": "simple",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Basic landing page Concept",
+      "summary": "Generated fixture output for simple_landing.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Basic landing page — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Basic landing page</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">hero panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Build a landing page for a productivity app called FocusFlow. Include hero, benefits, and signup CTA.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">hero · benefits · cta</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>benefits metrics</li><li>cta status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "simple_minimal_feature",
+    "complexity": "simple",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Minimal feature set Concept",
+      "summary": "Generated fixture output for simple_minimal_feature.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Minimal feature set — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Minimal feature set</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 grid-cols-1\"><section class=\"rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">task panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Create a tiny to-do app with one screen showing task list and add task input.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">task · input · list</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>input metrics</li><li>list status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "medium_dashboard",
+    "complexity": "medium",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Dashboard UI Concept",
+      "summary": "Generated fixture output for medium_dashboard.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Dashboard UI — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dashboard UI</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">kpi panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Analytics dashboard for support team with ticket volume, SLA trends, queue table, and assignee activity.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">kpi · table · activity</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>table metrics</li><li>activity status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "medium_multisection",
+    "complexity": "medium",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Multi-section workspace Concept",
+      "summary": "Generated fixture output for medium_multisection.",
+      "screens": [
+        {
+          "name": "Overview",
+          "purpose": "Multi-section workspace — Overview",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Multi-section workspace</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">roadmap panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Project workspace with roadmap, sprint board, release checklist, and risks panel.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">roadmap · board · checklist</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>board metrics</li><li>checklist status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Detail",
+          "purpose": "Multi-section workspace — Detail",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Multi-section workspace</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">roadmap panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Project workspace with roadmap, sprint board, release checklist, and risks panel.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">roadmap · board · checklist</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>board metrics</li><li>checklist status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Settings",
+          "purpose": "Multi-section workspace — Settings",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Multi-section workspace</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">roadmap panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Project workspace with roadmap, sprint board, release checklist, and risks panel.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">roadmap · board · checklist</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>board metrics</li><li>checklist status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "complex_product_flow",
+    "complexity": "complex",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Full onboarding and trial conversion Concept",
+      "summary": "Generated fixture output for complex_product_flow.",
+      "screens": [
+        {
+          "name": "Step 1: Setup",
+          "purpose": "Full onboarding and trial conversion — Step 1: Setup",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Full onboarding and trial conversion</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">step panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">step · integration · upgrade</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>integration metrics</li><li>upgrade status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Step 2: Configure",
+          "purpose": "Full onboarding and trial conversion — Step 2: Configure",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Full onboarding and trial conversion</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">step panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">step · integration · upgrade</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>integration metrics</li><li>upgrade status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Step 3: Upgrade",
+          "purpose": "Full onboarding and trial conversion — Step 3: Upgrade",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Full onboarding and trial conversion</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">step panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">step · integration · upgrade</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>integration metrics</li><li>upgrade status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "complex_dense_prd",
+    "complexity": "complex",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Dense enterprise PRD Concept",
+      "summary": "Generated fixture output for complex_dense_prd.",
+      "screens": [
+        {
+          "name": "Overview",
+          "purpose": "Dense enterprise PRD — Overview",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dense enterprise PRD</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">approval panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, a</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">approval · compliance · audit</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>compliance metrics</li><li>audit status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Detail",
+          "purpose": "Dense enterprise PRD — Detail",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dense enterprise PRD</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">approval panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, a</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">approval · compliance · audit</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>compliance metrics</li><li>audit status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Settings",
+          "purpose": "Dense enterprise PRD — Settings",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dense enterprise PRD</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">approval panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, a</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">approval · compliance · audit</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>compliance metrics</li><li>audit status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "edge_ambiguous",
+    "complexity": "edge",
+    "retries": 0,
+    "usedFallback": true,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 21,
+      "breakdown": {
+        "requiredSections": 0,
+        "layoutCoherence": 13,
+        "spacingConsistency": 3,
+        "visualHierarchy": 5
+      }
+    },
+    "generatorNotes": [
+      "Ambiguous PRD triggered safe fallback template."
+    ],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Ambiguous PRD (Fallback)",
+      "summary": "Deterministic fallback screen used after generation failures.",
+      "screens": [
+        {
+          "name": "Fallback Screen",
+          "purpose": "Keeps the preview renderable when generation is invalid.",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900 p-6\"><header class=\"mb-4\"><h1 class=\"text-2xl font-semibold\">Fallback workspace</h1><button type=\"button\" class=\"mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-white\">Retry</button></header><main><section class=\"rounded-xl border border-neutral-200 bg-white p-5\">Unable to produce valid output for this PRD. Use replay to debug.</section></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "edge_overloaded",
+    "complexity": "edge",
+    "retries": 1,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Overloaded input Concept",
+      "summary": "Generated fixture output for edge_overloaded.",
+      "screens": [
+        {
+          "name": "Overview",
+          "purpose": "Overloaded input — Overview",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Overloaded input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">navigation panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every poss</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">navigation · modules · controls</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>modules metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Detail",
+          "purpose": "Overloaded input — Detail",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Overloaded input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">navigation panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every poss</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">navigation · modules · controls</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>modules metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Settings",
+          "purpose": "Overloaded input — Settings",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Overloaded input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">navigation panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every poss</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">navigation · modules · controls</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>modules metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 1,
+    "caseId": "edge_minimal",
+    "complexity": "edge",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Minimal input Concept",
+      "summary": "Generated fixture output for edge_minimal.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Minimal input — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Minimal input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 grid-cols-1\"><section class=\"rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">task panel B</h2><p class=\"mt-2 text-sm text-neutral-600\">todo app</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">task · button</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>button metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "simple_landing",
+    "complexity": "simple",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Basic landing page Concept",
+      "summary": "Generated fixture output for simple_landing.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Basic landing page — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Basic landing page</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">hero panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Build a landing page for a productivity app called FocusFlow. Include hero, benefits, and signup CTA.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">hero · benefits · cta</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>benefits metrics</li><li>cta status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "simple_minimal_feature",
+    "complexity": "simple",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Minimal feature set Concept",
+      "summary": "Generated fixture output for simple_minimal_feature.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Minimal feature set — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Minimal feature set</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 grid-cols-1\"><section class=\"rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">task panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Create a tiny to-do app with one screen showing task list and add task input.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">task · input · list</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>input metrics</li><li>list status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "medium_dashboard",
+    "complexity": "medium",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Dashboard UI Concept",
+      "summary": "Generated fixture output for medium_dashboard.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Dashboard UI — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dashboard UI</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">kpi panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Analytics dashboard for support team with ticket volume, SLA trends, queue table, and assignee activity.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">kpi · table · activity</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>table metrics</li><li>activity status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "medium_multisection",
+    "complexity": "medium",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Multi-section workspace Concept",
+      "summary": "Generated fixture output for medium_multisection.",
+      "screens": [
+        {
+          "name": "Overview",
+          "purpose": "Multi-section workspace — Overview",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Multi-section workspace</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">roadmap panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Project workspace with roadmap, sprint board, release checklist, and risks panel.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">roadmap · board · checklist</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>board metrics</li><li>checklist status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Detail",
+          "purpose": "Multi-section workspace — Detail",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Multi-section workspace</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">roadmap panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Project workspace with roadmap, sprint board, release checklist, and risks panel.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">roadmap · board · checklist</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>board metrics</li><li>checklist status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Settings",
+          "purpose": "Multi-section workspace — Settings",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Multi-section workspace</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">roadmap panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Project workspace with roadmap, sprint board, release checklist, and risks panel.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">roadmap · board · checklist</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>board metrics</li><li>checklist status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "complex_product_flow",
+    "complexity": "complex",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Full onboarding and trial conversion Concept",
+      "summary": "Generated fixture output for complex_product_flow.",
+      "screens": [
+        {
+          "name": "Step 1: Setup",
+          "purpose": "Full onboarding and trial conversion — Step 1: Setup",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Full onboarding and trial conversion</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">step panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">step · integration · upgrade</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>integration metrics</li><li>upgrade status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Step 2: Configure",
+          "purpose": "Full onboarding and trial conversion — Step 2: Configure",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Full onboarding and trial conversion</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">step panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">step · integration · upgrade</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>integration metrics</li><li>upgrade status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Step 3: Upgrade",
+          "purpose": "Full onboarding and trial conversion — Step 3: Upgrade",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Full onboarding and trial conversion</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">step panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">End-to-end onboarding flow for B2B SaaS: invite team, connect integrations, configure alerts, and upgrade from trial.</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">step · integration · upgrade</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>integration metrics</li><li>upgrade status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "complex_dense_prd",
+    "complexity": "complex",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Dense enterprise PRD Concept",
+      "summary": "Generated fixture output for complex_dense_prd.",
+      "screens": [
+        {
+          "name": "Overview",
+          "purpose": "Dense enterprise PRD — Overview",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dense enterprise PRD</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">approval panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, a</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">approval · compliance · audit</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>compliance metrics</li><li>audit status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Detail",
+          "purpose": "Dense enterprise PRD — Detail",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dense enterprise PRD</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">approval panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, a</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">approval · compliance · audit</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>compliance metrics</li><li>audit status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Settings",
+          "purpose": "Dense enterprise PRD — Settings",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Dense enterprise PRD</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">approval panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">Enterprise procurement platform with RBAC, approval chains, vendor scorecards, contract milestones, compliance checks, a</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">approval · compliance · audit</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>compliance metrics</li><li>audit status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "edge_ambiguous",
+    "complexity": "edge",
+    "retries": 0,
+    "usedFallback": true,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 21,
+      "breakdown": {
+        "requiredSections": 0,
+        "layoutCoherence": 13,
+        "spacingConsistency": 3,
+        "visualHierarchy": 5
+      }
+    },
+    "generatorNotes": [
+      "Ambiguous PRD triggered safe fallback template."
+    ],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Ambiguous PRD (Fallback)",
+      "summary": "Deterministic fallback screen used after generation failures.",
+      "screens": [
+        {
+          "name": "Fallback Screen",
+          "purpose": "Keeps the preview renderable when generation is invalid.",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900 p-6\"><header class=\"mb-4\"><h1 class=\"text-2xl font-semibold\">Fallback workspace</h1><button type=\"button\" class=\"mt-3 rounded-lg bg-indigo-600 px-4 py-2 text-white\">Retry</button></header><main><section class=\"rounded-xl border border-neutral-200 bg-white p-5\">Unable to produce valid output for this PRD. Use replay to debug.</section></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "edge_overloaded",
+    "complexity": "edge",
+    "retries": 1,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 100,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 25,
+        "spacingConsistency": 20,
+        "visualHierarchy": 20
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Overloaded input Concept",
+      "summary": "Generated fixture output for edge_overloaded.",
+      "screens": [
+        {
+          "name": "Overview",
+          "purpose": "Overloaded input — Overview",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Overloaded input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">navigation panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every poss</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">navigation · modules · controls</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>modules metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Detail",
+          "purpose": "Overloaded input — Detail",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Overloaded input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">navigation panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every poss</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">navigation · modules · controls</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>modules metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        },
+        {
+          "name": "Settings",
+          "purpose": "Overloaded input — Settings",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Overloaded input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 md:grid-cols-3\"><section class=\"md:col-span-2 rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">navigation panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">One platform for CRM + ERP + HRIS + BI + CMS + help desk + AI assistant + billing + warehouse management with every poss</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">navigation · modules · controls</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>modules metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  },
+  {
+    "run": 2,
+    "caseId": "edge_minimal",
+    "complexity": "edge",
+    "retries": 0,
+    "usedFallback": false,
+    "renderSuccess": true,
+    "renderSkipped": true,
+    "renderWarning": "Screenshot rendering skipped: browserType.launch: Executable doesn't exist at /root/.cache/ms-playwright/chromium_headless_shell-1208/chrome-headless-shell-linux64/chrome-headless-shell\n╔═════════════════════════════════════════════════════════════════════════╗\n║ Looks like Playwright Test or Playwright was just installed or updated. ║\n║ Please run the following command to download new browsers:              ║\n║                                                                         ║\n║     npx playwright install                                              ║\n║                                                                         ║\n║ <3 Playwright Team                                                      ║\n╚═════════════════════════════════════════════════════════════════════════╝",
+    "screenshotPaths": [],
+    "structural": {
+      "isValid": true,
+      "issueCount": 0,
+      "issues": [],
+      "screenIssues": [],
+      "score": 100
+    },
+    "quality": {
+      "total": 78,
+      "breakdown": {
+        "requiredSections": 35,
+        "layoutCoherence": 20,
+        "spacingConsistency": 8,
+        "visualHierarchy": 15
+      }
+    },
+    "generatorNotes": [],
+    "payload": {
+      "version": "mockup_html_v1",
+      "title": "Minimal input Concept",
+      "summary": "Generated fixture output for edge_minimal.",
+      "screens": [
+        {
+          "name": "Primary Screen",
+          "purpose": "Minimal input — Primary Screen",
+          "html": "<div class=\"min-h-screen bg-neutral-50 text-neutral-900\"><header class=\"border-b border-neutral-200 bg-white px-6 py-4 flex items-center justify-between\"><h1 class=\"text-xl font-semibold\">Minimal input</h1><button type=\"button\" class=\"rounded-lg bg-indigo-600 text-white px-4 py-2\">Primary Action</button></header><main class=\"p-6 grid gap-6 grid-cols-1\"><section class=\"rounded-xl border border-neutral-200 bg-white p-6\"><h2 class=\"text-lg font-semibold\">task panel A</h2><p class=\"mt-2 text-sm text-neutral-600\">todo app</p><div class=\"mt-4 rounded-lg bg-neutral-100 p-4\">task · button</div></section><aside class=\"rounded-xl border border-neutral-200 bg-white p-5\"><h3 class=\"text-sm font-semibold\">supporting context</h3><ul class=\"mt-3 space-y-2 text-sm text-neutral-600\"><li>button metrics</li><li>controls status</li></ul><input class=\"mt-4 w-full rounded-md border border-neutral-300 px-3 py-2 text-sm\" placeholder=\"Filter\" /></aside></main></div>"
+        }
+      ]
+    }
+  }
+]
