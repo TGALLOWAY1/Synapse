@@ -56,9 +56,10 @@ generated.
 - [ ] **Flip default engine.** Change `getMockupEngine()` to default `'spec'`
       once the harness threshold is met, and update
       `docs/mockup-evaluation-harness.md` with the new baseline.
-- [ ] **Surface engine toggle in UI.** Add an advanced toggle in settings
-      (or the mockup view) for switching engines without touching
-      localStorage manually.
+- [x] **Surface engine toggle in UI** — added to `SettingsModal.tsx` as a
+      radio group next to the model selector; persists to
+      `localStorage.MOCKUP_ENGINE` (writes `'spec'` explicitly, clears the
+      key when on the default `'html'`).
 - [ ] **Remove HTML-engine path.** After one stable release on the spec
       default, delete `buildSystemPrompt`/`buildUserPrompt`/
       `parseMockupPayload`/`buildSafeFallbackPayload` plus the now-redundant
@@ -106,13 +107,16 @@ hard input to generation.
 
 ### Open — Phase B polish
 
-- [ ] **Backfill migration**: older projects in localStorage won't have
-      `domainEntities`/`primaryActions`. Decide whether to (a) leave them
-      blank and rely on heuristic critique, (b) extract entities on read
-      from the markdown PRD, or (c) offer a "Refresh structured PRD" button
-      that re-runs PRD generation.
-- [ ] **StructuredPRDView UI**: surface the new sections in
-      `src/components/StructuredPRDView.tsx` so users can see + edit them.
+- [x] **Backfill migration**: chose option (c). `StructuredPRDView` renders
+      a "Refresh grounding fields" amber CTA when either field is missing;
+      clicking re-runs `generateStructuredPRD` against a compact summary of
+      the existing structured PRD and merges only `domainEntities` and
+      `primaryActions` back — existing vision/features/risks untouched.
+- [x] **StructuredPRDView UI**: two new editable sections (domain entities
+      + primary actions) with inline edit using a one-per-line
+      pipe-delimited format (`Name | description | example1, example2` /
+      `verb | target`). Parse/serialize helpers extracted to
+      `src/lib/groundingFields.ts` with full round-trip tests.
 
 ---
 
@@ -169,9 +173,13 @@ cross-run diff) and gives recruiter demos a defensible "safe" setting.
 - [ ] **Establish a Phase C baseline**: after the first CI run, commit the
       generated `harness/sample-results/latest/summary.json` as the new
       baseline for regression detection.
-- [ ] **Probe telemetry dashboard**: today the degraded badge is per-preview
-      and ephemeral. Aggregate probe outcomes across a session so users can
-      see if one generation consistently degrades.
+- [x] **Probe telemetry dashboard**: session-scoped Zustand store
+      (`src/store/probeStore.ts`) aggregates probe outcomes per
+      `ArtifactVersion.id`. `MockupHtmlPreview` now takes an optional
+      `versionId` prop and records every interpreted probe report.
+      `MockupViewer` surfaces a per-version chip in the title strip —
+      green "Render OK (n/n)" or amber "Render degraded (d/n)" with the
+      last degradation reason as the tooltip.
 
 ---
 

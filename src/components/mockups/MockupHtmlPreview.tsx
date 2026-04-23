@@ -2,11 +2,16 @@ import { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import type { MockupPlatform } from '../../types';
 import { buildMockupSrcDoc, type MockupProbeReport } from './buildMockupSrcDoc';
+import { useProbeStore } from '../../store/probeStore';
 
 type Props = {
     html: string;
     platform: MockupPlatform;
     className?: string;
+    // Optional version id used to record probe outcomes into the session
+    // telemetry store. When absent (e.g. "Open in new tab"), probes still
+    // drive the degraded badge but aren't aggregated.
+    versionId?: string;
 };
 
 type ProbeState =
@@ -29,11 +34,12 @@ const interpretProbe = (report: MockupProbeReport): ProbeState => {
 // lets Tailwind CDN JIT-compile utility classes inside the iframe, but without
 // `allow-same-origin` the iframe is treated as cross-origin and cannot touch
 // Synapse state.
-export function MockupHtmlPreview({ html, platform, className }: Props) {
+export function MockupHtmlPreview({ html, platform, className, versionId }: Props) {
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [retryCount, setRetryCount] = useState(0);
     const [probe, setProbe] = useState<ProbeState>({ status: 'pending' });
     const frameKey = `${retryCount}-${html.length}`;
+    const recordProbe = useProbeStore(s => s.recordProbe);
 
     // Fresh probeId per (html, retryCount) pair so a remount/retry never
     // matches a stale probe message from the previous iframe instance.
@@ -86,11 +92,20 @@ export function MockupHtmlPreview({ html, platform, className }: Props) {
             if (!data || typeof data !== 'object') return;
             if (data.type !== 'mockup-probe') return;
             if (data.probeId !== probeId) return;
-            setProbe(interpretProbe(data as MockupProbeReport));
+            const next = interpretProbe(data as MockupProbeReport);
+            setProbe(next);
+            // interpretProbe only ever returns 'ok' or 'degraded' — never
+            // 'pending' — but TypeScript can't see that from ProbeState, so
+            // we narrow explicitly instead of casting.
+            if (versionId && next.status === 'ok') {
+                recordProbe(versionId, { outcome: 'ok', at: Date.now() });
+            } else if (versionId && next.status === 'degraded') {
+                recordProbe(versionId, { outcome: 'degraded', reason: next.reason, at: Date.now() });
+            }
         };
         window.addEventListener('message', onMessage);
         return () => window.removeEventListener('message', onMessage);
-    }, [probeId]);
+    }, [probeId, versionId, recordProbe]);
 
     const height = platform === 'mobile' ? 760 : platform === 'responsive' ? 720 : 760;
     const maxWidth = platform === 'mobile' ? 430 : undefined;

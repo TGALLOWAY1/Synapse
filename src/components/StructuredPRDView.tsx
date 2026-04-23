@@ -1,11 +1,17 @@
 import { useState, useEffect, useRef } from 'react';
-import { Pencil, Check, X, Plus, Trash2 } from 'lucide-react';
+import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
-import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
+import { structuredPRDToMarkdown, replyInBranch, generateStructuredPRD } from '../lib/llmProvider';
 import { FeatureCard } from './FeatureCard';
 import { v4 as uuidv4 } from 'uuid';
 import type { StructuredPRD, Feature } from '../types';
+import {
+    parseEntities,
+    parseActions,
+    serializeEntities,
+    serializeActions,
+} from '../lib/groundingFields';
 
 interface StructuredPRDViewProps {
     projectId: string;
@@ -14,7 +20,15 @@ interface StructuredPRDViewProps {
     readOnly: boolean;
 }
 
-type EditingSection = 'vision' | 'targetUsers' | 'coreProblem' | 'architecture' | 'risks' | null;
+type EditingSection =
+    | 'vision'
+    | 'targetUsers'
+    | 'coreProblem'
+    | 'architecture'
+    | 'risks'
+    | 'domainEntities'
+    | 'primaryActions'
+    | null;
 
 export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly }: StructuredPRDViewProps) {
     const { updateSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
@@ -155,6 +169,61 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         setEditingSection(null);
     };
 
+    const saveDomainEntities = () => {
+        const updated = { ...structuredPRD, domainEntities: parseEntities(editValue) };
+        savePRD(updated);
+        setEditingSection(null);
+    };
+
+    const savePrimaryActions = () => {
+        const updated = { ...structuredPRD, primaryActions: parseActions(editValue) };
+        savePRD(updated);
+        setEditingSection(null);
+    };
+
+    // Phase B backfill: older projects have no domainEntities / primaryActions
+    // because they were generated before those fields existed. This button
+    // re-runs the structured-PRD generator on a concise summary of the
+    // existing PRD and merges only the new grounding fields back in —
+    // existing vision / features / risks are left untouched.
+    const [isRefreshingGrounding, setIsRefreshingGrounding] = useState(false);
+    const [refreshError, setRefreshError] = useState<string | null>(null);
+    const groundingMissing =
+        !structuredPRD.domainEntities || structuredPRD.domainEntities.length === 0
+        || !structuredPRD.primaryActions || structuredPRD.primaryActions.length === 0;
+
+    const handleRefreshGrounding = async () => {
+        setRefreshError(null);
+        setIsRefreshingGrounding(true);
+        try {
+            // Synthesize a compact prompt from the existing structured PRD
+            // so the generator sees the same product context it originally
+            // produced, not a stale raw prompt.
+            const summaryLines: string[] = [];
+            if (structuredPRD.vision) summaryLines.push(`Vision: ${structuredPRD.vision}`);
+            if (structuredPRD.coreProblem) summaryLines.push(`Core problem: ${structuredPRD.coreProblem}`);
+            if (structuredPRD.targetUsers?.length) summaryLines.push(`Personas: ${structuredPRD.targetUsers.join(', ')}`);
+            if (structuredPRD.features?.length) {
+                summaryLines.push(`Features:\n${structuredPRD.features.slice(0, 8).map(f => `- ${f.name}: ${f.description}`).join('\n')}`);
+            }
+            const regenerated = await generateStructuredPRD(summaryLines.join('\n\n'));
+            const merged: StructuredPRD = {
+                ...structuredPRD,
+                domainEntities: regenerated.domainEntities?.length
+                    ? regenerated.domainEntities
+                    : structuredPRD.domainEntities,
+                primaryActions: regenerated.primaryActions?.length
+                    ? regenerated.primaryActions
+                    : structuredPRD.primaryActions,
+            };
+            savePRD(merged);
+        } catch (e) {
+            setRefreshError(e instanceof Error ? e.message : 'Failed to refresh grounding fields.');
+        } finally {
+            setIsRefreshingGrounding(false);
+        }
+    };
+
     const handleFeatureUpdate = (updatedFeature: Feature) => {
         const updated = {
             ...structuredPRD,
@@ -279,9 +348,157 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         </div>
     );
 
+    const renderDomainEntities = () => {
+        const items = structuredPRD.domainEntities ?? [];
+        const editing = editingSection === 'domainEntities';
+        return (
+            <div className="mb-8">
+                <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Domain Entities</h3>
+                    {!readOnly && !editing && (
+                        <button
+                            onClick={() => startEditing('domainEntities', serializeEntities(items))}
+                            className="p-1 text-neutral-300 hover:text-neutral-500 transition"
+                            title="Edit domain entities"
+                            aria-label="Edit domain entities"
+                        >
+                            <Pencil size={14} />
+                        </button>
+                    )}
+                </div>
+                {editing ? (
+                    <div className="space-y-2">
+                        <textarea
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            className="w-full bg-neutral-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-neutral-700 focus:outline-none focus:border-indigo-400 min-h-[140px] font-mono"
+                            placeholder={'Name | description | example1, example2\n(one entity per line; description and examples are optional)'}
+                            autoFocus
+                        />
+                        <div className="flex justify-end gap-2">
+                            <button onClick={cancelEditing} className="p-1.5 text-neutral-400 hover:text-neutral-600" title="Cancel" aria-label="Cancel editing">
+                                <X size={16} />
+                            </button>
+                            <button onClick={saveDomainEntities} className="p-1.5 text-indigo-500 hover:text-indigo-700" title="Save" aria-label="Save changes">
+                                <Check size={16} />
+                            </button>
+                        </div>
+                    </div>
+                ) : items.length === 0 ? (
+                    <div className="p-4 bg-neutral-50 border border-dashed border-neutral-200 rounded-lg text-xs text-neutral-500">
+                        No domain entities captured. These names drive table columns and labels in generated mockups — use "Refresh grounding fields" or edit to add them.
+                    </div>
+                ) : (
+                    <ul className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg space-y-3">
+                        {items.map((entity, i) => (
+                            <li key={`${entity.name}-${i}`} className="text-sm text-neutral-700">
+                                <p className="font-semibold text-neutral-900">{entity.name}</p>
+                                {entity.description && (
+                                    <p className="text-xs text-neutral-600 mt-0.5">{entity.description}</p>
+                                )}
+                                {entity.exampleValues && entity.exampleValues.length > 0 && (
+                                    <p className="text-xs text-neutral-500 mt-1">
+                                        <span className="text-neutral-400">Examples:</span> {entity.exampleValues.join(', ')}
+                                    </p>
+                                )}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        );
+    };
+
+    const renderPrimaryActions = () => {
+        const items = structuredPRD.primaryActions ?? [];
+        const editing = editingSection === 'primaryActions';
+        return (
+            <div className="mb-8">
+                <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Primary Actions</h3>
+                    {!readOnly && !editing && (
+                        <button
+                            onClick={() => startEditing('primaryActions', serializeActions(items))}
+                            className="p-1 text-neutral-300 hover:text-neutral-500 transition"
+                            title="Edit primary actions"
+                            aria-label="Edit primary actions"
+                        >
+                            <Pencil size={14} />
+                        </button>
+                    )}
+                </div>
+                {editing ? (
+                    <div className="space-y-2">
+                        <textarea
+                            value={editValue}
+                            onChange={(e) => setEditValue(e.target.value)}
+                            className="w-full bg-neutral-50 border border-indigo-200 rounded-lg px-4 py-3 text-sm text-neutral-700 focus:outline-none focus:border-indigo-400 min-h-[120px] font-mono"
+                            placeholder={'Verb | target\n(one action per line; both parts required)'}
+                            autoFocus
+                        />
+                        <div className="flex justify-end gap-2">
+                            <button onClick={cancelEditing} className="p-1.5 text-neutral-400 hover:text-neutral-600" title="Cancel" aria-label="Cancel editing">
+                                <X size={16} />
+                            </button>
+                            <button onClick={savePrimaryActions} className="p-1.5 text-indigo-500 hover:text-indigo-700" title="Save" aria-label="Save changes">
+                                <Check size={16} />
+                            </button>
+                        </div>
+                    </div>
+                ) : items.length === 0 ? (
+                    <div className="p-4 bg-neutral-50 border border-dashed border-neutral-200 rounded-lg text-xs text-neutral-500">
+                        No primary actions captured. These become the primary CTAs across generated mockups.
+                    </div>
+                ) : (
+                    <ul className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg space-y-1">
+                        {items.map((action, i) => (
+                            <li key={`${action.verb}-${action.target}-${i}`} className="text-sm text-neutral-700">
+                                <span className="font-semibold text-neutral-900">{action.verb}</span> {action.target}
+                            </li>
+                        ))}
+                    </ul>
+                )}
+            </div>
+        );
+    };
+
+    const renderGroundingBackfill = () => {
+        if (readOnly || !groundingMissing) return null;
+        return (
+            <div className="mb-6 rounded-lg border border-amber-200 bg-amber-50 p-4">
+                <div className="flex items-start gap-3">
+                    <Sparkles size={16} className="text-amber-600 mt-0.5 shrink-0" />
+                    <div className="flex-1">
+                        <p className="text-sm font-semibold text-amber-900">Grounding fields missing</p>
+                        <p className="text-xs text-amber-800 mt-0.5 leading-relaxed">
+                            This project was created before domain entities and primary actions were captured.
+                            Refresh to let the PRD generator fill them in — used by the mockup engine to ground
+                            table columns, section labels, and primary CTAs.
+                        </p>
+                        <button
+                            type="button"
+                            onClick={handleRefreshGrounding}
+                            disabled={isRefreshingGrounding}
+                            className="mt-3 inline-flex items-center gap-2 rounded-md border border-amber-300 bg-white px-3 py-1.5 text-xs font-medium text-amber-900 hover:bg-amber-100 disabled:opacity-50"
+                        >
+                            {isRefreshingGrounding
+                                ? <Loader2 size={12} className="animate-spin" />
+                                : <Sparkles size={12} />}
+                            {isRefreshingGrounding ? 'Refreshing…' : 'Refresh grounding fields'}
+                        </button>
+                        {refreshError && (
+                            <p className="mt-2 text-xs text-red-700">Refresh failed: {refreshError}</p>
+                        )}
+                    </div>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="relative" onMouseUp={handleMouseUp}>
             <div ref={contentRef} className="space-y-2">
+                {renderGroundingBackfill()}
                 {renderTextSection('Vision', 'vision', structuredPRD.vision)}
                 {renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
                 {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
@@ -329,6 +546,8 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
 
                 {renderTextSection('Architecture', 'architecture', structuredPRD.architecture)}
                 {renderListSection('Risks', 'risks', structuredPRD.risks)}
+                {renderDomainEntities()}
+                {renderPrimaryActions()}
             </div>
 
             {selection && (

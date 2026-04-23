@@ -338,6 +338,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         createdAt={version.createdAt}
                         sourceSpineVersionId={sourceSpineVersionId}
                         actions={actions}
+                        versionId={version.id}
                     />
                 </MockupErrorBoundary>
             );
@@ -387,6 +388,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                             versionNumber={v.versionNumber}
                             createdAt={v.createdAt}
                             sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
+                            versionId={v.id}
                         />
                     </MockupErrorBoundary>
                 );

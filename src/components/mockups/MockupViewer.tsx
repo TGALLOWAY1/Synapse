@@ -1,9 +1,10 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Eye, Code2, ExternalLink, Copy, Check } from 'lucide-react';
+import { Eye, Code2, ExternalLink, Copy, Check, AlertTriangle, Activity } from 'lucide-react';
 import type { MockupPayload, MockupSettings, StalenessState } from '../../types';
 import { StalenessBadge } from '../StalenessBadge';
 import { MockupHtmlPreview } from './MockupHtmlPreview';
 import { buildMockupSrcDoc } from './buildMockupSrcDoc';
+import { useProbeStore } from '../../store/probeStore';
 
 type Props = {
     payload: MockupPayload;
@@ -13,6 +14,9 @@ type Props = {
     createdAt: number;
     sourceSpineVersionId?: string;
     actions?: React.ReactNode;
+    // Passed through to MockupHtmlPreview so iframe probe outcomes are
+    // aggregated per artifact version in the session telemetry store.
+    versionId?: string;
 };
 
 type Mode = 'preview' | 'code';
@@ -38,10 +42,16 @@ export function MockupViewer({
     createdAt,
     sourceSpineVersionId,
     actions,
+    versionId,
 }: Props) {
     const [activeIdx, setActiveIdx] = useState(0);
     const [mode, setMode] = useState<Mode>('preview');
     const [copied, setCopied] = useState(false);
+    // Session-scoped probe aggregate for this artifact version. Populated
+    // by MockupHtmlPreview every time a probe message arrives; surfaced
+    // here as a small health badge so reviewers can see whether the
+    // renders have been clean or degraded in this session.
+    const probeStats = useProbeStore(s => (versionId ? s.byVersion[versionId] : undefined));
 
     // Clamp in case of payload mutation.
     const safeIdx = Math.min(activeIdx, Math.max(0, payload.screens.length - 1));
@@ -126,6 +136,25 @@ export function MockupViewer({
                     <span className={CHIP}>{FIDELITY_LABELS[settings.fidelity] ?? settings.fidelity}</span>
                     <span className={CHIP}>{SCOPE_LABELS[settings.scope] ?? settings.scope}</span>
                     <StalenessBadge staleness={staleness} />
+                    {probeStats && probeStats.total > 0 && (
+                        probeStats.degraded === 0 ? (
+                            <span
+                                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium"
+                                title={`All ${probeStats.total} iframe render(s) this session reported clean layout signals.`}
+                            >
+                                <Activity size={10} />
+                                Render OK ({probeStats.ok}/{probeStats.total})
+                            </span>
+                        ) : (
+                            <span
+                                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium"
+                                title={probeStats.lastReason ?? 'One or more renders reported degraded layout signals.'}
+                            >
+                                <AlertTriangle size={10} />
+                                Render degraded ({probeStats.degraded}/{probeStats.total})
+                            </span>
+                        )
+                    )}
                     <span className="text-[10px] text-neutral-400 ml-auto tabular-nums">
                         v{versionNumber} · {formatDate(createdAt)}
                     </span>
@@ -188,6 +217,7 @@ export function MockupViewer({
                         key={activeScreen.id}
                         html={activeScreen.html}
                         platform={settings.platform}
+                        versionId={versionId}
                     />
                 ) : (
                     <pre className="text-xs font-mono bg-neutral-900 text-neutral-100 rounded-lg p-4 overflow-auto max-h-[680px] whitespace-pre-wrap break-words">
