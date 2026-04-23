@@ -11,7 +11,9 @@ export interface MockupAlignmentIssue {
         | 'fidelity_mismatch'
         | 'generic_naming'
         | 'workflow_gap'
-        | 'prd_feature_gap';
+        | 'prd_feature_gap'
+        | 'insufficient_entity_grounding'
+        | 'insufficient_action_grounding';
     severity: AlignmentSeverity;
     reason: string;
     recommendation: string;
@@ -44,6 +46,11 @@ interface ProductConceptContext {
     entityTerms: string[];
     workflowTerms: string[];
     productTerms: string[];
+    // Phase B: structured grounding anchors sourced directly from
+    // StructuredPRD.domainEntities / primaryActions (if present). These drive
+    // harder pass/fail checks than the heuristic term lists above.
+    structuredEntityNames: string[];
+    structuredActionPhrases: string[];
 }
 
 const GENERIC_SLUDGE_PATTERNS: RegExp[] = [
@@ -94,6 +101,8 @@ const buildConceptContext = (prdContent: string, structuredPRD?: StructuredPRD):
             entityTerms: fallbackTerms,
             workflowTerms: fallbackTerms,
             productTerms: fallbackTerms,
+            structuredEntityNames: [],
+            structuredActionPhrases: [],
         };
     }
 
@@ -109,12 +118,21 @@ const buildConceptContext = (prdContent: string, structuredPRD?: StructuredPRD):
     const entityTerms = featureTerms.filter(term => !/user|workflow|screen|feature/.test(term)).slice(0, 40);
     const workflowTerms = featureTerms.filter(term => /(create|edit|review|submit|approve|track|configure|assign|flow|step|stage|sync|share)/.test(term)).slice(0, 30);
 
+    const structuredEntityNames = (structuredPRD.domainEntities ?? [])
+        .map(e => normalizeToken(e.name))
+        .filter(name => name.length >= 3);
+    const structuredActionPhrases = (structuredPRD.primaryActions ?? [])
+        .map(a => normalizeToken(`${a.verb} ${a.target}`))
+        .filter(phrase => phrase.length >= 3);
+
     return {
         personaTerms,
         corePurposeTerms,
         entityTerms,
         workflowTerms,
         productTerms: [...new Set([...personaTerms, ...corePurposeTerms, ...featureTerms])],
+        structuredEntityNames,
+        structuredActionPhrases,
     };
 };
 
@@ -159,6 +177,31 @@ const critiqueScreen = (
             reason: `Screen is weakly grounded in PRD context: missing ${missingConcepts.join(', ')}.`,
             recommendation: 'Tie title, purpose, and key UI regions directly to PRD persona, entities, and workflows.',
         });
+    }
+
+    // Phase B: when the PRD carries structured domain entities / primary
+    // actions, grade screens against those exact names rather than relying
+    // on the heuristic term extractor. This is the hard gate that stops
+    // "polished but wrong" output from passing — a mockup can look great
+    // but still mis-name the product's core nouns/verbs, and the looser
+    // feature-term check misses that.
+    if (context.structuredEntityNames.length > 0) {
+        const entityHits = context.structuredEntityNames.filter(name => normalizeToken(screenText).includes(name)).length;
+        if (entityHits === 0) {
+            issues.push({
+                code: 'insufficient_entity_grounding',
+                severity: 'high',
+                reason: 'Screen does not mention any of the PRD domain entities by name.',
+                recommendation: 'Use the exact domainEntities names as section headings, table columns, or detail-panel labels.',
+            });
+        } else if (entityHits === 1 && context.structuredEntityNames.length >= 3) {
+            issues.push({
+                code: 'insufficient_entity_grounding',
+                severity: 'medium',
+                reason: 'Screen surfaces only one PRD domain entity; others are missing.',
+                recommendation: 'Spread PRD domainEntities across section headings, columns, and labels.',
+            });
+        }
     }
 
     if (/dashboard|home|overview/i.test(screen.name) && context.productTerms.length > 0) {
@@ -264,6 +307,28 @@ export const critiqueMockupAlignment = (
             reason: 'Screens do not visibly represent key PRD entities/features.',
             recommendation: 'Surface PRD features directly in navigation labels, sections, cards, and action buttons.',
         });
+    }
+
+    // Phase B: verify at least one primary_cta across the screen set uses a
+    // verb from structuredPRD.primaryActions. Matching on the full
+    // "verb target" phrase is too strict (CTAs often abbreviate), so we
+    // match on the verb token.
+    if (context.structuredActionPhrases.length > 0) {
+        const allHtml = screens.map(s => normalizeToken(stripHtml(s.html))).join(' ');
+        const actionVerbs = [...new Set(
+            context.structuredActionPhrases
+                .map(phrase => phrase.split(' ')[0])
+                .filter(verb => verb.length >= 3),
+        )];
+        const matchedVerbs = actionVerbs.filter(verb => allHtml.includes(verb));
+        if (actionVerbs.length > 0 && matchedVerbs.length === 0) {
+            issues.push({
+                code: 'insufficient_action_grounding',
+                severity: 'high',
+                reason: 'No primary actions from the PRD are used as CTA labels across the screen set.',
+                recommendation: 'Use at least one primaryActions verb (e.g. the first one) as a primary_cta label.',
+            });
+        }
     }
 
     const penalties = issues.reduce((sum, issue) => sum + (issue.severity === 'high' ? 18 : issue.severity === 'medium' ? 10 : 5), 0);

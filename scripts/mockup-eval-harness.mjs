@@ -168,13 +168,30 @@ const generateFixture = async (testCase, runIndex, attempt) => {
   };
 };
 
-const renderScreenshots = async (payload, screenshotDir, prefix) => {
+// Phase C: Playwright-backed render also collects layout-viability signals
+// per screen (styled, overflow, bodyHeight, visibleElements). Aggregated
+// into a `layoutViabilityRate` metric so CI can catch "renders OK but looks
+// blank" regressions that regex checks miss.
+const probeLayout = async (page) =>
+  page.evaluate(() => {
+    const root = document.querySelector('.min-h-screen') || document.body;
+    const cs = window.getComputedStyle(root);
+    const styled = parseFloat(cs.minHeight || '0') >= 1 || parseFloat(cs.padding || '0') > 0;
+    const body = document.body;
+    const horizontalOverflow = (body.scrollWidth - body.clientWidth) > 1;
+    const bodyHeight = body.scrollHeight;
+    const visibleElements = root.querySelectorAll('section, header, main, aside, nav, table, ul, button').length;
+    return { styled, horizontalOverflow, bodyHeight, visibleElements };
+  });
+
+const renderAndProbe = async (payload, screenshotDir, prefix) => {
   const results = [];
+  const probes = [];
   let chromium;
   try {
     ({ chromium } = await import('playwright'));
   } catch {
-    return { ok: true, skipped: true, warning: 'Playwright is not available in this environment.', screenshots: results };
+    return { ok: true, skipped: true, warning: 'Playwright is not available in this environment.', screenshots: results, probes };
   }
 
   let browser;
@@ -184,18 +201,60 @@ const renderScreenshots = async (payload, screenshotDir, prefix) => {
       const screen = payload.screens[i];
       const page = await browser.newPage({ viewport: { width: 1440, height: 1024 } });
       await page.setContent(wrapHtmlDocument(screen.html), { waitUntil: 'networkidle' });
+      const probe = await probeLayout(page);
       const imageName = `${prefix}-screen-${i + 1}.png`;
       const imagePath = path.join(screenshotDir, imageName);
       await page.screenshot({ path: imagePath, fullPage: true });
       await page.close();
       results.push(imagePath);
+      probes.push({ screenIndex: i, ...probe });
     }
-    return { ok: true, screenshots: results };
+    return { ok: true, screenshots: results, probes };
   } catch (error) {
-    return { ok: true, skipped: true, warning: `Screenshot rendering skipped: ${error instanceof Error ? error.message : String(error)}`, screenshots: results };
+    return { ok: true, skipped: true, warning: `Screenshot rendering skipped: ${error instanceof Error ? error.message : String(error)}`, screenshots: results, probes };
   } finally {
     if (browser) await browser.close();
   }
+};
+
+// A render is layout-viable when every screen reports styled=true, no
+// horizontal overflow, >100px body height, and at least one landmark.
+const isLayoutViable = (probes) => {
+  if (!probes || probes.length === 0) return false;
+  return probes.every(p => p.styled && !p.horizontalOverflow && p.bodyHeight > 100 && p.visibleElements > 0);
+};
+
+// Shell signature = sorted unique Tailwind class tokens on the root shell
+// element. Used to score perturbation pairs: a ≤10-token PRD edit should
+// NOT flip the shell signature, because shell layout is a structural
+// choice, not a content choice.
+const extractShellSignature = (payload) => {
+  const signatures = (payload.screens || []).map(screen => {
+    const match = screen.html.match(/<div\s+class\s*=\s*["']([^"']*min-h-screen[^"']*)["']/i);
+    if (!match) return [];
+    const tokens = match[1].split(/\s+/).filter(Boolean);
+    return [...new Set(tokens)].sort();
+  });
+  return signatures;
+};
+
+const jaccard = (a, b) => {
+  if (!a.length && !b.length) return 1;
+  const setA = new Set(a);
+  const setB = new Set(b);
+  const intersection = [...setA].filter(x => setB.has(x)).length;
+  const union = new Set([...setA, ...setB]).size;
+  return union === 0 ? 1 : intersection / union;
+};
+
+const perturbationSimilarity = (primaryPayload, variantPayload) => {
+  const primarySigs = extractShellSignature(primaryPayload);
+  const variantSigs = extractShellSignature(variantPayload);
+  if (primarySigs.length === 0 || variantSigs.length === 0) return null;
+  const pairs = Math.min(primarySigs.length, variantSigs.length);
+  let total = 0;
+  for (let i = 0; i < pairs; i++) total += jaccard(primarySigs[i], variantSigs[i]);
+  return total / pairs;
 };
 
 const detectRegressions = (currentMetrics, baselineMetrics) => {
@@ -214,6 +273,20 @@ const detectRegressions = (currentMetrics, baselineMetrics) => {
   }
   if (currentMetrics.fallbackRate > baselineMetrics.fallbackRate + 0.01) {
     regressions.push(`Fallback rate increased by ${drop(baselineMetrics.fallbackRate, currentMetrics.fallbackRate)} points.`);
+  }
+  if (
+    typeof currentMetrics.layoutViabilityRate === 'number'
+    && typeof baselineMetrics.layoutViabilityRate === 'number'
+    && currentMetrics.layoutViabilityRate + 0.01 < baselineMetrics.layoutViabilityRate
+  ) {
+    regressions.push(`Layout viability dropped by ${drop(currentMetrics.layoutViabilityRate, baselineMetrics.layoutViabilityRate)} points.`);
+  }
+  if (
+    typeof currentMetrics.perturbationPassRate === 'number'
+    && typeof baselineMetrics.perturbationPassRate === 'number'
+    && currentMetrics.perturbationPassRate + 0.01 < baselineMetrics.perturbationPassRate
+  ) {
+    regressions.push(`Perturbation pass rate dropped by ${drop(currentMetrics.perturbationPassRate, baselineMetrics.perturbationPassRate)} points.`);
   }
 
   return regressions;
@@ -317,15 +390,20 @@ const main = async () => {
       const quality = qualityScore(payload, testCase.requiredSections || []);
 
       const screenshotPrefix = `${safeSlug(testCase.id)}-run-${run}`;
-      const renderResult = await renderScreenshots(payload, screenshotDir, screenshotPrefix);
+      const renderResult = await renderAndProbe(payload, screenshotDir, screenshotPrefix);
       const renderSuccess = renderResult.ok;
       const renderSkipped = Boolean(renderResult.skipped);
+      const layoutViable = renderSkipped ? null : isLayoutViable(renderResult.probes);
 
-      if (!structural.isValid || (!renderSuccess && !renderSkipped)) {
+      if (!structural.isValid || (!renderSuccess && !renderSkipped) || layoutViable === false) {
         failures.push({
           caseId: testCase.id,
           run,
-          reason: !structural.isValid ? structural.issues.join(', ') : renderResult.warning || 'render_failed',
+          reason: !structural.isValid
+            ? structural.issues.join(', ')
+            : layoutViable === false
+              ? `layout_not_viable: ${JSON.stringify(renderResult.probes)}`
+              : renderResult.warning || 'render_failed',
         });
       }
 
@@ -339,6 +417,8 @@ const main = async () => {
         renderSkipped,
         renderWarning: renderResult.warning,
         screenshotPaths: renderResult.screenshots.map((p) => path.relative(repoRoot, p)),
+        layoutViable,
+        layoutProbes: renderResult.probes,
         structural,
         quality,
         generatorNotes: generated.generatorNotes || [],
@@ -348,6 +428,29 @@ const main = async () => {
       if (!caseRunMap.has(testCase.id)) caseRunMap.set(testCase.id, []);
       caseRunMap.get(testCase.id).push(entry);
     }
+  }
+
+  // Phase C perturbation pairs: for every case that ships a `variantPrompt`,
+  // generate once under the variant and compare shell signatures against
+  // the primary run's output. A shell-signature Jaccard < 0.9 means a
+  // ≤10-token PRD edit altered the structural layout — the audit calls
+  // this "fragility on small edits" (§3.5 risk #6 in the failure map).
+  const perturbationPairs = [];
+  for (const testCase of testCases) {
+    if (!testCase.variantPrompt) continue;
+    const primaryRuns = caseRunMap.get(testCase.id) ?? [];
+    const primaryPayload = primaryRuns[0]?.payload;
+    if (!primaryPayload) continue;
+    const variantCase = { ...testCase, prd: testCase.variantPrompt, id: `${testCase.id}__variant` };
+    const variantGen = await generateFixture(variantCase, 1, 1);
+    const variantPayload = variantGen.payload;
+    if (!variantPayload) continue;
+    const similarity = perturbationSimilarity(primaryPayload, variantPayload);
+    perturbationPairs.push({
+      caseId: testCase.id,
+      similarity,
+      passedThreshold: similarity !== null ? similarity >= 0.9 : null,
+    });
   }
 
   const total = logs.length;
@@ -373,6 +476,21 @@ const main = async () => {
     'Prioritize deterministic seeds / temperature controls for consistency-sensitive cases.',
   ];
 
+  // Phase C aggregates. layoutViabilityRate is computed over entries that
+  // actually ran Playwright (not skipped). perturbationSimilarityAvg is the
+  // mean Jaccard across all variant pairs; undefined when no pairs exist.
+  const viabilityEntries = logs.filter(l => typeof l.layoutViable === 'boolean');
+  const layoutViabilityRate = viabilityEntries.length
+    ? Math.round((viabilityEntries.filter(l => l.layoutViable).length / viabilityEntries.length) * 10000) / 100
+    : null;
+  const perturbationWithValues = perturbationPairs.filter(p => typeof p.similarity === 'number');
+  const perturbationSimilarityAvg = perturbationWithValues.length
+    ? Math.round((perturbationWithValues.reduce((s, p) => s + p.similarity, 0) / perturbationWithValues.length) * 10000) / 10000
+    : null;
+  const perturbationPassRate = perturbationWithValues.length
+    ? Math.round((perturbationWithValues.filter(p => p.passedThreshold).length / perturbationWithValues.length) * 10000) / 100
+    : null;
+
   const metrics = {
     renderSuccessRate,
     structuralValidityRate,
@@ -380,6 +498,9 @@ const main = async () => {
     fallbackRate,
     visualQualityScore,
     consistencyScore,
+    layoutViabilityRate,
+    perturbationSimilarityAvg,
+    perturbationPassRate,
   };
 
   let baselineMetrics;
@@ -389,6 +510,13 @@ const main = async () => {
   }
 
   const regressions = detectRegressions(metrics, baselineMetrics);
+
+  if (layoutViabilityRate !== null && layoutViabilityRate < 100) {
+    weakAreas.push(`Layout viability under 100% (${layoutViabilityRate}%) — some renders are blank, clipped, or unstyled.`);
+  }
+  if (perturbationPassRate !== null && perturbationPassRate < 100) {
+    weakAreas.push(`Perturbation pass rate ${perturbationPassRate}% — minor PRD edits flip shell layout.`);
+  }
 
   const summary = {
     runId,
@@ -400,6 +528,7 @@ const main = async () => {
     totalEvaluations: total,
     metrics,
     failures,
+    perturbationPairs,
     weakAreas,
     recommendations,
     regressions,

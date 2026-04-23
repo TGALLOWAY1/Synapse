@@ -1,0 +1,81 @@
+name: Mockup harness
+
+on:
+  pull_request:
+    paths:
+      - 'src/lib/services/mockupService.ts'
+      - 'src/lib/mockup*.ts'
+      - 'src/lib/schemas/mockup*.ts'
+      - 'src/components/mockups/**'
+      - 'src/components/MockupsView.tsx'
+      - 'harness/**'
+      - 'scripts/mockup-eval-harness.mjs'
+      - '.github/workflows/mockup-harness.yml'
+
+jobs:
+  harness:
+    name: Harness gate
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Unit tests
+        run: npm test
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Run mockup harness vs baseline
+        # The harness is simulation-based (doesn't call Gemini). It still
+        # exercises the layout-viability + perturbation checks against
+        # deterministic fixture outputs, which is what we actually want
+        # to gate on in CI.
+        run: >-
+          npm run mockup:harness --
+          --runs 4
+          --max-attempts 3
+          --outdir harness/results
+          --baseline harness/sample-results/latest/summary.json
+
+      - name: Assert no harness regressions
+        # detectRegressions flags any consistency/quality/viability/
+        # perturbation drop vs the committed baseline. Any regression
+        # fails the job.
+        run: |
+          node -e "
+            const fs = require('node:fs');
+            const summary = JSON.parse(fs.readFileSync('harness/results/latest/summary.json', 'utf8'));
+            const regressions = summary.regressions ?? [];
+            const m = summary.metrics;
+            console.log(JSON.stringify({ metrics: m, regressions }, null, 2));
+            if (regressions.length > 0) {
+              console.error('Harness regressions detected:');
+              for (const r of regressions) console.error('- ' + r);
+              process.exit(1);
+            }
+            if (typeof m.layoutViabilityRate === 'number' && m.layoutViabilityRate < 100) {
+              console.error('Layout viability rate ' + m.layoutViabilityRate + '% < 100% — preview renderer is producing blank/clipped output.');
+              process.exit(1);
+            }
+          "
+
+      - name: Upload harness artifacts
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: mockup-harness-results
+          path: harness/results/latest
