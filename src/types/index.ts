@@ -225,6 +225,11 @@ export type MockupSettings = {
     style?: string;
     scope: MockupScope;
     selectedSections?: string[];
+    // Phase C: Demo Safe Mode. Pins temperature=0 + topK=1 on the provider
+    // call, disables the HTML-engine fallback chain, and hard-rejects on
+    // alignment critique miss. Intended for recruiter demos where a
+    // predictable "refused to generate" is preferable to a silent degrade.
+    safeMode?: boolean;
 };
 
 // Rendered HTML/Tailwind mockup payload (stored as JSON string in

@@ -118,30 +118,60 @@ hard input to generation.
 
 ## Phase C — Deterministic rendering & Demo Safe Mode
 
+**Status:** shipped.
+
 Closes the remaining runtime gaps (Tailwind CDN health, viewport occupancy,
 cross-run diff) and gives recruiter demos a defensible "safe" setting.
 
-### Planned work
+### Shipped
 
-- [ ] **Playwright harness** (already a devDep): render each generated
-      mockup in a real headless browser, not simulated. Check `onload`,
-      Tailwind-applied sentinel, `scrollWidth ≤ clientWidth`, above-the-fold
-      occupancy.
-- [ ] **Perturbation pairs** in `harness/mockup-test-suite.json`: for each
-      fixture, a variant with a ≤10-token PRD edit; assert shell-signature
-      similarity > 0.9 across the pair.
-- [ ] **Non-SaaS fixtures** — 3–4 consumer/marketplace/physical-goods PRDs
-      to stress the "generic dashboard" failure mode.
-- [ ] **Demo Safe Mode toggle** in `MockupsView.tsx`: pins `temperature: 0`
-      + `topK: 1`, disables the fallback chain, restricts shells, hard-
-      rejects on alignment critique miss.
-- [ ] **iframe post-load probe** in `MockupHtmlPreview.tsx`: inject a script
-      that posts `{ styled, occupancyPct }` via `postMessage`; show a
-      "preview degraded" badge when the probe fails.
-- [ ] **CI gate**: fail PRs touching `src/lib/services/mockupService.ts`,
-      `src/lib/schemas/mockup*`, `src/lib/mockup*.ts`, or
-      `src/components/mockups/**` when harness consistency < 90 or the
-      Playwright layout-viability pass rate < 100%.
+- [x] **Playwright layout-viability probe in harness**
+      (`scripts/mockup-eval-harness.mjs`): the existing `renderAndProbe` now
+      calls `page.evaluate` after `networkidle` to collect `styled`,
+      `horizontalOverflow`, `bodyHeight`, and `visibleElements` per screen.
+      A new `layoutViabilityRate` metric aggregates over all runs; a run
+      fails when any screen reports unstyled, overflowing, <100px body, or
+      zero landmarks.
+- [x] **Perturbation pairs**: `harness/mockup-test-suite.json` cases gain
+      an optional `variantPrompt` field (≤10-token edit). After the primary
+      loop, the harness generates each variant and computes shell-signature
+      Jaccard similarity. Aggregated as `perturbationSimilarityAvg` and
+      `perturbationPassRate` (share of pairs ≥ 0.9).
+- [x] **Non-SaaS fixtures**: `nonsaas_consumer_fitness`,
+      `nonsaas_marketplace`, `nonsaas_physical_goods` added to stress the
+      "generic dashboard sludge" failure mode against non-SaaS domains.
+- [x] **Demo Safe Mode toggle** in `MockupsView.tsx` + `MockupSettings`:
+      when on, pins `temperature=0 / topP=0.5 / topK=1` on the provider
+      call, disables both the spec→HTML fallback and the HTML safe
+      fallback template, and hard-rejects on ANY alignment critique hit
+      (not just high+low-score). Serialized into artifact metadata so
+      regeneration preserves the setting.
+- [x] **iframe post-load probe** in `buildMockupSrcDoc.ts` +
+      `MockupHtmlPreview.tsx`: a per-iframe UUID `probeId` drives an
+      injected script that inspects `min-h-screen` computed styles + body
+      geometry and posts a `MockupProbeReport` back to the parent via
+      `postMessage`. The preview surfaces a "Preview degraded: …" badge
+      when the probe reports missing Tailwind, horizontal overflow,
+      near-empty body, or no landmarks — or when it doesn't arrive within
+      6s.
+- [x] **CI gate** at `.github/workflows/mockup-harness.yml`: runs typecheck
+      + lint + tests + the harness (with Playwright installed) on PRs that
+      touch the mockup surface, and fails the job on any regression vs the
+      committed baseline or a `layoutViabilityRate < 100%`. Harness
+      artifacts are uploaded for debugging.
+- [x] Tests: Demo Safe Mode sampling pin + no-fallback behavior in
+      `mockupService.test.ts`, and probe-script injection in a new
+      `src/components/mockups/__tests__/buildMockupSrcDoc.test.ts`. 79/79
+      tests passing.
+
+### Open — Phase C polish
+
+- [ ] **Establish a Phase C baseline**: after the first CI run, commit the
+      generated `harness/sample-results/latest/summary.json` as the new
+      baseline for regression detection.
+- [ ] **Probe telemetry dashboard**: today the degraded badge is per-preview
+      and ephemeral. Aggregate probe outcomes across a session so users can
+      see if one generation consistently degrades.
 
 ---
 

@@ -498,12 +498,16 @@ const runSpecEngineAttempt = async (
 ): Promise<ParseResult> => {
     const system = buildSpecSystemPrompt(settings);
     const user = buildSpecUserPrompt(prdContent, structuredPRD);
+    // Demo Safe Mode pins deterministic sampling: temp=0 / topK=1 collapses
+    // the model to greedy decoding, which is the only way the stochastic
+    // boundary from the 2026-04-22 audit actually goes away.
+    const providerParams = settings.safeMode
+        ? { temperature: 0, topP: 0.5, topK: 1 }
+        : { temperature: 0.2, topP: 0.8, topK: 32 };
     const raw = await callGemini(system, user, {
         responseMimeType: 'application/json',
         responseSchema: mockupLayoutSpecSchema,
-        temperature: 0.2,
-        topP: 0.8,
-        topK: 32,
+        ...providerParams,
     });
     const fallbackProduct = inferConceptName(prdContent);
     const specResult = parseLayoutSpec(raw, fallbackProduct);
@@ -518,6 +522,14 @@ const runSpecEngineAttempt = async (
         prdContent,
         structuredPRD,
     );
+    // In Safe Mode, any medium-or-high alignment hit is a hard reject —
+    // the user gets an actionable error instead of a silent degrade.
+    if (settings.safeMode && critique.severity !== 'low') {
+        const reason = critique.mismatchReasons.slice(0, 3).join(' ');
+        throw new Error(
+            `Demo Safe Mode: mockup failed PRD alignment gate (${critique.alignmentScore}/100, severity=${critique.severity}). ${reason}`,
+        );
+    }
     if (critique.severity === 'high' && critique.alignmentScore < 45) {
         const reason = critique.mismatchReasons.slice(0, 3).join(' ');
         throw new Error(
@@ -556,6 +568,9 @@ const runHtmlEngine = async (
 ): Promise<ParseResult> => {
     const system = buildSystemPrompt(settings);
     const user = buildUserPrompt(prdContent, structuredPRD);
+    const providerParams = settings.safeMode
+        ? { temperature: 0, topP: 0.5, topK: 1 }
+        : { temperature: 0.2, topP: 0.8, topK: 32 };
     const warnings: string[] = [];
     let lastError: Error | null = null;
 
@@ -565,9 +580,7 @@ const runHtmlEngine = async (
             const raw = await callGemini(system, user, {
                 responseMimeType: 'application/json',
                 responseSchema: mockupSchema,
-                temperature: 0.2,
-                topP: 0.8,
-                topK: 32,
+                ...providerParams,
             });
             const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD);
             const qualityAvg = parsed.payload.screens.length
@@ -591,6 +604,15 @@ const runHtmlEngine = async (
             lastError = err;
             warnings.push(`Attempt ${attempt} failed: ${err.message}`);
         }
+    }
+
+    // Demo Safe Mode prefers an explicit "regenerate" failure over a silent
+    // fallback — the whole point is that recruiters don't see a watered-down
+    // output when the real output failed.
+    if (settings.safeMode) {
+        throw new Error(
+            `Demo Safe Mode: mockup generation failed after ${MAX_GENERATION_ATTEMPTS} attempts. ${lastError?.message ?? ''} Warnings: ${warnings.join(' ')}`,
+        );
     }
 
     console.warn('[mockupService] returning safe fallback after repeated generation failures', lastError);
@@ -618,6 +640,12 @@ const runSpecEngine = async (
             }
             warnings.push(`Spec attempt ${attempt} failed: ${err.message}`);
         }
+    }
+
+    if (settings.safeMode) {
+        throw new Error(
+            `Demo Safe Mode: spec engine failed after ${MAX_GENERATION_ATTEMPTS} attempts. ${lastError?.message ?? ''} Warnings: ${warnings.join(' ')}`,
+        );
     }
 
     console.warn('[mockupService] spec engine falling back to HTML engine after repeated failures', lastError);

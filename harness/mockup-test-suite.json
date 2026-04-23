@@ -4,6 +4,7 @@
     "complexity": "simple",
     "title": "Basic landing page",
     "prd": "Build a landing page for a productivity app called FocusFlow. Include hero, benefits, and signup CTA.",
+    "variantPrompt": "Build a landing page for FocusFlow, a productivity app. Include hero, benefits section, and primary signup CTA.",
     "settings": {
       "platform": "desktop",
       "fidelity": "mid",
@@ -52,6 +53,7 @@
     "complexity": "medium",
     "title": "Dashboard UI",
     "prd": "Analytics dashboard for support team with ticket volume, SLA trends, queue table, and assignee activity.",
+    "variantPrompt": "Analytics dashboard for the support team showing ticket volume, SLA trends, the queue table, and assignee activity feed.",
     "settings": {
       "platform": "desktop",
       "fidelity": "high",
@@ -155,6 +157,55 @@
     "requiredSections": [
       "task",
       "button"
+    ]
+  },
+  {
+    "id": "nonsaas_consumer_fitness",
+    "complexity": "medium",
+    "title": "Consumer fitness app",
+    "prd": "Running coach mobile app called PacePilot for amateur 5K/10K runners. Track workouts, suggest next session based on target race date, celebrate milestones, and share workouts with training partners.",
+    "variantPrompt": "Running coach mobile app (PacePilot) for amateur 5K and 10K runners. Track workouts, recommend the next training session based on a target race date, celebrate milestones, and share completed workouts with training partners.",
+    "settings": {
+      "platform": "mobile",
+      "fidelity": "mid",
+      "scope": "multi_screen"
+    },
+    "requiredSections": [
+      "workout",
+      "milestone",
+      "partner"
+    ]
+  },
+  {
+    "id": "nonsaas_marketplace",
+    "complexity": "complex",
+    "title": "Two-sided marketplace",
+    "prd": "Local tutoring marketplace connecting parents with vetted STEM tutors. Parents browse tutors by subject and location, book a first session, leave reviews after. Tutors manage availability, payouts, and student progress notes.",
+    "settings": {
+      "platform": "responsive",
+      "fidelity": "high",
+      "scope": "key_workflow"
+    },
+    "requiredSections": [
+      "tutor",
+      "session",
+      "review"
+    ]
+  },
+  {
+    "id": "nonsaas_physical_goods",
+    "complexity": "medium",
+    "title": "Physical-goods operations",
+    "prd": "Coffee roastery operations tool for 3 retail cafes. Track green-bean inventory per origin, schedule roast batches, log tasting notes per roast, and assign baristas to shifts.",
+    "settings": {
+      "platform": "desktop",
+      "fidelity": "mid",
+      "scope": "multi_screen"
+    },
+    "requiredSections": [
+      "inventory",
+      "roast",
+      "shift"
     ]
   }
 ]

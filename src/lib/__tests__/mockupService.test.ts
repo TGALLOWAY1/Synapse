@@ -293,6 +293,27 @@ describe('mockupService spec engine', () => {
         expect(userPrompt).toContain('MANDATORY');
     });
 
+    it('pins deterministic sampling and disables fallback under Demo Safe Mode', async () => {
+        localStorage.setItem('MOCKUP_ENGINE', 'spec');
+        // Spec engine fails 3 times; under Safe Mode we should throw, not
+        // fall back to the HTML engine.
+        callGeminiMock.mockResolvedValueOnce('not valid json');
+        callGeminiMock.mockResolvedValueOnce('still not json');
+        callGeminiMock.mockResolvedValueOnce('{bad');
+
+        await expect(
+            generateMockup('Clinic triage PRD', { ...settingsLocal, safeMode: true }, structuredPRDLocal),
+        ).rejects.toThrow(/Demo Safe Mode/);
+
+        // All three spec calls should use the deterministic sampling config.
+        for (let i = 0; i < 3; i++) {
+            const cfg = callGeminiMock.mock.calls[i][2] as { temperature: number; topP: number; topK: number };
+            expect(cfg.temperature).toBe(0);
+            expect(cfg.topP).toBe(0.5);
+            expect(cfg.topK).toBe(1);
+        }
+    });
+
     it('falls back to HTML engine when spec engine fails repeatedly', async () => {
         localStorage.setItem('MOCKUP_ENGINE', 'spec');
         // Spec engine gets 3 failing attempts, then HTML engine takes over
