@@ -65,6 +65,132 @@ describe('mockupAlignmentCritique', () => {
         expect(critique.missingConcepts).toContain('main entities/objects');
     });
 
+    it('emits insufficient_entity_grounding when domainEntities are absent from screens', () => {
+        const prdWithEntities: StructuredPRD = {
+            ...structuredPRD,
+            domainEntities: [
+                { name: 'Replenishment task' },
+                { name: 'Supplier order' },
+                { name: 'Stockout risk signal' },
+            ],
+        };
+        const screens: MockupScreen[] = [
+            {
+                id: '1',
+                name: 'Overview Dashboard',
+                purpose: 'Track KPIs for teams.',
+                html: '<div class="min-h-screen"><header><h1>Overview Dashboard</h1></header><main><section>Active users</section></main></div>',
+            },
+            {
+                id: '2',
+                name: 'Analytics Home',
+                purpose: 'Review trends.',
+                html: '<div class="min-h-screen"><main><section>Revenue summary</section></main></div>',
+            },
+            {
+                id: '3',
+                name: 'Settings',
+                purpose: 'Configure preferences.',
+                html: '<div class="min-h-screen"><main><section>Defaults</section></main></div>',
+            },
+        ];
+        const critique = critiqueMockupAlignment(screens, settings, prdContent, prdWithEntities);
+        const perScreenIssueCodes = critique.screens.flatMap(s => s.issues.map(i => i.code));
+        expect(perScreenIssueCodes).toContain('insufficient_entity_grounding');
+    });
+
+    it('does not emit insufficient_entity_grounding when screens mention domainEntities by name', () => {
+        const prdWithEntities: StructuredPRD = {
+            ...structuredPRD,
+            domainEntities: [
+                { name: 'Replenishment task', exampleValues: ['SKU-1042', 'SKU-1188'] },
+                { name: 'Supplier order' },
+            ],
+        };
+        const screens: MockupScreen[] = [
+            {
+                id: '1',
+                name: 'Replenishment Queue',
+                purpose: 'Warehouse manager triages replenishment task items.',
+                html: '<div class="min-h-screen"><header><h1>Replenishment task queue</h1></header><main><section>Supplier order status</section></main></div>',
+            },
+            {
+                id: '2',
+                name: 'Supplier Escalation',
+                purpose: 'Inventory analyst escalates supplier order delays.',
+                html: '<div class="min-h-screen"><main><section>Supplier order delays</section><section>Replenishment task follow-up</section></main></div>',
+            },
+            {
+                id: '3',
+                name: 'Restock Workflow Review',
+                purpose: 'Confirm replenishment task completion.',
+                html: '<div class="min-h-screen"><main><section>Replenishment task trend</section></main></div>',
+            },
+        ];
+        const critique = critiqueMockupAlignment(screens, settings, prdContent, prdWithEntities);
+        const perScreenIssueCodes = critique.screens.flatMap(s => s.issues.map(i => i.code));
+        expect(perScreenIssueCodes).not.toContain('insufficient_entity_grounding');
+    });
+
+    it('emits insufficient_action_grounding when no primaryActions verb appears on any CTA', () => {
+        const prdWithActions: StructuredPRD = {
+            ...structuredPRD,
+            primaryActions: [
+                { verb: 'Escalate', target: 'supplier order' },
+                { verb: 'Approve', target: 'substitution' },
+            ],
+        };
+        const screens: MockupScreen[] = [
+            {
+                id: '1',
+                name: 'Replenishment Queue',
+                purpose: 'Manager reviews restock risks.',
+                html: '<div class="min-h-screen"><header><h1>Replenishment queue</h1><button type="button">Create record</button></header><main><section>Items</section></main></div>',
+            },
+            {
+                id: '2',
+                name: 'Restock Workflow Review',
+                purpose: 'Confirm restock progress.',
+                html: '<div class="min-h-screen"><header><h1>Workflow review</h1><button type="button">Save</button></header><main><section>Progress</section></main></div>',
+            },
+            {
+                id: '3',
+                name: 'Settings',
+                purpose: 'Configure preferences.',
+                html: '<div class="min-h-screen"><header><h1>Settings</h1><button type="button">Export</button></header><main><section>Defaults</section></main></div>',
+            },
+        ];
+        const critique = critiqueMockupAlignment(screens, settings, prdContent, prdWithActions);
+        expect(critique.issues.some(i => i.code === 'insufficient_action_grounding')).toBe(true);
+    });
+
+    it('skips structured grounding checks when domainEntities/primaryActions are absent', () => {
+        const screens: MockupScreen[] = [
+            {
+                id: '1',
+                name: 'Replenishment Queue',
+                purpose: 'Warehouse manager triages replenishment.',
+                html: '<div class="min-h-screen"><header><h1>Replenishment queue</h1></header><main><section>Restock ladder</section><section>Supplier activity</section></main></div>',
+            },
+            {
+                id: '2',
+                name: 'Supplier Escalation',
+                purpose: 'Escalate delayed orders.',
+                html: '<div class="min-h-screen"><main><section>Delayed orders</section><section>Approvals</section></main></div>',
+            },
+            {
+                id: '3',
+                name: 'Restock Workflow Review',
+                purpose: 'Confirm completion.',
+                html: '<div class="min-h-screen"><main><section>Timeline</section><section>Trend</section></main></div>',
+            },
+        ];
+        const critique = critiqueMockupAlignment(screens, settings, prdContent, structuredPRD);
+        const codes = critique.issues.map(i => i.code);
+        expect(codes).not.toContain('insufficient_entity_grounding');
+        expect(codes).not.toContain('insufficient_action_grounding');
+    });
+
     it('accepts PRD-grounded screen sets', () => {
         const alignedScreens: MockupScreen[] = [
             {

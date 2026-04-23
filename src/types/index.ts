@@ -49,6 +49,23 @@ export type StructuredPRD = {
     risks: string[];
     nonFunctionalRequirements?: string[];
     constraints?: string[];
+    // Phase B grounding fields. Optional so older projects keep working; the
+    // mockup spec engine and alignment critique use them when present to
+    // force PRD-derived nouns/verbs into generated screens instead of
+    // relying on heuristic term extraction.
+    domainEntities?: DomainEntity[];
+    primaryActions?: PrimaryAction[];
+};
+
+export type DomainEntity = {
+    name: string;                 // e.g. "Patient case"
+    description?: string;         // short what-it-is line
+    exampleValues?: string[];     // 1–4 realistic example instances
+};
+
+export type PrimaryAction = {
+    verb: string;                 // e.g. "Assign"
+    target: string;               // e.g. "case owner"
 };
 
 export type SpineVersion = {

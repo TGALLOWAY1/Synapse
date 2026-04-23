@@ -460,6 +460,31 @@ const buildSpecUserPrompt = (prdContent: string, structuredPRD?: StructuredPRD):
         if (personas) structuredLines.push(`Personas: ${personas}`);
         if (features) structuredLines.push(`Key features:\n${features}`);
         parts.push(structuredLines.join('\n'));
+
+        const groundingLines: string[] = [];
+        if (structuredPRD.domainEntities && structuredPRD.domainEntities.length > 0) {
+            const entityLines = structuredPRD.domainEntities.slice(0, 8).map(e => {
+                const examples = e.exampleValues?.length
+                    ? ` (examples: ${e.exampleValues.slice(0, 4).join(', ')})`
+                    : '';
+                const desc = e.description ? ` — ${e.description}` : '';
+                return `- ${e.name}${desc}${examples}`;
+            });
+            groundingLines.push('Domain entities — use these EXACT names for table columns, detail-panel fields, activity-feed targets, and section headings. Use the exampleValues as realistic cell content/row values:');
+            groundingLines.push(entityLines.join('\n'));
+        }
+        if (structuredPRD.primaryActions && structuredPRD.primaryActions.length > 0) {
+            const actionLines = structuredPRD.primaryActions
+                .slice(0, 6)
+                .map(a => `- "${a.verb} ${a.target}"`);
+            groundingLines.push('Primary actions — use these exact verb phrases for primary_cta labels across screens:');
+            groundingLines.push(actionLines.join('\n'));
+        }
+        if (groundingLines.length > 0) {
+            parts.push(
+                `Grounding requirements (MANDATORY — compliance gates pass/fail):\n${groundingLines.join('\n\n')}`,
+            );
+        }
     }
     parts.push('Return the layout_spec JSON now. No HTML. No markdown fences. Use only the allowed enum values.');
     return parts.join('\n\n');

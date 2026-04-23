@@ -264,6 +264,35 @@ describe('mockupService spec engine', () => {
         });
     });
 
+    it('injects domainEntities and primaryActions into the spec-engine user prompt', async () => {
+        localStorage.setItem('MOCKUP_ENGINE', 'spec');
+        callGeminiMock.mockResolvedValueOnce(buildSpecResponse());
+
+        const prdWithGrounding: StructuredPRD = {
+            ...structuredPRDLocal,
+            domainEntities: [
+                { name: 'Patient case', description: 'An intake record', exampleValues: ['Alex Chen', 'Priya Patel'] },
+                { name: 'Triage owner' },
+            ],
+            primaryActions: [
+                { verb: 'Assign', target: 'case owner' },
+                { verb: 'Submit', target: 'triage recommendation' },
+            ],
+        };
+
+        await generateMockup('Clinic triage PRD', settingsLocal, prdWithGrounding);
+
+        const userPrompt = callGeminiMock.mock.calls[0][1] as string;
+        expect(userPrompt).toContain('Domain entities');
+        expect(userPrompt).toContain('Patient case');
+        expect(userPrompt).toContain('Triage owner');
+        expect(userPrompt).toContain('Alex Chen');
+        expect(userPrompt).toContain('Primary actions');
+        expect(userPrompt).toContain('"Assign case owner"');
+        expect(userPrompt).toContain('"Submit triage recommendation"');
+        expect(userPrompt).toContain('MANDATORY');
+    });
+
     it('falls back to HTML engine when spec engine fails repeatedly', async () => {
         localStorage.setItem('MOCKUP_ENGINE', 'spec');
         // Spec engine gets 3 failing attempts, then HTML engine takes over
