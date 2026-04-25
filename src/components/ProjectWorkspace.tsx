@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -18,6 +18,7 @@ import { MockupsView } from './MockupsView';
 import { ArtifactsView } from './ArtifactsView';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
+import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
@@ -38,6 +39,7 @@ export function ProjectWorkspace() {
     const [showStructuredView, setShowStructuredView] = useState(true);
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
+    const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -255,6 +257,13 @@ export function ProjectWorkspace() {
                                     Project Settings
                                 </button>
                                 <button
+                                    onClick={() => { setIsSnapshotsOpen(true); setShowNavOverflow(false); }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                >
+                                    <Cloud size={14} className="text-indigo-400" />
+                                    Cloud Snapshots
+                                </button>
+                                <button
                                     onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}
                                     disabled={isGenerating || hasBranches || isOldVersion}
                                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
@@ -286,6 +295,16 @@ export function ProjectWorkspace() {
 
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
             {isExportOpen && projectId && <ExportModal projectId={projectId} onClose={() => setIsExportOpen(false)} />}
+            {isSnapshotsOpen && projectId && (
+                <SnapshotsPanel
+                    projectId={projectId}
+                    onClose={() => setIsSnapshotsOpen(false)}
+                    onRestored={(restoredId) => {
+                        // If a different project id was restored, navigate to it.
+                        if (restoredId && restoredId !== projectId) navigate(`/p/${restoredId}`);
+                    }}
+                />
+            )}
 
             {/* Pipeline Stage Bar — shrink-0, no absolute */}
             <div className="shrink-0 z-10">
