@@ -17,6 +17,7 @@
     "@tailwindcss/typography": "^0.5.19",
     "@types/mark.js": "^8.11.12",
     "@vercel/analytics": "^2.0.1",
+    "@vercel/blob": "^2.3.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
     "lucide-react": "^0.575.0",

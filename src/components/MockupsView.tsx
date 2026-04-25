@@ -26,6 +26,8 @@ import type {
 } from '../types';
 import { MOCKUP_HTML_V1 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
+import { useMockupImageStore } from '../store/mockupImageStore';
+import { hasOpenAIKey } from '../lib/openaiClient';
 
 interface MockupsViewProps {
     projectId: string;
@@ -151,6 +153,36 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
 
+    /**
+     * If the HTML pipeline fell through to its safe-fallback template, the
+     * structured mockup didn't really succeed — kick off a parallel
+     * gpt-image-2 draft (low quality) for each screen so the user has a
+     * second visual to compare against. Fire-and-forget; the per-screen
+     * panel surfaces its own errors.
+     */
+    const maybeAutoFireImages = (
+        artifactId: string,
+        versionId: string,
+        payload: MockupPayload,
+        settings: MockupSettings,
+        usedFallback: boolean,
+    ) => {
+        if (!usedFallback) return;
+        if (!hasOpenAIKey()) return;
+        const store = useMockupImageStore.getState();
+        for (const screen of payload.screens) {
+            void store.generate({
+                projectId,
+                artifactId,
+                versionId,
+                screen,
+                payload,
+                settings,
+                quality: 'low',
+            });
+        }
+    };
+
     const handleGenerate = async () => {
         setError(null);
         setWarning(null);
@@ -170,7 +202,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                 || `Mockup — ${platform} / ${fidelity} / ${scope.replace('_', ' ')}`;
             const { artifactId } = createArtifact(projectId, 'mockup', title);
 
-            createArtifactVersion(
+            const usedFallback = warnings.some(w => w.includes('safe fallback'));
+            const { versionId } = createArtifactVersion(
                 projectId,
                 artifactId,
                 JSON.stringify(payload),
@@ -183,7 +216,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         missingConcepts: critique.missingConcepts,
                     },
                     generationStrategy: 'mockup_strategy_v2',
-                    usedFallbackTemplate: warnings.some(w => w.includes('safe fallback')),
+                    usedFallbackTemplate: usedFallback,
                 },
                 [{
                     id: uuidv4(),
@@ -199,6 +232,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             if (warnings.length > 0) {
                 setWarning(`Generated with safeguards (${warnings.length} notices): ${warnings.join(' ')}`);
             }
+            maybeAutoFireImages(artifactId, versionId, payload, settings, usedFallback);
         } catch (e) {
             const err = normalizeError(e);
             console.error('[Mockup generation failed]', err.raw);
@@ -219,7 +253,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
             const { payload, warnings, critique } = await generateMockup(prdContent, settings, structuredPRD);
 
-            createArtifactVersion(
+            const usedFallback = warnings.some(w => w.includes('safe fallback'));
+            const { versionId } = createArtifactVersion(
                 projectId,
                 artifactId,
                 JSON.stringify(payload),
@@ -232,7 +267,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         missingConcepts: critique.missingConcepts,
                     },
                     generationStrategy: 'mockup_strategy_v2',
-                    usedFallbackTemplate: warnings.some(w => w.includes('safe fallback')),
+                    usedFallbackTemplate: usedFallback,
                 },
                 [{
                     id: uuidv4(),
@@ -246,6 +281,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             if (warnings.length > 0) {
                 setWarning(`Regenerated with safeguards (${warnings.length} notices): ${warnings.join(' ')}`);
             }
+            maybeAutoFireImages(artifactId, versionId, payload, settings, usedFallback);
         } catch (e) {
             // On regeneration failure, the previous version is preserved — the
             // user still sees the last known good content.
@@ -321,6 +357,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const renderVersionBody = (
         version: ArtifactVersion,
+        artifactId: string,
         staleness: StalenessState,
         actions: React.ReactNode,
     ) => {
@@ -339,6 +376,8 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         sourceSpineVersionId={sourceSpineVersionId}
                         actions={actions}
                         versionId={version.id}
+                        projectId={projectId}
+                        artifactId={artifactId}
                     />
                 </MockupErrorBoundary>
             );
@@ -691,6 +730,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                                         ) : (
                                             renderVersionBody(
                                                 preferredVersion,
+                                                artifact.id,
                                                 staleness,
                                                 renderVersionActions(artifact.id, preferredVersion, versions),
                                             )

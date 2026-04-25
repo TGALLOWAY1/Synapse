@@ -85,7 +85,24 @@ generated from PRD context as `MarkupImageSpec` JSON and rendered as
 resolution-independent SVG with highlights, arrows, numbered markers, and
 text blocks. Exportable as SVG.
 
-### 6. History timeline
+### 6. Cloud snapshots (owner-only)
+
+Save the entire current project — spine versions, branches, artifacts,
+feedback, history, **and** the AI-generated mockup images — to Vercel
+Blob behind a single owner token. Reload from any browser or device, or
+delete a snapshot when you're done with it.
+
+- Demo viewers never see this panel: it gates on owner-token presence.
+- Images bundle along with the project, so a restored snapshot looks
+  identical to the moment it was saved (no re-generation, no missing
+  PNGs).
+- Token is stored in your browser's `localStorage`; the server side
+  validates with constant-time comparison against
+  `SYNAPSE_OWNER_TOKEN`.
+
+Open via the workspace overflow menu &rarr; **Cloud Snapshots**.
+
+### 7. History timeline
 
 <img width="100%" alt="History timeline" src="public/screenshots/history-view.png" />
 
@@ -120,9 +137,9 @@ graph TD
 ## Tech stack
 
 - **Frontend:** React 19, TypeScript, Vite 7, Tailwind CSS 3
-- **Backend:** Vercel serverless API routes + MongoDB (for recruiter auth analytics)
-- **State:** Zustand 5 with debounced `localStorage` persistence
-- **LLM:** Google Gemini 2.5 Pro / Flash (direct browser calls, streaming support)
+- **Backend:** Vercel serverless API routes + MongoDB (for recruiter auth analytics) + Vercel Blob (for owner-only project snapshots)
+- **State:** Zustand 5 with debounced `localStorage` persistence; mockup PNGs in IndexedDB
+- **LLM:** Google Gemini 2.5 Pro / Flash (direct browser calls, streaming support); OpenAI gpt-image-2 for mockup image previews
 - **Markdown:** `react-markdown` + `remark-gfm` + `rehype-raw`
 - **Routing:** React Router v7
 - **Icons & animation:** `lucide-react`, `@formkit/auto-animate`
@@ -143,7 +160,28 @@ npm run dev
 ```
 
 Open `http://localhost:5173`, click the Settings gear, and paste your
-key. All workspace state persists to `localStorage`.
+key. Workspace state (projects, spines, artifacts) persists to
+`localStorage`; AI-generated mockup PNGs persist to **IndexedDB**
+(typically gigabytes of headroom, so high-quality images don't blow
+the localStorage 5-10 MB cap).
+
+### Owner-only cloud snapshots (optional)
+
+To enable the **Cloud Snapshots** panel for archiving / restoring whole
+projects (state + images) across devices, set two Vercel environment
+variables:
+
+| Variable | Where it comes from |
+| --- | --- |
+| `SYNAPSE_OWNER_TOKEN` | Any random string &geq; 24 chars. The server compares with `crypto.timingSafeEqual`; the client stores it in `localStorage`. |
+| `BLOB_READ_WRITE_TOKEN` | Created automatically when you provision Vercel Blob for the project. No manual setup needed. |
+
+The owner-token gate is single-tenant: there is no signup, no per-user
+isolation, no demo access. It exists so the project owner can persist
+real work without exposing an unauthenticated write endpoint to the
+public demo. Snapshot bundles are subject to Vercel's serverless body
+limit (~4.5 MB on Hobby), so very large projects with many high-quality
+images may need to be split or saved at lower image quality.
 
 ### Build for production
 
@@ -170,6 +208,8 @@ npm run build
 
 ## Project status
 
-Portfolio project. Single-user, fully client-side, no telemetry. Every
-project you create lives in your browser's `localStorage` and nowhere
-else.
+Portfolio project. Single-user by design. Demo visitors run the workspace
+fully in-browser &mdash; spine + artifact state in `localStorage`, mockup
+PNGs in IndexedDB, no telemetry, no cross-device sync. The owner can
+opt-in to Vercel-Blob-backed Cloud Snapshots (gated by
+`SYNAPSE_OWNER_TOKEN`) to persist real work across browsers and devices.

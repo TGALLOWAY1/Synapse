@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Layers, Sparkles } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 
 interface SettingsModalProps {
@@ -99,21 +99,31 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
     const [mockupEngine, setMockupEngine] = useState<MockupEngine>(() => readMockupEngine());
+    const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('OPENAI_API_KEY') || '');
 
     // Expand the legacy section automatically if the user is currently on a
     // legacy model — otherwise keep it collapsed to reduce visual noise.
     const currentIsLegacy = LEGACY_MODELS.some((m) => m.id === model);
     const [legacyOpen, setLegacyOpen] = useState(currentIsLegacy);
 
+    const selectedIsPreview = /preview/i.test(model);
+
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
         localStorage.setItem('GEMINI_API_KEY', apiKey.trim());
         localStorage.setItem('GEMINI_MODEL', model);
+        localStorage.setItem('MOCKUP_ENGINE', mockupEngine);
         const trimmedProjectId = projectId.trim();
         if (trimmedProjectId) {
             localStorage.setItem('GEMINI_PROJECT_ID', trimmedProjectId);
         } else {
             localStorage.removeItem('GEMINI_PROJECT_ID');
+        }
+        const trimmedOpenai = openaiKey.trim();
+        if (trimmedOpenai) {
+            localStorage.setItem('OPENAI_API_KEY', trimmedOpenai);
+        } else {
+            localStorage.removeItem('OPENAI_API_KEY');
         }
         onClose();
     };
@@ -192,6 +202,37 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             Synapse sends it as <code className="text-neutral-400">x-goog-user-project</code> so
                             Gemini meters requests against that project — fixes the case where a key defaults
                             to free-tier quota even after billing is on.
+                        </p>
+                    </div>
+
+                    {/* OpenAI image preview (optional) */}
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+                                <Sparkles size={14} className="text-indigo-400" />
+                                OpenAI Image Preview
+                                <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
+                            </label>
+                            <a
+                                href="https://platform.openai.com/api-keys"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
+                            >
+                                Get Key <ExternalLink size={10} />
+                            </a>
+                        </div>
+                        <input
+                            type="password"
+                            value={openaiKey}
+                            onChange={(e) => setOpenaiKey(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
+                            placeholder="Paste your sk-... OpenAI key here"
+                        />
+                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
+                            Adds an "AI Image" tab to each mockup screen, powered by OpenAI <code className="text-neutral-400">gpt-image-2</code>.
+                            Click to generate a low-quality draft image; if you like it, regenerate at high quality.
+                            Your key is stored locally in your browser and never leaves your machine.
                         </p>
                     </div>
 
