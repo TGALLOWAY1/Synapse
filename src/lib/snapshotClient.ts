@@ -133,7 +133,7 @@ export const listSnapshots = async (): Promise<SnapshotListItem[]> => {
 };
 
 export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
-    const resp = await fetch(`${API_BASE}/${encodeURIComponent(id)}`, { headers: authHeaders() });
+    const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, { headers: authHeaders() });
     if (!resp.ok) {
         const err = await resp.json().catch(() => ({}));
         throw new Error(err?.error ?? `load_failed_${resp.status}`);
@@ -142,7 +142,7 @@ export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
 };
 
 export const deleteSnapshot = async (id: string): Promise<void> => {
-    const resp = await fetch(`${API_BASE}/${encodeURIComponent(id)}`, {
+    const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, {
         method: 'DELETE',
         headers: authHeaders(),
     });
