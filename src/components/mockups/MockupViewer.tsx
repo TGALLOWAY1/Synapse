@@ -1,8 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
-import { Eye, Code2, ExternalLink, Copy, Check, AlertTriangle, Activity } from 'lucide-react';
+import { Eye, Code2, ExternalLink, Copy, Check, AlertTriangle, Activity, Sparkles } from 'lucide-react';
 import type { MockupPayload, MockupSettings, StalenessState } from '../../types';
 import { StalenessBadge } from '../StalenessBadge';
 import { MockupHtmlPreview } from './MockupHtmlPreview';
+import { MockupScreenImage } from './MockupScreenImage';
 import { buildMockupSrcDoc } from './buildMockupSrcDoc';
 import { useProbeStore } from '../../store/probeStore';
 
@@ -17,9 +18,14 @@ type Props = {
     // Passed through to MockupHtmlPreview so iframe probe outcomes are
     // aggregated per artifact version in the session telemetry store.
     versionId?: string;
+    // Required for the AI Image tab (OpenAI gpt-image-2 path). Threaded
+    // through from MockupsView. When omitted (e.g. comparison view), the
+    // AI Image tab is hidden.
+    projectId?: string;
+    artifactId?: string;
 };
 
-type Mode = 'preview' | 'code';
+type Mode = 'preview' | 'code' | 'image';
 
 const CHIP = 'text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-neutral-200 bg-neutral-50 text-neutral-500 font-medium';
 
@@ -43,7 +49,10 @@ export function MockupViewer({
     sourceSpineVersionId,
     actions,
     versionId,
+    projectId,
+    artifactId,
 }: Props) {
+    const aiImageEnabled = !!(projectId && artifactId && versionId);
     const [activeIdx, setActiveIdx] = useState(0);
     const [mode, setMode] = useState<Mode>('preview');
     const [copied, setCopied] = useState(false);
@@ -101,7 +110,7 @@ export function MockupViewer({
                             <p className="text-sm text-neutral-500 mt-0.5 line-clamp-2">{payload.summary}</p>
                         )}
                     </div>
-                    {/* Preview / Code toggle */}
+                    {/* Preview / Code / AI Image toggle */}
                     <div className="shrink-0 flex items-center bg-neutral-100 rounded-lg p-0.5 text-xs font-medium">
                         <button
                             type="button"
@@ -127,6 +136,21 @@ export function MockupViewer({
                             <Code2 size={12} />
                             Code
                         </button>
+                        {aiImageEnabled && (
+                            <button
+                                type="button"
+                                onClick={() => setMode('image')}
+                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
+                                    mode === 'image'
+                                        ? 'bg-white text-neutral-900 shadow-sm'
+                                        : 'text-neutral-500 hover:text-neutral-700'
+                                }`}
+                                title="AI image preview (OpenAI gpt-image-2)"
+                            >
+                                <Sparkles size={12} />
+                                AI Image
+                            </button>
+                        )}
                     </div>
                 </div>
 
@@ -210,19 +234,31 @@ export function MockupViewer({
                 </div>
             </div>
 
-            {/* Preview / Code body */}
+            {/* Preview / Code / AI Image body */}
             <div className="px-5 pb-4">
-                {mode === 'preview' ? (
+                {mode === 'preview' && (
                     <MockupHtmlPreview
                         key={activeScreen.id}
                         html={activeScreen.html}
                         platform={settings.platform}
                         versionId={versionId}
                     />
-                ) : (
+                )}
+                {mode === 'code' && (
                     <pre className="text-xs font-mono bg-neutral-900 text-neutral-100 rounded-lg p-4 overflow-auto max-h-[680px] whitespace-pre-wrap break-words">
                         {codeString}
                     </pre>
+                )}
+                {mode === 'image' && aiImageEnabled && projectId && artifactId && versionId && (
+                    <MockupScreenImage
+                        key={`${activeScreen.id}:img`}
+                        projectId={projectId}
+                        artifactId={artifactId}
+                        versionId={versionId}
+                        screen={activeScreen}
+                        payload={payload}
+                        settings={settings}
+                    />
                 )}
             </div>
 

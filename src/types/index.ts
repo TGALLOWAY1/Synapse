@@ -251,6 +251,27 @@ export type MockupPayload = {
 
 export const MOCKUP_HTML_V1 = 'mockup_html_v1' as const;
 
+// --- AI image previews (OpenAI gpt-image-2) ---
+//
+// Each MockupScreen can optionally have an associated AI-generated image
+// preview produced by OpenAI gpt-image-2. The image lives outside the Zustand
+// store (in IndexedDB) because base64 PNGs are too large for localStorage's
+// quota. MockupPayload is intentionally unchanged — image presence is looked
+// up by `${versionId}:${screenId}` in the IDB image store.
+export type MockupImageQuality = 'low' | 'medium' | 'high';
+
+export type MockupImageRecord = {
+    key: string;            // `${versionId}:${screenId}`
+    projectId: string;
+    artifactId: string;
+    versionId: string;
+    screenId: string;
+    dataUrl: string;        // `data:image/png;base64,...`
+    quality: MockupImageQuality;
+    prompt: string;         // prompt sent to gpt-image-2 (for traceability)
+    generatedAt: number;
+};
+
 // --- Mockup Layout Spec (Phase A deterministic generation) ---
 //
 // The layout-spec engine narrows the model's generation surface from "any
