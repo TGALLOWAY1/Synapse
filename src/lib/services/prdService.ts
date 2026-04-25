@@ -38,6 +38,8 @@ Provide:
 - Risks with specific mitigation strategies
 - Non-functional requirements (performance, security, accessibility, etc.)
 - Constraints (budget, timeline, technical, regulatory)
+- domainEntities: 3–8 concrete nouns this product manipulates (e.g. "Patient case", "Intake note", "Triage owner"). Each entity MUST include a short description and 2–4 realistic exampleValues — these become table rows, detail-panel values, and activity-feed targets in downstream mockups, so make them specific (real names, real statuses, realistic IDs — no placeholders).
+- primaryActions: 3–6 verb+target pairs expressing the most important things a user does in this product (e.g. { verb: "Assign", target: "case owner" }). These become the primary CTAs in mockups, so prefer concrete verbs over vague ones like "manage" or "view".
 
 Each acceptance criterion must be testable and specific. Prioritize features using MoSCoW: "must" for launch-critical, "should" for important, "could" for nice-to-have.${platformNote}`;
 
@@ -103,6 +105,24 @@ export const structuredPRDToMarkdown = (prd: StructuredPRD): string => {
     if (prd.constraints && prd.constraints.length > 0) {
         lines.push('## Constraints');
         prd.constraints.forEach(c => lines.push(`- ${c}`));
+        lines.push('');
+    }
+
+    if (prd.domainEntities && prd.domainEntities.length > 0) {
+        lines.push('## Domain Entities');
+        prd.domainEntities.forEach(entity => {
+            const descPart = entity.description ? ` — ${entity.description}` : '';
+            lines.push(`- **${entity.name}**${descPart}`);
+            if (entity.exampleValues && entity.exampleValues.length > 0) {
+                lines.push(`  - Examples: ${entity.exampleValues.join(', ')}`);
+            }
+        });
+        lines.push('');
+    }
+
+    if (prd.primaryActions && prd.primaryActions.length > 0) {
+        lines.push('## Primary Actions');
+        prd.primaryActions.forEach(action => lines.push(`- ${action.verb} ${action.target}`));
         lines.push('');
     }
 

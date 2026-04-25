@@ -8,10 +8,12 @@ import type {
 import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { mockupSchema } from '../schemas/mockupSchema';
+import { mockupLayoutSpecSchema } from '../schemas/mockupLayoutSpec';
 import { assessMockupHtmlQuality, normalizeMockupHtml } from '../mockupQuality';
 import { critiqueMockupAlignment, type MockupAlignmentCritique } from '../mockupAlignmentCritique';
 import { PLACEHOLDER_PROMPT_CATALOG } from '../mockupPlaceholders';
 import { validateMockupHtmlStructure } from '../mockupValidation';
+import { MockupSpecParseError, parseLayoutSpec } from '../mockupLayoutRenderer';
 
 // ---- Instruction tables (rewritten for polished HTML/Tailwind output) ----
 
@@ -35,8 +37,22 @@ const SCOPE_INSTRUCTIONS: Record<string, string> = {
 
 const MOCKUP_PROMPT_TEMPLATE_VERSION = '2026-04-17.v2';
 const MOCKUP_GENERATION_STRATEGY_VERSION = 'mockup_strategy_v2';
+const MOCKUP_SPEC_STRATEGY_VERSION = 'mockup_strategy_spec_v1';
 const MAX_GENERATION_ATTEMPTS = 3;
 const QUALITY_THRESHOLD = 70;
+
+// Phase A engine switch. Default remains the HTML engine until the spec
+// engine has validated against the harness; users can opt-in via
+// localStorage.MOCKUP_ENGINE = 'spec'.
+type MockupEngine = 'html' | 'spec';
+const getMockupEngine = (): MockupEngine => {
+    try {
+        const raw = typeof localStorage !== 'undefined' ? localStorage.getItem('MOCKUP_ENGINE') : null;
+        return raw === 'spec' ? 'spec' : 'html';
+    } catch {
+        return 'html';
+    }
+};
 
 // ---- Prompt construction ----
 
@@ -362,18 +378,199 @@ const buildSafeFallbackPayload = (
     };
 };
 
-// ---- Public API ----
+// ---- Spec engine (Phase A) ----
+//
+// The spec engine replaces free-form HTML generation with a typed layout
+// spec. The model only picks shells/sections/actions from a closed vocabulary
+// and fills slot content; deterministic templates in
+// src/components/mockups/templates/ render the HTML. Slot text is still
+// critiqued for PRD alignment via critiqueMockupAlignment on the rendered
+// output so the existing gating path continues to apply.
 
-export const generateMockup = async (
+const buildSpecSystemPrompt = (settings: MockupSettings): string => {
+    const styleLine = settings.style ? `\nStyle direction from the user: ${settings.style}` : '';
+    return `You are a senior product designer producing a deterministic mockup layout spec (mockup_layout_spec_v1) for a new product, grounded in a PRD.
+
+DETERMINISTIC MODE IS ON.
+You MUST output ONLY a layout_spec JSON object matching the provided responseSchema. Do NOT return HTML. A separate deterministic renderer turns the spec into HTML.
+Prompt template version: ${MOCKUP_PROMPT_TEMPLATE_VERSION}.
+
+## Output contract
+- version: "mockup_layout_spec_v1"
+- tokenSet: "token_set_v1"
+- title: a short concept name grounded in the PRD
+- summary: one or two sentences framing the concept
+- screens: 1 to 5 screens. Use exactly the number implied by the scope setting below.
+
+## Per-screen rules
+- name: short screen title (e.g. "Triage Queue", "Case Detail Review")
+- purpose: one sentence explaining what this screen solves, for which persona, grounded in the PRD
+- shell: REUSE the same shell.type/platform/accent/productName/navLabels across ALL screens unless the workflow step explicitly requires a state change. This is how we enforce cross-screen coherence.
+- sections: 2 to 4 entries. At least one with role="primary"; the rest "support" or "utility".
+- actions: 1 to 4 entries. At least one action.kind="primary_cta" with a PRD-derived verb label.
+
+## Allowed values (strict — do not invent)
+- shell.type: sidebar_topbar | topbar_only | mobile_tab_shell
+- shell.platform: desktop | mobile | responsive
+- shell.accent: indigo
+- section.role: primary | support | utility
+- section.component: stat_grid | data_table | activity_feed | filters_bar | detail_panel | empty_state
+- action.kind: primary_cta | secondary_cta | input | select | tab
+
+## Section slot-data contract (fill only the fields for the chosen component)
+- stat_grid: data.rows = 2–6 items, each { label, value, delta? }. Use PRD metric names for labels; realistic numbers for values.
+- data_table: data.columns = 2–6 strings; data.tableRows = 1–8 items, each { cells: string[] }. Cell count should match columns. Column headers and cells must be grounded in PRD entities.
+- activity_feed: data.entries = 2–6 items, each { actor, verb, target, when }. Use real persona names, realistic verbs, PRD entities, and relative times like "2m ago".
+- filters_bar: data.filters = 1–4 items, each { label, options: 2–5 strings }. Use PRD-grounded filter dimensions.
+- detail_panel: data.fields = 2–8 items, each { label, value }. Use PRD entity field names and realistic values.
+- empty_state: data = { heading, body, primaryActionLabel? }.
+
+## Content quality bar
+- Copy MUST use the actual product's persona names, feature names, and entity names from the PRD. No "Lorem ipsum", no "Button 1", no "Item A".
+- Keep labels tight (under ~40 chars). No full paragraphs in slot text.
+- Reuse navLabels across screens; reuse productName exactly.
+- The first action on every screen should be the most important primary verb for that screen (e.g. "Assign case owner", not "Create").
+
+## Settings context
+${FIDELITY_INSTRUCTIONS[settings.fidelity]}
+${PLATFORM_INSTRUCTIONS[settings.platform]}
+${SCOPE_INSTRUCTIONS[settings.scope]}${styleLine}
+
+## Reminders
+Return ONLY the layout_spec JSON. No markdown, no commentary, no HTML.
+
+## Image & media placeholders (informational)
+Placeholder tokens below are available to the deterministic renderer. Do NOT include them yourself.
+${PLACEHOLDER_PROMPT_CATALOG}`;
+};
+
+const buildSpecUserPrompt = (prdContent: string, structuredPRD?: StructuredPRD): string => {
+    const parts: string[] = [`Product PRD:\n---\n${prdContent}\n---`];
+    if (structuredPRD) {
+        const personas = structuredPRD.targetUsers?.slice(0, 6).join(', ');
+        const features = structuredPRD.features
+            ?.slice(0, 8)
+            .map(f => `- ${f.name}${f.description ? `: ${f.description}` : ''}`)
+            .join('\n');
+        const vision = structuredPRD.vision?.trim();
+        const problem = structuredPRD.coreProblem?.trim();
+        const structuredLines: string[] = ['Structured PRD summary (use these names in your slot content):'];
+        if (vision) structuredLines.push(`Vision: ${vision}`);
+        if (problem) structuredLines.push(`Core problem: ${problem}`);
+        if (personas) structuredLines.push(`Personas: ${personas}`);
+        if (features) structuredLines.push(`Key features:\n${features}`);
+        parts.push(structuredLines.join('\n'));
+
+        const groundingLines: string[] = [];
+        if (structuredPRD.domainEntities && structuredPRD.domainEntities.length > 0) {
+            const entityLines = structuredPRD.domainEntities.slice(0, 8).map(e => {
+                const examples = e.exampleValues?.length
+                    ? ` (examples: ${e.exampleValues.slice(0, 4).join(', ')})`
+                    : '';
+                const desc = e.description ? ` — ${e.description}` : '';
+                return `- ${e.name}${desc}${examples}`;
+            });
+            groundingLines.push('Domain entities — use these EXACT names for table columns, detail-panel fields, activity-feed targets, and section headings. Use the exampleValues as realistic cell content/row values:');
+            groundingLines.push(entityLines.join('\n'));
+        }
+        if (structuredPRD.primaryActions && structuredPRD.primaryActions.length > 0) {
+            const actionLines = structuredPRD.primaryActions
+                .slice(0, 6)
+                .map(a => `- "${a.verb} ${a.target}"`);
+            groundingLines.push('Primary actions — use these exact verb phrases for primary_cta labels across screens:');
+            groundingLines.push(actionLines.join('\n'));
+        }
+        if (groundingLines.length > 0) {
+            parts.push(
+                `Grounding requirements (MANDATORY — compliance gates pass/fail):\n${groundingLines.join('\n\n')}`,
+            );
+        }
+    }
+    parts.push('Return the layout_spec JSON now. No HTML. No markdown fences. Use only the allowed enum values.');
+    return parts.join('\n\n');
+};
+
+const runSpecEngineAttempt = async (
     prdContent: string,
     settings: MockupSettings,
-    structuredPRD?: StructuredPRD,
-    options?: ProviderOptions,
+    structuredPRD: StructuredPRD | undefined,
+    warnings: string[],
 ): Promise<ParseResult> => {
-    options?.onStatus?.('Generating mockup...');
+    const system = buildSpecSystemPrompt(settings);
+    const user = buildSpecUserPrompt(prdContent, structuredPRD);
+    // Demo Safe Mode pins deterministic sampling: temp=0 / topK=1 collapses
+    // the model to greedy decoding, which is the only way the stochastic
+    // boundary from the 2026-04-22 audit actually goes away.
+    const providerParams = settings.safeMode
+        ? { temperature: 0, topP: 0.5, topK: 1 }
+        : { temperature: 0.2, topP: 0.8, topK: 32 };
+    const raw = await callGemini(system, user, {
+        responseMimeType: 'application/json',
+        responseSchema: mockupLayoutSpecSchema,
+        ...providerParams,
+    });
+    const fallbackProduct = inferConceptName(prdContent);
+    const specResult = parseLayoutSpec(raw, fallbackProduct);
+    specResult.warnings.forEach(w => warnings.push(w));
 
+    // Run the existing alignment critique on the rendered screens so the
+    // PRD-grounding gate still applies. The spec engine produces consistent
+    // structure, but copy can still drift generic if the PRD is thin.
+    const critique = critiqueMockupAlignment(
+        specResult.payload.screens,
+        settings,
+        prdContent,
+        structuredPRD,
+    );
+    // In Safe Mode, any medium-or-high alignment hit is a hard reject —
+    // the user gets an actionable error instead of a silent degrade.
+    if (settings.safeMode && critique.severity !== 'low') {
+        const reason = critique.mismatchReasons.slice(0, 3).join(' ');
+        throw new Error(
+            `Demo Safe Mode: mockup failed PRD alignment gate (${critique.alignmentScore}/100, severity=${critique.severity}). ${reason}`,
+        );
+    }
+    if (critique.severity === 'high' && critique.alignmentScore < 45) {
+        const reason = critique.mismatchReasons.slice(0, 3).join(' ');
+        throw new Error(
+            `Mockup spec failed PRD alignment critique (${critique.alignmentScore}/100). ${reason}`,
+        );
+    }
+    critique.screens
+        .filter(screen => screen.severity !== 'low')
+        .forEach(screen => {
+            warnings.push(
+                `Screen "${screen.screenName}": alignment ${screen.score}/100 (${screen.severity}). ${screen.mismatchReasons.slice(0, 2).join(' ')}`,
+            );
+        });
+    if (critique.severity !== 'low') {
+        warnings.push(
+            `Set alignment ${critique.alignmentScore}/100 (${critique.severity}). Missing: ${critique.missingConcepts.join(', ') || 'none identified'}.`,
+        );
+    }
+
+    return {
+        payload: specResult.payload,
+        critique,
+        warnings: specResult.warnings,
+        usedFallback: false,
+        strategyVersion: MOCKUP_SPEC_STRATEGY_VERSION,
+    };
+};
+
+// ---- Public API ----
+
+const runHtmlEngine = async (
+    prdContent: string,
+    settings: MockupSettings,
+    structuredPRD: StructuredPRD | undefined,
+    options: ProviderOptions | undefined,
+): Promise<ParseResult> => {
     const system = buildSystemPrompt(settings);
     const user = buildUserPrompt(prdContent, structuredPRD);
+    const providerParams = settings.safeMode
+        ? { temperature: 0, topP: 0.5, topK: 1 }
+        : { temperature: 0.2, topP: 0.8, topK: 32 };
     const warnings: string[] = [];
     let lastError: Error | null = null;
 
@@ -383,9 +580,7 @@ export const generateMockup = async (
             const raw = await callGemini(system, user, {
                 responseMimeType: 'application/json',
                 responseSchema: mockupSchema,
-                temperature: 0.2,
-                topP: 0.8,
-                topK: 32,
+                ...providerParams,
             });
             const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD);
             const qualityAvg = parsed.payload.screens.length
@@ -411,6 +606,67 @@ export const generateMockup = async (
         }
     }
 
+    // Demo Safe Mode prefers an explicit "regenerate" failure over a silent
+    // fallback — the whole point is that recruiters don't see a watered-down
+    // output when the real output failed.
+    if (settings.safeMode) {
+        throw new Error(
+            `Demo Safe Mode: mockup generation failed after ${MAX_GENERATION_ATTEMPTS} attempts. ${lastError?.message ?? ''} Warnings: ${warnings.join(' ')}`,
+        );
+    }
+
     console.warn('[mockupService] returning safe fallback after repeated generation failures', lastError);
     return buildSafeFallbackPayload(prdContent, settings, warnings);
+};
+
+const runSpecEngine = async (
+    prdContent: string,
+    settings: MockupSettings,
+    structuredPRD: StructuredPRD | undefined,
+    options: ProviderOptions | undefined,
+): Promise<ParseResult> => {
+    const warnings: string[] = [];
+    let lastError: Error | null = null;
+
+    for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
+        options?.onStatus?.(`Generating mockup spec (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})...`);
+        try {
+            return await runSpecEngineAttempt(prdContent, settings, structuredPRD, warnings);
+        } catch (error) {
+            const err = error instanceof Error ? error : new Error(String(error));
+            lastError = err;
+            if (err instanceof MockupSpecParseError) {
+                err.warnings.forEach(w => warnings.push(w));
+            }
+            warnings.push(`Spec attempt ${attempt} failed: ${err.message}`);
+        }
+    }
+
+    if (settings.safeMode) {
+        throw new Error(
+            `Demo Safe Mode: spec engine failed after ${MAX_GENERATION_ATTEMPTS} attempts. ${lastError?.message ?? ''} Warnings: ${warnings.join(' ')}`,
+        );
+    }
+
+    console.warn('[mockupService] spec engine falling back to HTML engine after repeated failures', lastError);
+    warnings.push('Spec engine failed repeatedly; falling back to HTML engine for this generation.');
+    const htmlResult = await runHtmlEngine(prdContent, settings, structuredPRD, options);
+    return {
+        ...htmlResult,
+        warnings: [...warnings, ...htmlResult.warnings],
+    };
+};
+
+export const generateMockup = async (
+    prdContent: string,
+    settings: MockupSettings,
+    structuredPRD?: StructuredPRD,
+    options?: ProviderOptions,
+): Promise<ParseResult> => {
+    options?.onStatus?.('Generating mockup...');
+    const engine = getMockupEngine();
+    if (engine === 'spec') {
+        return runSpecEngine(prdContent, settings, structuredPRD, options);
+    }
+    return runHtmlEngine(prdContent, settings, structuredPRD, options);
 };

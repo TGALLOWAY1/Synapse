@@ -121,6 +121,7 @@ const extractSettings = (version: ArtifactVersion): MockupSettings => {
         scope: (typeof s.scope === 'string' && ['single_screen', 'multi_screen', 'key_workflow'].includes(s.scope)
             ? s.scope : 'key_workflow') as MockupScope,
         style: typeof s.style === 'string' ? s.style : undefined,
+        safeMode: s.safeMode === true ? true : undefined,
     };
 };
 
@@ -144,6 +145,9 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
     // generation time from the project platform and PRD detail.
     const [scope, setScope] = useState<MockupScope>('key_workflow');
     const [style, setStyle] = useState('');
+    // Phase C: Demo Safe Mode pins the provider to greedy decoding, drops
+    // the fallback chain, and hard-rejects on alignment critique miss.
+    const [safeMode, setSafeMode] = useState(false);
 
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
 
@@ -157,6 +161,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             const settings: MockupSettings = {
                 platform, fidelity, scope,
                 style: style || undefined,
+                safeMode: safeMode || undefined,
             };
 
             const { payload, warnings, critique } = await generateMockup(prdContent, settings, structuredPRD);
@@ -333,6 +338,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                         createdAt={version.createdAt}
                         sourceSpineVersionId={sourceSpineVersionId}
                         actions={actions}
+                        versionId={version.id}
                     />
                 </MockupErrorBoundary>
             );
@@ -382,6 +388,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                             versionNumber={v.versionNumber}
                             createdAt={v.createdAt}
                             sourceSpineVersionId={v.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId}
+                            versionId={v.id}
                         />
                     </MockupErrorBoundary>
                 );
@@ -559,6 +566,23 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
                             placeholder="Select a preset or type your own…"
                             className="w-full px-3 py-2 border border-neutral-200 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500/30 focus:border-indigo-300"
                         />
+                    </div>
+
+                    <div>
+                        <label className="flex items-start gap-3 cursor-pointer select-none">
+                            <input
+                                type="checkbox"
+                                checked={safeMode}
+                                onChange={e => setSafeMode(e.target.checked)}
+                                className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-indigo-600 focus:ring-indigo-500"
+                            />
+                            <span>
+                                <span className="block text-sm font-medium text-neutral-700">Demo Safe Mode</span>
+                                <span className="block text-[11px] text-neutral-500 leading-tight">
+                                    Pin deterministic sampling (temperature 0) and hard-reject on PRD alignment miss instead of serving a fallback. Slower to succeed but repeatable — recommended for recruiter demos.
+                                </span>
+                            </span>
+                        </label>
                     </div>
 
                     <div className="flex items-center gap-3 pt-1 border-t border-neutral-100">
