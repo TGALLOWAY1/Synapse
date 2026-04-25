@@ -205,9 +205,7 @@ follow-up" section below.
 | `api/admin/recruiters.js` | Constant-time admin-key compare; reject short/unset keys; rate limit. |
 | `api/auth/login.js` | IP + (IP, email) rate limits. |
 | `api/auth/signup.js` | Per-IP signup rate limit. |
-| `api/auth/github.js` | Per-IP OAuth init rate limit. |
-| `api/auth/google.js` | Per-IP OAuth init rate limit. |
-| `api/auth/linkedin.js` | Per-IP OAuth init rate limit. |
+| `api/auth/[provider].js` | Per-IP OAuth init rate limit (consolidates github/google/linkedin via dynamic route). |
 | `api/activity.js` | Allowlist of event types; size/shape cap on metadata; per-user rate limit. |
 | `src/components/RecruiterAdminPage.tsx` | Client-side URL sanitization; explicit `noopener noreferrer`. |
 | `vercel.json` | CSP, HSTS, X-Frame-Options, X-Content-Type-Options, Referrer-Policy, Permissions-Policy, API no-store cache. |
