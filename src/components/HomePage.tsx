@@ -93,6 +93,7 @@ export function HomePage() {
                         message: userMessage(err),
                         category: err.category,
                         timestamp: err.timestamp,
+                        raw: err.raw,
                     });
                 });
         }).catch((e) => {
@@ -102,6 +103,7 @@ export function HomePage() {
                 message: 'Failed to load generation module. Try refreshing the page.',
                 category: err.category,
                 timestamp: err.timestamp,
+                raw: err.raw,
             });
         });
     };

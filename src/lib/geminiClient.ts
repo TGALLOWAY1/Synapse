@@ -122,7 +122,7 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        throw new Error(formatGeminiError(response.statusText, errorData));
+        throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
     }
 
     const data = await response.json();
@@ -169,7 +169,7 @@ export const callGeminiStream = async (
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);
-        const err = new Error(formatGeminiError(response.statusText, errorData));
+        const err = new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
         callbacks.onError(err);
         throw err;
     }

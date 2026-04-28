@@ -203,6 +203,11 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             Gemini meters requests against that project — fixes the case where a key defaults
                             to free-tier quota even after billing is on.
                         </p>
+                        <p className="text-[11px] text-amber-300/80 leading-relaxed px-1">
+                            Use the Project <strong>ID</strong> (e.g. <code className="text-neutral-400">my-project-123</code>),
+                            not the Project Number. The <strong>Generative Language API</strong> must be
+                            enabled on this project (Google Cloud Console → APIs &amp; Services → Library).
+                        </p>
                     </div>
 
                     {/* OpenAI image preview (optional) */}

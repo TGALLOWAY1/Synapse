@@ -110,7 +110,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         });
     },
 
-    setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number } | null) => {
+    setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => {
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const spine = projectSpines.find(s => s.id === spineId);

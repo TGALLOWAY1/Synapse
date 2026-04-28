@@ -181,6 +181,7 @@ export function ProjectWorkspace() {
                     message: userMessage(err),
                     category: err.category,
                     timestamp: err.timestamp,
+                    raw: err.raw,
                 });
             }
         } finally {
@@ -472,7 +473,20 @@ export function ProjectWorkspace() {
                                                     </div>
                                                     <div className="flex-1 min-w-0">
                                                         <p className="font-semibold text-red-800 mb-1">PRD generation could not be completed</p>
-                                                        <p className="text-sm text-red-700 mb-4">{activeSpine.generationError.message}</p>
+                                                        <p className="text-sm text-red-700 mb-4 whitespace-pre-wrap break-words">{activeSpine.generationError.message}</p>
+                                                        {activeSpine.generationError.raw && (
+                                                            <details className="mb-4 text-xs">
+                                                                <summary className="cursor-pointer font-medium text-red-700 hover:text-red-800 select-none">
+                                                                    Show technical details
+                                                                </summary>
+                                                                <div className="mt-2 p-3 rounded-lg bg-red-100/60 border border-red-200 text-red-900 font-mono whitespace-pre-wrap break-words">
+                                                                    <div className="text-[10px] uppercase tracking-wider text-red-700 mb-1">
+                                                                        Category: {activeSpine.generationError.category}
+                                                                    </div>
+                                                                    {activeSpine.generationError.raw}
+                                                                </div>
+                                                            </details>
+                                                        )}
                                                         <div className="flex items-center gap-3">
                                                             <button
                                                                 onClick={handleRegenerate}
