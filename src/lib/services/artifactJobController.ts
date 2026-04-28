@@ -107,10 +107,12 @@ async function runCoreArtifactSlot(
             status: 'generating',
             startedAt: Date.now(),
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
+            progressLog: [],
         });
         content = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
             generatedArtifacts,
             signal,
+            onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
     } finally {
         semaphore.release();
@@ -125,6 +127,7 @@ async function runCoreArtifactSlot(
     const warnings = [...validation.warnings, ...consistencyWarnings];
 
     const writeStore = useProjectStore.getState();
+    writeStore.appendSlotProgress(projectId, subtype, 'Saving artifact…');
     const existing = writeStore.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
     let artifactId: string;
     if (existing) {
@@ -163,12 +166,15 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             status: 'generating',
             startedAt: Date.now(),
             attempt: (store.getSlot(projectId, 'mockup')?.attempt ?? 0) + 1,
+            progressLog: [],
         });
+        store.appendSlotProgress(projectId, 'mockup', 'Sending request to model…');
         result = await generateMockup(prdContent, settings, structuredPRD);
     } finally {
         semaphore.release();
     }
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
+    useProjectStore.getState().appendSlotProgress(projectId, 'mockup', 'Saving artifact…');
 
     const { payload, warnings, critique } = result;
     const usedFallback = warnings.some(w => w.includes('safe fallback'));

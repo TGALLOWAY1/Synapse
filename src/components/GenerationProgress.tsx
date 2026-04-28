@@ -1,4 +1,5 @@
 import { useState, useEffect, useRef } from 'react';
+import { Check } from 'lucide-react';
 import type { ProgressStage } from './generationStages';
 
 interface GenerationProgressProps {
@@ -23,7 +24,15 @@ interface GenerationProgressProps {
      * the component is state-driven (paired with `progress`).
      */
     statusLabel?: string;
+    /**
+     * Real progress events emitted by the operation, oldest first. When
+     * non-empty, the panel renders an accumulating list (✓ for past entries,
+     * pulsing dot for the active one) instead of cycling stage labels.
+     */
+    history?: string[];
 }
+
+const VISIBLE_HISTORY_CAP = 8;
 
 const VARIANT_STYLES = {
     default: {
@@ -80,17 +89,19 @@ export function GenerationProgress({
     inline = false,
     progress,
     statusLabel,
+    history,
 }: GenerationProgressProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFading, setIsFading] = useState(false);
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const style = VARIANT_STYLES[variant];
     const isStateDriven = typeof progress === 'number';
+    const hasHistory = !!history && history.length > 0;
 
     useEffect(() => {
-        // When a real progress value is supplied, skip time-based advancement
-        // entirely — the parent component owns stage progression.
-        if (isStateDriven) return;
+        // When a real progress value is supplied or history is being streamed
+        // in, skip time-based advancement — the parent owns stage progression.
+        if (isStateDriven || hasHistory) return;
         if (stages.length === 0) return;
 
         const advance = () => {
@@ -111,9 +122,9 @@ export function GenerationProgress({
             clearTimeout(id);
             if (timerRef.current) clearTimeout(timerRef.current);
         };
-    }, [currentIndex, stages, isStateDriven]);
+    }, [currentIndex, stages, isStateDriven, hasHistory]);
 
-    if (stages.length === 0) return null;
+    if (stages.length === 0 && !hasHistory) return null;
 
     // Clamp/derive values for state-driven mode
     const clampedProgress = isStateDriven ? Math.max(0, Math.min(100, progress!)) : 0;
@@ -132,6 +143,14 @@ export function GenerationProgress({
         ? clampedProgress
         : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
 
+    // Dedupe consecutive identical entries (chunk-rate progress messages can
+    // round to the same string) and trim to the last N for display.
+    const dedupedHistory = hasHistory
+        ? history!.filter((msg, i, arr) => i === 0 || arr[i - 1] !== msg)
+        : [];
+    const visibleHistory = dedupedHistory.slice(-VISIBLE_HISTORY_CAP);
+    const hiddenCount = dedupedHistory.length - visibleHistory.length;
+
     if (inline) {
         return (
             <div className="flex items-center gap-3">
@@ -142,7 +161,7 @@ export function GenerationProgress({
                 <span
                     className={`text-sm ${style.accent} transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}
                 >
-                    {currentLabel}
+                    {hasHistory ? dedupedHistory[dedupedHistory.length - 1] : currentLabel}
                 </span>
             </div>
         );
@@ -172,11 +191,35 @@ export function GenerationProgress({
                     <p className="text-xs text-neutral-500 mb-3 ml-[18px]">{subtitle}</p>
                 )}
                 <div className="ml-[18px]">
-                    <p
-                        className={`text-sm text-neutral-600 transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}
-                    >
-                        {currentLabel}
-                    </p>
+                    {hasHistory ? (
+                        <ul className="space-y-1.5">
+                            {hiddenCount > 0 && (
+                                <li className="text-xs text-neutral-400 italic">+{hiddenCount} earlier…</li>
+                            )}
+                            {visibleHistory.map((msg, i) => {
+                                const isLast = i === visibleHistory.length - 1;
+                                return (
+                                    <li key={`${i}-${msg}`} className="flex items-center gap-2">
+                                        {isLast ? (
+                                            <span className="relative flex h-2 w-2 shrink-0">
+                                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dotColor} opacity-75`} />
+                                                <span className={`relative inline-flex rounded-full h-2 w-2 ${style.dotColor}`} />
+                                            </span>
+                                        ) : (
+                                            <Check size={12} className={`${style.accent} shrink-0`} />
+                                        )}
+                                        <span className={`text-sm ${isLast ? style.accent : 'text-neutral-500'}`}>{msg}</span>
+                                    </li>
+                                );
+                            })}
+                        </ul>
+                    ) : (
+                        <p
+                            className={`text-sm text-neutral-600 transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}
+                        >
+                            {currentLabel}
+                        </p>
+                    )}
                 </div>
 
                 {/* Stage dots */}

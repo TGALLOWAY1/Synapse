@@ -14,6 +14,7 @@ export type GenerationJobsSlice = {
         slot: ArtifactSlotKey,
         partial: Partial<SlotState>,
     ) => void;
+    appendSlotProgress: (projectId: string, slot: ArtifactSlotKey, message: string) => void;
     clearJob: (projectId: string) => void;
     getSlot: (projectId: string, slot: ArtifactSlotKey) => SlotState | undefined;
     getJob: (projectId: string) => ProjectJobState | undefined;
@@ -21,6 +22,8 @@ export type GenerationJobsSlice = {
 };
 
 const blankSlot = (): SlotState => ({ status: 'idle', attempt: 0 });
+
+const PROGRESS_LOG_CAP = 20;
 
 export const createGenerationJobsSlice: StateCreator<
     ProjectState,
@@ -33,7 +36,7 @@ export const createGenerationJobsSlice: StateCreator<
     initJob: (projectId, spineVersionId, slotKeys) => {
         const slots = {} as Record<ArtifactSlotKey, SlotState>;
         for (const key of slotKeys) {
-            slots[key] = { status: 'queued', attempt: 0 };
+            slots[key] = { status: 'queued', attempt: 0, progressLog: [] };
         }
         set((state) => ({
             jobs: {
@@ -60,6 +63,33 @@ export const createGenerationJobsSlice: StateCreator<
                         slots: {
                             ...job.slots,
                             [slot]: { ...current, ...partial },
+                        },
+                    },
+                },
+            };
+        });
+    },
+
+    appendSlotProgress: (projectId, slot, message) => {
+        set((state) => {
+            const job = state.jobs[projectId];
+            if (!job) return state;
+            const current = job.slots[slot] ?? blankSlot();
+            const log = current.progressLog ?? [];
+            // Dedupe consecutive identical messages so chunk-throttled emissions
+            // that round to the same string don't pile up.
+            if (log.length > 0 && log[log.length - 1] === message) return state;
+            const next = log.length >= PROGRESS_LOG_CAP
+                ? [...log.slice(log.length - PROGRESS_LOG_CAP + 1), message]
+                : [...log, message];
+            return {
+                jobs: {
+                    ...state.jobs,
+                    [projectId]: {
+                        ...job,
+                        slots: {
+                            ...job.slots,
+                            [slot]: { ...current, progressLog: next },
                         },
                     },
                 },
