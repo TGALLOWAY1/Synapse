@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Pencil, Check, X } from 'lucide-react';
 import type { Feature } from '../types';
+import { MvpTag } from './prd/PremiumSections';
 
 interface FeatureCardProps {
     feature: Feature;
@@ -69,7 +70,10 @@ export function FeatureCard({ feature, onUpdate, readOnly }: FeatureCardProps) {
     return (
         <div className="group p-4 bg-white border border-neutral-200 rounded-lg hover:border-neutral-300 transition">
             <div className="flex items-start justify-between mb-2 gap-2">
-                <h4 className="font-semibold text-neutral-800">{feature.name}</h4>
+                <div className="flex items-center gap-2 flex-wrap min-w-0">
+                    <h4 className="font-semibold text-neutral-800">{feature.name}</h4>
+                    <MvpTag tier={feature.tier} />
+                </div>
                 {!readOnly && (
                     <button
                         onClick={() => setIsEditing(true)}
@@ -82,9 +86,45 @@ export function FeatureCard({ feature, onUpdate, readOnly }: FeatureCardProps) {
                 )}
             </div>
             <p className="text-sm text-neutral-600 mb-2">{feature.description}</p>
-            <p className="text-xs text-neutral-500">
+            <p className="text-xs text-neutral-500 mb-2">
                 <span className="font-medium">User Value:</span> {feature.userValue}
             </p>
+            {(feature.successCriteria?.length || feature.edgeCases?.length || feature.failureModes?.length || feature.uiAcceptanceCriteria?.length) && (
+                <div className="mt-3 pt-3 border-t border-neutral-100 grid sm:grid-cols-2 gap-3 text-xs">
+                    {feature.successCriteria?.length ? (
+                        <div>
+                            <p className="font-semibold text-emerald-700 uppercase tracking-wider text-[10px] mb-1">Success</p>
+                            <ul className="list-disc pl-4 space-y-0.5 text-neutral-700">
+                                {feature.successCriteria.map((c, i) => <li key={i}>{c}</li>)}
+                            </ul>
+                        </div>
+                    ) : null}
+                    {feature.edgeCases?.length ? (
+                        <div>
+                            <p className="font-semibold text-amber-700 uppercase tracking-wider text-[10px] mb-1">Edge cases</p>
+                            <ul className="list-disc pl-4 space-y-0.5 text-neutral-700">
+                                {feature.edgeCases.map((c, i) => <li key={i}>{c}</li>)}
+                            </ul>
+                        </div>
+                    ) : null}
+                    {feature.failureModes?.length ? (
+                        <div>
+                            <p className="font-semibold text-red-700 uppercase tracking-wider text-[10px] mb-1">Failure modes</p>
+                            <ul className="list-disc pl-4 space-y-0.5 text-neutral-700">
+                                {feature.failureModes.map((c, i) => <li key={i}>{c}</li>)}
+                            </ul>
+                        </div>
+                    ) : null}
+                    {feature.uiAcceptanceCriteria?.length ? (
+                        <div>
+                            <p className="font-semibold text-indigo-700 uppercase tracking-wider text-[10px] mb-1">UI behavior</p>
+                            <ul className="list-disc pl-4 space-y-0.5 text-neutral-700">
+                                {feature.uiAcceptanceCriteria.map((c, i) => <li key={i}>{c}</li>)}
+                            </ul>
+                        </div>
+                    ) : null}
+                </div>
+            )}
         </div>
     );
 }

@@ -3,8 +3,17 @@ import type {
     PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
     SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState,
-    ArtifactSlotKey, ProjectJobState, SlotState
+    ArtifactSlotKey, ProjectJobState, SlotState,
+    QualityScores, GenerationMeta,
 } from '../types';
+
+export interface SpineGenerationMetaInput {
+    sourcePrompt?: string;
+    qualityScores?: QualityScores;
+    generationMeta?: GenerationMeta;
+    model?: string;
+    prdVersion?: number;
+}
 
 export interface ProjectState {
     projects: Record<string, Project>;
@@ -41,7 +50,23 @@ export interface ProjectState {
 
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
-    updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => void;
+    updateSpineStructuredPRD: (
+        projectId: string,
+        spineId: string,
+        structuredPRD: StructuredPRD,
+        responseText: string,
+        meta?: SpineGenerationMetaInput,
+    ) => void;
+    updateSpineQualityScores: (
+        projectId: string,
+        spineId: string,
+        scores: import('../types').QualityScores,
+        generationMeta?: import('../types').GenerationMeta,
+    ) => void;
+    updateProjectProductMetadata: (
+        projectId: string,
+        meta: { productName?: string; productCategory?: string },
+    ) => void;
 
     // Error handling
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => void;

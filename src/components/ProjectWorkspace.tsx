@@ -4,7 +4,7 @@ import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { generateStructuredPRD, structuredPRDToMarkdown } from '../lib/llmProvider';
+import { generateStructuredPRD } from '../lib/llmProvider';
 import { normalizeError, userMessage } from '../lib/errors';
 import { GenerationProgress } from './GenerationProgress';
 import { PRD_GENERATION_STAGES, PRD_REGENERATION_STAGES } from './generationStages';
@@ -19,6 +19,7 @@ import { ArtifactsView } from './ArtifactsView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
+import { QualityScoreChip } from './prd/QualityScoreChip';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
@@ -29,7 +30,7 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions } = useProjectStore();
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -149,9 +150,43 @@ export function ProjectWorkspace() {
             useProjectStore.getState().clearJob(projectId);
             const { newSpineId } = regenerateSpine(projectId);
             activeNewSpineId = newSpineId;
-            const structuredPRD = await generateStructuredPRD(latestSpine.promptText);
-            const markdown = structuredPRDToMarkdown(structuredPRD);
-            updateSpineStructuredPRD(projectId, newSpineId, structuredPRD, markdown);
+            const sourcePrompt = latestSpine.promptText;
+            await generateStructuredPRD(
+                sourcePrompt,
+                {
+                    onPartial: ({ structuredPRD, markdown }) => {
+                        updateSpineStructuredPRD(
+                            projectId,
+                            newSpineId,
+                            structuredPRD,
+                            markdown,
+                            { sourcePrompt },
+                        );
+                        if (structuredPRD.productName || structuredPRD.productCategory) {
+                            updateProjectProductMetadata(projectId, {
+                                productName: structuredPRD.productName,
+                                productCategory: structuredPRD.productCategory,
+                            });
+                        }
+                    },
+                    onResult: ({ structuredPRD, markdown, qualityScores, generationMeta, model }) => {
+                        updateSpineStructuredPRD(
+                            projectId,
+                            newSpineId,
+                            structuredPRD,
+                            markdown,
+                            {
+                                sourcePrompt,
+                                qualityScores,
+                                generationMeta,
+                                model,
+                                prdVersion: generationMeta.schemaVersion,
+                            },
+                        );
+                    },
+                },
+                project?.platform,
+            );
         } catch (e) {
             const err = normalizeError(e);
             console.error('[PRD regeneration failed]', err.raw);
@@ -427,19 +462,27 @@ export function ProjectWorkspace() {
 
                                         {/* View toggle when structured PRD exists */}
                                         {activeSpine.structuredPRD && (
-                                            <div className="flex items-center gap-2 mb-6">
-                                                <button
-                                                    onClick={() => setShowStructuredView(true)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Structured View
-                                                </button>
-                                                <button
-                                                    onClick={() => setShowStructuredView(false)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Markdown View
-                                                </button>
+                                            <div className="flex items-center justify-between gap-2 mb-6">
+                                                <div className="flex items-center gap-2">
+                                                    <button
+                                                        onClick={() => setShowStructuredView(true)}
+                                                        className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
+                                                    >
+                                                        Structured View
+                                                    </button>
+                                                    <button
+                                                        onClick={() => setShowStructuredView(false)}
+                                                        className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
+                                                    >
+                                                        Markdown View
+                                                    </button>
+                                                </div>
+                                                {activeSpine.qualityScores && (
+                                                    <QualityScoreChip
+                                                        scores={activeSpine.qualityScores}
+                                                        revised={activeSpine.generationMeta?.revised}
+                                                    />
+                                                )}
                                             </div>
                                         )}
 

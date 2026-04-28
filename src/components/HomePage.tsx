@@ -80,22 +80,59 @@ export function HomePage() {
         const { projectId, spineId } = createProject(projectName.trim(), promptText.trim(), platform);
         navigate(`/p/${projectId}`);
 
-        import('../lib/llmProvider').then(({ generateStructuredPRD, structuredPRDToMarkdown }) => {
-            generateStructuredPRD(promptText.trim(), undefined, platform)
-                .then((structuredPRD) => {
-                    const markdown = structuredPRDToMarkdown(structuredPRD);
-                    useProjectStore.getState().updateSpineStructuredPRD(projectId, spineId, structuredPRD, markdown);
-                })
-                .catch((e) => {
-                    const err = normalizeError(e);
-                    console.error('[PRD generation failed]', err.raw);
-                    useProjectStore.getState().setSpineError(projectId, spineId, {
-                        message: userMessage(err),
-                        category: err.category,
-                        timestamp: err.timestamp,
-                        raw: err.raw,
-                    });
+        const sourcePrompt = promptText.trim();
+
+        import('../lib/llmProvider').then(({ generateStructuredPRD }) => {
+            generateStructuredPRD(
+                sourcePrompt,
+                {
+                    // Progressive render: paint the Pass A draft as soon as it
+                    // lands so the user isn't staring at a placeholder for the
+                    // full 30–60s pipeline.
+                    onPartial: ({ structuredPRD, markdown }) => {
+                        useProjectStore.getState().updateSpineStructuredPRD(
+                            projectId,
+                            spineId,
+                            structuredPRD,
+                            markdown,
+                            { sourcePrompt },
+                        );
+                        if (structuredPRD.productName || structuredPRD.productCategory) {
+                            useProjectStore.getState().updateProjectProductMetadata(projectId, {
+                                productName: structuredPRD.productName,
+                                productCategory: structuredPRD.productCategory,
+                            });
+                        }
+                    },
+                    // Final result: persist the model-rendered markdown,
+                    // quality scores, and generation metadata.
+                    onResult: ({ structuredPRD, markdown, qualityScores, generationMeta, model }) => {
+                        useProjectStore.getState().updateSpineStructuredPRD(
+                            projectId,
+                            spineId,
+                            structuredPRD,
+                            markdown,
+                            {
+                                sourcePrompt,
+                                qualityScores,
+                                generationMeta,
+                                model,
+                                prdVersion: generationMeta.schemaVersion,
+                            },
+                        );
+                    },
+                },
+                platform,
+            ).catch((e) => {
+                const err = normalizeError(e);
+                console.error('[PRD generation failed]', err.raw);
+                useProjectStore.getState().setSpineError(projectId, spineId, {
+                    message: userMessage(err),
+                    category: err.category,
+                    timestamp: err.timestamp,
+                    raw: err.raw,
                 });
+            });
         }).catch((e) => {
             const err = normalizeError(e);
             console.error('[Module load failed]', err.raw);
