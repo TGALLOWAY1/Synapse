@@ -82,6 +82,7 @@ export type SpineVersion = {
         message: string;
         category: string;
         timestamp: number;
+        raw?: string;
     };
 };
 
