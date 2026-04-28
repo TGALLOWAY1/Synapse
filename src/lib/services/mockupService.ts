@@ -38,8 +38,18 @@ const SCOPE_INSTRUCTIONS: Record<string, string> = {
 const MOCKUP_PROMPT_TEMPLATE_VERSION = '2026-04-17.v2';
 const MOCKUP_GENERATION_STRATEGY_VERSION = 'mockup_strategy_v2';
 const MOCKUP_SPEC_STRATEGY_VERSION = 'mockup_strategy_spec_v1';
-const MAX_GENERATION_ATTEMPTS = 3;
-const QUALITY_THRESHOLD = 70;
+// Mockup generation is the slowest path in the app (sync structured-JSON
+// output, ~1.8k token system prompt, full PRD body). 3 attempts × ~25s on
+// a preview-tier model is the worst case users actually hit. Two attempts
+// at a softer quality bar trades the marginal third-attempt rescue for a
+// dramatically better p95 latency.
+const MAX_GENERATION_ATTEMPTS = 2;
+const QUALITY_THRESHOLD = 55;
+// Pin mockup generation to the stable Flash tier. The user's globally-
+// selected model (often a preview/Pro model) is reserved for paths where
+// reasoning quality matters; a mockup is structured HTML that 2.5 Flash
+// produces faster and with much higher capacity headroom.
+const MOCKUP_MODEL = 'gemini-2.5-flash';
 
 // Phase A engine switch. Default remains the HTML engine until the spec
 // engine has validated against the harness; users can opt-in via
@@ -507,6 +517,7 @@ const runSpecEngineAttempt = async (
     const raw = await callGemini(system, user, {
         responseMimeType: 'application/json',
         responseSchema: mockupLayoutSpecSchema,
+        model: MOCKUP_MODEL,
         ...providerParams,
     });
     const fallbackProduct = inferConceptName(prdContent);
@@ -580,6 +591,7 @@ const runHtmlEngine = async (
             const raw = await callGemini(system, user, {
                 responseMimeType: 'application/json',
                 responseSchema: mockupSchema,
+                model: MOCKUP_MODEL,
                 ...providerParams,
             });
             const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD);
