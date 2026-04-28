@@ -9,6 +9,7 @@
 export type ErrorCategory =
     | 'api_key_missing'
     | 'auth_failed'
+    | 'project_access_denied'
     | 'permission_denied'
     | 'billing_disabled'
     | 'model_not_found'
@@ -35,6 +36,10 @@ const CATEGORY_PATTERNS: [ErrorCategory, RegExp][] = [
     ['api_key_missing', /missing gemini api key/i],
     ['billing_disabled', /billing.*(not enabled|disabled)|enable billing|consumer.*not.*active|SERVICE_DISABLED/i],
     ['auth_failed', /api key not valid|api[_ ]?key.*invalid|invalid.*api.*key|UNAUTHENTICATED|\b401\b/i],
+    // serviceusage.services.use / "Caller does not have required permission to use project X"
+    // is a distinct failure from "API not enabled" — the API key principal lacks IAM access
+    // to the project ID being sent via x-goog-user-project. Match it before generic 403.
+    ['project_access_denied', /serviceusage\.services\.use|caller does not have required permission to use project|serviceUsageConsumer/i],
     ['permission_denied', /permission denied|PERMISSION_DENIED|forbidden|\b403\b/i],
     ['model_not_found', /publisher model.*not found|model.*not.*found|NOT_FOUND.*model|\b404\b.*model|is not supported/i],
     ['free_tier_quota', /free.?tier|freetier|-FreeTier/i],
@@ -65,7 +70,7 @@ export function normalizeError(e: unknown): NormalizedError {
     };
 }
 
-const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown'>, string> = {
+const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown' | 'project_access_denied'>, string> = {
     api_key_missing: 'API key not configured. Open Settings to add your Gemini API key.',
     auth_failed:
         'Gemini rejected the API key as invalid. Open Settings and paste a fresh key from ' +
@@ -98,6 +103,13 @@ const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown'>, string> = {
 
 const RAW_TRUNCATE = 400;
 
+// Pull the project ID out of phrases like "...permission to use project gen-lang-client-0225067349..."
+// Falls back to undefined when the error doesn't name a project.
+function extractProjectId(raw: string): string | undefined {
+    const match = raw.match(/use project\s+([a-z][a-z0-9-]{4,29})/i);
+    return match?.[1];
+}
+
 /** Return a calm, human-readable message suitable for product UI. */
 export function userMessage(err: NormalizedError): string {
     if (err.category === 'unknown') {
@@ -106,6 +118,19 @@ export function userMessage(err: NormalizedError): string {
         // something actionable to act on or share.
         const raw = err.raw.length > RAW_TRUNCATE ? `${err.raw.slice(0, RAW_TRUNCATE)}…` : err.raw;
         return `Something went wrong. Raw error from Gemini: ${raw}`;
+    }
+    if (err.category === 'project_access_denied') {
+        const projectId = extractProjectId(err.raw);
+        const target = projectId ? `project "${projectId}"` : 'the configured project';
+        return (
+            `Your API key isn't authorized to use ${target}. This usually means the Billing Project ID ` +
+            `in Settings doesn't match the project the API key was created in, so the x-goog-user-project ` +
+            `header is being rejected. Two ways to fix it: (1) clear the Billing Project ID in Settings ` +
+            `to let Gemini bill the key's home project, or (2) open AI Studio (https://aistudio.google.com/app/apikey), ` +
+            `create a new API key inside ${projectId ? `"${projectId}"` : 'your billing project'}, and paste ` +
+            `that key into Settings. Granting your account the roles/serviceusage.serviceUsageConsumer role ` +
+            `on the project also works if you'd rather keep the current key.`
+        );
     }
     return USER_MESSAGES[err.category];
 }
