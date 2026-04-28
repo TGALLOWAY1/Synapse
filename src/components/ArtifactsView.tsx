@@ -19,6 +19,7 @@ import {
     buildDependencyLayers,
     getArtifactMeta,
 } from '../lib/coreArtifactPipeline';
+import { withConcurrency, isAbortError } from '../lib/concurrency';
 
 interface ArtifactsViewProps {
     projectId: string;
@@ -32,32 +33,6 @@ const CORE_ARTIFACTS_DISPLAY = CORE_ARTIFACT_DISPLAY_ORDER;
 const TOTAL_CORE_ARTIFACTS = CORE_ARTIFACT_PIPELINE.length;
 // Max artifacts that can run in parallel within a single dependency layer.
 const MAX_PARALLEL_PER_LAYER = Math.max(...buildDependencyLayers().map(layer => layer.length));
-
-function isAbortError(reason: unknown): boolean {
-    return reason instanceof DOMException && reason.name === 'AbortError';
-}
-
-// Run async tasks with a concurrency limit
-async function withConcurrency<T>(tasks: (() => Promise<T>)[], limit: number): Promise<PromiseSettledResult<T>[]> {
-    const results: PromiseSettledResult<T>[] = new Array(tasks.length);
-    let nextIndex = 0;
-
-    async function runNext(): Promise<void> {
-        while (nextIndex < tasks.length) {
-            const index = nextIndex++;
-            try {
-                const value = await tasks[index]();
-                results[index] = { status: 'fulfilled', value };
-            } catch (reason) {
-                results[index] = { status: 'rejected', reason };
-            }
-        }
-    }
-
-    const workers = Array.from({ length: Math.min(limit, tasks.length) }, () => runNext());
-    await Promise.all(workers);
-    return results;
-}
 
 type ArtifactGenStatus = 'pending' | 'generating' | 'done' | 'error';
 
