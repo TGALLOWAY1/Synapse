@@ -1,5 +1,5 @@
 import type { StructuredPRD, CoreArtifactSubtype, ScreenInventoryContent, DataModelContent, ComponentInventoryContent } from '../../types';
-import { callGemini } from '../geminiClient';
+import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
@@ -277,10 +277,11 @@ export const generateCoreArtifact = async (
         mockupContext?: string;
         generatedArtifacts?: Partial<Record<CoreArtifactSubtype, string>>;
         signal?: AbortSignal;
+        onProgress?: (message: string) => void;
     },
 ): Promise<string> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
-    options?.onStatus?.(`Generating ${subtype.replace(/_/g, ' ')}...`);
+    const onProgress = options?.onProgress;
 
     const featureList = structuredPRD.features.map(f => {
         let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
@@ -327,12 +328,14 @@ Architecture: ${structuredPRD.architecture}${
     const schema = jsonSchemas[subtype];
     if (schema) {
         const jsonSystem = config.system + '\n\nReturn the result as structured JSON according to the provided schema.';
+        onProgress?.('Sending request to model…');
         const result = await callGemini(
             jsonSystem,
             `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
             { responseMimeType: 'application/json', responseSchema: schema },
             options?.signal,
         );
+        onProgress?.('Validating output…');
 
         try {
             const parsed = JSON.parse(result);
@@ -344,12 +347,30 @@ Architecture: ${structuredPRD.architecture}${
         }
     }
 
-    const result = await callGemini(
+    onProgress?.('Sending request to model…');
+    let chars = 0;
+    let lastEmittedChars = 0;
+    let lastEmittedAt = performance.now();
+    const result = await callGeminiStream(
         config.system,
         `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
-        undefined,
+        {
+            onChunk: (text) => {
+                chars += text.length;
+                const now = performance.now();
+                // Throttle to avoid hammering the Zustand store with chunk-rate updates.
+                if (chars - lastEmittedChars >= 500 || now - lastEmittedAt >= 750) {
+                    lastEmittedChars = chars;
+                    lastEmittedAt = now;
+                    onProgress?.(`Receiving response… (${chars.toLocaleString()} chars)`);
+                }
+            },
+            onComplete: () => {},
+            onError: () => {},
+        },
         options?.signal,
     );
+    onProgress?.('Validating output…');
     return normalizeArtifactMarkdown(result);
 };
 

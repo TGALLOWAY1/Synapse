@@ -173,6 +173,7 @@ export interface SlotState {
     finishedAt?: number;
     error?: { message: string; category: string; timestamp: number };
     attempt: number;
+    progressLog?: string[];
 }
 
 export interface ProjectJobState {

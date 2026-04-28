@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, StopCircle, Clock,
+    RefreshCcw, StopCircle,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -51,8 +51,9 @@ function buildSlotMetas(): SlotMeta[] {
 
 function StatusDot({ status }: { status: GenerationStatus }) {
     if (status === 'done') return <CheckCircle2 size={14} className="text-green-500 shrink-0" />;
-    if (status === 'generating') return <Loader2 size={14} className="text-sky-500 animate-spin shrink-0" />;
-    if (status === 'queued') return <Clock size={14} className="text-neutral-400 shrink-0" />;
+    if (status === 'generating' || status === 'queued') {
+        return <Loader2 size={14} className="text-sky-500 animate-spin shrink-0" />;
+    }
     if (status === 'error') return <AlertTriangle size={14} className="text-red-500 shrink-0" />;
     if (status === 'interrupted') return <AlertTriangle size={14} className="text-amber-500 shrink-0" />;
     return <Circle size={14} className="text-neutral-300 shrink-0" />;
@@ -145,7 +146,12 @@ export function ArtifactWorkspace({
         if (status === 'queued' || status === 'generating') {
             const meta = selected === 'mockup' ? null : getArtifactMeta(selected);
             const stages = selected === 'mockup' ? MOCKUP_GENERATION_STAGES : getArtifactStages(selected);
-            const title = selected === 'mockup' ? 'Designing your product interface' : `Generating ${meta?.title ?? selected}`;
+            const displayName = selected === 'mockup' ? 'Mockup' : (meta?.title ?? selected);
+            const title = status === 'queued'
+                ? `Queued: ${displayName}`
+                : selected === 'mockup'
+                    ? 'Designing your product interface'
+                    : `Generating ${displayName}`;
             return (
                 <div className="max-w-2xl mx-auto">
                     <GenerationProgress
@@ -153,6 +159,7 @@ export function ArtifactWorkspace({
                         variant={selected === 'mockup' ? 'creative' : 'systematic'}
                         title={title}
                         subtitle={status === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
+                        history={job?.slots[selected]?.progressLog ?? []}
                     />
                 </div>
             );

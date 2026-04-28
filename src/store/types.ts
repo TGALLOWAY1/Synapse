@@ -87,6 +87,7 @@ export interface ProjectState {
     jobs: Record<string, ProjectJobState | undefined>;
     initJob: (projectId: string, spineVersionId: string, slotKeys: ArtifactSlotKey[]) => void;
     setSlotStatus: (projectId: string, slot: ArtifactSlotKey, partial: Partial<SlotState>) => void;
+    appendSlotProgress: (projectId: string, slot: ArtifactSlotKey, message: string) => void;
     clearJob: (projectId: string) => void;
     getSlot: (projectId: string, slot: ArtifactSlotKey) => SlotState | undefined;
     getJob: (projectId: string) => ProjectJobState | undefined;
