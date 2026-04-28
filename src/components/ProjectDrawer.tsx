@@ -1,6 +1,7 @@
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
+import { artifactJobController } from '../lib/services/artifactJobController';
 
 interface ProjectDrawerProps {
     isOpen: boolean;
@@ -94,6 +95,7 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
                                         onClick={(e) => {
                                             e.stopPropagation();
                                             if (window.confirm(`Delete "${p.name}"?`)) {
+                                                artifactJobController.cancelAll(p.id);
                                                 deleteProject(p.id);
                                             }
                                         }}

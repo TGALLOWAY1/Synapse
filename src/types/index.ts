@@ -1,5 +1,6 @@
-// Navigation stages
-export type PipelineStage = 'prd' | 'mockups' | 'artifacts' | 'history';
+// Navigation stages. 'mockups' and 'artifacts' are legacy values preserved
+// for migration of older persisted projects; the active UI uses 'workspace'.
+export type PipelineStage = 'prd' | 'workspace' | 'history' | 'mockups' | 'artifacts';
 
 export type ProjectPlatform = 'app' | 'web';
 
@@ -152,6 +153,32 @@ export type CoreArtifactSubtype =
     | 'data_model'
     | 'prompt_pack'
     | 'design_system';
+
+// --- Background generation jobs ---
+
+export type GenerationStatus =
+    | 'idle'
+    | 'queued'
+    | 'generating'
+    | 'done'
+    | 'error'
+    | 'interrupted';
+
+export type ArtifactSlotKey = CoreArtifactSubtype | 'mockup';
+
+export interface SlotState {
+    status: GenerationStatus;
+    startedAt?: number;
+    finishedAt?: number;
+    error?: { message: string; category: string; timestamp: number };
+    attempt: number;
+}
+
+export interface ProjectJobState {
+    spineVersionId: string;
+    startedAt: number;
+    slots: Record<ArtifactSlotKey, SlotState>;
+}
 
 export type StalenessState = 'current' | 'possibly_outdated' | 'outdated';
 

@@ -1,4 +1,4 @@
-import { FileText, Image, Package, Clock } from 'lucide-react';
+import { FileText, Package, Clock } from 'lucide-react';
 import type { PipelineStage } from '../types';
 
 interface PipelineStageBarProps {
@@ -9,23 +9,30 @@ interface PipelineStageBarProps {
 
 const stages: { key: PipelineStage; label: string; icon: typeof FileText }[] = [
     { key: 'prd', label: 'PRD', icon: FileText },
-    { key: 'mockups', label: 'Mockups', icon: Image },
-    { key: 'artifacts', label: 'Artifacts', icon: Package },
+    { key: 'workspace', label: 'Workspace', icon: Package },
     { key: 'history', label: 'History', icon: Clock },
 ];
 
 export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: PipelineStageBarProps) {
     const isEnabled = (stage: PipelineStage): boolean => {
         if (stage === 'prd' || stage === 'history') return true;
-        if (stage === 'mockups' || stage === 'artifacts') return hasPRD;
+        if (stage === 'workspace') return hasPRD;
         return false;
     };
+
+    // Legacy currentStage values ('mockups', 'artifacts') route to the
+    // workspace tab so its highlighting stays correct during the brief
+    // window before the rehydrate migration runs.
+    const activeKey: PipelineStage =
+        currentStage === 'mockups' || currentStage === 'artifacts'
+            ? 'workspace'
+            : currentStage;
 
     return (
         <div className="flex items-center gap-1 px-4 py-2 bg-neutral-900 border-b border-neutral-800">
             {stages.map((stage) => {
                 const enabled = isEnabled(stage.key);
-                const active = currentStage === stage.key;
+                const active = activeKey === stage.key;
                 const Icon = stage.icon;
 
                 return (

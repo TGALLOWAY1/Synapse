@@ -16,11 +16,13 @@ import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
 import { MockupsView } from './MockupsView';
 import { ArtifactsView } from './ArtifactsView';
+import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
+import { artifactJobController } from '../lib/services/artifactJobController';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 
@@ -85,6 +87,27 @@ export function ProjectWorkspace() {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [showNavOverflow]);
 
+    // Auto-resume background generation when the user lands on a finalized
+    // project. Handles page refresh mid-job and tab return after navigation.
+    // Brief debounce so a fast spine regen doesn't trigger duplicate work.
+    useEffect(() => {
+        if (!projectId || projectId === DEMO_PROJECT_ID) return;
+        const timer = window.setTimeout(() => {
+            const store = useProjectStore.getState();
+            const latest = store.getLatestSpine(projectId);
+            if (!latest?.isFinal || !latest.structuredPRD) return;
+            const proj = store.getProject(projectId);
+            artifactJobController.resumeIfNeeded({
+                projectId,
+                spineVersionId: latest.id,
+                prdContent: latest.responseText,
+                structuredPRD: latest.structuredPRD,
+                projectPlatform: proj?.platform,
+            });
+        }, 2000);
+        return () => window.clearTimeout(timer);
+    }, [projectId]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -143,6 +166,8 @@ export function ProjectWorkspace() {
         let activeNewSpineId: string | null = null;
         try {
             setIsGenerating(true);
+            artifactJobController.cancelAll(projectId);
+            useProjectStore.getState().clearJob(projectId);
             const { newSpineId } = regenerateSpine(projectId);
             activeNewSpineId = newSpineId;
             const structuredPRD = await generateStructuredPRD(latestSpine.promptText);
@@ -174,7 +199,20 @@ export function ProjectWorkspace() {
 
     const handleToggleFinal = () => {
         if (!projectId || !activeSpine) return;
-        markSpineFinal(projectId, activeSpine.id, !activeSpine.isFinal);
+        const next = !activeSpine.isFinal;
+        markSpineFinal(projectId, activeSpine.id, next);
+        if (!next) return;
+
+        setProjectStage(projectId, 'workspace');
+        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
+            artifactJobController.startAll({
+                projectId,
+                spineVersionId: activeSpine.id,
+                prdContent: activeSpine.responseText,
+                structuredPRD: activeSpine.structuredPRD,
+                projectPlatform: project?.platform,
+            });
+        }
     };
 
     const handleExport = () => {
@@ -328,7 +366,16 @@ export function ProjectWorkspace() {
 
             {/* Main Workspace Area — flex-1 fills remaining height */}
             <div className="flex-1 flex overflow-hidden">
-
+                {pipelineStage === 'workspace' && activeSpine?.isFinal && activeSpine.structuredPRD ? (
+                    <ArtifactWorkspace
+                        projectId={projectId}
+                        spineVersionId={activeSpine.id}
+                        prdContent={activeSpine.responseText}
+                        structuredPRD={activeSpine.structuredPRD}
+                        projectPlatform={project?.platform}
+                    />
+                ) : (
+                <>
                 {/* Left: Main Content Column */}
                 <div className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 lg:p-12 shadow-inner z-0 relative">
                     {isOldVersion && pipelineStage === 'prd' && (
@@ -597,6 +644,8 @@ export function ProjectWorkspace() {
                             )}
                         </div>
                     </div>
+                )}
+                </>
                 )}
 
             </div>

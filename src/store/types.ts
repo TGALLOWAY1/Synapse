@@ -2,7 +2,8 @@ import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
     PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
-    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState
+    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState,
+    ArtifactSlotKey, ProjectJobState, SlotState
 } from '../types';
 
 export interface ProjectState {
@@ -81,4 +82,13 @@ export interface ProjectState {
 
     // Staleness
     getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;
+
+    // Background generation jobs (transient — excluded from persist)
+    jobs: Record<string, ProjectJobState | undefined>;
+    initJob: (projectId: string, spineVersionId: string, slotKeys: ArtifactSlotKey[]) => void;
+    setSlotStatus: (projectId: string, slot: ArtifactSlotKey, partial: Partial<SlotState>) => void;
+    clearJob: (projectId: string) => void;
+    getSlot: (projectId: string, slot: ArtifactSlotKey) => SlotState | undefined;
+    getJob: (projectId: string) => ProjectJobState | undefined;
+    markAllInterrupted: (projectId: string) => void;
 }

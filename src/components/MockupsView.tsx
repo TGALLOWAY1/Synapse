@@ -15,11 +15,8 @@ import { MOCKUP_GENERATION_STAGES } from './generationStages';
 import type {
     StructuredPRD,
     MockupSettings,
-    MockupPlatform,
-    MockupFidelity,
     MockupScope,
     MockupPayload,
-    MockupScreen,
     ArtifactVersion,
     StalenessState,
     ProjectPlatform,
@@ -28,6 +25,8 @@ import { MOCKUP_HTML_V1 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
 import { useMockupImageStore } from '../store/mockupImageStore';
 import { hasOpenAIKey } from '../lib/openaiClient';
+import { mapProjectPlatform, pickFidelity } from '../lib/mockupDefaults';
+import { tryParsePayload, extractMockupSettings, DEFAULT_MOCKUP_SETTINGS } from '../lib/mockupParsing';
 
 interface MockupsViewProps {
     projectId: string;
@@ -36,24 +35,6 @@ interface MockupsViewProps {
     structuredPRD?: StructuredPRD;
     projectPlatform?: ProjectPlatform;
 }
-
-// Project-level platform ('app' / 'web') maps directly to the mockup shell.
-const mapProjectPlatform = (p?: ProjectPlatform): MockupPlatform =>
-    p === 'app' ? 'mobile' : 'desktop';
-
-// Choose fidelity between 'mid' (structured) and 'high' (polished) based on how
-// rich the PRD is. Sparse PRDs yield 'mid'; feature-heavy or long PRDs yield
-// 'high'. Wireframe ('low') is intentionally never auto-selected.
-const pickFidelity = (prd: string, structured?: StructuredPRD): MockupFidelity => {
-    const words = prd.trim().split(/\s+/).filter(Boolean).length;
-    if (structured) {
-        const feats = structured.features ?? [];
-        const highCt = feats.filter(f => f.complexity === 'high').length;
-        if (feats.length >= 6 || highCt >= 2 || words >= 1500) return 'high';
-        return 'mid';
-    }
-    return words >= 1500 ? 'high' : 'mid';
-};
 
 const SCOPE_OPTIONS: { value: MockupScope; label: string; desc: string }[] = [
     { value: 'key_workflow', label: 'Key Workflow', desc: '3–5 screens forming a user journey' },
@@ -70,62 +51,8 @@ const STYLE_PRESETS: { label: string; value: string }[] = [
     { label: 'Marketing', value: 'marketing site, hero sections, bold CTAs, lifestyle imagery' },
 ];
 
-// Safely extract a MockupPayload from an ArtifactVersion. Returns null for
-// legacy markdown versions or unparseable content — callers fall back to the
-// legacy markdown renderer. Validates field types so corrupted localStorage
-// data doesn't cause downstream crashes.
-const tryParsePayload = (version: ArtifactVersion): MockupPayload | null => {
-    const format = (version.metadata as { format?: string } | undefined)?.format;
-    if (format !== MOCKUP_HTML_V1) return null;
-    try {
-        const parsed = JSON.parse(version.content);
-        if (!parsed || typeof parsed !== 'object') return null;
-        if (!Array.isArray(parsed.screens) || parsed.screens.length === 0) return null;
-
-        // Validate every screen has the minimum required string fields.
-        const validScreens = parsed.screens.filter(
-            (s: unknown): s is MockupScreen =>
-                !!s &&
-                typeof s === 'object' &&
-                typeof (s as Record<string, unknown>).id === 'string' &&
-                typeof (s as Record<string, unknown>).name === 'string' &&
-                typeof (s as Record<string, unknown>).html === 'string' &&
-                ((s as Record<string, unknown>).html as string).trim().length > 0
-        );
-        if (validScreens.length === 0) return null;
-
-        return {
-            version: 'mockup_html_v1',
-            title: typeof parsed.title === 'string' ? parsed.title : 'Mockup concept',
-            summary: typeof parsed.summary === 'string' ? parsed.summary : '',
-            screens: validScreens,
-        };
-    } catch {
-        return null;
-    }
-};
-
-const DEFAULT_SETTINGS: MockupSettings = {
-    platform: 'desktop', fidelity: 'mid', scope: 'key_workflow',
-};
-
-/** Safely extract MockupSettings from version metadata, falling back to
- *  sensible defaults so a corrupted metadata blob never crashes the UI. */
-const extractSettings = (version: ArtifactVersion): MockupSettings => {
-    const raw = (version.metadata as Record<string, unknown> | undefined)?.settings;
-    if (!raw || typeof raw !== 'object') return DEFAULT_SETTINGS;
-    const s = raw as Record<string, unknown>;
-    return {
-        platform: (typeof s.platform === 'string' && ['mobile', 'desktop', 'responsive'].includes(s.platform)
-            ? s.platform : 'desktop') as MockupPlatform,
-        fidelity: (typeof s.fidelity === 'string' && ['low', 'mid', 'high'].includes(s.fidelity)
-            ? s.fidelity : 'mid') as MockupFidelity,
-        scope: (typeof s.scope === 'string' && ['single_screen', 'multi_screen', 'key_workflow'].includes(s.scope)
-            ? s.scope : 'key_workflow') as MockupScope,
-        style: typeof s.style === 'string' ? s.style : undefined,
-        safeMode: s.safeMode === true ? true : undefined,
-    };
-};
+const DEFAULT_SETTINGS = DEFAULT_MOCKUP_SETTINGS;
+const extractSettings = extractMockupSettings;
 
 export function MockupsView({ projectId, spineVersionId, prdContent, structuredPRD, projectPlatform }: MockupsViewProps) {
     const {
