@@ -4,6 +4,13 @@ export interface JsonModeConfig {
     temperature?: number;
     topP?: number;
     topK?: number;
+    /**
+     * Per-call model override. When set, this model is used instead of the
+     * user's configured default. Lets latency-sensitive paths (e.g. mockup
+     * generation) pin to a faster, higher-capacity stable model without
+     * changing the global default.
+     */
+    model?: string;
 }
 
 export interface StreamCallbacks {
@@ -84,7 +91,7 @@ const formatGeminiError = (status: string, errorData: unknown): string => {
 export const callGemini = async (systemInstruction: string, promptText: string, jsonMode?: JsonModeConfig, signal?: AbortSignal) => {
     const startTime = performance.now();
     const apiKey = getApiKey();
-    const model = getModel();
+    const model = jsonMode?.model || getModel();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent`;
 
     const body: Record<string, unknown> = {
