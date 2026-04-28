@@ -10,6 +10,10 @@ export type Project = {
     createdAt: number;
     currentStage?: PipelineStage;
     platform?: ProjectPlatform;
+    // Inferred by the PRD pipeline. Stored as metadata only — never replaces
+    // the user-chosen `name`.
+    productName?: string;
+    productCategory?: string;
 };
 
 export type BranchMessage = {
@@ -39,6 +43,14 @@ export type Feature = {
     priority?: 'must' | 'should' | 'could';
     acceptanceCriteria?: string[];
     dependencies?: string[]; // feature IDs
+    // --- Premium PRD additions (all optional) ---
+    system?: string;                  // FeatureSystem id this feature rolls up under
+    successCriteria?: string[];       // happy-path acceptance checks
+    edgeCases?: string[];             // boundary / unusual conditions
+    failureModes?: string[];          // explicit failure states + recovery
+    uiAcceptanceCriteria?: string[];  // UI behavior expectations
+    analyticsEvents?: string[];       // events that should fire
+    tier?: 'mvp' | 'v1' | 'later';    // release tier
 };
 
 export type StructuredPRD = {
@@ -56,6 +68,26 @@ export type StructuredPRD = {
     // relying on heuristic term extraction.
     domainEntities?: DomainEntity[];
     primaryActions?: PrimaryAction[];
+
+    // --- Premium PRD additions (all optional). Populated by the multi-pass
+    // pipeline. Legacy projects keep working without these. ---
+    productName?: string;
+    productCategory?: string;
+    executiveSummary?: string;
+    productThesis?: ProductThesis;
+    jtbd?: Jtbd[];
+    principles?: Principle[];
+    userLoops?: UserLoop[];
+    uxPages?: UXPage[];
+    featureSystems?: FeatureSystem[];
+    richDataModel?: PrdDataModel;
+    stateMachines?: StateMachine[];
+    roles?: RolePermission[];
+    architectureFlows?: ArchFlow[];
+    risksDetailed?: RiskDetailed[];
+    mvpScope?: MvpScope;
+    successMetrics?: SuccessMetric[];
+    assumptions?: Assumption[];
 };
 
 export type DomainEntity = {
@@ -67,6 +99,162 @@ export type DomainEntity = {
 export type PrimaryAction = {
     verb: string;                 // e.g. "Assign"
     target: string;               // e.g. "case owner"
+};
+
+// --- Premium PRD section types ---
+
+export type ProductThesis = {
+    whyExist: string;
+    whyNow?: string;
+    differentiation: string;
+    intentionalTradeoffs?: string[];
+    nonGoals?: string[];          // what the product should NOT become
+};
+
+export type Jtbd = {
+    segment: string;
+    motivation: string;
+    painPoints: string[];
+    job: string;                  // the job-to-be-done
+    successMoment: string;
+};
+
+export type Principle = {
+    name: string;
+    description: string;
+};
+
+export type UserLoop = {
+    name: string;
+    trigger: string;
+    action: string;
+    systemResponse: string;
+    reward: string;
+    retentionMechanic: string;
+};
+
+export type UXPage = {
+    id: string;
+    name: string;
+    purpose: string;
+    primaryUser?: string;
+    components: string[];
+    interactions: string[];
+    emptyState?: string;
+    loadingState?: string;
+    errorState?: string;
+    responsiveNotes?: string;
+};
+
+export type FeatureSystem = {
+    id: string;
+    name: string;
+    purpose: string;
+    featureIds: string[];                  // Feature.id refs
+    endToEndBehavior?: string;
+    dependencies?: string[];
+    edgeCases?: string[];
+    mvpVsLater?: string;                   // narrative on tier split
+};
+
+export type PrdField = {
+    name: string;
+    type: string;
+    required?: boolean;
+    notes?: string;
+};
+
+export type PrdEntity = {
+    name: string;
+    description: string;
+    fields: PrdField[];
+    relationships?: string[];
+    constraints?: string[];
+    examples?: string[];                   // realistic example records
+};
+
+export type PrdDataModel = {
+    entities: PrdEntity[];
+};
+
+export type MachineState = {
+    name: string;
+    trigger?: string;                      // what causes entry
+    nextStates?: string[];
+    userVisible?: string;
+    systemBehavior?: string;
+};
+
+export type StateMachine = {
+    entity: string;                        // e.g. "ProductListing"
+    states: MachineState[];
+};
+
+export type RolePermission = {
+    role: string;                          // e.g. "Verified artisan"
+    allowed: string[];
+    restricted?: string[];
+    dataVisibility?: string;
+    notes?: string;
+};
+
+export type ArchFlow = {
+    name: string;                          // e.g. "Product image upload"
+    steps: string[];                       // numbered steps as plain strings
+};
+
+export type RiskDetailed = {
+    risk: string;
+    likelihood: 'low' | 'med' | 'high';
+    impact: string;
+    mitigation: string;
+    owner?: string;
+};
+
+export type MvpScope = {
+    mvp: string[];
+    v1: string[];
+    later: string[];
+    rationale?: string;
+};
+
+export type SuccessMetric = {
+    name: string;
+    target?: string;
+    instrumentation?: string;
+};
+
+export type Assumption = {
+    id: string;
+    statement: string;
+    confidence: 'low' | 'med' | 'high';
+};
+
+// --- Quality scoring (7-dimension rubric, 1–5 each) ---
+
+export type QualityScores = {
+    specificity: number;
+    uxUsefulness: number;
+    engineeringUsefulness: number;
+    strategicClarity: number;
+    formatting: number;
+    acceptanceCriteria: number;
+    downstreamReadiness: number;
+    overall: number;
+    notes?: string;
+};
+
+export type GenerationPassRecord = {
+    stage: string;                         // 'strategy' | 'render_score' | 'revision'
+    ms: number;
+    ok: boolean;
+};
+
+export type GenerationMeta = {
+    passes: GenerationPassRecord[];
+    totalMs: number;
+    revised: boolean;
+    schemaVersion: number;                 // bump when the StructuredPRD shape changes
 };
 
 export type SpineVersion = {
@@ -84,6 +272,12 @@ export type SpineVersion = {
         timestamp: number;
         raw?: string;
     };
+    // --- Premium PRD additions (all optional). ---
+    sourcePrompt?: string;                 // original user prompt at generation time
+    qualityScores?: QualityScores;
+    model?: string;                        // model used for generation
+    generationMeta?: GenerationMeta;
+    prdVersion?: number;                   // schema version (1 = legacy; 2 = premium)
 };
 
 // --- Structured Artifact Content Types ---

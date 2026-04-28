@@ -5,6 +5,7 @@ import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { replyInBranch } from '../lib/llmProvider';
 import { IntentHelperInline } from '../lib/intentHelper';
+import { Callout } from './prd/Callout';
 
 interface SelectableSpineProps {
     projectId: string;
@@ -134,7 +135,10 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                     prose-code:text-pink-600 prose-code:bg-neutral-100 prose-code:px-1.5 prose-code:py-0.5 prose-code:rounded
                 "
             >
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                <ReactMarkdown
+                    remarkPlugins={[remarkGfm]}
+                    components={{ blockquote: Callout }}
+                >
                     {text}
                 </ReactMarkdown>
             </div>

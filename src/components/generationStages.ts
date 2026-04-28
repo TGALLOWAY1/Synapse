@@ -7,19 +7,20 @@ export interface ProgressStage {
 // ── Pre-defined stage sets for common operations ──
 
 export const PRD_GENERATION_STAGES: ProgressStage[] = [
-    { label: 'Analyzing product vision...', minDuration: 2500 },
-    { label: 'Structuring requirements...', minDuration: 3000 },
-    { label: 'Defining core features...', minDuration: 3500 },
-    { label: 'Drafting user stories...', minDuration: 3000 },
-    { label: 'Composing PRD sections...', minDuration: 4000 },
-    { label: 'Finalizing document structure...', minDuration: 5000 },
+    { label: 'Drafting product strategy...', minDuration: 3500 },
+    { label: 'Designing UX architecture...', minDuration: 3500 },
+    { label: 'Writing detailed feature specs...', minDuration: 3500 },
+    { label: 'Defining data model and state machines...', minDuration: 3000 },
+    { label: 'Composing premium PRD markdown...', minDuration: 4000 },
+    { label: 'Running quality review...', minDuration: 4000 },
+    { label: 'Revising weak sections...', minDuration: 5000 },
 ];
 
 export const PRD_REGENERATION_STAGES: ProgressStage[] = [
-    { label: 'Re-evaluating requirements...', minDuration: 2500 },
-    { label: 'Restructuring product definition...', minDuration: 3500 },
-    { label: 'Drafting updated PRD...', minDuration: 4000 },
-    { label: 'Finalizing revisions...', minDuration: 5000 },
+    { label: 'Re-evaluating product strategy...', minDuration: 3000 },
+    { label: 'Refreshing UX architecture and feature specs...', minDuration: 3500 },
+    { label: 'Re-running quality review...', minDuration: 4000 },
+    { label: 'Finalizing revised PRD...', minDuration: 5000 },
 ];
 
 export const MOCKUP_GENERATION_STAGES: ProgressStage[] = [

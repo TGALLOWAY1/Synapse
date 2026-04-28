@@ -1,7 +1,10 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { SpineVersion, HistoryEvent, StructuredPRD } from '../../types';
-import type { ProjectState } from '../types';
+import type {
+    SpineVersion, HistoryEvent, StructuredPRD,
+    QualityScores, GenerationMeta,
+} from '../../types';
+import type { ProjectState, SpineGenerationMetaInput } from '../types';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -12,6 +15,8 @@ export type SpineSlice = {
     getLatestSpine: ProjectState['getLatestSpine'];
     updateStructuredPRD: ProjectState['updateStructuredPRD'];
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
+    updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
+    updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     setSpineError: ProjectState['setSpineError'];
 };
 
@@ -100,13 +105,60 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         });
     },
 
-    updateSpineStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD, responseText: string) => {
+    updateSpineStructuredPRD: (
+        projectId: string,
+        spineId: string,
+        structuredPRD: StructuredPRD,
+        responseText: string,
+        meta?: SpineGenerationMetaInput,
+    ) => {
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
-            const updatedSpines = projectSpines.map(s =>
-                s.id === spineId ? { ...s, structuredPRD, responseText } : s
-            );
+            const updatedSpines = projectSpines.map(s => {
+                if (s.id !== spineId) return s;
+                const next: SpineVersion = { ...s, structuredPRD, responseText };
+                if (meta?.sourcePrompt !== undefined) next.sourcePrompt = meta.sourcePrompt;
+                if (meta?.qualityScores !== undefined) next.qualityScores = meta.qualityScores;
+                if (meta?.generationMeta !== undefined) next.generationMeta = meta.generationMeta;
+                if (meta?.model !== undefined) next.model = meta.model;
+                if (meta?.prdVersion !== undefined) next.prdVersion = meta.prdVersion;
+                return next;
+            });
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
+    updateSpineQualityScores: (
+        projectId: string,
+        spineId: string,
+        scores: QualityScores,
+        generationMeta?: GenerationMeta,
+    ) => {
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const updatedSpines = projectSpines.map(s => {
+                if (s.id !== spineId) return s;
+                return {
+                    ...s,
+                    qualityScores: scores,
+                    ...(generationMeta ? { generationMeta } : {}),
+                };
+            });
+            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
+    updateProjectProductMetadata: (
+        projectId: string,
+        meta: { productName?: string; productCategory?: string },
+    ) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            const next = { ...project };
+            if (meta.productName !== undefined) next.productName = meta.productName;
+            if (meta.productCategory !== undefined) next.productCategory = meta.productCategory;
+            return { projects: { ...state.projects, [projectId]: next } };
         });
     },
 

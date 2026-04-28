@@ -21,6 +21,11 @@ export interface StreamCallbacks {
 
 export interface ProviderOptions {
     onStatus?: (status: string) => void;
+    /**
+     * AbortSignal forwarded to underlying fetch calls. Lets multi-pass
+     * pipelines (e.g. PRD generation) be cancelled mid-flight.
+     */
+    signal?: AbortSignal;
 }
 
 const getApiKey = () => {
