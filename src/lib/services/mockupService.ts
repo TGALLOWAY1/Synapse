@@ -281,10 +281,15 @@ const parseMockupPayload = (
 
     const critique = critiqueMockupAlignment(screens, settings, prdContent, structuredPRD);
 
+    // Alignment critique is informational. Structure + quality validators above
+    // already gate unrenderable HTML; this layer adds a heuristic semantic
+    // signal (PRD term coverage, generic-sludge detection) that is useful as a
+    // warning but too noisy to use as a hard gate — it was the dominant reason
+    // good output was being discarded for the deterministic safe-fallback.
     if (critique.severity === 'high' && critique.alignmentScore < 45) {
         const critiqueReason = critique.mismatchReasons.slice(0, 3).join(' ');
-        throw new Error(
-            `Mockup generation failed PRD alignment critique (${critique.alignmentScore}/100). ${critiqueReason}`
+        warnings.push(
+            `Low PRD alignment (${critique.alignmentScore}/100): ${critiqueReason}`
         );
     }
 

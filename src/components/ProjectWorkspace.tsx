@@ -87,27 +87,6 @@ export function ProjectWorkspace() {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [showNavOverflow]);
 
-    // Auto-resume background generation when the user lands on a finalized
-    // project. Handles page refresh mid-job and tab return after navigation.
-    // Brief debounce so a fast spine regen doesn't trigger duplicate work.
-    useEffect(() => {
-        if (!projectId || projectId === DEMO_PROJECT_ID) return;
-        const timer = window.setTimeout(() => {
-            const store = useProjectStore.getState();
-            const latest = store.getLatestSpine(projectId);
-            if (!latest?.isFinal || !latest.structuredPRD) return;
-            const proj = store.getProject(projectId);
-            artifactJobController.resumeIfNeeded({
-                projectId,
-                spineVersionId: latest.id,
-                prdContent: latest.responseText,
-                structuredPRD: latest.structuredPRD,
-                projectPlatform: proj?.platform,
-            });
-        }, 2000);
-        return () => window.clearTimeout(timer);
-    }, [projectId]);
-
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);

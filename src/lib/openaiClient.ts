@@ -67,15 +67,32 @@ export const callOpenAIImage = async (
         n: 1,
     };
 
-    const response = await fetch(OPENAI_IMAGE_URL, {
-        method: 'POST',
-        headers: {
-            'Content-Type': 'application/json',
-            'Authorization': `Bearer ${apiKey}`,
-        },
-        body: JSON.stringify(body),
-        signal: opts.signal,
-    });
+    let response: Response;
+    try {
+        response = await fetch(OPENAI_IMAGE_URL, {
+            method: 'POST',
+            headers: {
+                'Content-Type': 'application/json',
+                'Authorization': `Bearer ${apiKey}`,
+            },
+            body: JSON.stringify(body),
+            signal: opts.signal,
+        });
+    } catch (err) {
+        // Bubble user-cancellation untouched.
+        if ((err as { name?: string })?.name === 'AbortError') throw err;
+        // Browser-level fetch failures arrive as TypeError with messages like
+        // Safari's "Load failed" or Chromium's "Failed to fetch". These don't
+        // carry HTTP status; surface a diagnostic that points at the actual
+        // suspects (network, content blocker, VPN/proxy, CORS extension).
+        const raw = err instanceof Error ? err.message : String(err);
+        if (/load failed|failed to fetch|networkerror/i.test(raw)) {
+            throw new Error(
+                `Could not reach api.openai.com. Common causes: no network, ad/content blocker, VPN or corporate proxy, or a CORS-blocking browser extension. Raw: ${raw}`
+            );
+        }
+        throw new Error(`OpenAI image request failed before a response was received. Raw: ${raw}`);
+    }
 
     if (!response.ok) {
         const errorData = await response.json().catch(() => null);

@@ -19,6 +19,7 @@ import {
 import { isAbortError } from '../concurrency';
 import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
+import { fireScreenImagesInBackground } from './mockupImageService';
 
 export interface StartArgs {
     projectId: string;
@@ -98,6 +99,7 @@ async function runCoreArtifactSlot(
 ): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD } = args;
 
+    console.info(`[artifactJobController] ${subtype} starting`);
     await semaphore.acquire();
     let content: string;
     try {
@@ -189,7 +191,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     const versions = writeStore.getArtifactVersions(projectId, artifactId);
     const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
 
-    writeStore.createArtifactVersion(
+    const { versionId } = writeStore.createArtifactVersion(
         projectId,
         artifactId,
         JSON.stringify(payload),
@@ -211,6 +213,10 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     );
 
     writeStore.setSlotStatus(projectId, 'mockup', { status: 'done', finishedAt: Date.now() });
+
+    // AI image previews are the primary mockup surface — fire low-quality
+    // gpt-image-2 jobs for every screen as soon as the HTML version lands.
+    fireScreenImagesInBackground({ projectId, artifactId, versionId, payload, settings });
 }
 
 async function executeJob(args: StartArgs, controller: AbortController, slotKeys: ArtifactSlotKey[]): Promise<void> {
@@ -268,6 +274,15 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
 
     if (signal.aborted) {
         useProjectStore.getState().markAllInterrupted(projectId);
+        return;
+    }
+
+    const job = useProjectStore.getState().getJob(projectId);
+    if (job) {
+        const summary = slotKeys
+            .map(k => `${k}=${job.slots[k]?.status ?? 'unknown'}`)
+            .join(' ');
+        console.info(`[artifactJobController] job complete — ${summary}`);
     }
 }
 

@@ -54,7 +54,10 @@ export function MockupViewer({
 }: Props) {
     const aiImageEnabled = !!(projectId && artifactId && versionId);
     const [activeIdx, setActiveIdx] = useState(0);
-    const [mode, setMode] = useState<Mode>('preview');
+    // AI image is the primary mockup artifact — default to it when available,
+    // fall back to the HTML preview when no projectId/artifactId/versionId
+    // is threaded (e.g. comparison view).
+    const [mode, setMode] = useState<Mode>(aiImageEnabled ? 'image' : 'preview');
     const [copied, setCopied] = useState(false);
     // Session-scoped probe aggregate for this artifact version. Populated
     // by MockupHtmlPreview every time a probe message arrives; surfaced

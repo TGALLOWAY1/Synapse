@@ -16,15 +16,13 @@ import type {
     StructuredPRD,
     MockupSettings,
     MockupScope,
-    MockupPayload,
     ArtifactVersion,
     StalenessState,
     ProjectPlatform,
 } from '../types';
 import { MOCKUP_HTML_V1 } from '../types';
 import { v4 as uuidv4 } from 'uuid';
-import { useMockupImageStore } from '../store/mockupImageStore';
-import { hasOpenAIKey } from '../lib/openaiClient';
+import { fireScreenImagesInBackground } from '../lib/services/mockupImageService';
 import { mapProjectPlatform, pickFidelity } from '../lib/mockupDefaults';
 import { tryParsePayload, extractMockupSettings, DEFAULT_MOCKUP_SETTINGS } from '../lib/mockupParsing';
 
@@ -80,48 +78,6 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
 
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
 
-    /**
-     * If the HTML pipeline fell through to its safe-fallback template, the
-     * structured mockup didn't really succeed — kick off gpt-image-2 drafts
-     * (low quality) for each screen so the user has a second visual to
-     * compare against. Fire-and-forget at the call site; internally we cap
-     * concurrency to 2 to avoid rate-limit thrash on multi-screen scopes
-     * (gpt-image-2 is 30–60s per image and OpenAI penalises bursts).
-     */
-    const maybeAutoFireImages = (
-        artifactId: string,
-        versionId: string,
-        payload: MockupPayload,
-        settings: MockupSettings,
-        usedFallback: boolean,
-    ) => {
-        if (!usedFallback) return;
-        if (!hasOpenAIKey()) return;
-        const store = useMockupImageStore.getState();
-        const screens = [...payload.screens];
-        const CONCURRENCY = 2;
-        const worker = async () => {
-            while (screens.length > 0) {
-                const screen = screens.shift();
-                if (!screen) return;
-                try {
-                    await store.generate({
-                        projectId,
-                        artifactId,
-                        versionId,
-                        screen,
-                        payload,
-                        settings,
-                        quality: 'low',
-                    });
-                } catch {
-                    // store.generate already records the error; continue draining.
-                }
-            }
-        };
-        for (let i = 0; i < CONCURRENCY; i++) void worker();
-    };
-
     const handleGenerate = async () => {
         setError(null);
         setWarning(null);
@@ -171,7 +127,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             if (warnings.length > 0) {
                 setWarning(`Generated with safeguards (${warnings.length} notices): ${warnings.join(' ')}`);
             }
-            maybeAutoFireImages(artifactId, versionId, payload, settings, usedFallback);
+            fireScreenImagesInBackground({ projectId, artifactId, versionId, payload, settings });
         } catch (e) {
             const err = normalizeError(e);
             console.error('[Mockup generation failed]', err.raw);
@@ -220,7 +176,7 @@ export function MockupsView({ projectId, spineVersionId, prdContent, structuredP
             if (warnings.length > 0) {
                 setWarning(`Regenerated with safeguards (${warnings.length} notices): ${warnings.join(' ')}`);
             }
-            maybeAutoFireImages(artifactId, versionId, payload, settings, usedFallback);
+            fireScreenImagesInBackground({ projectId, artifactId, versionId, payload, settings });
         } catch (e) {
             // On regeneration failure, the previous version is preserved — the
             // user still sees the last known good content.
