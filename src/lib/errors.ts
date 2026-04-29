@@ -97,7 +97,9 @@ const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown' | 'project_access_d
         'capped quotas — switch to a stable model if this keeps happening.',
     safety_blocked: 'Content was blocked by safety filters. Try adjusting your prompt.',
     empty_response: 'No content was generated. Please try again.',
-    network: 'Network error. Check your internet connection and try again.',
+    network:
+        'Network connection failed after several retries. If you are on mobile, try switching ' +
+        'between Wi-Fi and cellular (or moving to a stronger signal) and tap Try Again.',
     parse_failure: 'The response could not be processed. Please try again.',
 };
 

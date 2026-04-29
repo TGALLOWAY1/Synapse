@@ -70,6 +70,55 @@ const buildHeaders = (apiKey: string): HeadersInit => {
     return headers;
 };
 
+// On mobile Safari, a transient connection drop during a long-running fetch
+// (the PRD pipeline can take 60–90s end-to-end) surfaces as a generic
+// `TypeError: Load failed`. Without retry, a single drop kills the whole
+// generation. We retry connection-level failures with exponential backoff;
+// any non-network error (auth, quota, abort, HTTP 4xx/5xx returned by the
+// server) bypasses retry and propagates immediately.
+const MAX_FETCH_RETRIES = 3;
+const RETRY_BASE_MS = 1000;
+
+const isRetryableNetworkError = (e: unknown): boolean => {
+    if (e instanceof DOMException && e.name === 'AbortError') return false;
+    if (!(e instanceof Error)) return false;
+    const msg = e.message.toLowerCase();
+    return (
+        msg.includes('load failed') ||
+        msg.includes('failed to fetch') ||
+        msg.includes('networkerror') ||
+        msg.includes('network request failed') ||
+        msg.startsWith('net::')
+    );
+};
+
+const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
+    new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+        const t = setTimeout(resolve, ms);
+        signal?.addEventListener('abort', () => {
+            clearTimeout(t);
+            reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+    });
+
+const fetchWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
+    const signal = init.signal as AbortSignal | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+        try {
+            return await fetch(url, init);
+        } catch (e) {
+            lastError = e;
+            if (!isRetryableNetworkError(e) || attempt === MAX_FETCH_RETRIES) throw e;
+            const delay = RETRY_BASE_MS * 2 ** attempt;
+            console.warn(`[gemini] fetch failed (${(e as Error).message}); retrying in ${delay}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
+            await sleepWithAbort(delay, signal);
+        }
+    }
+    throw lastError;
+};
+
 /**
  * Turn a raw Gemini error payload into a more specific message when the
  * failure is a quota/rate-limit hit. We surface free-tier hits explicitly so
@@ -118,7 +167,7 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
         };
     }
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: buildHeaders(apiKey),
         body: JSON.stringify(body),
@@ -165,7 +214,7 @@ export const callGeminiStream = async (
         contents: [{ parts: [{ text: promptText }] }],
     };
 
-    const response = await fetch(url, {
+    const response = await fetchWithRetry(url, {
         method: 'POST',
         headers: buildHeaders(apiKey),
         body: JSON.stringify(body),
