@@ -123,7 +123,10 @@ export const applyAiUpdate = (section: PrdSectionJob, content: string): PrdSecti
 
 export const defaultProvider: ModelProvider = {
   async generateText(input) {
-    return callGemini('Generate concise PRD section markdown.', input.prompt, { model: input.model });
+    // callGemini currently supports model overrides only via JSON mode config,
+    // which requires response schema fields. Progressive section generation is
+    // plain-text markdown, so we call with the active configured model.
+    return callGemini('Generate concise PRD section markdown.', input.prompt);
   },
 };
 
