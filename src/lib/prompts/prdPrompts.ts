@@ -1,8 +1,8 @@
 // System instructions for the 3-pass PRD generation pipeline.
 //
 // Pass A — Strategy: produce the full extended StructuredPRD JSON.
-// Pass B — Render + Self-Score: render canonical premium markdown and rate
-//          the PRD against a 7-dimension rubric.
+// Pass B — Self-Score: rate the PRD against a 7-dimension rubric (markdown
+//          is rendered deterministically on the client).
 // Pass C — Revision (conditional): replace only weak sections when any
 //          rubric dimension scored below 4.
 
@@ -78,27 +78,14 @@ Output ONLY the JSON object, conforming to the supplied schema.`;
 
 // --- Pass B: Render + Self-Score ---
 
-export const buildRenderAndScoreInstruction = (): string => {
-    return `You are rendering a Product Requirements Document into premium, scannable markdown AND scoring it against a quality rubric.
+export const buildScoreInstruction = (): string => {
+    return `You are scoring a Product Requirements Document against a quality rubric. The markdown render is produced deterministically on the client — your job is critique, not formatting.
 
 Inputs: a JSON object containing the structured PRD.
 
-Output: a single JSON object with three fields:
-1. markdown — the canonical PRD markdown (see formatting rules below).
-2. qualityScores — your honest, calibrated scores against the rubric.
-3. weakestDimensions — a list of rubric dimension names (camelCase) where you scored 4 or lower, ordered worst first.
-
-Markdown formatting rules:
-- H1: the product name (or a generated title if productName is missing).
-- H2 sections in this exact order, each present only if the underlying data exists: Executive Summary, Product Thesis, Target Users & Jobs-to-be-Done, Core Problem, Product Principles, Core User Loops, UX Architecture, Feature Systems, Detailed Features, Data Model, State Machines, Permissions & Roles, Architecture, Non-Functional Requirements, Risks, MVP Scope, Success Metrics, Assumptions.
-- Use GitHub-flavored markdown tables wherever a section is tabular (JTBD, principles, loops, roles, risks, metrics, MVP scope columns).
-- Use \`> [!ASSUMPTION]\`, \`> [!RISK]\`, \`> [!DECISION]\`, \`> [!NOTE]\` blockquote callouts where appropriate.
-- Tag each detailed feature heading with \`[MVP]\`, \`[V1]\`, or \`[Later]\` based on its tier.
-- For each feature, render Functional Requirements, Acceptance Criteria (Success / Edge / Failure / UI as separate sub-bullet groups), Dependencies, Analytics Events.
-- For state machines, render a transitions table with columns: State, Trigger, Next States, User-visible, System behavior.
-- For architecture flows, render numbered ordered lists.
-- Keep paragraphs short. Use bold labels. Avoid long undifferentiated prose.
-- Do NOT include filler section bodies like "TBD" — omit the section if data is missing.
+Output: a single JSON object with two fields:
+1. qualityScores — your honest, calibrated scores against the rubric.
+2. weakestDimensions — a list of rubric dimension names (camelCase) where you scored 4 or lower, ordered worst first.
 
 ${RUBRIC_DEFINITION}
 
