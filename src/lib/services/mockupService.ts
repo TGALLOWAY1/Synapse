@@ -510,6 +510,7 @@ const runSpecEngineAttempt = async (
     settings: MockupSettings,
     structuredPRD: StructuredPRD | undefined,
     warnings: string[],
+    options: ProviderOptions | undefined,
 ): Promise<ParseResult> => {
     const system = buildSpecSystemPrompt(settings);
     const user = buildSpecUserPrompt(prdContent, structuredPRD);
@@ -519,12 +520,14 @@ const runSpecEngineAttempt = async (
     const providerParams = settings.safeMode
         ? { temperature: 0, topP: 0.5, topK: 1 }
         : { temperature: 0.2, topP: 0.8, topK: 32 };
+    options?.onStatus?.('Sending layout spec request to model…');
     const raw = await callGemini(system, user, {
         responseMimeType: 'application/json',
         responseSchema: mockupLayoutSpecSchema,
         model: MOCKUP_MODEL,
         ...providerParams,
-    });
+    }, options?.signal);
+    options?.onStatus?.('Parsing layout spec…');
     const fallbackProduct = inferConceptName(prdContent);
     const specResult = parseLayoutSpec(raw, fallbackProduct);
     specResult.warnings.forEach(w => warnings.push(w));
@@ -591,15 +594,17 @@ const runHtmlEngine = async (
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
-        options?.onStatus?.(`Generating mockup (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})...`);
+        options?.onStatus?.(`Composing mockup HTML (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})…`);
         try {
             const raw = await callGemini(system, user, {
                 responseMimeType: 'application/json',
                 responseSchema: mockupSchema,
                 model: MOCKUP_MODEL,
                 ...providerParams,
-            });
+            }, options?.signal);
+            options?.onStatus?.(`Parsing screens (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})…`);
             const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD);
+            options?.onStatus?.(`Scoring quality (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})…`);
             const qualityAvg = parsed.payload.screens.length
                 ? Math.round(parsed.payload.screens
                     .map(screen => assessMockupHtmlQuality(screen.html).score)
@@ -646,9 +651,9 @@ const runSpecEngine = async (
     let lastError: Error | null = null;
 
     for (let attempt = 1; attempt <= MAX_GENERATION_ATTEMPTS; attempt++) {
-        options?.onStatus?.(`Generating mockup spec (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})...`);
+        options?.onStatus?.(`Building mockup spec (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})…`);
         try {
-            return await runSpecEngineAttempt(prdContent, settings, structuredPRD, warnings);
+            return await runSpecEngineAttempt(prdContent, settings, structuredPRD, warnings, options);
         } catch (error) {
             const err = error instanceof Error ? error : new Error(String(error));
             lastError = err;

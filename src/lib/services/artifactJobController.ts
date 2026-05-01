@@ -170,8 +170,11 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             attempt: (store.getSlot(projectId, 'mockup')?.attempt ?? 0) + 1,
             progressLog: [],
         });
-        store.appendSlotProgress(projectId, 'mockup', 'Sending request to model…');
-        result = await generateMockup(prdContent, settings, structuredPRD);
+        store.appendSlotProgress(projectId, 'mockup', 'Preparing mockup request…');
+        result = await generateMockup(prdContent, settings, structuredPRD, {
+            signal,
+            onStatus: (msg) => useProjectStore.getState().appendSlotProgress(projectId, 'mockup', msg),
+        });
     } finally {
         semaphore.release();
     }
@@ -344,11 +347,14 @@ export const artifactJobController = {
 
     /**
      * Retry a single slot. Reuses the active controller if one exists; else
-     * spins up a per-slot controller. Safe to call multiple times.
+     * spins up a per-slot controller and registers it in `runs` so that a
+     * subsequent `cancelAll` can see it and a subsequent `startAll` won't
+     * race against it.
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
-        const run = runs.get(args.projectId);
-        const controller = run && !run.controller.signal.aborted ? run.controller : new AbortController();
+        const existingRun = runs.get(args.projectId);
+        const reuseExisting = existingRun && !existingRun.controller.signal.aborted;
+        const controller = reuseExisting ? existingRun!.controller : new AbortController();
 
         const store = useProjectStore.getState();
         if (!store.getJob(args.projectId)) {
@@ -366,7 +372,7 @@ export const artifactJobController = {
             }
         }
 
-        void (async () => {
+        const promise = (async () => {
             try {
                 if (slot === 'mockup') {
                     await runMockupSlot(args, controller.signal);
@@ -377,7 +383,19 @@ export const artifactJobController = {
                 if (isAbortError(e) || controller.signal.aborted) return;
                 recordError(args.projectId, slot, e);
             }
-        })();
+        })().finally(() => {
+            // Only clear the run entry if we own it AND nothing else has
+            // taken it over. The reused-controller case is owned by the
+            // active run, so leave it alone.
+            const current = runs.get(args.projectId);
+            if (!reuseExisting && current && current.controller === controller) {
+                runs.delete(args.projectId);
+            }
+        });
+
+        if (!reuseExisting) {
+            runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise });
+        }
     },
 
     /**

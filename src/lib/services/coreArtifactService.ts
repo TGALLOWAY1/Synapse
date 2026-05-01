@@ -325,21 +325,54 @@ Architecture: ${structuredPRD.architecture}${
         component_inventory: componentInventorySchema,
     };
 
+    const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+
+    // Cap progress messages at ~3/s; emit every 250 chars OR 350ms to keep the
+    // UI feeling alive without thrashing the store.
+    const makeChunkEmitter = (label: (chars: number) => string) => {
+        let chars = 0;
+        let lastEmittedChars = 0;
+        let lastEmittedAt = performance.now();
+        return (text: string) => {
+            chars += text.length;
+            const now = performance.now();
+            if (chars - lastEmittedChars >= 250 || now - lastEmittedAt >= 350) {
+                lastEmittedChars = chars;
+                lastEmittedAt = now;
+                onProgress?.(label(chars));
+            }
+        };
+    };
+
+    // Phase the streaming label so the user sees motion even when the chars
+    // counter alone wouldn't change — different prefixes tell them where in
+    // the response we are.
+    const streamingLabel = (chars: number): string => {
+        if (chars < 600) return `Drafting opening sections… (${chars.toLocaleString()} chars)`;
+        if (chars < 2000) return `Filling in details… (${chars.toLocaleString()} chars)`;
+        if (chars < 4500) return `Expanding examples… (${chars.toLocaleString()} chars)`;
+        return `Wrapping up… (${chars.toLocaleString()} chars)`;
+    };
+
     const schema = jsonSchemas[subtype];
     if (schema) {
         const jsonSystem = config.system + '\n\nReturn the result as structured JSON according to the provided schema.';
         onProgress?.('Sending request to model…');
-        const result = await callGemini(
+        const result = await callGeminiStream(
             jsonSystem,
-            `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
-            { responseMimeType: 'application/json', responseSchema: schema },
+            userPrompt,
+            {
+                onChunk: makeChunkEmitter((c) => `Streaming structured JSON… (${c.toLocaleString()} chars)`),
+                onComplete: () => {},
+                onError: () => {},
+            },
             options?.signal,
+            { responseMimeType: 'application/json', responseSchema: schema },
         );
         onProgress?.('Validating output…');
 
         try {
             const parsed = JSON.parse(result);
-            // Convert structured JSON to readable markdown for storage/display
             return normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
         } catch {
             // Fallback: return raw result if JSON parse fails
@@ -348,23 +381,11 @@ Architecture: ${structuredPRD.architecture}${
     }
 
     onProgress?.('Sending request to model…');
-    let chars = 0;
-    let lastEmittedChars = 0;
-    let lastEmittedAt = performance.now();
     const result = await callGeminiStream(
         config.system,
-        `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`,
+        userPrompt,
         {
-            onChunk: (text) => {
-                chars += text.length;
-                const now = performance.now();
-                // Throttle to avoid hammering the Zustand store with chunk-rate updates.
-                if (chars - lastEmittedChars >= 500 || now - lastEmittedAt >= 750) {
-                    lastEmittedChars = chars;
-                    lastEmittedAt = now;
-                    onProgress?.(`Receiving response… (${chars.toLocaleString()} chars)`);
-                }
-            },
+            onChunk: makeChunkEmitter(streamingLabel),
             onComplete: () => {},
             onError: () => {},
         },

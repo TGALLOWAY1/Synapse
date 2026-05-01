@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, StopCircle,
@@ -81,6 +81,16 @@ export function ArtifactWorkspace({
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
 
     const job = getJob(projectId);
+
+    // Auto-resume any slots that didn't finish before the last unmount /
+    // page reload. The job state is transient (stripped from persisted
+    // store), so without this the user lands on a workspace where missing
+    // artifacts silently sit at "Idle" with no resume affordance.
+    useEffect(() => {
+        artifactJobController.resumeIfNeeded({
+            projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
+        });
+    }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform]);
 
     const slotStatusFor = (key: WorkspaceSelection): GenerationStatus => {
         if (key === 'prd') return 'done';

@@ -203,16 +203,27 @@ export const callGeminiStream = async (
     promptText: string,
     callbacks: StreamCallbacks,
     signal?: AbortSignal,
+    jsonMode?: JsonModeConfig,
 ): Promise<string> => {
     const startTime = performance.now();
     const apiKey = getApiKey();
-    const model = getModel();
+    const model = jsonMode?.model || getModel();
     const url = `https://generativelanguage.googleapis.com/v1beta/models/${model}:streamGenerateContent?alt=sse`;
 
-    const body = {
+    const body: Record<string, unknown> = {
         systemInstruction: { parts: [{ text: systemInstruction }] },
         contents: [{ parts: [{ text: promptText }] }],
     };
+
+    if (jsonMode) {
+        body.generationConfig = {
+            responseMimeType: jsonMode.responseMimeType,
+            responseSchema: jsonMode.responseSchema,
+            ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
+            ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
+            ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
+        };
+    }
 
     const response = await fetchWithRetry(url, {
         method: 'POST',
