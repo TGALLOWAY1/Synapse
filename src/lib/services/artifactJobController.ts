@@ -34,9 +34,18 @@ const ALL_SLOT_KEYS: ArtifactSlotKey[] = [
     'mockup',
 ];
 
-const GLOBAL_CONCURRENCY = 4;
+// Concurrency budget per project. Core artifacts run up to 4 in parallel
+// within a layer; mockup runs in its own single-slot bucket so its 25–60s
+// HTTP request never blocks core generation. Buckets are per-project so
+// two projects in two browser tabs don't starve each other.
+const CORE_CONCURRENCY_PER_PROJECT = 4;
 
-function createSemaphore(limit: number) {
+interface Semaphore {
+    acquire(): Promise<void>;
+    release(): void;
+}
+
+function createSemaphore(limit: number): Semaphore {
     let inFlight = 0;
     const waiters: Array<() => void> = [];
     return {
@@ -56,7 +65,26 @@ function createSemaphore(limit: number) {
     };
 }
 
-const semaphore = createSemaphore(GLOBAL_CONCURRENCY);
+const coreSemaphores = new Map<string, Semaphore>();
+const mockupSemaphores = new Map<string, Semaphore>();
+
+const getCoreSemaphore = (projectId: string): Semaphore => {
+    let s = coreSemaphores.get(projectId);
+    if (!s) {
+        s = createSemaphore(CORE_CONCURRENCY_PER_PROJECT);
+        coreSemaphores.set(projectId, s);
+    }
+    return s;
+};
+
+const getMockupSemaphore = (projectId: string): Semaphore => {
+    let s = mockupSemaphores.get(projectId);
+    if (!s) {
+        s = createSemaphore(1);
+        mockupSemaphores.set(projectId, s);
+    }
+    return s;
+};
 
 interface RunState {
     controller: AbortController;
@@ -75,9 +103,13 @@ function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersi
         ? artifacts.find(a => a.subtype === subtype)
         : artifacts[0];
     if (!match) return false;
-    const versions = store.getArtifactVersions(projectId, match.id);
-    return versions.some(v =>
-        v.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId),
+    // Only the preferred (currently displayed) version counts as "done" for
+    // this spine. Older versions linked to this spine — e.g. after the user
+    // reverted to an earlier version — should not block re-generation.
+    const preferred = store.getPreferredVersion(projectId, match.id);
+    if (!preferred) return false;
+    return preferred.sourceRefs.some(
+        r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
     );
 }
 
@@ -100,6 +132,7 @@ async function runCoreArtifactSlot(
     const { projectId, spineVersionId, prdContent, structuredPRD } = args;
 
     console.info(`[artifactJobController] ${subtype} starting`);
+    const semaphore = getCoreSemaphore(projectId);
     await semaphore.acquire();
     let content: string;
     try {
@@ -159,6 +192,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     const { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform } = args;
     const settings = buildAutoMockupSettings(prdContent, structuredPRD, projectPlatform);
 
+    const semaphore = getMockupSemaphore(projectId);
     await semaphore.acquire();
     let result: Awaited<ReturnType<typeof generateMockup>>;
     try {

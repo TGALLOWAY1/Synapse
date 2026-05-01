@@ -11,6 +11,7 @@
 
 import {
     callGemini,
+    callGeminiStream,
     DEFAULT_GEMINI_MODEL,
     type ProviderOptions,
 } from '../geminiClient';
@@ -60,6 +61,12 @@ export interface PrdPipelineOptions extends ProviderOptions {
      * (rendering + scoring) finishes.
      */
     onPartial?: (partial: { structuredPRD: StructuredPRD; markdown: string }) => void;
+    /**
+     * Fine-grained progress events suitable for a live status feed. Emitted
+     * during Pass A streaming and at each pass boundary. Receivers should
+     * de-duplicate consecutive identical messages.
+     */
+    onProgress?: (message: string) => void;
     signal?: AbortSignal;
 }
 
@@ -81,9 +88,16 @@ export const runPrdPipeline = async (
     options: PrdPipelineOptions = {},
     platform?: ProjectPlatform,
 ): Promise<PrdPipelineResult> => {
-    const { onStatus, onPartial, signal } = options;
+    const { onStatus, onPartial, onProgress, signal } = options;
     const passes: GenerationPassRecord[] = [];
     const overallStart = performance.now();
+
+    const phasedStrategyLabel = (chars: number): string => {
+        if (chars < 800) return `Drafting vision and target users… (${chars.toLocaleString()} chars)`;
+        if (chars < 2200) return `Designing UX architecture and feature specs… (${chars.toLocaleString()} chars)`;
+        if (chars < 4200) return `Defining data model and acceptance criteria… (${chars.toLocaleString()} chars)`;
+        return `Wrapping up structured PRD… (${chars.toLocaleString()} chars)`;
+    };
 
     // Resolve which model is being used (for storage/audit). Mirror the
     // logic in callGemini so we report the same value even if jsonMode.model
@@ -94,20 +108,38 @@ export const runPrdPipeline = async (
 
     // --- Pass A: Strategy ---
     onStatus?.('Drafting strategy…');
+    onProgress?.('Sending request to model…');
     const passAStart = performance.now();
     let structuredPRD: StructuredPRD;
     try {
-        const result = await callGemini(
+        let chars = 0;
+        let lastEmitChars = 0;
+        let lastEmitAt = performance.now();
+        const result = await callGeminiStream(
             buildStrategySystemInstruction(platform),
             `User's product idea:\n\n${promptText}`,
+            {
+                onChunk: (text) => {
+                    chars += text.length;
+                    const now = performance.now();
+                    if (chars - lastEmitChars >= 250 || now - lastEmitAt >= 350) {
+                        lastEmitChars = chars;
+                        lastEmitAt = now;
+                        onProgress?.(phasedStrategyLabel(chars));
+                    }
+                },
+                onComplete: () => {},
+                onError: () => {},
+            },
+            signal,
             {
                 responseMimeType: 'application/json',
                 responseSchema: structuredPRDSchema,
                 temperature: 0.4,
                 topP: 0.9,
             },
-            signal,
         );
+        onProgress?.('Parsing structured PRD…');
         structuredPRD = JSON.parse(result) as StructuredPRD;
         passes.push({ stage: 'strategy', ms: performance.now() - passAStart, ok: true });
     } catch (e) {
@@ -122,6 +154,7 @@ export const runPrdPipeline = async (
 
     // --- Pass B: Self-Score ---
     onStatus?.('Quality review…');
+    onProgress?.('Running quality review…');
     const passBStart = performance.now();
     let qualityScores: QualityScores | undefined;
     let weakestDimensions: string[] = [];
@@ -154,6 +187,7 @@ export const runPrdPipeline = async (
     let revised = false;
     if (qualityScores && minRubricScore(qualityScores) < MIN_PASSING_SCORE) {
         onStatus?.('Revising weak sections…');
+        onProgress?.('Revising weak sections…');
         const passCStart = performance.now();
         try {
             const result = await callGemini(

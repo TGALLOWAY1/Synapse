@@ -117,4 +117,10 @@ export interface ProjectState {
     getSlot: (projectId: string, slot: ArtifactSlotKey) => SlotState | undefined;
     getJob: (projectId: string) => ProjectJobState | undefined;
     markAllInterrupted: (projectId: string) => void;
+
+    // PRD generation progress (transient — excluded from persist)
+    prdProgress: Record<string, { messages: string[]; updatedAt: number } | undefined>;
+    appendPrdProgress: (projectId: string, message: string) => void;
+    clearPrdProgress: (projectId: string) => void;
+    getPrdProgress: (projectId: string) => { messages: string[]; updatedAt: number } | undefined;
 }
