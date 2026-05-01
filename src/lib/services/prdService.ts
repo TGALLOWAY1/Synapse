@@ -32,6 +32,7 @@ export const generateStructuredPRD = async (
     promptText: string,
     options?: ProviderOptions & {
         onPartial?: PrdPipelineOptions['onPartial'];
+        onProgress?: PrdPipelineOptions['onProgress'];
         onResult?: (result: PrdPipelineResult) => void;
     },
     platform?: ProjectPlatform,
@@ -43,6 +44,7 @@ export const generateStructuredPRD = async (
         {
             onStatus: options?.onStatus,
             onPartial: options?.onPartial,
+            onProgress: options?.onProgress,
             signal: options?.signal,
         },
         platform,

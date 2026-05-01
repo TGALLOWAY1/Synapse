@@ -99,9 +99,11 @@ export function GenerationProgress({
     const hasHistory = !!history && history.length > 0;
 
     useEffect(() => {
-        // When a real progress value is supplied or history is being streamed
-        // in, skip time-based advancement — the parent owns stage progression.
-        if (isStateDriven || hasHistory) return;
+        // When a real progress value is supplied skip time-based advancement —
+        // the parent owns stage progression. History is allowed to drive the
+        // event list AND let the timer advance the stage label, so users see
+        // both the curated stage label and the live stream of progress.
+        if (isStateDriven) return;
         if (stages.length === 0) return;
 
         const advance = () => {
@@ -152,6 +154,9 @@ export function GenerationProgress({
     const hiddenCount = dedupedHistory.length - visibleHistory.length;
 
     if (inline) {
+        const inlineLabel = hasHistory && dedupedHistory.length > 0
+            ? `${currentLabel} — ${dedupedHistory[dedupedHistory.length - 1]}`
+            : currentLabel;
         return (
             <div className="flex items-center gap-3">
                 <span className="relative flex h-2 w-2">
@@ -161,7 +166,7 @@ export function GenerationProgress({
                 <span
                     className={`text-sm ${style.accent} transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}
                 >
-                    {hasHistory ? dedupedHistory[dedupedHistory.length - 1] : currentLabel}
+                    {inlineLabel}
                 </span>
             </div>
         );
@@ -192,27 +197,34 @@ export function GenerationProgress({
                 )}
                 <div className="ml-[18px]">
                     {hasHistory ? (
-                        <ul className="space-y-1.5">
-                            {hiddenCount > 0 && (
-                                <li className="text-xs text-neutral-400 italic">+{hiddenCount} earlier…</li>
-                            )}
-                            {visibleHistory.map((msg, i) => {
-                                const isLast = i === visibleHistory.length - 1;
-                                return (
-                                    <li key={`${i}-${msg}`} className="flex items-center gap-2">
-                                        {isLast ? (
-                                            <span className="relative flex h-2 w-2 shrink-0">
-                                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dotColor} opacity-75`} />
-                                                <span className={`relative inline-flex rounded-full h-2 w-2 ${style.dotColor}`} />
-                                            </span>
-                                        ) : (
-                                            <Check size={12} className={`${style.accent} shrink-0`} />
-                                        )}
-                                        <span className={`text-sm ${isLast ? style.accent : 'text-neutral-500'}`}>{msg}</span>
-                                    </li>
-                                );
-                            })}
-                        </ul>
+                        <>
+                            <p
+                                className={`text-sm font-medium ${style.accent} mb-2 transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}
+                            >
+                                {currentLabel}
+                            </p>
+                            <ul className="space-y-1.5">
+                                {hiddenCount > 0 && (
+                                    <li className="text-xs text-neutral-400 italic">+{hiddenCount} earlier…</li>
+                                )}
+                                {visibleHistory.map((msg, i) => {
+                                    const isLast = i === visibleHistory.length - 1;
+                                    return (
+                                        <li key={`${i}-${msg}`} className="flex items-center gap-2">
+                                            {isLast ? (
+                                                <span className="relative flex h-2 w-2 shrink-0">
+                                                    <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dotColor} opacity-75`} />
+                                                    <span className={`relative inline-flex rounded-full h-2 w-2 ${style.dotColor}`} />
+                                                </span>
+                                            ) : (
+                                                <Check size={12} className={`${style.accent} shrink-0`} />
+                                            )}
+                                            <span className={`text-sm ${isLast ? 'text-neutral-700' : 'text-neutral-500'}`}>{msg}</span>
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                        </>
                     ) : (
                         <p
                             className={`text-sm text-neutral-600 transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}

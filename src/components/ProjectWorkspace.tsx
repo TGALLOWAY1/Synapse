@@ -14,8 +14,6 @@ import { ConsolidationModal } from './ConsolidationModal';
 import { SettingsModal } from './SettingsModal';
 import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
-import { MockupsView } from './MockupsView';
-import { ArtifactsView } from './ArtifactsView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
@@ -30,7 +28,8 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, appendPrdProgress, clearPrdProgress } = useProjectStore();
+    const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -148,12 +147,14 @@ export function ProjectWorkspace() {
             setIsGenerating(true);
             artifactJobController.cancelAll(projectId);
             useProjectStore.getState().clearJob(projectId);
+            clearPrdProgress(projectId);
             const { newSpineId } = regenerateSpine(projectId);
             activeNewSpineId = newSpineId;
             const sourcePrompt = latestSpine.promptText;
             await generateStructuredPRD(
                 sourcePrompt,
                 {
+                    onProgress: (message) => appendPrdProgress(projectId, message),
                     onPartial: ({ structuredPRD, markdown }) => {
                         updateSpineStructuredPRD(
                             projectId,
@@ -426,6 +427,7 @@ export function ProjectWorkspace() {
                                                     variant="foundation"
                                                     title="Regenerating PRD"
                                                     subtitle="Creating a fresh draft from your original prompt"
+                                                    history={prdProgress?.messages}
                                                 />
                                             </div>
                                         )}
@@ -439,6 +441,7 @@ export function ProjectWorkspace() {
                                                     variant="foundation"
                                                     title="Building your PRD"
                                                     subtitle="Transforming your product vision into a structured requirements document"
+                                                    history={prdProgress?.messages}
                                                 />
                                             </div>
                                         )}
@@ -561,6 +564,7 @@ export function ProjectWorkspace() {
                                             variant="foundation"
                                             title="Building your PRD"
                                             subtitle="Transforming your product vision into a structured requirements document"
+                                            history={prdProgress?.messages}
                                         />
                                         <div className="mt-6 space-y-4 animate-pulse">
                                             <div className="h-5 bg-neutral-100 rounded w-2/5" />
@@ -573,27 +577,6 @@ export function ProjectWorkspace() {
                                     </div>
                                 )}
                             </>
-                        )}
-
-                        {/* Mockups Stage */}
-                        {pipelineStage === 'mockups' && activeSpine && (
-                            <MockupsView
-                                projectId={projectId}
-                                spineVersionId={activeSpine.id}
-                                prdContent={activeSpine.responseText}
-                                structuredPRD={activeSpine.structuredPRD}
-                                projectPlatform={project?.platform}
-                            />
-                        )}
-
-                        {/* Artifacts Stage */}
-                        {pipelineStage === 'artifacts' && activeSpine && (
-                            <ArtifactsView
-                                projectId={projectId}
-                                spineVersionId={activeSpine.id}
-                                prdContent={activeSpine.responseText}
-                                structuredPRD={activeSpine.structuredPRD}
-                            />
                         )}
 
                         {/* History Stage */}
