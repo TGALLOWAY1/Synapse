@@ -1,11 +1,13 @@
 // Multi-pass PRD generation orchestrator.
 //
 // Pass A — Strategy + Architecture (heavy lift, JSON, big schema, T=0.4)
-// Pass B — Render + Self-Score (medium, JSON, T=0.2)
+// Pass B — Self-Score (small, JSON, T=0.2) — markdown is rendered locally
 // Pass C — Conditional Revision (medium, JSON, T=0.3, only if min score < 4)
 //
-// Progressive render: the caller can read the Pass A output via onPartial
-// before Pass B finishes, so the UI can render a draft PRD immediately.
+// Markdown is always produced by the deterministic renderer in
+// prdMarkdownRenderer.ts; the LLM only contributes structured JSON and
+// rubric scores. Progressive render: the caller can read the Pass A output
+// via onPartial before Pass B finishes, so the UI can paint immediately.
 
 import {
     callGemini,
@@ -14,12 +16,12 @@ import {
 } from '../geminiClient';
 import {
     structuredPRDSchema,
-    markdownAndScoreSchema,
+    scoreSchema,
     revisionPatchSchema,
 } from '../schemas/prdSchemas';
 import {
     buildStrategySystemInstruction,
-    buildRenderAndScoreInstruction,
+    buildScoreInstruction,
     buildRevisionInstruction,
 } from '../prompts/prdPrompts';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
@@ -118,38 +120,34 @@ export const runPrdPipeline = async (
     let markdown = renderPremiumMarkdown(structuredPRD);
     onPartial?.({ structuredPRD, markdown });
 
-    // --- Pass B: Render + Self-Score ---
+    // --- Pass B: Self-Score ---
     onStatus?.('Quality review…');
     const passBStart = performance.now();
     let qualityScores: QualityScores | undefined;
     let weakestDimensions: string[] = [];
     try {
         const result = await callGemini(
-            buildRenderAndScoreInstruction(),
+            buildScoreInstruction(),
             `PRD JSON:\n\n${JSON.stringify(structuredPRD)}`,
             {
                 responseMimeType: 'application/json',
-                responseSchema: markdownAndScoreSchema,
+                responseSchema: scoreSchema,
                 temperature: 0.2,
             },
             signal,
         );
         const parsed = JSON.parse(result) as {
-            markdown: string;
             qualityScores: QualityScores;
             weakestDimensions: string[];
         };
-        if (parsed.markdown && parsed.markdown.trim().length > 0) {
-            markdown = parsed.markdown;
-        }
         qualityScores = parsed.qualityScores;
         weakestDimensions = parsed.weakestDimensions || [];
         passes.push({ stage: 'render_score', ms: performance.now() - passBStart, ok: true });
     } catch (e) {
-        // Pass B failure is non-fatal — keep client-rendered markdown, no scores.
+        // Pass B failure is non-fatal — the PRD ships without scores.
         if ((e as { name?: string })?.name === 'AbortError') throw e;
         passes.push({ stage: 'render_score', ms: performance.now() - passBStart, ok: false });
-        console.warn('[PRD pipeline] Pass B failed; keeping client-rendered markdown without scores', e);
+        console.warn('[PRD pipeline] Pass B failed; shipping PRD without scores', e);
     }
 
     // --- Pass C: Conditional Revision ---

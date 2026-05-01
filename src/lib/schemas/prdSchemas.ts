@@ -288,8 +288,9 @@ export const structuredPRDSchema = {
 // --- Pass B: Render + Self-Score schema ---
 //
 // The model receives the StructuredPRD JSON from Pass A and returns a
-// premium-formatted markdown render plus a 7-dimension quality score and a
-// list of weakest dimensions (for use by the optional revision pass).
+// 7-dimension quality score and a list of weakest dimensions (for use by
+// the optional revision pass). Markdown is rendered deterministically on
+// the client from the structured JSON — no LLM round-trip needed for prose.
 
 const qualityScoresSchema = {
     type: "OBJECT",
@@ -316,14 +317,13 @@ const qualityScoresSchema = {
     ],
 };
 
-export const markdownAndScoreSchema = {
+export const scoreSchema = {
     type: "OBJECT",
     properties: {
-        markdown: { type: "STRING" },
         qualityScores: qualityScoresSchema,
         weakestDimensions: { type: "ARRAY", items: { type: "STRING" } },
     },
-    required: ["markdown", "qualityScores", "weakestDimensions"],
+    required: ["qualityScores", "weakestDimensions"],
 };
 
 // --- Pass C: Revision patch schema ---
