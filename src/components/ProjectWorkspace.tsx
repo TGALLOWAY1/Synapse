@@ -17,7 +17,6 @@ import { StructuredPRDView } from './StructuredPRDView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
-import { QualityScoreChip } from './prd/QualityScoreChip';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
@@ -170,7 +169,7 @@ export function ProjectWorkspace() {
                             });
                         }
                     },
-                    onResult: ({ structuredPRD, markdown, qualityScores, generationMeta, model }) => {
+                    onResult: ({ structuredPRD, markdown, generationMeta, model }) => {
                         updateSpineStructuredPRD(
                             projectId,
                             newSpineId,
@@ -178,7 +177,6 @@ export function ProjectWorkspace() {
                             markdown,
                             {
                                 sourcePrompt,
-                                qualityScores,
                                 generationMeta,
                                 model,
                                 prdVersion: generationMeta.schemaVersion,
@@ -465,27 +463,19 @@ export function ProjectWorkspace() {
 
                                         {/* View toggle when structured PRD exists */}
                                         {activeSpine.structuredPRD && (
-                                            <div className="flex items-center justify-between gap-2 mb-6">
-                                                <div className="flex items-center gap-2">
-                                                    <button
-                                                        onClick={() => setShowStructuredView(true)}
-                                                        className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                    >
-                                                        Structured View
-                                                    </button>
-                                                    <button
-                                                        onClick={() => setShowStructuredView(false)}
-                                                        className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                    >
-                                                        Markdown View
-                                                    </button>
-                                                </div>
-                                                {activeSpine.qualityScores && (
-                                                    <QualityScoreChip
-                                                        scores={activeSpine.qualityScores}
-                                                        revised={activeSpine.generationMeta?.revised}
-                                                    />
-                                                )}
+                                            <div className="flex items-center gap-2 mb-6">
+                                                <button
+                                                    onClick={() => setShowStructuredView(true)}
+                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
+                                                >
+                                                    Structured View
+                                                </button>
+                                                <button
+                                                    onClick={() => setShowStructuredView(false)}
+                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
+                                                >
+                                                    Markdown View
+                                                </button>
                                             </div>
                                         )}
 

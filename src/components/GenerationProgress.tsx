@@ -99,11 +99,13 @@ export function GenerationProgress({
     const hasHistory = !!history && history.length > 0;
 
     useEffect(() => {
-        // When a real progress value is supplied skip time-based advancement —
-        // the parent owns stage progression. History is allowed to drive the
-        // event list AND let the timer advance the stage label, so users see
-        // both the curated stage label and the live stream of progress.
+        // Skip the rotation timer entirely when the parent supplies real
+        // progress data — either an explicit `progress` value or a `history`
+        // event stream. Letting the timer run alongside real progress
+        // produces label/data mismatches (the timer would race ahead and
+        // park on a stage that the underlying work hadn't reached yet).
         if (isStateDriven) return;
+        if (hasHistory) return;
         if (stages.length === 0) return;
 
         const advance = () => {
@@ -128,23 +130,6 @@ export function GenerationProgress({
 
     if (stages.length === 0 && !hasHistory) return null;
 
-    // Clamp/derive values for state-driven mode
-    const clampedProgress = isStateDriven ? Math.max(0, Math.min(100, progress!)) : 0;
-    const activeDotIndex = isStateDriven
-        ? Math.min(
-              stages.length - 1,
-              Math.floor((clampedProgress / 100) * stages.length),
-          )
-        : currentIndex;
-
-    const currentLabel = isStateDriven
-        ? (statusLabel ?? stages[activeDotIndex]?.label ?? stages[stages.length - 1]?.label)
-        : (stages[currentIndex]?.label ?? stages[stages.length - 1]?.label);
-
-    const barWidthPct = isStateDriven
-        ? clampedProgress
-        : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
-
     // Dedupe consecutive identical entries (chunk-rate progress messages can
     // round to the same string) and trim to the last N for display.
     const dedupedHistory = hasHistory
@@ -152,6 +137,55 @@ export function GenerationProgress({
         : [];
     const visibleHistory = dedupedHistory.slice(-VISIBLE_HISTORY_CAP);
     const hiddenCount = dedupedHistory.length - visibleHistory.length;
+
+    // When `history` is the source of truth, derive the active stage from
+    // the latest message that matches a known stage label. We match by
+    // first-three-words substring (case-insensitive, ignoring trailing
+    // ellipsis/punctuation). Walk backwards so transient messages like
+    // "Sending request to model…", "Parsing structured PRD…", or
+    // "Connection dropped — retrying…" fall through to the most recent
+    // matching stage instead of yanking the dot to a wrong place.
+    const stageIndexFromMessage = (msg: string | undefined): number | null => {
+        if (!msg) return null;
+        const norm = msg.toLowerCase();
+        for (let i = stages.length - 1; i >= 0; i--) {
+            const label = stages[i]?.label?.toLowerCase().replace(/[….\s]+$/g, '') || '';
+            if (label && norm.includes(label.split(' ').slice(0, 3).join(' '))) {
+                return i;
+            }
+        }
+        return null;
+    };
+
+    // Clamp/derive values for state-driven mode
+    const clampedProgress = isStateDriven ? Math.max(0, Math.min(100, progress!)) : 0;
+    const historyLatest = hasHistory ? dedupedHistory[dedupedHistory.length - 1] : undefined;
+    let lastMatchedStage: number | null = null;
+    if (hasHistory) {
+        for (let i = dedupedHistory.length - 1; i >= 0 && lastMatchedStage === null; i--) {
+            lastMatchedStage = stageIndexFromMessage(dedupedHistory[i]);
+        }
+    }
+    const activeDotIndex = isStateDriven
+        ? Math.min(
+              stages.length - 1,
+              Math.floor((clampedProgress / 100) * stages.length),
+          )
+        : hasHistory
+            ? (lastMatchedStage !== null ? lastMatchedStage : 0)
+            : currentIndex;
+
+    const currentLabel = isStateDriven
+        ? (statusLabel ?? stages[activeDotIndex]?.label ?? stages[stages.length - 1]?.label)
+        : hasHistory
+            ? (historyLatest ?? stages[activeDotIndex]?.label ?? stages[stages.length - 1]?.label)
+            : (stages[currentIndex]?.label ?? stages[stages.length - 1]?.label);
+
+    const barWidthPct = isStateDriven
+        ? clampedProgress
+        : hasHistory
+            ? Math.min(((activeDotIndex + 1) / Math.max(stages.length, 1)) * 100, 95)
+            : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
 
     if (inline) {
         const inlineLabel = hasHistory && dedupedHistory.length > 0

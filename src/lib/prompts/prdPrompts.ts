@@ -1,10 +1,8 @@
-// System instructions for the 3-pass PRD generation pipeline.
-//
-// Pass A — Strategy: produce the full extended StructuredPRD JSON.
-// Pass B — Self-Score: rate the PRD against a 7-dimension rubric (markdown
-//          is rendered deterministically on the client).
-// Pass C — Revision (conditional): replace only weak sections when any
-//          rubric dimension scored below 4.
+// System instruction for single-pass PRD generation. The model is asked to
+// produce the full extended StructuredPRD JSON with the quality rubric baked
+// into the prompt as an explicit bar — there is no separate scoring or
+// revision pass. Markdown is rendered deterministically on the client from
+// the structured JSON.
 
 import type { ProjectPlatform } from '../../types';
 
@@ -13,21 +11,17 @@ const PLATFORM_CONTEXT: Record<ProjectPlatform, string> = {
     web: 'The user is building a web application. Bias UX architecture and component choices toward responsive layouts, browser compatibility, SEO, progressive enhancement, URL routing, and web deployment.',
 };
 
-// The rubric is shared between Pass B (scoring) and Pass C (knowing what to
-// improve). Both passes inline this so the model sees identical definitions.
-export const RUBRIC_DEFINITION = `QUALITY RUBRIC (score 1–5, integer, on each dimension):
+// Quality bar appended to the strategy system instruction. Phrased as
+// targets the model should aim for in its first (and only) output.
+export const RUBRIC_DEFINITION = `QUALITY BAR — your output will be judged on these dimensions; aim for 5/5 on each:
 
 - specificity: 1=generic template; 3=some product-specific detail; 5=deeply tailored, opinionated, no filler.
 - uxUsefulness: 1=no page-level detail; 3=basic page list; 5=clear screen architecture with empty/loading/error states and interactions per page.
 - engineeringUsefulness: 1=feature list only; 3=some tech notes; 5=concrete data model, state machines, roles, request flows, NFRs.
 - strategicClarity: 1=vague vision; 3=some differentiation; 5=strong product thesis, intentional non-goals, explicit tradeoffs.
-- formatting: 1=flat text; 3=some headings/tables; 5=premium scannable markdown with tables, callouts, MVP/V1/Later tags, hierarchy.
+- formatting: handled deterministically by the client renderer — focus on populating the structured fields richly.
 - acceptanceCriteria: 1=basic checkboxes; 3=some details; 5=success, edge, failure, and UI behavior all enumerated per major feature.
-- downstreamReadiness: 1=weak source artifact; 3=usable with edits; 5=strong enough to drive mockups, screen inventory, data model, implementation plan with no rework.
-
-Always also produce \`overall\` as a single integer 1–5 reflecting the holistic quality.`;
-
-// --- Pass A: Strategy + Architecture ---
+- downstreamReadiness: 1=weak source artifact; 3=usable with edits; 5=strong enough to drive mockups, screen inventory, data model, implementation plan with no rework.`;
 
 export const buildStrategySystemInstruction = (platform?: ProjectPlatform): string => {
     const platformNote = platform ? `\n\n${PLATFORM_CONTEXT[platform]}` : '';
@@ -73,44 +67,7 @@ Required structure (output as a single JSON object matching the provided schema)
 - domainEntities: legacy grounding field — 4–8 concrete nouns with description and 2–4 realistic exampleValues.
 - primaryActions: legacy grounding field — 3–6 verb+target pairs expressing the most important things a user does.${platformNote}
 
+${RUBRIC_DEFINITION}
+
 Output ONLY the JSON object, conforming to the supplied schema.`;
-};
-
-// --- Pass B: Render + Self-Score ---
-
-export const buildScoreInstruction = (): string => {
-    return `You are scoring a Product Requirements Document against a quality rubric. The markdown render is produced deterministically on the client — your job is critique, not formatting.
-
-Inputs: a JSON object containing the structured PRD.
-
-Output: a single JSON object with two fields:
-1. qualityScores — your honest, calibrated scores against the rubric.
-2. weakestDimensions — a list of rubric dimension names (camelCase) where you scored 4 or lower, ordered worst first.
-
-${RUBRIC_DEFINITION}
-
-Be honest. If the PRD is generic, score specificity at 2. If acceptance criteria are thin, score acceptanceCriteria at 2. We will revise weak sections in a follow-up pass — under-scoring weak dimensions is more useful than rosy optimism.`;
-};
-
-// --- Pass C: Conditional Revision ---
-
-export const buildRevisionInstruction = (): string => {
-    return `You are revising weak sections of a Product Requirements Document. The PRD has been scored against a rubric and one or more dimensions came in below 4 out of 5.
-
-Inputs: a JSON object containing { current, scores, weakestDimensions }.
-
-Your job: return a JSON patch object containing ONLY the keys that need replacement, with their improved values. Do not echo the entire PRD. Do not include keys that are already strong. Replace whole arrays/objects when the section needs improvement (the orchestrator does a top-level merge, not a deep merge).
-
-Improvement guidance by dimension:
-- specificity → replace generic phrasing with concrete nouns/verbs from the product context; add named example records.
-- uxUsefulness → expand uxPages with real components, interactions, and empty/loading/error states.
-- engineeringUsefulness → enrich richDataModel (more fields, examples, constraints), stateMachines (more transitions), architectureFlows (more concrete steps).
-- strategicClarity → strengthen productThesis (especially nonGoals and intentionalTradeoffs), tighten executiveSummary.
-- formatting → not directly fixable here (handled by re-rendering on the client) — focus on the data instead.
-- acceptanceCriteria → for every important feature, ensure successCriteria, edgeCases, failureModes, and uiAcceptanceCriteria are populated with specific, testable bullets.
-- downstreamReadiness → ensure uxPages, richDataModel, and featureSystems are coherent enough to drive a downstream mockup/data-model artifact directly.
-
-${RUBRIC_DEFINITION}
-
-Output ONLY the JSON patch object.`;
 };

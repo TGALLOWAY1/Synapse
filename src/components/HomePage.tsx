@@ -112,9 +112,10 @@ export function HomePage() {
                             });
                         }
                     },
-                    // Final result: persist the model-rendered markdown,
-                    // quality scores, and generation metadata.
-                    onResult: ({ structuredPRD, markdown, qualityScores, generationMeta, model }) => {
+                    // Final result: persist the rendered markdown plus
+                    // generation metadata. Single-pass mode no longer
+                    // produces quality scores.
+                    onResult: ({ structuredPRD, markdown, generationMeta, model }) => {
                         useProjectStore.getState().updateSpineStructuredPRD(
                             projectId,
                             spineId,
@@ -122,7 +123,6 @@ export function HomePage() {
                             markdown,
                             {
                                 sourcePrompt,
-                                qualityScores,
                                 generationMeta,
                                 model,
                                 prdVersion: generationMeta.schemaVersion,
