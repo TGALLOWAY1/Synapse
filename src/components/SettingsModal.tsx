@@ -1,14 +1,10 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Layers, Sparkles } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 
 interface SettingsModalProps {
     onClose: () => void;
 }
-
-type MockupEngine = 'html' | 'spec';
-const readMockupEngine = (): MockupEngine =>
-    localStorage.getItem('MOCKUP_ENGINE') === 'spec' ? 'spec' : 'html';
 
 /**
  * Model catalog. Order within each tier = display order in the UI. `current`
@@ -98,7 +94,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
     const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
-    const [mockupEngine, setMockupEngine] = useState<MockupEngine>(() => readMockupEngine());
     const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('OPENAI_API_KEY') || '');
 
     // Expand the legacy section automatically if the user is currently on a
@@ -112,7 +107,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         e.preventDefault();
         localStorage.setItem('GEMINI_API_KEY', apiKey.trim());
         localStorage.setItem('GEMINI_MODEL', model);
-        localStorage.setItem('MOCKUP_ENGINE', mockupEngine);
         const trimmedProjectId = projectId.trim();
         if (trimmedProjectId) {
             localStorage.setItem('GEMINI_PROJECT_ID', trimmedProjectId);
@@ -297,50 +291,6 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                     ))}
                                 </div>
                             )}
-                        </div>
-                    </div>
-
-                    {/* Mockup engine */}
-                    <div className="space-y-3">
-                        <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                            <Layers size={14} className="text-indigo-400" />
-                            Mockup Engine
-                        </label>
-                        <div className="grid grid-cols-1 gap-3">
-                            <button
-                                type="button"
-                                onClick={() => setMockupEngine('html')}
-                                className={`flex items-start gap-4 p-4 rounded-2xl border transition-all text-left ${
-                                    mockupEngine === 'html'
-                                        ? 'bg-indigo-500/10 border-indigo-500/50 ring-1 ring-indigo-500/50'
-                                        : 'bg-white/5 border-white/5 hover:bg-white/10'
-                                }`}
-                            >
-                                <div className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${mockupEngine === 'html' ? 'border-indigo-500' : 'border-neutral-600'}`}>
-                                    {mockupEngine === 'html' && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
-                                </div>
-                                <div>
-                                    <h4 className="text-sm font-bold text-white mb-0.5">HTML engine (default)</h4>
-                                    <p className="text-xs text-neutral-400">Free-form Tailwind output with heuristic validation + safe fallback. Stable, slightly less consistent across reruns.</p>
-                                </div>
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setMockupEngine('spec')}
-                                className={`flex items-start gap-4 p-4 rounded-2xl border transition-all text-left ${
-                                    mockupEngine === 'spec'
-                                        ? 'bg-indigo-500/10 border-indigo-500/50 ring-1 ring-indigo-500/50'
-                                        : 'bg-white/5 border-white/5 hover:bg-white/10'
-                                }`}
-                            >
-                                <div className={`mt-1 w-4 h-4 rounded-full border-2 flex items-center justify-center shrink-0 ${mockupEngine === 'spec' ? 'border-indigo-500' : 'border-neutral-600'}`}>
-                                    {mockupEngine === 'spec' && <div className="w-2 h-2 rounded-full bg-indigo-400" />}
-                                </div>
-                                <div>
-                                    <h4 className="text-sm font-bold text-white mb-0.5">Layout spec (experimental)</h4>
-                                    <p className="text-xs text-neutral-400">Typed shell + section + action vocabulary rendered deterministically. Better cross-run consistency; falls back to the HTML engine on failure.</p>
-                                </div>
-                            </button>
                         </div>
                     </div>
 
