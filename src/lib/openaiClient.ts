@@ -6,6 +6,7 @@
 // or response_format negotiation needed. Synchronous; cancel via AbortSignal.
 
 import type { MockupImageQuality } from '../types';
+import { isRetryableNetworkError } from './geminiClient';
 
 const OPENAI_IMAGE_URL = 'https://api.openai.com/v1/images/generations';
 const OPENAI_IMAGE_MODEL = 'gpt-image-2';
@@ -28,6 +29,41 @@ const getOpenAIKey = (): string => {
 
 export const hasOpenAIKey = (): boolean => {
     return !!localStorage.getItem('OPENAI_API_KEY')?.trim();
+};
+
+// Mobile Safari surfaces transient connection drops as `TypeError: Load failed`
+// during a single in-flight fetch. Image generation can take 20–60s, so a
+// flaky cellular link kills the request before it ever reaches the server.
+// Retry connection-level failures with exponential backoff; HTTP errors,
+// auth failures, and AbortError bypass retry and propagate immediately.
+const MAX_FETCH_RETRIES = 3;
+const RETRY_BASE_MS = 1000;
+
+const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
+    new Promise((resolve, reject) => {
+        if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
+        const t = setTimeout(resolve, ms);
+        signal?.addEventListener('abort', () => {
+            clearTimeout(t);
+            reject(new DOMException('Aborted', 'AbortError'));
+        }, { once: true });
+    });
+
+const fetchWithRetry = async (url: string, init: RequestInit): Promise<Response> => {
+    const signal = init.signal as AbortSignal | undefined;
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+        try {
+            return await fetch(url, init);
+        } catch (e) {
+            lastError = e;
+            if (!isRetryableNetworkError(e) || attempt === MAX_FETCH_RETRIES) throw e;
+            const delay = RETRY_BASE_MS * 2 ** attempt;
+            console.warn(`[openai] fetch failed (${(e as Error).message}); retrying in ${delay}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
+            await sleepWithAbort(delay, signal);
+        }
+    }
+    throw lastError;
 };
 
 const formatOpenAIError = (status: number, errorData: unknown): string => {
@@ -69,7 +105,7 @@ export const callOpenAIImage = async (
 
     let response: Response;
     try {
-        response = await fetch(OPENAI_IMAGE_URL, {
+        response = await fetchWithRetry(OPENAI_IMAGE_URL, {
             method: 'POST',
             headers: {
                 'Content-Type': 'application/json',
@@ -88,7 +124,7 @@ export const callOpenAIImage = async (
         const raw = err instanceof Error ? err.message : String(err);
         if (/load failed|failed to fetch|networkerror/i.test(raw)) {
             throw new Error(
-                `Could not reach api.openai.com. Common causes: no network, ad/content blocker, VPN or corporate proxy, or a CORS-blocking browser extension. Raw: ${raw}`
+                `Could not reach api.openai.com after retrying. Common causes: flaky mobile network, no network, ad/content blocker, VPN or corporate proxy, or a CORS-blocking browser extension. Raw: ${raw}`
             );
         }
         throw new Error(`OpenAI image request failed before a response was received. Raw: ${raw}`);
