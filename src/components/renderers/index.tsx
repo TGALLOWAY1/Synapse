@@ -1,21 +1,17 @@
 import type { CoreArtifactSubtype } from '../../types';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
+import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
 import { ComponentInventoryRenderer } from './ComponentInventoryRenderer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
-interface RendererProps {
+interface DispatchProps {
+    subtype: CoreArtifactSubtype;
     content: string;
+    /** Only consumed by `screen_inventory` today. Other subtypes ignore it. */
+    screenImageContext?: ScreenImageGalleryContext;
 }
-
-type RendererComponent = React.ComponentType<RendererProps>;
-
-const STRUCTURED_RENDERERS: Partial<Record<CoreArtifactSubtype, RendererComponent>> = {
-    screen_inventory: ScreenInventoryRenderer,
-    data_model: DataModelRenderer,
-    component_inventory: ComponentInventoryRenderer,
-};
 
 /**
  * Render artifact content using a type-specific renderer if available,
@@ -35,11 +31,15 @@ function isJsonString(str: string): boolean {
     }
 }
 
-export function ArtifactContentRenderer({ subtype, content }: { subtype: CoreArtifactSubtype; content: string }) {
-    const StructuredRenderer = STRUCTURED_RENDERERS[subtype];
-    if (StructuredRenderer && isJsonString(content)) {
-        return <StructuredRenderer content={content} />;
+export function ArtifactContentRenderer({ subtype, content, screenImageContext }: DispatchProps) {
+    if (subtype === 'screen_inventory' && isJsonString(content)) {
+        return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
-
+    if (subtype === 'data_model' && isJsonString(content)) {
+        return <DataModelRenderer content={content} />;
+    }
+    if (subtype === 'component_inventory' && isJsonString(content)) {
+        return <ComponentInventoryRenderer content={content} />;
+    }
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
 }

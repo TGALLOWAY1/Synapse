@@ -74,7 +74,7 @@ export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
 }: ArtifactWorkspaceProps) {
     const {
-        getArtifacts, getPreferredVersion, getArtifactStaleness, getJob,
+        getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
     } = useProjectStore();
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
@@ -252,9 +252,22 @@ export function ArtifactWorkspace({
         if (!artifact || !preferred) {
             return <EmptyState message="Not generated yet" />;
         }
+        const screenImageContext = subtype === 'screen_inventory'
+            ? {
+                projectId,
+                artifactId: artifact.id,
+                artifactVersionId: preferred.id,
+                productTitle: structuredPRD.productName ?? getProject(projectId)?.name ?? 'this product',
+                productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
+            }
+            : undefined;
         return (
             <div className="max-w-3xl mx-auto bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
-                <ArtifactContentRenderer subtype={subtype} content={preferred.content} />
+                <ArtifactContentRenderer
+                    subtype={subtype}
+                    content={preferred.content}
+                    screenImageContext={screenImageContext}
+                />
             </div>
         );
     };
