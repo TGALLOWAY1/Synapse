@@ -1,7 +1,12 @@
+import { useEffect } from 'react';
 import type { ScreenInventoryContent } from '../../types';
+import { ScreenImageGallery, type ScreenImageGalleryContext } from './ScreenImageGallery';
+import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
 
 interface Props {
     content: string;
+    /** When supplied, each screen card gets a copy-prompt + image-upload gallery. */
+    imageContext?: ScreenImageGalleryContext;
 }
 
 function tryParseScreenInventory(content: string): ScreenInventoryContent | null {
@@ -15,8 +20,14 @@ function tryParseScreenInventory(content: string): ScreenInventoryContent | null
     return null;
 }
 
-export function ScreenInventoryRenderer({ content }: Props) {
+export function ScreenInventoryRenderer({ content, imageContext }: Props) {
     const structured = tryParseScreenInventory(content);
+
+    const loadForArtifactVersion = useScreenInventoryImageStore(s => s.loadForArtifactVersion);
+    const artifactVersionId = imageContext?.artifactVersionId;
+    useEffect(() => {
+        if (artifactVersionId) void loadForArtifactVersion(artifactVersionId);
+    }, [artifactVersionId, loadForArtifactVersion]);
 
     // If we can't parse structured content, return null to fall back to markdown
     if (!structured) return null;
@@ -54,6 +65,9 @@ export function ScreenInventoryRenderer({ content }: Props) {
                                         {screen.navigationFrom?.join(', ') || '?'} → here → {screen.navigationTo?.join(', ') || '?'}
                                     </p>
                                 ) : null}
+                                {imageContext && (
+                                    <ScreenImageGallery screen={screen} context={imageContext} />
+                                )}
                             </div>
                         ))}
                     </div>

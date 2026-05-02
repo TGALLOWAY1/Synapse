@@ -495,6 +495,30 @@ export type MockupImageRecord = {
     generatedAt: number;
 };
 
+// --- Screen Inventory user-uploaded images ---
+//
+// Per-screen image history attached to a Screen Inventory artifact. Users
+// copy a generated prompt into an external image tool (Nano Banana, GPT
+// image, etc.), then upload the result back to the screen card. Each
+// upload is a new immutable record with an incrementing `versionNumber`;
+// `isPreferred` mirrors the same semantics as `ArtifactVersion.isPreferred`
+// — exactly one preferred record per `(artifactVersionId, screenSlug)`
+// bucket. Records live in IndexedDB to stay out of the localStorage quota.
+export type ScreenInventoryImageRecord = {
+    key: string;              // `${artifactVersionId}:${screenSlug}:${versionNumber}`
+    projectId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    screenSlug: string;       // slug of ScreenItem.name
+    screenName: string;       // original name (for display / debugging)
+    versionNumber: number;
+    isPreferred: boolean;
+    dataUrl: string;          // `data:<mime>;base64,...`
+    mimeType: string;
+    prompt: string;           // prompt that was offered for copy at upload time
+    generatedAt: number;
+};
+
 // Prompt artifact settings
 export type PromptTarget =
     | 'mockup'
