@@ -17,6 +17,13 @@ export interface StreamCallbacks {
     onChunk: (text: string) => void;
     onComplete: (fullText: string) => void;
     onError: (error: Error) => void;
+    /**
+     * Fired when the stream is re-attempted after a transient network drop.
+     * Callers that accumulate chunk-derived state (e.g. char counters, phase
+     * trackers) should reset it here — the next chunks belong to a fresh
+     * stream from byte zero.
+     */
+    onRestart?: () => void;
 }
 
 export interface ProviderOptions {
@@ -79,7 +86,7 @@ const buildHeaders = (apiKey: string): HeadersInit => {
 const MAX_FETCH_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 
-const isRetryableNetworkError = (e: unknown): boolean => {
+export const isRetryableNetworkError = (e: unknown): boolean => {
     if (e instanceof DOMException && e.name === 'AbortError') return false;
     if (!(e instanceof Error)) return false;
     const msg = e.message.toLowerCase();
@@ -224,64 +231,92 @@ export const callGeminiStream = async (
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
         };
     }
+    const bodyJson = JSON.stringify(body);
 
-    const response = await fetchWithRetry(url, {
-        method: 'POST',
-        headers: buildHeaders(apiKey),
-        body: JSON.stringify(body),
-        signal,
-    });
+    // Run a single stream attempt: connect, read SSE chunks, return the full
+    // accumulated text. Errors propagate to the outer retry loop so a mid-
+    // stream network drop can be retried from byte zero with a fresh fetch.
+    const streamOnce = async (): Promise<string> => {
+        const response = await fetchWithRetry(url, {
+            method: 'POST',
+            headers: buildHeaders(apiKey),
+            body: bodyJson,
+            signal,
+        });
 
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        const err = new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
-        callbacks.onError(err);
-        throw err;
-    }
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
+        }
 
-    const reader = response.body?.getReader();
-    if (!reader) throw new Error('No response body for streaming');
+        const reader = response.body?.getReader();
+        if (!reader) throw new Error('No response body for streaming');
 
-    const decoder = new TextDecoder();
-    let fullText = '';
-    let buffer = '';
+        const decoder = new TextDecoder();
+        let fullText = '';
+        let buffer = '';
 
-    try {
-        while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
+        try {
+            while (true) {
+                const { done, value } = await reader.read();
+                if (done) break;
 
-            buffer += decoder.decode(value, { stream: true });
-            const lines = buffer.split('\n');
-            buffer = lines.pop() || '';
+                buffer += decoder.decode(value, { stream: true });
+                const lines = buffer.split('\n');
+                buffer = lines.pop() || '';
 
-            for (const line of lines) {
-                if (!line.startsWith('data: ')) continue;
-                const jsonStr = line.slice(6).trim();
-                if (!jsonStr || jsonStr === '[DONE]') continue;
+                for (const line of lines) {
+                    if (!line.startsWith('data: ')) continue;
+                    const jsonStr = line.slice(6).trim();
+                    if (!jsonStr || jsonStr === '[DONE]') continue;
 
-                try {
-                    const chunk = JSON.parse(jsonStr);
-                    const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
-                    if (text) {
-                        fullText += text;
-                        callbacks.onChunk(text);
+                    try {
+                        const chunk = JSON.parse(jsonStr);
+                        const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
+                        if (text) {
+                            fullText += text;
+                            callbacks.onChunk(text);
+                        }
+                    } catch {
+                        // Skip malformed JSON chunks
                     }
-                } catch {
-                    // Skip malformed JSON chunks
                 }
             }
+        } catch (e) {
+            if (signal?.aborted) {
+                reader.cancel();
+                throw new DOMException('Aborted', 'AbortError');
+            }
+            throw e;
         }
-    } catch (e) {
-        if (signal?.aborted) {
-            reader.cancel();
-            throw new DOMException('Aborted', 'AbortError');
-        }
-        throw e;
-    }
 
-    const durationMs = performance.now() - startTime;
-    console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars)`);
-    callbacks.onComplete(fullText);
-    return fullText;
+        return fullText;
+    };
+
+    // Retry the entire stream (fetch + reader) on transient network errors.
+    // fetchWithRetry only covers connection setup; mid-stream socket failures
+    // surface here as `TypeError: Load failed` (Safari) or similar and would
+    // otherwise kill a long-running PRD generation outright.
+    let lastError: unknown;
+    for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
+        try {
+            const fullText = await streamOnce();
+            const durationMs = performance.now() - startTime;
+            console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars, attempts=${attempt + 1})`);
+            callbacks.onComplete(fullText);
+            return fullText;
+        } catch (e) {
+            lastError = e;
+            if (!isRetryableNetworkError(e) || attempt === MAX_FETCH_RETRIES) {
+                if (e instanceof Error) callbacks.onError(e);
+                throw e;
+            }
+            const delay = RETRY_BASE_MS * 2 ** attempt;
+            console.warn(`[gemini] stream failed (${(e as Error).message}); retrying in ${delay}ms (attempt ${attempt + 2}/${MAX_FETCH_RETRIES + 1})`);
+            await sleepWithAbort(delay, signal);
+            callbacks.onRestart?.();
+        }
+    }
+    // Unreachable — the loop either returns or throws — but keeps TS happy.
+    throw lastError;
 };

@@ -6,21 +6,22 @@ export interface ProgressStage {
 
 // ── Pre-defined stage sets for common operations ──
 
+// Stage labels mirror the four phase strings emitted by the single-pass PRD
+// pipeline (see `prdPipeline.ts:phaseFor`). The `GenerationProgress` panel
+// derives the active stage from the latest progress message rather than a
+// timer, so `minDuration` is informational only.
 export const PRD_GENERATION_STAGES: ProgressStage[] = [
-    { label: 'Drafting product strategy...', minDuration: 3500 },
-    { label: 'Designing UX architecture...', minDuration: 3500 },
-    { label: 'Writing detailed feature specs...', minDuration: 3500 },
-    { label: 'Defining data model and state machines...', minDuration: 3000 },
-    { label: 'Composing premium PRD markdown...', minDuration: 4000 },
-    { label: 'Running quality review...', minDuration: 4000 },
-    { label: 'Revising weak sections...', minDuration: 5000 },
+    { label: 'Drafting vision and target users…' },
+    { label: 'Designing UX architecture and feature specs…' },
+    { label: 'Defining data model and acceptance criteria…' },
+    { label: 'Wrapping up structured PRD…' },
 ];
 
 export const PRD_REGENERATION_STAGES: ProgressStage[] = [
-    { label: 'Re-evaluating product strategy...', minDuration: 3000 },
-    { label: 'Refreshing UX architecture and feature specs...', minDuration: 3500 },
-    { label: 'Re-running quality review...', minDuration: 4000 },
-    { label: 'Finalizing revised PRD...', minDuration: 5000 },
+    { label: 'Drafting vision and target users…' },
+    { label: 'Designing UX architecture and feature specs…' },
+    { label: 'Defining data model and acceptance criteria…' },
+    { label: 'Wrapping up structured PRD…' },
 ];
 
 export const MOCKUP_GENERATION_STAGES: ProgressStage[] = [
