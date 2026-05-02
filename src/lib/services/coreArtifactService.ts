@@ -346,12 +346,14 @@ Architecture: ${structuredPRD.architecture}${
 
     // Phase the streaming label so the user sees motion even when the chars
     // counter alone wouldn't change — different prefixes tell them where in
-    // the response we are.
+    // the response we are. Don't include the raw char count in the message:
+    // the store dedupes consecutive identical strings, and a changing suffix
+    // would defeat that and flood the progress log.
     const streamingLabel = (chars: number): string => {
-        if (chars < 600) return `Drafting opening sections… (${chars.toLocaleString()} chars)`;
-        if (chars < 2000) return `Filling in details… (${chars.toLocaleString()} chars)`;
-        if (chars < 4500) return `Expanding examples… (${chars.toLocaleString()} chars)`;
-        return `Wrapping up… (${chars.toLocaleString()} chars)`;
+        if (chars < 600) return 'Drafting opening sections…';
+        if (chars < 2000) return 'Filling in details…';
+        if (chars < 4500) return 'Expanding examples…';
+        return 'Wrapping up…';
     };
 
     const schema = jsonSchemas[subtype];
@@ -362,7 +364,7 @@ Architecture: ${structuredPRD.architecture}${
             jsonSystem,
             userPrompt,
             {
-                onChunk: makeChunkEmitter((c) => `Streaming structured JSON… (${c.toLocaleString()} chars)`),
+                onChunk: makeChunkEmitter(() => 'Streaming structured JSON…'),
                 onComplete: () => {},
                 onError: () => {},
             },

@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, StopCircle,
+    RefreshCcw, StopCircle, Menu, X,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -79,6 +79,9 @@ export function ArtifactWorkspace({
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
+    // Mobile-only: the left rail is a slide-in drawer below the md breakpoint.
+    // Closed by default so the content pane is fully visible on first paint.
+    const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
 
     const job = getJob(projectId);
 
@@ -272,10 +275,45 @@ export function ArtifactWorkspace({
         );
     };
 
+    const selectedMeta = slotMetas.find(s => s.key === selected);
+    const handleSelect = (key: WorkspaceSelection) => {
+        setSelected(key);
+        setMobileSidebarOpen(false);
+    };
+
     return (
-        <div className="flex h-full">
-            {/* Left rail */}
-            <aside className="w-64 shrink-0 border-r border-neutral-200 bg-white overflow-y-auto">
+        <div className="flex h-full relative">
+            {/* Mobile drawer backdrop */}
+            {mobileSidebarOpen && (
+                <button
+                    type="button"
+                    aria-label="Close artifact list"
+                    onClick={() => setMobileSidebarOpen(false)}
+                    className="md:hidden absolute inset-0 bg-black/30 z-30"
+                />
+            )}
+
+            {/* Left rail — fixed sidebar on md+, slide-in drawer on mobile */}
+            <aside
+                className={`
+                    absolute md:static inset-y-0 left-0 z-40 w-64 shrink-0
+                    border-r border-neutral-200 bg-white overflow-y-auto
+                    transition-transform duration-200 ease-out
+                    ${mobileSidebarOpen ? 'translate-x-0' : '-translate-x-full'}
+                    md:translate-x-0
+                `}
+            >
+                <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-neutral-100">
+                    <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Artifacts</span>
+                    <button
+                        type="button"
+                        onClick={() => setMobileSidebarOpen(false)}
+                        aria-label="Close artifact list"
+                        className="p-1.5 -mr-1 text-neutral-500 hover:text-neutral-900"
+                    >
+                        <X size={18} />
+                    </button>
+                </div>
                 <ul className="py-2">
                     {slotMetas.map(slot => {
                         const status = slotStatusFor(slot.key);
@@ -285,7 +323,7 @@ export function ArtifactWorkspace({
                             <li key={slot.key}>
                                 <button
                                     type="button"
-                                    onClick={() => setSelected(slot.key)}
+                                    onClick={() => handleSelect(slot.key)}
                                     className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition border-l-2 ${
                                         isSel
                                             ? 'bg-indigo-50 border-indigo-500'
@@ -312,12 +350,35 @@ export function ArtifactWorkspace({
             </aside>
 
             {/* Main pane */}
-            <main className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 p-6 md:p-8 relative">
-                {renderMain()}
+            <main className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
+                {/* Mobile-only header with sidebar toggle and current artifact name */}
+                <div className="md:hidden sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-white border-b border-neutral-200">
+                    <button
+                        type="button"
+                        onClick={() => setMobileSidebarOpen(true)}
+                        aria-label="Open artifact list"
+                        className="p-1.5 -ml-1 text-neutral-700 hover:text-neutral-900"
+                    >
+                        <Menu size={20} />
+                    </button>
+                    <span className="text-sm font-semibold text-neutral-800 truncate">
+                        {selectedMeta?.title ?? 'Artifacts'}
+                    </span>
+                    {selected !== 'prd' && (
+                        <span className="ml-auto shrink-0">
+                            <StatusDot status={slotStatusFor(selected)} />
+                        </span>
+                    )}
+                </div>
+                <div className="p-4 md:p-8">
+                    {renderMain()}
+                </div>
             </main>
 
-            {/* Right rail — Generation Status */}
-            <aside className="w-72 shrink-0 border-l border-neutral-200 bg-white overflow-y-auto">
+            {/* Right rail — Generation Status (hidden below xl; on smaller
+                screens status is visible inline via the StatusDots in the
+                left rail / mobile header) */}
+            <aside className="hidden xl:flex flex-col w-72 shrink-0 border-l border-neutral-200 bg-white overflow-y-auto">
                 <div className="p-4 border-b border-neutral-200">
                     <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Generation Status</h3>
                     <p className="text-sm text-neutral-700 mt-1">
