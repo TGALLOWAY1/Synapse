@@ -19,7 +19,6 @@ import {
 import { isAbortError } from '../concurrency';
 import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
-import { fireScreenImagesInBackground } from './mockupImageService';
 
 export interface StartArgs {
     projectId: string;
@@ -228,7 +227,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     const versions = writeStore.getArtifactVersions(projectId, artifactId);
     const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
 
-    const { versionId } = writeStore.createArtifactVersion(
+    writeStore.createArtifactVersion(
         projectId,
         artifactId,
         JSON.stringify(payload),
@@ -250,10 +249,6 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     );
 
     writeStore.setSlotStatus(projectId, 'mockup', { status: 'done', finishedAt: Date.now() });
-
-    // AI image previews are the primary mockup surface — fire low-quality
-    // gpt-image-2 jobs for every screen as soon as the HTML version lands.
-    fireScreenImagesInBackground({ projectId, artifactId, versionId, payload, settings });
 }
 
 async function executeJob(args: StartArgs, controller: AbortController, slotKeys: ArtifactSlotKey[]): Promise<void> {

@@ -124,11 +124,13 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
             <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center mb-3">
                 <ImageIcon size={20} className="text-indigo-500" />
             </div>
-            <div className="text-sm font-medium text-neutral-800">No AI image yet</div>
+            <div className="text-sm font-medium text-neutral-800">
+                {error ? 'AI image preview unavailable' : 'No AI image yet'}
+            </div>
             <div className="text-xs text-neutral-500 mt-1 max-w-sm">
-                Generate a quick draft image of this screen via OpenAI gpt-image-2.
-                Use it as a sanity check when the HTML mockup feels off — you can
-                regenerate at high quality once you like the draft.
+                {error
+                    ? 'The mockup rendered above — this is the optional AI screenshot. Tap retry below to try again.'
+                    : 'Generate a quick draft image of this screen via OpenAI gpt-image-2. Use it as a sanity check when the HTML mockup feels off — you can regenerate at high quality once you like the draft.'}
             </div>
             {error && (
                 <div className="mt-3 inline-flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 max-w-md">

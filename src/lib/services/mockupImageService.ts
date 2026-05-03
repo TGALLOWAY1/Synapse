@@ -3,8 +3,6 @@
 // store can stay thin.
 
 import type { MockupPayload, MockupScreen, MockupSettings, MockupPlatform } from '../../types';
-import { useMockupImageStore } from '../../store/mockupImageStore';
-import { hasOpenAIKey } from '../openaiClient';
 
 const FIDELITY_STYLE_HINTS: Record<string, string> = {
     low: 'low-fidelity wireframe sketch, neutral grey palette, simple boxes and labels, hand-drawn feel',
@@ -57,46 +55,4 @@ export const buildScreenImagePrompt = (
         `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,
         `No watermarks, no logos of real companies, no photographic people.`,
     ].join(' ');
-};
-
-interface AutoFireArgs {
-    projectId: string;
-    artifactId: string;
-    versionId: string;
-    payload: MockupPayload;
-    settings: MockupSettings;
-}
-
-/**
- * Fire low-quality gpt-image-2 generation for every screen in a mockup
- * payload, draining a 2-wide worker pool to avoid burst-rate-limit thrash.
- * Returns immediately; per-screen errors are captured by the image store and
- * surfaced in `MockupScreenImage`.
- */
-export const fireScreenImagesInBackground = (args: AutoFireArgs): void => {
-    if (!hasOpenAIKey()) return;
-    const { projectId, artifactId, versionId, payload, settings } = args;
-    const store = useMockupImageStore.getState();
-    const queue = [...payload.screens];
-    const CONCURRENCY = 2;
-    const worker = async () => {
-        while (queue.length > 0) {
-            const screen = queue.shift();
-            if (!screen) return;
-            try {
-                await store.generate({
-                    projectId,
-                    artifactId,
-                    versionId,
-                    screen,
-                    payload,
-                    settings,
-                    quality: 'low',
-                });
-            } catch {
-                // store.generate captures errors per screen key; keep draining.
-            }
-        }
-    };
-    for (let i = 0; i < CONCURRENCY; i++) void worker();
 };

@@ -39,6 +39,10 @@ export const hasOpenAIKey = (): boolean => {
 const MAX_FETCH_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 
+// gpt-image-2 high-quality p99 sits around 60s; 75s gives headroom without
+// leaving doomed sockets open on cellular eating retry budget.
+const REQUEST_TIMEOUT_MS = 75_000;
+
 const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
     new Promise((resolve, reject) => {
         if (signal?.aborted) return reject(new DOMException('Aborted', 'AbortError'));
@@ -103,6 +107,19 @@ export const callOpenAIImage = async (
         n: 1,
     };
 
+    // Combine the caller-cancel signal with a hard request timeout. We track
+    // `timedOut` separately so the error path can distinguish "we gave up"
+    // from "the user clicked Cancel" — both surface as AbortError otherwise.
+    const composite = new AbortController();
+    let timedOut = false;
+    const timeoutHandle = setTimeout(() => {
+        timedOut = true;
+        composite.abort();
+    }, REQUEST_TIMEOUT_MS);
+    const onCallerAbort = () => composite.abort();
+    opts.signal?.addEventListener('abort', onCallerAbort, { once: true });
+    if (opts.signal?.aborted) composite.abort();
+
     let response: Response;
     try {
         response = await fetchWithRetry(OPENAI_IMAGE_URL, {
@@ -112,22 +129,34 @@ export const callOpenAIImage = async (
                 'Authorization': `Bearer ${apiKey}`,
             },
             body: JSON.stringify(body),
-            signal: opts.signal,
+            signal: composite.signal,
         });
     } catch (err) {
-        // Bubble user-cancellation untouched.
-        if ((err as { name?: string })?.name === 'AbortError') throw err;
+        // Bubble user-cancellation untouched, but rewrap timeout-driven aborts
+        // so the UI can show "took too long" instead of swallowing silently.
+        if ((err as { name?: string })?.name === 'AbortError') {
+            if (timedOut) {
+                throw new Error(
+                    `Image preview took longer than ${Math.round(REQUEST_TIMEOUT_MS / 1000)}s. The mockup itself rendered above — this is just the optional AI screenshot. Try again on Wi-Fi.`
+                );
+            }
+            throw err;
+        }
         // Browser-level fetch failures arrive as TypeError with messages like
         // Safari's "Load failed" or Chromium's "Failed to fetch". These don't
-        // carry HTTP status; surface a diagnostic that points at the actual
-        // suspects (network, content blocker, VPN/proxy, CORS extension).
+        // carry HTTP status. Be specific that this is the optional image
+        // preview, not the (already-rendered) HTML mockup the user is staring
+        // at — otherwise users read "mockup generation failed."
         const raw = err instanceof Error ? err.message : String(err);
         if (/load failed|failed to fetch|networkerror/i.test(raw)) {
             throw new Error(
-                `Could not reach api.openai.com after retrying. Common causes: flaky mobile network, no network, ad/content blocker, VPN or corporate proxy, or a CORS-blocking browser extension. Raw: ${raw}`
+                `Image preview couldn't reach OpenAI. The mockup itself rendered above — this is just the optional AI screenshot. Tap retry, or switch to Wi-Fi. Raw: ${raw}`
             );
         }
         throw new Error(`OpenAI image request failed before a response was received. Raw: ${raw}`);
+    } finally {
+        clearTimeout(timeoutHandle);
+        opts.signal?.removeEventListener('abort', onCallerAbort);
     }
 
     if (!response.ok) {
