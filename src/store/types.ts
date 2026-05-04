@@ -123,4 +123,21 @@ export interface ProjectState {
     appendPrdProgress: (projectId: string, message: string) => void;
     clearPrdProgress: (projectId: string) => void;
     getPrdProgress: (projectId: string) => { messages: string[]; updatedAt: number } | undefined;
+
+    // Per-section generation status grid (transient — excluded from persist)
+    prdSectionStatus: Record<string, Record<string, {
+        tier: 'fast' | 'strong';
+        status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
+        model?: string;
+        ms?: number;
+        error?: string;
+    }> | undefined>;
+    setSectionStatus: (projectId: string, sectionId: string, update: Partial<{
+        tier: 'fast' | 'strong';
+        status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
+        model?: string;
+        ms?: number;
+        error?: string;
+    }>) => void;
+    clearSectionStatus: (projectId: string) => void;
 }

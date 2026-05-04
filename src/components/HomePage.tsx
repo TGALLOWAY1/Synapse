@@ -86,6 +86,7 @@ export function HomePage() {
         // with a clean event log so the workspace progress panel doesn't show
         // stale messages from a prior generation.
         useProjectStore.getState().clearPrdProgress(projectId);
+        useProjectStore.getState().clearSectionStatus(projectId);
 
         import('../lib/llmProvider').then(({ generateStructuredPRD }) => {
             generateStructuredPRD(
@@ -93,6 +94,9 @@ export function HomePage() {
                 {
                     onProgress: (message) => {
                         useProjectStore.getState().appendPrdProgress(projectId, message);
+                    },
+                    onSectionStatus: (sectionId, update) => {
+                        useProjectStore.getState().setSectionStatus(projectId, sectionId, update);
                     },
                     // Progressive render: paint the Pass A draft as soon as it
                     // lands so the user isn't staring at a placeholder for the

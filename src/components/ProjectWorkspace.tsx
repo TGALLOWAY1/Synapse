@@ -21,14 +21,16 @@ import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
 import { artifactJobController } from '../lib/services/artifactJobController';
+import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, appendPrdProgress, clearPrdProgress } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
+    const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -147,6 +149,7 @@ export function ProjectWorkspace() {
             artifactJobController.cancelAll(projectId);
             useProjectStore.getState().clearJob(projectId);
             clearPrdProgress(projectId);
+            clearSectionStatus(projectId);
             const { newSpineId } = regenerateSpine(projectId);
             activeNewSpineId = newSpineId;
             const sourcePrompt = latestSpine.promptText;
@@ -154,6 +157,7 @@ export function ProjectWorkspace() {
                 sourcePrompt,
                 {
                     onProgress: (message) => appendPrdProgress(projectId, message),
+                    onSectionStatus: (sectionId, update) => setSectionStatus(projectId, sectionId, update),
                     onPartial: ({ structuredPRD, markdown }) => {
                         updateSpineStructuredPRD(
                             projectId,
@@ -421,11 +425,12 @@ export function ProjectWorkspace() {
                                             <div className="mb-6">
                                                 <GenerationProgress
                                                     stages={PRD_REGENERATION_STAGES}
-
                                                     variant="foundation"
                                                     title="Regenerating PRD"
                                                     subtitle="Creating a fresh draft from your original prompt"
                                                     history={prdProgress?.messages}
+                                                    sectionStatus={prdSectionStatus}
+                                                    sectionTitles={SECTION_TITLES}
                                                 />
                                             </div>
                                         )}
@@ -435,11 +440,12 @@ export function ProjectWorkspace() {
                                             <div className="mb-6">
                                                 <GenerationProgress
                                                     stages={PRD_GENERATION_STAGES}
-
                                                     variant="foundation"
                                                     title="Building your PRD"
                                                     subtitle="Transforming your product vision into a structured requirements document"
                                                     history={prdProgress?.messages}
+                                                    sectionStatus={prdSectionStatus}
+                                                    sectionTitles={SECTION_TITLES}
                                                 />
                                             </div>
                                         )}
@@ -550,11 +556,12 @@ export function ProjectWorkspace() {
                                     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
                                         <GenerationProgress
                                             stages={PRD_GENERATION_STAGES}
-
                                             variant="foundation"
                                             title="Building your PRD"
                                             subtitle="Transforming your product vision into a structured requirements document"
                                             history={prdProgress?.messages}
+                                            sectionStatus={prdSectionStatus}
+                                            sectionTitles={SECTION_TITLES}
                                         />
                                         <div className="mt-6 space-y-4 animate-pulse">
                                             <div className="h-5 bg-neutral-100 rounded w-2/5" />

@@ -71,6 +71,12 @@ const getModel = () => {
     return localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
 };
 
+export const getFastModel = (): string =>
+    localStorage.getItem('GEMINI_FAST_MODEL') || getModel();
+
+export const getStrongModel = (): string =>
+    localStorage.getItem('GEMINI_STRONG_MODEL') || getModel();
+
 /**
  * Optional Google Cloud project ID. When present, we forward it as the
  * `x-goog-user-project` header so Gemini bills and meters the request against
