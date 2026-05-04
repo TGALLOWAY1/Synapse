@@ -68,7 +68,7 @@ describe('progressive PRD generation', () => {
     const provider = {
       async generateText(input: { prompt: string; model: string; schema: object }) {
         calls.push(input.model);
-        if (input.model === 'fast') return 'tiny'; // < 120 chars → confidence 0.6
+        if (input.model === 'fast') return '{"v":1}'; // parseable but < 120 chars → confidence 0.6
         return '{"vision":"refined","coreProblem":"solved","targetUsers":["user1"],"productName":"App"}';
       },
     };
@@ -95,7 +95,7 @@ describe('progressive PRD generation', () => {
   it('runs dependent sections only after their deps complete', async () => {
     const completionOrder: string[] = [];
     const provider = {
-      async generateText(_input: { prompt: string; model: string; schema: object }) {
+      async generateText() {
         return '{}';
       },
     };
@@ -126,6 +126,29 @@ describe('progressive PRD generation', () => {
     expect(thesisIdx).toBeGreaterThan(basicsIdx);
     expect(jobs.product_basics.status).toBe('complete');
     expect(jobs.product_thesis.status).toBe('complete');
+  });
+
+  it('marks section as error when response is unparseable JSON (not silently complete)', async () => {
+    const provider = {
+      async generateText() {
+        return 'not json at all';
+      },
+    };
+
+    const { jobs } = await generateProgressivePrd({
+      prompt: 'Test app',
+      provider,
+      sections: [DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!],
+      config: {
+        fastModel: 'fast',
+        strongModel: 'strong',
+        maxFastConcurrency: 1,
+        maxStrongConcurrency: 1,
+        enableRefinementPass: false,
+      },
+    });
+
+    expect(jobs.product_basics.status).toBe('error');
   });
 
   it('runs dependents even when an upstream section fails', async () => {

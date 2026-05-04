@@ -2,6 +2,7 @@ import { callGemini } from '../geminiClient';
 import type { StructuredPRD } from '../../types';
 import { type SectionId, SECTION_SCHEMAS } from '../schemas/prdSchemas';
 import { buildSectionPrompt, SECTION_TITLES, type SectionPromptContext } from '../prompts/prdSectionPrompts';
+import { repairTruncatedJson } from '../jsonRepair';
 import type { ProjectPlatform } from '../../types';
 
 export type PrdSectionStatus =
@@ -289,11 +290,35 @@ export async function generateProgressivePrd(params: {
         try {
             const raw = await provider.generateText({ prompt: `${system}\n\n${user}`, model, schema });
 
+            // Parse with truncation repair fallback. Per-section
+            // maxOutputTokens is bounded (8192) so complex sections like
+            // `features` can hit MAX_TOKENS and end mid-string. Try repair
+            // before giving up.
             let parsed: Partial<StructuredPRD> | null = null;
+            let parseError: string | undefined;
             try {
                 parsed = JSON.parse(raw) as Partial<StructuredPRD>;
-            } catch {
-                parsed = null;
+            } catch (parseErr) {
+                const { text: repairedText, repaired } = repairTruncatedJson(raw);
+                if (repaired) {
+                    try {
+                        parsed = JSON.parse(repairedText) as Partial<StructuredPRD>;
+                        console.warn(`[prd] section "${section.id}" recovered via JSON truncation repair`);
+                    } catch {
+                        parsed = null;
+                    }
+                }
+                if (!parsed) {
+                    parseError = parseErr instanceof Error ? parseErr.message : String(parseErr);
+                }
+            }
+
+            // Treat an unparsable response as a section failure: dropping
+            // it silently while still firing `section_completed` would
+            // mark the grid green with empty data and quietly omit the
+            // section from the merged PRD.
+            if (!parsed) {
+                throw new Error(`Section "${section.id}" returned unparseable JSON: ${parseError ?? 'unknown parse error'}`);
             }
 
             results[section.id] = parsed;

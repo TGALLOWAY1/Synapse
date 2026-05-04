@@ -28,10 +28,10 @@ describe('mergeSectionsToStructuredPrd', () => {
     it('later section fields are merged alongside earlier ones', () => {
         const merged = mergeSectionsToStructuredPrd(sr({
             product_basics: { vision: 'Great vision', targetUsers: ['PM'], coreProblem: 'Slow' },
-            product_thesis: { productThesis: { title: 'T', statement: 'S', uniqueValue: 'U' } },
+            product_thesis: { productThesis: { whyExist: 'X', whyNow: 'Y', differentiation: 'Z', intentionalTradeoffs: [], nonGoals: [] } },
         }));
         expect(merged.vision).toBe('Great vision');
-        expect(merged.productThesis?.title).toBe('T');
+        expect(merged.productThesis?.whyExist).toBe('X');
     });
 
     it('handles null section results gracefully', () => {

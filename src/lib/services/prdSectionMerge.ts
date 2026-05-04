@@ -57,11 +57,20 @@ export const mergeSectionsToStructuredPrd = (results: SectionResults): Structure
         if (r?.value) Object.assign(out, r.value);
     }
 
-    // Guarantee the four hard-required fields.
+    // Guarantee fields that the markdown renderer always references. If a
+    // section errors and we don't stub these, the renderer interpolates
+    // `undefined` directly into the rendered markdown ("## Architecture\n\nundefined")
+    // which is user-visible corruption.
     if (!out.vision) out.vision = '';
     if (!out.targetUsers) out.targetUsers = [];
     if (!out.coreProblem) out.coreProblem = '';
     if (!out.features) out.features = [];
+    if (!out.architecture) out.architecture = '';
+    if (!out.risks) out.risks = [];
+    if (!out.nonFunctionalRequirements) out.nonFunctionalRequirements = [];
+    if (!out.constraints) out.constraints = [];
+    if (!out.domainEntities) out.domainEntities = [];
+    if (!out.primaryActions) out.primaryActions = [];
 
     return out as StructuredPRD;
 };

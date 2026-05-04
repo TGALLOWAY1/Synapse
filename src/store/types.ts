@@ -6,6 +6,7 @@ import type {
     ArtifactSlotKey, ProjectJobState, SlotState,
     QualityScores, GenerationMeta,
 } from '../types';
+import type { SectionId } from '../lib/schemas/prdSchemas';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -125,14 +126,14 @@ export interface ProjectState {
     getPrdProgress: (projectId: string) => { messages: string[]; updatedAt: number } | undefined;
 
     // Per-section generation status grid (transient — excluded from persist)
-    prdSectionStatus: Record<string, Record<string, {
+    prdSectionStatus: Record<string, Record<SectionId, {
         tier: 'fast' | 'strong';
         status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
         model?: string;
         ms?: number;
         error?: string;
     }> | undefined>;
-    setSectionStatus: (projectId: string, sectionId: string, update: Partial<{
+    setSectionStatus: (projectId: string, sectionId: SectionId, update: Partial<{
         tier: 'fast' | 'strong';
         status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
         model?: string;

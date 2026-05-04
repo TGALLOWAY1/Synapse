@@ -126,10 +126,24 @@ export const runProgressivePrdPipeline = async (
     const structuredPRD = mergeSectionsToStructuredPrd(sectionResults);
     const markdown = renderPremiumMarkdown(structuredPRD);
 
-    const failedSections = Object.values(jobs).filter(j => j.status === 'error');
+    const allJobs = Object.values(jobs);
+    const failedSections = allJobs.filter(j => j.status === 'error');
+
+    // If every section errored, the merged PRD is just stub fields — that's
+    // not a "successful" result, it's a total outage (auth/quota/network).
+    // Reject so callers run their normal error-handling paths instead of
+    // persisting an empty PRD as if generation succeeded.
+    if (allJobs.length > 0 && failedSections.length === allJobs.length) {
+        const firstError = failedSections[0]?.error || 'unknown error';
+        throw new Error(
+            `PRD generation failed: all ${allJobs.length} sections errored. ` +
+            `First error: ${firstError}`,
+        );
+    }
+
     if (failedSections.length > 0) {
         console.warn(
-            `[prd] ${failedSections.length} section(s) failed: ${failedSections.map(j => j.id).join(', ')}. ` +
+            `[prd] ${failedSections.length} of ${allJobs.length} section(s) failed: ${failedSections.map(j => j.id).join(', ')}. ` +
             'Partial PRD rendered from completed sections.',
         );
     }
