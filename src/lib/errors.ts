@@ -20,6 +20,7 @@ export type ErrorCategory =
     | 'empty_response'
     | 'network'
     | 'parse_failure'
+    | 'truncated_response'
     | 'unknown';
 
 export interface NormalizedError {
@@ -48,6 +49,9 @@ const CATEGORY_PATTERNS: [ErrorCategory, RegExp][] = [
     ['safety_blocked', /safety filter/i],
     ['empty_response', /empty response/i],
     ['network', /failed to fetch|networkerror|load failed|net::/i],
+    // Match before the broader `parse_failure` so a truncated MAX_TOKENS
+    // response gets the more specific guidance.
+    ['truncated_response', /truncated before it could be completed|finishreason=max_tokens|unterminated string in json/i],
     ['parse_failure', /failed to parse|invalid json|json\.parse|non-object response/i],
 ];
 
@@ -101,6 +105,10 @@ const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown' | 'project_access_d
         'Network connection failed after several retries. If you are on mobile, try switching ' +
         'between Wi-Fi and cellular (or moving to a stronger signal) and tap Try Again.',
     parse_failure: 'The response could not be processed. Please try again.',
+    truncated_response:
+        'The model ran out of room before it could finish writing the PRD, so the response was cut off ' +
+        'mid-sentence and could not be parsed. Try a shorter, more focused product description, or open ' +
+        'Settings and switch to a model with more output capacity (e.g. Gemini 2.5 Pro). Then tap Try Again.',
 };
 
 const RAW_TRUNCATE = 400;

@@ -88,6 +88,7 @@ export type StructuredPRD = {
     mvpScope?: MvpScope;
     successMetrics?: SuccessMetric[];
     assumptions?: Assumption[];
+    implementationPlan?: ImplementationPlan;
 };
 
 export type DomainEntity = {
@@ -228,6 +229,19 @@ export type Assumption = {
     id: string;
     statement: string;
     confidence: 'low' | 'med' | 'high';
+};
+
+export type ImplementationPlanPhase = {
+    name: string;
+    goals: string[];
+    featureIds?: string[];
+    estimatedWeeks?: number;
+};
+
+export type ImplementationPlan = {
+    phases: ImplementationPlanPhase[];
+    techStack?: string[];
+    teamNotes?: string;
 };
 
 // --- Quality scoring (7-dimension rubric, 1–5 each) ---

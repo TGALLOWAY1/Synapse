@@ -1,6 +1,14 @@
 import { useState, useEffect, useRef } from 'react';
-import { Check } from 'lucide-react';
+import { Check, X, Zap, Brain } from 'lucide-react';
 import type { ProgressStage } from './generationStages';
+
+export interface SectionStatusInfo {
+    tier: 'fast' | 'strong';
+    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
+    model?: string;
+    ms?: number;
+    error?: string;
+}
 
 interface GenerationProgressProps {
     /** Ordered stages to cycle through */
@@ -30,6 +38,17 @@ interface GenerationProgressProps {
      * pulsing dot for the active one) instead of cycling stage labels.
      */
     history?: string[];
+    /**
+     * Per-section generation status. When populated, renders a section-grid
+     * below the message log: one pip per section, colour-coded by tier
+     * (teal = Flash, indigo = Pro) and shaped by status.
+     */
+    sectionStatus?: Record<string, SectionStatusInfo>;
+    /**
+     * Ordered section labels for the grid, keyed by section id.
+     * Falls back to the section id itself when omitted.
+     */
+    sectionTitles?: Record<string, string>;
 }
 
 const VISIBLE_HISTORY_CAP = 8;
@@ -90,6 +109,8 @@ export function GenerationProgress({
     progress,
     statusLabel,
     history,
+    sectionStatus,
+    sectionTitles,
 }: GenerationProgressProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFading, setIsFading] = useState(false);
@@ -97,6 +118,7 @@ export function GenerationProgress({
     const style = VARIANT_STYLES[variant];
     const isStateDriven = typeof progress === 'number';
     const hasHistory = !!history && history.length > 0;
+    const hasSectionStatus = !!sectionStatus && Object.keys(sectionStatus).length > 0;
 
     useEffect(() => {
         // Skip the rotation timer entirely when the parent supplies real
@@ -135,7 +157,8 @@ export function GenerationProgress({
     const dedupedHistory = hasHistory
         ? history!.filter((msg, i, arr) => i === 0 || arr[i - 1] !== msg)
         : [];
-    const visibleHistory = dedupedHistory.slice(-VISIBLE_HISTORY_CAP);
+    const effectiveHistoryCap = hasSectionStatus ? 3 : VISIBLE_HISTORY_CAP;
+    const visibleHistory = dedupedHistory.slice(-effectiveHistoryCap);
     const hiddenCount = dedupedHistory.length - visibleHistory.length;
 
     // When `history` is the source of truth, derive the active stage from
@@ -268,8 +291,8 @@ export function GenerationProgress({
                     )}
                 </div>
 
-                {/* Stage dots */}
-                {stages.length > 1 && (
+                {/* Stage dots — hidden when section-grid is shown */}
+                {stages.length > 1 && !hasSectionStatus && (
                     <div className="flex items-center gap-1 mt-3 ml-[18px]">
                         {stages.map((_, i) => (
                             <div
@@ -283,6 +306,61 @@ export function GenerationProgress({
                                 }`}
                             />
                         ))}
+                    </div>
+                )}
+
+                {/* Per-section status grid */}
+                {hasSectionStatus && (
+                    <div className="mt-4 ml-[18px]">
+                        <div className="grid grid-cols-5 gap-x-2 gap-y-3">
+                            {Object.entries(sectionStatus!).map(([sectionId, info]) => {
+                                const label = sectionTitles?.[sectionId] ?? sectionId;
+                                const isFast = info.tier === 'fast';
+                                const modelLabel = info.model
+                                    ? (info.model.toLowerCase().includes('flash') ? 'Flash'
+                                        : info.model.toLowerCase().includes('pro') ? 'Pro'
+                                        : info.model.slice(0, 6))
+                                    : (isFast ? 'Flash' : 'Pro');
+
+                                const isActive = info.status === 'generating' || info.status === 'refining';
+                                const isComplete = info.status === 'complete';
+                                const isError = info.status === 'error';
+
+                                const pipRing = isError
+                                    ? 'border-red-400 bg-red-400'
+                                    : isComplete
+                                        ? (isFast ? 'border-teal-400 bg-teal-400' : 'border-indigo-500 bg-indigo-500')
+                                        : isActive
+                                            ? (isFast ? 'border-teal-400 bg-teal-100' : 'border-indigo-400 bg-indigo-100')
+                                            : info.status === 'queued'
+                                                ? (isFast ? 'border-teal-300 bg-teal-50' : 'border-indigo-300 bg-indigo-50')
+                                                : 'border-neutral-300 bg-transparent';
+
+                                const textColor = isError
+                                    ? 'text-red-500'
+                                    : isComplete || isActive
+                                        ? (isFast ? 'text-teal-700' : 'text-indigo-700')
+                                        : 'text-neutral-400';
+
+                                return (
+                                    <div key={sectionId} className="flex flex-col items-center gap-0.5">
+                                        <div className={`relative flex h-7 w-7 items-center justify-center rounded-full border-2 transition-all duration-300 ${pipRing} ${isActive ? 'animate-pulse' : ''}`}>
+                                            {isComplete && <Check size={11} className="text-white" />}
+                                            {isError && <X size={11} className="text-white" />}
+                                            {isActive && (
+                                                isFast
+                                                    ? <Zap size={9} className="text-teal-500" />
+                                                    : <Brain size={9} className="text-indigo-500" />
+                                            )}
+                                        </div>
+                                        <div className="text-center min-w-0 w-full">
+                                            <div className={`text-[9px] font-medium leading-tight truncate ${textColor}`}>{label}</div>
+                                            <div className="text-[8px] text-neutral-400 leading-tight">{modelLabel}</div>
+                                        </div>
+                                    </div>
+                                );
+                            })}
+                        </div>
                     </div>
                 )}
             </div>

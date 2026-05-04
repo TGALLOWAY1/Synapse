@@ -1,8 +1,11 @@
 import type { StructuredPRD, ProjectPlatform } from '../../types';
 import { callGemini } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
-import { runPrdPipeline, type PrdPipelineOptions, type PrdPipelineResult } from './prdPipeline';
+import { runProgressivePrdPipeline, type ProgressivePrdPipelineOptions } from './progressivePrdPipeline';
+import type { PrdPipelineResult } from './prdPipeline';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
+import type { SectionId } from '../schemas/prdSchemas';
+import type { SectionStatusUpdate } from './progressivePrdPipeline';
 
 export const enhancePrompt = async (rawPrompt: string): Promise<string> => {
     const system = `You are an expert product consultant. The user has written a rough product idea. Your job is to expand it into a clear, detailed product description that will produce an excellent PRD.
@@ -31,20 +34,22 @@ Rules:
 export const generateStructuredPRD = async (
     promptText: string,
     options?: ProviderOptions & {
-        onPartial?: PrdPipelineOptions['onPartial'];
-        onProgress?: PrdPipelineOptions['onProgress'];
+        onPartial?: ProgressivePrdPipelineOptions['onPartial'];
+        onProgress?: ProgressivePrdPipelineOptions['onProgress'];
+        onSectionStatus?: (sectionId: SectionId, update: SectionStatusUpdate) => void;
         onResult?: (result: PrdPipelineResult) => void;
     },
     platform?: ProjectPlatform,
 ): Promise<StructuredPRD> => {
     options?.onStatus?.('Generating structured PRD with Gemini...');
 
-    const result = await runPrdPipeline(
+    const result = await runProgressivePrdPipeline(
         promptText,
         {
             onStatus: options?.onStatus,
             onPartial: options?.onPartial,
             onProgress: options?.onProgress,
+            onSectionStatus: options?.onSectionStatus,
             signal: options?.signal,
         },
         platform,

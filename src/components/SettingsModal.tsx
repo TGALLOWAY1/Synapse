@@ -1,6 +1,9 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
+
+const DEFAULT_FAST_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
 
 interface SettingsModalProps {
     onClose: () => void;
@@ -95,6 +98,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
     const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('OPENAI_API_KEY') || '');
+    const [fastModel, setFastModel] = useState(() => localStorage.getItem('GEMINI_FAST_MODEL') || DEFAULT_FAST_MODEL);
+    const [strongModel, setStrongModel] = useState(() => localStorage.getItem('GEMINI_STRONG_MODEL') || DEFAULT_STRONG_MODEL);
 
     // Expand the legacy section automatically if the user is currently on a
     // legacy model — otherwise keep it collapsed to reduce visual noise.
@@ -107,6 +112,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         e.preventDefault();
         localStorage.setItem('GEMINI_API_KEY', apiKey.trim());
         localStorage.setItem('GEMINI_MODEL', model);
+        localStorage.setItem('GEMINI_FAST_MODEL', fastModel);
+        localStorage.setItem('GEMINI_STRONG_MODEL', strongModel);
         const trimmedProjectId = projectId.trim();
         if (trimmedProjectId) {
             localStorage.setItem('GEMINI_PROJECT_ID', trimmedProjectId);
@@ -235,11 +242,55 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         </p>
                     </div>
 
+                    {/* Model Tiers for Progressive PRD */}
+                    <div className="space-y-4">
+                        <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+                            <Brain size={14} className="text-indigo-400" />
+                            PRD Generation Models
+                        </label>
+                        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
+                            PRD sections are generated concurrently using two models: Flash for simpler sections (product basics, grounding, risks, metrics) and Pro for complex sections (features, architecture, data model). If you hit rate limits, set both to the same model.
+                        </p>
+                        <div className="grid grid-cols-2 gap-3">
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-1.5 text-xs font-semibold text-teal-400">
+                                    <Zap size={11} />
+                                    Fast model (Flash)
+                                </label>
+                                <select
+                                    value={fastModel}
+                                    onChange={(e) => setFastModel(e.target.value)}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 text-neutral-100 text-xs transition-all"
+                                >
+                                    {MODEL_CATALOG.map((m) => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                            <div className="space-y-2">
+                                <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-400">
+                                    <Brain size={11} />
+                                    Expert model (Pro)
+                                </label>
+                                <select
+                                    value={strongModel}
+                                    onChange={(e) => setStrongModel(e.target.value)}
+                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 text-xs transition-all"
+                                >
+                                    {MODEL_CATALOG.map((m) => (
+                                        <option key={m.id} value={m.id}>{m.name}</option>
+                                    ))}
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+
                     {/* Model Selection */}
                     <div className="space-y-4">
                         <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
                             <Cpu size={14} className="text-indigo-400" />
                             Intelligence Level
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Other features</span>
                         </label>
 
                         <div className="grid grid-cols-1 gap-3">

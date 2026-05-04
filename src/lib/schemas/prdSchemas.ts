@@ -285,3 +285,170 @@ export const structuredPRDSchema = {
     required: ["vision", "targetUsers", "coreProblem", "features", "architecture", "risks", "nonFunctionalRequirements", "constraints", "domainEntities", "primaryActions"],
 };
 
+// ─── Per-section schemas for the progressive PRD pipeline ─────────────────
+// Each schema covers exactly the StructuredPRD fields its section produces.
+// Required lists are intentionally lenient (mirror structuredPRDSchema pattern).
+
+export const productBasicsSchema = {
+    type: "OBJECT",
+    properties: {
+        productName: { type: "STRING" },
+        productCategory: { type: "STRING" },
+        executiveSummary: { type: "STRING" },
+        vision: { type: "STRING" },
+        targetUsers: { type: "ARRAY", items: { type: "STRING" } },
+        coreProblem: { type: "STRING" },
+    },
+    required: ["vision", "targetUsers", "coreProblem"],
+};
+
+export const productThesisSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        productThesis: productThesisSchema,
+        principles: { type: "ARRAY", items: principleItemSchema },
+        jtbd: { type: "ARRAY", items: jtbdItemSchema },
+    },
+    required: ["productThesis"],
+};
+
+export const groundingSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        domainEntities: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    name: { type: "STRING" },
+                    description: { type: "STRING" },
+                    exampleValues: { type: "ARRAY", items: { type: "STRING" } },
+                },
+                required: ["name"],
+            },
+        },
+        primaryActions: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    verb: { type: "STRING" },
+                    target: { type: "STRING" },
+                },
+                required: ["verb", "target"],
+            },
+        },
+    },
+    required: ["domainEntities", "primaryActions"],
+};
+
+export const featuresSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        features: { type: "ARRAY", items: featureItemSchema },
+        featureSystems: { type: "ARRAY", items: featureSystemItemSchema },
+    },
+    required: ["features"],
+};
+
+export const dataModelSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        richDataModel: richDataModelSchema,
+        stateMachines: { type: "ARRAY", items: stateMachineSchema },
+    },
+    required: ["richDataModel"],
+};
+
+export const uxSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        userLoops: { type: "ARRAY", items: userLoopItemSchema },
+        uxPages: { type: "ARRAY", items: uxPageItemSchema },
+        roles: { type: "ARRAY", items: rolePermissionSchema },
+    },
+    required: ["userLoops"],
+};
+
+export const architectureSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        architecture: { type: "STRING" },
+        architectureFlows: { type: "ARRAY", items: archFlowSchema },
+        nonFunctionalRequirements: { type: "ARRAY", items: { type: "STRING" } },
+        constraints: { type: "ARRAY", items: { type: "STRING" } },
+    },
+    required: ["architecture"],
+};
+
+export const qualityRisksSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        risks: { type: "ARRAY", items: { type: "STRING" } },
+        risksDetailed: { type: "ARRAY", items: riskDetailedSchema },
+        assumptions: { type: "ARRAY", items: assumptionSchema },
+    },
+    required: ["risks"],
+};
+
+export const metricsScopeSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        mvpScope: mvpScopeSchema,
+        successMetrics: { type: "ARRAY", items: successMetricSchema },
+    },
+    required: ["successMetrics"],
+};
+
+const implementationPlanPhaseSchema = {
+    type: "OBJECT",
+    properties: {
+        name: { type: "STRING" },
+        goals: { type: "ARRAY", items: { type: "STRING" } },
+        featureIds: { type: "ARRAY", items: { type: "STRING" } },
+        estimatedWeeks: { type: "NUMBER" },
+    },
+    required: ["name", "goals"],
+};
+
+export const implementationPlanSliceSchema = {
+    type: "OBJECT",
+    properties: {
+        implementationPlan: {
+            type: "OBJECT",
+            properties: {
+                phases: { type: "ARRAY", items: implementationPlanPhaseSchema },
+                techStack: { type: "ARRAY", items: { type: "STRING" } },
+                teamNotes: { type: "STRING" },
+            },
+            required: ["phases"],
+        },
+    },
+    required: ["implementationPlan"],
+};
+
+export type SectionId =
+    | 'product_basics'
+    | 'product_thesis'
+    | 'grounding'
+    | 'features'
+    | 'data_model'
+    | 'ux_loops'
+    | 'architecture'
+    | 'quality_risks'
+    | 'metrics_scope'
+    | 'implementation_plan';
+
+export const SECTION_SCHEMAS: Record<SectionId, object> = {
+    product_basics: productBasicsSchema,
+    product_thesis: productThesisSliceSchema,
+    grounding: groundingSliceSchema,
+    features: featuresSliceSchema,
+    data_model: dataModelSliceSchema,
+    ux_loops: uxSliceSchema,
+    architecture: architectureSliceSchema,
+    quality_risks: qualityRisksSliceSchema,
+    metrics_scope: metricsScopeSliceSchema,
+    implementation_plan: implementationPlanSliceSchema,
+};
+

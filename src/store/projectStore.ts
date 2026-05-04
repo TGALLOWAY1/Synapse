@@ -30,9 +30,10 @@ export const useProjectStore = create<ProjectState>()(
             storage: createDebouncedStorage(500),
             partialize: (state) => {
                 // Strip transient generation status from persisted state.
-                const { jobs: _jobs, prdProgress: _prdProgress, ...persisted } = state;
+                const { jobs: _jobs, prdProgress: _prdProgress, prdSectionStatus: _prdSectionStatus, ...persisted } = state;
                 void _jobs;
                 void _prdProgress;
+                void _prdSectionStatus;
                 return persisted;
             },
             onRehydrateStorage: () => {
