@@ -11,6 +11,7 @@ import {
 import { structuredPRDSchema } from '../schemas/prdSchemas';
 import { buildStrategySystemInstruction } from '../prompts/prdPrompts';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
+import { repairTruncatedJson } from '../jsonRepair';
 import type {
     StructuredPRD,
     QualityScores,
@@ -81,6 +82,7 @@ export const runPrdPipeline = async (
     try {
         let chars = 0;
         let lastPhase = '';
+        let finishReason: string | undefined;
         const result = await callGeminiStream(
             buildStrategySystemInstruction(platform),
             `User's product idea:\n\n${promptText}`,
@@ -95,6 +97,9 @@ export const runPrdPipeline = async (
                 },
                 onComplete: () => {},
                 onError: () => {},
+                onFinish: (info) => {
+                    finishReason = info.finishReason;
+                },
                 onRestart: () => {
                     // Stream was retried after a network drop — reset our
                     // local accumulators so phase emissions track the new
@@ -110,10 +115,13 @@ export const runPrdPipeline = async (
                 responseSchema: structuredPRDSchema,
                 temperature: 0.4,
                 topP: 0.9,
+                // Pin to the model's full headroom so a rich PRD doesn't
+                // truncate inside a string at the default ~8K cap.
+                maxOutputTokens: 32768,
             },
         );
         onProgress?.('Parsing structured PRD…');
-        structuredPRD = JSON.parse(result) as StructuredPRD;
+        structuredPRD = parseStructuredPrd(result, finishReason);
         passes.push({ stage: 'strategy', ms: performance.now() - passAStart, ok: true });
     } catch (e) {
         passes.push({ stage: 'strategy', ms: performance.now() - passAStart, ok: false });
@@ -131,4 +139,45 @@ export const runPrdPipeline = async (
     };
 
     return { structuredPRD, markdown, generationMeta, model };
+};
+
+/**
+ * Parse the streamed JSON-mode response into a StructuredPRD. If the raw
+ * text fails to parse and Gemini reported MAX_TOKENS (or the parse error
+ * looks like truncation), try a best-effort repair before giving up. On
+ * unrecoverable failure, throw a clearer error than the bare
+ * `Unterminated string in JSON` message Gemini's truncated output
+ * produces — this is what `errors.ts` classifies and surfaces to the user.
+ */
+const parseStructuredPrd = (raw: string, finishReason?: string): StructuredPRD => {
+    try {
+        return JSON.parse(raw) as StructuredPRD;
+    } catch (parseErr) {
+        const msg = parseErr instanceof Error ? parseErr.message : String(parseErr);
+        const looksTruncated =
+            finishReason === 'MAX_TOKENS' ||
+            /unterminated|unexpected end of (json|data)|expected ['"a-z]/i.test(msg);
+
+        if (looksTruncated) {
+            const { text: repaired, repaired: didRepair } = repairTruncatedJson(raw);
+            if (didRepair) {
+                try {
+                    const parsed = JSON.parse(repaired) as StructuredPRD;
+                    console.warn(
+                        `[prd] response was truncated (finishReason=${finishReason ?? 'unknown'}, ${raw.length} chars) — recovered via JSON repair. The PRD may be missing trailing sections.`,
+                    );
+                    return parsed;
+                } catch {
+                    // fall through to throw
+                }
+            }
+            throw new Error(
+                `The PRD response was truncated before it could be completed (finishReason=${finishReason ?? 'unknown'}). ` +
+                `This usually means the model hit its output token limit on a long PRD. ` +
+                `Try a shorter prompt, or switch to a model with more output capacity in Settings. ` +
+                `Raw parse error: ${msg}`,
+            );
+        }
+        throw parseErr;
+    }
 };

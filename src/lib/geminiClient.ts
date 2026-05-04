@@ -5,6 +5,15 @@ export interface JsonModeConfig {
     topP?: number;
     topK?: number;
     /**
+     * Cap on the number of output tokens. Without this, Gemini applies a
+     * conservative default (~8K on Flash models) which is well under what a
+     * rich JSON-mode PRD response needs — hitting the cap mid-response
+     * truncates the JSON inside a string and causes "Unterminated string in
+     * JSON" parse failures. Pin this to the model's full headroom for
+     * structured-output paths.
+     */
+    maxOutputTokens?: number;
+    /**
      * Per-call model override. When set, this model is used instead of the
      * user's configured default. Lets latency-sensitive paths (e.g. mockup
      * generation) pin to a faster, higher-capacity stable model without
@@ -24,6 +33,13 @@ export interface StreamCallbacks {
      * stream from byte zero.
      */
     onRestart?: () => void;
+    /**
+     * Fired once the stream has finished, with the final `finishReason`
+     * reported by Gemini (e.g. 'STOP', 'MAX_TOKENS', 'SAFETY'). Lets callers
+     * distinguish a clean completion from a truncated one — important for
+     * JSON-mode where MAX_TOKENS leaves the response unparseable.
+     */
+    onFinish?: (info: { finishReason?: string }) => void;
 }
 
 export interface ProviderOptions {
@@ -171,6 +187,7 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
             ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
             ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
+            ...(typeof jsonMode.maxOutputTokens === 'number' ? { maxOutputTokens: jsonMode.maxOutputTokens } : {}),
         };
     }
 
@@ -229,14 +246,16 @@ export const callGeminiStream = async (
             ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
             ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
+            ...(typeof jsonMode.maxOutputTokens === 'number' ? { maxOutputTokens: jsonMode.maxOutputTokens } : {}),
         };
     }
     const bodyJson = JSON.stringify(body);
 
     // Run a single stream attempt: connect, read SSE chunks, return the full
-    // accumulated text. Errors propagate to the outer retry loop so a mid-
-    // stream network drop can be retried from byte zero with a fresh fetch.
-    const streamOnce = async (): Promise<string> => {
+    // accumulated text along with the latest finishReason reported by the
+    // server. Errors propagate to the outer retry loop so a mid-stream
+    // network drop can be retried from byte zero with a fresh fetch.
+    const streamOnce = async (): Promise<{ fullText: string; finishReason?: string }> => {
         const response = await fetchWithRetry(url, {
             method: 'POST',
             headers: buildHeaders(apiKey),
@@ -255,6 +274,7 @@ export const callGeminiStream = async (
         const decoder = new TextDecoder();
         let fullText = '';
         let buffer = '';
+        let finishReason: string | undefined;
 
         try {
             while (true) {
@@ -272,10 +292,14 @@ export const callGeminiStream = async (
 
                     try {
                         const chunk = JSON.parse(jsonStr);
-                        const text = chunk.candidates?.[0]?.content?.parts?.[0]?.text;
+                        const candidate = chunk.candidates?.[0];
+                        const text = candidate?.content?.parts?.[0]?.text;
                         if (text) {
                             fullText += text;
                             callbacks.onChunk(text);
+                        }
+                        if (candidate?.finishReason) {
+                            finishReason = candidate.finishReason;
                         }
                     } catch {
                         // Skip malformed JSON chunks
@@ -290,7 +314,7 @@ export const callGeminiStream = async (
             throw e;
         }
 
-        return fullText;
+        return { fullText, finishReason };
     };
 
     // Retry the entire stream (fetch + reader) on transient network errors.
@@ -300,9 +324,10 @@ export const callGeminiStream = async (
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
         try {
-            const fullText = await streamOnce();
+            const { fullText, finishReason } = await streamOnce();
             const durationMs = performance.now() - startTime;
-            console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars, attempts=${attempt + 1})`);
+            console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars, finishReason=${finishReason ?? 'unknown'}, attempts=${attempt + 1})`);
+            callbacks.onFinish?.({ finishReason });
             callbacks.onComplete(fullText);
             return fullText;
         } catch (e) {
