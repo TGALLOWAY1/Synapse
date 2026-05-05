@@ -31,15 +31,38 @@ const ensureDir = async (dir) => fs.mkdir(dir, { recursive: true });
 
 const safeSlug = (value) => value.replace(/[^a-z0-9-_]/gi, '_').toLowerCase();
 
+// Defensive CSS kept in lockstep with src/components/mockups/buildMockupSrcDoc.ts
+// (MOCKUP_RENDER_HEAD_STYLES). Both the live iframe preview and the
+// Playwright screenshot path must wrap the generated fragment identically;
+// otherwise screenshots can disagree with what users see and "renders OK
+// in app, blows up in screenshot" regressions sneak through. The most
+// load-bearing rule is the SVG safety net: without it, inline icons sized
+// only by Tailwind classes (class="w-5 h-5", etc.) fall back to the SVG
+// user-agent default of 300x150 when the CDN is slow or blocked.
+const MOCKUP_RENDER_HEAD_STYLES = `
+    :root { color-scheme: light; }
+    html, body { margin: 0; padding: 0; background: #e5e7eb; }
+    html, body { overflow-y: auto; }
+    body { font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif; color: #111827; }
+    body > div.min-h-screen { min-height: 100vh; height: auto; }
+    body > div.min-h-screen.flex { min-height: 100vh; }
+    main.overflow-hidden, div.overflow-hidden.flex, div.overflow-hidden.flex-col { overflow: visible !important; }
+    @layer mockup-fallback {
+        svg:not([width]):not([height]) { width: 1.25rem; height: 1.25rem; flex-shrink: 0; }
+        img:not([width]):not([height]) { max-width: 100%; height: auto; }
+    }
+`;
+
 const wrapHtmlDocument = (fragment) => `<!doctype html>
-<html>
+<html lang=\"en\">
 <head>
   <meta charset=\"utf-8\" />
   <meta name=\"viewport\" content=\"width=device-width,initial-scale=1\" />
-  <script src=\"https://cdn.tailwindcss.com\"></script>
   <title>Mockup Preview</title>
+  <script src=\"https://cdn.tailwindcss.com\"></script>
+  <style>${MOCKUP_RENDER_HEAD_STYLES}</style>
 </head>
-<body class=\"bg-neutral-100\">${fragment}</body>
+<body>${fragment}</body>
 </html>`;
 
 const countMatches = (text, regex) => (text.match(regex) || []).length;

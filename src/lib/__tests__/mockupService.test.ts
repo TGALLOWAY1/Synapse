@@ -68,7 +68,14 @@ describe('mockupService alignment integration', () => {
         expect(result.critique.screens).toHaveLength(3);
     });
 
-    it('fails when alignment is critically poor', async () => {
+    // Per commit 5b15f56, alignment critique is advisory — low PRD alignment
+    // emits warnings but does NOT discard the generated screens for the
+    // deterministic safe-fallback. Structure + quality validators handle
+    // unrenderable HTML; the alignment heuristic was over-eager and
+    // dominated good-output discards before the policy change. This test
+    // pins that contract so the threshold doesn't quietly regress back to
+    // a hard gate.
+    it('keeps generated screens but surfaces warnings when alignment is critically poor', async () => {
         callGeminiMock.mockResolvedValueOnce(JSON.stringify({
             version: 'mockup_html_v1',
             title: 'Generic App',
@@ -93,9 +100,14 @@ describe('mockupService alignment integration', () => {
         }));
 
         const result = await generateMockup('Clinic triage PRD', settings, structuredPRD);
-        expect(result.usedFallback).toBe(true);
-        expect(result.payload.screens[0].name).toBe('Fallback Workspace');
-        expect(result.warnings.some(w => w.includes('safe fallback'))).toBe(true);
+        // Generated screens are preserved (no safe-fallback substitution).
+        expect(result.usedFallback).toBe(false);
+        expect(result.payload.screens).toHaveLength(3);
+        expect(result.payload.screens[0].name).toBe('Overview Dashboard');
+        // Alignment is computed and degraded.
+        expect(result.critique.severity).not.toBe('low');
+        // The poor alignment is surfaced as a warning rather than a fatal error.
+        expect(result.warnings.some(w => /alignment/i.test(w))).toBe(true);
     });
 
     it('passes deterministic generation controls to Gemini JSON mode', async () => {
