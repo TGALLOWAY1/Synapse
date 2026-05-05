@@ -16,6 +16,27 @@
 // Tailwind utility rules (which the CDN injects unlayered) always win on
 // the happy path while still leaving a sane fallback if the CDN is slow,
 // blocked by CSP, or fails outright.
+//
+// Role in the broader mockup pipeline
+// -----------------------------------
+// This iframe/HTML render path is the SECONDARY mockup output. The primary
+// presentation in MockupViewer is the gpt-image-2-generated PNG (the
+// "AI Image" tab, which is the default mode when projectId/artifactId/
+// versionId are threaded through — see MockupViewer.tsx). The HTML fragment
+// is still the ground-truth artifact in storage and the source of the
+// "Preview" + "Code" tabs, but the user-facing mockup is the rendered
+// image. Keep that ordering in mind when changing this file.
+//
+// TODO(tailwind-hardening): The Tailwind CDN dependency is the load-bearing
+// risk in this path. The cascade-layer SVG fallback below stops "huge blue
+// shapes" when the CDN misses, but if Tailwind fails entirely the layout
+// shell (`flex h-screen`, `min-h-0`, sidebar widths, grid columns) still
+// collapses to unstyled-block flow. Inline a built Tailwind stylesheet
+// snapshot (compiled against the actual mockup HTML at build time, or a
+// static "mockup-safelist" snapshot) and switch this wrapper to load it
+// directly so renders are deterministic even when the CDN is unreachable.
+// Until that lands, the iframe preview remains best-effort and the AI
+// image (gpt-image-2) is the canonical mockup output.
 
 import { normalizeMockupHtml } from '../../lib/mockupQuality';
 
