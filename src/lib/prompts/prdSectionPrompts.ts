@@ -122,7 +122,7 @@ Grounding entities: ${grounding}
 
 Return JSON with:
 - richDataModel: { entities: array of { name, description, fields (array of { name, type, required, notes? }), relationships?, constraints?, examples? } } — 4–8 entities
-- stateMachines: array of { entity, states: array of { name, trigger?, nextStates?, userVisible?, systemBehavior? } } — for 2–3 stateful entities`,
+- stateMachines: array of { entity, states: array of { name, trigger?, nextStates?, userVisible?: string[], systemBehavior?: string[] } } — for 2–3 stateful entities. userVisible and systemBehavior are arrays of 1–5 distinct short sentences (≤ 140 chars each); never one paragraph, never repeat the same sentence.`,
         };
     },
 

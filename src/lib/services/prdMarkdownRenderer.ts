@@ -24,6 +24,11 @@ import type {
     ArchFlow,
     PrdEntity,
 } from '../../types';
+import { coerceToBulletList } from '../textCleanup';
+import {
+    deriveImplementationSummary,
+    isImplementationSummaryEmpty,
+} from '../derive/implementationSummary';
 
 const tierTag = (tier?: string): string => {
     if (!tier) return '';
@@ -160,15 +165,31 @@ const renderEntity = (e: PrdEntity): string[] => {
 };
 
 const renderStateMachine = (m: StateMachine): string[] => {
+    // Per-state subsections with bullet lists. The previous wide-table
+    // layout could overflow horribly when the model emitted a degenerate
+    // mega-string into one cell; bullets render cleanly at any width and
+    // collapsing through coerceToBulletList prevents repetition leaking
+    // through from legacy projects.
     const lines: string[] = [];
     lines.push(`### ${m.entity}`);
-    lines.push('| State | Trigger | Next States | User-visible | System behavior |');
-    lines.push('|---|---|---|---|---|');
-    m.states.forEach(s => {
-        const next = (s.nextStates || []).join(', ') || '—';
-        lines.push(`| ${escapeCell(s.name)} | ${escapeCell(s.trigger || '—')} | ${escapeCell(next)} | ${escapeCell(s.userVisible || '—')} | ${escapeCell(s.systemBehavior || '—')} |`);
-    });
     lines.push('');
+    m.states.forEach(s => {
+        lines.push(`#### ${s.name}`);
+        if (s.trigger) lines.push(`**Trigger:** ${s.trigger}`);
+        const next = s.nextStates && s.nextStates.length ? s.nextStates.join(' → ') : '';
+        if (next) lines.push(`**Next states:** ${next}`);
+        const userVisible = coerceToBulletList(s.userVisible, { max: 6 });
+        if (userVisible.length) {
+            lines.push('**User-visible:**');
+            userVisible.forEach(b => lines.push(`- ${b}`));
+        }
+        const systemBehavior = coerceToBulletList(s.systemBehavior, { max: 6 });
+        if (systemBehavior.length) {
+            lines.push('**System behavior:**');
+            systemBehavior.forEach(b => lines.push(`- ${b}`));
+        }
+        lines.push('');
+    });
     return lines;
 };
 
@@ -240,6 +261,47 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('## Executive Summary');
         lines.push(prd.executiveSummary);
         lines.push('');
+    }
+
+    // Implementation Summary — synthesized from features/risks/assumptions so
+    // exports (PDF, markdown download) carry the same "what to build first"
+    // entry point the in-app PRD now shows.
+    const summary = deriveImplementationSummary(prd);
+    if (!isImplementationSummaryEmpty(summary)) {
+        lines.push('## Implementation Summary');
+        lines.push('');
+        if (summary.buildFirst.length > 0) {
+            lines.push('### Build First');
+            summary.buildFirst.forEach((f, i) => {
+                const reason = f.reason ? ` — ${f.reason}` : '';
+                lines.push(`${i + 1}. **${f.id}** ${f.name}${reason}`);
+            });
+            lines.push('');
+        }
+        if (summary.buildNext.length > 0) {
+            lines.push('### Build Next');
+            summary.buildNext.forEach(f => lines.push(`- **${f.id}** ${f.name}`));
+            lines.push('');
+        }
+        if (summary.defer.length > 0) {
+            lines.push('### Defer');
+            summary.defer.forEach(f => lines.push(`- **${f.id}** ${f.name}`));
+            lines.push('');
+        }
+        if (summary.highestRisks.length > 0) {
+            lines.push('### Highest Risks');
+            summary.highestRisks.forEach(r => {
+                const tag = r.likelihood !== 'unknown' ? ` (${r.likelihood})` : '';
+                const impact = r.impact ? ` — ${r.impact}` : '';
+                lines.push(`- ${r.risk}${tag}${impact}`);
+            });
+            lines.push('');
+        }
+        if (summary.openDecisions.length > 0) {
+            lines.push('### Open Decisions');
+            summary.openDecisions.forEach(d => lines.push(`- **${d.id}** ${d.statement}`));
+            lines.push('');
+        }
     }
 
     // Vision (always present in legacy spec)

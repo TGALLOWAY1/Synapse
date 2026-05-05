@@ -34,7 +34,7 @@ Hard rules:
 - Every claim must be concrete. Prefer enumeration over prose. Prefer named entities over abstractions.
 - When you must infer a fact the user did not state, capture it as an Assumption with a confidence level — never present it as fact.
 - Every major feature must have success, edge, failure, and UI acceptance criteria.
-- State machines must list states with triggers, allowed next states, user-visible behavior, and system behavior.
+- State machines must list states with triggers, allowed next states, user-visible behavior, and system behavior. \`userVisible\` and \`systemBehavior\` are arrays of 1–5 short distinct sentences each (≤ 140 chars per item) — never one giant paragraph, never the same sentence twice, never "Disables… Shows… Hides…" mashed into one item.
 - Architecture must include at least one example data flow with numbered steps, not just a tech stack.
 - MVP scope must be opinionated: not every feature belongs in MVP. Defer aggressively.
 - Use realistic example records and example values. No "Lorem ipsum", no "Foo / Bar".
@@ -53,7 +53,7 @@ Required structure (output as a single JSON object matching the provided schema)
 - featureSystems: 3–7 systems grouping related features — { id, name, purpose, featureIds, endToEndBehavior?, dependencies?, edgeCases?, mvpVsLater? }.
 - features: 6–14 detailed feature specs — { id (f1, f2…), name, description, userValue, complexity (low/medium/high), priority (must/should/could), acceptanceCriteria (>=2, success-path), system?, successCriteria?, edgeCases?, failureModes?, uiAcceptanceCriteria?, analyticsEvents?, tier? (mvp/v1/later), dependencies? }. Cross-reference featureSystems via the system field.
 - richDataModel: { entities: [{ name, description, fields: [{name, type, required?, notes?}], relationships?, constraints?, examples? }] }. 4–10 entities. Examples are realistic records (real names, real statuses, realistic IDs).
-- stateMachines: 1–3 state machines for the most important entities — { entity, states: [{ name, trigger?, nextStates?, userVisible?, systemBehavior? }] }.
+- stateMachines: 1–3 state machines for the most important entities — { entity, states: [{ name, trigger?, nextStates?, userVisible?: string[], systemBehavior?: string[] }] }. userVisible and systemBehavior are arrays of 1–5 crisp distinct sentences each. Each sentence describes one observable behavior, ≤ 140 chars, no repetition.
 - roles: 3–6 roles — { role, allowed, restricted?, dataVisibility?, notes? }.
 - architecture: prose architecture overview that explains WHY each major choice fits the product (not just a tech stack).
 - architectureFlows: 1–3 example data/request flows — { name, steps (numbered plain strings) }.
