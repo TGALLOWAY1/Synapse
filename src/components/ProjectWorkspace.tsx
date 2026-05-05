@@ -109,6 +109,17 @@ export function ProjectWorkspace() {
     // Detect if the current spine is still waiting for initial generation
     const isPRDGenerating = !!activeSpine && activeSpine.responseText === 'Generating PRD...' && !activeSpine.structuredPRD && !activeSpine.generationError;
 
+    // Multi-agent pipeline emits onPartial after each of ~10 sections, so
+    // structuredPRD becomes truthy long before generation finishes. Use the
+    // section-status grid as the source of truth for "still working" — any
+    // section in pending/queued/generating/refining state means the panel
+    // should stay visible. Combined with isPRDGenerating to cover the brief
+    // initial window before the first section_started event arrives.
+    const sectionsStillRunning = !!prdSectionStatus && Object.values(prdSectionStatus).some(
+        (s) => s && s.status !== 'complete' && s.status !== 'error',
+    );
+    const isPRDActivelyGenerating = isPRDGenerating || sectionsStillRunning;
+
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
         const idx = allSpines.findIndex(s => s.id === spineId);
@@ -252,11 +263,11 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine
                             ? activeSpine.generationError
                                 ? 'Generation Failed'
-                                : isPRDGenerating
+                                : isPRDActivelyGenerating
                                     ? 'Generating...'
                                     : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
                             : 'Initializing...'}
@@ -421,7 +432,7 @@ export function ProjectWorkspace() {
                                 {activeSpine ? (
                                     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
                                         {/* Regeneration progress overlay */}
-                                        {isGenerating && !isPRDGenerating && (
+                                        {isGenerating && (
                                             <div className="mb-6">
                                                 <GenerationProgress
                                                     stages={PRD_REGENERATION_STAGES}
@@ -436,7 +447,7 @@ export function ProjectWorkspace() {
                                         )}
 
                                         {/* Initial generation progress */}
-                                        {isPRDGenerating && (
+                                        {!isGenerating && isPRDActivelyGenerating && (
                                             <div className="mb-6">
                                                 <GenerationProgress
                                                     stages={PRD_GENERATION_STAGES}
