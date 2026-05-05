@@ -12,6 +12,7 @@ import {
     serializeEntities,
     serializeActions,
 } from '../lib/groundingFields';
+import { ImplementationSummarySection } from './prd/ImplementationSummarySection';
 import {
     ExecutiveSummarySection,
     ProductThesisSection,
@@ -521,6 +522,11 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                 {structuredPRD.executiveSummary && (
                     <ExecutiveSummarySection summary={structuredPRD.executiveSummary} />
                 )}
+
+                {/* Implementation summary — synthesized from existing fields so a
+                    reader can answer "what should I build first?" without scrolling
+                    the entire document. Hidden if the PRD has no actionable signal. */}
+                <ImplementationSummarySection prd={structuredPRD} />
 
                 {renderTextSection('Vision', 'vision', structuredPRD.vision)}
 

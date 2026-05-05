@@ -1,10 +1,16 @@
 import type { CoreArtifactSubtype } from '../types';
+import { dedupeSentences } from './textCleanup';
 
 export interface ValidationResult {
     isValid: boolean;
     qualityScore: number; // 0-100
     warnings: string[];
 }
+
+// Cell-level threshold beyond which a single | … | … | markdown table cell
+// is almost certainly carrying degenerate LLM output. Cells > 800 chars
+// are visually unscannable in a 5-column table.
+const MAX_TABLE_CELL_CHARS = 800;
 
 const MIN_CONTENT_LENGTH: Record<CoreArtifactSubtype, number> = {
     screen_inventory: 200,
@@ -72,9 +78,49 @@ export function validateArtifactContent(
         score -= 10;
     }
 
+    // Quality gate: detect degenerate output patterns. The classic failure
+    // mode is a single markdown table cell holding a phrase repeated 30+
+    // times — cleanup utilities now defend against it at render time, but
+    // we surface a warning so users can choose to regenerate.
+    const degenerate = detectDegenerateContent(content);
+    if (degenerate) {
+        warnings.push(degenerate);
+        score -= 15;
+    }
+
     return {
         isValid: score >= 40,
         qualityScore: Math.max(0, Math.min(100, score)),
         warnings,
     };
+}
+
+/**
+ * Scan markdown for two degenerate patterns we want to flag:
+ *   1. A table row with any single cell over MAX_TABLE_CELL_CHARS.
+ *   2. A list bullet whose dedupe-pass collapses ≥ 50% of the original
+ *      sentence count (clear sign of a repetition loop).
+ *
+ * Returns a human-readable warning string or null when content is clean.
+ */
+export function detectDegenerateContent(content: string): string | null {
+    const lines = content.split('\n');
+    for (const line of lines) {
+        // Markdown table row: starts and ends with `|`.
+        if (!line.trim().startsWith('|') || !line.trim().endsWith('|')) continue;
+        const cells = line.split('|').slice(1, -1).map(c => c.trim());
+        for (const cell of cells) {
+            if (cell.length > MAX_TABLE_CELL_CHARS) {
+                return `A table cell is unusually long (${cell.length} chars) — output may be repeating itself. Consider regenerating.`;
+            }
+            if (cell.length > 200) {
+                const dedup = dedupeSentences(cell);
+                const rough = cell.split(/(?<=[.!?])\s+/).filter(Boolean).length;
+                if (rough >= 4 && dedup.length <= rough / 2) {
+                    return `A table cell repeats the same sentence multiple times — output may be degenerate. Consider regenerating.`;
+                }
+            }
+        }
+    }
+    return null;
 }

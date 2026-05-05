@@ -3,6 +3,7 @@ import type {
     StateMachine, RolePermission, ArchFlow, RiskDetailed, MvpScope,
     SuccessMetric, Assumption, ProductThesis,
 } from '../../types';
+import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
 
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
 // for visual consistency.
@@ -297,35 +298,100 @@ export function DataModelSection({ model }: { model: PrdDataModel }) {
 }
 
 export function StateMachinesSection({ machines }: { machines: StateMachine[] }) {
+    // Card-per-state layout. The previous wide table overflowed catastrophically
+    // when a single cell carried a long degenerate string from the model. Cards
+    // wrap naturally and the bullet lists are easier to scan than dense prose.
+    const hasQualityIssue = machines.some(m =>
+        m.states.some(s => looksDegenerate(s.userVisible) || looksDegenerate(s.systemBehavior)),
+    );
     return (
         <Section title="State Machines" id="prd-state-machines">
-            <div className="space-y-4">
+            {hasQualityIssue && (
+                <div className="mb-3 flex items-center gap-2 px-3 py-2 bg-amber-50 border border-amber-200 rounded-md">
+                    <span className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                        Quality issue
+                    </span>
+                    <span className="text-xs text-amber-800">
+                        Some cells looked repetitive and were auto-cleaned. Consider regenerating for cleaner output.
+                    </span>
+                </div>
+            )}
+            <div className="space-y-6">
                 {machines.map((m, idx) => (
-                    <div key={idx}>
-                        <p className="text-sm font-bold text-neutral-900 mb-2">{m.entity}</p>
-                        <div className="overflow-x-auto rounded-lg border border-neutral-200">
-                            <table className="w-full text-xs">
-                                <thead className="bg-neutral-50 text-neutral-500 uppercase tracking-wider">
-                                    <tr>
-                                        <th className="px-2 py-1.5 text-left">State</th>
-                                        <th className="px-2 py-1.5 text-left">Trigger</th>
-                                        <th className="px-2 py-1.5 text-left">Next States</th>
-                                        <th className="px-2 py-1.5 text-left">User-visible</th>
-                                        <th className="px-2 py-1.5 text-left">System behavior</th>
-                                    </tr>
-                                </thead>
-                                <tbody className="divide-y divide-neutral-100">
-                                    {m.states.map((s, k) => (
-                                        <tr key={k}>
-                                            <td className="px-2 py-1.5 font-mono text-neutral-800">{s.name}</td>
-                                            <td className="px-2 py-1.5 text-neutral-700">{s.trigger || '—'}</td>
-                                            <td className="px-2 py-1.5 text-neutral-700">{(s.nextStates || []).join(', ') || '—'}</td>
-                                            <td className="px-2 py-1.5 text-neutral-700">{s.userVisible || '—'}</td>
-                                            <td className="px-2 py-1.5 text-neutral-700">{s.systemBehavior || '—'}</td>
-                                        </tr>
-                                    ))}
-                                </tbody>
-                            </table>
+                    <div key={idx} className="space-y-3">
+                        <div className="flex items-baseline gap-2">
+                            <h4 className="text-sm font-bold text-neutral-900 font-mono">{m.entity}</h4>
+                            <span className="text-[11px] text-neutral-500">
+                                {m.states.length} state{m.states.length === 1 ? '' : 's'}
+                            </span>
+                        </div>
+                        <div className="space-y-2">
+                            {m.states.map((s, k) => {
+                                const userVisible = coerceToBulletList(s.userVisible, { max: 6 });
+                                const systemBehavior = coerceToBulletList(s.systemBehavior, { max: 6 });
+                                return (
+                                    <div
+                                        key={k}
+                                        className="bg-white rounded-lg border border-neutral-200 p-4"
+                                    >
+                                        <div className="flex flex-wrap items-center gap-2 mb-2">
+                                            <span className="font-mono text-sm font-semibold text-neutral-900">
+                                                {s.name}
+                                            </span>
+                                            {s.trigger && (
+                                                <span className="text-[11px] text-neutral-500">
+                                                    <span className="font-semibold uppercase tracking-wider">Trigger</span>
+                                                    {' '}
+                                                    {s.trigger}
+                                                </span>
+                                            )}
+                                            {s.nextStates && s.nextStates.length > 0 && (
+                                                <span className="flex flex-wrap items-center gap-1">
+                                                    <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">
+                                                        →
+                                                    </span>
+                                                    {s.nextStates.map((ns, i) => (
+                                                        <span
+                                                            key={i}
+                                                            className="inline-flex items-center px-1.5 py-0.5 text-[11px] font-mono bg-neutral-100 text-neutral-700 rounded"
+                                                        >
+                                                            {ns}
+                                                        </span>
+                                                    ))}
+                                                </span>
+                                            )}
+                                        </div>
+                                        {(userVisible.length > 0 || systemBehavior.length > 0) && (
+                                            <div className="grid sm:grid-cols-2 gap-3 mt-2">
+                                                {userVisible.length > 0 && (
+                                                    <div>
+                                                        <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-700 mb-1">
+                                                            User-visible
+                                                        </p>
+                                                        <ul className="list-disc pl-4 text-xs text-neutral-700 space-y-0.5">
+                                                            {userVisible.map((b, i) => (
+                                                                <li key={i}>{b}</li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                                {systemBehavior.length > 0 && (
+                                                    <div>
+                                                        <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
+                                                            System behavior
+                                                        </p>
+                                                        <ul className="list-disc pl-4 text-xs text-neutral-700 space-y-0.5">
+                                                            {systemBehavior.map((b, i) => (
+                                                                <li key={i}>{b}</li>
+                                                            ))}
+                                                        </ul>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
+                                    </div>
+                                );
+                            })}
                         </div>
                     </div>
                 ))}

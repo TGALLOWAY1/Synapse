@@ -145,8 +145,12 @@ const machineStateSchema = {
         name: { type: "STRING" },
         trigger: { type: "STRING" },
         nextStates: { type: "ARRAY", items: { type: "STRING" } },
-        userVisible: { type: "STRING" },
-        systemBehavior: { type: "STRING" },
+        // Arrays of short distinct sentences. Older PRDs emitted a single
+        // STRING here and the model would sometimes repeat the same phrase
+        // dozens of times in one cell; the array shape plus prompt guidance
+        // and textCleanup defenses prevent that degenerate output.
+        userVisible: { type: "ARRAY", items: { type: "STRING" } },
+        systemBehavior: { type: "ARRAY", items: { type: "STRING" } },
     },
     required: ["name"],
 };

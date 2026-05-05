@@ -3,6 +3,10 @@ import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
 import { ComponentInventoryRenderer } from './ComponentInventoryRenderer';
+import { DesignSystemRenderer } from './DesignSystemRenderer';
+import { UserFlowsRenderer } from './UserFlowsRenderer';
+import { ImplementationPlanRenderer } from './ImplementationPlanRenderer';
+import { PromptPackRenderer } from './PromptPackRenderer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -17,10 +21,17 @@ interface DispatchProps {
  * Render artifact content using a type-specific renderer if available,
  * falling back to ReactMarkdown for markdown content.
  *
- * Structured renderers expect JSON content. Since generateCoreArtifact()
- * converts JSON responses to markdown via structuredArtifactToMarkdown()
- * before storage, content is typically markdown. We check if the content
- * is valid JSON before attempting the structured renderer path.
+ * Three subtypes (`screen_inventory`, `data_model`, `component_inventory`)
+ * are stored as JSON when generation succeeds and rendered through
+ * structured renderers; the structured renderers return `null` if the
+ * content turns out not to be JSON, and we fall through.
+ *
+ * The four markdown-only subtypes (`design_system`, `user_flows`,
+ * `implementation_plan`, `prompt_pack`) get bespoke layouts that parse
+ * the conventional markdown shapes into rich visual presentations
+ * (color swatches, milestone timeline, prompt cards, etc.). Each
+ * gracefully falls back to ReactMarkdown if the conventions don't
+ * match — older artifacts always remain readable.
  */
 function isJsonString(str: string): boolean {
     try {
@@ -40,6 +51,18 @@ export function ArtifactContentRenderer({ subtype, content, screenImageContext }
     }
     if (subtype === 'component_inventory' && isJsonString(content)) {
         return <ComponentInventoryRenderer content={content} />;
+    }
+    if (subtype === 'design_system') {
+        return <DesignSystemRenderer content={content} />;
+    }
+    if (subtype === 'user_flows') {
+        return <UserFlowsRenderer content={content} />;
+    }
+    if (subtype === 'implementation_plan') {
+        return <ImplementationPlanRenderer content={content} />;
+    }
+    if (subtype === 'prompt_pack') {
+        return <PromptPackRenderer content={content} />;
     }
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
 }

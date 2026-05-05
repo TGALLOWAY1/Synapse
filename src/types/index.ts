@@ -182,8 +182,12 @@ export type MachineState = {
     name: string;
     trigger?: string;                      // what causes entry
     nextStates?: string[];
-    userVisible?: string;
-    systemBehavior?: string;
+    // Arrays of short distinct sentences. Legacy projects in localStorage
+    // may have stored a single concatenated string here; the textCleanup
+    // utility (`coerceToBulletList`) accepts both shapes so the renderer
+    // never has to think about the difference.
+    userVisible?: string[] | string;
+    systemBehavior?: string[] | string;
 };
 
 export type StateMachine = {
