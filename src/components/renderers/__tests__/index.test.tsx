@@ -57,6 +57,46 @@ describe('ArtifactContentRenderer', () => {
         expect(container).toHaveTextContent('Text Fallback');
         // Risk callout copy.
         expect(container).toHaveTextContent('Camera permission denied');
+        // Section-level Journey row (replaces the old `flow:` text).
+        expect(container).toHaveTextContent('Journey');
+        expect(container).not.toHaveTextContent(/^\s*flow:/);
+        expect(container).toHaveTextContent('Landing');
+        expect(container).toHaveTextContent('Capture');
+        expect(container).toHaveTextContent('Player');
+        // Card-level Navigation subsection groups Entry + Exit.
+        expect(container).toHaveTextContent('Navigation');
+        expect(container).toHaveTextContent('Entry');
+        expect(container).toHaveTextContent('Exit');
+        // Linked Features label + the feature ref still surfaces.
+        expect(container).toHaveTextContent('Linked Features');
+        expect(container).toHaveTextContent('F-014');
+        // Screen count metadata.
+        expect(container).toHaveTextContent('1 screen');
+    });
+
+    it('renders feature ref pills with id + label when refs include names', () => {
+        const jsonContent = JSON.stringify({
+            sections: [{
+                title: 'Household Meal Logistics',
+                screens: [{
+                    name: 'Smart Grocery List',
+                    priority: 'P0',
+                    purpose: 'Aggregate ingredients into a shopping list',
+                    featureRefs: ['f8 Ingredient Aggregation', 'f10 Grocery Export', 'f12'],
+                }],
+            }],
+        });
+        const { container } = render(
+            <ArtifactContentRenderer subtype="screen_inventory" content={jsonContent} />
+        );
+        expect(container).toHaveTextContent('Linked Features');
+        // Ids and human-readable labels both render.
+        expect(container).toHaveTextContent('f8');
+        expect(container).toHaveTextContent('Ingredient Aggregation');
+        expect(container).toHaveTextContent('f10');
+        expect(container).toHaveTextContent('Grocery Export');
+        // Bare ids without a label still render.
+        expect(container).toHaveTextContent('f12');
     });
 
     it('renders legacy groups + core/secondary priorities by normalizing on read', () => {
