@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Check, Upload, Image as ImageIcon, X, AlertTriangle, Loader2 } from 'lucide-react';
 import type { ScreenItem } from '../../types';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
@@ -24,8 +24,19 @@ export function ScreenImageGallery({ screen, context }: Props) {
     const [copied, setCopied] = useState(false);
     const [lightboxKey, setLightboxKey] = useState<string | null>(null);
 
-    const versions = useScreenInventoryImageStore(s => s.listForScreen(artifactVersionId, screen.name));
-    const bucketKey = `${artifactVersionId}:${slugifyScreenName(screen.name)}`;
+    // Subscribe to the raw images map (stable reference) and derive the
+    // per-screen list via useMemo. Calling listForScreen() inside the selector
+    // returns a fresh array on every render, which Zustand v5 treats as a
+    // changed snapshot under Object.is — that loops setState and trips
+    // React error #185 (max update depth).
+    const allImages = useScreenInventoryImageStore(s => s.images);
+    const screenSlug = slugifyScreenName(screen.name);
+    const versions = useMemo(() => {
+        return Object.values(allImages)
+            .filter(r => r.artifactVersionId === artifactVersionId && r.screenSlug === screenSlug)
+            .sort((a, b) => a.versionNumber - b.versionNumber);
+    }, [allImages, artifactVersionId, screenSlug]);
+    const bucketKey = `${artifactVersionId}:${screenSlug}`;
     const isUploading = useScreenInventoryImageStore(s => Boolean(s.uploading[bucketKey]));
     const error = useScreenInventoryImageStore(s => s.errors[bucketKey]);
     const upload = useScreenInventoryImageStore(s => s.upload);
