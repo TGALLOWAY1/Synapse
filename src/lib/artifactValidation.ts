@@ -1,5 +1,6 @@
 import type { CoreArtifactSubtype } from '../types';
 import { dedupeSentences } from './textCleanup';
+import { parseScreenInventory, screenInventoryToMarkdown } from './screenInventoryNormalize';
 
 export interface ValidationResult {
     isValid: boolean;
@@ -36,6 +37,14 @@ export function validateArtifactContent(
     subtype: CoreArtifactSubtype,
     content: string
 ): ValidationResult {
+    // Screen inventory is now persisted as structured JSON. Validate the
+    // shape directly when we recognize it, and fall back to the markdown
+    // path for legacy artifacts.
+    if (subtype === 'screen_inventory') {
+        const parsed = parseScreenInventory(content);
+        if (parsed) return validateScreenInventoryStructured(parsed);
+    }
+
     const warnings: string[] = [];
     let score = 100;
 
@@ -101,6 +110,51 @@ export function validateArtifactContent(
                 score -= 5;
             }
         }
+    }
+
+    return {
+        isValid: score >= 40,
+        qualityScore: Math.max(0, Math.min(100, score)),
+        warnings,
+    };
+}
+
+function validateScreenInventoryStructured(
+    parsed: import('../types').ScreenInventoryContent,
+): ValidationResult {
+    const warnings: string[] = [];
+    let score = 100;
+
+    if (parsed.sections.length === 0) {
+        warnings.push('No sections found — screen inventory is empty');
+        score -= 40;
+    }
+
+    const allScreens = parsed.sections.flatMap(s => s.screens);
+    if (allScreens.length === 0) {
+        warnings.push('No screens found in any section');
+        score -= 30;
+    }
+
+    const missingPurpose = allScreens.filter(s => !s.purpose || s.purpose.length < 8).length;
+    if (allScreens.length > 0 && missingPurpose / allScreens.length > 0.25) {
+        warnings.push(`${missingPurpose} screens have a missing or stub \`purpose\``);
+        score -= 15;
+    }
+
+    const allP0 = allScreens.length > 1 && allScreens.every(s => s.priority === 'P0');
+    if (allP0) {
+        warnings.push('Every screen is marked P0 — priorities are not meaningfully differentiated');
+        score -= 10;
+    }
+
+    // Reuse the markdown degenerate-text scan against the rendered form
+    // so a degenerate LLM repetition still surfaces a warning.
+    const md = screenInventoryToMarkdown(parsed);
+    const degenerate = detectDegenerateContent(md);
+    if (degenerate) {
+        warnings.push(degenerate);
+        score -= 15;
     }
 
     return {

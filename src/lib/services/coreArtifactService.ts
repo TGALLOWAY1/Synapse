@@ -1,25 +1,33 @@
-import type { StructuredPRD, CoreArtifactSubtype, ScreenInventoryContent, DataModelContent, ComponentInventoryContent, StructuredImplementationPlan } from '../../types';
+import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, StructuredImplementationPlan } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
+import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
-        system: `You are an expert product designer. Create a comprehensive Screen Inventory — a structured list of all screens and views implied by the PRD.
+        system: `You are an expert product designer. Produce a system-level Screen Inventory — a structured map of the product experience, NOT a flat list.
 
-Group screens by functional area (e.g., "Authentication", "Dashboard", "Settings"). For each screen, use this exact format:
+Output strictly the JSON shape supplied. The schema groups screens into product-area sections; for each screen you must model state, intent, entry/exit, and risk.
 
-### [Screen Name]
-**Purpose:** One-sentence description of what the user accomplishes here.
-**Components:** Bulleted list of key UI components on this screen.
-**Navigation:** Where users come from → this screen → where they go next.
-**Priority:** Core | Secondary | Supporting
-**Feature Refs:** Which PRD features this screen implements (by feature ID if available).
-
-Include screens for: empty states, error states, loading states, and onboarding flows — not just happy-path screens.
-End with a summary table listing all screens with their priority and functional area.`,
+Rules:
+1. Group screens into \`sections[]\` by product area (e.g. "Onboarding", "Mood Capture", "Library", "Account"). Give each section a one-line \`description\` and a textual \`flowSummary\` like "Landing → Mood Capture → Loading → Auth → Player".
+2. A loading / error / empty / permission-denied variant of a screen is a \`state\` under that screen's \`states[]\`, NOT its own screen. Only promote a state to its own screen when it has a separate route or full-page ownership (e.g. a dedicated /404 page).
+3. Use \`entryPoints[]\` (where the user comes from) and \`exitPaths[]\` (label → target screen, with optional condition). Never write inline "from X → here → to Y" navigation prose.
+4. \`coreUIElements[]\` must be **semantic**: "Mood capture canvas", "Camera permission prompt", "Submit CTA". Do NOT list implementation details like "div", "input element", or "button with hover state".
+5. Provide \`userIntent\` per screen — the goal in the user's own words (e.g. "Capture a vibe in under 5 seconds and share it"). This is distinct from \`purpose\` (which is the screen's role in the product).
+6. Use the priority rubric LITERALLY:
+   - P0 = essential to the main product loop
+   - P1 = important supporting flow
+   - P2 = edge case / fallback / admin / secondary view
+   - P3 = nice-to-have / future
+   Do NOT mark every screen P0. A typical inventory has a handful of P0s, several P1s, and a long tail of P2/P3.
+7. Use \`type\` to distinguish "screen" (full route) from "modal", "overlay", or "system-state".
+8. Populate \`risks[]\` with edge cases or failure modes worth surfacing ("camera permission denied", "low-light noise", "rate limit hit"). Populate \`outputData[]\` when a screen produces named data ("mood vector", "caption text", "uploaded photo URL").
+9. Populate \`featureRefs[]\` with the canonical feature IDs each screen implements.
+10. Reuse exact PRD terminology for screen and feature names.`,
         userPrefix: 'Create a Screen Inventory from this PRD:',
     },
     user_flows: {
@@ -203,32 +211,14 @@ Begin your response directly with the first section heading. Do NOT include any 
     },
 };
 
-function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data: unknown): string {
+export function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data: unknown): string {
     if (subtype === 'screen_inventory') {
-        const inv = data as ScreenInventoryContent;
-        const lines: string[] = ['# Screen Inventory\n'];
-        for (const group of inv.groups) {
-            lines.push(`## ${group.name}\n`);
-            for (const screen of group.screens) {
-                lines.push(`### ${screen.name}`);
-                lines.push(`**Purpose:** ${screen.purpose}`);
-                lines.push(`**Priority:** ${screen.priority}`);
-                if (screen.components?.length) {
-                    lines.push(`**Components:**`);
-                    screen.components.forEach(c => lines.push(`- ${c}`));
-                }
-                if (screen.navigationFrom?.length || screen.navigationTo?.length) {
-                    const from = screen.navigationFrom?.join(', ') || 'N/A';
-                    const to = screen.navigationTo?.join(', ') || 'N/A';
-                    lines.push(`**Navigation:** ${from} → this screen → ${to}`);
-                }
-                if (screen.featureRefs?.length) {
-                    lines.push(`**Feature Refs:** ${screen.featureRefs.join(', ')}`);
-                }
-                lines.push('');
-            }
+        const normalized = normalizeScreenInventory(data);
+        if (!normalized) {
+            // Unrecognized shape — surface raw JSON so a human can recover.
+            return `# Screen Inventory\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n`;
         }
-        return lines.join('\n');
+        return screenInventoryToMarkdown(normalized);
     }
 
     if (subtype === 'data_model') {
@@ -429,6 +419,15 @@ Architecture: ${structuredPRD.architecture}${
 
         try {
             const parsed = JSON.parse(result);
+            // For screen_inventory we persist the structured JSON so the
+            // structured renderer in `renderers/index.tsx` activates and
+            // export / dependency-context flows can re-render markdown
+            // on demand. Other JSON-mode subtypes still serialize to
+            // markdown for storage to avoid cross-cutting changes.
+            if (subtype === 'screen_inventory') {
+                const normalized = normalizeScreenInventory(parsed) ?? parsed;
+                return JSON.stringify(normalized, null, 2);
+            }
             return normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
         } catch {
             // Fallback: return raw result if JSON parse fails
@@ -461,6 +460,38 @@ export const refineCoreArtifact = async (
 ): Promise<string> => {
     options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
 
+    const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
+
+    if (subtype === 'screen_inventory') {
+        const system = `You are an expert product designer refining a structured Screen Inventory.
+
+The current artifact may be either:
+- The post-upgrade JSON shape (sections[].screens[] with states, entryPoints, exitPaths, P0–P3 priority, etc.), OR
+- A legacy markdown or JSON artifact (groups[].screens[] with core/secondary/supporting priority).
+
+Rules:
+1. Apply the user's requested changes precisely. Do not rewrite parts that weren't asked about.
+2. If the input is legacy, migrate it to the post-upgrade shape on output: sections, P0–P3 priorities, states arrays, entryPoints, exitPaths.
+3. Loading / error / empty / permission states belong under \`states[]\` of their parent screen, never as separate screens (unless they own a route).
+4. coreUIElements must be semantic, not implementation-level. Provide userIntent for every screen.
+5. Return strictly the JSON shape supplied — no commentary, no markdown.`;
+
+        const result = await callGemini(
+            system,
+            `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
+            { responseMimeType: 'application/json', responseSchema: screenInventorySchema },
+            options?.signal,
+        );
+
+        try {
+            const parsed = JSON.parse(result);
+            const normalized = normalizeScreenInventory(parsed) ?? parsed;
+            return JSON.stringify(normalized, null, 2);
+        } catch {
+            return result;
+        }
+    }
+
     const system = `You are an expert product designer helping refine a ${subtype.replace(/_/g, ' ')}. The user has an existing artifact and wants specific changes.
 
 Rules:
@@ -469,8 +500,6 @@ Rules:
 3. If the user asks to add content, integrate it naturally into the existing structure.
 4. If the user asks to modify content, change only what's requested — don't rewrite everything.
 5. Return the complete updated artifact (not just the changes).`;
-
-    const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
 
     return callGemini(
         system,
