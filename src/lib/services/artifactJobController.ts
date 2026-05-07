@@ -19,6 +19,8 @@ import {
 import { isAbortError } from '../concurrency';
 import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
+import { useMockupImageStore } from '../../store/mockupImageStore';
+import { hasOpenAIKey } from '../openaiClient';
 
 export interface StartArgs {
     projectId: string;
@@ -227,7 +229,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     const versions = writeStore.getArtifactVersions(projectId, artifactId);
     const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
 
-    writeStore.createArtifactVersion(
+    const newVersion = writeStore.createArtifactVersion(
         projectId,
         artifactId,
         JSON.stringify(payload),
@@ -249,6 +251,31 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     );
 
     writeStore.setSlotStatus(projectId, 'mockup', { status: 'done', finishedAt: Date.now() });
+
+    // Fire-and-forget: kick off low-quality AI image generation for each
+    // screen. The user landed on the AI Image tab by default in MockupViewer
+    // — having the image start populating immediately matches the expectation
+    // that the AI image is the primary mockup output. Skipped when no OpenAI
+    // key is configured (the empty-state CTA is shown instead). High-quality
+    // can be promoted later via the regenerate button without losing the
+    // low-quality render — both qualities coexist in IndexedDB.
+    const versionId = newVersion?.versionId;
+    if (versionId && hasOpenAIKey() && !signal.aborted) {
+        const imageStore = useMockupImageStore.getState();
+        for (const screen of payload.screens) {
+            void imageStore.generate({
+                projectId,
+                artifactId,
+                versionId,
+                screen,
+                payload,
+                settings,
+                quality: 'low',
+            }).catch((err) => {
+                console.warn('[artifactJobController] auto image generation failed', err);
+            });
+        }
+    }
 }
 
 async function executeJob(args: StartArgs, controller: AbortController, slotKeys: ArtifactSlotKey[]): Promise<void> {

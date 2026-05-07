@@ -25,6 +25,12 @@ describe('buildMockupSrcDoc (back-compat shim)', () => {
         expect(srcDoc).toContain('horizontalOverflow');
         expect(srcDoc).toContain('bodyHeight');
         expect(srcDoc).toContain('visibleElements');
+        // Styled detection uses a `.hidden` sentinel: Tailwind resolves the
+        // class to `display: none`; an unstyled fallback leaves it `block`.
+        // This is the only reliable way to distinguish a CSP-blocked CDN
+        // from a happy-path render.
+        expect(srcDoc).toContain('mockup-probe-sentinel');
+        expect(srcDoc).toContain("className = 'hidden'");
     });
 
     it('keeps the Tailwind CDN script and defensive overflow overrides', () => {
