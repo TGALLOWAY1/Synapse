@@ -13,6 +13,28 @@ interface MinimalArtifactState {
     artifactVersions: Record<string, ArtifactVersion[]>;
 }
 
+// Reference-stable normalization cache. `normalizeDesignTokens` allocates
+// fresh nested objects on every call, so calling it inside a Zustand
+// selector (`useProjectStore(state => selectPreferredDesignTokens(...))`)
+// produced a brand-new tokens reference on every store update — Zustand's
+// default `Object.is` equality then schedules a re-render, which re-runs
+// the selector, which produces yet another reference. The result is
+// React error #185 ("Maximum update depth exceeded"). Caching keyed on the
+// ArtifactVersion identity guarantees the same version always yields the
+// same DesignTokens reference. WeakMap means the cache cleans itself when
+// the version is evicted from the store.
+const TOKENS_CACHE = new WeakMap<ArtifactVersion, DesignTokens>();
+
+function memoizedNormalize(version: ArtifactVersion, raw: unknown): DesignTokens | null {
+    if (!raw || typeof raw !== 'object') return null;
+    let cached = TOKENS_CACHE.get(version);
+    if (!cached) {
+        cached = normalizeDesignTokens(raw);
+        TOKENS_CACHE.set(version, cached);
+    }
+    return cached;
+}
+
 /**
  * Resolve the preferred Design System artifact + its tokens for a given
  * project. Returns `null` when there is no design_system artifact, no
@@ -37,10 +59,9 @@ export function selectPreferredDesignSystem(
     const preferred = versions.find(v => v.id === designSystem.currentVersionId);
     if (!preferred) return null;
 
-    const rawTokens = preferred.metadata?.tokens;
+    const tokens = memoizedNormalize(preferred, preferred.metadata?.tokens);
+    if (!tokens) return null;
     const rawHash = preferred.metadata?.tokensHash;
-    if (!rawTokens || typeof rawTokens !== 'object') return null;
-    const tokens = normalizeDesignTokens(rawTokens);
     const tokensHash = typeof rawHash === 'string' ? rawHash : '';
     return {
         artifactId: designSystem.id,
@@ -53,7 +74,9 @@ export function selectPreferredDesignSystem(
 /**
  * Convenience: returns just the DesignTokens for a project (or undefined
  * if no tokens are available). Suitable for cheap consumer code that
- * doesn't need the artifact id / hash.
+ * doesn't need the artifact id / hash. Reference-stable across calls for
+ * the same underlying ArtifactVersion — safe to use directly inside a
+ * Zustand selector.
  */
 export function selectPreferredDesignTokens(
     state: MinimalArtifactState,

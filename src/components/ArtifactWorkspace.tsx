@@ -232,7 +232,7 @@ export function ArtifactWorkspace({
                             <RefreshCcw size={12} /> Regenerate Mockup
                         </button>
                     </div>
-                    <MockupErrorBoundary>
+                    <MockupErrorBoundary resetKey={preferred.id}>
                         <MockupViewer
                             payload={payload}
                             settings={settings}
