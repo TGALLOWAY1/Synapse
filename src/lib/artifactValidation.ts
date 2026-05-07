@@ -97,6 +97,21 @@ export function validateArtifactContent(
         score -= 15;
     }
 
+    // Soft check for the implementation_plan structured payload. The renderer
+    // falls back to legacy markdown parsing when the fence is missing or
+    // malformed, so this is a warning, not a hard fail.
+    if (subtype === 'implementation_plan') {
+        const fence = content.match(/```json\s+synapse-plan\s*\n([\s\S]*?)\n```/);
+        if (fence) {
+            try {
+                JSON.parse(fence[1]);
+            } catch {
+                warnings.push('Implementation plan structured JSON fence is malformed — UI will fall back to legacy timeline.');
+                score -= 5;
+            }
+        }
+    }
+
     return {
         isValid: score >= 40,
         qualityScore: Math.max(0, Math.min(100, score)),

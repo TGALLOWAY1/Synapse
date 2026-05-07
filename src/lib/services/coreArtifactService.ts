@@ -1,7 +1,7 @@
-import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent } from '../../types';
+import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, StructuredImplementationPlan } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
-import { screenInventorySchema, dataModelSchema, componentInventorySchema } from '../schemas/artifactSchemas';
+import { screenInventorySchema, dataModelSchema, componentInventorySchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
@@ -73,25 +73,42 @@ End with a dependency summary showing which components compose other components.
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are an expert software architect. Create a high-level Implementation Plan — a milestone-oriented development roadmap grounded in the other generated artifacts.
+        system: `You are an expert software architect. Produce a structured Implementation Plan as a task-driven execution system, not a narrative document. The JSON you return drives the rendered UI directly.
 
-Use this exact format for each milestone:
+Top-level shape:
+- overview: { summary, criticalPath, teamSize }
+  - summary: 2-3 sentences describing the build approach.
+  - criticalPath: one sentence naming the milestones on the critical path.
+  - teamSize: short recommendation (e.g. "1 frontend + 1 backend" or "Solo dev, ~6 weeks").
+- milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep.
+- architecture: top-level array of cross-cutting technical decisions (tech stack picks, key architectural calls). Hoisted out of per-milestone bodies.
+- risks: top-level array of { description, mitigation } items spanning the project.
+- definitionOfDone: top-level array of project-wide acceptance criteria.
 
-### Milestone [N]: [Name] (Week [X]-[Y])
-**Goal:** One-sentence objective.
-**Key Deliverables:**
-- [ ] Deliverable 1
-- [ ] Deliverable 2
-**Technical Approach:** Specific technology choices and architectural decisions.
-**Dependencies:** Which milestones must be completed first.
-**Risks:** What could go wrong and how to mitigate it.
-**Definition of Done:** How to verify this milestone is complete.
+Per milestone:
+- id: stable lower-snake-case identifier (e.g. "m_setup", "m_emotion_extraction").
+- name: human-readable milestone name.
+- timeframe: "Week 1-2" style range.
+- goal: one-sentence objective.
+- tasks: 3-8 atomic, executable tasks.
 
-Include 4-6 milestones. First milestone should be infrastructure/setup. Last milestone should include testing and launch prep.
-End with:
-- A critical path summary
-- Team size recommendation
-- Traceability map (milestone → PRD feature IDs)`,
+Per task:
+- id: stable lower-snake-case identifier (e.g. "task_initialize_nextjs"). Unique across the whole plan.
+- title: short imperative (e.g. "Initialize Next.js SPA").
+- description: optional extra context, ONE sentence max.
+- status: ALWAYS "todo". You are generating a plan, not tracking execution.
+- dependencies: array of OTHER task ids (from this same plan) that must be done first. Empty array if none.
+- linkedArtifacts: { prd, dataModel, mockups }
+  - prd: PRD feature names this task implements, drawn from the Canonical Feature Glossary in the user prompt.
+  - dataModel: entity names from the data_model dependency context that this task touches.
+  - mockups: screen names from the screen_inventory dependency context that this task implements.
+  - Omit (or use empty arrays) if there is no genuine reference. Don't invent artifact references.
+
+Rules:
+- Task ids must be unique across the entire plan.
+- All ids in dependencies must reference other task ids in the same plan.
+- Hoist cross-cutting architecture, risks, and definition-of-done into the top-level arrays — do NOT duplicate them per milestone.
+- Tasks should read as atomic engineering work, not as themes.`,
         userPrefix: 'Create an Implementation Plan from this PRD:',
     },
     data_model: {
@@ -233,7 +250,66 @@ export function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data:
         return lines.join('\n');
     }
 
+    if (subtype === 'implementation_plan') {
+        return implementationPlanToMarkdown(data as StructuredImplementationPlan);
+    }
+
     return JSON.stringify(data, null, 2);
+}
+
+// Converts the structured plan to a markdown body that the new tabbed
+// renderer can re-parse via the trailing `synapse-plan` JSON fence, while
+// the legacy milestone-regex parser still produces a usable timeline view
+// for older builds. Headers ('Milestone', 'Goal', 'Deliverables',
+// 'Dependencies') match what artifactValidation expects.
+function implementationPlanToMarkdown(plan: StructuredImplementationPlan): string {
+    const lines: string[] = ['# Implementation Plan\n'];
+    if (plan.overview?.summary) lines.push(plan.overview.summary, '');
+
+    plan.milestones.forEach((m, i) => {
+        const heading = `### Milestone ${i + 1}: ${m.name}${m.timeframe ? ` (${m.timeframe})` : ''}`;
+        lines.push(heading);
+        if (m.goal) lines.push(`**Goal:** ${m.goal}`);
+        if (m.tasks.length) {
+            lines.push('**Key Deliverables:**');
+            for (const t of m.tasks) {
+                lines.push(`- [${t.status === 'done' ? 'x' : ' '}] **${t.title}** — _${t.status}_`);
+            }
+        }
+        const deps = Array.from(new Set(m.tasks.flatMap(t => t.dependencies ?? []))).filter(Boolean);
+        if (deps.length) lines.push(`**Dependencies:** ${deps.join(', ')}`);
+        lines.push('');
+    });
+
+    if (plan.architecture?.length) {
+        lines.push('---', '', '## Architecture');
+        plan.architecture.forEach(a => lines.push(`- ${a}`));
+        lines.push('');
+    }
+    if (plan.risks?.length) {
+        lines.push('## Risks');
+        plan.risks.forEach(r => {
+            lines.push(`- **${r.description}**${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`);
+        });
+        lines.push('');
+    }
+    if (plan.definitionOfDone?.length) {
+        lines.push('## Definition of Done');
+        plan.definitionOfDone.forEach(d => lines.push(`- [ ] ${d}`));
+        lines.push('');
+    }
+    if (plan.overview?.criticalPath || plan.overview?.teamSize) {
+        if (!plan.architecture?.length) lines.push('---', '');
+        if (plan.overview.criticalPath) lines.push(`**Critical Path:** ${plan.overview.criticalPath}`);
+        if (plan.overview.teamSize) lines.push(`**Team Size:** ${plan.overview.teamSize}`);
+        lines.push('');
+    }
+
+    lines.push('```json synapse-plan');
+    lines.push(JSON.stringify(plan, null, 2));
+    lines.push('```');
+
+    return lines.join('\n');
 }
 
 export const generateCoreArtifact = async (
@@ -290,6 +366,7 @@ Architecture: ${structuredPRD.architecture}${
         screen_inventory: screenInventorySchema,
         data_model: dataModelSchema,
         component_inventory: componentInventorySchema,
+        implementation_plan: implementationPlanSchema,
     };
 
     const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
