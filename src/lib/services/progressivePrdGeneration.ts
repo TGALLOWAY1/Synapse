@@ -42,6 +42,8 @@ export type PrdSectionTemplate = {
     order: number;
     risk: GenerationTaskRisk;
     dependencies?: SectionId[];
+    /** Rough wall-clock estimate (seconds) used by the progress UI. */
+    estimatedSeconds: number;
 };
 
 export type SectionGenerationResult = {
@@ -79,17 +81,22 @@ export type ProgressiveEvent =
 // independently; strong (Pro) sections depend on earlier results.
 
 export const DEFAULT_PRD_SECTIONS: PrdSectionTemplate[] = [
-    { id: 'product_basics',       title: SECTION_TITLES.product_basics,       order: 1,  risk: 'low' },
-    { id: 'product_thesis',       title: SECTION_TITLES.product_thesis,       order: 2,  risk: 'high', dependencies: ['product_basics'] },
-    { id: 'grounding',            title: SECTION_TITLES.grounding,            order: 3,  risk: 'low',  dependencies: ['product_basics'] },
-    { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', dependencies: ['product_basics', 'product_thesis'] },
-    { id: 'data_model',           title: SECTION_TITLES.data_model,           order: 5,  risk: 'high', dependencies: ['features', 'grounding'] },
-    { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', dependencies: ['features', 'product_thesis'] },
-    { id: 'architecture',         title: SECTION_TITLES.architecture,         order: 7,  risk: 'high', dependencies: ['features', 'data_model'] },
-    { id: 'quality_risks',        title: SECTION_TITLES.quality_risks,        order: 8,  risk: 'low',  dependencies: ['features', 'architecture'] },
-    { id: 'metrics_scope',        title: SECTION_TITLES.metrics_scope,        order: 9,  risk: 'low',  dependencies: ['features'] },
-    { id: 'implementation_plan',  title: SECTION_TITLES.implementation_plan,  order: 10, risk: 'high', dependencies: ['features', 'data_model', 'architecture'] },
+    { id: 'product_basics',       title: SECTION_TITLES.product_basics,       order: 1,  risk: 'low',  estimatedSeconds: 8 },
+    { id: 'product_thesis',       title: SECTION_TITLES.product_thesis,       order: 2,  risk: 'high', estimatedSeconds: 25, dependencies: ['product_basics'] },
+    { id: 'grounding',            title: SECTION_TITLES.grounding,            order: 3,  risk: 'low',  estimatedSeconds: 10, dependencies: ['product_basics'] },
+    { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', estimatedSeconds: 35, dependencies: ['product_basics', 'product_thesis'] },
+    { id: 'data_model',           title: SECTION_TITLES.data_model,           order: 5,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'grounding'] },
+    { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'product_thesis'] },
+    { id: 'architecture',         title: SECTION_TITLES.architecture,         order: 7,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'data_model'] },
+    { id: 'quality_risks',        title: SECTION_TITLES.quality_risks,        order: 8,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features', 'architecture'] },
+    { id: 'metrics_scope',        title: SECTION_TITLES.metrics_scope,        order: 9,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
+    { id: 'implementation_plan',  title: SECTION_TITLES.implementation_plan,  order: 10, risk: 'high', estimatedSeconds: 30, dependencies: ['features', 'data_model', 'architecture'] },
 ];
+
+/** Lookup of estimated wall-clock seconds per section, derived from DEFAULT_PRD_SECTIONS. */
+export const SECTION_ESTIMATES_S: Record<string, number> = Object.fromEntries(
+    DEFAULT_PRD_SECTIONS.map(s => [s.id, s.estimatedSeconds]),
+);
 
 const nowIso = () => new Date().toISOString();
 

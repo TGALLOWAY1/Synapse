@@ -20,6 +20,8 @@ export type SectionStatusUpdate = {
     model?: string;
     ms?: number;
     error?: string;
+    /** Rough wall-clock estimate (seconds) shown in the progress UI. */
+    estimatedSeconds?: number;
 };
 
 export interface ProgressivePrdPipelineOptions extends PrdPipelineOptions {
@@ -79,13 +81,16 @@ export const runProgressivePrdPipeline = async (
         onEvent: (event) => {
             if (event.type === 'section_started') {
                 sectionStarts[event.sectionId] = performance.now();
-                onProgress?.(`Generating ${
-                    DEFAULT_PRD_SECTIONS.find(s => s.id === event.sectionId)?.title ?? event.sectionId
-                } (${event.modelTier === 'fast' ? 'Flash' : 'Pro'})…`);
+                const startedSection = DEFAULT_PRD_SECTIONS.find(s => s.id === event.sectionId);
+                const tierLabel = event.modelTier === 'fast' ? 'Flash' : 'Pro';
+                const estimate = startedSection?.estimatedSeconds;
+                const estimateSuffix = estimate ? ` · ~${estimate}s` : '';
+                onProgress?.(`Generating ${startedSection?.title ?? event.sectionId} (${tierLabel}${estimateSuffix})…`);
                 onSectionStatus?.(event.sectionId as SectionId, {
                     tier: event.modelTier === 'fast' ? 'fast' : 'strong',
                     status: 'generating',
                     model: event.model,
+                    estimatedSeconds: estimate,
                 });
             } else if (event.type === 'section_completed') {
                 const ms = performance.now() - (sectionStarts[event.sectionId] ?? overallStart);

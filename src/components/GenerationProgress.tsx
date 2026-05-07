@@ -8,6 +8,10 @@ export interface SectionStatusInfo {
     model?: string;
     ms?: number;
     error?: string;
+    /** Rough wall-clock estimate (seconds). */
+    estimatedSeconds?: number;
+    /** Wall-clock start timestamp (ms). Set when status === 'generating'. */
+    startedAt?: number;
 }
 
 interface GenerationProgressProps {
@@ -114,11 +118,23 @@ export function GenerationProgress({
 }: GenerationProgressProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFading, setIsFading] = useState(false);
+    const [now, setNow] = useState(() => Date.now());
     const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
     const style = VARIANT_STYLES[variant];
     const isStateDriven = typeof progress === 'number';
     const hasHistory = !!history && history.length > 0;
     const hasSectionStatus = !!sectionStatus && Object.keys(sectionStatus).length > 0;
+
+    // Tick once per second while any section is mid-generation so the
+    // "elapsed/estimate" counter on each active pip stays current.
+    const hasActiveSection = hasSectionStatus && Object.values(sectionStatus!).some(
+        info => info.status === 'generating' || info.status === 'refining',
+    );
+    useEffect(() => {
+        if (!hasActiveSection) return;
+        const id = setInterval(() => setNow(Date.now()), 1000);
+        return () => clearInterval(id);
+    }, [hasActiveSection]);
 
     useEffect(() => {
         // Skip the rotation timer entirely when the parent supplies real
@@ -326,6 +342,35 @@ export function GenerationProgress({
                                 const isComplete = info.status === 'complete';
                                 const isError = info.status === 'error';
 
+                                // Time annotation for the pip subtitle:
+                                //   - active   → "5s / ~25s" (live elapsed vs. estimate)
+                                //   - complete → "9.7s"     (actual duration)
+                                //   - queued / pending → "~25s" (estimate only)
+                                let timeLabel = '';
+                                if (isComplete && typeof info.ms === 'number') {
+                                    timeLabel = `${(info.ms / 1000).toFixed(1)}s`;
+                                } else if (isActive) {
+                                    const elapsedS = info.startedAt
+                                        ? Math.max(0, Math.floor((now - info.startedAt) / 1000))
+                                        : null;
+                                    if (elapsedS !== null && info.estimatedSeconds) {
+                                        timeLabel = `${elapsedS}s / ~${info.estimatedSeconds}s`;
+                                    } else if (elapsedS !== null) {
+                                        timeLabel = `${elapsedS}s`;
+                                    } else if (info.estimatedSeconds) {
+                                        timeLabel = `~${info.estimatedSeconds}s`;
+                                    }
+                                } else if (info.estimatedSeconds) {
+                                    timeLabel = `~${info.estimatedSeconds}s`;
+                                }
+
+                                // Highlight the elapsed counter when it overshoots the estimate
+                                // so users can tell that a section is running long.
+                                const overEstimate = isActive
+                                    && info.startedAt
+                                    && info.estimatedSeconds
+                                    && (now - info.startedAt) / 1000 > info.estimatedSeconds;
+
                                 const pipRing = isError
                                     ? 'border-red-400 bg-red-400'
                                     : isComplete
@@ -342,6 +387,12 @@ export function GenerationProgress({
                                         ? (isFast ? 'text-teal-700' : 'text-indigo-700')
                                         : 'text-neutral-400';
 
+                                const timeColor = overEstimate
+                                    ? 'text-amber-600'
+                                    : isComplete
+                                        ? (isFast ? 'text-teal-600' : 'text-indigo-600')
+                                        : 'text-neutral-400';
+
                                 return (
                                     <div key={sectionId} className="flex flex-col items-center gap-0.5">
                                         <div className={`relative flex h-7 w-7 items-center justify-center rounded-full border-2 transition-all duration-300 ${pipRing} ${isActive ? 'animate-pulse' : ''}`}>
@@ -356,6 +407,9 @@ export function GenerationProgress({
                                         <div className="text-center min-w-0 w-full">
                                             <div className={`text-[9px] font-medium leading-tight truncate ${textColor}`}>{label}</div>
                                             <div className="text-[8px] text-neutral-400 leading-tight">{modelLabel}</div>
+                                            {timeLabel && (
+                                                <div className={`text-[8px] leading-tight tabular-nums ${timeColor}`}>{timeLabel}</div>
+                                            )}
                                         </div>
                                     </div>
                                 );
