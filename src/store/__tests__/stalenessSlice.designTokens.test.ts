@@ -35,7 +35,7 @@ const designSystemArtifact = (projectId: string, id: string): Artifact => ({
 });
 
 const version = (
-    projectId: string,
+    _projectId: string,
     artifactId: string,
     versionId: string,
     sourceRefs: SourceRef[],
