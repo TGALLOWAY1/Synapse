@@ -1,6 +1,19 @@
 import { useState } from 'react';
 import { Download, X, FileText, Package } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
+import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenInventoryNormalize';
+import type { Artifact } from '../types';
+
+// Screen inventory is now persisted as JSON. For human-readable exports,
+// re-render it through the markdown converter; legacy markdown content
+// is returned as-is.
+function exportContentFor(artifact: Artifact, raw: string): string {
+    if (artifact.subtype === 'screen_inventory') {
+        const parsed = parseScreenInventory(raw);
+        if (parsed) return screenInventoryToMarkdown(parsed);
+    }
+    return raw;
+}
 
 interface ExportModalProps {
     projectId: string;
@@ -31,11 +44,14 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         downloadFile(latestSpine.responseText, `${project?.name || 'project'}-prd.md`);
     };
 
-    const exportArtifact = (artifactId: string, title: string) => {
-        const versions = getArtifactVersions(projectId, artifactId);
+    const exportArtifact = (artifact: Artifact) => {
+        const versions = getArtifactVersions(projectId, artifact.id);
         const preferred = versions.find(v => v.isPreferred);
         if (!preferred) return;
-        downloadFile(preferred.content, `${title.replace(/\s+/g, '-').toLowerCase()}.md`);
+        downloadFile(
+            exportContentFor(artifact, preferred.content),
+            `${artifact.title.replace(/\s+/g, '-').toLowerCase()}.md`,
+        );
     };
 
     const exportStructuredJSON = () => {
@@ -77,7 +93,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                 const preferred = versions.find(v => v.isPreferred);
                 if (preferred) {
                     sections.push(`# ${artifact.title}\n`);
-                    sections.push(preferred.content);
+                    sections.push(exportContentFor(artifact, preferred.content));
                     sections.push('\n---\n');
                 }
             }
@@ -131,7 +147,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                                 {coreArtifacts.map(a => (
                                     <button
                                         key={a.id}
-                                        onClick={() => exportArtifact(a.id, a.title)}
+                                        onClick={() => exportArtifact(a)}
                                         className="w-full flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 rounded-md transition text-left text-sm text-neutral-700"
                                     >
                                         <Download size={14} className="text-neutral-400 shrink-0" />
