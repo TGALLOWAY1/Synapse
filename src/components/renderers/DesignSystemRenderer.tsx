@@ -1,4 +1,5 @@
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
@@ -350,7 +351,11 @@ interface DownstreamSummary {
 }
 
 function useDownstreamSummary(projectId: string | undefined): DownstreamSummary | null {
-    return useProjectStore(state => {
+    // useShallow is required: Zustand v5's useSyncExternalStore-based subscription
+    // calls getSnapshot multiple times per render and compares with Object.is —
+    // returning a fresh `{ mockupCount, componentInventoryExists }` object on each
+    // call triggers React error #185 ("Maximum update depth exceeded").
+    return useProjectStore(useShallow(state => {
         if (!projectId) return null;
         const artifacts = state.artifacts[projectId] ?? [];
         const mockupCount = artifacts.filter(a => a.type === 'mockup' && a.status !== 'archived').length;
@@ -358,7 +363,7 @@ function useDownstreamSummary(projectId: string | undefined): DownstreamSummary 
             a => a.type === 'core_artifact' && a.subtype === 'component_inventory' && a.status !== 'archived',
         );
         return { mockupCount, componentInventoryExists };
-    });
+    }));
 }
 
 function DownstreamUsage({ projectId }: { projectId?: string }) {
