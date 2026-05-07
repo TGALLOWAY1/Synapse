@@ -104,5 +104,98 @@ describes the full implementation. In summary:
 
 ## Verification
 
-Final summary, files touched, residual risks, and test results will be
-appended to this document in the last commit on this branch.
+### Final state
+
+The design system pipeline is now an enforced generation contract:
+
+1. The `design_system` core artifact is generated via Gemini JSON mode
+   against `designSystemTokensSchema`. The structured output is
+   normalized into a canonical `DesignTokens` object, hashed
+   deterministically (FNV-1a), and persisted on
+   `ArtifactVersion.metadata.tokens` plus `metadata.tokensHash`. A
+   canonical markdown body (which the existing renderer can still parse)
+   is stored on `ArtifactVersion.content`.
+2. The Design System artifact UI now has seven sections: Token
+   Summary (counts + hash badge), Color Tokens (grouped by namespace),
+   Typography Tokens (live previews), Spacing & Radius (proportional
+   bars), Component Tokens (recipe cards), Usage Rules, and Downstream
+   Usage Status (with a warning when no consumer exists yet). Old
+   markdown-only artifacts continue rendering via the legacy fallback
+   path.
+3. AI image mockups (gpt-image-2) inject a compact palette + typography
+   brief into the prompt via `tokensToImagePromptBrief`.
+4. HTML mockups (Gemini) inject the full token catalog and rules via
+   `tokensToPromptSnippet`. The "Tailwind utilities exclusively" rule
+   is relaxed to permit inline `style="background:
+   var(--color-brand-primary)"` — Tailwind still drives layout.
+5. The HTML mockup iframe (`buildMockupSrcDoc`) prepends a
+   `<style>:root { --color-...: ...; --typography-...: ...;
+   --spacing-...: ...; --radius-...: ... }</style>` block before
+   Tailwind loads, so generated HTML referencing those variables
+   resolves synchronously.
+6. Mockup generation runs `validateMockupHtmlAgainstTokens` per screen
+   when tokens are present; results are persisted in
+   `ArtifactVersion.metadata.designSystemCompliance` and surfaced in
+   `MockupViewer` as a collapsible warning callout. Soft-only — never
+   blocks generation.
+7. `stalenessSlice` has been extended with a mockup-only check: when a
+   mockup carries a `core_artifact` `SourceRef` with `anchorInfo`
+   (tokensHash) that no longer matches the project's preferred design
+   system, the artifact returns `possibly_outdated`. Identical token
+   regenerations leave hashes unchanged → mockups stay current. The PRD
+   spine boundary is preserved; non-mockup artifacts are unaffected.
+
+### Files changed (final)
+
+| Path | Change |
+|---|---|
+| `DESIGN_SYSTEM_PIPELINE_AUDIT.md` | This document |
+| `src/types/index.ts` | Added `DesignTokens`, `DesignColorToken`, `DesignTypographyToken`, `DesignComponentToken` |
+| `src/lib/schemas/artifactSchemas.ts` | Added `designSystemTokensSchema` |
+| `src/lib/designTokens/normalize.ts` | New — `normalizeDesignTokens` |
+| `src/lib/designTokens/hash.ts` | New — `hashDesignTokens` (FNV-1a, double-pass) |
+| `src/lib/designTokens/cssVariables.ts` | New — `tokensToCssVariables` + `tokensToCssStyleBlock` |
+| `src/lib/designTokens/promptSnippet.ts` | New — `tokensToPromptSnippet` + `tokensToImagePromptBrief` |
+| `src/lib/designTokens/markdownRenderer.ts` | New — `designSystemTokensToMarkdown` |
+| `src/lib/designTokens/validation.ts` | New — `validateMockupHtmlAgainstTokens` |
+| `src/lib/designTokens/storeSelectors.ts` | New — `selectPreferredDesignSystem`, `selectPreferredDesignTokens` |
+| `src/lib/designTokens/index.ts` | New barrel |
+| `src/lib/services/coreArtifactService.ts` | Switched design_system to JSON mode; returns `{ content, metadata? }` shape |
+| `src/lib/services/mockupService.ts` | Token-aware system prompt; per-screen compliance metadata |
+| `src/lib/services/mockupImageService.ts` | Optional palette/typography injection into image prompt |
+| `src/lib/services/artifactJobController.ts` | Threads tokens to mockup generation; records design_system source ref + hash |
+| `src/components/renderers/DesignSystemRenderer.tsx` | Token-aware UI + downstream usage indicator (legacy markdown fallback preserved) |
+| `src/components/renderers/index.tsx` | `metadata` and `projectId` plumbed to design_system renderer |
+| `src/components/ArtifactWorkspace.tsx` | Forwards version metadata + projectId; passes compliance to MockupViewer |
+| `src/components/AdminCaptureDemo.tsx` | Updated for new generateCoreArtifact return shape |
+| `src/components/mockups/buildMockupSrcDoc.ts` | Injects `:root { --... }` block when tokens present |
+| `src/components/mockups/MockupHtmlPreview.tsx` | Forwards `designTokens` prop |
+| `src/components/mockups/MockupViewer.tsx` | Resolves tokens from store; surfaces compliance warnings |
+| `src/store/mockupImageStore.ts` | Resolves tokens at AI image generation time |
+| `src/store/slices/stalenessSlice.ts` | Adds tokensHash drift check (mockups only) |
+| `src/lib/__tests__/designTokens.test.ts` | New — 28 unit tests |
+| `src/lib/__tests__/mockupService.test.ts` | 2 new tests for token injection / compliance |
+| `src/store/__tests__/stalenessSlice.designTokens.test.ts` | New — 6 staleness tests |
+
+### Test results
+
+- `npm test` — **24 test files, 212 tests, all passing.**
+- `npx tsc --noEmit` — clean.
+- `npm run lint` — clean.
+- `npm run build` — clean (one pre-existing chunk-size warning unrelated to this change).
+
+### Residual risks
+
+- The mockup prompt still asks for Tailwind utility classes; the model
+  may default to neutral / indigo when the design system is absent,
+  matching the pre-change behavior. This is intentional.
+- Generation order: design_system runs in the core layer before the
+  mockup slot starts, but the mockup slot's separate semaphore could
+  theoretically race ahead on a project that already has design_system
+  cached. The fall-through path (`designTokens` undefined) is benign.
+- Validation is regex-based and intentionally lenient. False positives
+  are mitigated by surfacing the warnings in a collapsed `details`
+  element so users can ignore them.
+- The tokensHash compares the entire DesignTokens object. A
+  functionally-equivalent token rename would still trigger drift. This
+  is acceptable for v1; documented as a known limitation.
