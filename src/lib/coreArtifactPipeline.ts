@@ -11,6 +11,13 @@ export interface CoreArtifactMeta {
 
 // Pipeline is ordered so dependencies appear before dependents (topologically valid).
 // Use CORE_ARTIFACT_DISPLAY_ORDER for UI rendering instead of this array.
+//
+// Dependency rule of thumb: only declare a dep when the dependent artifact
+// genuinely needs the dep's *output* to be high quality (e.g. user_flows
+// referencing screen names from screen_inventory). The PRD itself is in every
+// prompt, so most artifacts can be generated independently from it. Spurious
+// deps serialize the pipeline — buildDependencyLayers turns them into wait
+// gates — which kneecaps parallelism with little quality benefit.
 export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
     {
         subtype: 'screen_inventory',
@@ -30,28 +37,28 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
         subtype: 'component_inventory',
         title: 'Component Inventory',
         description: 'Reusable components implied by the product design',
-        dependsOn: ['screen_inventory', 'user_flows'],
+        dependsOn: ['screen_inventory'],
         displayOrder: 4,
     },
     {
         subtype: 'data_model',
         title: 'Data Model Draft',
         description: 'Primary entities, relationships, and data needs',
-        dependsOn: ['user_flows'],
+        dependsOn: [],
         displayOrder: 1,
     },
     {
         subtype: 'implementation_plan',
         title: 'Implementation Plan',
         description: 'High-level build sequence and milestone-oriented dev plan',
-        dependsOn: ['component_inventory', 'data_model'],
+        dependsOn: [],
         displayOrder: 6,
     },
     {
         subtype: 'design_system',
         title: 'Design System Starter',
         description: 'Foundational UI system draft with patterns and components',
-        dependsOn: ['component_inventory'],
+        dependsOn: [],
         displayOrder: 5,
     },
     {
