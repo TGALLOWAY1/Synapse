@@ -1,8 +1,9 @@
-import type { StructuredPRD, CoreArtifactSubtype, ScreenInventoryContent, DataModelContent, ComponentInventoryContent, DesignTokens } from '../../types';
+import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
-import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema } from '../schemas/artifactSchemas';
+import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
+import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
 import {
     normalizeDesignTokens,
@@ -24,19 +25,26 @@ export interface CoreArtifactGenerationResult {
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
-        system: `You are an expert product designer. Create a comprehensive Screen Inventory — a structured list of all screens and views implied by the PRD.
+        system: `You are an expert product designer. Produce a system-level Screen Inventory — a structured map of the product experience, NOT a flat list.
 
-Group screens by functional area (e.g., "Authentication", "Dashboard", "Settings"). For each screen, use this exact format:
+Output strictly the JSON shape supplied. The schema groups screens into product-area sections; for each screen you must model state, intent, entry/exit, and risk.
 
-### [Screen Name]
-**Purpose:** One-sentence description of what the user accomplishes here.
-**Components:** Bulleted list of key UI components on this screen.
-**Navigation:** Where users come from → this screen → where they go next.
-**Priority:** Core | Secondary | Supporting
-**Feature Refs:** Which PRD features this screen implements (by feature ID if available).
-
-Include screens for: empty states, error states, loading states, and onboarding flows — not just happy-path screens.
-End with a summary table listing all screens with their priority and functional area.`,
+Rules:
+1. Group screens into \`sections[]\` by product area (e.g. "Onboarding", "Mood Capture", "Library", "Account"). Give each section a one-line \`description\` and a textual \`flowSummary\` like "Landing → Mood Capture → Loading → Auth → Player".
+2. A loading / error / empty / permission-denied variant of a screen is a \`state\` under that screen's \`states[]\`, NOT its own screen. Only promote a state to its own screen when it has a separate route or full-page ownership (e.g. a dedicated /404 page).
+3. Use \`entryPoints[]\` (where the user comes from) and \`exitPaths[]\` (label → target screen, with optional condition). Never write inline "from X → here → to Y" navigation prose.
+4. \`coreUIElements[]\` must be **semantic**: "Mood capture canvas", "Camera permission prompt", "Submit CTA". Do NOT list implementation details like "div", "input element", or "button with hover state".
+5. Provide \`userIntent\` per screen — the goal in the user's own words (e.g. "Capture a vibe in under 5 seconds and share it"). This is distinct from \`purpose\` (which is the screen's role in the product).
+6. Use the priority rubric LITERALLY:
+   - P0 = essential to the main product loop
+   - P1 = important supporting flow
+   - P2 = edge case / fallback / admin / secondary view
+   - P3 = nice-to-have / future
+   Do NOT mark every screen P0. A typical inventory has a handful of P0s, several P1s, and a long tail of P2/P3.
+7. Use \`type\` to distinguish "screen" (full route) from "modal", "overlay", or "system-state".
+8. Populate \`risks[]\` with edge cases or failure modes worth surfacing ("camera permission denied", "low-light noise", "rate limit hit"). Populate \`outputData[]\` when a screen produces named data ("mood vector", "caption text", "uploaded photo URL").
+9. Populate \`featureRefs[]\` with the canonical feature IDs each screen implements.
+10. Reuse exact PRD terminology for screen and feature names.`,
         userPrefix: 'Create a Screen Inventory from this PRD:',
     },
     user_flows: {
@@ -82,25 +90,42 @@ End with a dependency summary showing which components compose other components.
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are an expert software architect. Create a high-level Implementation Plan — a milestone-oriented development roadmap grounded in the other generated artifacts.
+        system: `You are an expert software architect. Produce a structured Implementation Plan as a task-driven execution system, not a narrative document. The JSON you return drives the rendered UI directly.
 
-Use this exact format for each milestone:
+Top-level shape:
+- overview: { summary, criticalPath, teamSize }
+  - summary: 2-3 sentences describing the build approach.
+  - criticalPath: one sentence naming the milestones on the critical path.
+  - teamSize: short recommendation (e.g. "1 frontend + 1 backend" or "Solo dev, ~6 weeks").
+- milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep.
+- architecture: top-level array of cross-cutting technical decisions (tech stack picks, key architectural calls). Hoisted out of per-milestone bodies.
+- risks: top-level array of { description, mitigation } items spanning the project.
+- definitionOfDone: top-level array of project-wide acceptance criteria.
 
-### Milestone [N]: [Name] (Week [X]-[Y])
-**Goal:** One-sentence objective.
-**Key Deliverables:**
-- [ ] Deliverable 1
-- [ ] Deliverable 2
-**Technical Approach:** Specific technology choices and architectural decisions.
-**Dependencies:** Which milestones must be completed first.
-**Risks:** What could go wrong and how to mitigate it.
-**Definition of Done:** How to verify this milestone is complete.
+Per milestone:
+- id: stable lower-snake-case identifier (e.g. "m_setup", "m_emotion_extraction").
+- name: human-readable milestone name.
+- timeframe: "Week 1-2" style range.
+- goal: one-sentence objective.
+- tasks: 3-8 atomic, executable tasks.
 
-Include 4-6 milestones. First milestone should be infrastructure/setup. Last milestone should include testing and launch prep.
-End with:
-- A critical path summary
-- Team size recommendation
-- Traceability map (milestone → PRD feature IDs)`,
+Per task:
+- id: stable lower-snake-case identifier (e.g. "task_initialize_nextjs"). Unique across the whole plan.
+- title: short imperative (e.g. "Initialize Next.js SPA").
+- description: optional extra context, ONE sentence max.
+- status: ALWAYS "todo". You are generating a plan, not tracking execution.
+- dependencies: array of OTHER task ids (from this same plan) that must be done first. Empty array if none.
+- linkedArtifacts: { prd, dataModel, mockups }
+  - prd: PRD feature names this task implements, drawn from the Canonical Feature Glossary in the user prompt.
+  - dataModel: entity names from the data_model dependency context that this task touches.
+  - mockups: screen names from the screen_inventory dependency context that this task implements.
+  - Omit (or use empty arrays) if there is no genuine reference. Don't invent artifact references.
+
+Rules:
+- Task ids must be unique across the entire plan.
+- All ids in dependencies must reference other task ids in the same plan.
+- Hoist cross-cutting architecture, risks, and definition-of-done into the top-level arrays — do NOT duplicate them per milestone.
+- Tasks should read as atomic engineering work, not as themes.`,
         userPrefix: 'Create an Implementation Plan from this PRD:',
     },
     data_model: {
@@ -139,22 +164,56 @@ Use stable names for entities and fields. Do not rename PRD concepts unless you 
         userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
-        system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of ready-to-use downstream prompts.
+        system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into Cursor, Claude Code, ChatGPT, or Copilot WITHOUT also pasting the PRD.
 
 For each prompt, use this exact format:
 
 ### [N]. [Prompt Title]
 **Target Tool:** Cursor | Claude Code | ChatGPT | Copilot | Generic
+**Reason:** One short user-facing sentence (≤25 words) explaining why this target tool fits THIS prompt — e.g. "Cursor — best fit for applying multi-file code changes directly in the repo with diff preview." Keep it concrete; do not say "best AI tool".
 **Category:** UI Implementation | UX Critique | Testing | API Design | Content | Accessibility
 **Prompt:**
 \`\`\`
-[The full, copy-pasteable prompt text here. Include all necessary context from the PRD. Make it self-contained — the recipient should not need to read the PRD separately.]
+# Task
+<one-line objective in plain English>
+
+## Context
+<2–4 sentences of product/user context drawn from the PRD vision and target users>
+
+## Features In Scope
+- <id> — <Feature Name>
+  - Purpose: <one sentence>
+  - Inputs / behavior: <one sentence>
+  - Constraints: <one sentence, or 2–3 bullets if needed>
+- <id> — <Feature Name>
+  - Purpose: ...
+  - Inputs / behavior: ...
+  - Constraints: ...
+
+## Requirements
+- <bulleted, specific, testable>
+- ...
+
+## Constraints
+- <bulleted; e.g. tech stack limits, performance budgets, accessibility minimums>
+- ...
+
+## Expected Output
+- <bulleted; what artifacts/files/behaviors the recipient should produce>
+- ...
 \`\`\`
 **Expected Output:** What this prompt should produce.
 
-Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
+Hard rules — these are non-negotiable:
 
-Every prompt must explicitly reference at least two canonical feature IDs and one named screen/entity.
+1. Every prompt MUST be self-contained. The recipient receives ONLY this fenced block — no PRD, no glossary, no other artifact.
+2. Feature IDs (e.g. \`f1\`, \`f2\`) MUST appear ONLY inside the "## Features In Scope" section, where they are defined inline with name, purpose, inputs/behavior, and constraints from the canonical feature glossary above.
+3. In every other section ("# Task", "## Context", "## Requirements", "## Constraints", "## Expected Output"), refer to features by their human name only — never by bare ID. Example: write "the WebRTC emotion extractor" in Requirements, not "[f1]" or "f1".
+4. Each prompt MUST cover 2–4 features under "Features In Scope" and reference at least one named screen or entity from the dependency artifacts.
+5. Do not invent feature IDs. Only use IDs that appear in the canonical feature glossary supplied below.
+6. Keep the structure exactly as shown — same headings, same order. The renderer parses it.
+
+Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
 
 Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
         userPrefix: 'Create a Prompt Pack from this PRD:',
@@ -180,32 +239,14 @@ Constraints:
     },
 };
 
-function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data: unknown): string {
+export function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data: unknown): string {
     if (subtype === 'screen_inventory') {
-        const inv = data as ScreenInventoryContent;
-        const lines: string[] = ['# Screen Inventory\n'];
-        for (const group of inv.groups) {
-            lines.push(`## ${group.name}\n`);
-            for (const screen of group.screens) {
-                lines.push(`### ${screen.name}`);
-                lines.push(`**Purpose:** ${screen.purpose}`);
-                lines.push(`**Priority:** ${screen.priority}`);
-                if (screen.components?.length) {
-                    lines.push(`**Components:**`);
-                    screen.components.forEach(c => lines.push(`- ${c}`));
-                }
-                if (screen.navigationFrom?.length || screen.navigationTo?.length) {
-                    const from = screen.navigationFrom?.join(', ') || 'N/A';
-                    const to = screen.navigationTo?.join(', ') || 'N/A';
-                    lines.push(`**Navigation:** ${from} → this screen → ${to}`);
-                }
-                if (screen.featureRefs?.length) {
-                    lines.push(`**Feature Refs:** ${screen.featureRefs.join(', ')}`);
-                }
-                lines.push('');
-            }
+        const normalized = normalizeScreenInventory(data);
+        if (!normalized) {
+            // Unrecognized shape — surface raw JSON so a human can recover.
+            return `# Screen Inventory\n\n\`\`\`json\n${JSON.stringify(data, null, 2)}\n\`\`\`\n`;
         }
-        return lines.join('\n');
+        return screenInventoryToMarkdown(normalized);
     }
 
     if (subtype === 'data_model') {
@@ -241,7 +282,66 @@ function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data: unknow
         return designSystemTokensToMarkdown(data as DesignTokens);
     }
 
+    if (subtype === 'implementation_plan') {
+        return implementationPlanToMarkdown(data as StructuredImplementationPlan);
+    }
+
     return JSON.stringify(data, null, 2);
+}
+
+// Converts the structured plan to a markdown body that the new tabbed
+// renderer can re-parse via the trailing `synapse-plan` JSON fence, while
+// the legacy milestone-regex parser still produces a usable timeline view
+// for older builds. Headers ('Milestone', 'Goal', 'Deliverables',
+// 'Dependencies') match what artifactValidation expects.
+function implementationPlanToMarkdown(plan: StructuredImplementationPlan): string {
+    const lines: string[] = ['# Implementation Plan\n'];
+    if (plan.overview?.summary) lines.push(plan.overview.summary, '');
+
+    plan.milestones.forEach((m, i) => {
+        const heading = `### Milestone ${i + 1}: ${m.name}${m.timeframe ? ` (${m.timeframe})` : ''}`;
+        lines.push(heading);
+        if (m.goal) lines.push(`**Goal:** ${m.goal}`);
+        if (m.tasks.length) {
+            lines.push('**Key Deliverables:**');
+            for (const t of m.tasks) {
+                lines.push(`- [${t.status === 'done' ? 'x' : ' '}] **${t.title}** — _${t.status}_`);
+            }
+        }
+        const deps = Array.from(new Set(m.tasks.flatMap(t => t.dependencies ?? []))).filter(Boolean);
+        if (deps.length) lines.push(`**Dependencies:** ${deps.join(', ')}`);
+        lines.push('');
+    });
+
+    if (plan.architecture?.length) {
+        lines.push('---', '', '## Architecture');
+        plan.architecture.forEach(a => lines.push(`- ${a}`));
+        lines.push('');
+    }
+    if (plan.risks?.length) {
+        lines.push('## Risks');
+        plan.risks.forEach(r => {
+            lines.push(`- **${r.description}**${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`);
+        });
+        lines.push('');
+    }
+    if (plan.definitionOfDone?.length) {
+        lines.push('## Definition of Done');
+        plan.definitionOfDone.forEach(d => lines.push(`- [ ] ${d}`));
+        lines.push('');
+    }
+    if (plan.overview?.criticalPath || plan.overview?.teamSize) {
+        if (!plan.architecture?.length) lines.push('---', '');
+        if (plan.overview.criticalPath) lines.push(`**Critical Path:** ${plan.overview.criticalPath}`);
+        if (plan.overview.teamSize) lines.push(`**Team Size:** ${plan.overview.teamSize}`);
+        lines.push('');
+    }
+
+    lines.push('```json synapse-plan');
+    lines.push(JSON.stringify(plan, null, 2));
+    lines.push('```');
+
+    return lines.join('\n');
 }
 
 export const generateCoreArtifact = async (
@@ -299,6 +399,7 @@ Architecture: ${structuredPRD.architecture}${
         data_model: dataModelSchema,
         component_inventory: componentInventorySchema,
         design_system: designSystemTokensSchema,
+        implementation_plan: implementationPlanSchema,
     };
 
     const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
@@ -351,6 +452,15 @@ Architecture: ${structuredPRD.architecture}${
 
         try {
             const parsed = JSON.parse(result);
+            // For screen_inventory we persist the structured JSON so the
+            // structured renderer in `renderers/index.tsx` activates and
+            // export / dependency-context flows can re-render markdown
+            // on demand. Other JSON-mode subtypes still serialize to
+            // markdown for storage to avoid cross-cutting changes.
+            if (subtype === 'screen_inventory') {
+                const normalized = normalizeScreenInventory(parsed) ?? parsed;
+                return { content: JSON.stringify(normalized, null, 2) };
+            }
             const content = normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
             // For design_system specifically, the parsed JSON IS the token
             // contract — surface it back to the caller as metadata so the
@@ -397,6 +507,38 @@ export const refineCoreArtifact = async (
 ): Promise<string> => {
     options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
 
+    const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
+
+    if (subtype === 'screen_inventory') {
+        const system = `You are an expert product designer refining a structured Screen Inventory.
+
+The current artifact may be either:
+- The post-upgrade JSON shape (sections[].screens[] with states, entryPoints, exitPaths, P0–P3 priority, etc.), OR
+- A legacy markdown or JSON artifact (groups[].screens[] with core/secondary/supporting priority).
+
+Rules:
+1. Apply the user's requested changes precisely. Do not rewrite parts that weren't asked about.
+2. If the input is legacy, migrate it to the post-upgrade shape on output: sections, P0–P3 priorities, states arrays, entryPoints, exitPaths.
+3. Loading / error / empty / permission states belong under \`states[]\` of their parent screen, never as separate screens (unless they own a route).
+4. coreUIElements must be semantic, not implementation-level. Provide userIntent for every screen.
+5. Return strictly the JSON shape supplied — no commentary, no markdown.`;
+
+        const result = await callGemini(
+            system,
+            `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
+            { responseMimeType: 'application/json', responseSchema: screenInventorySchema },
+            options?.signal,
+        );
+
+        try {
+            const parsed = JSON.parse(result);
+            const normalized = normalizeScreenInventory(parsed) ?? parsed;
+            return JSON.stringify(normalized, null, 2);
+        } catch {
+            return result;
+        }
+    }
+
     const system = `You are an expert product designer helping refine a ${subtype.replace(/_/g, ' ')}. The user has an existing artifact and wants specific changes.
 
 Rules:
@@ -405,8 +547,6 @@ Rules:
 3. If the user asks to add content, integrate it naturally into the existing structure.
 4. If the user asks to modify content, change only what's requested — don't rewrite everything.
 5. Return the complete updated artifact (not just the changes).`;
-
-    const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
 
     return callGemini(
         system,

@@ -3,34 +3,65 @@
 export const screenInventorySchema = {
     type: "OBJECT",
     properties: {
-        groups: {
+        sections: {
             type: "ARRAY",
             items: {
                 type: "OBJECT",
                 properties: {
-                    name: { type: "STRING" },
+                    title: { type: "STRING" },
+                    description: { type: "STRING" },
+                    flowSummary: { type: "STRING" },
                     screens: {
                         type: "ARRAY",
                         items: {
                             type: "OBJECT",
                             properties: {
+                                id: { type: "STRING" },
                                 name: { type: "STRING" },
+                                type: { type: "STRING", enum: ["screen", "modal", "overlay", "system-state"] },
+                                priority: { type: "STRING", enum: ["P0", "P1", "P2", "P3"] },
                                 purpose: { type: "STRING" },
-                                components: { type: "ARRAY", items: { type: "STRING" } },
-                                navigationFrom: { type: "ARRAY", items: { type: "STRING" } },
-                                navigationTo: { type: "ARRAY", items: { type: "STRING" } },
-                                priority: { type: "STRING", enum: ["core", "secondary", "supporting"] },
+                                userIntent: { type: "STRING" },
+                                states: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            name: { type: "STRING" },
+                                            description: { type: "STRING" },
+                                            trigger: { type: "STRING" },
+                                            recoveryPath: { type: "STRING" },
+                                        },
+                                        required: ["name", "description"],
+                                    },
+                                },
+                                entryPoints: { type: "ARRAY", items: { type: "STRING" } },
+                                exitPaths: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            label: { type: "STRING" },
+                                            target: { type: "STRING" },
+                                            condition: { type: "STRING" },
+                                        },
+                                        required: ["label", "target"],
+                                    },
+                                },
+                                coreUIElements: { type: "ARRAY", items: { type: "STRING" } },
+                                outputData: { type: "ARRAY", items: { type: "STRING" } },
+                                risks: { type: "ARRAY", items: { type: "STRING" } },
                                 featureRefs: { type: "ARRAY", items: { type: "STRING" } },
                             },
-                            required: ["name", "purpose", "components", "priority"],
+                            required: ["name", "purpose", "priority"],
                         },
                     },
                 },
-                required: ["name", "screens"],
+                required: ["title", "screens"],
             },
         },
     },
-    required: ["groups"],
+    required: ["sections"],
 };
 
 const FIELD_GROUP_NAMES = [
@@ -313,6 +344,72 @@ export const designSystemTokensSchema = {
         },
     },
     required: ["colors", "typography", "spacing", "radius", "components", "rules"],
+};
+
+export const implementationPlanSchema = {
+    type: "OBJECT",
+    properties: {
+        overview: {
+            type: "OBJECT",
+            properties: {
+                summary: { type: "STRING" },
+                criticalPath: { type: "STRING" },
+                teamSize: { type: "STRING" },
+            },
+        },
+        milestones: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    id: { type: "STRING" },
+                    name: { type: "STRING" },
+                    timeframe: { type: "STRING" },
+                    goal: { type: "STRING" },
+                    tasks: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                id: { type: "STRING" },
+                                title: { type: "STRING" },
+                                description: { type: "STRING" },
+                                status: {
+                                    type: "STRING",
+                                    enum: ["todo", "in_progress", "done", "blocked"],
+                                },
+                                dependencies: { type: "ARRAY", items: { type: "STRING" } },
+                                linkedArtifacts: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        prd: { type: "ARRAY", items: { type: "STRING" } },
+                                        dataModel: { type: "ARRAY", items: { type: "STRING" } },
+                                        mockups: { type: "ARRAY", items: { type: "STRING" } },
+                                    },
+                                },
+                            },
+                            required: ["id", "title", "status"],
+                        },
+                    },
+                },
+                required: ["id", "name", "tasks"],
+            },
+        },
+        architecture: { type: "ARRAY", items: { type: "STRING" } },
+        risks: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    description: { type: "STRING" },
+                    mitigation: { type: "STRING" },
+                },
+                required: ["description"],
+            },
+        },
+        definitionOfDone: { type: "ARRAY", items: { type: "STRING" } },
+    },
+    required: ["milestones"],
 };
 
 export const componentInventorySchema = {

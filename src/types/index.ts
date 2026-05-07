@@ -300,18 +300,58 @@ export type SpineVersion = {
 
 // --- Structured Artifact Content Types ---
 
-export interface ScreenItem {
+export type ScreenPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export type LegacyScreenPriority = 'core' | 'secondary' | 'supporting';
+export type ScreenType = 'screen' | 'modal' | 'overlay' | 'system-state';
+
+export interface ScreenState {
     name: string;
+    description: string;
+    trigger?: string;
+    recoveryPath?: string;
+}
+
+export interface ExitPath {
+    label: string;
+    target: string;
+    condition?: string;
+}
+
+export interface ScreenItem {
+    id?: string;
+    name: string;
+    type?: ScreenType;
+    priority: ScreenPriority | LegacyScreenPriority;
     purpose: string;
-    components: string[];
+    userIntent?: string;
+    states?: ScreenState[];
+    entryPoints?: string[];
+    exitPaths?: ExitPath[];
+    coreUIElements?: string[];
+    // Legacy alias kept readable for old artifacts; new generations
+    // populate `coreUIElements`.
+    components?: string[];
+    outputData?: string[];
+    risks?: string[];
+    featureRefs?: string[];
+    // Legacy navigation fields, retained so persisted localStorage data
+    // still satisfies the type without rewrites.
     navigationFrom?: string[];
     navigationTo?: string[];
-    priority: 'core' | 'secondary' | 'supporting';
-    featureRefs?: string[];
+}
+
+export interface ScreenInventorySection {
+    title: string;
+    description?: string;
+    flowSummary?: string;
+    screens: ScreenItem[];
 }
 
 export interface ScreenInventoryContent {
-    groups: { name: string; screens: ScreenItem[] }[];
+    sections: ScreenInventorySection[];
+    // Legacy shape: pre-upgrade artifacts emitted `groups`. The renderer
+    // and orchestration layers normalize this to `sections` on read.
+    groups?: { name: string; screens: ScreenItem[] }[];
 }
 
 export interface DataField {
@@ -425,6 +465,50 @@ export interface DesignTokens {
     radius: Record<string, number>;                       // px
     components: Record<string, DesignComponentToken>;     // dot-paths e.g. "button.primary"
     rules: string[];                                      // human-readable usage rules
+}
+
+// --- Implementation Plan (structured) ---
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'blocked';
+
+export interface LinkedArtifacts {
+    prd?: string[];
+    dataModel?: string[];
+    mockups?: string[];
+}
+
+export interface ImplementationPlanTask {
+    id: string;
+    title: string;
+    description?: string;
+    status: TaskStatus;
+    dependencies?: string[];
+    linkedArtifacts?: LinkedArtifacts;
+}
+
+export interface ImplementationPlanMilestone {
+    id: string;
+    name: string;
+    timeframe?: string;
+    goal?: string;
+    tasks: ImplementationPlanTask[];
+}
+
+export interface RiskItem {
+    description: string;
+    mitigation?: string;
+}
+
+export interface StructuredImplementationPlan {
+    overview?: {
+        summary?: string;
+        criticalPath?: string;
+        teamSize?: string;
+    };
+    milestones: ImplementationPlanMilestone[];
+    architecture?: string[];
+    risks?: RiskItem[];
+    definitionOfDone?: string[];
 }
 
 // --- Artifact System ---

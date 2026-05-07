@@ -75,6 +75,7 @@ export function ArtifactWorkspace({
 }: ArtifactWorkspaceProps) {
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
+        updateArtifactVersionMetadata,
     } = useProjectStore();
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
@@ -265,6 +266,14 @@ export function ArtifactWorkspace({
                 productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
             }
             : undefined;
+        const promptEdits = subtype === 'prompt_pack'
+            ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
+            : undefined;
+        const handleUpdatePromptEdits = subtype === 'prompt_pack'
+            ? (next: Record<number, string>) => {
+                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next });
+            }
+            : undefined;
         return (
             <div className="max-w-3xl mx-auto bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
                 <ArtifactContentRenderer
@@ -273,6 +282,9 @@ export function ArtifactWorkspace({
                     screenImageContext={screenImageContext}
                     metadata={preferred.metadata}
                     projectId={projectId}
+                    features={subtype === 'prompt_pack' ? structuredPRD.features : undefined}
+                    promptEdits={promptEdits}
+                    onUpdatePromptEdits={handleUpdatePromptEdits}
                 />
             </div>
         );
