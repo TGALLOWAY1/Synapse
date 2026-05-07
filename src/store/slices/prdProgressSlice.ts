@@ -13,6 +13,10 @@ export interface PrdSectionStatusEntry {
     model?: string;
     ms?: number;
     error?: string;
+    /** Rough wall-clock estimate (seconds) for this section. */
+    estimatedSeconds?: number;
+    /** Wall-clock start timestamp (ms) — set when status flips to 'generating'. */
+    startedAt?: number;
 }
 
 export type PrdProgressSlice = {
@@ -73,12 +77,18 @@ export const createPrdProgressSlice: StateCreator<
         set((state) => {
             const current = state.prdSectionStatus[projectId] ?? {} as Record<SectionId, PrdSectionStatusEntry>;
             const existing = current[sectionId] ?? { tier: update.tier ?? 'strong', status: 'pending' };
+            const merged: PrdSectionStatusEntry = { ...existing, ...update };
+            // Stamp wall-clock start the first time a section flips to 'generating'
+            // so the live elapsed counter has a stable origin across re-renders.
+            if (update.status === 'generating' && !merged.startedAt) {
+                merged.startedAt = Date.now();
+            }
             return {
                 prdSectionStatus: {
                     ...state.prdSectionStatus,
                     [projectId]: {
                         ...current,
-                        [sectionId]: { ...existing, ...update },
+                        [sectionId]: merged,
                     },
                 },
             };
