@@ -12,8 +12,55 @@ describe('ArtifactContentRenderer', () => {
         expect(container.querySelector('h1')).toHaveTextContent('Screen Inventory');
     });
 
-    it('renders structured content for screen_inventory when content is valid JSON', () => {
+    it('renders structured content for screen_inventory in the new sections shape', () => {
         const jsonContent = JSON.stringify({
+            sections: [{
+                title: 'Mood Capture',
+                description: 'Where the user records a vibe.',
+                flowSummary: 'Landing → Capture → Loading → Player',
+                screens: [{
+                    name: 'Mood Ingestion Portal',
+                    type: 'screen',
+                    priority: 'P0',
+                    purpose: 'Capture a mood signal from the camera',
+                    userIntent: 'Share a vibe in under 5 seconds',
+                    states: [
+                        { name: 'Default', description: 'Camera active' },
+                        { name: 'Loading', description: 'Submitting capture' },
+                        { name: 'Camera denied', description: 'Permission refused', trigger: 'permission denied' },
+                    ],
+                    entryPoints: ['Landing', 'Shared Vibe'],
+                    exitPaths: [
+                        { label: 'Submit', target: 'Loading' },
+                        { label: 'Camera denied', target: 'Text Fallback', condition: 'permission denied' },
+                    ],
+                    coreUIElements: ['Mood capture canvas', 'Submit CTA'],
+                    outputData: ['mood vector'],
+                    risks: ['Camera permission denied'],
+                    featureRefs: ['F-014'],
+                }],
+            }],
+        });
+        const { container } = render(
+            <ArtifactContentRenderer subtype="screen_inventory" content={jsonContent} />
+        );
+        // Section header is numbered.
+        expect(container).toHaveTextContent('1.');
+        expect(container).toHaveTextContent('Mood Capture');
+        expect(container).toHaveTextContent('Mood Ingestion Portal');
+        // Priority badge.
+        expect(container).toHaveTextContent('P0');
+        // User intent + state chip.
+        expect(container).toHaveTextContent('Share a vibe in under 5 seconds');
+        expect(container).toHaveTextContent('Camera denied');
+        // Exit path target.
+        expect(container).toHaveTextContent('Text Fallback');
+        // Risk callout copy.
+        expect(container).toHaveTextContent('Camera permission denied');
+    });
+
+    it('renders legacy groups + core/secondary priorities by normalizing on read', () => {
+        const legacyJson = JSON.stringify({
             groups: [{
                 name: 'Auth',
                 screens: [{
@@ -21,15 +68,22 @@ describe('ArtifactContentRenderer', () => {
                     purpose: 'User authentication',
                     components: ['EmailInput', 'PasswordInput'],
                     priority: 'core',
+                    navigationFrom: ['Landing'],
+                    navigationTo: ['Dashboard'],
                 }],
             }],
         });
         const { container } = render(
-            <ArtifactContentRenderer subtype="screen_inventory" content={jsonContent} />
+            <ArtifactContentRenderer subtype="screen_inventory" content={legacyJson} />
         );
-        // Should render via ScreenInventoryRenderer with card layout
         expect(container).toHaveTextContent('Login');
-        expect(container).toHaveTextContent('User authentication');
+        // Legacy 'core' migrates to P0.
+        expect(container).toHaveTextContent('P0');
+        // Legacy components survive as core UI.
+        expect(container).toHaveTextContent('EmailInput');
+        // Legacy navigation surfaces as entry/exit blocks.
+        expect(container).toHaveTextContent('Landing');
+        expect(container).toHaveTextContent('Dashboard');
     });
 
     it('renders markdown for subtypes without structured renderers', () => {

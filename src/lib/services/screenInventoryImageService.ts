@@ -35,24 +35,38 @@ export const buildScreenInventoryImagePrompt = (
     context: ScreenImagePromptContext,
 ): string => {
     const platform = PLATFORM_HINTS[context.platformHint ?? 'responsive'];
-    const componentsLine = screen.components && screen.components.length > 0
-        ? `Key UI components on this screen: ${screen.components.join(', ')}.`
+    const ui = (screen.coreUIElements && screen.coreUIElements.length > 0)
+        ? screen.coreUIElements
+        : (screen.components ?? []);
+    const componentsLine = ui.length > 0
+        ? `Key UI elements on this screen: ${ui.join(', ')}.`
         : '';
+
+    const intentLine = screen.userIntent ? `User intent: ${screen.userIntent}` : '';
+
+    const entry = (screen.entryPoints && screen.entryPoints.length > 0)
+        ? screen.entryPoints
+        : (screen.navigationFrom ?? []);
+    const exits = (screen.exitPaths && screen.exitPaths.length > 0)
+        ? screen.exitPaths.map(p => p.target)
+        : (screen.navigationTo ?? []);
     const navParts: string[] = [];
-    if (screen.navigationFrom && screen.navigationFrom.length > 0) {
-        navParts.push(`reachable from ${screen.navigationFrom.join(', ')}`);
-    }
-    if (screen.navigationTo && screen.navigationTo.length > 0) {
-        navParts.push(`navigates to ${screen.navigationTo.join(', ')}`);
-    }
+    if (entry.length > 0) navParts.push(`reachable from ${entry.join(', ')}`);
+    if (exits.length > 0) navParts.push(`navigates to ${exits.join(', ')}`);
     const navLine = navParts.length > 0 ? `Navigation context: ${navParts.join('; ')}.` : '';
+
+    const stateLine = screen.states && screen.states.length > 0
+        ? `Render the default / primary state. Other states modeled: ${screen.states.map(s => s.name).join(', ')}.`
+        : '';
 
     return [
         `UI mockup of "${screen.name}" for the product "${context.productTitle}".`,
         `Screen purpose: ${screen.purpose}`,
+        intentLine,
         `Product context: ${context.productSummary}`,
         componentsLine,
         navLine,
+        stateLine,
         `Render as a ${platform}.`,
         `Style: mid-fidelity flat UI mockup, structured layout with clear hierarchy, neutral palette with one accent color, no decorative imagery.`,
         `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,

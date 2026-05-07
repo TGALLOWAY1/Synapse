@@ -1,5 +1,6 @@
 import type { CoreArtifactSubtype, StructuredPRD } from '../types';
 import { getArtifactMeta } from './coreArtifactPipeline';
+import { parseScreenInventory, screenInventoryToMarkdown } from './screenInventoryNormalize';
 
 const GENERIC_PHRASES = [
     'user-friendly interface',
@@ -26,11 +27,24 @@ export function buildDependencyContext(
         .map(dep => {
             const depContent = generatedArtifacts[dep];
             if (!depContent) return `### ${dep}\nNot generated yet.`;
-            return `### ${dep}\n${depContent.slice(0, 1400)}`;
+            // Screen inventory is now persisted as JSON. Render to a
+            // human-readable markdown summary before slicing so downstream
+            // LLMs (user_flows, component_inventory, implementation_plan)
+            // keep receiving the same kind of input they did pre-upgrade.
+            const text = dep === 'screen_inventory'
+                ? renderScreenInventoryDependency(depContent)
+                : depContent;
+            return `### ${dep}\n${text.slice(0, 1400)}`;
         })
         .join('\n\n');
 
     return slices;
+}
+
+function renderScreenInventoryDependency(content: string): string {
+    const parsed = parseScreenInventory(content);
+    if (!parsed) return content;
+    return screenInventoryToMarkdown(parsed);
 }
 
 export function buildNarrativeGuardrails(prd: StructuredPRD): string {

@@ -3,34 +3,65 @@
 export const screenInventorySchema = {
     type: "OBJECT",
     properties: {
-        groups: {
+        sections: {
             type: "ARRAY",
             items: {
                 type: "OBJECT",
                 properties: {
-                    name: { type: "STRING" },
+                    title: { type: "STRING" },
+                    description: { type: "STRING" },
+                    flowSummary: { type: "STRING" },
                     screens: {
                         type: "ARRAY",
                         items: {
                             type: "OBJECT",
                             properties: {
+                                id: { type: "STRING" },
                                 name: { type: "STRING" },
+                                type: { type: "STRING", enum: ["screen", "modal", "overlay", "system-state"] },
+                                priority: { type: "STRING", enum: ["P0", "P1", "P2", "P3"] },
                                 purpose: { type: "STRING" },
-                                components: { type: "ARRAY", items: { type: "STRING" } },
-                                navigationFrom: { type: "ARRAY", items: { type: "STRING" } },
-                                navigationTo: { type: "ARRAY", items: { type: "STRING" } },
-                                priority: { type: "STRING", enum: ["core", "secondary", "supporting"] },
+                                userIntent: { type: "STRING" },
+                                states: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            name: { type: "STRING" },
+                                            description: { type: "STRING" },
+                                            trigger: { type: "STRING" },
+                                            recoveryPath: { type: "STRING" },
+                                        },
+                                        required: ["name", "description"],
+                                    },
+                                },
+                                entryPoints: { type: "ARRAY", items: { type: "STRING" } },
+                                exitPaths: {
+                                    type: "ARRAY",
+                                    items: {
+                                        type: "OBJECT",
+                                        properties: {
+                                            label: { type: "STRING" },
+                                            target: { type: "STRING" },
+                                            condition: { type: "STRING" },
+                                        },
+                                        required: ["label", "target"],
+                                    },
+                                },
+                                coreUIElements: { type: "ARRAY", items: { type: "STRING" } },
+                                outputData: { type: "ARRAY", items: { type: "STRING" } },
+                                risks: { type: "ARRAY", items: { type: "STRING" } },
                                 featureRefs: { type: "ARRAY", items: { type: "STRING" } },
                             },
-                            required: ["name", "purpose", "components", "priority"],
+                            required: ["name", "purpose", "priority"],
                         },
                     },
                 },
-                required: ["name", "screens"],
+                required: ["title", "screens"],
             },
         },
     },
-    required: ["groups"],
+    required: ["sections"],
 };
 
 export const dataModelSchema = {
