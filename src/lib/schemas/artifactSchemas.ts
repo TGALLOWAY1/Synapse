@@ -135,6 +135,72 @@ export const dataModelSchema = {
     required: ["entities", "apiEndpoints"],
 };
 
+export const implementationPlanSchema = {
+    type: "OBJECT",
+    properties: {
+        overview: {
+            type: "OBJECT",
+            properties: {
+                summary: { type: "STRING" },
+                criticalPath: { type: "STRING" },
+                teamSize: { type: "STRING" },
+            },
+        },
+        milestones: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    id: { type: "STRING" },
+                    name: { type: "STRING" },
+                    timeframe: { type: "STRING" },
+                    goal: { type: "STRING" },
+                    tasks: {
+                        type: "ARRAY",
+                        items: {
+                            type: "OBJECT",
+                            properties: {
+                                id: { type: "STRING" },
+                                title: { type: "STRING" },
+                                description: { type: "STRING" },
+                                status: {
+                                    type: "STRING",
+                                    enum: ["todo", "in_progress", "done", "blocked"],
+                                },
+                                dependencies: { type: "ARRAY", items: { type: "STRING" } },
+                                linkedArtifacts: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        prd: { type: "ARRAY", items: { type: "STRING" } },
+                                        dataModel: { type: "ARRAY", items: { type: "STRING" } },
+                                        mockups: { type: "ARRAY", items: { type: "STRING" } },
+                                    },
+                                },
+                            },
+                            required: ["id", "title", "status"],
+                        },
+                    },
+                },
+                required: ["id", "name", "tasks"],
+            },
+        },
+        architecture: { type: "ARRAY", items: { type: "STRING" } },
+        risks: {
+            type: "ARRAY",
+            items: {
+                type: "OBJECT",
+                properties: {
+                    description: { type: "STRING" },
+                    mitigation: { type: "STRING" },
+                },
+                required: ["description"],
+            },
+        },
+        definitionOfDone: { type: "ARRAY", items: { type: "STRING" } },
+    },
+    required: ["milestones"],
+};
+
 export const componentInventorySchema = {
     type: "OBJECT",
     properties: {

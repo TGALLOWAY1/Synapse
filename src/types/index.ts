@@ -386,6 +386,48 @@ export interface ComponentInventoryContent {
     categories: { name: string; components: ComponentItem[] }[];
 }
 
+export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'blocked';
+
+export interface LinkedArtifacts {
+    prd?: string[];
+    dataModel?: string[];
+    mockups?: string[];
+}
+
+export interface ImplementationPlanTask {
+    id: string;
+    title: string;
+    description?: string;
+    status: TaskStatus;
+    dependencies?: string[];
+    linkedArtifacts?: LinkedArtifacts;
+}
+
+export interface ImplementationPlanMilestone {
+    id: string;
+    name: string;
+    timeframe?: string;
+    goal?: string;
+    tasks: ImplementationPlanTask[];
+}
+
+export interface RiskItem {
+    description: string;
+    mitigation?: string;
+}
+
+export interface StructuredImplementationPlan {
+    overview?: {
+        summary?: string;
+        criticalPath?: string;
+        teamSize?: string;
+    };
+    milestones: ImplementationPlanMilestone[];
+    architecture?: string[];
+    risks?: RiskItem[];
+    definitionOfDone?: string[];
+}
+
 // --- Artifact System ---
 
 export type ArtifactType = 'prd' | 'mockup' | 'prompt' | 'core_artifact';
