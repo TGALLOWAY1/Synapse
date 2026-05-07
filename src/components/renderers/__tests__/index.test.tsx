@@ -50,6 +50,21 @@ describe('ArtifactContentRenderer', () => {
         expect(container).toHaveTextContent('this is not valid json');
     });
 
+    it('renders structured user_flows content with sidebar navigation when `### Flow:` heading is present', () => {
+        const flowMarkdown = `### Flow: Login
+**Goal:** User authenticates to access account.
+**Steps:**
+1. [Login] — User enters credentials → System validates
+**Success Outcome:** Dashboard loads.`;
+        const { container } = render(
+            <ArtifactContentRenderer subtype="user_flows" content={flowMarkdown} />
+        );
+        expect(container).toHaveTextContent('Login');
+        expect(container).toHaveTextContent('Goal');
+        // step number badge
+        expect(container).toHaveTextContent('1');
+    });
+
     it('renders structured data_model content when valid JSON is provided', () => {
         const jsonContent = JSON.stringify({
             entities: [{
