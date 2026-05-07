@@ -1,4 +1,4 @@
-import type { CoreArtifactSubtype } from '../../types';
+import type { CoreArtifactSubtype, Feature } from '../../types';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -15,6 +15,12 @@ interface DispatchProps {
     content: string;
     /** Only consumed by `screen_inventory` today. Other subtypes ignore it. */
     screenImageContext?: ScreenImageGalleryContext;
+    /** Only consumed by `prompt_pack`; supplies the canonical feature list for ID resolution. */
+    features?: Feature[];
+    /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
+    promptEdits?: Record<number, string>;
+    /** Only consumed by `prompt_pack`; persists the new edit overlay. */
+    onUpdatePromptEdits?: (next: Record<number, string>) => void;
 }
 
 /**
@@ -42,7 +48,14 @@ function isJsonString(str: string): boolean {
     }
 }
 
-export function ArtifactContentRenderer({ subtype, content, screenImageContext }: DispatchProps) {
+export function ArtifactContentRenderer({
+    subtype,
+    content,
+    screenImageContext,
+    features,
+    promptEdits,
+    onUpdatePromptEdits,
+}: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
@@ -62,7 +75,14 @@ export function ArtifactContentRenderer({ subtype, content, screenImageContext }
         return <ImplementationPlanRenderer content={content} />;
     }
     if (subtype === 'prompt_pack') {
-        return <PromptPackRenderer content={content} />;
+        return (
+            <PromptPackRenderer
+                content={content}
+                features={features}
+                edits={promptEdits}
+                onUpdateEdits={onUpdatePromptEdits}
+            />
+        );
     }
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
 }
