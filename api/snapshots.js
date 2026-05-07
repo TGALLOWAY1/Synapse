@@ -103,18 +103,36 @@ async function handlePost(req, res) {
 
   await put(`${SNAPSHOT_PREFIX}${id}/data.json`, dataJson, {
     contentType: 'application/json',
-    access: 'public',
+    access: 'private',
     addRandomSuffix: false,
     allowOverwrite: false,
   });
   await put(`${SNAPSHOT_PREFIX}${id}/manifest.json`, manifestJson, {
     contentType: 'application/json',
-    access: 'public',
+    access: 'private',
     addRandomSuffix: false,
     allowOverwrite: false,
   });
 
   return json(res, 201, { id, manifest: JSON.parse(manifestJson) });
+}
+
+// Private blob URLs require the read/write token in the Authorization header
+// — public-store URLs are open by URL, but for a private store we must
+// authenticate every fetch. The SDK's `put`/`list`/`del` already do this; the
+// raw `fetch(blob.url)` calls below are the only ones we have to wire up.
+async function fetchBlobJson(url) {
+  const resp = await fetch(url, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '');
+    const err = new Error(`blob_fetch_failed_${resp.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return await resp.json();
 }
 
 async function handleList(_req, res) {
@@ -125,9 +143,7 @@ async function handleList(_req, res) {
     for (const blob of page.blobs) {
       if (!blob.pathname.endsWith('/manifest.json')) continue;
       try {
-        const resp = await fetch(blob.url, { cache: 'no-store' });
-        if (!resp.ok) continue;
-        summaries.push(await resp.json());
+        summaries.push(await fetchBlobJson(blob.url));
       } catch {
         // skip unreadable manifests
       }
@@ -144,9 +160,12 @@ async function handleGetOne(id, res) {
   const dataBlob = blobs.find((b) => b.pathname.endsWith('/data.json'));
   if (!dataBlob) return json(res, 404, { error: 'not_found' });
 
-  const resp = await fetch(dataBlob.url, { cache: 'no-store' });
-  if (!resp.ok) return json(res, 502, { error: 'blob_fetch_failed' });
-  return json(res, 200, await resp.json());
+  try {
+    const data = await fetchBlobJson(dataBlob.url);
+    return json(res, 200, data);
+  } catch (err) {
+    return json(res, 502, { error: 'blob_fetch_failed', message: err?.message ?? 'unknown' });
+  }
 }
 
 async function handleDelete(id, res) {
