@@ -136,6 +136,7 @@ async function runCoreArtifactSlot(
     const semaphore = getCoreSemaphore(projectId);
     await semaphore.acquire();
     let content: string;
+    let extraMetadata: Record<string, unknown> = {};
     try {
         if (signal.aborted) throw new DOMException('aborted', 'AbortError');
         const store = useProjectStore.getState();
@@ -145,11 +146,13 @@ async function runCoreArtifactSlot(
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
         });
-        content = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
+        const result = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
             generatedArtifacts,
             signal,
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
+        content = result.content;
+        if (result.metadata) extraMetadata = result.metadata;
     } finally {
         semaphore.release();
     }
@@ -180,7 +183,7 @@ async function runCoreArtifactSlot(
         projectId,
         artifactId,
         content,
-        { subtype, dependencyTrace, validationWarnings: warnings },
+        { subtype, dependencyTrace, validationWarnings: warnings, ...extraMetadata },
         [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
         `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}`,
         parentVersionId,
