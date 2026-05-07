@@ -1,32 +1,71 @@
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertCircle } from 'lucide-react';
+import type { Feature } from '../../../types';
 import { parseFlows } from './parseFlow';
-import type { ParsedErrorPath, ViewMode } from './types';
+import type { FeatureRef, FlowIssue } from './types';
 import { FlowSidebar } from './FlowSidebar';
 import { FlowSummaryCard } from './FlowSummaryCard';
-import { FlowDiagram } from './FlowDiagram';
+import { FlowJourney } from './FlowJourney';
 import { StepCard } from './StepCard';
 import { SuccessCriteriaBlock } from './SuccessCriteriaBlock';
-import { EdgeCasesAccordion } from './EdgeCasesAccordion';
-import { blockMd, inlineMd } from './markdown';
+import { IssuesPanel } from './IssuesPanel';
+import { FeatureDetailDrawer } from './FeatureDetailDrawer';
 
 interface Props {
     content: string;
+    /** Canonical feature catalog from the current spine PRD. Optional — drawer
+     * shows a graceful fallback when missing. */
+    features?: Feature[];
 }
 
-const VIEW_MODES: Array<{ id: ViewMode; label: string }> = [
-    { id: 'summary', label: 'Summary' },
-    { id: 'detailed', label: 'Detailed' },
-    { id: 'debug', label: 'Debug / QA' },
-];
+const TTV_RE = /<\s*(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\b|\b(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\s+to\s+value\b/i;
 
-export function UserFlowsRenderer({ content }: Props) {
+function inferTimeToValue(sources: Array<string | undefined>): string | null {
+    const text = sources.filter(Boolean).join('\n');
+    const m = text.match(TTV_RE);
+    if (!m) return null;
+    const value = m[1] ?? m[3];
+    const unit = m[2] ?? m[4];
+    if (!value || !unit) return null;
+    return `<${value}${unit}`;
+}
+
+export function UserFlowsRenderer({ content, features }: Props) {
     const flows = useMemo(() => parseFlows(content), [content]);
+    const featuresById = useMemo(() => {
+        if (!features) return undefined;
+        const map = new Map<string, Feature>();
+        for (const f of features) {
+            map.set(f.id.toLowerCase().replace(/-/g, ''), f);
+        }
+        return map;
+    }, [features]);
+
+    const ttvByFlow = useMemo(
+        () => flows.map(f => inferTimeToValue([
+            f.goal, f.successOutcome, f.preconditions, ...f.steps.map(s => s.rawText),
+        ])),
+        [flows],
+    );
+
     const [selectedIndex, setSelectedIndex] = useState(0);
-    const [viewMode, setViewMode] = useState<ViewMode>('detailed');
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const [drawerRef, setDrawerRef] = useState<FeatureRef | null>(null);
+    const [drawerPinned, setDrawerPinned] = useState(false);
+
+    const onSelectFeature = useCallback((refToken: FeatureRef) => {
+        setDrawerRef(refToken);
+    }, []);
+
+    const onCloseDrawer = useCallback(() => {
+        if (drawerPinned) return;
+        setDrawerRef(null);
+    }, [drawerPinned]);
+
+    const onTogglePin = useCallback(() => {
+        setDrawerPinned(p => !p);
+    }, []);
 
     if (flows.length === 0) {
         return (
@@ -39,21 +78,27 @@ export function UserFlowsRenderer({ content }: Props) {
     const safeIndex = Math.min(selectedIndex, flows.length - 1);
     const flow = flows[safeIndex];
 
-    const inlineErrorByStep = new Map<number, ParsedErrorPath[]>();
-    const globalErrors: ParsedErrorPath[] = [];
-    for (const e of flow.errorPaths) {
-        if (typeof e.linkedStepIndex === 'number') {
-            const list = inlineErrorByStep.get(e.linkedStepIndex) ?? [];
-            list.push(e);
-            inlineErrorByStep.set(e.linkedStepIndex, list);
-        } else {
-            globalErrors.push(e);
-        }
+    // Group inline issues by their linked step. Issues without a linked
+    // step appear in the flow-level IssuesPanel.
+    const inlineByStep = new Map<number, FlowIssue[]>();
+    for (const issue of flow.issues) {
+        if (typeof issue.linkedStepIndex !== 'number') continue;
+        const list = inlineByStep.get(issue.linkedStepIndex) ?? [];
+        list.push(issue);
+        inlineByStep.set(issue.linkedStepIndex, list);
     }
 
-    const showSteps = viewMode !== 'summary';
-    const showEdgeCases = viewMode !== 'summary';
-    const showGlobalErrors = viewMode !== 'summary' && globalErrors.length > 0;
+    // Per-step issue counts surfaced on the journey nodes.
+    const issuesByStep = new Map<number, number>();
+    for (const issue of flow.issues) {
+        if (typeof issue.linkedStepIndex !== 'number') continue;
+        issuesByStep.set(
+            issue.linkedStepIndex,
+            (issuesByStep.get(issue.linkedStepIndex) ?? 0) + 1,
+        );
+    }
+
+    const drawerFeature = drawerRef ? featuresById?.get(drawerRef.id) : undefined;
 
     return (
         <div className="flex gap-5 items-start">
@@ -63,41 +108,26 @@ export function UserFlowsRenderer({ content }: Props) {
                 onSelect={setSelectedIndex}
                 isMobileOpen={mobileNavOpen}
                 onToggleMobile={setMobileNavOpen}
+                ttvByFlow={ttvByFlow}
             />
             <div className="flex-1 min-w-0">
-                <div className="flex items-center justify-end gap-1 mb-3">
-                    <div
-                        role="tablist"
-                        aria-label="View mode"
-                        className="inline-flex rounded-md bg-neutral-100 p-0.5"
-                    >
-                        {VIEW_MODES.map(m => {
-                            const active = m.id === viewMode;
-                            return (
-                                <button
-                                    key={m.id}
-                                    type="button"
-                                    role="tab"
-                                    aria-selected={active}
-                                    onClick={() => setViewMode(m.id)}
-                                    className={`px-2.5 py-1 text-xs font-medium rounded transition ${
-                                        active
-                                            ? 'bg-white text-indigo-700 shadow-sm'
-                                            : 'text-neutral-600 hover:text-neutral-900'
-                                    }`}
-                                >
-                                    {m.label}
-                                </button>
-                            );
-                        })}
-                    </div>
-                </div>
+                <FlowSummaryCard
+                    flow={flow}
+                    index={safeIndex}
+                    timeToValue={ttvByFlow[safeIndex]}
+                    featuresById={featuresById}
+                    onSelectFeature={onSelectFeature}
+                />
 
-                <FlowSummaryCard flow={flow} index={safeIndex} />
-                <FlowDiagram flowIndex={safeIndex} steps={flow.steps} />
+                <FlowJourney
+                    flowIndex={safeIndex}
+                    steps={flow.steps}
+                    issuesByStep={issuesByStep}
+                />
+
                 <SuccessCriteriaBlock flow={flow} />
 
-                {showSteps && flow.steps.length > 0 && (
+                {flow.steps.length > 0 && (
                     <section className="mb-4">
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
                             Steps
@@ -107,39 +137,39 @@ export function UserFlowsRenderer({ content }: Props) {
                                 key={step.index}
                                 flowIndex={safeIndex}
                                 step={step}
-                                inlineErrors={inlineErrorByStep.get(step.index) ?? []}
-                                viewMode={viewMode}
+                                inlineIssues={inlineByStep.get(step.index) ?? []}
+                                featuresById={featuresById}
+                                onSelectFeature={onSelectFeature}
                             />
                         ))}
                     </section>
                 )}
 
-                {showSteps && flow.steps.length === 0 && flow.rest && (
-                    <section className="bg-white rounded-xl border border-neutral-200 p-4 mb-4">
-                        {blockMd(flow.rest)}
+                {flow.steps.length === 0 && flow.rest && (
+                    <section className="bg-white rounded-xl border border-neutral-200 p-4 mb-4 prose prose-sm prose-neutral max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{flow.rest}</ReactMarkdown>
                     </section>
                 )}
 
-                {showGlobalErrors && (
-                    <section className="bg-red-50/60 border border-red-100 rounded-xl p-4 mb-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-red-700 flex items-center gap-1 mb-2">
-                            <AlertCircle size={11} /> General error paths
-                        </p>
-                        <ul className="space-y-1 text-sm text-red-900">
-                            {globalErrors.map((e, i) => (
-                                <li key={i} className="flex gap-2">
-                                    <span className="text-red-400">•</span>
-                                    <div className="min-w-0 flex-1">{inlineMd(e.text)}</div>
-                                </li>
-                            ))}
-                        </ul>
-                    </section>
-                )}
-
-                {showEdgeCases && (
-                    <EdgeCasesAccordion edgeCases={flow.edgeCases} viewMode={viewMode} />
-                )}
+                <IssuesPanel
+                    flowIndex={safeIndex}
+                    issues={flow.issues.filter(i => typeof i.linkedStepIndex !== 'number')}
+                    edgeCases={flow.edgeCases}
+                    steps={flow.steps}
+                    featuresById={featuresById}
+                    onSelectFeature={onSelectFeature}
+                />
             </div>
+
+            <FeatureDetailDrawer
+                open={drawerRef !== null}
+                refToken={drawerRef}
+                feature={drawerFeature}
+                flows={flows}
+                onClose={onCloseDrawer}
+                pinned={drawerPinned}
+                onTogglePin={onTogglePin}
+            />
         </div>
     );
 }
