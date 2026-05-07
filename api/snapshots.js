@@ -103,18 +103,36 @@ async function handlePost(req, res) {
 
   await put(`${SNAPSHOT_PREFIX}${id}/data.json`, dataJson, {
     contentType: 'application/json',
-    access: 'public',
+    access: 'private',
     addRandomSuffix: false,
     allowOverwrite: false,
   });
   await put(`${SNAPSHOT_PREFIX}${id}/manifest.json`, manifestJson, {
     contentType: 'application/json',
-    access: 'public',
+    access: 'private',
     addRandomSuffix: false,
     allowOverwrite: false,
   });
 
   return json(res, 201, { id, manifest: JSON.parse(manifestJson) });
+}
+
+// Private blob URLs require the read/write token in the Authorization header
+// — public-store URLs are open by URL, but for a private store we must
+// authenticate every fetch. The SDK's `put`/`list`/`del` already do this; the
+// raw `fetch(blob.url)` calls below are the only ones we have to wire up.
+async function fetchBlobJson(url) {
+  const resp = await fetch(url, {
+    cache: 'no-store',
+    headers: { Authorization: `Bearer ${process.env.BLOB_READ_WRITE_TOKEN}` },
+  });
+  if (!resp.ok) {
+    const detail = await resp.text().catch(() => '');
+    const err = new Error(`blob_fetch_failed_${resp.status}${detail ? `: ${detail.slice(0, 200)}` : ''}`);
+    err.status = resp.status;
+    throw err;
+  }
+  return await resp.json();
 }
 
 async function handleList(_req, res) {
@@ -125,9 +143,7 @@ async function handleList(_req, res) {
     for (const blob of page.blobs) {
       if (!blob.pathname.endsWith('/manifest.json')) continue;
       try {
-        const resp = await fetch(blob.url, { cache: 'no-store' });
-        if (!resp.ok) continue;
-        summaries.push(await resp.json());
+        summaries.push(await fetchBlobJson(blob.url));
       } catch {
         // skip unreadable manifests
       }
@@ -144,9 +160,12 @@ async function handleGetOne(id, res) {
   const dataBlob = blobs.find((b) => b.pathname.endsWith('/data.json'));
   if (!dataBlob) return json(res, 404, { error: 'not_found' });
 
-  const resp = await fetch(dataBlob.url, { cache: 'no-store' });
-  if (!resp.ok) return json(res, 502, { error: 'blob_fetch_failed' });
-  return json(res, 200, await resp.json());
+  try {
+    const data = await fetchBlobJson(dataBlob.url);
+    return json(res, 200, data);
+  } catch (err) {
+    return json(res, 502, { error: 'blob_fetch_failed', message: err?.message ?? 'unknown' });
+  }
 }
 
 async function handleDelete(id, res) {
@@ -172,6 +191,19 @@ export default async function handler(req, res) {
   }
   if (requireOwner(req, res)) return;
 
+  // @vercel/blob reads BLOB_READ_WRITE_TOKEN from the env. Just creating a
+  // Blob store in the Vercel dashboard isn't enough — the store has to be
+  // connected to this project, which is what populates the token. Fail fast
+  // with an actionable message so the owner knows what to fix.
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error('[snapshots] BLOB_READ_WRITE_TOKEN is not set on this deployment.');
+    return json(res, 503, {
+      error: 'blob_not_configured',
+      message:
+        'Vercel Blob is not connected to this project. In the Vercel dashboard go to Storage, then connect the Blob store to this project (this adds BLOB_READ_WRITE_TOKEN to the environment), then redeploy.',
+    });
+  }
+
   const id = typeof req.query?.id === 'string' ? req.query.id : null;
   if (id !== null && !ID_RE.test(id)) {
     return json(res, 400, { error: 'invalid_id' });
@@ -191,6 +223,17 @@ export default async function handler(req, res) {
     return await handleGetOne(id, res);
   } catch (err) {
     console.error('[snapshots]', err);
-    return json(res, 500, { error: 'internal_error', message: err?.message ?? 'unknown' });
+    const message = err?.message ?? 'unknown';
+    // Surface the most common Blob-specific failure modes with an obviously
+    // actionable hint, since the only thing the snapshot panel shows is this
+    // message.
+    if (/BLOB_READ_WRITE_TOKEN|No token found/i.test(message)) {
+      return json(res, 503, {
+        error: 'blob_not_configured',
+        message:
+          'Vercel Blob rejected the call: BLOB_READ_WRITE_TOKEN is missing or invalid. Reconnect the Blob store to this project in the Vercel dashboard and redeploy.',
+      });
+    }
+    return json(res, 500, { error: 'internal_error', message });
   }
 }

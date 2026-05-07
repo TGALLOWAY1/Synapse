@@ -70,6 +70,19 @@ const authHeaders = (): Record<string, string> => {
     return { Authorization: `Bearer ${token}` };
 };
 
+// The server returns { error: 'code', message: 'human-readable detail' }. The
+// panel only renders one string, so we prefer the message when it exists and
+// fall back to the code; on parse failure we fall back to the status.
+const errorFromResponse = async (resp: Response, fallbackCode: string): Promise<Error> => {
+    const body = await resp.json().catch(() => null) as { error?: string; message?: string } | null;
+    const message = typeof body?.message === 'string' && body.message.length > 0 ? body.message : null;
+    const code = typeof body?.error === 'string' && body.error.length > 0 ? body.error : null;
+    if (message && code) return new Error(`${code}: ${message}`);
+    if (message) return new Error(message);
+    if (code) return new Error(code);
+    return new Error(`${fallbackCode}_${resp.status}`);
+};
+
 // Pull the per-project slice out of Zustand. We snapshot the store at one
 // point in time so concurrent edits don't tear the bundle.
 export const collectProjectBundle = (projectId: string): SnapshotProjectBundle => {
@@ -114,30 +127,21 @@ export const saveSnapshot = async (
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
         body: JSON.stringify({ title, project: bundle, images }),
     });
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err?.error ?? `save_failed_${resp.status}`);
-    }
+    if (!resp.ok) throw await errorFromResponse(resp, 'save_failed');
     const result = await resp.json();
     return result.manifest as SnapshotManifest;
 };
 
 export const listSnapshots = async (): Promise<SnapshotListItem[]> => {
     const resp = await fetch(API_BASE, { headers: authHeaders() });
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err?.error ?? `list_failed_${resp.status}`);
-    }
+    if (!resp.ok) throw await errorFromResponse(resp, 'list_failed');
     const data = await resp.json();
     return Array.isArray(data?.snapshots) ? data.snapshots : [];
 };
 
 export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
     const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, { headers: authHeaders() });
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err?.error ?? `load_failed_${resp.status}`);
-    }
+    if (!resp.ok) throw await errorFromResponse(resp, 'load_failed');
     return await resp.json();
 };
 
@@ -146,10 +150,7 @@ export const deleteSnapshot = async (id: string): Promise<void> => {
         method: 'DELETE',
         headers: authHeaders(),
     });
-    if (!resp.ok) {
-        const err = await resp.json().catch(() => ({}));
-        throw new Error(err?.error ?? `delete_failed_${resp.status}`);
-    }
+    if (!resp.ok) throw await errorFromResponse(resp, 'delete_failed');
 };
 
 // Restore a snapshot into the live store. Replaces any existing project with

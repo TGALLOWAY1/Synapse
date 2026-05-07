@@ -55,7 +55,14 @@ function validateMetadata(metadata) {
 export default async function handler(req, res) {
   if (req.method !== 'POST') return methodNotAllowed(res, ['POST']);
 
+  // The PRD workspace fires trackActivity() unconditionally, but most users
+  // never log into the recruiter portal — so "no session cookie" is the
+  // expected case, not an error. Silently no-op for anonymous callers so we
+  // don't litter the browser console with 401s. We only return 401 if the
+  // cookie is present but bad (malformed/expired/tampered), which is a real
+  // auth signal worth surfacing.
   const token = parseSessionCookie(req);
+  if (!token) return json(res, 200, { ok: true, tracked: false });
   const claims = verifySessionToken(token);
   const subjectId = claims?.userId || claims?.recruiterId;
   if (!subjectId) return json(res, 401, { error: 'Unauthorized' });
