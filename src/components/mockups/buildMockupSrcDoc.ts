@@ -73,18 +73,27 @@ const buildProbeScript = (probeId: string): string => {
     // Pure-browser IIFE: waits for load, inspects computed styles + layout,
     // posts one MockupProbeReport. Kept inline (no external file) so the
     // iframe works even when bundled into a downloaded artifact.
+    //
+    // The styled check uses a sentinel element with the `.hidden` Tailwind
+    // utility (which resolves to `display: none`). If Tailwind loaded, the
+    // sentinel's computed display is `none`; if Tailwind failed (CSP block,
+    // network failure, sandbox restriction), the sentinel falls back to the
+    // user-agent default `display: block` and `styled` flips false. We avoid
+    // checking the root's `min-height` or `display` because every <div>
+    // defaults to `display: block` regardless of Tailwind, which let the
+    // previous probe falsely report "styled" on completely unstyled output.
     const script = `(() => {
         const report = () => {
             try {
+                const sentinel = document.createElement('div');
+                sentinel.className = 'hidden';
+                sentinel.setAttribute('data-mockup-probe-sentinel', '');
+                sentinel.setAttribute('aria-hidden', 'true');
+                document.body.appendChild(sentinel);
+                const sentinelDisplay = window.getComputedStyle(sentinel).display;
+                sentinel.remove();
+                const styled = sentinelDisplay === 'none';
                 const root = document.querySelector('.min-h-screen') || document.body;
-                // Styled check: the vetted templates always ship the root
-                // with 'min-h-screen'. If Tailwind CDN applied its styles,
-                // the computed min-height resolves to at least 100vh; if
-                // the CDN failed (CSP, network), min-height stays 0.
-                const cs = window.getComputedStyle(root);
-                const styled = parseFloat(cs.minHeight || '0') >= 1
-                    || cs.display !== 'inline'
-                    || parseFloat(cs.padding || '0') > 0;
                 const body = document.body;
                 const horizontalOverflow = (body.scrollWidth - body.clientWidth) > 1;
                 const bodyHeight = body.scrollHeight;
@@ -109,9 +118,9 @@ const buildProbeScript = (probeId: string): string => {
             }
         };
         if (document.readyState === 'complete') {
-            setTimeout(report, 50);
+            setTimeout(report, 250);
         } else {
-            window.addEventListener('load', () => setTimeout(report, 50), { once: true });
+            window.addEventListener('load', () => setTimeout(report, 250), { once: true });
         }
     })();`;
     return `<script>${script}</script>`;

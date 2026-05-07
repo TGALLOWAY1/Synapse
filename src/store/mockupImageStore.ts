@@ -6,6 +6,11 @@
  *
  * Persistence (the source of truth) lives in src/lib/mockupImageStore.ts
  * (IndexedDB). This store is purely a reactive cache and orchestrator.
+ *
+ * Records are keyed by `${versionId}:${screenId}:${quality}` so each quality
+ * level coexists rather than overwriting earlier renders. `getAllForScreen`
+ * returns every variant for one (version, screen) pair so the UI can show a
+ * quality switcher when both low- and high-quality images exist.
  */
 
 import { create } from 'zustand';
@@ -14,6 +19,7 @@ import { callOpenAIImage } from '../lib/openaiClient';
 import { buildScreenImagePrompt, pickImageSize } from '../lib/services/mockupImageService';
 import {
     buildImageKey,
+    buildScreenScopeKey,
     getImage as idbGetImage,
     listImagesForVersion as idbListImages,
     putImage as idbPutImage,
@@ -25,19 +31,29 @@ interface InFlight {
     abort: AbortController;
 }
 
+const screenScope = (versionId: string, screenId: string): string =>
+    buildScreenScopeKey(versionId, screenId);
+
 interface ImageStoreState {
+    /** Map of `${versionId}:${screenId}:${quality}` -> record. */
     images: Record<string, MockupImageRecord>;
+    /** Map of `${versionId}:${screenId}` -> in-flight info (one per screen). */
     inFlight: Record<string, InFlight>;
+    /** Map of `${versionId}:${screenId}` -> error message. */
     errors: Record<string, string>;
 
     /** Hydrate this version's images from IndexedDB into the reactive cache. */
     loadForVersion: (versionId: string) => Promise<void>;
 
-    /** Look up a single record (cache first, then IDB). */
-    getRecord: (versionId: string, screenId: string) => Promise<MockupImageRecord | undefined>;
+    /** Look up a single record at a specific quality (cache first, then IDB). */
+    getRecord: (
+        versionId: string,
+        screenId: string,
+        quality: MockupImageQuality,
+    ) => Promise<MockupImageRecord | undefined>;
 
-    /** Synchronous cache lookup for render-path use. */
-    peek: (versionId: string, screenId: string) => MockupImageRecord | undefined;
+    /** Synchronous lookup — returns every cached quality variant for one screen. */
+    listForScreen: (versionId: string, screenId: string) => MockupImageRecord[];
 
     /** Generate (or regenerate at higher quality) an image for one screen. */
     generate: (args: {
@@ -53,7 +69,7 @@ interface ImageStoreState {
     /** Cancel an in-flight generation. */
     cancel: (versionId: string, screenId: string) => void;
 
-    /** Clear the error state for one key (e.g. on retry click). */
+    /** Clear the error state for one screen (e.g. on retry click). */
     clearError: (versionId: string, screenId: string) => void;
 }
 
@@ -72,8 +88,8 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         });
     },
 
-    getRecord: async (versionId, screenId) => {
-        const key = buildImageKey(versionId, screenId);
+    getRecord: async (versionId, screenId, quality) => {
+        const key = buildImageKey(versionId, screenId, quality);
         const cached = get().images[key];
         if (cached) return cached;
         const fromIdb = await idbGetImage(key);
@@ -83,18 +99,24 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         return fromIdb;
     },
 
-    peek: (versionId, screenId) => {
-        return get().images[buildImageKey(versionId, screenId)];
+    listForScreen: (versionId, screenId) => {
+        const prefix = screenScope(versionId, screenId);
+        const out: MockupImageRecord[] = [];
+        const images = get().images;
+        for (const k of Object.keys(images)) {
+            if (k.startsWith(prefix)) out.push(images[k]);
+        }
+        return out;
     },
 
     generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality }) => {
-        const key = buildImageKey(versionId, screen.id);
-        if (get().inFlight[key]) return; // already generating this exact key
+        const scope = screenScope(versionId, screen.id);
+        if (get().inFlight[scope]) return; // already generating something for this screen
 
         const abort = new AbortController();
         set((state) => ({
-            inFlight: { ...state.inFlight, [key]: { quality, startedAt: Date.now(), abort } },
-            errors: { ...state.errors, [key]: '' },
+            inFlight: { ...state.inFlight, [scope]: { quality, startedAt: Date.now(), abort } },
+            errors: { ...state.errors, [scope]: '' },
         }));
 
         const prompt = buildScreenImagePrompt(payload, screen, settings);
@@ -102,6 +124,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
 
         try {
             const b64 = await callOpenAIImage(prompt, { quality, size, signal: abort.signal });
+            const key = buildImageKey(versionId, screen.id, quality);
             const record: MockupImageRecord = {
                 key,
                 projectId,
@@ -116,7 +139,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             await idbPutImage(record);
             set((state) => {
                 const nextInFlight = { ...state.inFlight };
-                delete nextInFlight[key];
+                delete nextInFlight[scope];
                 return {
                     images: { ...state.images, [key]: record },
                     inFlight: nextInFlight,
@@ -129,27 +152,27 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
                 : err instanceof Error ? err.message : 'OpenAI image generation failed.';
             set((state) => {
                 const nextInFlight = { ...state.inFlight };
-                delete nextInFlight[key];
+                delete nextInFlight[scope];
                 const nextErrors = { ...state.errors };
-                if (message) nextErrors[key] = message; else delete nextErrors[key];
+                if (message) nextErrors[scope] = message; else delete nextErrors[scope];
                 return { inFlight: nextInFlight, errors: nextErrors };
             });
         }
     },
 
     cancel: (versionId, screenId) => {
-        const key = buildImageKey(versionId, screenId);
-        const inFlight = get().inFlight[key];
+        const scope = screenScope(versionId, screenId);
+        const inFlight = get().inFlight[scope];
         if (!inFlight) return;
         inFlight.abort.abort();
     },
 
     clearError: (versionId, screenId) => {
-        const key = buildImageKey(versionId, screenId);
+        const scope = screenScope(versionId, screenId);
         set((state) => {
-            if (!state.errors[key]) return state;
+            if (!state.errors[scope]) return state;
             const next = { ...state.errors };
-            delete next[key];
+            delete next[scope];
             return { errors: next };
         });
     },
