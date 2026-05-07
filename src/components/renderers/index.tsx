@@ -15,6 +15,18 @@ interface DispatchProps {
     content: string;
     /** Only consumed by `screen_inventory` today. Other subtypes ignore it. */
     screenImageContext?: ScreenImageGalleryContext;
+    /**
+     * Per-version metadata. Currently consumed only by `design_system` to
+     * surface structured token contracts; other subtypes ignore it.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * Project id, used by the design_system renderer to query downstream
+     * mockup / component_inventory artifacts for the "Downstream Usage"
+     * indicator. Optional — renderers fall back to a content-only view
+     * when absent.
+     */
+    projectId?: string;
 }
 
 /**
@@ -42,7 +54,7 @@ function isJsonString(str: string): boolean {
     }
 }
 
-export function ArtifactContentRenderer({ subtype, content, screenImageContext }: DispatchProps) {
+export function ArtifactContentRenderer({ subtype, content, screenImageContext, metadata, projectId }: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
@@ -53,7 +65,7 @@ export function ArtifactContentRenderer({ subtype, content, screenImageContext }
         return <ComponentInventoryRenderer content={content} />;
     }
     if (subtype === 'design_system') {
-        return <DesignSystemRenderer content={content} />;
+        return <DesignSystemRenderer content={content} metadata={metadata} projectId={projectId} />;
     }
     if (subtype === 'user_flows') {
         return <UserFlowsRenderer content={content} />;

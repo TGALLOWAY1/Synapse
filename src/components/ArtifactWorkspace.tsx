@@ -270,6 +270,8 @@ export function ArtifactWorkspace({
                     subtype={subtype}
                     content={preferred.content}
                     screenImageContext={screenImageContext}
+                    metadata={preferred.metadata}
+                    projectId={projectId}
                 />
             </div>
         );
