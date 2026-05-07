@@ -3,6 +3,7 @@ import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
+import { dataModelToMarkdown } from './dataModelMarkdown';
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
@@ -86,31 +87,39 @@ End with:
         userPrefix: 'Create an Implementation Plan from this PRD:',
     },
     data_model: {
-        system: `You are an expert backend architect. Create a Data Model Draft — the primary entities, relationships, and data needs.
+        system: `You are an expert backend architect. Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup.
 
-For each entity, use this exact format:
+The JSON you return drives both downstream artifacts and the rendered UI. Populate these top-level fields:
 
-### [EntityName]
-**Description:** What this entity represents.
-**Fields:**
-| Field | Type | Required | Description |
-|-------|------|----------|-------------|
-| id | UUID | Yes | Primary key |
-| ... | ... | ... | ... |
+- overview.summary: 2-3 sentences in plain English describing what this data model represents and the primary entities involved.
+- overview.dataFlow: 1-2 sentences describing how user input flows through the system (e.g., "User input creates a MoodSnapshot, which seeds a ResonancePlaylist that adapts to swipe feedback over time.").
+- overview.productOutcome: 1-2 sentences describing the resulting user-visible behavior. Keep summary + dataFlow + productOutcome combined under ~600 characters total — they appear at the top of the rendered artifact and the first slice is fed to downstream generators.
 
-**Relationships:**
-- Has many [OtherEntity] (via foreign key \`entity_id\`)
-- Belongs to [OtherEntity]
-**Indexes:** List recommended indexes for query performance.
-**Constraints:** Uniqueness, check constraints, etc.
+For each entity, populate:
 
-After all entities, include:
-- An entity-relationship summary showing all connections
-- API surface implications (key endpoints each entity needs)
-- State management notes for the frontend
+- name, description: existing fields. Description is what the entity represents; keep distinct from purpose.
+- purpose: one sentence on WHY this entity exists.
+- userFacing: true if the user directly sees or manipulates this entity's data, false for purely internal/system entities.
+- mutability: "immutable" (write-once), "mostly_immutable" (rare changes), or "mutable" (regularly updated).
+- fields: each field with name, type, required (boolean), description.
+- fieldGroups: assign EVERY field to exactly one of these groups:
+  - "Key Product Fields" (the meaningful product attributes)
+  - "Relationships" (foreign keys to other entities)
+  - "System Metadata" (id, created_at, updated_at, version, audit fields)
+  - "API / Integration" (webhook URLs, external IDs, integration payloads)
+  - "Privacy / Safety" (PII, secrets, sensitive data subject to safety rules)
+- relationships: existing array of { type: has_many|belongs_to|has_one|many_to_many, target, description? }.
+- indexes: recommended database indexes for query performance.
+- constraints: business/database constraints (uniqueness, check constraints, cardinality limits) — NOT privacy concerns.
+- privacyRules: separate from constraints. Privacy/safety rules like "raw_input must be null when source = FACE_SCAN", "PII fields must be encrypted at rest", "soft-delete only — never hard delete". Use this for anything safety, privacy, or compliance related.
+- exampleRecord: optional. For the FIRST userFacing entity (and others only when illustrative), provide a compact example record as a JSON-encoded STRING (e.g., "{\\"joy_score\\": 0.7, \\"energy_level\\": 0.6, \\"vibe_title\\": \\"Warm Sunset Drift\\"}"). 4-8 fields max; keep it illustrative, not exhaustive.
 
-Use stable names for entities and fields. Do not rename PRD concepts unless you provide an alias note.`,
-        userPrefix: 'Create a Data Model Draft from this PRD:',
+Top-level apiEndpoints: existing array of { method, path, description, entity }. Required.
+
+Top-level productMapping: an array of { field, uiBehavior } mapping the most product-relevant fields to visible UI behavior (e.g., { field: "vibe_title", uiBehavior: "Appears as the generated playlist name" }, { field: "energy_level", uiBehavior: "Affects track intensity" }). Aim for 5-10 entries covering the fields that most directly shape the user experience.
+
+Use stable names for entities and fields. Do not rename PRD concepts unless you provide an alias note. Keep terminology consistent across overview, fieldGroups, productMapping, and the entities themselves.`,
+        userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
         system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of ready-to-use downstream prompts.
@@ -206,39 +215,7 @@ function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data: unknow
     }
 
     if (subtype === 'data_model') {
-        const model = data as DataModelContent;
-        const lines: string[] = ['# Data Model\n'];
-        for (const entity of model.entities) {
-            lines.push(`## ${entity.name}`);
-            lines.push(`${entity.description}\n`);
-            lines.push('| Field | Type | Required | Description |');
-            lines.push('|-------|------|----------|-------------|');
-            for (const field of entity.fields) {
-                lines.push(`| ${field.name} | ${field.type} | ${field.required ? 'Yes' : 'No'} | ${field.description} |`);
-            }
-            lines.push('');
-            if (entity.relationships?.length) {
-                lines.push('**Relationships:**');
-                entity.relationships.forEach(r => lines.push(`- ${r.type.replace(/_/g, ' ')} → ${r.target}${r.description ? ` (${r.description})` : ''}`));
-                lines.push('');
-            }
-            if (entity.indexes?.length) {
-                lines.push(`**Indexes:** ${entity.indexes.join(', ')}`);
-            }
-            if (entity.constraints?.length) {
-                lines.push(`**Constraints:** ${entity.constraints.join(', ')}`);
-            }
-            lines.push('');
-        }
-        if (model.apiEndpoints?.length) {
-            lines.push('## API Endpoints\n');
-            lines.push('| Method | Path | Description | Entity |');
-            lines.push('|--------|------|-------------|--------|');
-            for (const ep of model.apiEndpoints) {
-                lines.push(`| ${ep.method} | ${ep.path} | ${ep.description} | ${ep.entity} |`);
-            }
-        }
-        return lines.join('\n');
+        return dataModelToMarkdown(data as DataModelContent);
     }
 
     if (subtype === 'component_inventory') {

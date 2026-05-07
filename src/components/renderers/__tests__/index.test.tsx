@@ -41,13 +41,13 @@ describe('ArtifactContentRenderer', () => {
         expect(container.querySelector('ol')).toBeTruthy();
     });
 
-    it('falls back to markdown when JSON is malformed for structured type', () => {
-        const badJson = '{ this is not valid json }';
+    it('falls back to markdown when content is unparseable for data_model', () => {
+        const garbage = 'this is not a data model artifact at all';
         const { container } = render(
-            <ArtifactContentRenderer subtype="data_model" content={badJson} />
+            <ArtifactContentRenderer subtype="data_model" content={garbage} />
         );
-        // Should not crash — renders as text via ReactMarkdown
-        expect(container).toHaveTextContent('this is not valid json');
+        // Should not crash — renders as text via ReactMarkdown fallback
+        expect(container).toHaveTextContent('this is not a data model artifact at all');
     });
 
     it('renders structured data_model content when valid JSON is provided', () => {
@@ -59,13 +59,93 @@ describe('ArtifactContentRenderer', () => {
                     { name: 'id', type: 'UUID', required: true, description: 'Primary key' },
                     { name: 'email', type: 'string', required: true, description: 'Email address' },
                 ],
+                relationships: [],
             }],
-            relationships: [],
+            apiEndpoints: [],
         });
         const { container } = render(
             <ArtifactContentRenderer subtype="data_model" content={jsonContent} />
         );
         expect(container).toHaveTextContent('User');
         expect(container).toHaveTextContent('email');
+    });
+
+    it('renders rich data_model content when full markdown shape is provided', () => {
+        const richMarkdown = `# Data Model
+
+## How This Data Model Works
+
+User input creates a Snapshot which seeds a Playlist.
+
+**Data flow:** User → Snapshot → Playlist.
+
+**Product outcome:** Adaptive playlists.
+
+## Snapshot
+
+Captures emotional state.
+
+**Purpose:** Acts as the seed.
+**Visibility:** User-facing
+**Mutability:** mostly_immutable
+
+**Key Product Fields**
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| joy_score | Float | Yes | Joy intensity |
+
+> [!CONSTRAINT] joy_score must be between 0 and 1
+> [!PRIVACY] raw_input must be null when source is FACE_SCAN
+
+## How This Appears in the Product
+
+| Field | UI behavior |
+|-------|-------------|
+| \`joy_score\` | Drives playlist energy |
+
+## API Endpoints
+
+| Method | Path | Description | Entity |
+|--------|------|-------------|--------|
+| GET | /api/snapshots | List snapshots | Snapshot |
+`;
+        const { container } = render(
+            <ArtifactContentRenderer subtype="data_model" content={richMarkdown} />
+        );
+        expect(container).toHaveTextContent('How This Data Model Works');
+        expect(container).toHaveTextContent('Snapshot');
+        expect(container).toHaveTextContent('joy_score');
+        expect(container).toHaveTextContent('Constraint');
+        expect(container).toHaveTextContent('Privacy');
+        expect(container).toHaveTextContent('How This Appears in the Product');
+    });
+
+    it('renders legacy data_model markdown without crashing', () => {
+        const legacy = `# Data Model
+
+## Patient
+A patient record.
+
+| Field | Type | Required | Description |
+|-------|------|----------|-------------|
+| id | UUID | Yes | Primary key |
+| name | String | Yes | Full name |
+
+**Relationships:**
+- has many Visit (via foreign key \`patient_id\`)
+
+## API Endpoints
+
+| Method | Path | Description | Entity |
+|--------|------|-------------|--------|
+| GET | /api/patients | List patients | Patient |
+`;
+        const { container } = render(
+            <ArtifactContentRenderer subtype="data_model" content={legacy} />
+        );
+        expect(container).toHaveTextContent('Patient');
+        expect(container).toHaveTextContent('id');
+        expect(container).toHaveTextContent('name');
     });
 });
