@@ -282,7 +282,7 @@ export function ArtifactWorkspace({
     };
 
     return (
-        <div className="flex h-full relative">
+        <div className="flex h-full flex-1 min-w-0 relative bg-neutral-50">
             {/* Mobile drawer backdrop */}
             {mobileSidebarOpen && (
                 <button

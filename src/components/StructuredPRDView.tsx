@@ -1,4 +1,4 @@
-import { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useMemo, useRef } from 'react';
 import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
@@ -57,28 +57,57 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
-    // Get active branches for this spine to highlight their anchors
-    const activeBranches = (branches[projectId] || []).filter(b => b.spineVersionId === spineId && b.status === 'active');
+    // Get active branches for this spine to highlight their anchors.
+    // Memoized so the Mark.js effect below doesn't re-run on every parent
+    // render — the project store is destructured wholesale, so any unrelated
+    // store change would otherwise re-trigger the expensive DOM traversal.
+    const anchorTexts = useMemo(
+        () => (branches[projectId] || [])
+            .filter(b => b.spineVersionId === spineId && b.status === 'active' && b.anchorText)
+            .map(b => b.anchorText as string),
+        [branches, projectId, spineId],
+    );
 
-    // Highlight branch anchors with mark.js
+    // Highlight branch anchors with mark.js. Deferred to an idle/next-frame
+    // callback so the initial mount paints before the synchronous DOM
+    // traversal starts — switching to the PRD tab from the workspace would
+    // otherwise stall on a large structured PRD.
     useEffect(() => {
         if (!contentRef.current) return;
-        const instance = new Mark(contentRef.current);
-        instance.unmark();
+        let cancelled = false;
+        let instance: Mark | null = null;
+        const ric = (window as unknown as {
+            requestIdleCallback?: (cb: () => void, opts?: { timeout: number }) => number;
+            cancelIdleCallback?: (id: number) => void;
+        });
+        const schedule = ric.requestIdleCallback
+            ? (cb: () => void) => ric.requestIdleCallback!(cb, { timeout: 200 })
+            : (cb: () => void) => window.setTimeout(cb, 0) as unknown as number;
+        const cancel = ric.cancelIdleCallback
+            ? (id: number) => ric.cancelIdleCallback!(id)
+            : (id: number) => window.clearTimeout(id);
 
-        activeBranches.forEach(b => {
-            if (!b.anchorText) return;
-            instance.mark(b.anchorText, {
-                className: '!bg-indigo-500/20 !text-inherit !border-l-2 !border-indigo-500 !p-0.5 !rounded',
-                accuracy: 'partially',
-                separateWordSearch: false,
-                diacritics: false,
-                acrossElements: true,
+        const handle = schedule(() => {
+            if (cancelled || !contentRef.current) return;
+            instance = new Mark(contentRef.current);
+            instance.unmark();
+            anchorTexts.forEach(text => {
+                instance!.mark(text, {
+                    className: '!bg-indigo-500/20 !text-inherit !border-l-2 !border-indigo-500 !p-0.5 !rounded',
+                    accuracy: 'partially',
+                    separateWordSearch: false,
+                    diacritics: false,
+                    acrossElements: true,
+                });
             });
         });
 
-        return () => instance.unmark();
-    }, [structuredPRD, activeBranches]);
+        return () => {
+            cancelled = true;
+            cancel(handle);
+            instance?.unmark();
+        };
+    }, [structuredPRD, anchorTexts]);
 
     // Escape to dismiss popover
     useEffect(() => {
