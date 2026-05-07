@@ -17,6 +17,7 @@ export type ArtifactSlice = {
     getArtifactVersions: ProjectState['getArtifactVersions'];
     getPreferredVersion: ProjectState['getPreferredVersion'];
     getLatestArtifactVersion: ProjectState['getLatestArtifactVersion'];
+    updateArtifactVersionMetadata: ProjectState['updateArtifactVersionMetadata'];
 };
 
 export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSlice> = (set, get) => ({
@@ -199,5 +200,30 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
             .filter(v => v.artifactId === artifactId);
         if (versions.length === 0) return undefined;
         return versions.reduce((latest, v) => v.versionNumber > latest.versionNumber ? v : latest);
+    },
+
+    updateArtifactVersionMetadata: (
+        projectId: string,
+        artifactId: string,
+        versionId: string,
+        patch: Record<string, unknown>,
+    ) => {
+        set((state) => {
+            const allVersions = state.artifactVersions[projectId] || [];
+            const updatedVersions = allVersions.map(v =>
+                v.id === versionId && v.artifactId === artifactId
+                    ? { ...v, metadata: { ...v.metadata, ...patch } }
+                    : v
+            );
+            const projectArtifacts = state.artifacts[projectId] || [];
+            const now = Date.now();
+            const updatedArtifacts = projectArtifacts.map(a =>
+                a.id === artifactId ? { ...a, updatedAt: now } : a
+            );
+            return {
+                artifactVersions: { ...state.artifactVersions, [projectId]: updatedVersions },
+                artifacts: { ...state.artifacts, [projectId]: updatedArtifacts },
+            };
+        });
     },
 });

@@ -130,22 +130,56 @@ Use stable names for entities and fields. Do not rename PRD concepts unless you 
         userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
-        system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of ready-to-use downstream prompts.
+        system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into Cursor, Claude Code, ChatGPT, or Copilot WITHOUT also pasting the PRD.
 
 For each prompt, use this exact format:
 
 ### [N]. [Prompt Title]
 **Target Tool:** Cursor | Claude Code | ChatGPT | Copilot | Generic
+**Reason:** One short user-facing sentence (≤25 words) explaining why this target tool fits THIS prompt — e.g. "Cursor — best fit for applying multi-file code changes directly in the repo with diff preview." Keep it concrete; do not say "best AI tool".
 **Category:** UI Implementation | UX Critique | Testing | API Design | Content | Accessibility
 **Prompt:**
 \`\`\`
-[The full, copy-pasteable prompt text here. Include all necessary context from the PRD. Make it self-contained — the recipient should not need to read the PRD separately.]
+# Task
+<one-line objective in plain English>
+
+## Context
+<2–4 sentences of product/user context drawn from the PRD vision and target users>
+
+## Features In Scope
+- <id> — <Feature Name>
+  - Purpose: <one sentence>
+  - Inputs / behavior: <one sentence>
+  - Constraints: <one sentence, or 2–3 bullets if needed>
+- <id> — <Feature Name>
+  - Purpose: ...
+  - Inputs / behavior: ...
+  - Constraints: ...
+
+## Requirements
+- <bulleted, specific, testable>
+- ...
+
+## Constraints
+- <bulleted; e.g. tech stack limits, performance budgets, accessibility minimums>
+- ...
+
+## Expected Output
+- <bulleted; what artifacts/files/behaviors the recipient should produce>
+- ...
 \`\`\`
 **Expected Output:** What this prompt should produce.
 
-Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
+Hard rules — these are non-negotiable:
 
-Every prompt must explicitly reference at least two canonical feature IDs and one named screen/entity.
+1. Every prompt MUST be self-contained. The recipient receives ONLY this fenced block — no PRD, no glossary, no other artifact.
+2. Feature IDs (e.g. \`f1\`, \`f2\`) MUST appear ONLY inside the "## Features In Scope" section, where they are defined inline with name, purpose, inputs/behavior, and constraints from the canonical feature glossary above.
+3. In every other section ("# Task", "## Context", "## Requirements", "## Constraints", "## Expected Output"), refer to features by their human name only — never by bare ID. Example: write "the WebRTC emotion extractor" in Requirements, not "[f1]" or "f1".
+4. Each prompt MUST cover 2–4 features under "Features In Scope" and reference at least one named screen or entity from the dependency artifacts.
+5. Do not invent feature IDs. Only use IDs that appear in the canonical feature glossary supplied below.
+6. Keep the structure exactly as shown — same headings, same order. The renderer parses it.
+
+Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
 
 Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
         userPrefix: 'Create a Prompt Pack from this PRD:',
