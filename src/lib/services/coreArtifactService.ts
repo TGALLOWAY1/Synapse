@@ -1,10 +1,27 @@
-import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, StructuredImplementationPlan } from '../../types';
+import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
-import { screenInventorySchema, dataModelSchema, componentInventorySchema, implementationPlanSchema } from '../schemas/artifactSchemas';
+import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
+import {
+    normalizeDesignTokens,
+    hashDesignTokens,
+    designSystemTokensToMarkdown,
+} from '../designTokens';
+
+export interface CoreArtifactGenerationResult {
+    /** Canonical markdown body, stored in `ArtifactVersion.content`. */
+    content: string;
+    /**
+     * Subtype-specific metadata to merge into `ArtifactVersion.metadata` when
+     * the version is created. For `design_system`, this carries the
+     * structured `tokens` plus `tokensHash`. Undefined for subtypes that
+     * have no extra metadata to surface.
+     */
+    metadata?: Record<string, unknown>;
+}
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
@@ -202,46 +219,23 @@ Begin your response directly with the first section heading. Do NOT include any 
         userPrefix: 'Create a Prompt Pack from this PRD:',
     },
     design_system: {
-        system: `You are an expert design systems architect. Create a Design System Starter — a foundational UI system draft.
+        system: `You are an expert design systems architect. Produce a Design System Starter as a STRUCTURED TOKEN CONTRACT. The output is consumed by downstream mockup generation, so every value must be machine-usable and consistent.
 
-Use this exact structure:
+Return a single JSON object matching the provided schema. Token namespaces:
 
-### Color Palette
-**Primary:** [hex] — usage description
-**Secondary:** [hex] — usage description
-**Neutral Scale:** 50/100/200/.../900 hex values
-**Semantic:** Success [hex], Warning [hex], Error [hex], Info [hex]
+- colors: dot-pathed hex tokens. REQUIRED keys: brand.primary, text.primary, surface.app, surface.card. Strongly suggested additional keys: brand.secondary, text.secondary, border.subtle, state.success, state.warning, state.error, state.info. Add product-specific extensions if useful (still as dot-paths, e.g. "accent.glow"). Hex format: #RRGGBB.
+- typography: dot-pathed type roles. REQUIRED: heading.lg, heading.md, body.md. Suggested: heading.xl, body.sm. Each token: { font, size (px), weight (100..900), lineHeight (unitless multiplier) }. Pick fonts that are real and broadly available (Inter, Outfit, Manrope, Roboto, system-ui, etc.).
+- spacing: px values. REQUIRED: xs, sm, md, lg. Suggested xl. Use a consistent scale (typically 4-8 multiples).
+- radius: px values. REQUIRED: sm, md. Suggested: lg.
+- components: dot-pathed component recipes. REQUIRED: button.primary, card.default. Suggested: button.secondary, input.default. Each value references token names where possible (e.g. background "brand.primary", radius "md", padding "sm md"); raw hex is acceptable when the token name doesn't fit. Optional notes field for short usage hints.
+- rules: 5–8 short imperative rules describing how to apply the tokens (e.g. "Use brand.primary only for primary actions.", "Use state colors only for status, warning, success, error, info.").
 
-### Typography
-| Role | Font | Size | Weight | Line Height |
-|------|------|------|--------|-------------|
-| H1 | ... | ... | ... | ... |
-| Body | ... | ... | ... | ... |
-
-### Spacing Scale
-Base unit and scale (4px, 8px, 12px, 16px, 24px, 32px, 48px, 64px).
-
-### Component Patterns
-For each pattern (Button, Input, Card, Modal, Toast, Badge, Avatar):
-- Variants with visual description
-- States: default, hover, focus, disabled, loading
-- Sizing options
-
-### Interaction Patterns
-- Transitions and animation timing
-- Loading states approach
-- Error state patterns
-- Empty state patterns
-
-### Layout
-- Grid system (columns, gutters, margins)
-- Breakpoints
-- Container max-widths
-
-Be specific with hex values, pixel sizes, and font choices. This should be implementable directly.
-
-Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
-        userPrefix: 'Create a Design System Starter from this PRD:',
+Constraints:
+- Choose tokens that match the PRD's product personality (e.g. healthcare → calm trust palette; consumer audio → vibrant energy; B2B SaaS → restrained neutrals + one accent). Do not default to a generic indigo-on-neutral system unless the PRD truly calls for it.
+- Keep typography practical: 1 or 2 fonts max. Don't pick decorative fonts for body.
+- Component recipes must reference tokens that exist in your output.
+- All required keys MUST be present.`,
+        userPrefix: 'Create a Design System Starter from this PRD. Produce structured token JSON only:',
     },
 };
 
@@ -282,6 +276,10 @@ export function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data:
             }
         }
         return lines.join('\n');
+    }
+
+    if (subtype === 'design_system') {
+        return designSystemTokensToMarkdown(data as DesignTokens);
     }
 
     if (subtype === 'implementation_plan') {
@@ -356,7 +354,7 @@ export const generateCoreArtifact = async (
         signal?: AbortSignal;
         onProgress?: (message: string) => void;
     },
-): Promise<string> => {
+): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     const onProgress = options?.onProgress;
 
@@ -400,6 +398,7 @@ Architecture: ${structuredPRD.architecture}${
         screen_inventory: screenInventorySchema,
         data_model: dataModelSchema,
         component_inventory: componentInventorySchema,
+        design_system: designSystemTokensSchema,
         implementation_plan: implementationPlanSchema,
     };
 
@@ -460,12 +459,26 @@ Architecture: ${structuredPRD.architecture}${
             // markdown for storage to avoid cross-cutting changes.
             if (subtype === 'screen_inventory') {
                 const normalized = normalizeScreenInventory(parsed) ?? parsed;
-                return JSON.stringify(normalized, null, 2);
+                return { content: JSON.stringify(normalized, null, 2) };
             }
-            return normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
+            const content = normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
+            // For design_system specifically, the parsed JSON IS the token
+            // contract — surface it back to the caller as metadata so the
+            // controller can persist tokens + tokensHash on the
+            // ArtifactVersion alongside the canonical markdown.
+            if (subtype === 'design_system') {
+                const tokens = normalizeDesignTokens(parsed);
+                return {
+                    content,
+                    metadata: { tokens, tokensHash: hashDesignTokens(tokens) },
+                };
+            }
+            return { content };
         } catch {
-            // Fallback: return raw result if JSON parse fails
-            return normalizeArtifactMarkdown(result);
+            // JSON-mode failure: fall back to the raw text body. For
+            // design_system this means we won't have structured tokens —
+            // legacy markdown rendering still works in the UI.
+            return { content: normalizeArtifactMarkdown(result) };
         }
     }
 
@@ -481,7 +494,7 @@ Architecture: ${structuredPRD.architecture}${
         options?.signal,
     );
     onProgress?.('Validating output…');
-    return normalizeArtifactMarkdown(result);
+    return { content: normalizeArtifactMarkdown(result) };
 };
 
 export const refineCoreArtifact = async (

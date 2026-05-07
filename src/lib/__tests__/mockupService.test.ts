@@ -110,6 +110,70 @@ describe('mockupService alignment integration', () => {
         expect(result.warnings.some(w => /alignment/i.test(w))).toBe(true);
     });
 
+    it('injects design system tokens into the system prompt when provided', async () => {
+        const designTokens = (await import('../designTokens')).normalizeDesignTokens({
+            colors: { 'brand.primary': '#8B5CF6', 'surface.app': '#0F172A' },
+            rules: ['Use brand.primary only for primary CTAs.'],
+        });
+        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
+            version: 'mockup_html_v1',
+            title: 'Tokenized Concept',
+            summary: 'Brand-aware screens.',
+            screens: [
+                {
+                    name: 'Triage Queue',
+                    purpose: 'Care coordinator reviews urgent patient cases.',
+                    html: '<div class="min-h-screen font-sans" style="background: var(--color-surface-app); color: var(--color-text-primary)"><header class="px-6 py-4 border-b flex items-center justify-between"><h1 class="text-xl font-semibold">Triage Queue</h1><button type="button" class="primary px-3 py-2 rounded-lg" style="background: var(--color-brand-primary); color: var(--color-text-primary)">Assign case owner</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Patient case</td><td>Urgency</td></tr></tbody></table></section><aside class="rounded-xl border bg-white p-5"><ul class="space-y-2"><li>Triage actions</li></ul></aside></main></div>',
+                },
+            ],
+        }));
+
+        const result = await generateMockup('Clinic triage PRD', settings, structuredPRD, { designTokens });
+        const callArgs = callGeminiMock.mock.calls[0];
+        const systemPrompt = callArgs[0] as string;
+
+        // System prompt must carry the binding token contract header and at
+        // least one specific token reference.
+        expect(systemPrompt).toMatch(/Design system contract/i);
+        expect(systemPrompt).toContain('brand.primary');
+        expect(systemPrompt).toContain('#8B5CF6');
+        expect(systemPrompt).toContain('Use brand.primary only for primary CTAs.');
+        // CSS-variable usage instruction is present.
+        expect(systemPrompt).toMatch(/var\(--color-brand-primary\)/);
+
+        // Compliance summary is attached when tokens were supplied.
+        expect(result.designSystemCompliance).toBeDefined();
+        const screenId = result.payload.screens[0].id;
+        expect(result.designSystemCompliance?.[screenId]).toBeDefined();
+        expect(result.designSystemCompliance?.[screenId].score).toBeGreaterThan(0.6);
+    });
+
+    it('omits design system tokens from the system prompt when none provided', async () => {
+        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
+            version: 'mockup_html_v1',
+            title: 'Generic Concept',
+            summary: 'Default mockup.',
+            screens: [
+                {
+                    name: 'Overview',
+                    purpose: 'Generic dashboard.',
+                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b flex items-center justify-between"><h1 class="text-xl font-semibold">Overview</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Create</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border bg-white p-5"><ul><li>Item</li></ul></section><aside class="rounded-xl border bg-white p-5"><ul><li>Sidebar</li></ul></aside></main></div>',
+                },
+            ],
+        }));
+
+        const result = await generateMockup('Generic PRD', settings, structuredPRD);
+        const callArgs = callGeminiMock.mock.calls[0];
+        const systemPrompt = callArgs[0] as string;
+
+        // No token contract header in this path.
+        expect(systemPrompt).not.toMatch(/Design system contract/i);
+        // Legacy palette guidance is still present.
+        expect(systemPrompt).toContain('indigo-600');
+        // No compliance metadata when tokens absent.
+        expect(result.designSystemCompliance).toBeUndefined();
+    });
+
     it('passes deterministic generation controls to Gemini JSON mode', async () => {
         callGeminiMock.mockResolvedValueOnce(JSON.stringify({
             version: 'mockup_html_v1',

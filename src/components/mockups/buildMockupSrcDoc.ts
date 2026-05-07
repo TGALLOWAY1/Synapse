@@ -39,6 +39,8 @@
 // image (gpt-image-2) is the canonical mockup output.
 
 import { normalizeMockupHtml } from '../../lib/mockupQuality';
+import { tokensToCssStyleBlock } from '../../lib/designTokens';
+import type { DesignTokens } from '../../types';
 
 export type MockupRenderViewport = 'desktop' | 'tablet' | 'mobile';
 
@@ -54,10 +56,19 @@ export interface BuildMockupRenderDocumentParams {
      *  parent scopes incoming messages by matching probeId so multiple
      *  previews on the same page don't cross-contaminate. */
     probeId?: string;
+    /**
+     * Optional design system tokens. When supplied, a `:root { --color-...,
+     * --typography-..., --spacing-..., --radius-... }` block is injected
+     * into the iframe `<head>` so generated HTML using
+     * `style="background: var(--color-brand-primary)"` (and similar) renders
+     * with the project's design tokens.
+     */
+    designTokens?: DesignTokens;
 }
 
 export interface BuildMockupSrcDocOptions {
     probeId?: string;
+    designTokens?: DesignTokens;
 }
 
 export interface MockupProbeReport {
@@ -187,16 +198,23 @@ export const buildMockupRenderDocument = ({
     title = 'Mockup preview',
     viewport = 'desktop',
     probeId,
+    designTokens,
 }: BuildMockupRenderDocumentParams): string => {
     const normalized = normalizeMockupHtml(html);
     const probeScript = probeId ? buildProbeScript(probeId) : '';
     const meta = VIEWPORT_META[viewport] ?? VIEWPORT_META.desktop;
+    // Inject design tokens BEFORE Tailwind so var(--color-...) is resolved
+    // synchronously by the browser even if the Tailwind CDN is slow. The
+    // defensive head styles block stays after — its cascade-layer rules
+    // are independent.
+    const tokensBlock = designTokens ? tokensToCssStyleBlock(designTokens) : '';
     return `<!doctype html>
 <html lang="en" data-viewport="${viewport}">
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="${meta}" />
   <title>${escapeHtmlText(title)}</title>
+  ${tokensBlock}
   <script src="https://cdn.tailwindcss.com"></script>
   <style>${MOCKUP_RENDER_HEAD_STYLES}</style>
 </head>
@@ -213,4 +231,8 @@ ${probeScript}
 export const buildMockupSrcDoc = (
     fragment: string,
     options: BuildMockupSrcDocOptions = {},
-): string => buildMockupRenderDocument({ html: fragment, probeId: options.probeId });
+): string => buildMockupRenderDocument({
+    html: fragment,
+    probeId: options.probeId,
+    designTokens: options.designTokens,
+});

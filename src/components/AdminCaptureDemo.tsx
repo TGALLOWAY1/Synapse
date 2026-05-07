@@ -152,18 +152,18 @@ export function AdminCaptureDemo() {
             const stepIndex = 3 + i;
             try {
                 patchStep(stepIndex, { status: 'running' });
-                const content = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD, {
+                const result = await generateCoreArtifact(meta.subtype, prdContent, structuredPRD, {
                     generatedArtifacts,
                 });
-                generatedArtifacts[meta.subtype] = content;
+                generatedArtifacts[meta.subtype] = result.content;
                 const { artifactId } = useProjectStore
                     .getState()
                     .createArtifact(projectId, 'core_artifact', getArtifactMeta(meta.subtype).title, meta.subtype);
                 useProjectStore.getState().createArtifactVersion(
                     projectId,
                     artifactId,
-                    content,
-                    { subtype: meta.subtype },
+                    result.content,
+                    { subtype: meta.subtype, ...(result.metadata ?? {}) },
                     [
                         {
                             id: uuidv4(),

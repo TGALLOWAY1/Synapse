@@ -243,6 +243,7 @@ export function ArtifactWorkspace({
                             versionId={preferred.id}
                             projectId={projectId}
                             artifactId={mockup.id}
+                            designSystemCompliance={preferred.metadata?.designSystemCompliance as Parameters<typeof MockupViewer>[0]['designSystemCompliance']}
                         />
                     </MockupErrorBoundary>
                 </div>
@@ -279,6 +280,8 @@ export function ArtifactWorkspace({
                     subtype={subtype}
                     content={preferred.content}
                     screenImageContext={screenImageContext}
+                    metadata={preferred.metadata}
+                    projectId={projectId}
                     features={subtype === 'prompt_pack' ? structuredPRD.features : undefined}
                     promptEdits={promptEdits}
                     onUpdatePromptEdits={handleUpdatePromptEdits}

@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type {
+    DesignTokens,
     MockupSettings,
     MockupPayload,
     MockupScreen,
@@ -12,6 +13,11 @@ import { assessMockupHtmlQuality, normalizeMockupHtml } from '../mockupQuality';
 import { critiqueMockupAlignment, type MockupAlignmentCritique } from '../mockupAlignmentCritique';
 import { PLACEHOLDER_PROMPT_CATALOG } from '../mockupPlaceholders';
 import { validateMockupHtmlStructure } from '../mockupValidation';
+import {
+    tokensToPromptSnippet,
+    validateMockupHtmlAgainstTokens,
+    type DesignSystemCompliance,
+} from '../designTokens';
 
 // ---- Instruction tables (rewritten for polished HTML/Tailwind output) ----
 
@@ -50,13 +56,29 @@ const MOCKUP_MODEL = 'gemini-2.5-flash';
 
 // ---- Prompt construction ----
 
-const buildSystemPrompt = (settings: MockupSettings): string => {
+const buildSystemPrompt = (settings: MockupSettings, designTokens?: DesignTokens): string => {
     const styleLine = settings.style ? `\nStyle direction from the user: ${settings.style}` : '';
 
-    return `You are a senior product designer at a top-tier SaaS company (think Linear, Notion, Vercel, Stripe). You generate high-fidelity UI *concepts* — not production code — for new products, grounded in a provided PRD. Your output MUST be valid JSON matching the provided response schema.
-Prompt template version: ${MOCKUP_PROMPT_TEMPLATE_VERSION}.
-
-## Visual language
+    // When the project has a design system, dynamically inject its token
+    // contract and switch the model from the hard-coded Tailwind palette
+    // narrative to a token-aware narrative. CSS variables (`var(--color-...)`)
+    // are available in the render iframe via buildMockupSrcDoc; the model
+    // is told to use them for brand-specific values.
+    const tokenContractBlock = designTokens
+        ? `\n${tokensToPromptSnippet(designTokens)}\n`
+        : '';
+    const visualLanguageBlock = designTokens
+        ? `## Visual language (token-bound)
+- Modern SaaS aesthetic. Generous whitespace. Clear hierarchy.
+- Use the design system tokens above as the only source of truth for color, typography, spacing, radius, and component recipes. Do NOT default to indigo / neutral / 8px because of training-data inertia.
+- Brand-specific values: prefer inline style references like \`style="background: var(--color-brand-primary); color: var(--color-text-primary); border-radius: var(--radius-md)"\`. The render sandbox injects these CSS variables before Tailwind loads.
+- Tailwind utilities are still allowed for layout, structural sizing, and responsive behavior (\`grid grid-cols-3\`, \`p-6\`, \`flex items-center gap-3\`).
+- Type scale: use the typography tokens for headings/labels/body. You may map them to Tailwind utilities of equivalent size if it keeps the markup terse.
+- Prefer real product patterns: topbar + sidebar shells, stat cards, data tables with zebra rows and hover states, kanban columns, timelines, split panes, chat sidebars, filter chips, breadcrumb trails, rich empty states, toast notifications, modal previews, activity feeds with avatars.
+- Use inline <svg> or CSS gradients for icons. NEVER reference external images or fonts.
+- For avatars, hero banners, product images, logos, charts, and image thumbnails, emit a placeholder token (see catalog below) instead of an <img> tag or hand-rolled SVG. The render pipeline expands each token into a consistent inline SVG.
+- Copy MUST be realistic and grounded in the actual product — use real persona names, feature names, and entity names from the PRD. NO "Lorem ipsum", NO "Button 1 / Button 2", NO generic "Item A / Item B".`
+        : `## Visual language
 - Modern SaaS aesthetic. Generous whitespace. Clear hierarchy. 8px spacing scale.
 - Neutral base palette: white / neutral-50 / neutral-100 backgrounds, neutral-900 headings, neutral-500 secondary text, neutral-200 borders. Single accent color: indigo-600 for primary actions, indigo-50 / indigo-100 for tints — unless the user's style direction says otherwise.
 - Cards: rounded-xl or rounded-2xl, border border-neutral-200, shadow-sm, p-5 / p-6.
@@ -64,15 +86,24 @@ Prompt template version: ${MOCKUP_PROMPT_TEMPLATE_VERSION}.
 - Prefer real product patterns: topbar + sidebar shells, stat cards (label + large number + delta chip), data tables with zebra rows and hover states, kanban columns, timelines, split panes, chat sidebars, filter chips, breadcrumb trails, rich empty states, toast notifications, modal previews, activity feeds with avatars.
 - Use inline <svg> or CSS gradients for icons. NEVER reference external images or fonts.
 - For avatars, hero banners, product images, logos, charts, and image thumbnails, emit a placeholder token (see catalog below) instead of an <img> tag or hand-rolled SVG. The render pipeline expands each token into a consistent inline SVG.
-- Copy MUST be realistic and grounded in the actual product — use real persona names, feature names, and entity names from the PRD. NO "Lorem ipsum", NO "Button 1 / Button 2", NO generic "Item A / Item B".
+- Copy MUST be realistic and grounded in the actual product — use real persona names, feature names, and entity names from the PRD. NO "Lorem ipsum", NO "Button 1 / Button 2", NO generic "Item A / Item B".`;
+
+    return `You are a senior product designer at a top-tier SaaS company (think Linear, Notion, Vercel, Stripe). You generate high-fidelity UI *concepts* — not production code — for new products, grounded in a provided PRD. Your output MUST be valid JSON matching the provided response schema.
+Prompt template version: ${MOCKUP_PROMPT_TEMPLATE_VERSION}.
+${tokenContractBlock}
+${visualLanguageBlock}
 
 ## Technical constraints (non-negotiable)
 - For each screen's \`html\` field, output ONLY a body fragment. Do NOT include \`<!doctype>\`, \`<html>\`, \`<head>\`, \`<body>\`, \`<meta>\`, \`<link>\`, or \`<script>\` tags. Tailwind is already loaded in the render sandbox.
 - No JavaScript. No inline event handlers (onclick, onload, onmouseover, etc.). No \`javascript:\` URLs.
 - No external stylesheets, no \`<style>\` tags, no \`<link>\` tags, no Google Fonts, no images from the internet.
-- Use Tailwind utility classes exclusively for styling.
+- ${designTokens
+        ? `Tailwind utilities for layout/sizing/structural styling. Inline \`style\` attributes are PERMITTED for brand-specific values that reference the injected CSS variables (\`var(--color-...)\`, \`var(--radius-...)\`, \`var(--spacing-...)\`).`
+        : `Use Tailwind utility classes exclusively for styling.`}
 - Use semantic HTML: \`<header>\`, \`<nav>\`, \`<main>\`, \`<aside>\`, \`<section>\`, \`<article>\`, \`<table>\`, \`<ul>\`, \`<button type="button">\`.
-- Wrap EACH screen in a single top-level \`<div class="min-h-screen bg-neutral-50 text-neutral-900 font-sans antialiased">\` so the sandbox renders a full-bleed surface.
+- ${designTokens
+        ? `Wrap EACH screen in a single top-level \`<div class="min-h-screen font-sans antialiased" style="background: var(--color-surface-app); color: var(--color-text-primary)">\` so the sandbox renders a full-bleed surface using the design system surface.`
+        : `Wrap EACH screen in a single top-level \`<div class="min-h-screen bg-neutral-50 text-neutral-900 font-sans antialiased">\` so the sandbox renders a full-bleed surface.`}
 - Output must be valid HTML — every opening tag closed, attributes quoted.
 
 ## Layout & scrolling rules (critical — preview will be blank if violated)
@@ -172,6 +203,12 @@ export interface ParseResult {
     warnings: string[];
     usedFallback?: boolean;
     strategyVersion?: string;
+    /**
+     * Per-screen design system compliance summaries, keyed by screen id.
+     * Populated only when the project has a design system; soft-validation
+     * only — never gates generation.
+     */
+    designSystemCompliance?: Record<string, DesignSystemCompliance>;
 }
 
 /**
@@ -184,6 +221,7 @@ const parseMockupPayload = (
     prdContent: string,
     settings: MockupSettings,
     structuredPRD?: StructuredPRD,
+    designTokens?: DesignTokens,
 ): ParseResult => {
     let parsed: unknown;
     try {
@@ -296,6 +334,27 @@ const parseMockupPayload = (
         : 'Mockup concept';
     const summary = typeof obj.summary === 'string' ? obj.summary.trim() : '';
 
+    // Run lightweight token compliance validation per screen if the project
+    // has a design system. Soft-only: never throws, never gates generation.
+    let designSystemCompliance: Record<string, DesignSystemCompliance> | undefined;
+    if (designTokens) {
+        designSystemCompliance = {};
+        for (const screen of screens) {
+            designSystemCompliance[screen.id] = validateMockupHtmlAgainstTokens(
+                screen.html,
+                designTokens,
+            );
+        }
+        const lowComplianceScreens = Object.entries(designSystemCompliance)
+            .filter(([, c]) => c.score < 0.6)
+            .length;
+        if (lowComplianceScreens > 0) {
+            warnings.push(
+                `${lowComplianceScreens} screen${lowComplianceScreens === 1 ? '' : 's'} fell below 0.6 design-system compliance score.`,
+            );
+        }
+    }
+
     return {
         payload: {
             version: 'mockup_html_v1',
@@ -307,6 +366,7 @@ const parseMockupPayload = (
         warnings,
         usedFallback: false,
         strategyVersion: MOCKUP_GENERATION_STRATEGY_VERSION,
+        designSystemCompliance,
     };
 };
 
@@ -383,9 +443,10 @@ const runHtmlEngine = async (
     prdContent: string,
     settings: MockupSettings,
     structuredPRD: StructuredPRD | undefined,
+    designTokens: DesignTokens | undefined,
     options: ProviderOptions | undefined,
 ): Promise<ParseResult> => {
-    const system = buildSystemPrompt(settings);
+    const system = buildSystemPrompt(settings, designTokens);
     const user = buildUserPrompt(prdContent, structuredPRD);
     const providerParams = settings.safeMode
         ? { temperature: 0, topP: 0.5, topK: 1 }
@@ -403,7 +464,7 @@ const runHtmlEngine = async (
                 ...providerParams,
             }, options?.signal);
             options?.onStatus?.(`Parsing screens (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})…`);
-            const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD);
+            const parsed = parseMockupPayload(raw, prdContent, settings, structuredPRD, designTokens);
             options?.onStatus?.(`Scoring quality (attempt ${attempt}/${MAX_GENERATION_ATTEMPTS})…`);
             const qualityAvg = parsed.payload.screens.length
                 ? Math.round(parsed.payload.screens
@@ -445,8 +506,8 @@ export const generateMockup = async (
     prdContent: string,
     settings: MockupSettings,
     structuredPRD?: StructuredPRD,
-    options?: ProviderOptions,
+    options?: ProviderOptions & { designTokens?: DesignTokens },
 ): Promise<ParseResult> => {
     options?.onStatus?.('Generating mockup...');
-    return runHtmlEngine(prdContent, settings, structuredPRD, options);
+    return runHtmlEngine(prdContent, settings, structuredPRD, options?.designTokens, options);
 };

@@ -426,6 +426,49 @@ export interface ComponentInventoryContent {
     categories: { name: string; components: ComponentItem[] }[];
 }
 
+// --- Design System Tokens ---
+//
+// The Design System Starter artifact emits a structured token contract
+// alongside its rendered markdown. Tokens flow downstream into mockup
+// generation prompts and the HTML mockup iframe (as CSS variables) so
+// generated mockups respect the project's actual design intent rather
+// than the hard-coded Tailwind palette baked into the mockup prompt.
+//
+// Token values are stored on `ArtifactVersion.metadata.tokens` and a
+// canonical hash on `metadata.tokensHash`. Backwards-compatible: legacy
+// projects without these fields fall back to markdown parsing.
+
+export type DesignColorToken = string; // hex (#RRGGBB)
+
+export interface DesignTypographyToken {
+    font: string;
+    size: number;          // px
+    weight: number;        // 100..900
+    lineHeight: number;    // unitless multiplier (1.5 = 150%)
+    letterSpacing?: number; // px
+}
+
+export interface DesignComponentToken {
+    background?: string;   // token reference (e.g. "surface.card") or hex
+    text?: string;
+    border?: string;
+    radius?: string;       // token reference (e.g. "md") or px
+    padding?: string;      // tokenized shorthand (e.g. "sm md")
+    notes?: string;
+}
+
+export interface DesignTokens {
+    version: 1;
+    colors: Record<string, DesignColorToken>;             // dot-paths e.g. "brand.primary"
+    typography: Record<string, DesignTypographyToken>;    // dot-paths e.g. "heading.lg"
+    spacing: Record<string, number>;                      // px
+    radius: Record<string, number>;                       // px
+    components: Record<string, DesignComponentToken>;     // dot-paths e.g. "button.primary"
+    rules: string[];                                      // human-readable usage rules
+}
+
+// --- Implementation Plan (structured) ---
+
 export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'blocked';
 
 export interface LinkedArtifacts {
