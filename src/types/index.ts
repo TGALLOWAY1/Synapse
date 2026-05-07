@@ -327,6 +327,18 @@ export interface DataRelationship {
     description?: string;
 }
 
+export type FieldGroupName =
+    | 'Key Product Fields'
+    | 'Relationships'
+    | 'System Metadata'
+    | 'API / Integration'
+    | 'Privacy / Safety';
+
+export interface FieldGroup {
+    name: FieldGroupName;
+    fieldNames: string[];
+}
+
 export interface DataEntity {
     name: string;
     description: string;
@@ -334,11 +346,31 @@ export interface DataEntity {
     relationships: DataRelationship[];
     indexes?: string[];
     constraints?: string[];
+    userFacing?: boolean;
+    mutability?: 'immutable' | 'mostly_immutable' | 'mutable';
+    purpose?: string;
+    fieldGroups?: FieldGroup[];
+    privacyRules?: string[];
+    /** Stored as a JSON-encoded string in Gemini output; the converter parses it. */
+    exampleRecord?: string;
+}
+
+export interface DataModelOverview {
+    summary: string;
+    dataFlow: string;
+    productOutcome: string;
+}
+
+export interface ProductMappingEntry {
+    field: string;
+    uiBehavior: string;
 }
 
 export interface DataModelContent {
     entities: DataEntity[];
     apiEndpoints?: { method: string; path: string; description: string; entity: string }[];
+    overview?: DataModelOverview;
+    productMapping?: ProductMappingEntry[];
 }
 
 export interface ComponentItem {
