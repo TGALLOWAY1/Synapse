@@ -172,6 +172,19 @@ export default async function handler(req, res) {
   }
   if (requireOwner(req, res)) return;
 
+  // @vercel/blob reads BLOB_READ_WRITE_TOKEN from the env. Just creating a
+  // Blob store in the Vercel dashboard isn't enough — the store has to be
+  // connected to this project, which is what populates the token. Fail fast
+  // with an actionable message so the owner knows what to fix.
+  if (!process.env.BLOB_READ_WRITE_TOKEN) {
+    console.error('[snapshots] BLOB_READ_WRITE_TOKEN is not set on this deployment.');
+    return json(res, 503, {
+      error: 'blob_not_configured',
+      message:
+        'Vercel Blob is not connected to this project. In the Vercel dashboard go to Storage, then connect the Blob store to this project (this adds BLOB_READ_WRITE_TOKEN to the environment), then redeploy.',
+    });
+  }
+
   const id = typeof req.query?.id === 'string' ? req.query.id : null;
   if (id !== null && !ID_RE.test(id)) {
     return json(res, 400, { error: 'invalid_id' });
@@ -191,6 +204,17 @@ export default async function handler(req, res) {
     return await handleGetOne(id, res);
   } catch (err) {
     console.error('[snapshots]', err);
-    return json(res, 500, { error: 'internal_error', message: err?.message ?? 'unknown' });
+    const message = err?.message ?? 'unknown';
+    // Surface the most common Blob-specific failure modes with an obviously
+    // actionable hint, since the only thing the snapshot panel shows is this
+    // message.
+    if (/BLOB_READ_WRITE_TOKEN|No token found/i.test(message)) {
+      return json(res, 503, {
+        error: 'blob_not_configured',
+        message:
+          'Vercel Blob rejected the call: BLOB_READ_WRITE_TOKEN is missing or invalid. Reconnect the Blob store to this project in the Vercel dashboard and redeploy.',
+      });
+    }
+    return json(res, 500, { error: 'internal_error', message });
   }
 }
