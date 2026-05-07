@@ -8,3 +8,7 @@ export {
     type DesignSystemCompliance,
     type DesignSystemComplianceCounts,
 } from './validation';
+export {
+    selectPreferredDesignSystem,
+    selectPreferredDesignTokens,
+} from './storeSelectors';
