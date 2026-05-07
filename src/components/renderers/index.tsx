@@ -46,7 +46,7 @@ export function ArtifactContentRenderer({ subtype, content, screenImageContext }
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
-    if (subtype === 'data_model' && isJsonString(content)) {
+    if (subtype === 'data_model') {
         return <DataModelRenderer content={content} />;
     }
     if (subtype === 'component_inventory' && isJsonString(content)) {
