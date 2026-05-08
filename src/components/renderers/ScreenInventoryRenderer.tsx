@@ -1,5 +1,5 @@
-import { useEffect } from 'react';
-import { AlertTriangle, ArrowRight } from 'lucide-react';
+import { useEffect, type ReactNode } from 'react';
+import { AlertTriangle, ChevronRight, ArrowRight } from 'lucide-react';
 import type { ExitPath, ScreenItem, ScreenPriority, ScreenState } from '../../types';
 import { ScreenImageGallery, type ScreenImageGalleryContext } from './ScreenImageGallery';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
@@ -30,26 +30,16 @@ export function ScreenInventoryRenderer({ content, imageContext }: Props) {
     if (!inventory) return null;
 
     return (
-        <div className="space-y-8">
+        <div className="space-y-10">
             {inventory.sections.map((section, sectionIndex) => (
                 <section key={sectionIndex}>
-                    <header className="mb-3 flex flex-wrap items-baseline justify-between gap-2">
-                        <div>
-                            <h3 className="text-base font-semibold text-neutral-800">
-                                <span className="text-neutral-400 font-normal mr-2">{sectionIndex + 1}.</span>
-                                {section.title}
-                            </h3>
-                            {section.description && (
-                                <p className="text-xs text-neutral-500 mt-0.5">{section.description}</p>
-                            )}
-                        </div>
-                        {section.flowSummary && (
-                            <p className="text-[11px] font-mono text-neutral-500 bg-neutral-50 rounded px-2 py-1">
-                                <span className="text-neutral-400 mr-1">flow:</span>
-                                {section.flowSummary}
-                            </p>
-                        )}
-                    </header>
+                    <SectionHeader
+                        index={sectionIndex}
+                        title={section.title}
+                        description={section.description}
+                        screenCount={section.screens.length}
+                        flowSummary={section.flowSummary}
+                    />
                     <div className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {section.screens.map((screen, screenIndex) => (
                             <ScreenCard
@@ -61,6 +51,69 @@ export function ScreenInventoryRenderer({ content, imageContext }: Props) {
                     </div>
                 </section>
             ))}
+        </div>
+    );
+}
+
+function SectionHeader({
+    index,
+    title,
+    description,
+    screenCount,
+    flowSummary,
+}: {
+    index: number;
+    title: string;
+    description?: string;
+    screenCount: number;
+    flowSummary?: string;
+}) {
+    const journeySteps = parseJourney(flowSummary);
+    return (
+        <header className="mb-4 space-y-3">
+            <div>
+                <h3 className="text-base font-semibold text-neutral-800">
+                    <span className="text-neutral-400 font-normal mr-2">{index + 1}.</span>
+                    {title}
+                </h3>
+                {description && (
+                    <p className="text-xs text-neutral-500 mt-1">{description}</p>
+                )}
+                <div className="mt-1.5 text-[11px] uppercase tracking-wide text-neutral-400">
+                    {screenCount} {screenCount === 1 ? 'screen' : 'screens'}
+                </div>
+            </div>
+            {journeySteps.length > 0 && <JourneyRow steps={journeySteps} />}
+        </header>
+    );
+}
+
+function parseJourney(flowSummary?: string): string[] {
+    if (!flowSummary) return [];
+    return flowSummary
+        .split(/\s*(?:→|->|»|>)\s*/)
+        .map(s => s.trim())
+        .filter(s => s.length > 0);
+}
+
+function JourneyRow({ steps }: { steps: string[] }) {
+    return (
+        <div className="rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2">
+            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">
+                Journey
+            </div>
+            <div className="flex items-center gap-1.5 overflow-x-auto flex-nowrap sm:flex-wrap pb-0.5">
+                {steps.map((step, i) => (
+                    <div key={i} className="flex items-center gap-1.5 shrink-0">
+                        <span className="text-xs bg-white text-neutral-700 px-2 py-1 rounded-md border border-neutral-200 shadow-sm whitespace-nowrap">
+                            {step}
+                        </span>
+                        {i < steps.length - 1 && (
+                            <ChevronRight size={14} className="text-neutral-400 shrink-0" aria-hidden />
+                        )}
+                    </div>
+                ))}
+            </div>
         </div>
     );
 }
@@ -79,9 +132,12 @@ function ScreenCard({
         ? screen.priority
         : 'P1') as ScreenPriority;
 
+    const hasNavigation = (screen.entryPoints?.length ?? 0) > 0
+        || (screen.exitPaths?.length ?? 0) > 0;
+
     return (
-        <article className="bg-white rounded-lg border border-neutral-200 p-4 space-y-3">
-            <header className="flex items-center justify-between gap-2">
+        <article className="bg-white rounded-lg border border-neutral-200 p-4 space-y-3.5">
+            <header className="flex items-start justify-between gap-2">
                 <h4 className="font-semibold text-neutral-800 text-sm leading-tight">
                     {screen.name}
                 </h4>
@@ -97,56 +153,62 @@ function ScreenCard({
                 </div>
             </header>
 
-            <p className="text-xs text-neutral-700">{screen.purpose}</p>
+            {screen.purpose && (
+                <p className="text-xs leading-relaxed text-neutral-700">{screen.purpose}</p>
+            )}
 
             {screen.userIntent && (
-                <p className="text-xs italic text-neutral-500">
-                    <span className="not-italic font-medium text-neutral-600 mr-1">Intent:</span>
-                    {screen.userIntent}
-                </p>
+                <CardField label="Intent">
+                    <p className="text-xs italic text-neutral-600">{screen.userIntent}</p>
+                </CardField>
             )}
 
             {screen.states && screen.states.length > 0 && (
-                <StatesRow states={screen.states} />
+                <CardField label="States">
+                    <div className="flex flex-wrap gap-1">
+                        {screen.states.map((s, i) => (
+                            <StateChip key={i} state={s} />
+                        ))}
+                    </div>
+                </CardField>
             )}
 
-            {(screen.entryPoints?.length || screen.exitPaths?.length) ? (
-                <FlowBlock screen={screen} />
-            ) : null}
+            {hasNavigation && <NavigationBlock screen={screen} />}
 
             {ui.length > 0 && (
-                <div>
-                    <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">Core UI</div>
+                <CardField label="Core UI">
                     <div className="flex flex-wrap gap-1">
                         {ui.map((c, ci) => (
-                            <span key={ci} className="text-xs bg-neutral-100 text-neutral-600 px-1.5 py-0.5 rounded">
+                            <span
+                                key={ci}
+                                className="text-xs bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded"
+                            >
                                 {c}
                             </span>
                         ))}
                     </div>
-                </div>
+                </CardField>
             )}
 
             {screen.outputData && screen.outputData.length > 0 && (
-                <div className="text-xs">
-                    <span className="text-[10px] uppercase tracking-wide text-neutral-400 mr-1">Outputs:</span>
-                    <span className="text-neutral-600">{screen.outputData.join(' · ')}</span>
-                </div>
+                <CardField label="Outputs">
+                    <ul className="text-xs text-neutral-700 space-y-0.5">
+                        {screen.outputData.map((o, i) => (
+                            <li key={i} className="flex gap-1.5">
+                                <span className="text-neutral-300 select-none">·</span>
+                                <span>{o}</span>
+                            </li>
+                        ))}
+                    </ul>
+                </CardField>
             )}
 
             {screen.risks && screen.risks.length > 0 && (
-                <div className="rounded bg-amber-50 border border-amber-200 px-2 py-1.5 flex gap-1.5 items-start">
-                    <AlertTriangle size={12} className="text-amber-600 mt-0.5 shrink-0" />
-                    <ul className="text-xs text-amber-800 space-y-0.5">
-                        {screen.risks.map((r, ri) => <li key={ri}>{r}</li>)}
-                    </ul>
-                </div>
+                <RisksBlock risks={screen.risks} />
             )}
 
             {screen.featureRefs && screen.featureRefs.length > 0 && (
-                <div className="text-[10px] font-mono text-neutral-400">
-                    {screen.featureRefs.join(' · ')}
-                </div>
+                <LinkedFeatures refs={screen.featureRefs} />
             )}
 
             {imageContext && <ScreenImageGallery screen={screen} context={imageContext} />}
@@ -154,58 +216,131 @@ function ScreenCard({
     );
 }
 
-function StatesRow({ states }: { states: ScreenState[] }) {
+function CardField({ label, children }: { label: string; children: ReactNode }) {
     return (
         <div>
-            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">States</div>
-            <div className="flex flex-wrap gap-1">
-                {states.map((s, i) => (
-                    <span
-                        key={i}
-                        title={[s.description, s.trigger ? `Trigger: ${s.trigger}` : null, s.recoveryPath ? `Recovery: ${s.recoveryPath}` : null]
-                            .filter(Boolean).join('\n')}
-                        className="text-xs bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded border border-neutral-200"
-                    >
-                        {s.name}
-                    </span>
-                ))}
+            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">
+                {label}
+            </div>
+            {children}
+        </div>
+    );
+}
+
+function StateChip({ state }: { state: ScreenState }) {
+    const tooltip = [
+        state.description,
+        state.trigger ? `Trigger: ${state.trigger}` : null,
+        state.recoveryPath ? `Recovery: ${state.recoveryPath}` : null,
+    ].filter(Boolean).join('\n');
+    return (
+        <span
+            title={tooltip}
+            className="text-xs bg-neutral-100 text-neutral-700 px-1.5 py-0.5 rounded border border-neutral-200"
+        >
+            {state.name}
+        </span>
+    );
+}
+
+function NavigationBlock({ screen }: { screen: ScreenItem }) {
+    const entry = screen.entryPoints ?? [];
+    const exits: ExitPath[] = screen.exitPaths ?? [];
+    return (
+        <div>
+            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1.5">
+                Navigation
+            </div>
+            <div className="grid grid-cols-1 sm:grid-cols-2 gap-x-4 gap-y-2 text-xs">
+                {entry.length > 0 && (
+                    <div>
+                        <div className="text-[10px] font-medium text-neutral-500 mb-1">Entry</div>
+                        <ul className="text-neutral-700 space-y-0.5">
+                            {entry.map((e, i) => (
+                                <li key={i} className="flex gap-1.5">
+                                    <span className="text-neutral-300 select-none">·</span>
+                                    <span>{e}</span>
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
+                {exits.length > 0 && (
+                    <div>
+                        <div className="text-[10px] font-medium text-neutral-500 mb-1">Exit</div>
+                        <ul className="text-neutral-700 space-y-1">
+                            {exits.map((p, i) => (
+                                <li key={i}>
+                                    <div className="flex items-center gap-1 flex-wrap">
+                                        <span>{p.label}</span>
+                                        <ArrowRight size={10} className="text-neutral-400 shrink-0" aria-hidden />
+                                        <span className="text-neutral-700">{p.target}</span>
+                                    </div>
+                                    {p.condition && (
+                                        <div className="text-[11px] text-neutral-400 italic mt-0.5">
+                                            when {p.condition}
+                                        </div>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                )}
             </div>
         </div>
     );
 }
 
-function FlowBlock({ screen }: { screen: ScreenItem }) {
-    const entry = screen.entryPoints ?? [];
-    const exits: ExitPath[] = screen.exitPaths ?? [];
+function RisksBlock({ risks }: { risks: string[] }) {
     return (
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-            {entry.length > 0 && (
-                <div>
-                    <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">Entry</div>
-                    <ul className="text-neutral-600 space-y-0.5">
-                        {entry.map((e, i) => (
-                            <li key={i}>· {e}</li>
-                        ))}
-                    </ul>
-                </div>
-            )}
-            {exits.length > 0 && (
-                <div>
-                    <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">Exits</div>
-                    <ul className="text-neutral-600 space-y-0.5">
-                        {exits.map((p, i) => (
-                            <li key={i} className="flex items-center gap-1 flex-wrap">
-                                <span>{p.label}</span>
-                                <ArrowRight size={10} className="text-neutral-400 shrink-0" />
-                                <span className="text-neutral-700">{p.target}</span>
-                                {p.condition && (
-                                    <span className="text-neutral-400 italic">— {p.condition}</span>
-                                )}
-                            </li>
-                        ))}
-                    </ul>
-                </div>
-            )}
+        <div>
+            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-1">
+                Risks / Edge Cases
+            </div>
+            <ul className="text-xs text-amber-800 space-y-1">
+                {risks.map((r, i) => (
+                    <li key={i} className="flex gap-1.5 items-start">
+                        <AlertTriangle size={12} className="text-amber-600 mt-0.5 shrink-0" aria-hidden />
+                        <span>{r}</span>
+                    </li>
+                ))}
+            </ul>
         </div>
+    );
+}
+
+const FEATURE_REF_PATTERN = /^(f-?\d+|feat-?\d+)\b\s*[:\-—]?\s*(.*)$/i;
+
+function parseFeatureRef(ref: string): { id: string; label?: string } {
+    const trimmed = ref.trim();
+    const match = trimmed.match(FEATURE_REF_PATTERN);
+    if (match) {
+        const id = match[1];
+        const label = match[2]?.trim();
+        return { id, label: label && label.length > 0 ? label : undefined };
+    }
+    return { id: trimmed };
+}
+
+function LinkedFeatures({ refs }: { refs: string[] }) {
+    return (
+        <CardField label="Linked Features">
+            <div className="flex flex-wrap gap-1">
+                {refs.map((ref, i) => {
+                    const { id, label } = parseFeatureRef(ref);
+                    return (
+                        <span
+                            key={i}
+                            className="inline-flex items-center gap-1 text-[11px] bg-violet-50 text-violet-700 ring-1 ring-violet-200 rounded-md px-1.5 py-0.5"
+                        >
+                            <span className="font-mono font-medium">{id}</span>
+                            {label && (
+                                <span className="text-violet-600/90">{label}</span>
+                            )}
+                        </span>
+                    );
+                })}
+            </div>
+        </CardField>
     );
 }
