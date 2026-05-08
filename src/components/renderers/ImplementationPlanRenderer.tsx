@@ -17,7 +17,7 @@ import type {
 // Legacy artifacts (no fence) fall through to the original milestone-regex
 // timeline so older projects in localStorage keep rendering unchanged.
 //
-// See ImplementationPlanRenderer.BACKLOG.md for deferred features.
+// See docs/backlog/BACKLOG.md (Implementation Plan section) for deferred features.
 
 interface Props {
     content: string;

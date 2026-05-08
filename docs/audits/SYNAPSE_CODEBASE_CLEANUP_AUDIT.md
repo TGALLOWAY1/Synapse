@@ -115,7 +115,7 @@ docs/
 ├── architecture.md, artifact-flow.md, auth.md, deployment.md (current)
 ├── mockup-audit-*.md, mockup-failure-map-*.md, mockup-improvements-plan-*.md (recent)
 ├── audits/                       # this audit
-├── backlog/                      # prompt-pack-backlog + new cleanup-backlog
+├── backlog/                      # consolidated BACKLOG.md
 └── archive/                      # 3 retained v1/v2 design notes (after this pass)
 ```
 
@@ -302,7 +302,7 @@ but neither is wasteful enough to justify removal-debt now.
 | `docs/archive/{original-prd, codebase-audit-2026-03-25, codebase-assessment, expansion-plan, prd-compliance, qa-testing-guide, assessment-action-plan}.md` | Delete | Low — preserved in git history |
 | `docs/archive/README.md` | Update index to drop deleted files | Low |
 | `docs/audits/SYNAPSE_CODEBASE_CLEANUP_AUDIT.md` | New (this file) | — |
-| `docs/backlog/CODEBASE_CLEANUP_BACKLOG.md` | New (sibling) | — |
+| `docs/backlog/BACKLOG.md` | New consolidated backlog (sibling) | — |
 
 **Validation**: `npm run lint`, `npx tsc --noEmit`, `npm run build`,
 `npm test` — see commit description.
