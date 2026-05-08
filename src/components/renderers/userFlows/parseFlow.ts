@@ -1,4 +1,6 @@
-import type { ParsedErrorPath, ParsedFlow, ParsedStep } from './types';
+import type {
+    FeatureRef, FlowIssue, FlowIssueKind, ParsedErrorPath, ParsedFlow, ParsedStep,
+} from './types';
 import { categorize } from './categorize';
 
 type RawSection = {
@@ -97,6 +99,42 @@ function intersectSize(a: Set<string>, b: Set<string>): number {
     return n;
 }
 
+// Match feature reference tokens. Accepts the canonical bracketed form `[f1]`
+// / `[F-014]` and the bare form `f1` (also `F-014`). Bracketed wins; bare
+// tokens are only matched when surrounded by word boundaries so we don't
+// over-match identifiers like `fps` or `f5key`. The bracketed form is what
+// the artifact prompt encourages, so it's the primary path.
+const FEATURE_BRACKET_RE = /\[([fF]-?\d+)\]/g;
+const FEATURE_BARE_RE = /\b([fF]-?\d{1,4})\b/g;
+
+function normalizeFeatureId(token: string): string {
+    return token.toLowerCase().replace(/-/g, '');
+}
+
+function extractFeatureRefs(text: string, opts: { allowBare?: boolean } = {}): FeatureRef[] {
+    if (!text) return [];
+    const seen = new Set<string>();
+    const out: FeatureRef[] = [];
+    let m: RegExpExecArray | null;
+    FEATURE_BRACKET_RE.lastIndex = 0;
+    while ((m = FEATURE_BRACKET_RE.exec(text)) !== null) {
+        const id = normalizeFeatureId(m[1]);
+        if (seen.has(id)) continue;
+        seen.add(id);
+        out.push({ id, raw: m[0] });
+    }
+    if (opts.allowBare) {
+        FEATURE_BARE_RE.lastIndex = 0;
+        while ((m = FEATURE_BARE_RE.exec(text)) !== null) {
+            const id = normalizeFeatureId(m[1]);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            out.push({ id, raw: m[1] });
+        }
+    }
+    return out;
+}
+
 function parseStepsBlock(block: string): ParsedStep[] {
     type Raw = { rawLine: string; subs: string[] };
     const groups: Raw[] = [];
@@ -169,18 +207,19 @@ function parseStep(index: number, rawLine: string, subs: string[]): ParsedStep {
     collect(rawLine);
     for (const sub of subs) collect(sub);
 
-    // "[Screen Name] — User action → System response"  per generation prompt
+    // "[Screen Name] — User action → System response"  per generation prompt.
+    // We bias the bracket match away from feature-ref tokens like `[f1]` so
+    // those don't accidentally become the step title.
     let title: string | undefined;
     let userAction: string | undefined;
     let systemBehavior: string | undefined;
 
-    const bracket = rawLine.match(/^\s*\[(.+?)\]\s*[—-]\s*(.+)$/);
+    const bracket = rawLine.match(/^\s*\[([^\]]+?)\]\s*[—-]\s*(.+)$/);
     let actionAndSystem: string | undefined;
-    if (bracket) {
+    if (bracket && !/^[fF]-?\d+$/.test(bracket[1].trim())) {
         title = bracket[1].trim();
         actionAndSystem = bracket[2];
     } else {
-        // fall back: title = text up to the first em-dash, action = the rest
         const dashSplit = rawLine.split(/\s+[—–-]\s+/);
         if (dashSplit.length >= 2) {
             title = dashSplit[0].trim();
@@ -204,6 +243,19 @@ function parseStep(index: number, rawLine: string, subs: string[]): ParsedStep {
     if (userAction && userAction.length === 0) userAction = undefined;
     if (systemBehavior && systemBehavior.length === 0) systemBehavior = undefined;
 
+    // Feature refs: collected from every text-bearing field of the step.
+    // Bracket-form wins; we only fall through to bare matching after we've
+    // already pulled the bracketed ones out.
+    const stepText = [
+        rawLine,
+        userAction ?? '',
+        systemBehavior ?? '',
+        uiFeedback ?? '',
+        ...decisions,
+        ...errorRefs,
+    ].join('\n');
+    const featureRefs = extractFeatureRefs(stepText);
+
     return {
         index,
         rawText: rawLine,
@@ -214,6 +266,7 @@ function parseStep(index: number, rawLine: string, subs: string[]): ParsedStep {
         decisions,
         apiRefs,
         errorRefs,
+        featureRefs,
     };
 }
 
@@ -264,6 +317,36 @@ function linkErrorToStep(text: string, steps: ParsedStep[]): number | undefined 
     return bestIdx;
 }
 
+/**
+ * Classify an issue into one of the canonical kinds. The artifact prompt
+ * groups everything under `**Error Paths:**` and per-step error-bullets so
+ * we infer from wording. Order matters: more specific patterns first.
+ */
+export function classifyIssue(text: string): FlowIssueKind {
+    const t = text.toLowerCase();
+    if (/\b(unresolved|missing|undefined|not\s+found|dangling|tbd|todo)\b/.test(t)) {
+        return 'unresolved_reference';
+    }
+    if (/\b(invalid|validation|must\s+be|required|min|max|out[-\s]?of[-\s]?range|format)\b/.test(t)) {
+        return 'validation_warning';
+    }
+    if (/\b(crash|fatal|unrecoverable|outage|500|503|cannot\s+recover|hard\s+fail)\b/.test(t)) {
+        return 'failure_mode';
+    }
+    if (/\b(alternate|alternative|otherwise|else|fallback|instead|retry|backoff|secondary\s+path)\b/.test(t)) {
+        return 'alternate_path';
+    }
+    if (/\b(edge\s+case|rare|unusual|first[-\s]time|empty\s+state|offline|degraded)\b/.test(t)) {
+        return 'edge_case';
+    }
+    // Generic error/timeout/denied wording defaults to alternate path —
+    // these are usually "what happens when X goes wrong", not data corruption.
+    if (/\b(error|fail(ed|ure|s)?|timeout|denied|blocked)\b/.test(t)) {
+        return 'alternate_path';
+    }
+    return 'edge_case';
+}
+
 function parseEntryPoints(preconditions?: string): string[] {
     if (!preconditions) return [];
     const out: string[] = [];
@@ -285,6 +368,63 @@ function parseInferredSystems(steps: ParsedStep[]): string[] {
     return Array.from(seen);
 }
 
+function aggregateFeatureRefs(
+    steps: ParsedStep[],
+    extras: Array<string | undefined>,
+): FeatureRef[] {
+    const seen = new Set<string>();
+    const out: FeatureRef[] = [];
+    for (const step of steps) {
+        for (const f of step.featureRefs) {
+            if (seen.has(f.id)) continue;
+            seen.add(f.id);
+            out.push(f);
+        }
+    }
+    for (const text of extras) {
+        if (!text) continue;
+        for (const f of extractFeatureRefs(text)) {
+            if (seen.has(f.id)) continue;
+            seen.add(f.id);
+            out.push(f);
+        }
+    }
+    return out;
+}
+
+function buildIssues(
+    flow: { errorPaths: ParsedErrorPath[]; edgeCases?: string; steps: ParsedStep[] },
+): FlowIssue[] {
+    const out: FlowIssue[] = [];
+
+    // Error-paths block: classify each entry.
+    for (const e of flow.errorPaths) {
+        out.push({
+            text: e.text,
+            kind: classifyIssue(e.text),
+            linkedStepIndex: e.linkedStepIndex,
+        });
+    }
+
+    // Per-step error-flagged sub-bullets that didn't already make it into
+    // the error-paths block. We classify them too so the panel can group
+    // them alongside their flow-level siblings.
+    const seenTexts = new Set(out.map(o => o.text));
+    for (const step of flow.steps) {
+        for (const text of step.errorRefs) {
+            if (seenTexts.has(text)) continue;
+            seenTexts.add(text);
+            out.push({
+                text,
+                kind: classifyIssue(text),
+                linkedStepIndex: step.index,
+            });
+        }
+    }
+
+    return out;
+}
+
 export function parseFlows(markdown: string): ParsedFlow[] {
     const raw = splitFlows(markdown);
     return raw.map(r => {
@@ -292,6 +432,10 @@ export function parseFlows(markdown: string): ParsedFlow[] {
         const errorPaths = r.errorPaths ? parseErrorPaths(r.errorPaths, steps) : [];
         const inferredEntryPoints = parseEntryPoints(r.preconditions);
         const inferredSystems = parseInferredSystems(steps);
+        const issues = buildIssues({ errorPaths, edgeCases: r.edgeCases, steps });
+        const featureRefs = aggregateFeatureRefs(steps, [
+            r.goal, r.preconditions, r.successOutcome, r.edgeCases,
+        ]);
         return {
             title: r.title,
             category: categorize(r.title, r.goal),
@@ -302,8 +446,14 @@ export function parseFlows(markdown: string): ParsedFlow[] {
             rest: r.rest,
             steps,
             errorPaths,
+            issues,
             inferredEntryPoints,
             inferredSystems,
+            featureRefs,
         };
     });
 }
+
+// Re-exported for tests + components that need to render arbitrary text
+// with feature chips substituted.
+export { extractFeatureRefs };

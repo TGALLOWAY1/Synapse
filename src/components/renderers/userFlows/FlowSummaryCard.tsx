@@ -1,88 +1,191 @@
-import { AlertCircle, GitBranch, ListChecks, Server, Sparkles, Target, Zap } from 'lucide-react';
-import type { ParsedFlow } from './types';
+import { type ReactNode } from 'react';
+import {
+    Bookmark, Clock, DoorOpen, GitBranch, ListChecks, MoreHorizontal, Server,
+    Share2, ShieldCheck, Sparkles, Target,
+} from 'lucide-react';
+import type { Feature } from '../../../types';
+import type { FeatureRef, ParsedFlow } from './types';
 import { inlineMd } from './markdown';
+import { inlineWithFeatures } from './inlineWithFeatures';
 
 interface Props {
     flow: ParsedFlow;
     index: number;
+    timeToValue: string | null;
+    featuresById?: Map<string, Feature>;
+    onSelectFeature: (refToken: FeatureRef) => void;
 }
 
-function inferTimeToValue(flow: ParsedFlow): string | null {
-    const sources = [flow.goal, flow.successOutcome, flow.preconditions, ...flow.steps.map(s => s.rawText)]
-        .filter((s): s is string => Boolean(s))
-        .join('\n');
-    const m = sources.match(/<\s*(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\b/i)
-        ?? sources.match(/\b(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\b/i);
-    if (!m) return null;
-    return `< ${m[1]}${m[2]}`;
+function MetadataChip({
+    icon, label, tone,
+}: { icon: ReactNode; label: string; tone?: 'neutral' | 'amber' | 'emerald' }) {
+    const palette = tone === 'amber'
+        ? 'bg-amber-50 border-amber-200 text-amber-800'
+        : tone === 'emerald'
+            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
+            : 'bg-neutral-50 border-neutral-200 text-neutral-700';
+    return (
+        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${palette}`}>
+            {icon}
+            <span>{label}</span>
+        </span>
+    );
 }
 
-export function FlowSummaryCard({ flow, index }: Props) {
-    const errorCount = flow.errorPaths.length;
+function FullWidthSection({
+    title, accent, icon, children,
+}: { title: string; accent: 'emerald' | 'indigo' | 'amber' | 'neutral'; icon: ReactNode; children: ReactNode }) {
+    const palette = {
+        emerald: 'border-emerald-100 bg-emerald-50/40',
+        indigo: 'border-indigo-100 bg-indigo-50/40',
+        amber: 'border-amber-100 bg-amber-50/40',
+        neutral: 'border-neutral-200 bg-neutral-50/60',
+    }[accent];
+    const headColor = {
+        emerald: 'text-emerald-700',
+        indigo: 'text-indigo-700',
+        amber: 'text-amber-700',
+        neutral: 'text-neutral-600',
+    }[accent];
+    return (
+        <section className={`rounded-lg border ${palette} p-3.5`}>
+            <p className={`text-[10px] font-semibold uppercase tracking-wider mb-1.5 inline-flex items-center gap-1 ${headColor}`}>
+                {icon} {title}
+            </p>
+            <div className="text-sm text-neutral-800 leading-relaxed">{children}</div>
+        </section>
+    );
+}
+
+function HalfSection({
+    title, icon, children,
+}: { title: string; icon: ReactNode; children: ReactNode }) {
+    return (
+        <section className="rounded-lg border border-neutral-200 bg-white p-3.5">
+            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5 inline-flex items-center gap-1">
+                {icon} {title}
+            </p>
+            <div className="text-sm text-neutral-700 leading-relaxed">{children}</div>
+        </section>
+    );
+}
+
+export function FlowSummaryCard({
+    flow, index, timeToValue, featuresById, onSelectFeature,
+}: Props) {
     const stepCount = flow.steps.length;
-    const ttv = inferTimeToValue(flow);
+    const altPaths = flow.issues.filter(i => i.kind === 'alternate_path' || i.kind === 'failure_mode').length;
+    const renderText = (text: string) =>
+        inlineWithFeatures(text, { featuresById, onSelectFeature });
 
     return (
         <section className="bg-white rounded-xl border border-neutral-200 p-5 mb-4">
-            <header className="flex items-start gap-3 pb-3 mb-3 border-b border-neutral-100">
-                <div className="shrink-0 inline-flex items-center justify-center w-8 h-8 rounded-md bg-indigo-50 text-indigo-600">
-                    <GitBranch size={16} />
+            <header className="flex items-start gap-3 pb-3 mb-4 border-b border-neutral-100">
+                <div className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-md bg-indigo-50 text-indigo-600">
+                    <GitBranch size={18} />
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600">
                             Flow {index + 1}
                         </p>
-                        <span className="text-[10px] px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-medium">
+                        <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-medium border border-indigo-100">
                             {flow.category}
                         </span>
                     </div>
-                    <h3 className="text-base font-bold text-neutral-900 leading-snug mt-0.5">
+                    <h3 className="text-base font-bold text-neutral-900 leading-snug mt-1">
                         {flow.title}
                     </h3>
+                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
+                        <MetadataChip
+                            icon={<ListChecks size={11} />}
+                            label={`${stepCount} ${stepCount === 1 ? 'step' : 'steps'}`}
+                        />
+                        {altPaths > 0 && (
+                            <MetadataChip
+                                icon={<GitBranch size={11} />}
+                                label={`${altPaths} alternate ${altPaths === 1 ? 'path' : 'paths'}`}
+                                tone="amber"
+                            />
+                        )}
+                        {timeToValue && (
+                            <MetadataChip
+                                icon={<Clock size={11} />}
+                                label={`${timeToValue} to value`}
+                                tone="emerald"
+                            />
+                        )}
+                    </div>
+                </div>
+                <div className="hidden sm:flex items-center gap-1 shrink-0">
+                    <button
+                        type="button"
+                        title="Bookmark flow"
+                        aria-label="Bookmark flow"
+                        className="p-1.5 rounded hover:bg-neutral-100 text-neutral-500"
+                    >
+                        <Bookmark size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        title="Share flow"
+                        aria-label="Share flow"
+                        className="p-1.5 rounded hover:bg-neutral-100 text-neutral-500"
+                    >
+                        <Share2 size={14} />
+                    </button>
+                    <button
+                        type="button"
+                        title="More actions"
+                        aria-label="More actions"
+                        className="p-1.5 rounded hover:bg-neutral-100 text-neutral-500"
+                    >
+                        <MoreHorizontal size={14} />
+                    </button>
                 </div>
             </header>
 
-            <dl className="grid grid-cols-1 sm:grid-cols-2 gap-x-6 gap-y-3 text-sm">
+            <div className="space-y-3">
                 {flow.goal && (
-                    <div className="flex items-start gap-2 sm:col-span-2">
-                        <Target size={14} className="shrink-0 mt-0.5 text-emerald-600" />
-                        <div className="min-w-0">
-                            <dt className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
-                                Goal
-                            </dt>
-                            <dd className="text-neutral-800">{inlineMd(flow.goal)}</dd>
-                        </div>
+                    <FullWidthSection title="Goal" accent="emerald" icon={<Target size={11} />}>
+                        {renderText(flow.goal)}
+                    </FullWidthSection>
+                )}
+
+                {(flow.preconditions || flow.inferredEntryPoints.length > 0) && (
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+                        {flow.preconditions && (
+                            <HalfSection title="Preconditions" icon={<ShieldCheck size={11} />}>
+                                {renderText(flow.preconditions)}
+                            </HalfSection>
+                        )}
+                        {flow.inferredEntryPoints.length > 0 && (
+                            <HalfSection title="Entry points" icon={<DoorOpen size={11} />}>
+                                <ul className="space-y-1">
+                                    {flow.inferredEntryPoints.slice(0, 5).map((ep, i) => (
+                                        <li key={i} className="flex gap-2">
+                                            <span className="text-neutral-400">•</span>
+                                            <span className="min-w-0 flex-1">{renderText(ep)}</span>
+                                        </li>
+                                    ))}
+                                </ul>
+                            </HalfSection>
+                        )}
                     </div>
                 )}
-                {flow.preconditions && (
-                    <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                            Preconditions
-                        </dt>
-                        <dd className="text-neutral-700">{inlineMd(flow.preconditions)}</dd>
-                    </div>
+
+                {flow.successOutcome && (
+                    <FullWidthSection title="Success outcome" accent="emerald" icon={<Sparkles size={11} />}>
+                        {renderText(flow.successOutcome)}
+                    </FullWidthSection>
                 )}
-                {flow.inferredEntryPoints.length > 0 && (
-                    <div>
-                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500">
-                            Entry points
-                        </dt>
-                        <dd className="text-neutral-700">
-                            <ul className="list-disc list-inside">
-                                {flow.inferredEntryPoints.slice(0, 4).map((ep, i) => (
-                                    <li key={i}>{inlineMd(ep)}</li>
-                                ))}
-                            </ul>
-                        </dd>
-                    </div>
-                )}
+
                 {flow.inferredSystems.length > 0 && (
-                    <div className="sm:col-span-2">
-                        <dt className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 flex items-center gap-1">
+                    <section className="rounded-lg border border-neutral-200 bg-white p-3.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5 inline-flex items-center gap-1">
                             <Server size={11} /> Core systems / dependencies
-                        </dt>
-                        <dd className="mt-1 flex flex-wrap gap-1">
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
                             {flow.inferredSystems.map((s, i) => (
                                 <code
                                     key={i}
@@ -91,41 +194,48 @@ export function FlowSummaryCard({ flow, index }: Props) {
                                     {s}
                                 </code>
                             ))}
-                        </dd>
-                    </div>
-                )}
-                {flow.successOutcome && (
-                    <div className="flex items-start gap-2 sm:col-span-2">
-                        <Sparkles size={14} className="shrink-0 mt-0.5 text-emerald-600" />
-                        <div className="min-w-0">
-                            <dt className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700">
-                                Success outcome
-                            </dt>
-                            <dd className="text-neutral-800">{inlineMd(flow.successOutcome)}</dd>
                         </div>
-                    </div>
+                    </section>
                 )}
-            </dl>
 
-            <div className="flex flex-wrap gap-3 mt-4 pt-3 border-t border-neutral-100 text-xs">
-                <span className="inline-flex items-center gap-1 text-neutral-600">
-                    <ListChecks size={12} />
-                    <strong className="font-semibold text-neutral-800">{stepCount}</strong> steps
-                </span>
-                <span className="inline-flex items-center gap-1 text-neutral-600">
-                    <AlertCircle size={12} className={errorCount > 0 ? 'text-red-500' : ''} />
-                    <strong className={`font-semibold ${errorCount > 0 ? 'text-red-700' : 'text-neutral-800'}`}>
-                        {errorCount}
-                    </strong>{' '}
-                    error paths
-                </span>
-                {ttv && (
-                    <span className="inline-flex items-center gap-1 text-neutral-600">
-                        <Zap size={12} className="text-amber-500" />
-                        <strong className="font-semibold text-neutral-800">{ttv}</strong> to value
-                    </span>
+                {/* Aggregate feature refs (if any) appear as quick-access chips */}
+                {flow.featureRefs.length > 0 && (
+                    <section className="rounded-lg border border-neutral-200 bg-white p-3.5">
+                        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">
+                            Referenced features
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                            {flow.featureRefs.map(ref => {
+                                const feature = featuresById?.get(ref.id);
+                                const id = feature?.id ?? ref.id.toUpperCase();
+                                const name = feature?.name;
+                                return (
+                                    <button
+                                        key={ref.id}
+                                        type="button"
+                                        onClick={() => onSelectFeature(ref)}
+                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-fuchsia-50 hover:bg-fuchsia-100 border border-fuchsia-200 text-fuchsia-700 text-[11px] font-semibold transition-colors"
+                                    >
+                                        <span className="font-mono uppercase">{id}</span>
+                                        {name && (
+                                            <span className="font-medium normal-case text-fuchsia-800">
+                                                {name}
+                                            </span>
+                                        )}
+                                    </button>
+                                );
+                            })}
+                        </div>
+                    </section>
                 )}
             </div>
+
+            {/* Light-touch fallback if structured data is empty: keep the raw goal markdown readable */}
+            {!flow.goal && !flow.successOutcome && flow.rest && (
+                <div className="mt-4 prose prose-sm prose-neutral max-w-none">
+                    {inlineMd(flow.rest)}
+                </div>
+            )}
         </section>
     );
 }

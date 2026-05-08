@@ -282,7 +282,11 @@ export function ArtifactWorkspace({
                     screenImageContext={screenImageContext}
                     metadata={preferred.metadata}
                     projectId={projectId}
-                    features={subtype === 'prompt_pack' ? structuredPRD.features : undefined}
+                    features={
+                        subtype === 'prompt_pack' || subtype === 'user_flows'
+                            ? structuredPRD.features
+                            : undefined
+                    }
                     promptEdits={promptEdits}
                     onUpdatePromptEdits={handleUpdatePromptEdits}
                 />

@@ -27,7 +27,7 @@ interface DispatchProps {
      * when absent.
      */
     projectId?: string;
-    /** Only consumed by `prompt_pack`; supplies the canonical feature list for ID resolution. */
+    /** Consumed by `prompt_pack` and `user_flows` for canonical feature ID resolution. */
     features?: Feature[];
     /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
     promptEdits?: Record<number, string>;
@@ -83,7 +83,7 @@ export function ArtifactContentRenderer({
         return <DesignSystemRenderer content={content} metadata={metadata} projectId={projectId} />;
     }
     if (subtype === 'user_flows') {
-        return <UserFlowsRenderer content={content} />;
+        return <UserFlowsRenderer content={content} features={features} />;
     }
     if (subtype === 'implementation_plan') {
         return <ImplementationPlanRenderer content={content} />;
