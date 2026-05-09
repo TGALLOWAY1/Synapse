@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 
 const DEFAULT_FAST_MODEL = 'gemini-3-flash-preview';
@@ -100,6 +100,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('OPENAI_API_KEY') || '');
     const [fastModel, setFastModel] = useState(() => localStorage.getItem('GEMINI_FAST_MODEL') || DEFAULT_FAST_MODEL);
     const [strongModel, setStrongModel] = useState(() => localStorage.getItem('GEMINI_STRONG_MODEL') || DEFAULT_STRONG_MODEL);
+    const [githubToken, setGithubToken] = useState(() => localStorage.getItem('GITHUB_TOKEN') || '');
+    const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem('GITHUB_DEFAULT_REPO') || '');
 
     // Expand the legacy section automatically if the user is currently on a
     // legacy model — otherwise keep it collapsed to reduce visual noise.
@@ -125,6 +127,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
             localStorage.setItem('OPENAI_API_KEY', trimmedOpenai);
         } else {
             localStorage.removeItem('OPENAI_API_KEY');
+        }
+        const trimmedGithubToken = githubToken.trim();
+        if (trimmedGithubToken) {
+            localStorage.setItem('GITHUB_TOKEN', trimmedGithubToken);
+        } else {
+            localStorage.removeItem('GITHUB_TOKEN');
+        }
+        const trimmedGithubRepo = githubRepo.trim();
+        if (trimmedGithubRepo) {
+            localStorage.setItem('GITHUB_DEFAULT_REPO', trimmedGithubRepo);
+        } else {
+            localStorage.removeItem('GITHUB_DEFAULT_REPO');
         }
         onClose();
     };
@@ -239,6 +253,44 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             Adds an "AI Image" tab to each mockup screen, powered by OpenAI <code className="text-neutral-400">gpt-image-2</code>.
                             Click to generate a low-quality draft image; if you like it, regenerate at high quality.
                             Your key is stored locally in your browser and never leaves your machine.
+                        </p>
+                    </div>
+
+                    {/* Integrations — credentials for task export targets */}
+                    <div className="space-y-3">
+                        <div className="flex items-center justify-between">
+                            <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
+                                <Github size={14} className="text-indigo-400" />
+                                GitHub Integration
+                                <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
+                            </label>
+                            <a
+                                href="https://github.com/settings/tokens?type=beta"
+                                target="_blank"
+                                rel="noreferrer"
+                                className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
+                            >
+                                Create Token <ExternalLink size={10} />
+                            </a>
+                        </div>
+                        <input
+                            type="password"
+                            value={githubToken}
+                            onChange={(e) => setGithubToken(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
+                            placeholder="ghp_... or github_pat_..."
+                        />
+                        <input
+                            type="text"
+                            value={githubRepo}
+                            onChange={(e) => setGithubRepo(e.target.value)}
+                            className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
+                            placeholder="owner/repo (default destination for exported tasks)"
+                        />
+                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
+                            Used by <strong>Convert to Tasks</strong> on the Implementation Plan artifact to create
+                            real GitHub issues. Token needs <code className="text-neutral-400">issues:write</code>
+                            scope on the target repo. Stored locally in your browser only.
                         </p>
                     </div>
 

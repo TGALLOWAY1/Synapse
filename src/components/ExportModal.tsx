@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { Download, X, FileText, Package } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
+import { downloadFile } from '../lib/utils/downloadFile';
 
 interface ExportModalProps {
     projectId: string;
@@ -15,16 +16,6 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const latestSpine = getLatestSpine(projectId);
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
-
-    const downloadFile = (content: string, filename: string, mimeType: string = 'text/markdown') => {
-        const blob = new Blob([content], { type: mimeType });
-        const url = URL.createObjectURL(blob);
-        const a = document.createElement('a');
-        a.href = url;
-        a.download = filename;
-        a.click();
-        URL.revokeObjectURL(url);
-    };
 
     const exportPRD = () => {
         if (!latestSpine) return;
