@@ -2,7 +2,8 @@
 // IDB, no Zustand — just prompt assembly and size selection so the wiring
 // store can stay thin.
 
-import type { MockupPayload, MockupScreen, MockupSettings, MockupPlatform } from '../../types';
+import type { DesignTokens, MockupPayload, MockupScreen, MockupSettings, MockupPlatform } from '../../types';
+import { tokensToImagePromptBrief } from '../designTokens';
 
 const FIDELITY_STYLE_HINTS: Record<string, string> = {
     low: 'low-fidelity wireframe sketch, neutral grey palette, simple boxes and labels, hand-drawn feel',
@@ -31,11 +32,18 @@ export const pickImageSize = (platform: MockupPlatform): string => {
  * Build the natural-language prompt sent to gpt-image-2 for a single screen.
  * Grounded in the mockup payload + per-screen purpose so the resulting image
  * tracks what the HTML pipeline already committed to.
+ *
+ * When `designTokens` is provided, prepends a compact design-system brief
+ * (palette, typography, radius, primary-action color) that the image model
+ * uses to keep the rendered screen consistent with the project's design
+ * system. Tokens are optional: when absent, behavior matches the legacy
+ * pipeline.
  */
 export const buildScreenImagePrompt = (
     payload: MockupPayload,
     screen: MockupScreen,
     settings: MockupSettings,
+    designTokens?: DesignTokens,
 ): string => {
     const styleHint = FIDELITY_STYLE_HINTS[settings.fidelity] ?? FIDELITY_STYLE_HINTS.mid;
     const platformHint =
@@ -45,13 +53,16 @@ export const buildScreenImagePrompt = (
 
     const userStyle = settings.style?.trim();
     const styleSuffix = userStyle ? ` Visual direction: ${userStyle}.` : '';
+    const tokenBrief = designTokens
+        ? ` ${tokensToImagePromptBrief(designTokens)}`
+        : '';
 
     return [
         `UI mockup of "${screen.name}" for the product "${payload.title}".`,
         `Screen purpose: ${screen.purpose}`,
         `Product context: ${payload.summary}`,
         `Render as a ${platformHint}.`,
-        `Style: ${styleHint}.${styleSuffix}`,
+        `Style: ${styleHint}.${styleSuffix}${tokenBrief}`,
         `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,
         `No watermarks, no logos of real companies, no photographic people.`,
     ].join(' ');

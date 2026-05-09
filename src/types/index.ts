@@ -300,18 +300,58 @@ export type SpineVersion = {
 
 // --- Structured Artifact Content Types ---
 
-export interface ScreenItem {
+export type ScreenPriority = 'P0' | 'P1' | 'P2' | 'P3';
+export type LegacyScreenPriority = 'core' | 'secondary' | 'supporting';
+export type ScreenType = 'screen' | 'modal' | 'overlay' | 'system-state';
+
+export interface ScreenState {
     name: string;
+    description: string;
+    trigger?: string;
+    recoveryPath?: string;
+}
+
+export interface ExitPath {
+    label: string;
+    target: string;
+    condition?: string;
+}
+
+export interface ScreenItem {
+    id?: string;
+    name: string;
+    type?: ScreenType;
+    priority: ScreenPriority | LegacyScreenPriority;
     purpose: string;
-    components: string[];
+    userIntent?: string;
+    states?: ScreenState[];
+    entryPoints?: string[];
+    exitPaths?: ExitPath[];
+    coreUIElements?: string[];
+    // Legacy alias kept readable for old artifacts; new generations
+    // populate `coreUIElements`.
+    components?: string[];
+    outputData?: string[];
+    risks?: string[];
+    featureRefs?: string[];
+    // Legacy navigation fields, retained so persisted localStorage data
+    // still satisfies the type without rewrites.
     navigationFrom?: string[];
     navigationTo?: string[];
-    priority: 'core' | 'secondary' | 'supporting';
-    featureRefs?: string[];
+}
+
+export interface ScreenInventorySection {
+    title: string;
+    description?: string;
+    flowSummary?: string;
+    screens: ScreenItem[];
 }
 
 export interface ScreenInventoryContent {
-    groups: { name: string; screens: ScreenItem[] }[];
+    sections: ScreenInventorySection[];
+    // Legacy shape: pre-upgrade artifacts emitted `groups`. The renderer
+    // and orchestration layers normalize this to `sections` on read.
+    groups?: { name: string; screens: ScreenItem[] }[];
 }
 
 export interface DataField {
@@ -327,6 +367,18 @@ export interface DataRelationship {
     description?: string;
 }
 
+export type FieldGroupName =
+    | 'Key Product Fields'
+    | 'Relationships'
+    | 'System Metadata'
+    | 'API / Integration'
+    | 'Privacy / Safety';
+
+export interface FieldGroup {
+    name: FieldGroupName;
+    fieldNames: string[];
+}
+
 export interface DataEntity {
     name: string;
     description: string;
@@ -334,11 +386,31 @@ export interface DataEntity {
     relationships: DataRelationship[];
     indexes?: string[];
     constraints?: string[];
+    userFacing?: boolean;
+    mutability?: 'immutable' | 'mostly_immutable' | 'mutable';
+    purpose?: string;
+    fieldGroups?: FieldGroup[];
+    privacyRules?: string[];
+    /** Stored as a JSON-encoded string in Gemini output; the converter parses it. */
+    exampleRecord?: string;
+}
+
+export interface DataModelOverview {
+    summary: string;
+    dataFlow: string;
+    productOutcome: string;
+}
+
+export interface ProductMappingEntry {
+    field: string;
+    uiBehavior: string;
 }
 
 export interface DataModelContent {
     entities: DataEntity[];
     apiEndpoints?: { method: string; path: string; description: string; entity: string }[];
+    overview?: DataModelOverview;
+    productMapping?: ProductMappingEntry[];
 }
 
 export interface ComponentItem {
@@ -352,6 +424,91 @@ export interface ComponentItem {
 
 export interface ComponentInventoryContent {
     categories: { name: string; components: ComponentItem[] }[];
+}
+
+// --- Design System Tokens ---
+//
+// The Design System Starter artifact emits a structured token contract
+// alongside its rendered markdown. Tokens flow downstream into mockup
+// generation prompts and the HTML mockup iframe (as CSS variables) so
+// generated mockups respect the project's actual design intent rather
+// than the hard-coded Tailwind palette baked into the mockup prompt.
+//
+// Token values are stored on `ArtifactVersion.metadata.tokens` and a
+// canonical hash on `metadata.tokensHash`. Backwards-compatible: legacy
+// projects without these fields fall back to markdown parsing.
+
+export type DesignColorToken = string; // hex (#RRGGBB)
+
+export interface DesignTypographyToken {
+    font: string;
+    size: number;          // px
+    weight: number;        // 100..900
+    lineHeight: number;    // unitless multiplier (1.5 = 150%)
+    letterSpacing?: number; // px
+}
+
+export interface DesignComponentToken {
+    background?: string;   // token reference (e.g. "surface.card") or hex
+    text?: string;
+    border?: string;
+    radius?: string;       // token reference (e.g. "md") or px
+    padding?: string;      // tokenized shorthand (e.g. "sm md")
+    notes?: string;
+}
+
+export interface DesignTokens {
+    version: 1;
+    colors: Record<string, DesignColorToken>;             // dot-paths e.g. "brand.primary"
+    typography: Record<string, DesignTypographyToken>;    // dot-paths e.g. "heading.lg"
+    spacing: Record<string, number>;                      // px
+    radius: Record<string, number>;                       // px
+    components: Record<string, DesignComponentToken>;     // dot-paths e.g. "button.primary"
+    rules: string[];                                      // human-readable usage rules
+}
+
+// --- Implementation Plan (structured) ---
+
+export type TaskStatus = 'todo' | 'in_progress' | 'done' | 'blocked';
+
+export interface LinkedArtifacts {
+    prd?: string[];
+    dataModel?: string[];
+    mockups?: string[];
+}
+
+export interface ImplementationPlanTask {
+    id: string;
+    title: string;
+    description?: string;
+    status: TaskStatus;
+    dependencies?: string[];
+    linkedArtifacts?: LinkedArtifacts;
+}
+
+export interface ImplementationPlanMilestone {
+    id: string;
+    name: string;
+    timeframe?: string;
+    goal?: string;
+    tasks: ImplementationPlanTask[];
+}
+
+export interface RiskItem {
+    description: string;
+    mitigation?: string;
+}
+
+export interface StructuredImplementationPlan {
+    overview?: {
+        summary?: string;
+        criticalPath?: string;
+        teamSize?: string;
+    };
+    milestones: ImplementationPlanMilestone[];
+    architecture?: string[];
+    risks?: RiskItem[];
+    definitionOfDone?: string[];
 }
 
 // --- Artifact System ---

@@ -1,27 +1,54 @@
 /**
  * Pure parser for `implementation_plan` artifact markdown.
  *
- * The markdown shape is determined by the system prompt in
- * `coreArtifactService.ts`:
+ * Two on-disk shapes are supported:
  *
- *   ### Milestone N: Title (Week X-Y)
- *   **Goal:** ...
- *   **Key Deliverables:**
- *   - [ ] Item one
- *   - [ ] Item two
- *   **Technical Approach:** ...
- *   **Dependencies:** ...
- *   **Risks:** ...
- *   **Definition of Done:** ...
- *   ---
- *   ## Critical Path Summary
- *   ...
+ * 1. **Structured (current)** — the artifact body ends with a
+ *    ` ```json synapse-plan ` fenced block holding a
+ *    `StructuredImplementationPlan`. `extractStructuredPlan` returns it
+ *    when present; both the renderer and task extractor prefer this
+ *    path because the data is already typed.
+ * 2. **Legacy markdown** — older artifacts (and the markdown rendered
+ *    above the fence even on new artifacts) use the milestone heading
+ *    convention from `coreArtifactService.ts`:
  *
- * The renderer at `src/components/renderers/ImplementationPlanRenderer.tsx`
- * imports these helpers; the task-extractor at
- * `src/lib/services/taskExtractor.ts` does too — so any change in plan
- * shape is handled in one place.
+ *      ### Milestone N: Title (Week X-Y)
+ *      **Goal:** ...
+ *      **Key Deliverables:**
+ *      - [ ] Item one
+ *      **Technical Approach:** ...
+ *      **Dependencies:** ...
+ *      **Risks:** ...
+ *      **Definition of Done:** ...
+ *      ---
+ *      ## Critical Path Summary
+ *
+ * `parseImplementationPlan` parses that shape; `parseMilestoneBody`
+ * splits a single milestone body into labeled sections + checkbox
+ * deliverables.
  */
+
+import type { StructuredImplementationPlan } from '../../types';
+
+const STRUCTURED_FENCE = /```json\s+synapse-plan\s*\n([\s\S]*?)\n```/;
+
+/**
+ * Returns the structured plan from the trailing JSON fence, or `null` if
+ * the artifact doesn't have one (legacy markdown-only).
+ */
+export function extractStructuredPlan(
+    markdown: string,
+): StructuredImplementationPlan | null {
+    const match = markdown.match(STRUCTURED_FENCE);
+    if (!match) return null;
+    try {
+        const parsed = JSON.parse(match[1]) as StructuredImplementationPlan;
+        if (!Array.isArray(parsed?.milestones)) return null;
+        return parsed;
+    } catch {
+        return null;
+    }
+}
 
 export interface ParsedDeliverable {
     text: string;

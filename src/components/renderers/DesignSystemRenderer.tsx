@@ -1,30 +1,441 @@
 import { useMemo } from 'react';
+import { useShallow } from 'zustand/react/shallow';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
+import { AlertTriangle, CheckCircle2 } from 'lucide-react';
+import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
+import { useProjectStore } from '../../store/projectStore';
+import { hashDesignTokens } from '../../lib/designTokens';
 import { SectionTabs, type SectionTabItem } from '../SectionTabs';
 
-// Render a `design_system` artifact with first-class visual tokens:
-//  • inline color swatches for every hex code
-//  • a "live preview" cell next to each typography table row
-//  • horizontal bars for spacing-scale list items
+// Render a `design_system` artifact. The renderer prefers a structured
+// token contract on `metadata.tokens` (new generations) and falls back
+// to regex-parsing the legacy markdown body when tokens aren't present
+// (older projects in localStorage).
 //
-// We don't change the artifact schema — the artifact is still markdown.
-// Instead we split the markdown on `### ` boundaries and dispatch each
-// section to a specialty sub-renderer where it pays off, then fall
-// back to ReactMarkdown for everything else with a small text-level
-// enhancement that turns standalone `#RRGGBB` tokens into swatches.
+// New token-aware sections (when metadata.tokens is present):
+//   1. Token Summary (counts + tokensHash badge)
+//   2. Color Tokens (grouped by namespace)
+//   3. Typography Tokens (live previews)
+//   4. Spacing + Radius (proportional bars)
+//   5. Component Tokens (recipe cards)
+//   6. Usage Rules (verbatim from tokens.rules)
+//   7. Downstream Usage Status (mockup / HTML mockup / component_inventory)
+//
+// Legacy markdown rendering preserved unchanged for back-compat.
 
 interface Props {
     content: string;
+    metadata?: Record<string, unknown>;
+    projectId?: string;
 }
+
+export function DesignSystemRenderer({ content, metadata, projectId }: Props) {
+    const tokens = useTokensFromMetadata(metadata);
+    if (tokens) {
+        return <TokenizedDesignSystem tokens={tokens} projectId={projectId} />;
+    }
+    return <LegacyMarkdownDesignSystem content={content} />;
+}
+
+// ─── Token extraction ──────────────────────────────────────────────────────
+
+function useTokensFromMetadata(metadata: Record<string, unknown> | undefined): DesignTokens | null {
+    return useMemo(() => {
+        if (!metadata) return null;
+        const raw = metadata.tokens;
+        if (!raw || typeof raw !== 'object') return null;
+        // Trust normalized tokens; the generator runs them through
+        // normalizeDesignTokens before persisting. Cast is safe at this
+        // boundary; a defensive normalize is unnecessary cost.
+        return raw as DesignTokens;
+    }, [metadata]);
+}
+
+// ─── Tokenized renderer ───────────────────────────────────────────────────
+
+function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; projectId?: string }) {
+    const tabs: SectionTabItem[] = [
+        { id: 'ds-summary', label: 'Summary' },
+        { id: 'ds-colors', label: 'Colors' },
+        { id: 'ds-typography', label: 'Typography' },
+        { id: 'ds-spacing', label: 'Spacing & Radius' },
+        { id: 'ds-components', label: 'Components' },
+        { id: 'ds-rules', label: 'Rules' },
+        { id: 'ds-downstream', label: 'Downstream' },
+    ];
+
+    return (
+        <div className="space-y-6">
+            <SectionTabs items={tabs} />
+
+            <Section id="ds-summary" title="Token Summary">
+                <TokenSummary tokens={tokens} />
+            </Section>
+
+            <Section id="ds-colors" title="Color Tokens">
+                <ColorTokens tokens={tokens} />
+            </Section>
+
+            <Section id="ds-typography" title="Typography Tokens">
+                <TypographyTokens tokens={tokens} />
+            </Section>
+
+            <Section id="ds-spacing" title="Spacing & Radius">
+                <SpacingAndRadius tokens={tokens} />
+            </Section>
+
+            <Section id="ds-components" title="Component Tokens">
+                <ComponentTokens tokens={tokens} />
+            </Section>
+
+            <Section id="ds-rules" title="Usage Rules">
+                <UsageRules tokens={tokens} />
+            </Section>
+
+            <Section id="ds-downstream" title="Downstream Usage">
+                <DownstreamUsage projectId={projectId} />
+            </Section>
+        </div>
+    );
+}
+
+function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
+    return (
+        <section id={id} className="scroll-mt-24">
+            <h3 className="text-base font-bold text-neutral-900 mb-3 pb-2 border-b border-neutral-200">
+                {title}
+            </h3>
+            {children}
+        </section>
+    );
+}
+
+function TokenSummary({ tokens }: { tokens: DesignTokens }) {
+    const hash = useMemo(() => hashDesignTokens(tokens), [tokens]);
+    const counts = [
+        { label: 'Colors', value: Object.keys(tokens.colors).length },
+        { label: 'Typography roles', value: Object.keys(tokens.typography).length },
+        { label: 'Spacing slots', value: Object.keys(tokens.spacing).length },
+        { label: 'Radius slots', value: Object.keys(tokens.radius).length },
+        { label: 'Components', value: Object.keys(tokens.components).length },
+        { label: 'Rules', value: tokens.rules.length },
+    ];
+    return (
+        <div className="space-y-3">
+            <div className="flex flex-wrap gap-2">
+                {counts.map(c => (
+                    <span
+                        key={c.label}
+                        className="text-[11px] uppercase tracking-wider px-2.5 py-1 rounded-md border border-neutral-200 bg-neutral-50 text-neutral-600 font-medium"
+                    >
+                        {c.value} {c.label}
+                    </span>
+                ))}
+            </div>
+            <div className="flex items-center gap-2 text-xs text-neutral-500">
+                <span>Token hash:</span>
+                <code className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-neutral-100 border border-neutral-200 text-neutral-700">
+                    {hash}
+                </code>
+                <span className="text-neutral-400">— used to detect downstream staleness when tokens change.</span>
+            </div>
+        </div>
+    );
+}
+
+// ─── Color Tokens ─────────────────────────────────────────────────────────
+
+const NAMESPACE_LABEL: Record<string, string> = {
+    brand: 'Brand',
+    text: 'Text',
+    surface: 'Surface',
+    border: 'Border',
+    state: 'State',
+    accent: 'Accent',
+};
+
+function ColorTokens({ tokens }: { tokens: DesignTokens }) {
+    const grouped = useMemo(() => {
+        const out: Record<string, [string, string][]> = {};
+        for (const [name, hex] of Object.entries(tokens.colors)) {
+            const ns = name.split('.')[0] || 'other';
+            if (!out[ns]) out[ns] = [];
+            out[ns].push([name, hex]);
+        }
+        return out;
+    }, [tokens.colors]);
+
+    const namespaceOrder = ['brand', 'text', 'surface', 'border', 'state', 'accent'];
+    const namespaces = [
+        ...namespaceOrder.filter(n => n in grouped),
+        ...Object.keys(grouped).filter(n => !namespaceOrder.includes(n)).sort(),
+    ];
+
+    return (
+        <div className="space-y-4">
+            {namespaces.map(ns => (
+                <div key={ns}>
+                    <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">
+                        {NAMESPACE_LABEL[ns] ?? ns}
+                    </p>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                        {grouped[ns].map(([name, hex]) => (
+                            <div key={name} className="flex items-center gap-3 bg-white rounded-lg border border-neutral-200 p-3">
+                                <span
+                                    className="shrink-0 w-12 h-12 rounded-md border border-neutral-200"
+                                    style={{ background: hex }}
+                                    aria-hidden="true"
+                                />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-xs font-semibold text-neutral-900 truncate">{name}</p>
+                                    <p className="font-mono text-[11px] text-neutral-500 mt-0.5">{hex}</p>
+                                </div>
+                            </div>
+                        ))}
+                    </div>
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ─── Typography Tokens ───────────────────────────────────────────────────
+
+function TypographyTokens({ tokens }: { tokens: DesignTokens }) {
+    const sorted = useMemo(() => {
+        return Object.entries(tokens.typography).sort((a, b) => {
+            const aHead = a[0].startsWith('heading.') ? 0 : 1;
+            const bHead = b[0].startsWith('heading.') ? 0 : 1;
+            if (aHead !== bHead) return aHead - bHead;
+            return b[1].size - a[1].size;
+        });
+    }, [tokens.typography]);
+
+    return (
+        <div className="space-y-2">
+            {sorted.map(([name, t]: [string, DesignTypographyToken]) => {
+                const previewSize = Math.min(Math.max(t.size, 12), 40);
+                return (
+                    <div
+                        key={name}
+                        className="grid grid-cols-[auto,1fr] gap-4 items-center bg-white rounded-lg border border-neutral-200 p-3"
+                    >
+                        <div className="min-w-[150px]">
+                            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
+                                {name}
+                            </p>
+                            <p className="text-[11px] text-neutral-500 mt-0.5">
+                                {t.font} · {t.size}px · {t.weight} · LH {t.lineHeight}
+                            </p>
+                        </div>
+                        <div className="min-w-0">
+                            <p
+                                className="text-neutral-900 truncate"
+                                style={{
+                                    fontFamily: t.font,
+                                    fontSize: `${previewSize}px`,
+                                    fontWeight: t.weight,
+                                    lineHeight: t.lineHeight,
+                                    ...(t.letterSpacing !== undefined ? { letterSpacing: `${t.letterSpacing}px` } : {}),
+                                }}
+                            >
+                                The quick brown fox jumps over the lazy dog
+                            </p>
+                        </div>
+                    </div>
+                );
+            })}
+        </div>
+    );
+}
+
+// ─── Spacing + Radius ───────────────────────────────────────────────────
+
+function SpacingAndRadius({ tokens }: { tokens: DesignTokens }) {
+    const spacingEntries = Object.entries(tokens.spacing).sort((a, b) => a[1] - b[1]);
+    const radiusEntries = Object.entries(tokens.radius).sort((a, b) => a[1] - b[1]);
+    const maxSpacing = Math.max(1, ...spacingEntries.map(([, v]) => v));
+    const maxRadius = Math.max(1, ...radiusEntries.map(([, v]) => v));
+
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Spacing scale</p>
+                <div className="space-y-1.5">
+                    {spacingEntries.map(([key, px]) => (
+                        <div key={key} className="flex items-center gap-3 bg-white rounded-md border border-neutral-200 px-3 py-2">
+                            <code className="font-mono text-xs text-neutral-700 shrink-0 w-10">{px}px</code>
+                            <span className="text-[11px] font-medium uppercase tracking-wider text-indigo-600 shrink-0 w-10">{key}</span>
+                            <div
+                                className="shrink-0 h-3 bg-indigo-200 rounded-sm"
+                                style={{ width: `${(px / maxSpacing) * 200}px` }}
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+            <div>
+                <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Radius scale</p>
+                <div className="space-y-1.5">
+                    {radiusEntries.map(([key, px]) => (
+                        <div key={key} className="flex items-center gap-3 bg-white rounded-md border border-neutral-200 px-3 py-2">
+                            <code className="font-mono text-xs text-neutral-700 shrink-0 w-10">{px}px</code>
+                            <span className="text-[11px] font-medium uppercase tracking-wider text-indigo-600 shrink-0 w-10">{key}</span>
+                            <div
+                                className="shrink-0 w-12 h-8 bg-indigo-100 border border-indigo-200"
+                                style={{ borderRadius: `${(px / maxRadius) * 16}px` }}
+                            />
+                        </div>
+                    ))}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+// ─── Component Tokens ────────────────────────────────────────────────────
+
+function ComponentTokens({ tokens }: { tokens: DesignTokens }) {
+    const entries = Object.entries(tokens.components).sort((a, b) => a[0].localeCompare(b[0]));
+    return (
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+            {entries.map(([name, c]: [string, DesignComponentToken]) => (
+                <div key={name} className="bg-white rounded-lg border border-neutral-200 p-3 space-y-2">
+                    <p className="text-xs font-semibold text-neutral-900">{name}</p>
+                    <dl className="text-[11px] text-neutral-600 space-y-0.5">
+                        {(['background', 'text', 'border', 'radius', 'padding'] as const).map(field => (
+                            c[field] !== undefined ? (
+                                <div key={field} className="grid grid-cols-[80px,1fr] gap-2">
+                                    <dt className="font-medium uppercase tracking-wider text-neutral-400">{field}</dt>
+                                    <dd className="font-mono">{c[field]}</dd>
+                                </div>
+                            ) : null
+                        ))}
+                    </dl>
+                    {c.notes && (
+                        <p className="text-[11px] text-neutral-500 italic border-t border-neutral-100 pt-2">{c.notes}</p>
+                    )}
+                </div>
+            ))}
+        </div>
+    );
+}
+
+// ─── Usage Rules ─────────────────────────────────────────────────────────
+
+function UsageRules({ tokens }: { tokens: DesignTokens }) {
+    if (tokens.rules.length === 0) {
+        return (
+            <p className="text-sm text-neutral-500 italic">No usage rules defined.</p>
+        );
+    }
+    return (
+        <ul className="space-y-1.5">
+            {tokens.rules.map((rule, i) => (
+                <li key={i} className="flex items-start gap-2 text-sm text-neutral-700">
+                    <span className="shrink-0 mt-1.5 w-1.5 h-1.5 rounded-full bg-indigo-500" aria-hidden="true" />
+                    <span>{rule}</span>
+                </li>
+            ))}
+        </ul>
+    );
+}
+
+// ─── Downstream Usage Status ─────────────────────────────────────────────
+
+interface DownstreamSummary {
+    mockupCount: number;
+    componentInventoryExists: boolean;
+}
+
+function useDownstreamSummary(projectId: string | undefined): DownstreamSummary | null {
+    // useShallow is required: Zustand v5's useSyncExternalStore-based subscription
+    // calls getSnapshot multiple times per render and compares with Object.is —
+    // returning a fresh `{ mockupCount, componentInventoryExists }` object on each
+    // call triggers React error #185 ("Maximum update depth exceeded").
+    return useProjectStore(useShallow(state => {
+        if (!projectId) return null;
+        const artifacts = state.artifacts[projectId] ?? [];
+        const mockupCount = artifacts.filter(a => a.type === 'mockup' && a.status !== 'archived').length;
+        const componentInventoryExists = artifacts.some(
+            a => a.type === 'core_artifact' && a.subtype === 'component_inventory' && a.status !== 'archived',
+        );
+        return { mockupCount, componentInventoryExists };
+    }));
+}
+
+function DownstreamUsage({ projectId }: { projectId?: string }) {
+    const summary = useDownstreamSummary(projectId);
+
+    if (!summary) {
+        return (
+            <p className="text-sm text-neutral-500 italic">
+                Downstream usage is detected automatically when a project context is available.
+            </p>
+        );
+    }
+
+    const consumers: Array<{ label: string; present: boolean; description: string }> = [
+        {
+            label: 'Mockups',
+            present: summary.mockupCount > 0,
+            description: summary.mockupCount > 0
+                ? `${summary.mockupCount} mockup artifact${summary.mockupCount === 1 ? '' : 's'} pull design tokens at generation time.`
+                : 'No mockup artifact has been generated yet — design tokens will be applied to the next generation.',
+        },
+        {
+            label: 'Component inventory',
+            present: summary.componentInventoryExists,
+            description: summary.componentInventoryExists
+                ? 'A component inventory exists; future iterations can map components to design tokens.'
+                : 'No component inventory generated yet.',
+        },
+    ];
+
+    const noConsumers = !consumers.some(c => c.present);
+
+    return (
+        <div className="space-y-3">
+            {noConsumers && (
+                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <div>
+                        <p className="font-medium">No downstream artifact is using this design system yet.</p>
+                        <p className="text-xs text-amber-700 mt-0.5">
+                            Generate a mockup to see the design tokens injected as CSS variables and prompt context.
+                        </p>
+                    </div>
+                </div>
+            )}
+            <ul className="space-y-1.5">
+                {consumers.map(c => (
+                    <li
+                        key={c.label}
+                        className="flex items-start gap-2 rounded-md border border-neutral-200 bg-white p-3 text-sm"
+                    >
+                        {c.present ? (
+                            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
+                        ) : (
+                            <span className="mt-0.5 shrink-0 w-4 h-4 rounded-full border border-neutral-300" />
+                        )}
+                        <div>
+                            <p className="text-neutral-900 font-medium">{c.label}</p>
+                            <p className="text-xs text-neutral-500 mt-0.5">{c.description}</p>
+                        </div>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
+// ─── Legacy markdown renderer (preserved as-is for back-compat) ──────────
 
 const HEX_RE = /#[0-9a-fA-F]{6}\b/g;
 const HEX_TEST = /^#[0-9a-fA-F]{6}$/;
 
-// Pre-replace hex codes with a span carrying a data attribute, so the
-// span override below can render them as a swatch + label without us
-// having to walk every text node by hand.
 function annotateHexes(markdown: string): string {
     return markdown.replace(HEX_RE, hex => `<span data-hex="${hex}">${hex}</span>`);
 }
@@ -44,7 +455,6 @@ function HexSwatch({ hex }: { hex: string }) {
 
 const baseComponents: Components = {
     span(props) {
-        // rehype-raw lifts the data-hex attribute into props.
         const dataHex = (props as Record<string, unknown>)['data-hex'] as string | undefined;
         if (dataHex && HEX_TEST.test(dataHex)) return <HexSwatch hex={dataHex} />;
         const { children, ...rest } = props;
@@ -79,15 +489,12 @@ function splitByH3(markdown: string): Section[] {
     return sections;
 }
 
-// ─── Color Palette ──────────────────────────────────────────────────────────
-
 type ColorRow = { label: string; hex: string; description: string };
 
 function parseColorPalette(body: string): { rows: ColorRow[]; rest: string } {
     const rows: ColorRow[] = [];
     const restLines: string[] = [];
     for (const line of body.split('\n')) {
-        // **Label:** #RRGGBB optional description
         const m = line.match(/^\s*[-*]?\s*\*?\*?\s*([^*:]+?)\s*\*?\*?\s*[:-]\s*(#[0-9a-fA-F]{6})\b\s*(.*)$/);
         if (m) {
             const [, label, hex, description] = m;
@@ -136,8 +543,6 @@ function ColorPaletteSection({ body }: { body: string }) {
     );
 }
 
-// ─── Typography ─────────────────────────────────────────────────────────────
-
 type TypographyRow = {
     role: string;
     font: string;
@@ -158,7 +563,6 @@ function parseTypographyTable(body: string): TypographyRow[] | null {
         }
     }
     if (headerIdx === -1) return null;
-    // Rows start two lines after the header (header + separator).
     const rows: TypographyRow[] = [];
     for (let i = headerIdx + 2; i < lines.length; i++) {
         const cells = lines[i]
@@ -228,15 +632,11 @@ function TypographySection({ body }: { body: string }) {
     );
 }
 
-// ─── Spacing Scale ──────────────────────────────────────────────────────────
-
 type SpacingRow = { px: number; label: string; description: string };
 
 function parseSpacing(body: string): SpacingRow[] {
     const rows: SpacingRow[] = [];
     for (const line of body.split('\n')) {
-        // - 4px (xs): description
-        // - 4px: description
         const m = line.match(/^\s*[-*]\s*(\d+)px\s*(?:\(([^)]+)\))?\s*[:\-—]?\s*(.*)$/);
         if (m) {
             rows.push({
@@ -253,7 +653,6 @@ function SpacingSection({ body }: { body: string }) {
     const rows = useMemo(() => parseSpacing(body), [body]);
     if (rows.length === 0) return <FallbackMarkdown body={body} />;
     const max = Math.max(...rows.map(r => r.px));
-    // Match the existing markdown list closely while adding a visual bar.
     return (
         <div>
             {body.split('\n').filter(l => /^[A-Za-z]/.test(l.trim())).map((line, i) => (
@@ -284,8 +683,6 @@ function SpacingSection({ body }: { body: string }) {
     );
 }
 
-// ─── Generic fallback with hex enhancement ─────────────────────────────────
-
 function FallbackMarkdown({ body }: { body: string }) {
     const annotated = useMemo(() => annotateHexes(body), [body]);
     return (
@@ -301,9 +698,7 @@ function FallbackMarkdown({ body }: { body: string }) {
     );
 }
 
-// ─── Top-level dispatcher ──────────────────────────────────────────────────
-
-export function DesignSystemRenderer({ content }: Props) {
+function LegacyMarkdownDesignSystem({ content }: { content: string }) {
     const sections = useMemo(() => splitByH3(content), [content]);
     const tabs: SectionTabItem[] = sections
         .filter(s => s.title)

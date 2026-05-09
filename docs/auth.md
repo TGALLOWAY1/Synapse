@@ -59,8 +59,7 @@ db.recruiters.find({ userId: { $exists: false } }).forEach((doc) => {
 });
 ```
 
-A read-only version of this lives in `scripts/migrate-recruiters-to-users.mjs`.
-Session tokens issued before the migration still resolve because
+Session tokens issued before this migration still resolve because
 `/api/session` falls back to `linkedinId` lookup when `userId` is absent from
 the token claims.
 

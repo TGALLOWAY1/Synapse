@@ -6,6 +6,8 @@ import { MockupHtmlPreview } from './MockupHtmlPreview';
 import { MockupScreenImage } from './MockupScreenImage';
 import { buildMockupSrcDoc } from './buildMockupSrcDoc';
 import { useProbeStore } from '../../store/probeStore';
+import { useProjectStore } from '../../store/projectStore';
+import { selectPreferredDesignTokens, type DesignSystemCompliance } from '../../lib/designTokens';
 
 type Props = {
     payload: MockupPayload;
@@ -23,6 +25,12 @@ type Props = {
     // AI Image tab is hidden.
     projectId?: string;
     artifactId?: string;
+    /**
+     * Per-screen design system compliance summaries, keyed by screen id.
+     * When supplied, the per-screen header surfaces a small warning chip
+     * with the compliance score.
+     */
+    designSystemCompliance?: Record<string, DesignSystemCompliance>;
 };
 
 type Mode = 'preview' | 'code' | 'image';
@@ -51,9 +59,17 @@ export function MockupViewer({
     versionId,
     projectId,
     artifactId,
+    designSystemCompliance,
 }: Props) {
     const aiImageEnabled = !!(projectId && artifactId && versionId);
     const [activeIdx, setActiveIdx] = useState(0);
+    // Resolve current design tokens for live preview rendering. Token
+    // changes do NOT auto-regenerate the mockup; the staleness slice will
+    // mark the artifact `possibly_outdated` so the user can regenerate
+    // explicitly.
+    const designTokens = useProjectStore(state =>
+        projectId ? selectPreferredDesignTokens(state, projectId) : undefined,
+    );
     // AI image is the primary mockup artifact — default to it when available,
     // fall back to the HTML preview when no projectId/artifactId/versionId
     // is threaded (e.g. comparison view).
@@ -72,7 +88,7 @@ export function MockupViewer({
 
     const openInNewTab = useCallback(() => {
         if (!activeScreen) return;
-        const doc = buildMockupSrcDoc(activeScreen.html);
+        const doc = buildMockupSrcDoc(activeScreen.html, { designTokens });
         const blob = new Blob([doc], { type: 'text/html' });
         const url = URL.createObjectURL(blob);
         const win = window.open(url, '_blank', 'noopener,noreferrer');
@@ -80,7 +96,7 @@ export function MockupViewer({
         if (!win) {
             console.warn('[mockup] window.open blocked; object URL created but not opened');
         }
-    }, [activeScreen]);
+    }, [activeScreen, designTokens]);
 
     const handleCopy = useCallback(() => {
         if (!activeScreen) return;
@@ -245,6 +261,7 @@ export function MockupViewer({
                         html={activeScreen.html}
                         platform={settings.platform}
                         versionId={versionId}
+                        designTokens={designTokens}
                     />
                 )}
                 {mode === 'code' && (
@@ -274,6 +291,26 @@ export function MockupViewer({
                     {activeScreen.notes && (
                         <p className="text-xs text-neutral-400 italic">{activeScreen.notes}</p>
                     )}
+                </div>
+            )}
+
+            {/* Design system compliance — soft warnings only, never blocking. */}
+            {designSystemCompliance?.[activeScreen.id] && designSystemCompliance[activeScreen.id].warnings.length > 0 && (
+                <div className="px-5 pb-4">
+                    <details className="rounded-md border border-amber-200 bg-amber-50/60 text-xs">
+                        <summary className="cursor-pointer px-3 py-2 text-amber-800 font-medium flex items-center gap-2">
+                            <AlertTriangle size={12} />
+                            Design system compliance · {Math.round(designSystemCompliance[activeScreen.id].score * 100)}/100
+                            <span className="text-amber-700 font-normal">
+                                · {designSystemCompliance[activeScreen.id].warnings.length} warning{designSystemCompliance[activeScreen.id].warnings.length === 1 ? '' : 's'}
+                            </span>
+                        </summary>
+                        <ul className="px-4 pb-3 pt-1 space-y-1 text-amber-800">
+                            {designSystemCompliance[activeScreen.id].warnings.map((w, i) => (
+                                <li key={i} className="list-disc ml-4">{w}</li>
+                            ))}
+                        </ul>
+                    </details>
                 </div>
             )}
 

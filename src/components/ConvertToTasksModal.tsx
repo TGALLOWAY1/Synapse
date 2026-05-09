@@ -8,8 +8,7 @@ import type {
     TaskPriority,
     TaskType,
 } from '../types/tasks';
-import { parseImplementationPlan } from '../lib/services/implementationPlanParser';
-import { extractTasks } from '../lib/services/taskExtractor';
+import { extractTasksFromMarkdown } from '../lib/services/taskExtractor';
 import { EXPORT_PROVIDERS, exportTasks } from '../lib/services/taskExport';
 import { useToastStore } from '../store/toastStore';
 import { ErrorBanner } from './ErrorBanner';
@@ -80,10 +79,10 @@ export function ConvertToTasksModal({
     onClose,
 }: ConvertToTasksModalProps) {
     const { addToast } = useToastStore();
-    const initialTasks = useMemo(() => {
-        const plan = parseImplementationPlan(artifactContent);
-        return extractTasks(plan, { sourceArtifactId }).map(toEditable);
-    }, [artifactContent, sourceArtifactId]);
+    const initialTasks = useMemo(
+        () => extractTasksFromMarkdown(artifactContent, { sourceArtifactId }).map(toEditable),
+        [artifactContent, sourceArtifactId],
+    );
 
     const [tasks, setTasks] = useState<EditableTask[]>(initialTasks);
     const [target, setTarget] = useState<ExportTargetId>('markdown');

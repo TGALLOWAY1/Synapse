@@ -1,6 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
-import type { MockupPlatform } from '../../types';
+import type { DesignTokens, MockupPlatform } from '../../types';
 import { buildMockupSrcDoc, type MockupProbeReport } from './buildMockupSrcDoc';
 import { useProbeStore } from '../../store/probeStore';
 
@@ -12,6 +12,12 @@ type Props = {
     // telemetry store. When absent (e.g. "Open in new tab"), probes still
     // drive the degraded badge but aren't aggregated.
     versionId?: string;
+    /**
+     * Optional design tokens. When provided, the iframe `<head>` gets a
+     * `:root { --color-... }` block that any inline `style` references in
+     * the mockup HTML can resolve.
+     */
+    designTokens?: DesignTokens;
 };
 
 type ProbeState =
@@ -34,7 +40,7 @@ const interpretProbe = (report: MockupProbeReport): ProbeState => {
 // lets Tailwind CDN JIT-compile utility classes inside the iframe, but without
 // `allow-same-origin` the iframe is treated as cross-origin and cannot touch
 // Synapse state.
-export function MockupHtmlPreview({ html, platform, className, versionId }: Props) {
+export function MockupHtmlPreview({ html, platform, className, versionId, designTokens }: Props) {
     const [status, setStatus] = useState<'loading' | 'ready' | 'error'>('loading');
     const [retryCount, setRetryCount] = useState(0);
     const [probe, setProbe] = useState<ProbeState>({ status: 'pending' });
@@ -52,12 +58,15 @@ export function MockupHtmlPreview({ html, platform, className, versionId }: Prop
         if (!html || !html.trim()) return { srcDoc: null, probeId: '' };
         const id = uuidv4();
         try {
-            return { srcDoc: buildMockupSrcDoc(html, { probeId: id }), probeId: id };
+            return {
+                srcDoc: buildMockupSrcDoc(html, { probeId: id, designTokens }),
+                probeId: id,
+            };
         } catch (e) {
             console.warn('[MockupHtmlPreview] buildMockupSrcDoc failed:', e);
             return { srcDoc: null, probeId: '' };
         }
-    }, [html, retryCount]);
+    }, [html, retryCount, designTokens]);
 
     useEffect(() => {
         // Both state resets are batched inside a zero-delay timeout so the

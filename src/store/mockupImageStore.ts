@@ -17,6 +17,8 @@ import { create } from 'zustand';
 import type { MockupImageQuality, MockupImageRecord, MockupPayload, MockupScreen, MockupSettings } from '../types';
 import { callOpenAIImage } from '../lib/openaiClient';
 import { buildScreenImagePrompt, pickImageSize } from '../lib/services/mockupImageService';
+import { selectPreferredDesignTokens } from '../lib/designTokens';
+import { useProjectStore } from './projectStore';
 import {
     buildImageKey,
     buildScreenScopeKey,
@@ -119,7 +121,8 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             errors: { ...state.errors, [scope]: '' },
         }));
 
-        const prompt = buildScreenImagePrompt(payload, screen, settings);
+        const designTokens = selectPreferredDesignTokens(useProjectStore.getState(), projectId);
+        const prompt = buildScreenImagePrompt(payload, screen, settings, designTokens);
         const size = pickImageSize(settings.platform);
 
         try {

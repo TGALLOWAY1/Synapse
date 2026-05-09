@@ -76,6 +76,7 @@ export function ArtifactWorkspace({
 }: ArtifactWorkspaceProps) {
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
+        updateArtifactVersionMetadata,
     } = useProjectStore();
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
@@ -238,7 +239,7 @@ export function ArtifactWorkspace({
                             <RefreshCcw size={12} /> Regenerate Mockup
                         </button>
                     </div>
-                    <MockupErrorBoundary>
+                    <MockupErrorBoundary resetKey={preferred.id}>
                         <MockupViewer
                             payload={payload}
                             settings={settings}
@@ -249,6 +250,7 @@ export function ArtifactWorkspace({
                             versionId={preferred.id}
                             projectId={projectId}
                             artifactId={mockup.id}
+                            designSystemCompliance={preferred.metadata?.designSystemCompliance as Parameters<typeof MockupViewer>[0]['designSystemCompliance']}
                         />
                     </MockupErrorBoundary>
                 </div>
@@ -269,6 +271,14 @@ export function ArtifactWorkspace({
                 artifactVersionId: preferred.id,
                 productTitle: structuredPRD.productName ?? getProject(projectId)?.name ?? 'this product',
                 productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
+            }
+            : undefined;
+        const promptEdits = subtype === 'prompt_pack'
+            ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
+            : undefined;
+        const handleUpdatePromptEdits = subtype === 'prompt_pack'
+            ? (next: Record<number, string>) => {
+                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next });
             }
             : undefined;
         return (
@@ -294,6 +304,15 @@ export function ArtifactWorkspace({
                         subtype={subtype}
                         content={preferred.content}
                         screenImageContext={screenImageContext}
+                        metadata={preferred.metadata}
+                        projectId={projectId}
+                        features={
+                            subtype === 'prompt_pack' || subtype === 'user_flows'
+                                ? structuredPRD.features
+                                : undefined
+                        }
+                        promptEdits={promptEdits}
+                        onUpdatePromptEdits={handleUpdatePromptEdits}
                     />
                 </div>
             </div>

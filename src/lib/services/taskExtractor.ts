@@ -1,14 +1,22 @@
 /**
- * Convert a parsed Implementation Plan into a flat list of
- * `ImplementationTask`s — one per `Key Deliverable` checkbox.
+ * Convert an Implementation Plan into a flat list of `ImplementationTask`s.
+ *
+ * Two on-disk formats are supported (the parser auto-detects):
+ *  - Structured JSON fence (current): one task per `milestones[].tasks[]` entry.
+ *  - Legacy markdown: one task per `- [ ]` `Key Deliverable` checkbox.
  *
  * Acceptance criteria are derived deterministically (no LLM call):
- *  1. The deliverable text itself, rephrased as a "deliverable is implemented and merged" line.
- *  2. Each line of the milestone's "Definition of Done" section, when present.
- *  3. If neither yields anything observable, fall back to two generic
- *     title-derived criteria so the task is never criteria-less.
+ *  1. The task/deliverable text itself, rephrased as an observable criterion.
+ *  2. Each line of the milestone's `Definition of Done` (legacy) or the
+ *     plan-wide `definitionOfDone` array (structured).
+ *  3. Title-derived fallbacks when neither yields anything.
  */
 
+import type {
+    ImplementationPlanMilestone,
+    ImplementationPlanTask,
+    StructuredImplementationPlan,
+} from '../../types';
 import type {
     ImplementationTask,
     TaskComplexity,
@@ -16,7 +24,9 @@ import type {
     TaskType,
 } from '../../types/tasks';
 import {
+    extractStructuredPlan,
     findSection,
+    parseImplementationPlan,
     parseMilestoneBody,
     type ParsedPlan,
 } from './implementationPlanParser';
@@ -246,4 +256,88 @@ function humanizeTitle(text: string): string {
     const cleaned = text.replace(/\s+/g, ' ').trim().replace(/[.;]+$/, '');
     if (!cleaned) return 'Untitled task';
     return cleaned.charAt(0).toUpperCase() + cleaned.slice(1);
+}
+
+// --- Structured-plan extraction (preferred when artifact has JSON fence) ---
+
+function buildLinkedNotes(task: ImplementationPlanTask): string[] {
+    const notes: string[] = [];
+    const links = task.linkedArtifacts;
+    if (!links) return notes;
+    if (links.prd?.length) notes.push(`Linked PRD features: ${links.prd.join(', ')}`);
+    if (links.dataModel?.length) notes.push(`Linked data entities: ${links.dataModel.join(', ')}`);
+    if (links.mockups?.length) notes.push(`Linked mockup screens: ${links.mockups.join(', ')}`);
+    return notes;
+}
+
+export function extractTasksFromStructuredPlan(
+    plan: StructuredImplementationPlan,
+    context: ExtractContext,
+): ImplementationTask[] {
+    const titleById = new Map<string, string>();
+    for (const m of plan.milestones) {
+        for (const t of m.tasks) titleById.set(t.id, t.title);
+    }
+    const totalMilestones = plan.milestones.length;
+    const planDoD = plan.definitionOfDone ?? [];
+    const out: ImplementationTask[] = [];
+
+    plan.milestones.forEach((milestone: ImplementationPlanMilestone, milestoneIndex) => {
+        const milestoneNumericId = milestoneIndex + 1;
+        milestone.tasks.forEach(task => {
+            const haystack = `${task.title} ${task.description ?? ''} ${milestone.goal ?? ''}`;
+            const taskType = inferTaskType(haystack);
+            const priority = inferPriority(milestoneIndex, totalMilestones);
+            const complexity = inferComplexity(task.title);
+
+            const acceptanceCriteria = buildAcceptanceCriteria(
+                task.title,
+                planDoD.length ? planDoD.join('\n') : undefined,
+                milestone.tasks.map(t => t.title),
+            );
+
+            const implementationNotes: string[] = [];
+            if (task.description) implementationNotes.push(oneLine(task.description));
+            implementationNotes.push(...buildLinkedNotes(task));
+
+            const dependencies = (task.dependencies ?? [])
+                .map(id => titleById.get(id) ?? id)
+                .filter(Boolean);
+
+            out.push({
+                id: task.id,
+                title: humanizeTitle(task.title),
+                summary: buildSummary(task.title, milestone.name, milestone.goal, task.description),
+                sourceArtifactId: context.sourceArtifactId,
+                sourceSectionId: `milestone-${milestoneNumericId}`,
+                priority,
+                taskType,
+                estimatedComplexity: complexity,
+                dependencies: dependencies.length ? dependencies : undefined,
+                acceptanceCriteria,
+                implementationNotes: implementationNotes.length ? implementationNotes : undefined,
+                suggestedLabels: buildLabels(taskType, milestoneNumericId),
+            });
+        });
+    });
+
+    return out;
+}
+
+/**
+ * Single entry-point that auto-detects the artifact's storage format and
+ * returns a flat `ImplementationTask[]`. Prefer this in callers that hold
+ * the raw artifact `content` string — it removes the need to know which
+ * shape the artifact is in.
+ */
+export function extractTasksFromMarkdown(
+    markdown: string,
+    context: ExtractContext,
+    options: ExtractTasksOptions = {},
+): ImplementationTask[] {
+    const structured = extractStructuredPlan(markdown);
+    if (structured) {
+        return extractTasksFromStructuredPlan(structured, context);
+    }
+    return extractTasks(parseImplementationPlan(markdown), context, options);
 }

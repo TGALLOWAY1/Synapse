@@ -3,6 +3,7 @@ import type {
     ArtifactSlotKey,
     CoreArtifactSubtype,
     ProjectPlatform,
+    SourceRef,
     StructuredPRD,
 } from '../../types';
 import { MOCKUP_HTML_V1 } from '../../types';
@@ -21,6 +22,7 @@ import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { hasOpenAIKey } from '../openaiClient';
+import { selectPreferredDesignSystem } from '../designTokens';
 
 export interface StartArgs {
     projectId: string;
@@ -136,6 +138,7 @@ async function runCoreArtifactSlot(
     const semaphore = getCoreSemaphore(projectId);
     await semaphore.acquire();
     let content: string;
+    let extraMetadata: Record<string, unknown> = {};
     try {
         if (signal.aborted) throw new DOMException('aborted', 'AbortError');
         const store = useProjectStore.getState();
@@ -145,11 +148,13 @@ async function runCoreArtifactSlot(
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
         });
-        content = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
+        const result = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
             generatedArtifacts,
             signal,
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
+        content = result.content;
+        if (result.metadata) extraMetadata = result.metadata;
     } finally {
         semaphore.release();
     }
@@ -180,7 +185,7 @@ async function runCoreArtifactSlot(
         projectId,
         artifactId,
         content,
-        { subtype, dependencyTrace, validationWarnings: warnings },
+        { subtype, dependencyTrace, validationWarnings: warnings, ...extraMetadata },
         [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
         `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}`,
         parentVersionId,
@@ -192,6 +197,13 @@ async function runCoreArtifactSlot(
 async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform } = args;
     const settings = buildAutoMockupSettings(prdContent, structuredPRD, projectPlatform);
+
+    // Resolve the project's preferred design system tokens (if any). The
+    // mockup generation prompt and per-screen compliance validation use
+    // them; staleness tracking records the tokensHash on the new mockup
+    // version's source refs.
+    const designSystemPreferred = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
+    const designTokens = designSystemPreferred?.tokens;
 
     const semaphore = getMockupSemaphore(projectId);
     await semaphore.acquire();
@@ -209,6 +221,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         result = await generateMockup(prdContent, settings, structuredPRD, {
             signal,
             onStatus: (msg) => useProjectStore.getState().appendSlotProgress(projectId, 'mockup', msg),
+            designTokens,
         });
     } finally {
         semaphore.release();
@@ -216,7 +229,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
     useProjectStore.getState().appendSlotProgress(projectId, 'mockup', 'Saving artifact…');
 
-    const { payload, warnings, critique } = result;
+    const { payload, warnings, critique, designSystemCompliance } = result;
     const usedFallback = warnings.some(w => w.includes('safe fallback'));
     const writeStore = useProjectStore.getState();
     const title = payload.title?.trim() || `Mockup — ${settings.platform} / ${settings.fidelity} / ${settings.scope.replace('_', ' ')}`;
@@ -228,6 +241,22 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
 
     const versions = writeStore.getArtifactVersions(projectId, artifactId);
     const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
+
+    // Build source refs: spine + (optional) design_system. The design_system
+    // ref's `anchorInfo` carries the tokensHash so staleness can detect
+    // token drift later without re-comparing the full token object.
+    const sourceRefs: SourceRef[] = [
+        { id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' },
+    ];
+    if (designSystemPreferred) {
+        sourceRefs.push({
+            id: uuidv4(),
+            sourceArtifactId: designSystemPreferred.artifactId,
+            sourceArtifactVersionId: designSystemPreferred.versionId,
+            sourceType: 'core_artifact',
+            anchorInfo: designSystemPreferred.tokensHash,
+        });
+    }
 
     const newVersion = writeStore.createArtifactVersion(
         projectId,
@@ -244,8 +273,10 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             generationStrategy: 'mockup_strategy_v2',
             usedFallbackTemplate: usedFallback,
             autoGenerated: true,
+            ...(designSystemCompliance ? { designSystemCompliance } : {}),
+            ...(designSystemPreferred ? { designSystemTokensHash: designSystemPreferred.tokensHash } : {}),
         },
-        [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+        sourceRefs,
         `Auto-generate ${settings.fidelity} ${settings.platform} mockup (${settings.scope.replace('_', ' ')})`,
         parentVersionId,
     );

@@ -93,6 +93,12 @@ export interface ProjectState {
     getArtifactVersions: (projectId: string, artifactId: string) => ArtifactVersion[];
     getPreferredVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
     getLatestArtifactVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
+    updateArtifactVersionMetadata: (
+        projectId: string,
+        artifactId: string,
+        versionId: string,
+        patch: Record<string, unknown>,
+    ) => void;
 
     // Feedback actions
     createFeedbackItem: (

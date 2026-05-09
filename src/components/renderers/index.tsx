@@ -1,4 +1,4 @@
-import type { CoreArtifactSubtype } from '../../types';
+import type { CoreArtifactSubtype, Feature } from '../../types';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -15,6 +15,24 @@ interface DispatchProps {
     content: string;
     /** Only consumed by `screen_inventory` today. Other subtypes ignore it. */
     screenImageContext?: ScreenImageGalleryContext;
+    /**
+     * Per-version metadata. Currently consumed only by `design_system` to
+     * surface structured token contracts; other subtypes ignore it.
+     */
+    metadata?: Record<string, unknown>;
+    /**
+     * Project id, used by the design_system renderer to query downstream
+     * mockup / component_inventory artifacts for the "Downstream Usage"
+     * indicator. Optional — renderers fall back to a content-only view
+     * when absent.
+     */
+    projectId?: string;
+    /** Consumed by `prompt_pack` and `user_flows` for canonical feature ID resolution. */
+    features?: Feature[];
+    /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
+    promptEdits?: Record<number, string>;
+    /** Only consumed by `prompt_pack`; persists the new edit overlay. */
+    onUpdatePromptEdits?: (next: Record<number, string>) => void;
 }
 
 /**
@@ -42,27 +60,43 @@ function isJsonString(str: string): boolean {
     }
 }
 
-export function ArtifactContentRenderer({ subtype, content, screenImageContext }: DispatchProps) {
+export function ArtifactContentRenderer({
+    subtype,
+    content,
+    screenImageContext,
+    metadata,
+    projectId,
+    features,
+    promptEdits,
+    onUpdatePromptEdits,
+}: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
-    if (subtype === 'data_model' && isJsonString(content)) {
+    if (subtype === 'data_model') {
         return <DataModelRenderer content={content} />;
     }
     if (subtype === 'component_inventory' && isJsonString(content)) {
         return <ComponentInventoryRenderer content={content} />;
     }
     if (subtype === 'design_system') {
-        return <DesignSystemRenderer content={content} />;
+        return <DesignSystemRenderer content={content} metadata={metadata} projectId={projectId} />;
     }
     if (subtype === 'user_flows') {
-        return <UserFlowsRenderer content={content} />;
+        return <UserFlowsRenderer content={content} features={features} />;
     }
     if (subtype === 'implementation_plan') {
         return <ImplementationPlanRenderer content={content} />;
     }
     if (subtype === 'prompt_pack') {
-        return <PromptPackRenderer content={content} />;
+        return (
+            <PromptPackRenderer
+                content={content}
+                features={features}
+                edits={promptEdits}
+                onUpdateEdits={onUpdatePromptEdits}
+            />
+        );
     }
     return <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>;
 }

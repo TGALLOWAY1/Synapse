@@ -1,0 +1,212 @@
+import { useEffect } from 'react';
+import { Clock, GitBranch, Menu, X } from 'lucide-react';
+import type { FlowCategory, FlowIssueKind, ParsedFlow } from './types';
+import { CATEGORY_ORDER } from './categorize';
+
+interface Props {
+    flows: ParsedFlow[];
+    selectedIndex: number;
+    onSelect: (index: number) => void;
+    isMobileOpen: boolean;
+    onToggleMobile: (open: boolean) => void;
+    /** Optional per-flow time-to-value strings (computed once at parent level). */
+    ttvByFlow?: (string | null)[];
+}
+
+type Grouped = { category: FlowCategory; items: Array<{ flow: ParsedFlow; originalIndex: number }> };
+
+function groupFlows(flows: ParsedFlow[]): Grouped[] {
+    const map = new Map<FlowCategory, Array<{ flow: ParsedFlow; originalIndex: number }>>();
+    flows.forEach((flow, originalIndex) => {
+        const list = map.get(flow.category) ?? [];
+        list.push({ flow, originalIndex });
+        map.set(flow.category, list);
+    });
+    return CATEGORY_ORDER
+        .filter(cat => map.has(cat))
+        .map(category => ({ category, items: map.get(category)! }));
+}
+
+const ALT_PATH_KINDS: FlowIssueKind[] = ['alternate_path', 'failure_mode'];
+
+function summarizeIssues(flow: ParsedFlow): {
+    altPaths: number;
+    edgeCases: number;
+    unresolved: number;
+} {
+    let altPaths = 0;
+    let edgeCases = 0;
+    let unresolved = 0;
+    for (const issue of flow.issues) {
+        if (ALT_PATH_KINDS.includes(issue.kind)) altPaths++;
+        else if (issue.kind === 'edge_case') edgeCases++;
+        else if (issue.kind === 'unresolved_reference') unresolved++;
+        else if (issue.kind === 'validation_warning') edgeCases++;
+    }
+    return { altPaths, edgeCases, unresolved };
+}
+
+export function FlowSidebar({
+    flows, selectedIndex, onSelect, isMobileOpen, onToggleMobile, ttvByFlow,
+}: Props) {
+    const grouped = groupFlows(flows);
+    const selected = flows[selectedIndex];
+
+    useEffect(() => {
+        if (!isMobileOpen) return;
+        const onKey = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onToggleMobile(false);
+        };
+        window.addEventListener('keydown', onKey);
+        return () => window.removeEventListener('keydown', onKey);
+    }, [isMobileOpen, onToggleMobile]);
+
+    const renderList = (onPick: (i: number) => void) => (
+        <div className="space-y-4">
+            {grouped.map(group => (
+                <div key={group.category}>
+                    <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5 px-2">
+                        {group.category}
+                    </p>
+                    <ul className="space-y-1">
+                        {group.items.map(({ flow, originalIndex }) => {
+                            const active = originalIndex === selectedIndex;
+                            const stepCount = flow.steps.length;
+                            const { altPaths, edgeCases, unresolved } = summarizeIssues(flow);
+                            const ttv = ttvByFlow?.[originalIndex] ?? null;
+                            return (
+                                <li key={originalIndex}>
+                                    <button
+                                        type="button"
+                                        onClick={() => onPick(originalIndex)}
+                                        aria-current={active ? 'true' : undefined}
+                                        className={`w-full text-left px-2.5 py-2.5 rounded-md transition border ${
+                                            active
+                                                ? 'bg-indigo-50 border-indigo-200 ring-1 ring-indigo-200 text-indigo-900 shadow-sm'
+                                                : 'border-transparent hover:bg-neutral-50 text-neutral-700'
+                                        }`}
+                                    >
+                                        <div className="flex items-start gap-2">
+                                            <span
+                                                className={`shrink-0 inline-flex items-center justify-center w-5 h-5 rounded-full text-[10px] font-bold ${
+                                                    active
+                                                        ? 'bg-indigo-600 text-white'
+                                                        : 'bg-neutral-200 text-neutral-700'
+                                                }`}
+                                            >
+                                                {originalIndex + 1}
+                                            </span>
+                                            <div className="min-w-0 flex-1">
+                                                <p
+                                                    className="text-sm font-medium leading-snug break-words"
+                                                    title={flow.title}
+                                                >
+                                                    {flow.title}
+                                                </p>
+                                                <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-neutral-500">
+                                                    <span className="inline-flex items-center gap-0.5">
+                                                        <GitBranch size={10} />
+                                                        {stepCount} {stepCount === 1 ? 'step' : 'steps'}
+                                                    </span>
+                                                    {altPaths > 0 && (
+                                                        <span>
+                                                            {altPaths} alternate {altPaths === 1 ? 'path' : 'paths'}
+                                                        </span>
+                                                    )}
+                                                    {edgeCases > 0 && (
+                                                        <span>
+                                                            {edgeCases} edge {edgeCases === 1 ? 'case' : 'cases'}
+                                                        </span>
+                                                    )}
+                                                    {unresolved > 0 && (
+                                                        <span className="text-amber-700">
+                                                            {unresolved} unresolved
+                                                        </span>
+                                                    )}
+                                                    {ttv && (
+                                                        <span className="inline-flex items-center gap-0.5">
+                                                            <Clock size={10} /> {ttv} to value
+                                                        </span>
+                                                    )}
+                                                </div>
+                                            </div>
+                                        </div>
+                                    </button>
+                                </li>
+                            );
+                        })}
+                    </ul>
+                </div>
+            ))}
+        </div>
+    );
+
+    return (
+        <>
+            {/* Desktop rail */}
+            <aside
+                className="hidden md:block w-72 shrink-0 self-start sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2 border-r border-neutral-200"
+                aria-label="Flow navigation"
+            >
+                <div className="px-2 mb-3 flex items-center justify-between">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-700">
+                        User Flows
+                    </p>
+                    <span className="text-[10px] text-neutral-400 font-mono">{flows.length}</span>
+                </div>
+                {renderList(onSelect)}
+            </aside>
+
+            {/* Mobile trigger */}
+            <div className="md:hidden mb-3 flex items-center justify-between gap-2">
+                <button
+                    type="button"
+                    onClick={() => onToggleMobile(true)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50"
+                >
+                    <Menu size={14} /> Flows
+                    <span className="text-neutral-400">({flows.length})</span>
+                </button>
+                {selected && (
+                    <span className="text-xs text-neutral-500 truncate flex-1 text-right">
+                        {selected.title}
+                    </span>
+                )}
+            </div>
+
+            {/* Mobile drawer overlay + panel */}
+            {isMobileOpen && (
+                <button
+                    type="button"
+                    aria-label="Close flow navigation"
+                    onClick={() => onToggleMobile(false)}
+                    className="md:hidden fixed inset-0 bg-black/40 z-40"
+                />
+            )}
+            <aside
+                className={`md:hidden fixed top-0 left-0 h-full w-80 max-w-[85vw] bg-white border-r border-neutral-200 z-50 transform transition-transform duration-200 ease-out ${
+                    isMobileOpen ? 'translate-x-0' : '-translate-x-full'
+                }`}
+                aria-hidden={!isMobileOpen}
+            >
+                <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-200">
+                    <span className="text-sm font-semibold text-neutral-900">Flows</span>
+                    <button
+                        type="button"
+                        onClick={() => onToggleMobile(false)}
+                        className="p-1 rounded hover:bg-neutral-100 text-neutral-500"
+                        aria-label="Close"
+                    >
+                        <X size={16} />
+                    </button>
+                </div>
+                <div className="overflow-y-auto h-[calc(100%-2.75rem)] p-2">
+                    {renderList(i => {
+                        onSelect(i);
+                        onToggleMobile(false);
+                    })}
+                </div>
+            </aside>
+        </>
+    );
+}
