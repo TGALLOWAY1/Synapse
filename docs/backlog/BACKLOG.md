@@ -218,8 +218,48 @@ generated/stored/rendered.
 - [ ] **Stable task IDs across regenerations.** Currently the model picks
   IDs; regeneration may rename them. Anchor to titles via fuzzy match to
   preserve user state across regenerations.
-- [ ] **External tracker sync.** Export tasks to GitHub Issues / Linear /
-  Jira with bidirectional status sync.
+- [~] **External tracker sync.** Export tasks to GitHub Issues / Linear /
+  Jira with bidirectional status sync. _Partial: one-way export to GitHub
+  Issues (PAT-based), Linear (mocked), and Markdown shipped via
+  `ConvertToTasksModal` + `src/lib/services/taskExport/`. Follow-ups
+  itemised below._
+  - [ ] **Real Linear export.** `linearExporter.ts` builds the real
+    payload (`buildLinearIssueInput`) and tests cover it, but the network
+    call is mocked. To finish: add `LINEAR_API_KEY` (and optional
+    `LINEAR_TEAM_ID`) inputs to `SettingsModal.tsx` next to the GitHub
+    fields, replace the stub branch with a real
+    `https://api.linear.app/graphql` `issueCreate` mutation per task,
+    and add a label-resolution pass (Linear stores labels as IDs, not
+    strings — same shape as `fetchExistingLabels` in
+    `githubExporter.ts`). Drop the `(mock)` badge in
+    `ConvertToTasksModal.tsx` once `mock: true` is gone. ~1 day.
+  - [ ] **GitHub OAuth with `repo` scope.** Today the export uses a
+    user-supplied PAT in `localStorage` — same security posture as the
+    Gemini key. `api/_lib/github.js` only has `read:user`/`user:email`
+    scopes, so a separate OAuth app + token-storage backend is needed
+    (reuse the recruiter portal's MongoDB plumbing under `api/_lib/`).
+    Replace the `localStorage.getItem('GITHUB_TOKEN')` lookups in
+    `githubExporter.ts` with a fetch against the new endpoint; the
+    export client adapts cleanly because the token is already injected
+    via `GithubExportDeps`. ~3 days.
+  - [ ] **LLM-augmented acceptance criteria.** Today criteria are
+    deterministic (milestone `Definition of Done` + plan-wide
+    `definitionOfDone` array + title-derived fallbacks). When a task
+    yields fewer than ~3 criteria, fall back to a single `callGemini`
+    JSON-mode call to expand. Keep deterministic as primary so tests
+    stay cheap and offline behaviour is unchanged. ~half a day.
+  - [ ] **Bidirectional sync.** Once tasks are persisted (see
+    "First-class task primitive" above), store `externalUrl`/`externalId`
+    on the persisted task and add a "Refresh status" action that hits
+    `GET /repos/{owner}/{repo}/issues/{number}` per linked task and
+    updates local status. Webhook-driven sync needs a backend endpoint
+    + auth and probably isn't worth it before there's user demand.
+  - [ ] **Sub-issue / parent-child hierarchy.** Currently a flat list,
+    one task per deliverable. Modelling parent (epic) / child cleanly
+    across all three providers blows up the export contract: Linear
+    handles it natively, GitHub needs tracking-issue checklists or the
+    sub-issues beta API, Markdown is fine either way. Defer until a
+    user explicitly asks. ~2 days when picked up.
 
 ---
 

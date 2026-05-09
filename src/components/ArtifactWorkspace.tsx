@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight,
+    RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight, ListChecks,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -14,6 +14,7 @@ import { MockupViewer } from './mockups/MockupViewer';
 import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
+import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
@@ -83,6 +84,12 @@ export function ArtifactWorkspace({
     // Mobile-only: the left rail is a slide-in drawer below the md breakpoint.
     // Closed by default so the content pane is fully visible on first paint.
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    // Holds the artifact id + content the modal should extract tasks from.
+    // Stored as state (rather than derived) so the modal keeps working even
+    // if the user mutates the artifact in another tab while it's open.
+    const [tasksModalSource, setTasksModalSource] = useState<
+        { artifactId: string; content: string } | null
+    >(null);
 
     const job = getJob(projectId);
 
@@ -275,21 +282,39 @@ export function ArtifactWorkspace({
             }
             : undefined;
         return (
-            <div className="max-w-3xl mx-auto bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
-                <ArtifactContentRenderer
-                    subtype={subtype}
-                    content={preferred.content}
-                    screenImageContext={screenImageContext}
-                    metadata={preferred.metadata}
-                    projectId={projectId}
-                    features={
-                        subtype === 'prompt_pack' || subtype === 'user_flows'
-                            ? structuredPRD.features
-                            : undefined
-                    }
-                    promptEdits={promptEdits}
-                    onUpdatePromptEdits={handleUpdatePromptEdits}
-                />
+            <div className="max-w-3xl mx-auto space-y-4">
+                {subtype === 'implementation_plan' && (
+                    <div className="flex items-center justify-end">
+                        <button
+                            type="button"
+                            onClick={() =>
+                                setTasksModalSource({
+                                    artifactId: artifact.id,
+                                    content: preferred.content,
+                                })
+                            }
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                        >
+                            <ListChecks size={12} /> Convert to Tasks
+                        </button>
+                    </div>
+                )}
+                <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
+                    <ArtifactContentRenderer
+                        subtype={subtype}
+                        content={preferred.content}
+                        screenImageContext={screenImageContext}
+                        metadata={preferred.metadata}
+                        projectId={projectId}
+                        features={
+                            subtype === 'prompt_pack' || subtype === 'user_flows'
+                                ? structuredPRD.features
+                                : undefined
+                        }
+                        promptEdits={promptEdits}
+                        onUpdatePromptEdits={handleUpdatePromptEdits}
+                    />
+                </div>
             </div>
         );
     };
@@ -412,6 +437,15 @@ export function ArtifactWorkspace({
                 onCancelAll={handleCancelAll}
                 onResumeAll={handleResumeAll}
             />
+
+            {tasksModalSource && (
+                <ConvertToTasksModal
+                    sourceArtifactId={tasksModalSource.artifactId}
+                    artifactContent={tasksModalSource.content}
+                    projectName={getProject(projectId)?.name}
+                    onClose={() => setTasksModalSource(null)}
+                />
+            )}
         </div>
     );
 }

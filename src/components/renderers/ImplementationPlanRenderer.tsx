@@ -9,6 +9,11 @@ import type {
     ImplementationPlanTask,
     TaskStatus,
 } from '../../types';
+import {
+    parseImplementationPlan,
+    parseMilestoneBody,
+    type ParsedMilestone,
+} from '../../lib/services/implementationPlanParser';
 
 // Render an `implementation_plan` artifact.
 //
@@ -37,124 +42,8 @@ function extractStructuredPlan(markdown: string): StructuredImplementationPlan |
     }
 }
 
-// --- Legacy markdown parsing (kept verbatim for backward compat) ---
-
-type Milestone = {
-    id: number;
-    title: string;
-    timeframe?: string;
-    body: string;
-};
-
-type ParsedPlan = {
-    preamble: string;
-    milestones: Milestone[];
-    appendix: string;
-};
-
-const MILESTONE_HEADING = /^###\s+Milestone\s+(\d+)\s*[:\-—]?\s*(.+?)\s*(\(([^)]*)\))?\s*$/i;
-
-function parsePlan(markdown: string): ParsedPlan {
-    const lines = markdown.split('\n');
-    const preamble: string[] = [];
-    const milestones: Milestone[] = [];
-    let inMilestones = false;
-    let appendixStart = -1;
-    let current: Milestone | null = null;
-
-    for (let i = 0; i < lines.length; i++) {
-        const line = lines[i];
-        const m = line.match(MILESTONE_HEADING);
-        if (m) {
-            if (current) milestones.push(current);
-            inMilestones = true;
-            const id = Number(m[1]);
-            const baseTitle = m[2].trim();
-            const timeframe = m[4]?.trim();
-            current = {
-                id,
-                title: timeframe ? baseTitle : baseTitle.replace(/\s*\([^)]*\)\s*$/, ''),
-                timeframe: timeframe ?? extractTimeframe(baseTitle),
-                body: '',
-            };
-            continue;
-        }
-        if (inMilestones && /^---+\s*$/.test(line.trim())) {
-            if (current) {
-                milestones.push(current);
-                current = null;
-            }
-            appendixStart = i + 1;
-            break;
-        }
-        if (current) {
-            current.body += line + '\n';
-        } else if (!inMilestones) {
-            preamble.push(line);
-        }
-    }
-    if (current) milestones.push(current);
-
-    const appendix = appendixStart >= 0 ? lines.slice(appendixStart).join('\n').trim() : '';
-    return {
-        preamble: preamble.join('\n').trim(),
-        milestones,
-        appendix,
-    };
-}
-
-function extractTimeframe(title: string): string | undefined {
-    const m = title.match(/\(([^)]*)\)\s*$/);
-    return m?.[1];
-}
-
-type ParsedSection = {
-    label: string;
-    body: string;
-};
-
-function parseMilestoneBody(body: string): {
-    sections: ParsedSection[];
-    deliverables: { text: string; checked: boolean }[];
-} {
-    const lines = body.split('\n');
-    const sections: ParsedSection[] = [];
-    const deliverables: { text: string; checked: boolean }[] = [];
-    let currentLabel: string | null = null;
-    let currentLines: string[] = [];
-
-    const flushSection = () => {
-        if (currentLabel) {
-            sections.push({ label: currentLabel, body: currentLines.join('\n').trim() });
-        }
-        currentLabel = null;
-        currentLines = [];
-    };
-
-    for (const raw of lines) {
-        const line = raw;
-        const labelMatch = line.match(/^\*\*([^*]+):\*\*\s*(.*)$/);
-        if (labelMatch) {
-            flushSection();
-            currentLabel = labelMatch[1].trim();
-            currentLines = labelMatch[2] ? [labelMatch[2]] : [];
-            continue;
-        }
-        const checklistMatch = line.match(/^\s*-\s*\[\s*([ xX])\s*\]\s*(.+)$/);
-        if (checklistMatch) {
-            deliverables.push({
-                text: checklistMatch[2].trim(),
-                checked: checklistMatch[1].toLowerCase() === 'x',
-            });
-            continue;
-        }
-        if (currentLabel) {
-            currentLines.push(line);
-        }
-    }
-    flushSection();
-    return { sections, deliverables };
-}
+// Legacy markdown parsing now lives in `src/lib/services/implementationPlanParser.ts`
+// so the task extractor can share the same regexes.
 
 function inlineMd(text: string) {
     return (
@@ -181,7 +70,7 @@ const SECTION_ICON: Record<string, typeof Target> = {
     'definition of done': Target,
 };
 
-function LegacyMilestoneCard({ milestone }: { milestone: Milestone }) {
+function LegacyMilestoneCard({ milestone }: { milestone: ParsedMilestone }) {
     const { sections, deliverables } = useMemo(() => parseMilestoneBody(milestone.body), [milestone.body]);
     return (
         <article
@@ -264,7 +153,7 @@ function AppendixSection({ markdown }: { markdown: string }) {
 }
 
 function LegacyTimeline({ content }: { content: string }) {
-    const plan = useMemo(() => parsePlan(content), [content]);
+    const plan = useMemo(() => parseImplementationPlan(content), [content]);
     if (plan.milestones.length === 0) {
         return (
             <div className="prose prose-sm prose-neutral max-w-none">
