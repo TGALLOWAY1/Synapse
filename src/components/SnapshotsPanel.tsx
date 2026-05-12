@@ -1,8 +1,9 @@
 import { useEffect, useState } from 'react';
-import { X, Save, Cloud, Trash2, Download, KeyRound, RefreshCw } from 'lucide-react';
+import { X, Save, Cloud, Trash2, Download, KeyRound, RefreshCw, Star } from 'lucide-react';
 import {
     getOwnerToken, setOwnerToken,
     saveSnapshot, listSnapshots, loadSnapshot, restoreSnapshot, deleteSnapshot,
+    setDemoSnapshot,
     type SnapshotListItem,
 } from '../lib/snapshotClient';
 import { useProjectStore } from '../store/projectStore';
@@ -32,6 +33,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     const [token, setTokenState] = useState<string>(getOwnerToken() ?? '');
     const [tokenDraft, setTokenDraft] = useState<string>(token);
     const [snapshots, setSnapshots] = useState<SnapshotListItem[] | null>(null);
+    const [demoSnapshotId, setDemoSnapshotIdState] = useState<string | null>(null);
     const [busy, setBusy] = useState<string | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [title, setTitle] = useState<string>(project?.name ?? 'Untitled');
@@ -41,8 +43,9 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         setBusy('listing');
         setError(null);
         try {
-            const items = await listSnapshots();
-            setSnapshots(items);
+            const result = await listSnapshots();
+            setSnapshots(result.snapshots);
+            setDemoSnapshotIdState(result.demoSnapshotId);
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -103,6 +106,30 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         try {
             await deleteSnapshot(id);
             await refresh();
+        } catch (err) {
+            setError(err instanceof Error ? err.message : String(err));
+        } finally {
+            setBusy(null);
+        }
+    };
+
+    // Pin (or unpin) a snapshot as the public demo project. The "Demo project"
+    // button on the home page fetches whichever snapshot is pinned here via
+    // the public `?demo=1` endpoint, so no owner token is needed to view it.
+    const handleSetDemo = async (id: string) => {
+        const willClear = demoSnapshotId === id;
+        const confirmMsg = willClear
+            ? 'Unset this snapshot as the public demo? The "View demo project" button will stop working until another snapshot is set.'
+            : 'Make this snapshot the public demo? Any visitor (no owner token required) will be able to load it from the home page.';
+        if (!confirm(confirmMsg)) return;
+        setBusy(`demo:${id}`);
+        setError(null);
+        try {
+            const next = await setDemoSnapshot(willClear ? null : id);
+            setDemoSnapshotIdState(next);
+            setSnapshots((prev) =>
+                prev ? prev.map((s) => ({ ...s, isDemo: s.id === next })) : prev,
+            );
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
@@ -214,40 +241,72 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                             )}
                             {snapshots !== null && snapshots.length > 0 && (
                                 <ul className="space-y-2">
-                                    {snapshots.map((s) => (
-                                        <li
-                                            key={s.id}
-                                            className="border border-neutral-800 rounded-md px-3 py-2.5 bg-neutral-900 hover:bg-neutral-800/50 transition"
-                                        >
-                                            <div className="flex items-start justify-between gap-3">
-                                                <div className="min-w-0 flex-1">
-                                                    <div className="text-sm text-neutral-100 font-medium truncate">{s.title}</div>
-                                                    <div className="text-[11px] text-neutral-500 mt-0.5">
-                                                        {s.projectName} &middot; {formatDate(s.createdAt)} &middot; {s.imageCount} image{s.imageCount === 1 ? '' : 's'} &middot; {formatBytes(s.sizeBytes)}
+                                    {snapshots.map((s) => {
+                                        const isDemo = s.id === demoSnapshotId;
+                                        return (
+                                            <li
+                                                key={s.id}
+                                                className={`border rounded-md px-3 py-2.5 transition ${
+                                                    isDemo
+                                                        ? 'border-amber-500/50 bg-amber-500/5 hover:bg-amber-500/10'
+                                                        : 'border-neutral-800 bg-neutral-900 hover:bg-neutral-800/50'
+                                                }`}
+                                            >
+                                                <div className="flex items-start justify-between gap-3">
+                                                    <div className="min-w-0 flex-1">
+                                                        <div className="text-sm text-neutral-100 font-medium truncate flex items-center gap-2">
+                                                            {s.title}
+                                                            {isDemo && (
+                                                                <span className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[10px] font-semibold uppercase tracking-wide text-amber-300 bg-amber-500/15 border border-amber-500/30">
+                                                                    <Star size={9} className="fill-amber-300" />
+                                                                    Demo
+                                                                </span>
+                                                            )}
+                                                        </div>
+                                                        <div className="text-[11px] text-neutral-500 mt-0.5">
+                                                            {s.projectName} &middot; {formatDate(s.createdAt)} &middot; {s.imageCount} image{s.imageCount === 1 ? '' : 's'} &middot; {formatBytes(s.sizeBytes)}
+                                                        </div>
+                                                    </div>
+                                                    <div className="flex items-center gap-1 shrink-0">
+                                                        <button
+                                                            onClick={() => handleSetDemo(s.id)}
+                                                            disabled={busy !== null}
+                                                            className={`flex items-center gap-1 px-2 py-1 text-xs rounded disabled:opacity-40 ${
+                                                                isDemo
+                                                                    ? 'text-amber-300 bg-amber-500/15 hover:bg-amber-500/25'
+                                                                    : 'text-neutral-300 bg-neutral-800 hover:bg-neutral-700'
+                                                            }`}
+                                                            title={isDemo ? 'Unset as public demo' : 'Set as public demo project'}
+                                                        >
+                                                            <Star size={12} className={isDemo ? 'fill-amber-300' : ''} />
+                                                            {busy === `demo:${s.id}`
+                                                                ? '…'
+                                                                : isDemo
+                                                                    ? 'Demo'
+                                                                    : 'Set demo'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleLoad(s.id)}
+                                                            disabled={busy !== null}
+                                                            className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded disabled:opacity-40"
+                                                            title="Load into workspace"
+                                                        >
+                                                            <Download size={12} />
+                                                            {busy === `loading:${s.id}` ? 'Loading…' : 'Load'}
+                                                        </button>
+                                                        <button
+                                                            onClick={() => handleDelete(s.id)}
+                                                            disabled={busy !== null}
+                                                            className="flex items-center gap-1 px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded disabled:opacity-40"
+                                                            title="Delete from cloud"
+                                                        >
+                                                            <Trash2 size={12} />
+                                                        </button>
                                                     </div>
                                                 </div>
-                                                <div className="flex items-center gap-1 shrink-0">
-                                                    <button
-                                                        onClick={() => handleLoad(s.id)}
-                                                        disabled={busy !== null}
-                                                        className="flex items-center gap-1 px-2 py-1 text-xs text-neutral-200 bg-neutral-800 hover:bg-neutral-700 rounded disabled:opacity-40"
-                                                        title="Load into workspace"
-                                                    >
-                                                        <Download size={12} />
-                                                        {busy === `loading:${s.id}` ? 'Loading…' : 'Load'}
-                                                    </button>
-                                                    <button
-                                                        onClick={() => handleDelete(s.id)}
-                                                        disabled={busy !== null}
-                                                        className="flex items-center gap-1 px-2 py-1 text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 rounded disabled:opacity-40"
-                                                        title="Delete from cloud"
-                                                    >
-                                                        <Trash2 size={12} />
-                                                    </button>
-                                                </div>
-                                            </div>
-                                        </li>
-                                    ))}
+                                            </li>
+                                        );
+                                    })}
                                 </ul>
                             )}
                         </>

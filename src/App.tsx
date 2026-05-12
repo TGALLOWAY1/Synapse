@@ -7,7 +7,6 @@ import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { MeetSynapsePage } from './components/MeetSynapsePage';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
-import { AdminCaptureDemo } from './components/AdminCaptureDemo';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { ToastContainer } from './components/ToastContainer';
 import { useAuthStore } from './store/authStore';
@@ -65,9 +64,6 @@ function App() {
           <Route path="/p/:projectId" element={<ProjectWorkspace />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
-          {import.meta.env.DEV && (
-            <Route path="/admin/capture-demo" element={<AdminCaptureDemo />} />
-          )}
         </Routes>
         <ToastContainer />
       </BrowserRouter>

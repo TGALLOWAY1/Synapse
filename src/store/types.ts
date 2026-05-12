@@ -46,8 +46,10 @@ export interface ProjectState {
     // Pipeline stage
     setProjectStage: (projectId: string, stage: PipelineStage) => void;
 
-    // Demo project hydration
-    loadDemoProject: () => { projectId: string; captured: boolean };
+    // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
+    // a demo snapshot was available. When `available` is false, the home
+    // page surfaces a friendly "no demo set" message.
+    loadDemoProject: () => Promise<{ projectId: string; available: boolean }>;
 
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;

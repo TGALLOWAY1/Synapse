@@ -76,6 +76,33 @@ export function LoginPage() {
     const [submitting, setSubmitting] = useState(false);
     const [banner, setBanner] = useState<string | null>(null);
     const [fieldErrors, setFieldErrors] = useState<Partial<Record<FieldName, string>>>({});
+    const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+
+    const handleOpenDemo = async () => {
+        if (isLoadingDemo) return;
+        setIsLoadingDemo(true);
+        try {
+            const { available } = await useProjectStore.getState().loadDemoProject();
+            if (!available) {
+                useToastStore.getState().addToast({
+                    type: 'warning',
+                    title: 'Demo not available yet',
+                    message: 'No demo snapshot has been pinned. The Synapse owner can pin one from the Cloud Snapshots panel.',
+                });
+                return;
+            }
+            navigate(`/p/${DEMO_PROJECT_ID}`);
+        } catch (err) {
+            console.error('[handleOpenDemo] failed', err);
+            useToastStore.getState().addToast({
+                type: 'warning',
+                title: 'Could not load demo',
+                message: err instanceof Error ? err.message : 'Unknown error',
+            });
+        } finally {
+            setIsLoadingDemo(false);
+        }
+    };
 
     // Surface auth errors passed back from OAuth redirects via `?auth_error=...`.
     useEffect(() => {
@@ -158,21 +185,12 @@ export function LoginPage() {
                     </button>
                     <button
                         type="button"
-                        onClick={() => {
-                            const { captured } = useProjectStore.getState().loadDemoProject();
-                            if (!captured) {
-                                useToastStore.getState().addToast({
-                                    type: 'warning',
-                                    title: 'Demo not available yet',
-                                    message: 'The demo fixture has not been captured. A developer needs to run /admin/capture-demo and commit the result.',
-                                });
-                                return;
-                            }
-                            navigate(`/p/${DEMO_PROJECT_ID}`);
-                        }}
-                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition"
+                        onClick={handleOpenDemo}
+                        disabled={isLoadingDemo}
+                        className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition disabled:opacity-60 disabled:cursor-wait"
                     >
-                        Demo project
+                        {isLoadingDemo && <Loader2 size={14} className="animate-spin" />}
+                        {isLoadingDemo ? 'Loading demo…' : 'Demo project'}
                     </button>
                 </div>
 

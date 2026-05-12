@@ -3,15 +3,8 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Project, HistoryEvent, PipelineStage, ProjectPlatform } from '../../types';
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
-import {
-    DEMO_PROJECT_ID,
-    DEMO_PROJECT_CAPTURED,
-    demoProject,
-    demoSpineVersions,
-    demoArtifacts,
-    demoArtifactVersions,
-    demoHistoryEvents,
-} from '../../data/demoProject';
+import { DEMO_PROJECT_ID } from '../../data/demoProject';
+import { loadDemoSnapshotPublic, restoreSnapshotAs } from '../../lib/snapshotClient';
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -113,51 +106,27 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         void trackActivity(stage === 'mockups' ? 'viewed_mockups' : 'clicked_section', { section: stage, projectId });
     },
 
-    // Hydrates the store with the pre-captured demo project. Idempotent: if
-    // the demo project already exists, no records are mutated (so a user's
-    // in-progress edits to the demo copy are preserved on re-click).
-    loadDemoProject: () => {
+    // Hydrates the store with the demo project. The demo is now a normal
+    // cloud snapshot that the owner has pinned via SnapshotsPanel — we fetch
+    // it from the public `/api/snapshots?demo=1` endpoint and splice it in
+    // at the stable DEMO_PROJECT_ID. Idempotent: if the demo is already
+    // present, returns without a network call so a user's in-progress
+    // changes to the demo copy aren't clobbered on re-click.
+    loadDemoProject: async () => {
         const existing = get().projects[DEMO_PROJECT_ID];
         if (existing) {
-            return { projectId: DEMO_PROJECT_ID, captured: DEMO_PROJECT_CAPTURED };
+            return { projectId: DEMO_PROJECT_ID, available: true };
         }
 
-        if (!DEMO_PROJECT_CAPTURED) {
-            // Placeholder fixture is still in place — don't hydrate a hollow
-            // project. The caller surfaces this to the user.
-            return { projectId: DEMO_PROJECT_ID, captured: false };
+        const payload = await loadDemoSnapshotPublic().catch((err) => {
+            console.error('[loadDemoProject] failed to fetch demo snapshot', err);
+            return null;
+        });
+        if (!payload) {
+            return { projectId: DEMO_PROJECT_ID, available: false };
         }
 
-        set((state) => ({
-            projects: { ...state.projects, [DEMO_PROJECT_ID]: demoProject },
-            spineVersions: {
-                ...state.spineVersions,
-                [DEMO_PROJECT_ID]: demoSpineVersions,
-            },
-            artifacts: {
-                ...state.artifacts,
-                [DEMO_PROJECT_ID]: demoArtifacts,
-            },
-            artifactVersions: {
-                ...state.artifactVersions,
-                [DEMO_PROJECT_ID]: demoArtifactVersions,
-            },
-            historyEvents: {
-                ...state.historyEvents,
-                [DEMO_PROJECT_ID]: demoHistoryEvents,
-            },
-            // Branches and feedbackItems intentionally left empty — demo has
-            // none. Keep the maps shaped the same as other projects.
-            branches: {
-                ...state.branches,
-                [DEMO_PROJECT_ID]: state.branches[DEMO_PROJECT_ID] ?? [],
-            },
-            feedbackItems: {
-                ...state.feedbackItems,
-                [DEMO_PROJECT_ID]: state.feedbackItems[DEMO_PROJECT_ID] ?? [],
-            },
-        }));
-
-        return { projectId: DEMO_PROJECT_ID, captured: true };
+        await restoreSnapshotAs(payload, DEMO_PROJECT_ID);
+        return { projectId: DEMO_PROJECT_ID, available: true };
     },
 });
