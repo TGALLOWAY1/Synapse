@@ -9,10 +9,13 @@ import { requireOwner } from './_lib/ownerAuth.js';
 // optional `?id=<uuid>` query param instead of splitting into per-id and
 // collection files.
 //
-//   POST   /api/snapshots         -> save (body: { title, project, images })
-//   GET    /api/snapshots         -> list summaries
-//   GET    /api/snapshots?id=...  -> load one
-//   DELETE /api/snapshots?id=...  -> remove one
+//   POST   /api/snapshots             -> save (body: { title, project, images })
+//   GET    /api/snapshots             -> list summaries (owner)
+//   GET    /api/snapshots?id=...      -> load one (owner)
+//   DELETE /api/snapshots?id=...      -> remove one (owner)
+//   GET    /api/snapshots?demo=1      -> load the demo snapshot (PUBLIC)
+//   PUT    /api/snapshots?demo=1&id=  -> mark a snapshot as the demo (owner)
+//   PUT    /api/snapshots?demo=1      -> clear the demo pointer (owner)
 
 // Hard cap on a single snapshot payload — guards against runaway uploads
 // (e.g. accidentally bundling a giant project). Vercel's Hobby request
@@ -20,6 +23,7 @@ import { requireOwner } from './_lib/ownerAuth.js';
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 const SNAPSHOT_PREFIX = 'snapshots/';
+const DEMO_POINTER_PATH = 'snapshots/_demo.json';
 const ID_RE = /^[0-9a-f-]{8,64}$/i;
 
 async function readJsonBody(req) {
@@ -68,6 +72,42 @@ async function findBlobsForId(id) {
     cursor = page.hasMore ? page.cursor : undefined;
   } while (cursor);
   return out;
+}
+
+// Read the demo pointer blob, which holds `{ snapshotId, updatedAt }` and
+// indicates which saved snapshot is currently surfaced as "the demo project".
+// Returns null when no pointer has ever been written.
+async function readDemoPointer() {
+  const page = await list({ prefix: DEMO_POINTER_PATH });
+  const blob = page.blobs.find((b) => b.pathname === DEMO_POINTER_PATH);
+  if (!blob) return null;
+  try {
+    const body = await fetchBlobJson(blob.url);
+    const snapshotId = typeof body?.snapshotId === 'string' ? body.snapshotId : null;
+    if (!snapshotId || !ID_RE.test(snapshotId)) return null;
+    return { snapshotId, updatedAt: body?.updatedAt ?? null };
+  } catch {
+    return null;
+  }
+}
+
+async function writeDemoPointer(snapshotId) {
+  const payload = JSON.stringify({ snapshotId, updatedAt: nowIso() });
+  await put(DEMO_POINTER_PATH, payload, {
+    contentType: 'application/json',
+    access: 'private',
+    addRandomSuffix: false,
+    allowOverwrite: true,
+  });
+}
+
+async function clearDemoPointer() {
+  const page = await list({ prefix: DEMO_POINTER_PATH });
+  await Promise.all(
+    page.blobs
+      .filter((b) => b.pathname === DEMO_POINTER_PATH)
+      .map((b) => del(b.url)),
+  );
 }
 
 async function handlePost(req, res) {
@@ -136,23 +176,70 @@ async function fetchBlobJson(url) {
 }
 
 async function handleList(_req, res) {
-  const summaries = [];
-  let cursor;
-  do {
-    const page = await list({ prefix: SNAPSHOT_PREFIX, cursor });
-    for (const blob of page.blobs) {
-      if (!blob.pathname.endsWith('/manifest.json')) continue;
-      try {
-        summaries.push(await fetchBlobJson(blob.url));
-      } catch {
-        // skip unreadable manifests
-      }
-    }
-    cursor = page.hasMore ? page.cursor : undefined;
-  } while (cursor);
+  const [summaries, pointer] = await Promise.all([
+    (async () => {
+      const out = [];
+      let cursor;
+      do {
+        const page = await list({ prefix: SNAPSHOT_PREFIX, cursor });
+        for (const blob of page.blobs) {
+          if (!blob.pathname.endsWith('/manifest.json')) continue;
+          try {
+            out.push(await fetchBlobJson(blob.url));
+          } catch {
+            // skip unreadable manifests
+          }
+        }
+        cursor = page.hasMore ? page.cursor : undefined;
+      } while (cursor);
+      return out;
+    })(),
+    readDemoPointer(),
+  ]);
+
+  const demoId = pointer?.snapshotId ?? null;
+  for (const m of summaries) {
+    m.isDemo = m.id === demoId;
+  }
 
   summaries.sort((a, b) => (b.createdAt ?? '').localeCompare(a.createdAt ?? ''));
-  return json(res, 200, { snapshots: summaries });
+  return json(res, 200, { snapshots: summaries, demoSnapshotId: demoId });
+}
+
+// Public: serve whichever snapshot the owner has marked as the demo. No
+// auth required so anonymous "View demo project" buttons keep working.
+async function handleGetDemo(res) {
+  const pointer = await readDemoPointer();
+  if (!pointer) return json(res, 404, { error: 'no_demo_set' });
+  const blobs = await findBlobsForId(pointer.snapshotId);
+  const dataBlob = blobs.find((b) => b.pathname.endsWith('/data.json'));
+  if (!dataBlob) {
+    // Pointer dangles — the snapshot it referenced was deleted. Treat as
+    // "no demo" rather than 500ing so the home page can fall back cleanly.
+    return json(res, 404, { error: 'no_demo_set' });
+  }
+  try {
+    const data = await fetchBlobJson(dataBlob.url);
+    return json(res, 200, data);
+  } catch (err) {
+    return json(res, 502, { error: 'blob_fetch_failed', message: err?.message ?? 'unknown' });
+  }
+}
+
+async function handlePutDemo(id, res) {
+  // PUT /api/snapshots?demo=1&id=<id>  -> set pointer
+  // PUT /api/snapshots?demo=1          -> clear pointer
+  if (id === null) {
+    await clearDemoPointer();
+    return json(res, 200, { demoSnapshotId: null });
+  }
+  // Verify the target snapshot exists before we update the pointer, so we
+  // don't leave a dangling reference.
+  const blobs = await findBlobsForId(id);
+  const exists = blobs.some((b) => b.pathname.endsWith('/data.json'));
+  if (!exists) return json(res, 404, { error: 'not_found' });
+  await writeDemoPointer(id);
+  return json(res, 200, { demoSnapshotId: id });
 }
 
 async function handleGetOne(id, res) {
@@ -176,8 +263,8 @@ async function handleDelete(id, res) {
 }
 
 export default async function handler(req, res) {
-  if (!['GET', 'POST', 'DELETE'].includes(req.method)) {
-    return methodNotAllowed(res, ['GET', 'POST', 'DELETE']);
+  if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) {
+    return methodNotAllowed(res, ['GET', 'POST', 'PUT', 'DELETE']);
   }
   if (
     enforceRateLimit(req, res, {
@@ -189,7 +276,13 @@ export default async function handler(req, res) {
   ) {
     return;
   }
-  if (requireOwner(req, res)) return;
+
+  // `?demo=1` is the public-demo channel. GET is anonymous (so any visitor
+  // can load the demo), but PUT (set/clear pointer) is owner-only. Every
+  // other route stays owner-gated as before.
+  const isDemoChannel = req.query?.demo === '1' || req.query?.demo === 'true';
+  const isPublicDemoRead = isDemoChannel && req.method === 'GET';
+  if (!isPublicDemoRead && requireOwner(req, res)) return;
 
   // @vercel/blob reads BLOB_READ_WRITE_TOKEN from the env. Just creating a
   // Blob store in the Vercel dashboard isn't enough — the store has to be
@@ -210,6 +303,11 @@ export default async function handler(req, res) {
   }
 
   try {
+    if (isDemoChannel) {
+      if (req.method === 'GET') return await handleGetDemo(res);
+      if (req.method === 'PUT') return await handlePutDemo(id, res);
+      return methodNotAllowed(res, ['GET', 'PUT']);
+    }
     if (req.method === 'POST') {
       if (id !== null) return json(res, 400, { error: 'unexpected_id' });
       return await handlePost(req, res);
@@ -217,6 +315,10 @@ export default async function handler(req, res) {
     if (req.method === 'DELETE') {
       if (id === null) return json(res, 400, { error: 'missing_id' });
       return await handleDelete(id, res);
+    }
+    if (req.method === 'PUT') {
+      // PUT is only valid for the demo channel. Reject otherwise.
+      return methodNotAllowed(res, ['GET', 'POST', 'DELETE']);
     }
     // GET
     if (id === null) return await handleList(req, res);

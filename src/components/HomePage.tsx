@@ -45,17 +45,32 @@ export function HomePage() {
     const navigate = useNavigate();
     const user = useAuthStore((s) => s.user);
 
-    const handleOpenDemo = () => {
-        const { captured } = loadDemoProject();
-        if (!captured) {
+    const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+
+    const handleOpenDemo = async () => {
+        if (isLoadingDemo) return;
+        setIsLoadingDemo(true);
+        try {
+            const { available } = await loadDemoProject();
+            if (!available) {
+                useToastStore.getState().addToast({
+                    type: 'warning',
+                    title: 'Demo not available yet',
+                    message: 'No demo snapshot has been pinned. The Synapse owner can pin one from the Cloud Snapshots panel.',
+                });
+                return;
+            }
+            navigate(`/p/${DEMO_PROJECT_ID}`);
+        } catch (err) {
+            console.error('[handleOpenDemo] failed', err);
             useToastStore.getState().addToast({
                 type: 'warning',
-                title: 'Demo not available yet',
-                message: 'The demo fixture has not been captured. Run /admin/capture-demo in dev to generate it.',
+                title: 'Could not load demo',
+                message: err instanceof Error ? err.message : 'Unknown error',
             });
-            return;
+        } finally {
+            setIsLoadingDemo(false);
         }
-        navigate(`/p/${DEMO_PROJECT_ID}`);
     };
 
     const [projectName, setProjectName] = useState('');
@@ -285,10 +300,12 @@ export function HomePage() {
                         <button
                             type="button"
                             onClick={handleOpenDemo}
-                            className="shrink-0 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition whitespace-nowrap"
+                            disabled={isLoadingDemo}
+                            className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
                             title="Open the prepopulated demo project — no API key required"
                         >
-                            View demo project
+                            {isLoadingDemo && <Loader2 size={14} className="animate-spin" />}
+                            {isLoadingDemo ? 'Loading demo…' : 'View demo project'}
                         </button>
                         {EXAMPLE_PROMPTS.map((example) => (
                             <button

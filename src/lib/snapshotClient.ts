@@ -6,6 +6,10 @@
 // The owner token is entered once via the Snapshots panel and stored in
 // localStorage under OWNER_TOKEN_KEY. Demo viewers never see snapshots —
 // the panel is gated by token presence and every API call requires it.
+//
+// One snapshot can also be designated "the demo project": the server keeps a
+// pointer blob (_demo.json) and exposes a public `?demo=1` read so anonymous
+// visitors can load it from the home page without an owner token.
 
 import type {
     Project, SpineVersion, HistoryEvent, Branch,
@@ -43,7 +47,12 @@ export type SnapshotPayload = {
     images: MockupImageRecord[];
 };
 
-export type SnapshotListItem = SnapshotManifest;
+export type SnapshotListItem = SnapshotManifest & { isDemo?: boolean };
+
+export type SnapshotListResult = {
+    snapshots: SnapshotListItem[];
+    demoSnapshotId: string | null;
+};
 
 const API_BASE = '/api/snapshots';
 
@@ -132,11 +141,34 @@ export const saveSnapshot = async (
     return result.manifest as SnapshotManifest;
 };
 
-export const listSnapshots = async (): Promise<SnapshotListItem[]> => {
+export const listSnapshots = async (): Promise<SnapshotListResult> => {
     const resp = await fetch(API_BASE, { headers: authHeaders() });
     if (!resp.ok) throw await errorFromResponse(resp, 'list_failed');
     const data = await resp.json();
-    return Array.isArray(data?.snapshots) ? data.snapshots : [];
+    const snapshots: SnapshotListItem[] = Array.isArray(data?.snapshots) ? data.snapshots : [];
+    const demoSnapshotId: string | null =
+        typeof data?.demoSnapshotId === 'string' ? data.demoSnapshotId : null;
+    return { snapshots, demoSnapshotId };
+};
+
+// Owner-only: pin a snapshot as the demo project. Pass null to clear.
+export const setDemoSnapshot = async (snapshotId: string | null): Promise<string | null> => {
+    const url = snapshotId
+        ? `${API_BASE}?demo=1&id=${encodeURIComponent(snapshotId)}`
+        : `${API_BASE}?demo=1`;
+    const resp = await fetch(url, { method: 'PUT', headers: authHeaders() });
+    if (!resp.ok) throw await errorFromResponse(resp, 'set_demo_failed');
+    const body = await resp.json();
+    return typeof body?.demoSnapshotId === 'string' ? body.demoSnapshotId : null;
+};
+
+// Public: fetch the snapshot the owner has marked as the demo. No auth.
+// Returns null when no demo has been set (server returns 404 in that case).
+export const loadDemoSnapshotPublic = async (): Promise<SnapshotPayload | null> => {
+    const resp = await fetch(`${API_BASE}?demo=1`);
+    if (resp.status === 404) return null;
+    if (!resp.ok) throw await errorFromResponse(resp, 'load_demo_failed');
+    return await resp.json();
 };
 
 export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
@@ -185,4 +217,63 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
     }));
 
     return projectId;
+};
+
+// Deep-clone a bundle while rewriting every string occurrence of `fromId` to
+// `toId`. We use this when restoring a snapshot as the demo project so the
+// project URL is stable across visitors (always /p/<DEMO_PROJECT_ID>) and
+// independent of whichever real project id was saved.
+const rewriteProjectId = <T,>(value: T, fromId: string, toId: string): T => {
+    if (Array.isArray(value)) {
+        return value.map((v) => rewriteProjectId(v, fromId, toId)) as unknown as T;
+    }
+    if (value && typeof value === 'object') {
+        const out: Record<string, unknown> = {};
+        for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
+            out[k] = rewriteProjectId(v, fromId, toId);
+        }
+        return out as T;
+    }
+    if (typeof value === 'string' && value === fromId) {
+        return toId as unknown as T;
+    }
+    return value;
+};
+
+// Restore a snapshot into the store under a fixed `targetProjectId` instead
+// of the snapshot's own id. Used by `loadDemoProject` so the demo always
+// lives at `/p/<DEMO_PROJECT_ID>` regardless of which real project the owner
+// saved as the demo source.
+export const restoreSnapshotAs = async (
+    snapshot: SnapshotPayload,
+    targetProjectId: string,
+): Promise<string> => {
+    const sourceId = snapshot.project.project.id;
+    const remapped: SnapshotProjectBundle = sourceId === targetProjectId
+        ? snapshot.project
+        : rewriteProjectId(snapshot.project, sourceId, targetProjectId);
+
+    const versionIds = new Set(snapshot.images.map((r) => r.versionId));
+    for (const vid of versionIds) {
+        await deleteImagesForVersion(vid);
+    }
+    for (const record of snapshot.images) {
+        // Image records also embed projectId, so remap before persisting.
+        const remappedRecord = sourceId === targetProjectId
+            ? record
+            : rewriteProjectId(record, sourceId, targetProjectId);
+        await putImage(remappedRecord);
+    }
+
+    useProjectStore.setState((state) => ({
+        projects: { ...state.projects, [targetProjectId]: remapped.project },
+        spineVersions: { ...state.spineVersions, [targetProjectId]: remapped.spineVersions },
+        historyEvents: { ...state.historyEvents, [targetProjectId]: remapped.historyEvents },
+        branches: { ...state.branches, [targetProjectId]: remapped.branches ?? [] },
+        artifacts: { ...state.artifacts, [targetProjectId]: remapped.artifacts },
+        artifactVersions: { ...state.artifactVersions, [targetProjectId]: remapped.artifactVersions },
+        feedbackItems: { ...state.feedbackItems, [targetProjectId]: remapped.feedbackItems ?? [] },
+    }));
+
+    return targetProjectId;
 };
