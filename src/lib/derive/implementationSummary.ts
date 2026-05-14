@@ -53,11 +53,9 @@ function isLater(feature: Feature): boolean {
     return false;
 }
 
-function complexitySortKey(complexity?: 'low' | 'medium' | 'high'): number {
-    if (complexity === 'low') return 0;
-    if (complexity === 'medium') return 1;
-    if (complexity === 'high') return 2;
-    return 1;
+function featureIdSortKey(id: string): number {
+    const match = id.match(/\d+/);
+    return match ? parseInt(match[0], 10) : Number.MAX_SAFE_INTEGER;
 }
 
 function summaryFeatureFor(f: Feature, withReason: boolean): SummaryFeature {
@@ -98,14 +96,16 @@ function pickFeatures(features: Feature[]): {
     const buildNext = features.filter(f => !isMvp(f) && isV1(f));
     const defer = features.filter(f => !isMvp(f) && !isV1(f) && isLater(f));
 
-    // Within each bucket prefer lower complexity first, then declaration order.
-    const sortByComplexity = (arr: Feature[]) =>
-        [...arr].sort((a, b) => complexitySortKey(a.complexity) - complexitySortKey(b.complexity));
+    // Within each bucket sort by the numeric portion of the feature id so the
+    // user sees f1, f2, f3… in their natural order rather than a complexity
+    // re-ranking that scrambles the numbers visible in the cards.
+    const sortById = (arr: Feature[]) =>
+        [...arr].sort((a, b) => featureIdSortKey(a.id) - featureIdSortKey(b.id));
 
     return {
-        buildFirst: sortByComplexity(buildFirst),
-        buildNext: sortByComplexity(buildNext),
-        defer: sortByComplexity(defer),
+        buildFirst: sortById(buildFirst),
+        buildNext: sortById(buildNext),
+        defer: sortById(defer),
     };
 }
 

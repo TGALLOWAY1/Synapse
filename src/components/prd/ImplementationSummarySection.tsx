@@ -1,4 +1,4 @@
-import { AlertTriangle, ArrowRight, ListChecks, Pause, ShieldQuestion } from 'lucide-react';
+import { ArrowRight, ListChecks, Pause, ShieldQuestion } from 'lucide-react';
 import type { StructuredPRD } from '../../types';
 import {
     deriveImplementationSummary,
@@ -88,7 +88,7 @@ export function ImplementationSummarySection({ prd }: { prd: StructuredPRD }) {
                     Implementation Summary
                 </h3>
                 <span className="text-[11px] text-neutral-400">
-                    Derived from features, risks, assumptions
+                    Derived from features and assumptions
                 </span>
             </div>
 
@@ -117,76 +117,30 @@ export function ImplementationSummarySection({ prd }: { prd: StructuredPRD }) {
                     />
                 </div>
 
-                {(summary.highestRisks.length > 0 || summary.openDecisions.length > 0) && (
-                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4 pt-4 border-t border-indigo-100">
-                        {summary.highestRisks.length > 0 && (
-                            <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <AlertTriangle size={14} className="text-red-600" />
-                                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-red-700">
-                                        Highest Risks
-                                    </h4>
-                                    <span className="text-[11px] text-neutral-400">{summary.highestRisks.length}</span>
-                                </div>
-                                <ul className="space-y-1.5">
-                                    {summary.highestRisks.map((r, i) => (
-                                        <li
-                                            key={i}
-                                            className="rounded-md border border-red-100 bg-red-50/40 px-3 py-2"
-                                        >
-                                            <div className="flex items-start gap-2">
-                                                <span
-                                                    className={`shrink-0 mt-0.5 inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${
-                                                        r.likelihood === 'high'
-                                                            ? 'bg-red-200 text-red-900'
-                                                            : r.likelihood === 'med'
-                                                                ? 'bg-amber-200 text-amber-900'
-                                                                : 'bg-neutral-200 text-neutral-700'
-                                                    }`}
-                                                >
-                                                    {r.likelihood}
-                                                </span>
-                                                <div className="min-w-0">
-                                                    <p className="text-sm text-neutral-900">{r.risk}</p>
-                                                    {r.impact && (
-                                                        <p className="text-[11px] text-neutral-600 mt-0.5">
-                                                            {r.impact}
-                                                        </p>
-                                                    )}
-                                                </div>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
-
-                        {summary.openDecisions.length > 0 && (
-                            <div>
-                                <div className="flex items-center gap-2 mb-2">
-                                    <ShieldQuestion size={14} className="text-amber-700" />
-                                    <h4 className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
-                                        Open Decisions
-                                    </h4>
-                                    <span className="text-[11px] text-neutral-400">{summary.openDecisions.length}</span>
-                                </div>
-                                <ul className="space-y-1.5">
-                                    {summary.openDecisions.map(d => (
-                                        <li
-                                            key={d.id}
-                                            className="rounded-md border border-amber-100 bg-amber-50/40 px-3 py-2"
-                                        >
-                                            <div className="flex items-start gap-2">
-                                                <span className="shrink-0 mt-0.5 text-[10px] font-mono font-bold text-amber-700">
-                                                    {d.id}
-                                                </span>
-                                                <p className="text-sm text-neutral-900">{d.statement}</p>
-                                            </div>
-                                        </li>
-                                    ))}
-                                </ul>
-                            </div>
-                        )}
+                {summary.openDecisions.length > 0 && (
+                    <div className="pt-4 border-t border-indigo-100">
+                        <div className="flex items-center gap-2 mb-2">
+                            <ShieldQuestion size={14} className="text-amber-700" />
+                            <h4 className="text-[11px] font-bold uppercase tracking-wider text-amber-700">
+                                Open Decisions
+                            </h4>
+                            <span className="text-[11px] text-neutral-400">{summary.openDecisions.length}</span>
+                        </div>
+                        <ul className="space-y-1.5">
+                            {summary.openDecisions.map(d => (
+                                <li
+                                    key={d.id}
+                                    className="rounded-md border border-amber-100 bg-amber-50/40 px-3 py-2"
+                                >
+                                    <div className="flex items-start gap-2">
+                                        <span className="shrink-0 mt-0.5 text-[10px] font-mono font-bold text-amber-700">
+                                            {d.id}
+                                        </span>
+                                        <p className="text-sm text-neutral-900">{d.statement}</p>
+                                    </div>
+                                </li>
+                            ))}
+                        </ul>
                     </div>
                 )}
             </div>

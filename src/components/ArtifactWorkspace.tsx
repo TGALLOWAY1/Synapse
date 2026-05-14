@@ -150,7 +150,7 @@ export function ArtifactWorkspace({
     const renderMain = () => {
         if (selected === 'prd') {
             return (
-                <div className="max-w-3xl mx-auto">
+                <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
                     <StructuredPRDView
                         projectId={projectId}
                         spineId={spineVersionId}
@@ -282,7 +282,7 @@ export function ArtifactWorkspace({
             }
             : undefined;
         return (
-            <div className="max-w-3xl mx-auto space-y-4">
+            <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
                 {subtype === 'implementation_plan' && (
                     <div className="flex items-center justify-end">
                         <button
