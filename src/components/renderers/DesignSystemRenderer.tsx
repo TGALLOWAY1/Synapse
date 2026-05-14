@@ -214,7 +214,7 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
                             {grouped[ns].length} {grouped[ns].length === 1 ? 'token' : 'tokens'}
                         </p>
                     </div>
-                    <div className="flex rounded-2xl overflow-hidden border border-neutral-200 h-[300px] shadow-sm bg-white">
+                    <div className="flex rounded-2xl overflow-hidden border border-neutral-200 h-[140px] shadow-sm bg-white">
                         {grouped[ns].map(([name, hex]) => (
                             <ColorStripe key={name} name={name} hex={hex} />
                         ))}
@@ -244,36 +244,30 @@ function ColorStripe({ name, hex }: { name: string; hex: string }) {
             >
                 {subName}
             </p>
-            <div className="absolute bottom-3 left-3 right-3 flex items-end gap-3 pointer-events-none">
-                <div
-                    className="flex items-center gap-1.5"
-                    style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-                >
+            <div className="absolute bottom-2.5 left-3 right-3 flex flex-col gap-0.5 pointer-events-none">
+                <div className="flex items-baseline gap-1.5 min-w-0">
                     <span
-                        className="font-mono text-[9px] uppercase tracking-[0.15em]"
+                        className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0"
                         style={{ color: subtleColor }}
                     >
                         HEX
                     </span>
                     <span
-                        className="font-mono text-[11px] font-semibold"
+                        className="font-mono text-[11px] font-semibold truncate"
                         style={{ color: valueColor }}
                     >
                         {hex.replace('#', '').toUpperCase()}
                     </span>
                 </div>
-                <div
-                    className="flex items-center gap-1.5"
-                    style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
-                >
+                <div className="flex items-baseline gap-1.5 min-w-0">
                     <span
-                        className="font-mono text-[9px] uppercase tracking-[0.15em]"
+                        className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0"
                         style={{ color: subtleColor }}
                     >
                         RGB
                     </span>
                     <span
-                        className="font-mono text-[10px]"
+                        className="font-mono text-[10px] truncate"
                         style={{ color: valueColor }}
                     >
                         {rgb}
@@ -331,21 +325,21 @@ function TypographyCard({ name, token, index }: { name: string; token: DesignTyp
     };
 
     return (
-        <div className={`relative ${style.bg} rounded-2xl p-7 min-h-[320px] flex flex-col overflow-hidden shadow-sm`}>
+        <div className={`relative ${style.bg} rounded-2xl p-4 min-h-[160px] flex flex-col overflow-hidden shadow-sm`}>
             <div className="flex justify-between items-start gap-3">
-                <span className={`inline-block ${style.chip} text-[11px] font-semibold px-3 py-1.5 rounded-full shadow-sm`}>
+                <span className={`inline-block ${style.chip} text-[10px] font-semibold px-2.5 py-1 rounded-full shadow-sm`}>
                     {name}
                 </span>
                 <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500/80">
                     {token.size}px · {token.weight}
                 </span>
             </div>
-            <div className="flex-1 flex items-center py-6">
+            <div className="flex-1 flex items-center py-3">
                 <p
                     className="text-neutral-900 break-words"
                     style={{
                         ...tokenFontStyle,
-                        fontSize: 'clamp(44px, 7vw, 76px)',
+                        fontSize: 'clamp(24px, 4vw, 40px)',
                         lineHeight: 1,
                     }}
                 >
@@ -354,10 +348,10 @@ function TypographyCard({ name, token, index }: { name: string; token: DesignTyp
             </div>
             <div>
                 <p
-                    className="text-neutral-900/90 leading-relaxed break-words"
+                    className="text-neutral-900/90 leading-snug break-words"
                     style={{
                         ...tokenFontStyle,
-                        fontSize: '15px',
+                        fontSize: '12px',
                         lineHeight: token.lineHeight,
                     }}
                 >
