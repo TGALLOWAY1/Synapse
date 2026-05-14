@@ -65,16 +65,16 @@ describe('deriveImplementationSummary — feature bucketing', () => {
         expect(s.defer).toHaveLength(2);
     });
 
-    it('orders buckets by ascending complexity', () => {
+    it('orders buckets by feature id so f1, f2, f3… stay in natural order', () => {
         const prd = basePRD({
             features: [
-                baseFeature({ id: 'h', name: 'H', tier: 'mvp', complexity: 'high' }),
-                baseFeature({ id: 'l', name: 'L', tier: 'mvp', complexity: 'low' }),
-                baseFeature({ id: 'm', name: 'M', tier: 'mvp', complexity: 'medium' }),
+                baseFeature({ id: 'f3', name: 'F3', tier: 'mvp', complexity: 'low' }),
+                baseFeature({ id: 'f1', name: 'F1', tier: 'mvp', complexity: 'high' }),
+                baseFeature({ id: 'f2', name: 'F2', tier: 'mvp', complexity: 'medium' }),
             ],
         });
         const s = deriveImplementationSummary(prd);
-        expect(s.buildFirst.map(f => f.id)).toEqual(['l', 'm', 'h']);
+        expect(s.buildFirst.map(f => f.id)).toEqual(['f1', 'f2', 'f3']);
     });
 
     it('caps each bucket at 5', () => {
