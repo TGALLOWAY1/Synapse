@@ -145,7 +145,7 @@ function TokenSummary({ tokens }: { tokens: DesignTokens }) {
     );
 }
 
-// ─── Color Tokens ─────────────────────────────────────────────────────────
+// ─── Color/typography helpers ─────────────────────────────────────────────
 
 const NAMESPACE_LABEL: Record<string, string> = {
     brand: 'Brand',
@@ -155,6 +155,35 @@ const NAMESPACE_LABEL: Record<string, string> = {
     state: 'State',
     accent: 'Accent',
 };
+
+function parseHex(hex: string): [number, number, number] | null {
+    const clean = hex.replace('#', '').trim();
+    if (clean.length !== 6) return null;
+    const r = parseInt(clean.slice(0, 2), 16);
+    const g = parseInt(clean.slice(2, 4), 16);
+    const b = parseInt(clean.slice(4, 6), 16);
+    if ([r, g, b].some(Number.isNaN)) return null;
+    return [r, g, b];
+}
+
+function hexToRgbString(hex: string): string {
+    const rgb = parseHex(hex);
+    if (!rgb) return '—';
+    return `${rgb[0]}, ${rgb[1]}, ${rgb[2]}`;
+}
+
+function isDarkColor(hex: string): boolean {
+    const rgb = parseHex(hex);
+    if (!rgb) return false;
+    const [rs, gs, bs] = rgb.map(c => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    const lum = 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+    return lum < 0.55;
+}
+
+// ─── Color Tokens ─────────────────────────────────────────────────────────
 
 function ColorTokens({ tokens }: { tokens: DesignTokens }) {
     const grouped = useMemo(() => {
@@ -174,25 +203,20 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
     ];
 
     return (
-        <div className="space-y-4">
+        <div className="space-y-6">
             {namespaces.map(ns => (
                 <div key={ns}>
-                    <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">
-                        {NAMESPACE_LABEL[ns] ?? ns}
-                    </p>
-                    <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-2">
+                    <div className="flex items-baseline justify-between mb-3">
+                        <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
+                            {NAMESPACE_LABEL[ns] ?? ns}
+                        </p>
+                        <p className="text-[11px] text-neutral-400 font-mono">
+                            {grouped[ns].length} {grouped[ns].length === 1 ? 'token' : 'tokens'}
+                        </p>
+                    </div>
+                    <div className="flex rounded-2xl overflow-hidden border border-neutral-200 h-[300px] shadow-sm bg-white">
                         {grouped[ns].map(([name, hex]) => (
-                            <div key={name} className="flex items-center gap-3 bg-white rounded-lg border border-neutral-200 p-3">
-                                <span
-                                    className="shrink-0 w-12 h-12 rounded-md border border-neutral-200"
-                                    style={{ background: hex }}
-                                    aria-hidden="true"
-                                />
-                                <div className="min-w-0 flex-1">
-                                    <p className="text-xs font-semibold text-neutral-900 truncate">{name}</p>
-                                    <p className="font-mono text-[11px] text-neutral-500 mt-0.5">{hex}</p>
-                                </div>
-                            </div>
+                            <ColorStripe key={name} name={name} hex={hex} />
                         ))}
                     </div>
                 </div>
@@ -201,7 +225,82 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
     );
 }
 
+function ColorStripe({ name, hex }: { name: string; hex: string }) {
+    const dark = isDarkColor(hex);
+    const subtleColor = dark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.5)';
+    const valueColor = dark ? '#ffffff' : '#0a0a0a';
+    const subName = name.includes('.') ? name.split('.').slice(1).join('.') : name;
+    const rgb = hexToRgbString(hex);
+    return (
+        <div
+            className="flex-1 relative min-w-[64px] transition-[flex-grow] duration-300 ease-out hover:flex-grow-[2]"
+            style={{ background: hex }}
+            title={`${name} · ${hex} · rgb(${rgb})`}
+            aria-label={`${name} ${hex}`}
+        >
+            <p
+                className="absolute top-3 left-3 right-3 text-[10px] font-bold uppercase tracking-wider truncate"
+                style={{ color: subtleColor }}
+            >
+                {subName}
+            </p>
+            <div className="absolute bottom-3 left-3 right-3 flex items-end gap-3 pointer-events-none">
+                <div
+                    className="flex items-center gap-1.5"
+                    style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                >
+                    <span
+                        className="font-mono text-[9px] uppercase tracking-[0.15em]"
+                        style={{ color: subtleColor }}
+                    >
+                        HEX
+                    </span>
+                    <span
+                        className="font-mono text-[11px] font-semibold"
+                        style={{ color: valueColor }}
+                    >
+                        {hex.replace('#', '').toUpperCase()}
+                    </span>
+                </div>
+                <div
+                    className="flex items-center gap-1.5"
+                    style={{ writingMode: 'vertical-rl', transform: 'rotate(180deg)' }}
+                >
+                    <span
+                        className="font-mono text-[9px] uppercase tracking-[0.15em]"
+                        style={{ color: subtleColor }}
+                    >
+                        RGB
+                    </span>
+                    <span
+                        className="font-mono text-[10px]"
+                        style={{ color: valueColor }}
+                    >
+                        {rgb}
+                    </span>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 // ─── Typography Tokens ───────────────────────────────────────────────────
+
+const TYPO_CARD_STYLES: Array<{ bg: string; chip: string }> = [
+    { bg: 'bg-sky-100', chip: 'bg-white text-neutral-900' },
+    { bg: 'bg-neutral-100', chip: 'bg-white text-neutral-900' },
+    { bg: 'bg-amber-50', chip: 'bg-white text-neutral-900' },
+    { bg: 'bg-emerald-50', chip: 'bg-white text-neutral-900' },
+    { bg: 'bg-rose-50', chip: 'bg-white text-neutral-900' },
+    { bg: 'bg-violet-50', chip: 'bg-white text-neutral-900' },
+];
+
+const ALPHABET_PREVIEW = 'Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz';
+
+function fontFamilyDisplay(font: string): string {
+    const first = font.split(',')[0]?.trim() ?? font;
+    return first.replace(/^["']|["']$/g, '');
+}
 
 function TypographyTokens({ tokens }: { tokens: DesignTokens }) {
     const sorted = useMemo(() => {
@@ -214,39 +313,57 @@ function TypographyTokens({ tokens }: { tokens: DesignTokens }) {
     }, [tokens.typography]);
 
     return (
-        <div className="space-y-2">
-            {sorted.map(([name, t]: [string, DesignTypographyToken]) => {
-                const previewSize = Math.min(Math.max(t.size, 12), 40);
-                return (
-                    <div
-                        key={name}
-                        className="grid grid-cols-[auto,1fr] gap-4 items-center bg-white rounded-lg border border-neutral-200 p-3"
-                    >
-                        <div className="min-w-[150px]">
-                            <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
-                                {name}
-                            </p>
-                            <p className="text-[11px] text-neutral-500 mt-0.5">
-                                {t.font} · {t.size}px · {t.weight} · LH {t.lineHeight}
-                            </p>
-                        </div>
-                        <div className="min-w-0">
-                            <p
-                                className="text-neutral-900 truncate"
-                                style={{
-                                    fontFamily: t.font,
-                                    fontSize: `${previewSize}px`,
-                                    fontWeight: t.weight,
-                                    lineHeight: t.lineHeight,
-                                    ...(t.letterSpacing !== undefined ? { letterSpacing: `${t.letterSpacing}px` } : {}),
-                                }}
-                            >
-                                The quick brown fox jumps over the lazy dog
-                            </p>
-                        </div>
-                    </div>
-                );
-            })}
+        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+            {sorted.map(([name, t]: [string, DesignTypographyToken], idx) => (
+                <TypographyCard key={name} name={name} token={t} index={idx} />
+            ))}
+        </div>
+    );
+}
+
+function TypographyCard({ name, token, index }: { name: string; token: DesignTypographyToken; index: number }) {
+    const style = TYPO_CARD_STYLES[index % TYPO_CARD_STYLES.length];
+    const display = fontFamilyDisplay(token.font);
+    const tokenFontStyle: React.CSSProperties = {
+        fontFamily: token.font,
+        fontWeight: token.weight,
+        ...(token.letterSpacing !== undefined ? { letterSpacing: `${token.letterSpacing}px` } : {}),
+    };
+
+    return (
+        <div className={`relative ${style.bg} rounded-2xl p-7 min-h-[320px] flex flex-col overflow-hidden shadow-sm`}>
+            <div className="flex justify-between items-start gap-3">
+                <span className={`inline-block ${style.chip} text-[11px] font-semibold px-3 py-1.5 rounded-full shadow-sm`}>
+                    {name}
+                </span>
+                <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500/80">
+                    {token.size}px · {token.weight}
+                </span>
+            </div>
+            <div className="flex-1 flex items-center py-6">
+                <p
+                    className="text-neutral-900 break-words"
+                    style={{
+                        ...tokenFontStyle,
+                        fontSize: 'clamp(44px, 7vw, 76px)',
+                        lineHeight: 1,
+                    }}
+                >
+                    {display}
+                </p>
+            </div>
+            <div>
+                <p
+                    className="text-neutral-900/90 leading-relaxed break-words"
+                    style={{
+                        ...tokenFontStyle,
+                        fontSize: '15px',
+                        lineHeight: token.lineHeight,
+                    }}
+                >
+                    {ALPHABET_PREVIEW}
+                </p>
+            </div>
         </div>
     );
 }
