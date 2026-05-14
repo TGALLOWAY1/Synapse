@@ -48,7 +48,7 @@ export function SectionTabs({ items }: Props) {
     return (
         <nav
             aria-label="Artifact sections"
-            className="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-2 bg-neutral-50/95 backdrop-blur border-b border-neutral-200 mb-4"
+            className="sticky top-0 z-20 -mx-4 md:-mx-8 px-4 md:px-8 py-2.5 bg-white/90 backdrop-blur supports-[backdrop-filter]:bg-white/75 border-b border-neutral-200/80 mb-4"
         >
             <div className="flex flex-wrap gap-1.5 overflow-x-auto">
                 {items.map(item => {
@@ -65,10 +65,11 @@ export function SectionTabs({ items }: Props) {
                                     setActiveId(item.id);
                                 }
                             }}
-                            className={`shrink-0 px-2.5 py-1 text-xs font-medium rounded-full transition ${
+                            aria-current={active ? 'true' : undefined}
+                            className={`shrink-0 inline-flex items-center px-3 py-1.5 text-xs font-semibold rounded-full no-underline hover:no-underline transition-all duration-150 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-offset-2 focus-visible:ring-offset-white ${
                                 active
-                                    ? 'bg-indigo-600 text-white'
-                                    : 'bg-white text-neutral-700 border border-neutral-200 hover:border-indigo-300 hover:text-indigo-700'
+                                    ? 'bg-indigo-600 text-white border border-indigo-600 shadow-sm shadow-indigo-600/25 hover:bg-indigo-700 hover:border-indigo-700'
+                                    : 'bg-white text-neutral-700 border border-neutral-200 hover:bg-neutral-50 hover:text-neutral-900 hover:border-neutral-300'
                             }`}
                         >
                             {item.label}
