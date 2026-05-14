@@ -1,0 +1,15 @@
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+/*
+ * This file is the Tailwind input for the precompiled mockup stylesheet.
+ * It is processed by scripts/mockup-tailwind.config.cjs and emitted to
+ * src/styles/mockup-tailwind.generated.css, which buildMockupSrcDoc.ts
+ * inlines into the sandbox iframe.
+ *
+ * The mockup HTML is rendered inside an iframe whose document is built
+ * fresh per preview — the iframe's <body> never inherits the parent SPA's
+ * Tailwind reset. The @tailwind base import above re-applies Preflight
+ * so generated shells render with consistent defaults.
+ */

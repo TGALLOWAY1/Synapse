@@ -33,9 +33,15 @@ describe('buildMockupSrcDoc (back-compat shim)', () => {
         expect(srcDoc).toContain("className = 'hidden'");
     });
 
-    it('keeps the Tailwind CDN script and defensive overflow overrides', () => {
+    it('inlines the precompiled Tailwind stylesheet and defensive overflow overrides', () => {
         const srcDoc = buildMockupSrcDoc(fragment, { probeId: 'probe-1' });
-        expect(srcDoc).toContain('cdn.tailwindcss.com');
+        // The Tailwind CDN script has been replaced by an inlined Tailwind
+        // sheet so styles apply synchronously regardless of network state.
+        expect(srcDoc).not.toContain('cdn.tailwindcss.com');
+        // Spot-check that the inlined sheet carries the base utilities the
+        // probe relies on (`.hidden { display: none }`) and the SVG fallback
+        // rules MOCKUP_RENDER_HEAD_STYLES adds.
+        expect(srcDoc).toMatch(/\.hidden\s*\{\s*display:\s*none/);
         expect(srcDoc).toContain('overflow: visible !important');
     });
 });
@@ -72,9 +78,15 @@ describe('buildMockupRenderDocument', () => {
         expect(tablet).toContain('data-viewport="tablet"');
     });
 
-    it('always loads the Tailwind CDN inside the rendered document', () => {
+    it('inlines the precompiled Tailwind stylesheet instead of the CDN script', () => {
         const doc = buildMockupRenderDocument({ html: fragment });
-        expect(doc).toContain('<script src="https://cdn.tailwindcss.com"></script>');
+        // The Play CDN script was the source of "Tailwind styles did not
+        // apply" reports — it must not be loaded anymore.
+        expect(doc).not.toContain('cdn.tailwindcss.com');
+        // Sanity-check the inlined sheet by looking for two utilities the
+        // generator always emits: `.flex` and `.hidden`.
+        expect(doc).toMatch(/\.flex\s*\{\s*display:\s*flex/);
+        expect(doc).toMatch(/\.hidden\s*\{\s*display:\s*none/);
     });
 
     it('inlines the SVG-sizing safety net inside a cascade layer so Tailwind utilities still win', () => {
@@ -114,10 +126,11 @@ describe('buildMockupRenderDocument', () => {
                 '<form action="javascript:evil()"><input/></form>' +
                 '</div>',
         });
-        // Sanitizer-stripped <script>/<form>; only the wrapper-injected
-        // Tailwind CDN <script> survives.
+        // Sanitizer-stripped <script>/<form>. The wrapper no longer injects
+        // a Tailwind CDN <script> either, so a fragment with no probe
+        // should yield zero <script> tags.
         const scriptMatches = doc.match(/<script\b/gi) || [];
-        expect(scriptMatches).toHaveLength(1);
+        expect(scriptMatches).toHaveLength(0);
         expect(doc).not.toContain('alert(1)');
         expect(doc).not.toContain('<form');
     });
