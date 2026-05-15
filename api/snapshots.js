@@ -5,26 +5,37 @@ import { enforceRateLimit } from './_lib/rateLimit.js';
 import { requireOwner } from './_lib/ownerAuth.js';
 
 // Single endpoint for the whole snapshot lifecycle. Vercel Hobby caps a
-// deployment at 12 serverless functions, so we dispatch by method + the
-// optional `?id=<uuid>` query param instead of splitting into per-id and
-// collection files.
+// deployment at 12 serverless functions, so we dispatch by method + query
+// params instead of splitting into per-id and collection files.
 //
-//   POST   /api/snapshots             -> save (body: { title, project, images })
-//   GET    /api/snapshots             -> list summaries (owner)
-//   GET    /api/snapshots?id=...      -> load one (owner)
-//   DELETE /api/snapshots?id=...      -> remove one (owner)
-//   GET    /api/snapshots?demo=1      -> load the demo snapshot (PUBLIC)
-//   PUT    /api/snapshots?demo=1&id=  -> mark a snapshot as the demo (owner)
-//   PUT    /api/snapshots?demo=1      -> clear the demo pointer (owner)
+//   POST   /api/snapshots                     -> save bundle (no image bodies)
+//   POST   /api/snapshots?id=...&image=1      -> upload one image blob (owner)
+//   GET    /api/snapshots                     -> list summaries (owner)
+//   GET    /api/snapshots?id=...              -> load bundle + image refs (owner)
+//   GET    /api/snapshots?id=...&image=<key>  -> load one image (owner)
+//   DELETE /api/snapshots?id=...              -> remove one snapshot (owner)
+//   GET    /api/snapshots?demo=1              -> load the demo snapshot (PUBLIC)
+//   GET    /api/snapshots?demo=1&image=<key>  -> load one demo image (PUBLIC)
+//   PUT    /api/snapshots?demo=1&id=          -> mark a snapshot as the demo (owner)
+//   PUT    /api/snapshots?demo=1              -> clear the demo pointer (owner)
+//
+// Schema v2 stores mockup images as separate per-image blobs under
+// `snapshots/<id>/images/<hash>.json` so a single project with N large
+// images doesn't blow past Vercel's ~4.5 MB serverless body cap on either
+// the upload or the download side. v1 snapshots (inline images) are still
+// readable on GET — the response just preserves the legacy shape.
 
-// Hard cap on a single snapshot payload — guards against runaway uploads
-// (e.g. accidentally bundling a giant project). Vercel's Hobby request
-// body cap is ~4.5 MB; this matches.
+// Per-request body cap. Vercel's serverless platform enforces its own
+// ~4.5 MB limit upstream, so this is a defense-in-depth check and keeps
+// `req.on('data')` from buffering an unbounded payload if Vercel ever
+// changes that limit.
 const MAX_BODY_BYTES = 4 * 1024 * 1024;
 
 const SNAPSHOT_PREFIX = 'snapshots/';
 const DEMO_POINTER_PATH = 'snapshots/_demo.json';
 const ID_RE = /^[0-9a-f-]{8,64}$/i;
+const IMAGE_KEY_MAX = 512;
+const CURRENT_SCHEMA_VERSION = 2;
 
 async function readJsonBody(req) {
   if (req.body && typeof req.body === 'object') return req.body;
@@ -61,6 +72,27 @@ function sanitizeTitle(title) {
   if (typeof title !== 'string') return 'Untitled';
   const trimmed = title.trim().slice(0, 200);
   return trimmed.length > 0 ? trimmed : 'Untitled';
+}
+
+// Image keys look like `${versionId}:${screenId}:${quality}`. Hashing to a
+// fixed hex digest gives us a URL- and storage-safe filename regardless of
+// how the caller composed the key, and avoids any path-traversal foot-guns
+// from raw client input.
+function hashImageKey(key) {
+  return crypto.createHash('sha256').update(String(key)).digest('hex');
+}
+
+function imageBlobPath(snapshotId, key) {
+  return `${SNAPSHOT_PREFIX}${snapshotId}/images/${hashImageKey(key)}.json`;
+}
+
+// Strip dataUrl off an image record so we can store the metadata next to
+// the project bundle without inlining the (large) base64 payload.
+function imageMetadata(record) {
+  if (!record || typeof record !== 'object') return null;
+  const meta = { ...record };
+  delete meta.dataUrl;
+  return meta;
 }
 
 async function findBlobsForId(id) {
@@ -122,10 +154,17 @@ async function handlePost(req, res) {
   }
 
   const project = body?.project;
-  const images = Array.isArray(body?.images) ? body.images : [];
+  const rawImages = Array.isArray(body?.images) ? body.images : [];
   if (!project || typeof project !== 'object') {
     return json(res, 400, { error: 'missing_project' });
   }
+
+  // Drop any dataUrl that snuck through — image blobs are uploaded
+  // individually via `?id=...&image=1`. Storing dataUrl inline would just
+  // bring back the size problem this split was meant to solve.
+  const imageRefs = rawImages
+    .map(imageMetadata)
+    .filter((m) => m && typeof m.key === 'string' && m.key.length > 0 && m.key.length <= IMAGE_KEY_MAX);
 
   const id = crypto.randomUUID();
   const manifest = {
@@ -133,11 +172,19 @@ async function handlePost(req, res) {
     title: sanitizeTitle(body.title),
     projectName: typeof project?.project?.name === 'string' ? project.project.name : 'Untitled',
     createdAt: nowIso(),
-    schemaVersion: 1,
-    imageCount: images.length,
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    imageCount: imageRefs.length,
   };
 
-  const data = { schemaVersion: 1, manifest, project, images };
+  const data = {
+    schemaVersion: CURRENT_SCHEMA_VERSION,
+    manifest,
+    project,
+    // v2: images carry metadata only; the dataUrl for each lives in a
+    // separate blob under snapshots/<id>/images/<hash>.json so that no
+    // single request crosses the 4.5 MB serverless body cap.
+    images: imageRefs,
+  };
   const dataJson = JSON.stringify(data);
   const manifestJson = JSON.stringify({ ...manifest, sizeBytes: dataJson.length });
 
@@ -155,6 +202,52 @@ async function handlePost(req, res) {
   });
 
   return json(res, 201, { id, manifest: JSON.parse(manifestJson) });
+}
+
+// POST /api/snapshots?id=<id>&image=1
+// Body: { image: MockupImageRecord }
+// Writes one image to snapshots/<id>/images/<hash>.json. The data.json
+// already records the metadata (key, screenId, etc.) — the per-image blob
+// just carries the dataUrl so it can be fetched on demand at load time.
+async function handleImagePost(id, req, res) {
+  // Make sure the snapshot exists before writing under it, so a stray
+  // image POST doesn't leave orphaned blobs behind.
+  const blobs = await findBlobsForId(id);
+  const dataBlob = blobs.find((b) => b.pathname.endsWith('/data.json'));
+  if (!dataBlob) return json(res, 404, { error: 'not_found' });
+
+  let body;
+  try {
+    body = await readJsonBody(req);
+  } catch (err) {
+    if (err?.message === 'payload_too_large') {
+      return json(res, 413, { error: 'payload_too_large', limitBytes: MAX_BODY_BYTES });
+    }
+    return json(res, 400, { error: 'invalid_json' });
+  }
+
+  const image = body?.image;
+  if (!image || typeof image !== 'object') {
+    return json(res, 400, { error: 'missing_image' });
+  }
+  if (typeof image.key !== 'string' || image.key.length === 0 || image.key.length > IMAGE_KEY_MAX) {
+    return json(res, 400, { error: 'invalid_image_key' });
+  }
+  if (typeof image.dataUrl !== 'string' || !image.dataUrl.startsWith('data:')) {
+    return json(res, 400, { error: 'invalid_image_dataurl' });
+  }
+
+  const payload = JSON.stringify({ key: image.key, image });
+  await put(imageBlobPath(id, image.key), payload, {
+    contentType: 'application/json',
+    access: 'private',
+    addRandomSuffix: false,
+    // Allow overwrite so a partial save can be retried by re-running the
+    // whole upload loop without first deleting any half-written images.
+    allowOverwrite: true,
+  });
+
+  return json(res, 201, { id, key: image.key });
 }
 
 // Private blob URLs require the read/write token in the Authorization header
@@ -226,6 +319,15 @@ async function handleGetDemo(res) {
   }
 }
 
+// Public counterpart to `handleGetImage` — looks up the image via the
+// current demo pointer so anonymous viewers can hydrate the demo project's
+// mockup images without an owner token.
+async function handleGetDemoImage(key, res) {
+  const pointer = await readDemoPointer();
+  if (!pointer) return json(res, 404, { error: 'no_demo_set' });
+  return await handleGetImage(pointer.snapshotId, key, res);
+}
+
 async function handlePutDemo(id, res) {
   // PUT /api/snapshots?demo=1&id=<id>  -> set pointer
   // PUT /api/snapshots?demo=1          -> clear pointer
@@ -249,6 +351,25 @@ async function handleGetOne(id, res) {
 
   try {
     const data = await fetchBlobJson(dataBlob.url);
+    return json(res, 200, data);
+  } catch (err) {
+    return json(res, 502, { error: 'blob_fetch_failed', message: err?.message ?? 'unknown' });
+  }
+}
+
+// GET one per-image blob written by `handleImagePost`. The key is the
+// caller-supplied image key (`${versionId}:${screenId}:${quality}`); we
+// hash it to find the blob path.
+async function handleGetImage(id, key, res) {
+  if (typeof key !== 'string' || key.length === 0 || key.length > IMAGE_KEY_MAX) {
+    return json(res, 400, { error: 'invalid_image_key' });
+  }
+  const path = imageBlobPath(id, key);
+  const page = await list({ prefix: path });
+  const blob = page.blobs.find((b) => b.pathname === path);
+  if (!blob) return json(res, 404, { error: 'image_not_found' });
+  try {
+    const data = await fetchBlobJson(blob.url);
     return json(res, 200, data);
   } catch (err) {
     return json(res, 502, { error: 'blob_fetch_failed', message: err?.message ?? 'unknown' });
@@ -302,13 +423,28 @@ export default async function handler(req, res) {
     return json(res, 400, { error: 'invalid_id' });
   }
 
+  // `image=1` (POST) flags a per-image upload; any other string value of
+  // `image` is treated as the image key to fetch on GET.
+  const imageQuery = typeof req.query?.image === 'string' ? req.query.image : null;
+  const isImageUpload = req.method === 'POST' && imageQuery === '1';
+  const imageReadKey = req.method === 'GET' && imageQuery !== null && imageQuery !== '1'
+    ? imageQuery
+    : null;
+
   try {
     if (isDemoChannel) {
-      if (req.method === 'GET') return await handleGetDemo(res);
+      if (req.method === 'GET') {
+        if (imageReadKey !== null) return await handleGetDemoImage(imageReadKey, res);
+        return await handleGetDemo(res);
+      }
       if (req.method === 'PUT') return await handlePutDemo(id, res);
       return methodNotAllowed(res, ['GET', 'PUT']);
     }
     if (req.method === 'POST') {
+      if (isImageUpload) {
+        if (id === null) return json(res, 400, { error: 'missing_id' });
+        return await handleImagePost(id, req, res);
+      }
       if (id !== null) return json(res, 400, { error: 'unexpected_id' });
       return await handlePost(req, res);
     }
@@ -322,6 +458,7 @@ export default async function handler(req, res) {
     }
     // GET
     if (id === null) return await handleList(req, res);
+    if (imageReadKey !== null) return await handleGetImage(id, imageReadKey, res);
     return await handleGetOne(id, res);
   } catch (err) {
     console.error('[snapshots]', err);
