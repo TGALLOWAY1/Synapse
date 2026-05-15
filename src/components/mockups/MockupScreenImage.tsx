@@ -196,7 +196,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
             </div>
             <div className="text-xs text-neutral-500 mt-1 max-w-sm">
                 {error
-                    ? 'Tap retry below to try again. The HTML mockup is still available under the Preview tab.'
+                    ? 'Tap retry below to try again.'
                     : 'Generate a quick draft image of this screen via OpenAI gpt-image-2. You can regenerate at high quality once you like the draft — both renders stay accessible.'}
             </div>
             {error && (

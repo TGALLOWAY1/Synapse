@@ -24,11 +24,11 @@ interface State {
 
 /**
  * Lightweight error boundary scoped to mockup rendering. If the MockupViewer
- * or MockupHtmlPreview tree throws (e.g. due to corrupted payload data or an
- * infinite render loop), this catches it and shows a clean placeholder
- * instead of crashing the entire MockupsView panel. The fallback exposes a
- * "Try again" button so users aren't trapped on the error UI when the
- * surrounding app state has moved on.
+ * tree throws (e.g. due to corrupted payload data or an infinite render
+ * loop), this catches it and shows a clean placeholder instead of crashing
+ * the entire mockup panel. The fallback exposes a "Try again" button so
+ * users aren't trapped on the error UI when the surrounding app state has
+ * moved on.
  */
 export class MockupErrorBoundary extends Component<Props, State> {
     state: State = { hasError: false };

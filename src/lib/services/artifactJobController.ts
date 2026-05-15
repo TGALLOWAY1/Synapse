@@ -6,7 +6,7 @@ import type {
     SourceRef,
     StructuredPRD,
 } from '../../types';
-import { MOCKUP_HTML_V1 } from '../../types';
+import { MOCKUP_SPEC_V1 } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
 import { generateCoreArtifact } from './coreArtifactService';
 import { generateMockup } from './mockupService';
@@ -23,6 +23,8 @@ import { normalizeError } from '../errors';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { hasOpenAIKey } from '../openaiClient';
 import { selectPreferredDesignSystem } from '../designTokens';
+import { parseScreenInventory } from '../screenInventoryNormalize';
+import { parseComponentInventoryMarkdown } from '../componentInventoryParse';
 
 export interface StartArgs {
     projectId: string;
@@ -38,9 +40,11 @@ const ALL_SLOT_KEYS: ArtifactSlotKey[] = [
 ];
 
 // Concurrency budget per project. Core artifacts run up to 4 in parallel
-// within a layer; mockup runs in its own single-slot bucket so its 25–60s
-// HTTP request never blocks core generation. Buckets are per-project so
-// two projects in two browser tabs don't starve each other.
+// within a layer; mockup runs in its own single-slot bucket. Mockup spec
+// derivation is deterministic and cheap — the slow part is the downstream
+// gpt-image-2 image generation which runs through its own image store and
+// is not gated by this semaphore. Buckets are per-project so two projects
+// in two browser tabs don't starve each other.
 const CORE_CONCURRENCY_PER_PROJECT = 4;
 
 interface Semaphore {
@@ -194,20 +198,51 @@ async function runCoreArtifactSlot(
     writeStore.setSlotStatus(projectId, subtype, { status: 'done', finishedAt: Date.now() });
 }
 
+const MOCKUP_DEPENDENCIES: CoreArtifactSubtype[] = [
+    'screen_inventory',
+    'component_inventory',
+    'design_system',
+];
+
+const readPreferredArtifactForSpine = (
+    projectId: string,
+    subtype: CoreArtifactSubtype,
+    spineVersionId: string,
+): string | null => {
+    const store = useProjectStore.getState();
+    const artifact = store.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
+    if (!artifact) return null;
+    const preferred = store.getPreferredVersion(projectId, artifact.id);
+    if (!preferred) return null;
+    const matches = preferred.sourceRefs.some(
+        r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
+    );
+    return matches ? preferred.content : null;
+};
+
+const readPreferredArtifactRef = (
+    projectId: string,
+    subtype: CoreArtifactSubtype,
+    spineVersionId: string,
+): { artifactId: string; versionId: string } | null => {
+    const store = useProjectStore.getState();
+    const artifact = store.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
+    if (!artifact) return null;
+    const preferred = store.getPreferredVersion(projectId, artifact.id);
+    if (!preferred) return null;
+    const matches = preferred.sourceRefs.some(
+        r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
+    );
+    return matches ? { artifactId: artifact.id, versionId: preferred.id } : null;
+};
+
 async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform } = args;
     const settings = buildAutoMockupSettings(prdContent, structuredPRD, projectPlatform);
 
-    // Resolve the project's preferred design system tokens (if any). The
-    // mockup generation prompt and per-screen compliance validation use
-    // them; staleness tracking records the tokensHash on the new mockup
-    // version's source refs.
-    const designSystemPreferred = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
-    const designTokens = designSystemPreferred?.tokens;
-
     const semaphore = getMockupSemaphore(projectId);
     await semaphore.acquire();
-    let result: Awaited<ReturnType<typeof generateMockup>>;
+    let result: ReturnType<typeof generateMockup>;
     try {
         if (signal.aborted) throw new DOMException('aborted', 'AbortError');
         const store = useProjectStore.getState();
@@ -217,20 +252,36 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             attempt: (store.getSlot(projectId, 'mockup')?.attempt ?? 0) + 1,
             progressLog: [],
         });
-        store.appendSlotProgress(projectId, 'mockup', 'Preparing mockup request…');
-        result = await generateMockup(prdContent, settings, structuredPRD, {
-            signal,
-            onStatus: (msg) => useProjectStore.getState().appendSlotProgress(projectId, 'mockup', msg),
-            designTokens,
-        });
+        store.appendSlotProgress(projectId, 'mockup', 'Resolving upstream artifacts…');
+
+        const screenInventoryRaw = readPreferredArtifactForSpine(
+            projectId, 'screen_inventory', spineVersionId,
+        );
+        const componentInventoryRaw = readPreferredArtifactForSpine(
+            projectId, 'component_inventory', spineVersionId,
+        );
+
+        const screenInventory = screenInventoryRaw
+            ? parseScreenInventory(screenInventoryRaw)
+            : null;
+        const componentInventory = componentInventoryRaw
+            ? parseComponentInventoryMarkdown(componentInventoryRaw)
+            : null;
+
+        store.appendSlotProgress(projectId, 'mockup', 'Composing screen specs from inventory…');
+        result = generateMockup(
+            settings,
+            structuredPRD,
+            screenInventory,
+            componentInventory,
+        );
     } finally {
         semaphore.release();
     }
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
-    useProjectStore.getState().appendSlotProgress(projectId, 'mockup', 'Saving artifact…');
+    useProjectStore.getState().appendSlotProgress(projectId, 'mockup', 'Saving mockup spec…');
 
-    const { payload, warnings, critique, designSystemCompliance } = result;
-    const usedFallback = warnings.some(w => w.includes('safe fallback'));
+    const { payload, warnings } = result;
     const writeStore = useProjectStore.getState();
     const title = payload.title?.trim() || `Mockup — ${settings.platform} / ${settings.fidelity} / ${settings.scope.replace('_', ' ')}`;
 
@@ -242,12 +293,26 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     const versions = writeStore.getArtifactVersions(projectId, artifactId);
     const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
 
-    // Build source refs: spine + (optional) design_system. The design_system
-    // ref's `anchorInfo` carries the tokensHash so staleness can detect
-    // token drift later without re-comparing the full token object.
+    // Build source refs spanning every upstream artifact this mockup
+    // consumes. The design_system ref's `anchorInfo` carries the
+    // tokensHash so staleness can detect token drift without re-comparing
+    // the full token object.
+    const designSystemPreferred = selectPreferredDesignSystem(writeStore, projectId);
     const sourceRefs: SourceRef[] = [
         { id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' },
     ];
+    for (const subtype of MOCKUP_DEPENDENCIES) {
+        if (subtype === 'design_system') continue; // handled below to attach hash
+        const ref = readPreferredArtifactRef(projectId, subtype, spineVersionId);
+        if (ref) {
+            sourceRefs.push({
+                id: uuidv4(),
+                sourceArtifactId: ref.artifactId,
+                sourceArtifactVersionId: ref.versionId,
+                sourceType: 'core_artifact',
+            });
+        }
+    }
     if (designSystemPreferred) {
         sourceRefs.push({
             id: uuidv4(),
@@ -264,16 +329,10 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         JSON.stringify(payload),
         {
             settings,
-            format: MOCKUP_HTML_V1,
-            alignmentCritique: {
-                score: critique.alignmentScore,
-                severity: critique.severity,
-                missingConcepts: critique.missingConcepts,
-            },
-            generationStrategy: 'mockup_strategy_v2',
-            usedFallbackTemplate: usedFallback,
+            format: MOCKUP_SPEC_V1,
+            generationStrategy: 'mockup_spec_v1',
             autoGenerated: true,
-            ...(designSystemCompliance ? { designSystemCompliance } : {}),
+            warnings,
             ...(designSystemPreferred ? { designSystemTokensHash: designSystemPreferred.tokensHash } : {}),
         },
         sourceRefs,
@@ -284,12 +343,10 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
     writeStore.setSlotStatus(projectId, 'mockup', { status: 'done', finishedAt: Date.now() });
 
     // Fire-and-forget: kick off low-quality AI image generation for each
-    // screen. The user landed on the AI Image tab by default in MockupViewer
-    // — having the image start populating immediately matches the expectation
-    // that the AI image is the primary mockup output. Skipped when no OpenAI
-    // key is configured (the empty-state CTA is shown instead). High-quality
-    // can be promoted later via the regenerate button without losing the
-    // low-quality render — both qualities coexist in IndexedDB.
+    // screen. The AI image is the sole visual deliverable, so kicking it
+    // off as soon as the spec lands matches the expectation that the
+    // mockup page lights up with images. Skipped when no OpenAI key is
+    // configured (the empty-state CTA is shown instead).
     const versionId = newVersion?.versionId;
     if (versionId && hasOpenAIKey() && !signal.aborted) {
         const imageStore = useMockupImageStore.getState();
@@ -349,9 +406,16 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
         }
     })();
 
+    // Mockup is now tightly coupled to screen_inventory, component_inventory,
+    // and design_system. Wait for the core pipeline to finish before kicking
+    // it off so the spec builder reads completed (or at least attempted)
+    // upstream artifacts. If any dep errored, generateMockup degrades
+    // gracefully with warnings rather than failing.
     const mockupPromise = wantsMockup
         ? (async () => {
             try {
+                await corePromise;
+                if (signal.aborted) return;
                 await runMockupSlot(args, signal);
             } catch (e) {
                 if (isAbortError(e) || signal.aborted) return;

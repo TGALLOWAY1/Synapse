@@ -1,13 +1,7 @@
-import { useCallback, useMemo, useState } from 'react';
-import { Eye, Code2, ExternalLink, Copy, Check, AlertTriangle, Activity, Sparkles } from 'lucide-react';
+import { useState } from 'react';
 import type { MockupPayload, MockupSettings, StalenessState } from '../../types';
 import { StalenessBadge } from '../StalenessBadge';
-import { MockupHtmlPreview } from './MockupHtmlPreview';
 import { MockupScreenImage } from './MockupScreenImage';
-import { buildMockupSrcDoc } from './buildMockupSrcDoc';
-import { useProbeStore } from '../../store/probeStore';
-import { useProjectStore } from '../../store/projectStore';
-import { selectPreferredDesignTokens, type DesignSystemCompliance } from '../../lib/designTokens';
 
 type Props = {
     payload: MockupPayload;
@@ -17,23 +11,10 @@ type Props = {
     createdAt: number;
     sourceSpineVersionId?: string;
     actions?: React.ReactNode;
-    // Passed through to MockupHtmlPreview so iframe probe outcomes are
-    // aggregated per artifact version in the session telemetry store.
     versionId?: string;
-    // Required for the AI Image tab (OpenAI gpt-image-2 path). Threaded
-    // through from MockupsView. When omitted (e.g. comparison view), the
-    // AI Image tab is hidden.
     projectId?: string;
     artifactId?: string;
-    /**
-     * Per-screen design system compliance summaries, keyed by screen id.
-     * When supplied, the per-screen header surfaces a small warning chip
-     * with the compliance score.
-     */
-    designSystemCompliance?: Record<string, DesignSystemCompliance>;
 };
-
-type Mode = 'preview' | 'code' | 'image';
 
 const CHIP = 'text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-neutral-200 bg-neutral-50 text-neutral-500 font-medium';
 
@@ -59,54 +40,13 @@ export function MockupViewer({
     versionId,
     projectId,
     artifactId,
-    designSystemCompliance,
 }: Props) {
     const aiImageEnabled = !!(projectId && artifactId && versionId);
     const [activeIdx, setActiveIdx] = useState(0);
-    // Resolve current design tokens for live preview rendering. Token
-    // changes do NOT auto-regenerate the mockup; the staleness slice will
-    // mark the artifact `possibly_outdated` so the user can regenerate
-    // explicitly.
-    const designTokens = useProjectStore(state =>
-        projectId ? selectPreferredDesignTokens(state, projectId) : undefined,
-    );
-    // AI image is the primary mockup artifact — default to it when available,
-    // fall back to the HTML preview when no projectId/artifactId/versionId
-    // is threaded (e.g. comparison view).
-    const [mode, setMode] = useState<Mode>(aiImageEnabled ? 'image' : 'preview');
-    const [copied, setCopied] = useState(false);
-    // Session-scoped probe aggregate for this artifact version. Populated
-    // by MockupHtmlPreview every time a probe message arrives; surfaced
-    // here as a small health badge so reviewers can see whether the
-    // renders have been clean or degraded in this session.
-    const probeStats = useProbeStore(s => (versionId ? s.byVersion[versionId] : undefined));
 
-    // Clamp in case of payload mutation.
     const safeIdx = Math.min(activeIdx, Math.max(0, payload.screens.length - 1));
     const activeScreen = payload.screens[safeIdx];
     const hasMultiple = payload.screens.length > 1;
-
-    const openInNewTab = useCallback(() => {
-        if (!activeScreen) return;
-        const doc = buildMockupSrcDoc(activeScreen.html, { designTokens });
-        const blob = new Blob([doc], { type: 'text/html' });
-        const url = URL.createObjectURL(blob);
-        const win = window.open(url, '_blank', 'noopener,noreferrer');
-        setTimeout(() => URL.revokeObjectURL(url), 30_000);
-        if (!win) {
-            console.warn('[mockup] window.open blocked; object URL created but not opened');
-        }
-    }, [activeScreen, designTokens]);
-
-    const handleCopy = useCallback(() => {
-        if (!activeScreen) return;
-        navigator.clipboard.writeText(activeScreen.html).then(() => {
-            setCopied(true);
-            setTimeout(() => setCopied(false), 2000);
-        });
-    }, [activeScreen]);
-
-    const codeString = useMemo(() => activeScreen?.html ?? '', [activeScreen]);
 
     if (!activeScreen) {
         return (
@@ -118,93 +58,27 @@ export function MockupViewer({
 
     return (
         <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-hidden">
-            {/* Title strip */}
             <div className="px-5 pt-5 pb-4 border-b border-neutral-100">
-                <div className="flex items-start justify-between gap-4">
-                    <div className="min-w-0">
-                        <h3 className="text-base font-bold text-neutral-900 tracking-tight truncate">
-                            {payload.title}
-                        </h3>
-                        {payload.summary && (
-                            <p className="text-sm text-neutral-500 mt-0.5 line-clamp-2">{payload.summary}</p>
-                        )}
-                    </div>
-                    {/* Preview / Code / AI Image toggle */}
-                    <div className="shrink-0 flex items-center bg-neutral-100 rounded-lg p-0.5 text-xs font-medium">
-                        <button
-                            type="button"
-                            onClick={() => setMode('preview')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                                mode === 'preview'
-                                    ? 'bg-white text-neutral-900 shadow-sm'
-                                    : 'text-neutral-500 hover:text-neutral-700'
-                            }`}
-                        >
-                            <Eye size={12} />
-                            Preview
-                        </button>
-                        <button
-                            type="button"
-                            onClick={() => setMode('code')}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                                mode === 'code'
-                                    ? 'bg-white text-neutral-900 shadow-sm'
-                                    : 'text-neutral-500 hover:text-neutral-700'
-                            }`}
-                        >
-                            <Code2 size={12} />
-                            Code
-                        </button>
-                        {aiImageEnabled && (
-                            <button
-                                type="button"
-                                onClick={() => setMode('image')}
-                                className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md transition ${
-                                    mode === 'image'
-                                        ? 'bg-white text-neutral-900 shadow-sm'
-                                        : 'text-neutral-500 hover:text-neutral-700'
-                                }`}
-                                title="AI image preview (OpenAI gpt-image-2)"
-                            >
-                                <Sparkles size={12} />
-                                AI Image
-                            </button>
-                        )}
-                    </div>
+                <div className="min-w-0">
+                    <h3 className="text-base font-bold text-neutral-900 tracking-tight truncate">
+                        {payload.title}
+                    </h3>
+                    {payload.summary && (
+                        <p className="text-sm text-neutral-500 mt-0.5 line-clamp-2">{payload.summary}</p>
+                    )}
                 </div>
 
-                {/* Settings chips + metadata */}
                 <div className="flex flex-wrap items-center gap-1.5 mt-3">
                     <span className={CHIP}>{settings.platform}</span>
                     <span className={CHIP}>{FIDELITY_LABELS[settings.fidelity] ?? settings.fidelity}</span>
                     <span className={CHIP}>{SCOPE_LABELS[settings.scope] ?? settings.scope}</span>
                     <StalenessBadge staleness={staleness} />
-                    {probeStats && probeStats.total > 0 && (
-                        probeStats.degraded === 0 ? (
-                            <span
-                                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-emerald-200 bg-emerald-50 text-emerald-700 font-medium"
-                                title={`All ${probeStats.total} iframe render(s) this session reported clean layout signals.`}
-                            >
-                                <Activity size={10} />
-                                Render OK ({probeStats.ok}/{probeStats.total})
-                            </span>
-                        ) : (
-                            <span
-                                className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium"
-                                title={probeStats.lastReason ?? 'One or more renders reported degraded layout signals.'}
-                            >
-                                <AlertTriangle size={10} />
-                                Render degraded ({probeStats.degraded}/{probeStats.total})
-                            </span>
-                        )
-                    )}
                     <span className="text-[10px] text-neutral-400 ml-auto tabular-nums">
                         v{versionNumber} · {formatDate(createdAt)}
                     </span>
                 </div>
             </div>
 
-            {/* Screen nav + open-in-tab */}
             <div className="px-5 pt-3 pb-2 flex items-center gap-2 flex-wrap">
                 {hasMultiple ? (
                     <div className="flex items-center gap-1 flex-wrap">
@@ -229,47 +103,10 @@ export function MockupViewer({
                 ) : (
                     <div className="text-xs text-neutral-500 font-medium">{activeScreen.name}</div>
                 )}
-                <div className="ml-auto flex items-center gap-1">
-                    {mode === 'code' && (
-                        <button
-                            type="button"
-                            onClick={handleCopy}
-                            className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-800 px-2 py-1 rounded-md hover:bg-neutral-50 transition"
-                            title="Copy HTML to clipboard"
-                        >
-                            {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
-                            {copied ? 'Copied' : 'Copy'}
-                        </button>
-                    )}
-                    <button
-                        type="button"
-                        onClick={openInNewTab}
-                        className="flex items-center gap-1.5 text-xs text-neutral-500 hover:text-neutral-800 px-2 py-1 rounded-md hover:bg-neutral-50 transition"
-                        title="Open this screen in a new browser tab"
-                    >
-                        <ExternalLink size={12} />
-                        New Tab
-                    </button>
-                </div>
             </div>
 
-            {/* Preview / Code / AI Image body */}
             <div className="px-5 pb-4">
-                {mode === 'preview' && (
-                    <MockupHtmlPreview
-                        key={activeScreen.id}
-                        html={activeScreen.html}
-                        platform={settings.platform}
-                        versionId={versionId}
-                        designTokens={designTokens}
-                    />
-                )}
-                {mode === 'code' && (
-                    <pre className="text-xs font-mono bg-neutral-900 text-neutral-100 rounded-lg p-4 overflow-auto max-h-[680px] whitespace-pre-wrap break-words">
-                        {codeString}
-                    </pre>
-                )}
-                {mode === 'image' && aiImageEnabled && projectId && artifactId && versionId && (
+                {aiImageEnabled && projectId && artifactId && versionId ? (
                     <MockupScreenImage
                         key={`${activeScreen.id}:img`}
                         projectId={projectId}
@@ -279,14 +116,20 @@ export function MockupViewer({
                         payload={payload}
                         settings={settings}
                     />
+                ) : (
+                    <div className="bg-white rounded-lg border border-dashed border-neutral-300 p-6 text-sm text-neutral-500 text-center">
+                        AI image preview is unavailable in this context.
+                    </div>
                 )}
             </div>
 
-            {/* Screen description + notes */}
-            {(activeScreen.purpose || activeScreen.notes) && (
+            {(activeScreen.purpose || activeScreen.userIntent || activeScreen.notes) && (
                 <div className="px-5 pb-4 space-y-1">
                     {activeScreen.purpose && (
                         <p className="text-sm text-neutral-600">{activeScreen.purpose}</p>
+                    )}
+                    {activeScreen.userIntent && (
+                        <p className="text-xs text-neutral-500 italic">User intent: {activeScreen.userIntent}</p>
                     )}
                     {activeScreen.notes && (
                         <p className="text-xs text-neutral-400 italic">{activeScreen.notes}</p>
@@ -294,27 +137,35 @@ export function MockupViewer({
                 </div>
             )}
 
-            {/* Design system compliance — soft warnings only, never blocking. */}
-            {designSystemCompliance?.[activeScreen.id] && designSystemCompliance[activeScreen.id].warnings.length > 0 && (
-                <div className="px-5 pb-4">
-                    <details className="rounded-md border border-amber-200 bg-amber-50/60 text-xs">
-                        <summary className="cursor-pointer px-3 py-2 text-amber-800 font-medium flex items-center gap-2">
-                            <AlertTriangle size={12} />
-                            Design system compliance · {Math.round(designSystemCompliance[activeScreen.id].score * 100)}/100
-                            <span className="text-amber-700 font-normal">
-                                · {designSystemCompliance[activeScreen.id].warnings.length} warning{designSystemCompliance[activeScreen.id].warnings.length === 1 ? '' : 's'}
-                            </span>
-                        </summary>
-                        <ul className="px-4 pb-3 pt-1 space-y-1 text-amber-800">
-                            {designSystemCompliance[activeScreen.id].warnings.map((w, i) => (
-                                <li key={i} className="list-disc ml-4">{w}</li>
-                            ))}
-                        </ul>
-                    </details>
+            {(activeScreen.coreUIElements?.length || activeScreen.componentRefs?.length) && (
+                <div className="px-5 pb-4 grid gap-3 md:grid-cols-2">
+                    {activeScreen.coreUIElements && activeScreen.coreUIElements.length > 0 && (
+                        <div className="rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium mb-1">
+                                Core UI elements
+                            </p>
+                            <ul className="text-xs text-neutral-700 space-y-0.5">
+                                {activeScreen.coreUIElements.map((el, i) => (
+                                    <li key={i}>· {el}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
+                    {activeScreen.componentRefs && activeScreen.componentRefs.length > 0 && (
+                        <div className="rounded-md border border-neutral-200 bg-neutral-50/60 px-3 py-2">
+                            <p className="text-[10px] uppercase tracking-wider text-neutral-500 font-medium mb-1">
+                                Components used
+                            </p>
+                            <ul className="text-xs text-neutral-700 space-y-0.5">
+                                {activeScreen.componentRefs.map((c, i) => (
+                                    <li key={i} className="font-mono">· {c}</li>
+                                ))}
+                            </ul>
+                        </div>
+                    )}
                 </div>
             )}
 
-            {/* Actions + provenance */}
             {actions && (
                 <div className="px-5 py-3 border-t border-neutral-100 bg-neutral-50/40 flex items-center gap-2 flex-wrap">
                     {actions}

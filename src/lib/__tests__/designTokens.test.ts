@@ -7,7 +7,6 @@ import {
     tokensToPromptSnippet,
     tokensToImagePromptBrief,
     designSystemTokensToMarkdown,
-    validateMockupHtmlAgainstTokens,
 } from '../designTokens';
 
 describe('normalizeDesignTokens', () => {
@@ -212,45 +211,3 @@ describe('designSystemTokensToMarkdown', () => {
     });
 });
 
-describe('validateMockupHtmlAgainstTokens', () => {
-    const tokens = normalizeDesignTokens({
-        colors: {
-            'brand.primary': '#8B5CF6',
-            'surface.card': '#1E293B',
-            'text.primary': '#F8FAFC',
-        },
-    });
-
-    it('reports clean compliance for HTML using only known colors', () => {
-        const html = '<div style="background: #8B5CF6; color: #F8FAFC">Hi</div>';
-        const result = validateMockupHtmlAgainstTokens(html, tokens);
-        expect(result.warnings).toEqual([]);
-        expect(result.score).toBe(1);
-    });
-
-    it('flags hex colors not present in tokens', () => {
-        const html = '<button class="primary" style="background: #FF0000">Buy</button>';
-        const result = validateMockupHtmlAgainstTokens(html, tokens);
-        expect(result.counts.unknownHexes).toBeGreaterThan(0);
-        expect(result.warnings.some(w => /not present in design system/i.test(w))).toBe(true);
-        expect(result.score).toBeLessThan(1);
-    });
-
-    it('flags primary CTA without brand.primary reference', () => {
-        const html = '<button class="primary" style="background: #112233">Click</button>';
-        const result = validateMockupHtmlAgainstTokens(html, tokens);
-        expect(result.warnings.some(w => /Primary CTA/i.test(w))).toBe(true);
-    });
-
-    it('passes when CTA uses brand.primary CSS variable', () => {
-        const html = '<button class="primary" style="background: var(--color-brand-primary); color: #F8FAFC">Click</button>';
-        const result = validateMockupHtmlAgainstTokens(html, tokens);
-        expect(result.warnings.some(w => /Primary CTA/i.test(w))).toBe(false);
-    });
-
-    it('does not flag inline styles below the threshold', () => {
-        const html = '<div style="padding: 4px"></div>';
-        const result = validateMockupHtmlAgainstTokens(html, tokens);
-        expect(result.warnings.some(w => /Heavy use of inline style/i.test(w))).toBe(false);
-    });
-});
