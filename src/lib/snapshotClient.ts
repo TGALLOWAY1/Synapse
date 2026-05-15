@@ -10,6 +10,14 @@
 // One snapshot can also be designated "the demo project": the server keeps a
 // pointer blob (_demo.json) and exposes a public `?demo=1` read so anonymous
 // visitors can load it from the home page without an owner token.
+//
+// Save/load splits images out of the JSON envelope. Each mockup image (base64
+// PNG, 1–3 MB) is shipped as its own request so neither the upload body nor
+// the download response crosses Vercel's ~4.5 MB serverless cap. The initial
+// POST/GET carries the project bundle plus a list of image *metadata*
+// records (no `dataUrl`); the per-image dataUrls are uploaded/fetched one at
+// a time. Legacy v1 snapshots that still embed dataUrls inline are detected
+// on load and returned as-is.
 
 import type {
     Project, SpineVersion, HistoryEvent, Branch,
@@ -53,6 +61,16 @@ export type SnapshotListResult = {
     snapshots: SnapshotListItem[];
     demoSnapshotId: string | null;
 };
+
+// Progress callback shape. `phase` lets the UI render different messages
+// for "uploading the bundle" vs "uploading image N of M". `total` is 0 for
+// the bundle phase.
+export type SnapshotProgress = {
+    phase: 'bundle' | 'images';
+    completed: number;
+    total: number;
+};
+export type SnapshotProgressCallback = (p: SnapshotProgress) => void;
 
 const API_BASE = '/api/snapshots';
 
@@ -124,21 +142,58 @@ const collectProjectImages = async (bundle: SnapshotProjectBundle): Promise<Mock
     return out;
 };
 
+// Strip the (large) base64 payload off an image record so the bundle POST
+// only carries the routing metadata. The dataUrl is uploaded in its own
+// request immediately after.
+const imageMetadata = (img: MockupImageRecord): Omit<MockupImageRecord, 'dataUrl'> => {
+    // We intentionally destructure-then-discard so a future field added to
+    // MockupImageRecord automatically makes it into the metadata blob.
+    const { dataUrl: _dataUrl, ...meta } = img;
+    void _dataUrl;
+    return meta;
+};
+
 export const saveSnapshot = async (
     projectId: string,
     title: string,
+    onProgress?: SnapshotProgressCallback,
 ): Promise<SnapshotManifest> => {
     const bundle = collectProjectBundle(projectId);
     const images = await collectProjectImages(bundle);
 
-    const resp = await fetch(API_BASE, {
+    onProgress?.({ phase: 'bundle', completed: 0, total: 0 });
+
+    // Step 1 — POST the project bundle plus image metadata only. This is
+    // bounded (typically a few hundred KB) regardless of how many or how
+    // large the mockup images are.
+    const bundleResp = await fetch(API_BASE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
-        body: JSON.stringify({ title, project: bundle, images }),
+        body: JSON.stringify({
+            title,
+            project: bundle,
+            images: images.map(imageMetadata),
+        }),
     });
-    if (!resp.ok) throw await errorFromResponse(resp, 'save_failed');
-    const result = await resp.json();
-    return result.manifest as SnapshotManifest;
+    if (!bundleResp.ok) throw await errorFromResponse(bundleResp, 'save_failed');
+    const { id, manifest } = await bundleResp.json() as { id: string; manifest: SnapshotManifest };
+
+    // Step 2 — upload each image as a separate request. We go sequentially
+    // so a slow/flaky uplink doesn't try to push all images at once and so
+    // browsers don't hold every base64 payload in flight concurrently.
+    onProgress?.({ phase: 'images', completed: 0, total: images.length });
+    for (let i = 0; i < images.length; i++) {
+        const img = images[i];
+        const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}&image=1`, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json', ...authHeaders() },
+            body: JSON.stringify({ image: img }),
+        });
+        if (!resp.ok) throw await errorFromResponse(resp, 'save_image_failed');
+        onProgress?.({ phase: 'images', completed: i + 1, total: images.length });
+    }
+
+    return manifest;
 };
 
 export const listSnapshots = async (): Promise<SnapshotListResult> => {
@@ -162,19 +217,75 @@ export const setDemoSnapshot = async (snapshotId: string | null): Promise<string
     return typeof body?.demoSnapshotId === 'string' ? body.demoSnapshotId : null;
 };
 
+// True if the bundle still has every image dataUrl inline — i.e. a legacy
+// v1 snapshot. v2 bundles return image metadata only and need a follow-up
+// fetch per image to hydrate the dataUrls.
+const isFullyInlined = (images: unknown[]): images is MockupImageRecord[] => {
+    if (!Array.isArray(images)) return false;
+    if (images.length === 0) return true;
+    return images.every((img) =>
+        img != null
+        && typeof img === 'object'
+        && typeof (img as { dataUrl?: unknown }).dataUrl === 'string',
+    );
+};
+
+// Pull each image blob into a full MockupImageRecord. Runs the fetches
+// with a small concurrency limit so a project with dozens of screens
+// doesn't try to open a fetch for every one simultaneously.
+const hydrateImages = async (
+    fetchOne: (key: string) => Promise<Response>,
+    refs: Array<Omit<MockupImageRecord, 'dataUrl'>>,
+): Promise<MockupImageRecord[]> => {
+    const CONCURRENCY = 4;
+    const out: MockupImageRecord[] = new Array(refs.length);
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, refs.length) }, async () => {
+        while (true) {
+            const idx = cursor++;
+            if (idx >= refs.length) return;
+            const ref = refs[idx];
+            const resp = await fetchOne(ref.key);
+            if (!resp.ok) throw await errorFromResponse(resp, 'load_image_failed');
+            const body = await resp.json() as { image?: MockupImageRecord };
+            if (!body?.image || typeof body.image.dataUrl !== 'string') {
+                throw new Error(`load_image_failed: malformed image record for ${ref.key}`);
+            }
+            out[idx] = body.image;
+        }
+    });
+    await Promise.all(workers);
+    return out;
+};
+
 // Public: fetch the snapshot the owner has marked as the demo. No auth.
 // Returns null when no demo has been set (server returns 404 in that case).
 export const loadDemoSnapshotPublic = async (): Promise<SnapshotPayload | null> => {
     const resp = await fetch(`${API_BASE}?demo=1`);
     if (resp.status === 404) return null;
     if (!resp.ok) throw await errorFromResponse(resp, 'load_demo_failed');
-    return await resp.json();
+    const payload = await resp.json() as SnapshotPayload;
+    if (isFullyInlined(payload.images)) return payload;
+    const hydrated = await hydrateImages(
+        (key) => fetch(`${API_BASE}?demo=1&image=${encodeURIComponent(key)}`),
+        payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+    );
+    return { ...payload, images: hydrated };
 };
 
 export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
     const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, { headers: authHeaders() });
     if (!resp.ok) throw await errorFromResponse(resp, 'load_failed');
-    return await resp.json();
+    const payload = await resp.json() as SnapshotPayload;
+    if (isFullyInlined(payload.images)) return payload;
+    const hydrated = await hydrateImages(
+        (key) => fetch(
+            `${API_BASE}?id=${encodeURIComponent(id)}&image=${encodeURIComponent(key)}`,
+            { headers: authHeaders() },
+        ),
+        payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+    );
+    return { ...payload, images: hydrated };
 };
 
 export const deleteSnapshot = async (id: string): Promise<void> => {

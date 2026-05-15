@@ -5,6 +5,7 @@ import {
     saveSnapshot, listSnapshots, loadSnapshot, restoreSnapshot, deleteSnapshot,
     setDemoSnapshot,
     type SnapshotListItem,
+    type SnapshotProgress,
 } from '../lib/snapshotClient';
 import { useProjectStore } from '../store/projectStore';
 
@@ -35,6 +36,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     const [snapshots, setSnapshots] = useState<SnapshotListItem[] | null>(null);
     const [demoSnapshotId, setDemoSnapshotIdState] = useState<string | null>(null);
     const [busy, setBusy] = useState<string | null>(null);
+    const [saveProgress, setSaveProgress] = useState<SnapshotProgress | null>(null);
     const [error, setError] = useState<string | null>(null);
     const [title, setTitle] = useState<string>(project?.name ?? 'Untitled');
 
@@ -72,16 +74,26 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
 
     const handleSave = async () => {
         setBusy('saving');
+        setSaveProgress(null);
         setError(null);
         try {
-            await saveSnapshot(projectId, title.trim() || 'Untitled');
+            await saveSnapshot(projectId, title.trim() || 'Untitled', (p) => setSaveProgress(p));
             await refresh();
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
         } finally {
             setBusy(null);
+            setSaveProgress(null);
         }
     };
+
+    const saveButtonLabel = (() => {
+        if (busy !== 'saving') return 'Save';
+        if (!saveProgress) return 'Saving…';
+        if (saveProgress.phase === 'bundle') return 'Saving…';
+        if (saveProgress.total === 0) return 'Saving…';
+        return `Image ${saveProgress.completed}/${saveProgress.total}…`;
+    })();
 
     const handleLoad = async (id: string) => {
         if (!confirm('Loading will replace the current copy of this project in the workspace. Continue?')) return;
@@ -214,7 +226,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-emerald-600 hover:bg-emerald-500 disabled:opacity-40 text-white rounded transition"
                                     >
                                         <Save size={14} />
-                                        {busy === 'saving' ? 'Saving…' : 'Save'}
+                                        {saveButtonLabel}
                                     </button>
                                 </div>
                             </div>
