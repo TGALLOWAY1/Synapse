@@ -1,28 +1,95 @@
 import type {
-    FeatureRef, FlowIssue, FlowIssueKind, ParsedErrorPath, ParsedFlow, ParsedStep,
+    FeatureRef, FlowIssue, FlowIssueKind, FlowRiskLevel, ParsedErrorPath, ParsedFlow, ParsedStep,
 } from './types';
 import { categorize } from './categorize';
 
 type RawSection = {
     goal?: string;
     preconditions?: string;
+    entryPoints?: string;
     stepsBlock?: string;
     successOutcome?: string;
     errorPaths?: string;
     edgeCases?: string;
+    assumptions?: string;
+    openQuestions?: string;
     rest?: string;
 };
 
 const SECTION_LABELS: Array<[keyof RawSection, RegExp]> = [
     ['goal', /^\*\*Goal:\*\*\s*/i],
     ['preconditions', /^\*\*Preconditions:\*\*\s*/i],
+    ['entryPoints', /^\*\*Entry\s*Points?:\*\*\s*/i],
     ['stepsBlock', /^\*\*Steps:\*\*\s*/i],
     ['successOutcome', /^\*\*Success Outcome:\*\*\s*/i],
     ['errorPaths', /^\*\*Error Paths:\*\*\s*/i],
     ['edgeCases', /^\*\*Edge Cases:\*\*\s*/i],
+    ['assumptions', /^\*\*Assumptions?:\*\*\s*/i],
+    ['openQuestions', /^\*\*Open\s*Questions?:\*\*\s*/i],
 ];
 
-type RawFlow = RawSection & { title: string };
+type RawFlow = RawSection & { rawTitle: string };
+
+/**
+ * Strip `[Traces to: f1, f2, ...]` / `(Traces: f1, f2)` / `[Maps to: f1]`
+ * style metadata from a flow title. Returns the cleaned title plus the
+ * extracted feature reference tokens so the renderer can surface them as
+ * chips outside the heading.
+ *
+ * Real-world generated titles include shapes like:
+ *   "Onboarding [Traces to: f1, f3, f4]"
+ *   "Workout Loop (Traces: f1, f2)"
+ *   "Offline Mode — Maps to: f1, f2"
+ *
+ * We keep the matcher narrow to avoid eating bracketed text that is part
+ * of the actual title (e.g. "[Beta] Onboarding").
+ */
+const TRACE_BRACKET_RE = /\s*[[(]\s*(?:traces?(?:\s+to)?|maps?\s+to|covers|implements|features?|refs?)\s*:?\s+([^)\]]+?)\s*[\])]/gi;
+const TRACE_DASH_RE = /\s+[—–-]\s+(?:traces?(?:\s+to)?|maps?\s+to|covers|implements|features?|refs?)\s*:?\s+([\w\s,;.&/-]+?)\s*$/i;
+const FEATURE_TOKEN_RE = /\b([fF]-?\d{1,4})\b/g;
+
+export function stripTraceMetadata(title: string): {
+    cleanTitle: string;
+    extracted: FeatureRef[];
+} {
+    if (!title) return { cleanTitle: '', extracted: [] };
+    const seen = new Set<string>();
+    const extracted: FeatureRef[] = [];
+
+    const pushTokens = (chunk: string) => {
+        FEATURE_TOKEN_RE.lastIndex = 0;
+        let m: RegExpExecArray | null;
+        while ((m = FEATURE_TOKEN_RE.exec(chunk)) !== null) {
+            const id = normalizeFeatureId(m[1]);
+            if (seen.has(id)) continue;
+            seen.add(id);
+            extracted.push({ id, raw: m[1] });
+        }
+    };
+
+    let out = title;
+
+    // Bracketed / parenthesized trace metadata — may appear anywhere in the title.
+    out = out.replace(TRACE_BRACKET_RE, (_full, contents: string) => {
+        pushTokens(contents);
+        return '';
+    });
+
+    // Trailing " — Traces to: f1, f2" form (no brackets).
+    out = out.replace(TRACE_DASH_RE, (_full, contents: string) => {
+        pushTokens(contents);
+        return '';
+    });
+
+    // Collapse double-spaces / dangling separators left behind.
+    out = out
+        .replace(/\s{2,}/g, ' ')
+        .replace(/[\s—–-]+$/g, '')
+        .replace(/^[\s—–-]+/g, '')
+        .trim();
+
+    return { cleanTitle: out, extracted };
+}
 
 function splitFlows(markdown: string): RawFlow[] {
     const flows: RawFlow[] = [];
@@ -49,7 +116,7 @@ function splitFlows(markdown: string): RawFlow[] {
                 flush();
                 flows.push(current);
             }
-            current = { title: headingMatch[1] };
+            current = { rawTitle: headingMatch[1] };
             bufferKey = null;
             bufferLines = [];
             continue;
@@ -347,16 +414,63 @@ export function classifyIssue(text: string): FlowIssueKind {
     return 'edge_case';
 }
 
-function parseEntryPoints(preconditions?: string): string[] {
-    if (!preconditions) return [];
+function parseBulletLines(block?: string): string[] {
+    if (!block) return [];
     const out: string[] = [];
-    for (const line of preconditions.split('\n')) {
+    for (const line of block.split('\n')) {
         const trimmed = line.trim().replace(/^[-*]\s+/, '');
         if (trimmed.length === 0) continue;
         out.push(trimmed);
     }
     return out;
 }
+
+/**
+ * Normalize text for dedupe — strip punctuation, lowercase, collapse
+ * whitespace. We use this when comparing preconditions vs entry points so
+ * that "User has installed the PWA." matches "user has installed the
+ * PWA" regardless of trailing periods or capitalization.
+ */
+function normalizeForCompare(text: string): string {
+    return text
+        .toLowerCase()
+        .replace(/[`*_]/g, '')
+        .replace(/[^a-z0-9]+/g, ' ')
+        .trim();
+}
+
+/**
+ * Pick a final list of entry points for display. Prefers an explicit
+ * `**Entry Points:**` section when present. Falls back to inferring from
+ * preconditions, but skips any line that is byte-equal (after
+ * normalization) to the preconditions text itself — otherwise the UI
+ * shows the same sentence in both cards.
+ */
+function chooseEntryPoints(opts: {
+    explicit?: string;
+    preconditions?: string;
+}): string[] {
+    if (opts.explicit && opts.explicit.trim().length > 0) {
+        const explicit = parseBulletLines(opts.explicit);
+        if (!opts.preconditions) return explicit;
+        const preNorms = new Set(
+            parseBulletLines(opts.preconditions).map(normalizeForCompare),
+        );
+        // Also compare against the precondition text as a whole, since the
+        // common shape is a single paragraph rather than a bullet list.
+        preNorms.add(normalizeForCompare(opts.preconditions));
+        return explicit.filter(line => !preNorms.has(normalizeForCompare(line)));
+    }
+
+    // No explicit section — infer from preconditions but only when the
+    // preconditions look like a list of distinct entry-style triggers.
+    // A single-paragraph precondition like "User has an account." is more
+    // of a state-fact than an entry point; surfacing it duplicates content.
+    const inferred = parseBulletLines(opts.preconditions);
+    if (inferred.length <= 1) return [];
+    return inferred;
+}
+
 
 function parseInferredSystems(steps: ParsedStep[]): string[] {
     const seen = new Set<string>();
@@ -371,9 +485,19 @@ function parseInferredSystems(steps: ParsedStep[]): string[] {
 function aggregateFeatureRefs(
     steps: ParsedStep[],
     extras: Array<string | undefined>,
+    titleExtracted: FeatureRef[] = [],
 ): FeatureRef[] {
     const seen = new Set<string>();
     const out: FeatureRef[] = [];
+
+    // Refs extracted from the title's `[Traces to: ...]` metadata go first
+    // so they always surface — even when no step or section mentions them.
+    for (const f of titleExtracted) {
+        if (seen.has(f.id)) continue;
+        seen.add(f.id);
+        out.push(f);
+    }
+
     for (const step of steps) {
         for (const f of step.featureRefs) {
             if (seen.has(f.id)) continue;
@@ -425,31 +549,72 @@ function buildIssues(
     return out;
 }
 
+/**
+ * Compute a coarse risk score for the flow from its issue mix and
+ * step density. Used to give product/eng a "where to look first"
+ * indicator in the sidebar.
+ *
+ *   - high   : any failure_mode, or >=3 alt paths/edge cases combined, or >=1 unresolved ref
+ *   - medium : any alternate_path / edge_case / validation_warning
+ *   - low    : otherwise (including a flow with no recognized issues)
+ */
+function inferRisk(issues: FlowIssue[]): FlowRiskLevel {
+    if (issues.length === 0) return 'low';
+    let alt = 0;
+    let edge = 0;
+    let failure = 0;
+    let unresolved = 0;
+    let validation = 0;
+    for (const i of issues) {
+        if (i.kind === 'failure_mode') failure++;
+        else if (i.kind === 'alternate_path') alt++;
+        else if (i.kind === 'edge_case') edge++;
+        else if (i.kind === 'unresolved_reference') unresolved++;
+        else if (i.kind === 'validation_warning') validation++;
+    }
+    if (failure > 0 || unresolved > 0) return 'high';
+    if (alt + edge >= 3) return 'high';
+    if (alt + edge + validation > 0) return 'medium';
+    return 'low';
+}
+
 export function parseFlows(markdown: string): ParsedFlow[] {
     const raw = splitFlows(markdown);
     return raw.map(r => {
+        const { cleanTitle, extracted: titleExtractedRefs } = stripTraceMetadata(r.rawTitle);
         const steps = r.stepsBlock ? parseStepsBlock(r.stepsBlock) : [];
         const errorPaths = r.errorPaths ? parseErrorPaths(r.errorPaths, steps) : [];
-        const inferredEntryPoints = parseEntryPoints(r.preconditions);
+        const entryPoints = chooseEntryPoints({
+            explicit: r.entryPoints,
+            preconditions: r.preconditions,
+        });
         const inferredSystems = parseInferredSystems(steps);
         const issues = buildIssues({ errorPaths, edgeCases: r.edgeCases, steps });
-        const featureRefs = aggregateFeatureRefs(steps, [
-            r.goal, r.preconditions, r.successOutcome, r.edgeCases,
-        ]);
+        const featureRefs = aggregateFeatureRefs(
+            steps,
+            [r.goal, r.preconditions, r.entryPoints, r.successOutcome, r.edgeCases, r.assumptions, r.openQuestions],
+            titleExtractedRefs,
+        );
+        const risk = inferRisk(issues);
         return {
-            title: r.title,
-            category: categorize(r.title, r.goal),
+            title: cleanTitle || r.rawTitle,
+            rawTitle: r.rawTitle,
+            category: categorize(cleanTitle || r.rawTitle, r.goal),
             goal: r.goal,
             preconditions: r.preconditions,
             successOutcome: r.successOutcome,
             edgeCases: r.edgeCases,
+            assumptions: r.assumptions,
+            openQuestions: r.openQuestions,
             rest: r.rest,
             steps,
             errorPaths,
             issues,
-            inferredEntryPoints,
+            entryPoints,
+            inferredEntryPoints: entryPoints,
             inferredSystems,
             featureRefs,
+            risk,
         };
     });
 }

@@ -1,12 +1,13 @@
 import { type ReactNode } from 'react';
 import {
-    Bookmark, Clock, DoorOpen, GitBranch, ListChecks, MoreHorizontal, Server,
-    Share2, ShieldCheck, Sparkles, Target,
+    AlertTriangle, Bookmark, Clock, DoorOpen, GitBranch, ListChecks,
+    MoreHorizontal, Server, Share2, ShieldCheck, Sparkles, Target,
 } from 'lucide-react';
 import type { Feature } from '../../../types';
-import type { FeatureRef, ParsedFlow } from './types';
+import type { FeatureRef, FlowRiskLevel, ParsedFlow } from './types';
 import { inlineMd } from './markdown';
 import { inlineWithFeatures } from './inlineWithFeatures';
+import { FeatureReferenceChip } from './FeatureReferenceChip';
 
 interface Props {
     flow: ParsedFlow;
@@ -15,6 +16,12 @@ interface Props {
     featuresById?: Map<string, Feature>;
     onSelectFeature: (refToken: FeatureRef) => void;
 }
+
+const RISK_META: Record<FlowRiskLevel, { label: string; classes: string }> = {
+    low: { label: 'Low risk', classes: 'bg-emerald-50 border-emerald-200 text-emerald-800' },
+    medium: { label: 'Medium risk', classes: 'bg-amber-50 border-amber-200 text-amber-800' },
+    high: { label: 'High risk', classes: 'bg-red-50 border-red-200 text-red-800' },
+};
 
 function MetadataChip({
     icon, label, tone,
@@ -75,8 +82,18 @@ export function FlowSummaryCard({
 }: Props) {
     const stepCount = flow.steps.length;
     const altPaths = flow.issues.filter(i => i.kind === 'alternate_path' || i.kind === 'failure_mode').length;
+    const edgeCount = flow.issues.filter(i => i.kind === 'edge_case').length;
     const renderText = (text: string) =>
         inlineWithFeatures(text, { featuresById, onSelectFeature });
+
+    const risk = RISK_META[flow.risk];
+    const showRisk = flow.risk !== 'low' || flow.issues.length > 0;
+
+    // Drop preconditions block entirely when there's nothing useful to add —
+    // older artifacts sometimes emit a precondition identical to the entry
+    // point sentence, which we want to avoid double-rendering.
+    const hasPreconditions = Boolean(flow.preconditions && flow.preconditions.trim().length > 0);
+    const hasEntryPoints = flow.entryPoints.length > 0;
 
     return (
         <section className="bg-white rounded-xl border border-neutral-200 p-5 mb-4">
@@ -108,6 +125,15 @@ export function FlowSummaryCard({
                                 tone="amber"
                             />
                         )}
+                        {edgeCount > 0 && (
+                            <span
+                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-sky-50 border-sky-200 text-sky-800"
+                                title={`${edgeCount} edge case${edgeCount === 1 ? '' : 's'}`}
+                            >
+                                <AlertTriangle size={11} />
+                                <span>{edgeCount} edge {edgeCount === 1 ? 'case' : 'cases'}</span>
+                            </span>
+                        )}
                         {timeToValue && (
                             <MetadataChip
                                 icon={<Clock size={11} />}
@@ -115,7 +141,28 @@ export function FlowSummaryCard({
                                 tone="emerald"
                             />
                         )}
+                        {showRisk && (
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${risk.classes}`}>
+                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
+                                <span>{risk.label}</span>
+                            </span>
+                        )}
                     </div>
+                    {flow.featureRefs.length > 0 && (
+                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
+                            <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mr-0.5">
+                                Related features
+                            </span>
+                            {flow.featureRefs.map(ref => (
+                                <FeatureReferenceChip
+                                    key={ref.id}
+                                    refToken={ref}
+                                    feature={featuresById?.get(ref.id)}
+                                    onSelect={onSelectFeature}
+                                />
+                            ))}
+                        </div>
+                    )}
                 </div>
                 <div className="hidden sm:flex items-center gap-1 shrink-0">
                     <button
@@ -152,17 +199,17 @@ export function FlowSummaryCard({
                     </FullWidthSection>
                 )}
 
-                {(flow.preconditions || flow.inferredEntryPoints.length > 0) && (
-                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-                        {flow.preconditions && (
+                {(hasPreconditions || hasEntryPoints) && (
+                    <div className={`grid grid-cols-1 ${hasPreconditions && hasEntryPoints ? 'sm:grid-cols-2' : ''} gap-3`}>
+                        {hasPreconditions && (
                             <HalfSection title="Preconditions" icon={<ShieldCheck size={11} />}>
-                                {renderText(flow.preconditions)}
+                                {renderText(flow.preconditions!)}
                             </HalfSection>
                         )}
-                        {flow.inferredEntryPoints.length > 0 && (
+                        {hasEntryPoints && (
                             <HalfSection title="Entry points" icon={<DoorOpen size={11} />}>
                                 <ul className="space-y-1">
-                                    {flow.inferredEntryPoints.slice(0, 5).map((ep, i) => (
+                                    {flow.entryPoints.slice(0, 5).map((ep, i) => (
                                         <li key={i} className="flex gap-2">
                                             <span className="text-neutral-400">•</span>
                                             <span className="min-w-0 flex-1">{renderText(ep)}</span>
@@ -194,37 +241,6 @@ export function FlowSummaryCard({
                                     {s}
                                 </code>
                             ))}
-                        </div>
-                    </section>
-                )}
-
-                {/* Aggregate feature refs (if any) appear as quick-access chips */}
-                {flow.featureRefs.length > 0 && (
-                    <section className="rounded-lg border border-neutral-200 bg-white p-3.5">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">
-                            Referenced features
-                        </p>
-                        <div className="flex flex-wrap gap-1.5">
-                            {flow.featureRefs.map(ref => {
-                                const feature = featuresById?.get(ref.id);
-                                const id = feature?.id ?? ref.id.toUpperCase();
-                                const name = feature?.name;
-                                return (
-                                    <button
-                                        key={ref.id}
-                                        type="button"
-                                        onClick={() => onSelectFeature(ref)}
-                                        className="inline-flex items-center gap-1 px-2 py-0.5 rounded-md bg-fuchsia-50 hover:bg-fuchsia-100 border border-fuchsia-200 text-fuchsia-700 text-[11px] font-semibold transition-colors"
-                                    >
-                                        <span className="font-mono uppercase">{id}</span>
-                                        {name && (
-                                            <span className="font-medium normal-case text-fuchsia-800">
-                                                {name}
-                                            </span>
-                                        )}
-                                    </button>
-                                );
-                            })}
                         </div>
                     </section>
                 )}

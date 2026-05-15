@@ -1,4 +1,6 @@
-import type { CoreArtifactSubtype, Feature } from '../../types';
+import type {
+    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, UXPage,
+} from '../../types';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -29,6 +31,11 @@ interface DispatchProps {
     projectId?: string;
     /** Consumed by `prompt_pack` and `user_flows` for canonical feature ID resolution. */
     features?: Feature[];
+    /** Consumed only by `user_flows` to surface heuristic related-artifact links. */
+    uxPages?: UXPage[];
+    domainEntities?: DomainEntity[];
+    featureSystems?: FeatureSystem[];
+    implementationPlan?: ImplementationPlan;
     /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
     promptEdits?: Record<number, string>;
     /** Only consumed by `prompt_pack`; persists the new edit overlay. */
@@ -67,6 +74,10 @@ export function ArtifactContentRenderer({
     metadata,
     projectId,
     features,
+    uxPages,
+    domainEntities,
+    featureSystems,
+    implementationPlan,
     promptEdits,
     onUpdatePromptEdits,
 }: DispatchProps) {
@@ -83,7 +94,16 @@ export function ArtifactContentRenderer({
         return <DesignSystemRenderer content={content} metadata={metadata} projectId={projectId} />;
     }
     if (subtype === 'user_flows') {
-        return <UserFlowsRenderer content={content} features={features} />;
+        return (
+            <UserFlowsRenderer
+                content={content}
+                features={features}
+                uxPages={uxPages}
+                domainEntities={domainEntities}
+                featureSystems={featureSystems}
+                implementationPlan={implementationPlan}
+            />
+        );
     }
     if (subtype === 'implementation_plan') {
         return <ImplementationPlanRenderer content={content} />;

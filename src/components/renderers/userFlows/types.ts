@@ -12,6 +12,9 @@ export type FeatureRef = {
     raw: string;
 };
 
+/** Heuristic risk level inferred from the issue mix on a flow. */
+export type FlowRiskLevel = 'low' | 'medium' | 'high';
+
 export type ParsedStep = {
     index: number;
     rawText: string;
@@ -71,20 +74,37 @@ export type FlowJourneyNode = {
 };
 
 export type ParsedFlow = {
+    /** Title with any `[Traces to: …]` / `(Traces: …)` metadata stripped. */
     title: string;
+    /** Original heading text — kept so authors editing the source can debug. */
+    rawTitle: string;
     category: FlowCategory;
     goal?: string;
     preconditions?: string;
     successOutcome?: string;
     edgeCases?: string;
+    /** Optional explicit assumptions section (`**Assumptions:**`). */
+    assumptions?: string;
+    /** Optional explicit open-questions section (`**Open Questions:**`). */
+    openQuestions?: string;
     rest?: string;
     steps: ParsedStep[];
     /** Raw error-paths block items, kept for backwards-compat consumers. */
     errorPaths: ParsedErrorPath[];
     /** Normalized issues with categorization (alternate path, edge case, etc.). */
     issues: FlowIssue[];
+    /**
+     * Entry points presented in the UI. Sourced from an explicit
+     * `**Entry Points:**` block when available, otherwise inferred from
+     * `**Preconditions:**`. May be empty when the only entry point is
+     * indistinguishable from the preconditions text.
+     */
+    entryPoints: string[];
+    /** Legacy alias for `entryPoints` — older callers may still read this. */
     inferredEntryPoints: string[];
     inferredSystems: string[];
     /** Aggregated feature references across the whole flow. */
     featureRefs: FeatureRef[];
+    /** Heuristic risk level derived from the issue mix. */
+    risk: FlowRiskLevel;
 };
