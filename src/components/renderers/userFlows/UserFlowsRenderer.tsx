@@ -1,7 +1,9 @@
 import { useCallback, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import type { Feature } from '../../../types';
+import type {
+    DomainEntity, Feature, FeatureSystem, ImplementationPlan, UXPage,
+} from '../../../types';
 import { parseFlows } from './parseFlow';
 import type { FeatureRef, FlowIssue } from './types';
 import { FlowSidebar } from './FlowSidebar';
@@ -11,12 +13,20 @@ import { StepCard } from './StepCard';
 import { SuccessCriteriaBlock } from './SuccessCriteriaBlock';
 import { IssuesPanel } from './IssuesPanel';
 import { FeatureDetailDrawer } from './FeatureDetailDrawer';
+import { RelatedArtifactsPanel } from './RelatedArtifactsPanel';
+import { AssumptionsPanel } from './AssumptionsPanel';
 
 interface Props {
     content: string;
     /** Canonical feature catalog from the current spine PRD. Optional — drawer
      * shows a graceful fallback when missing. */
     features?: Feature[];
+    /** Optional related-artifact context from the structured PRD. Surfaced
+     * in the "Related artifacts" panel via heuristic matching. */
+    uxPages?: UXPage[];
+    domainEntities?: DomainEntity[];
+    featureSystems?: FeatureSystem[];
+    implementationPlan?: ImplementationPlan;
 }
 
 const TTV_RE = /<\s*(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\b|\b(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\s+to\s+value\b/i;
@@ -31,7 +41,9 @@ function inferTimeToValue(sources: Array<string | undefined>): string | null {
     return `<${value}${unit}`;
 }
 
-export function UserFlowsRenderer({ content, features }: Props) {
+export function UserFlowsRenderer({
+    content, features, uxPages, domainEntities, featureSystems, implementationPlan,
+}: Props) {
     const flows = useMemo(() => parseFlows(content), [content]);
     const featuresById = useMemo(() => {
         if (!features) return undefined;
@@ -125,12 +137,10 @@ export function UserFlowsRenderer({ content, features }: Props) {
                     issuesByStep={issuesByStep}
                 />
 
-                <SuccessCriteriaBlock flow={flow} />
-
                 {flow.steps.length > 0 && (
                     <section className="mb-4">
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
-                            Steps
+                            Step-by-step flow
                         </p>
                         {flow.steps.map(step => (
                             <StepCard
@@ -151,11 +161,29 @@ export function UserFlowsRenderer({ content, features }: Props) {
                     </section>
                 )}
 
+                <SuccessCriteriaBlock flow={flow} />
+
+                <RelatedArtifactsPanel
+                    flow={flow}
+                    featuresById={featuresById}
+                    onSelectFeature={onSelectFeature}
+                    uxPages={uxPages}
+                    domainEntities={domainEntities}
+                    featureSystems={featureSystems}
+                    implementationPlan={implementationPlan}
+                />
+
                 <IssuesPanel
                     flowIndex={safeIndex}
                     issues={flow.issues.filter(i => typeof i.linkedStepIndex !== 'number')}
                     edgeCases={flow.edgeCases}
                     steps={flow.steps}
+                    featuresById={featuresById}
+                    onSelectFeature={onSelectFeature}
+                />
+
+                <AssumptionsPanel
+                    flow={flow}
                     featuresById={featuresById}
                     onSelectFeature={onSelectFeature}
                 />

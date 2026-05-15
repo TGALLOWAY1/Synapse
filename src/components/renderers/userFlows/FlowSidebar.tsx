@@ -1,7 +1,13 @@
 import { useEffect } from 'react';
-import { Clock, GitBranch, Menu, X } from 'lucide-react';
-import type { FlowCategory, FlowIssueKind, ParsedFlow } from './types';
+import { Clock, GitBranch, Menu, Sparkles, X } from 'lucide-react';
+import type { FlowCategory, FlowIssueKind, FlowRiskLevel, ParsedFlow } from './types';
 import { CATEGORY_ORDER } from './categorize';
+
+const RISK_DOT: Record<FlowRiskLevel, { color: string; label: string }> = {
+    low: { color: 'bg-emerald-400', label: 'Low risk' },
+    medium: { color: 'bg-amber-400', label: 'Medium risk' },
+    high: { color: 'bg-red-500', label: 'High risk' },
+};
 
 interface Props {
     flows: ParsedFlow[];
@@ -73,7 +79,13 @@ export function FlowSidebar({
                             const active = originalIndex === selectedIndex;
                             const stepCount = flow.steps.length;
                             const { altPaths, edgeCases, unresolved } = summarizeIssues(flow);
+                            const featureCount = flow.featureRefs.length;
                             const ttv = ttvByFlow?.[originalIndex] ?? null;
+                            const risk = RISK_DOT[flow.risk];
+                            // Only surface the risk dot when there's something to
+                            // warn about — a green "low risk" dot on every flow
+                            // teaches the eye to ignore the indicator.
+                            const showRisk = flow.risk !== 'low' || flow.issues.length > 0;
                             return (
                                 <li key={originalIndex}>
                                     <button
@@ -97,20 +109,35 @@ export function FlowSidebar({
                                                 {originalIndex + 1}
                                             </span>
                                             <div className="min-w-0 flex-1">
-                                                <p
-                                                    className="text-sm font-medium leading-snug break-words"
-                                                    title={flow.title}
-                                                >
-                                                    {flow.title}
-                                                </p>
+                                                <div className="flex items-start gap-1.5">
+                                                    <p
+                                                        className="text-sm font-medium leading-snug break-words min-w-0 flex-1"
+                                                        title={flow.title}
+                                                    >
+                                                        {flow.title}
+                                                    </p>
+                                                    {showRisk && (
+                                                        <span
+                                                            className={`mt-1.5 shrink-0 inline-block w-2 h-2 rounded-full ${risk.color}`}
+                                                            title={risk.label}
+                                                            aria-label={risk.label}
+                                                        />
+                                                    )}
+                                                </div>
                                                 <div className="mt-1 flex flex-wrap items-center gap-x-2 gap-y-0.5 text-[10px] text-neutral-500">
                                                     <span className="inline-flex items-center gap-0.5">
                                                         <GitBranch size={10} />
                                                         {stepCount} {stepCount === 1 ? 'step' : 'steps'}
                                                     </span>
+                                                    {featureCount > 0 && (
+                                                        <span className="inline-flex items-center gap-0.5">
+                                                            <Sparkles size={10} className="text-fuchsia-500" />
+                                                            {featureCount} {featureCount === 1 ? 'feature' : 'features'}
+                                                        </span>
+                                                    )}
                                                     {altPaths > 0 && (
                                                         <span>
-                                                            {altPaths} alternate {altPaths === 1 ? 'path' : 'paths'}
+                                                            {altPaths} alt {altPaths === 1 ? 'path' : 'paths'}
                                                         </span>
                                                     )}
                                                     {edgeCases > 0 && (

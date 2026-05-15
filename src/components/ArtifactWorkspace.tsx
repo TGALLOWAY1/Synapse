@@ -311,6 +311,10 @@ export function ArtifactWorkspace({
                                 ? structuredPRD.features
                                 : undefined
                         }
+                        uxPages={subtype === 'user_flows' ? structuredPRD.uxPages : undefined}
+                        domainEntities={subtype === 'user_flows' ? structuredPRD.domainEntities : undefined}
+                        featureSystems={subtype === 'user_flows' ? structuredPRD.featureSystems : undefined}
+                        implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                     />
