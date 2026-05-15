@@ -630,23 +630,33 @@ export type MockupSettings = {
     safeMode?: boolean;
 };
 
-// Rendered HTML/Tailwind mockup payload (stored as JSON string in
-// ArtifactVersion.content; distinguished by metadata.format === 'mockup_html_v1').
+// Mockup screen payload. Each screen is a semantic specification derived
+// from the screen_inventory + component_inventory + design_system artifacts.
+// The visual rendering is produced by AI image generation (OpenAI gpt-image-2);
+// no HTML is generated or stored here.
 export type MockupScreen = {
-    id: string;       // stable per-screen id (uuid, assigned client-side)
-    name: string;     // screen title, e.g. "Editor Dashboard"
-    purpose: string;  // one-sentence rationale grounded in the PRD
-    html: string;     // static body fragment — no <html>/<head>/<script>
-    notes?: string;   // optional assumptions / callouts
+    id: string;                  // stable per-screen id (uuid, assigned client-side)
+    name: string;                // screen title, e.g. "Editor Dashboard"
+    purpose: string;             // one-sentence rationale grounded in the PRD
+    userIntent?: string;         // goal in the user's own words (from screen_inventory)
+    priority?: ScreenPriority;   // P0..P3 (from screen_inventory)
+    type?: ScreenType;           // screen | modal | overlay | system-state
+    coreUIElements?: string[];   // semantic UI elements present on this screen
+    componentRefs?: string[];    // component names from component_inventory used here
+    notes?: string;              // optional assumptions / callouts
 };
 
 export type MockupPayload = {
-    version: 'mockup_html_v1';
+    version: 'mockup_spec_v1';
     title: string;              // overall title, e.g. "Editor Workspace Concept"
     summary: string;            // 1–2 sentence product framing
     screens: MockupScreen[];    // always >= 1
 };
 
+export const MOCKUP_SPEC_V1 = 'mockup_spec_v1' as const;
+// Legacy format identifier kept for in-place parsing of pre-refactor
+// localStorage artifacts. Old payloads carried HTML fragments which are
+// no longer used; the parser strips them on read.
 export const MOCKUP_HTML_V1 = 'mockup_html_v1' as const;
 
 // --- AI image previews (OpenAI gpt-image-2) ---

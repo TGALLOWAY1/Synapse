@@ -25,10 +25,9 @@ export const PRD_REGENERATION_STAGES: ProgressStage[] = [
 ];
 
 export const MOCKUP_GENERATION_STAGES: ProgressStage[] = [
-    { label: 'Interpreting layout requirements...', minDuration: 2500 },
-    { label: 'Composing screen structures...', minDuration: 3500 },
-    { label: 'Rendering HTML views...', minDuration: 4000 },
-    { label: 'Assembling mockup payload...', minDuration: 5000 },
+    { label: 'Resolving upstream artifacts…', minDuration: 1000 },
+    { label: 'Composing screen specs from inventory…', minDuration: 2000 },
+    { label: 'Saving mockup spec…', minDuration: 1000 },
 ];
 
 export const CONSOLIDATION_STAGES: ProgressStage[] = [

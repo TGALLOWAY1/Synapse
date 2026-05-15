@@ -1,25 +1,14 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
-import type { MockupSettings, StructuredPRD } from '../../types';
-
-const callGeminiMock = vi.fn();
-
-vi.mock('../geminiClient', () => ({
-    callGemini: (...args: unknown[]) => callGeminiMock(...args),
-}));
-
+import { describe, expect, it } from 'vitest';
+import type {
+    ComponentInventoryContent,
+    MockupSettings,
+    ScreenInventoryContent,
+    StructuredPRD,
+} from '../../types';
 import { generateMockup } from '../services/mockupService';
 
-beforeEach(() => {
-    callGeminiMock.mockReset();
-});
-
-const settings: MockupSettings = {
-    platform: 'desktop',
-    fidelity: 'mid',
-    scope: 'multi_screen',
-};
-
 const structuredPRD: StructuredPRD = {
+    productName: 'ClinicFlow',
     vision: 'Coordinate clinic intake and triage decisions in one place.',
     coreProblem: 'Care coordinators lose time jumping between intake notes and triage actions.',
     targetUsers: ['Care coordinator'],
@@ -36,160 +25,134 @@ const structuredPRD: StructuredPRD = {
     risks: ['Incomplete intake data'],
 };
 
-describe('mockupService alignment integration', () => {
-    it('returns structured critique alongside payload', async () => {
-        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
-            version: 'mockup_html_v1',
-            title: 'Clinic Triage Concept',
-            summary: 'Queue-first layout for care coordinators.',
+const screenInventory: ScreenInventoryContent = {
+    sections: [
+        {
+            title: 'Triage',
             screens: [
                 {
                     name: 'Triage Queue',
-                    purpose: 'Care coordinator reviews urgent patient cases and assigns triage owner.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Triage Queue</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Assign case owner</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Patient case</td><td>Urgency</td></tr></tbody></table></section><aside class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Triage actions</li></ul></aside></main></div>',
+                    priority: 'P0',
+                    purpose: 'Review urgent patient cases and assign triage owner.',
+                    userIntent: 'Find the most urgent case quickly.',
+                    coreUIElements: ['Case list table', 'Urgency filter', 'Assign owner CTA'],
                 },
                 {
                     name: 'Case Detail Review',
-                    purpose: 'Care coordinator validates intake details and logs triage recommendation.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Case Detail Review</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Submit triage recommendation</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Intake note summary</li><li>Risk indicators</li></ul></section><aside class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Escalation checklist</li></ul></aside></main></div>',
-                },
-                {
-                    name: 'Handoff Confirmation',
-                    purpose: 'Care coordinator confirms triage handoff and tracks pending follow-ups.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Handoff Confirmation</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Close handoff</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Assigned clinician</td><td>Status</td></tr></tbody></table></section><aside class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Follow-up tasks</li></ul></aside></main></div>',
-                },
-            ],
-        }));
-
-        const result = await generateMockup('Clinic triage PRD', settings, structuredPRD);
-
-        expect(result.payload.screens).toHaveLength(3);
-        expect(result.critique.alignmentScore).toBeGreaterThan(0);
-        expect(result.critique.screens).toHaveLength(3);
-    });
-
-    // Per commit 5b15f56, alignment critique is advisory — low PRD alignment
-    // emits warnings but does NOT discard the generated screens for the
-    // deterministic safe-fallback. Structure + quality validators handle
-    // unrenderable HTML; the alignment heuristic was over-eager and
-    // dominated good-output discards before the policy change. This test
-    // pins that contract so the threshold doesn't quietly regress back to
-    // a hard gate.
-    it('keeps generated screens but surfaces warnings when alignment is critically poor', async () => {
-        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
-            version: 'mockup_html_v1',
-            title: 'Generic App',
-            summary: 'Overview',
-            screens: [
-                {
-                    name: 'Overview Dashboard',
-                    purpose: 'Track KPIs for teams.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Overview Dashboard</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Create</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Revenue</td><td>Users</td></tr></tbody></table></section><aside class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Analytics panel</li></ul></aside></main></div>',
-                },
-                {
-                    name: 'Analytics Home',
-                    purpose: 'Review trends and metrics.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Analytics Home</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Export</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Active users</td><td>Conversion</td></tr></tbody></table></section><aside class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Team workspace summary</li></ul></aside></main></div>',
+                    priority: 'P0',
+                    purpose: 'Validate intake details and log triage recommendation.',
+                    coreUIElements: ['Intake summary', 'Recommendation form'],
                 },
                 {
                     name: 'Settings',
-                    purpose: 'Configure account preferences.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Settings</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Save</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Notification defaults</li></ul></section><aside class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Account settings</li></ul></aside></main></div>',
+                    priority: 'P2',
+                    purpose: 'Configure clinic preferences.',
                 },
             ],
-        }));
-
-        const result = await generateMockup('Clinic triage PRD', settings, structuredPRD);
-        // Generated screens are preserved (no safe-fallback substitution).
-        expect(result.usedFallback).toBe(false);
-        expect(result.payload.screens).toHaveLength(3);
-        expect(result.payload.screens[0].name).toBe('Overview Dashboard');
-        // Alignment is computed and degraded.
-        expect(result.critique.severity).not.toBe('low');
-        // The poor alignment is surfaced as a warning rather than a fatal error.
-        expect(result.warnings.some(w => /alignment/i.test(w))).toBe(true);
-    });
-
-    it('injects design system tokens into the system prompt when provided', async () => {
-        const designTokens = (await import('../designTokens')).normalizeDesignTokens({
-            colors: { 'brand.primary': '#8B5CF6', 'surface.app': '#0F172A' },
-            rules: ['Use brand.primary only for primary CTAs.'],
-        });
-        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
-            version: 'mockup_html_v1',
-            title: 'Tokenized Concept',
-            summary: 'Brand-aware screens.',
+        },
+        {
+            title: 'Handoff',
             screens: [
                 {
-                    name: 'Triage Queue',
-                    purpose: 'Care coordinator reviews urgent patient cases.',
-                    html: '<div class="min-h-screen font-sans" style="background: var(--color-surface-app); color: var(--color-text-primary)"><header class="px-6 py-4 border-b flex items-center justify-between"><h1 class="text-xl font-semibold">Triage Queue</h1><button type="button" class="primary px-3 py-2 rounded-lg" style="background: var(--color-brand-primary); color: var(--color-text-primary)">Assign case owner</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Patient case</td><td>Urgency</td></tr></tbody></table></section><aside class="rounded-xl border bg-white p-5"><ul class="space-y-2"><li>Triage actions</li></ul></aside></main></div>',
+                    name: 'Handoff Confirmation',
+                    priority: 'P1',
+                    purpose: 'Confirm triage handoff and track pending follow-ups.',
+                    coreUIElements: ['Assigned clinician list', 'Follow-up tasks'],
                 },
             ],
-        }));
+        },
+    ],
+};
 
-        const result = await generateMockup('Clinic triage PRD', settings, structuredPRD, { designTokens });
-        const callArgs = callGeminiMock.mock.calls[0];
-        const systemPrompt = callArgs[0] as string;
+const componentInventory: ComponentInventoryContent = {
+    categories: [
+        {
+            name: 'Data Display',
+            components: [
+                {
+                    name: 'CaseListTable',
+                    purpose: 'Render prioritized cases.',
+                    complexity: 'moderate',
+                    usedIn: ['Triage Queue'],
+                },
+            ],
+        },
+        {
+            name: 'Forms & Inputs',
+            components: [
+                {
+                    name: 'AssignOwnerButton',
+                    purpose: 'Assign a triage owner.',
+                    complexity: 'simple',
+                    usedIn: ['Triage Queue', 'Case Detail Review'],
+                },
+            ],
+        },
+    ],
+};
 
-        // System prompt must carry the binding token contract header and at
-        // least one specific token reference.
-        expect(systemPrompt).toMatch(/Design system contract/i);
-        expect(systemPrompt).toContain('brand.primary');
-        expect(systemPrompt).toContain('#8B5CF6');
-        expect(systemPrompt).toContain('Use brand.primary only for primary CTAs.');
-        // CSS-variable usage instruction is present.
-        expect(systemPrompt).toMatch(/var\(--color-brand-primary\)/);
+const baseSettings: MockupSettings = {
+    platform: 'desktop',
+    fidelity: 'mid',
+    scope: 'multi_screen',
+};
 
-        // Compliance summary is attached when tokens were supplied.
-        expect(result.designSystemCompliance).toBeDefined();
-        const screenId = result.payload.screens[0].id;
-        expect(result.designSystemCompliance?.[screenId]).toBeDefined();
-        expect(result.designSystemCompliance?.[screenId].score).toBeGreaterThan(0.6);
+describe('mockupService.generateMockup', () => {
+    it('derives screens from screen inventory and attaches component refs', () => {
+        const result = generateMockup(baseSettings, structuredPRD, screenInventory, componentInventory);
+        expect(result.payload.version).toBe('mockup_spec_v1');
+        expect(result.payload.screens.length).toBeGreaterThan(0);
+        const triage = result.payload.screens.find(s => s.name === 'Triage Queue');
+        expect(triage).toBeDefined();
+        expect(triage?.priority).toBe('P0');
+        expect(triage?.userIntent).toBe('Find the most urgent case quickly.');
+        expect(triage?.coreUIElements).toContain('Case list table');
+        expect(triage?.componentRefs).toContain('CaseListTable');
+        expect(triage?.componentRefs).toContain('AssignOwnerButton');
     });
 
-    it('omits design system tokens from the system prompt when none provided', async () => {
-        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
-            version: 'mockup_html_v1',
-            title: 'Generic Concept',
-            summary: 'Default mockup.',
-            screens: [
-                {
-                    name: 'Overview',
-                    purpose: 'Generic dashboard.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b flex items-center justify-between"><h1 class="text-xl font-semibold">Overview</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Create</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border bg-white p-5"><ul><li>Item</li></ul></section><aside class="rounded-xl border bg-white p-5"><ul><li>Sidebar</li></ul></aside></main></div>',
-                },
-            ],
-        }));
-
-        const result = await generateMockup('Generic PRD', settings, structuredPRD);
-        const callArgs = callGeminiMock.mock.calls[0];
-        const systemPrompt = callArgs[0] as string;
-
-        // No token contract header in this path.
-        expect(systemPrompt).not.toMatch(/Design system contract/i);
-        // Legacy palette guidance is still present.
-        expect(systemPrompt).toContain('indigo-600');
-        // No compliance metadata when tokens absent.
-        expect(result.designSystemCompliance).toBeUndefined();
+    it('respects single_screen scope by selecting one top-priority screen', () => {
+        const result = generateMockup(
+            { ...baseSettings, scope: 'single_screen' },
+            structuredPRD,
+            screenInventory,
+            componentInventory,
+        );
+        expect(result.payload.screens).toHaveLength(1);
+        expect(result.payload.screens[0].priority).toBe('P0');
     });
 
-    it('passes deterministic generation controls to Gemini JSON mode', async () => {
-        callGeminiMock.mockResolvedValueOnce(JSON.stringify({
-            version: 'mockup_html_v1',
-            title: 'Clinic Triage Concept',
-            summary: 'Queue-first layout for care coordinators.',
-            screens: [
-                {
-                    name: 'Triage Queue',
-                    purpose: 'Care coordinator reviews urgent patient cases and assigns triage owner.',
-                    html: '<div class="min-h-screen bg-neutral-50 text-neutral-900"><header class="px-6 py-4 border-b border-neutral-200 flex items-center justify-between"><h1 class="text-xl font-semibold">Triage Queue</h1><button type="button" class="px-3 py-2 rounded-lg bg-indigo-600 text-white">Assign case owner</button></header><main class="p-6 grid grid-cols-3 gap-4"><section class="col-span-2 rounded-xl border border-neutral-200 bg-white p-5"><table class="w-full text-sm"><tbody><tr><td>Patient case</td><td>Urgency</td></tr></tbody></table></section><section class="rounded-xl border border-neutral-200 bg-white p-5"><ul class="space-y-2"><li>Triage actions</li></ul></section></main></div>',
-                },
-            ],
-        }));
+    it('respects key_workflow scope and prefers P0/P1 screens', () => {
+        const result = generateMockup(
+            { ...baseSettings, scope: 'key_workflow' },
+            structuredPRD,
+            screenInventory,
+            componentInventory,
+        );
+        // Settings screen is P2 — should not be picked
+        const names = result.payload.screens.map(s => s.name);
+        expect(names).not.toContain('Settings');
+        expect(names.length).toBeGreaterThan(0);
+    });
 
-        await generateMockup('Clinic triage PRD', settings, structuredPRD);
-        const call = callGeminiMock.mock.calls[0];
-        expect(call[2]).toMatchObject({ temperature: 0.2, topP: 0.8, topK: 32 });
+    it('falls back to a placeholder when screen_inventory is missing', () => {
+        const result = generateMockup(baseSettings, structuredPRD, null, componentInventory);
+        expect(result.payload.screens).toHaveLength(1);
+        expect(result.warnings.some(w => /Screen Inventory/i.test(w))).toBe(true);
+    });
+
+    it('emits a warning when component_inventory is missing but still produces screens', () => {
+        const result = generateMockup(baseSettings, structuredPRD, screenInventory, null);
+        expect(result.payload.screens.length).toBeGreaterThan(0);
+        expect(result.warnings.some(w => /Component Inventory/i.test(w))).toBe(true);
+        // No componentRefs when inventory missing
+        for (const screen of result.payload.screens) {
+            expect(screen.componentRefs).toBeUndefined();
+        }
+    });
+
+    it('uses the product name when building the mockup title', () => {
+        const result = generateMockup(baseSettings, structuredPRD, screenInventory, componentInventory);
+        expect(result.payload.title).toContain('ClinicFlow');
     });
 });

@@ -250,7 +250,6 @@ export function ArtifactWorkspace({
                             versionId={preferred.id}
                             projectId={projectId}
                             artifactId={mockup.id}
-                            designSystemCompliance={preferred.metadata?.designSystemCompliance as Parameters<typeof MockupViewer>[0]['designSystemCompliance']}
                         />
                     </MockupErrorBoundary>
                 </div>
