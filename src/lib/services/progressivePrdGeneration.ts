@@ -348,7 +348,7 @@ export async function generateProgressivePrd(params: {
                 params.onEvent?.({ type: 'section_refining', sectionId: section.id });
                 const refined = await provider.generateText({
                     model: params.config.strongModel,
-                    prompt: `Refine this PRD section for specificity:\n${result.content}`,
+                    prompt: `Refine this PRD section. Increase specificity, remove all ambiguity and hedging, and replace any vague or informal phrasing with formal, professional, implementation-ready language. Preserve the structure and schema exactly — same fields, same shape — and return only the JSON object.\n\n${result.content}`,
                     schema,
                 });
                 const post = applyAiUpdate(jobs[section.id], refined);

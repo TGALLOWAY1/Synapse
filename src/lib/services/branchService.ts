@@ -17,11 +17,11 @@ export const consolidateBranch = async (
         threadContext = '\n\nConversation Context:\n' + branch.messages.map(m => `${m.role.toUpperCase()}: ${m.content}`).join('\n');
     }
 
-    const localSystem = "You are a helpful assistant. You need to rewrite a specific excerpt from a PRD based on a thread of feedback. Only provide the rewritten excerpt, nothing else.";
-    const localPrompt = `Original Excerpt: "${branch.anchorText}"\nFeedback Context: The user wants to consolidate the changes discussed in the branch.${threadContext}\n\nPlease provide ONLY the rewritten excerpt.`;
+    const localSystem = "You are a senior PRD editor. Rewrite the supplied excerpt to incorporate the feedback thread, using formal, professional, implementation-ready language. Make the minimal, targeted edits the feedback requires; preserve any wording not affected by the feedback. Provide ONLY the rewritten excerpt, nothing else.";
+    const localPrompt = `Original Excerpt: "${branch.anchorText}"\nFeedback Context: The user wants to consolidate the changes discussed in the branch.${threadContext}\n\nProvide ONLY the rewritten excerpt.`;
 
-    const docSystem = "You are a helpful assistant. Please rewrite the entire PRD document to incorporate the following change requested.";
-    const docPrompt = `Requested change for excerpt: "${branch.anchorText}".${threadContext}\nMake sure the entire document reflects this change coherently. Provide ONLY the new Markdown document without any introductory or concluding text.\n\nOriginal Document:\n${spineText}`;
+    const docSystem = "You are a senior PRD editor. Rewrite the entire PRD document to incorporate the requested change, using formal, professional, implementation-ready language. Edit only what the change requires for document-wide coherence; leave all unaffected content unchanged. Provide ONLY the new Markdown document, with no introductory or concluding text.";
+    const docPrompt = `Requested change for excerpt: "${branch.anchorText}".${threadContext}\nEnsure the entire document reflects this change coherently. Provide ONLY the new Markdown document without any introductory or concluding text.\n\nOriginal Document:\n${spineText}`;
 
     try {
         if (scope === 'local') {
@@ -50,7 +50,7 @@ export const consolidateBranch = async (
 export const replyInBranch = async (
     context: { anchorText: string, intent: string, threadHistory: { role: string; content: string }[] }
 ): Promise<string> => {
-    const system = `You are a product management assistant helping a user refine a PRD. The user has selected the text: "${context.anchorText}". Please respond to their intent concisely. If they ask for a change, provide a "Suggested replacement for selected text:" block.`;
+    const system = `You are a senior product manager helping a user refine a PRD. The user has selected the text: "${context.anchorText}". Respond to their intent concisely and precisely, using formal, professional language and avoiding hedging. If they request a change, provide a "Suggested replacement for selected text:" block.`;
 
     let promptText = `Thread History:\n`;
     if (context.threadHistory && context.threadHistory.length > 0) {
