@@ -1,6 +1,6 @@
 import type { ProjectPlatform, StructuredPRD } from '../../types';
 import type { SectionId } from '../schemas/prdSchemas';
-import { RUBRIC_DEFINITION } from './prdPrompts';
+import { RUBRIC_DEFINITION, PROMPT_CONTRACT } from './prdPrompts';
 
 export type SectionPromptContext = {
     idea: string;
@@ -9,11 +9,13 @@ export type SectionPromptContext = {
 };
 
 const PLATFORM_NOTE: Record<ProjectPlatform, string> = {
-    app: 'Target platform: native mobile app (iOS/Android). Bias toward touch UX, offline, push notifications, device APIs.',
-    web: 'Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, URL routing.',
+    app: 'Target platform: native mobile application (iOS/Android). Bias toward touch interaction, offline operation, push notifications, and device APIs.',
+    web: 'Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, and URL routing.',
 };
 
-const SHARED_PREAMBLE = `You are a senior product strategist and tech lead generating one section of a structured PRD JSON. Output ONLY the JSON object matching the provided schema — no markdown, no explanation, no extra fields. Every string value must be specific and opinionated: imagine you shipped this product yourself.
+const SHARED_PREAMBLE = `You are a senior product strategist and tech lead generating one section of a structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product.
+
+${PROMPT_CONTRACT}
 
 ${RUBRIC_DEFINITION}`;
 
@@ -92,7 +94,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the features slice: features, featureSystems. This is the most important section — be thorough and opinionated.
+You are generating the features slice: features, featureSystems. This is the most consequential section; be thorough, specific, and definitive. Every feature and system decision must include reasoning or a stated constraint that justifies it (user value, dependency, or scope rationale).
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
@@ -156,7 +158,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the architecture slice: architecture (narrative), architectureFlows, nonFunctionalRequirements, constraints.
+You are generating the architecture slice: architecture (narrative), architectureFlows, nonFunctionalRequirements, constraints. Every technology and architectural decision must include reasoning grounded in scalability, maintainability, ecosystem maturity, or performance — never stylistic descriptors. Prefer widely adopted, stable technologies unless the product requires otherwise.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
@@ -222,7 +224,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the implementation_plan slice: a phased development roadmap.
+You are generating the implementation_plan slice: a phased development roadmap. Phases and their goals must be concrete and actionable, not abstract; each phase must state the reasoning or dependency that determines its ordering.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
