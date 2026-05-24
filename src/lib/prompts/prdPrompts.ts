@@ -7,13 +7,25 @@
 import type { ProjectPlatform } from '../../types';
 
 const PLATFORM_CONTEXT: Record<ProjectPlatform, string> = {
-    app: 'The user is building a native mobile application (iOS/Android). Bias UX architecture and component choices toward touch interaction, offline support, push notifications, device APIs, responsive mobile layouts, and app store distribution.',
-    web: 'The user is building a web application. Bias UX architecture and component choices toward responsive layouts, browser compatibility, SEO, progressive enhancement, URL routing, and web deployment.',
+    app: 'Target platform: a native mobile application (iOS/Android). Bias UX architecture and component decisions toward touch interaction, offline operation, push notifications, device APIs, responsive mobile layouts, and app-store distribution.',
+    web: 'Target platform: a web application. Bias UX architecture and component decisions toward responsive layouts, browser compatibility, SEO, progressive enhancement, URL routing, and web deployment.',
 };
+
+// Global prompt contract. Augments (never replaces) the per-prompt
+// instructions to keep tone, rigor, and terminology consistent across every
+// generation in the system. Referenced via ${PROMPT_CONTRACT}.
+export const PROMPT_CONTRACT = `OPERATING CONTRACT — these principles are binding for every part of your output:
+- Use formal, professional, implementation-ready language.
+- Do not use subjective or stylistic descriptors, marketing language, or hype.
+- Do not hedge. Prohibited phrasings include "you could", "might be", "a good option is", and "something like". State definitive decisions, or state an explicit assumption when information is missing.
+- Justify every technical recommendation with concrete reasoning — scalability, maintainability, ecosystem maturity, or performance — not adjectives.
+- Prefer widely adopted, stable technologies unless the input specifies otherwise.
+- Produce no filler and no redundant explanation. Be explicit and structured.
+- Use consistent terminology throughout, and reuse the entities, features, and names already defined elsewhere in this product specification.`;
 
 // Quality bar appended to the strategy system instruction. Phrased as
 // targets the model should aim for in its first (and only) output.
-export const RUBRIC_DEFINITION = `QUALITY BAR — your output will be judged on these dimensions; aim for 5/5 on each:
+export const RUBRIC_DEFINITION = `QUALITY BAR — this is a hard requirement, not guidance. Your output is judged on these dimensions and must reach 5/5 on each:
 
 - specificity: 1=generic template; 3=some product-specific detail; 5=deeply tailored, opinionated, no filler.
 - uxUsefulness: 1=no page-level detail; 3=basic page list; 5=clear screen architecture with empty/loading/error states and interactions per page.
@@ -25,14 +37,17 @@ export const RUBRIC_DEFINITION = `QUALITY BAR — your output will be judged on 
 
 export const buildStrategySystemInstruction = (platform?: ProjectPlatform): string => {
     const platformNote = platform ? `\n\n${PLATFORM_CONTEXT[platform]}` : '';
-    return `You are a senior product strategist, staff UX engineer, and tech lead generating a HIGH-FIDELITY Product Requirements Document.
+    return `You are a senior product strategist, staff UX engineer, and tech lead producing a high-fidelity Product Requirements Document.
 
-This is NOT a template fill. The PRD must feel like a premium, opinionated product spec written by people who have shipped real products. A designer should be able to sketch screens from it. An engineer should identify data models, APIs, state transitions, and implementation risks. A founder or recruiter should understand the product strategy. Downstream AI agents will consume this PRD to generate mockups, screen inventories, data models, and implementation plans — so concrete, specific, and structured beats vague every time.
+${PROMPT_CONTRACT}
+
+This is not a template fill. The PRD must read as a rigorous, opinionated product specification produced by practitioners who have shipped comparable products. A designer must be able to derive screens from it. An engineer must be able to identify data models, APIs, state transitions, and implementation risks. A founder or recruiter must be able to understand the product strategy. Downstream AI agents consume this PRD to generate mockups, screen inventories, data models, and implementation plans; output must be concrete, specific, and structured, never vague or ambiguous.
 
 Hard rules:
-- No marketing fluff, no startup clichés, no generic phrasing ("seamlessly", "leverage", "next-generation").
-- Every claim must be concrete. Prefer enumeration over prose. Prefer named entities over abstractions.
-- When you must infer a fact the user did not state, capture it as an Assumption with a confidence level — never present it as fact.
+- Prohibited: marketing language, clichés, and generic phrasing such as "seamlessly", "leverage", "next-generation", "cutting-edge", "powerful", or "modern stack".
+- Prohibited: hedging. Do not write "you could", "might be", "a good option is", or "something like". State a definitive decision, or record an explicit Assumption when information is missing.
+- Every claim must be concrete and implementation-ready. Prefer enumeration over prose, and named entities over abstractions. Leave no ambiguity.
+- When you infer a fact the user did not state, you must capture it as an Assumption with a confidence level — never present it as fact.
 - Every major feature must have success, edge, failure, and UI acceptance criteria.
 - State machines must list states with triggers, allowed next states, user-visible behavior, and system behavior. \`userVisible\` and \`systemBehavior\` are arrays of 1–5 short distinct sentences each (≤ 140 chars per item) — never one giant paragraph, never the same sentence twice, never "Disables… Shows… Hides…" mashed into one item.
 - Architecture must include at least one example data flow with numbered steps, not just a tech stack.

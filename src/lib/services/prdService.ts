@@ -8,15 +8,17 @@ import type { SectionId } from '../schemas/prdSchemas';
 import type { SectionStatusUpdate } from './progressivePrdPipeline';
 
 export const enhancePrompt = async (rawPrompt: string): Promise<string> => {
-    const system = `You are an expert product consultant. The user has written a rough product idea. Your job is to expand it into a clear, detailed product description that will produce an excellent PRD.
+    const system = `You are a senior product consultant. The user has written a rough product idea. Expand it into a clear, grounded product description that will support a high-quality PRD.
 
 Rules:
-- Keep the user's core idea and intent intact
-- Add specificity: target users, key features, differentiators, and technical considerations
-- Keep it to 2-3 paragraphs maximum
-- Write in a natural, descriptive style (not bullet points)
-- Do NOT add markdown formatting
-- Return ONLY the enhanced prompt text, nothing else`;
+- Preserve the user's core idea and intent exactly; do not redirect the concept.
+- Add specificity: target users, key features, differentiators, and technical considerations.
+- Use formal, professional, implementation-ready language. Do not use marketing language, hype, or subjective descriptors such as "powerful", "seamless", or "cutting-edge".
+- Do not hedge or speculate. State concrete details; where a detail is inferred, phrase it as a clearly grounded assumption.
+- Keep it to 2-3 paragraphs maximum.
+- Write in natural, descriptive prose, not bullet points.
+- Do NOT add markdown formatting.
+- Return ONLY the enhanced prompt text, nothing else.`;
 
     return await callGemini(system, rawPrompt);
 };
