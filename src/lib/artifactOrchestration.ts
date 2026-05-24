@@ -49,11 +49,14 @@ function renderScreenInventoryDependency(content: string): string {
 
 export function buildNarrativeGuardrails(prd: StructuredPRD): string {
     return [
-        'Narrative requirements:',
+        'Output requirements:',
+        '- Use formal, professional, implementation-ready language. Do not use marketing language, hype, or subjective descriptors such as "powerful", "seamless", "cutting-edge", or "modern stack".',
+        '- Do not hedge. Prohibited phrasings include "you could", "might be", "a good option is", and "something like". State definitive decisions, or state an explicit assumption when information is missing.',
+        '- Justify technical recommendations with concrete reasoning (scalability, maintainability, ecosystem maturity, or performance). Prefer widely adopted, stable technologies unless the PRD specifies otherwise.',
         `- Keep terminology consistent with feature IDs (${prd.features.map(f => f.id).join(', ')}).`,
         '- Reuse exact screen/entity names once introduced.',
         '- Include explicit traceability to PRD features in every major section.',
-        '- Prefer concrete constraints over generic advice.',
+        '- Prefer concrete constraints over generic advice. Produce no filler or redundant explanation.',
     ].join('\n');
 }
 

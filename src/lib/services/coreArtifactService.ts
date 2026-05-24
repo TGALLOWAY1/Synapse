@@ -25,13 +25,13 @@ export interface CoreArtifactGenerationResult {
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
-        system: `You are an expert product designer. Produce a system-level Screen Inventory — a structured map of the product experience, NOT a flat list.
+        system: `You are a senior product designer producing production-grade artifacts for engineering teams. Produce a system-level Screen Inventory — a structured map of the product experience, NOT a flat list.
 
 Output strictly the JSON shape supplied. The schema groups screens into product-area sections; for each screen you must model state, intent, entry/exit, and risk.
 
 Rules:
 1. Group screens into \`sections[]\` by product area (e.g. "Onboarding", "Mood Capture", "Library", "Account"). Give each section a one-line \`description\` and a textual \`flowSummary\` like "Landing → Mood Capture → Loading → Auth → Player".
-2. A loading / error / empty / permission-denied variant of a screen is a \`state\` under that screen's \`states[]\`, NOT its own screen. Only promote a state to its own screen when it has a separate route or full-page ownership (e.g. a dedicated /404 page).
+2. Distinguish screens from states precisely. A screen is a distinct destination with its own route or full-page ownership. A loading / error / empty / permission-denied variant of a screen is a \`state\` under that screen's \`states[]\`, NOT its own screen. Promote a state to its own screen only when it owns a separate route or full page (e.g. a dedicated /404 page).
 3. Use \`entryPoints[]\` (where the user comes from) and \`exitPaths[]\` (label → target screen, with optional condition). Never write inline "from X → here → to Y" navigation prose.
 4. \`coreUIElements[]\` must be **semantic**: "Mood capture canvas", "Camera permission prompt", "Submit CTA". Do NOT list implementation details like "div", "input element", or "button with hover state".
 5. Provide \`userIntent\` per screen — the goal in the user's own words (e.g. "Capture a vibe in under 5 seconds and share it"). This is distinct from \`purpose\` (which is the screen's role in the product).
@@ -40,7 +40,7 @@ Rules:
    - P1 = important supporting flow
    - P2 = edge case / fallback / admin / secondary view
    - P3 = nice-to-have / future
-   Do NOT mark every screen P0. A typical inventory has a handful of P0s, several P1s, and a long tail of P2/P3.
+   Assign priority deterministically by the screen's role in the main product loop, not by perceived importance. Do NOT mark every screen P0. A typical inventory has a handful of P0s, several P1s, and a long tail of P2/P3.
 7. Use \`type\` to distinguish "screen" (full route) from "modal", "overlay", or "system-state".
 8. Populate \`risks[]\` with edge cases or failure modes worth surfacing ("camera permission denied", "low-light noise", "rate limit hit"). Populate \`outputData[]\` when a screen produces named data ("mood vector", "caption text", "uploaded photo URL").
 9. Populate \`featureRefs[]\` with the canonical feature IDs each screen implements.
@@ -48,7 +48,9 @@ Rules:
         userPrefix: 'Create a Screen Inventory from this PRD:',
     },
     user_flows: {
-        system: `You are an expert UX designer. Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD and screen inventory context.
+        system: `You are a senior UX designer producing production-grade artifacts for engineering teams. Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD and screen inventory context.
+
+Adhere strictly to the format below. Do not drift into narrative prose; every flow must use the exact headings and the step → response structure. Edge cases must be meaningful failure or boundary scenarios that affect the flow, not filler.
 
 For each flow, use this exact format:
 
@@ -71,7 +73,9 @@ Begin your response directly with the first section heading. Do NOT include any 
         userPrefix: 'Create User Flows from this PRD:',
     },
     component_inventory: {
-        system: `You are an expert frontend architect. Create a Component Inventory — a structured catalog of reusable UI components implied by the product design.
+        system: `You are a senior frontend architect producing production-grade artifacts for engineering teams. Create a Component Inventory — a structured catalog of reusable UI components implied by the product design.
+
+Maintain consistent granularity: each entry must be a reusable component at the same level of abstraction. Do not list duplicate or overlapping components; consolidate variants of one component under that component's Props/Variants.
 
 Group by category. For each component, use this exact format:
 
@@ -90,7 +94,7 @@ End with a dependency summary showing which components compose other components.
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are an expert software architect. Produce a structured Implementation Plan as a task-driven execution system, not a narrative document. The JSON you return drives the rendered UI directly.
+        system: `You are a senior software architect producing production-grade artifacts for engineering teams. Produce a structured Implementation Plan as a task-driven execution system, not a narrative document. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
 
 Top-level shape:
 - overview: { summary, criticalPath, teamSize }
@@ -129,7 +133,7 @@ Rules:
         userPrefix: 'Create an Implementation Plan from this PRD:',
     },
     data_model: {
-        system: `You are an expert backend architect. Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup.
+        system: `You are a senior backend architect producing production-grade artifacts for engineering teams. Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup. Define every field at field level — name, type, requiredness, and a precise description. Model only entities and fields that the PRD's features and entities require; do not introduce speculative fields. Keep entity and field names consistent with the PRD's defined entities.
 
 The JSON you return drives both downstream artifacts and the rendered UI. Populate these top-level fields:
 
@@ -164,7 +168,7 @@ Use stable names for entities and fields. Do not rename PRD concepts unless you 
         userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
-        system: `You are an expert at writing AI prompts. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into Cursor, Claude Code, ChatGPT, or Copilot WITHOUT also pasting the PRD.
+        system: `You are a senior prompt engineer producing production-grade artifacts for engineering teams. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into Cursor, Claude Code, ChatGPT, or Copilot WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language.
 
 For each prompt, use this exact format:
 
@@ -219,7 +223,7 @@ Begin your response directly with the first section heading. Do NOT include any 
         userPrefix: 'Create a Prompt Pack from this PRD:',
     },
     design_system: {
-        system: `You are an expert design systems architect. Produce a Design System Starter as a STRUCTURED TOKEN CONTRACT. The output is consumed by downstream mockup generation, so every value must be machine-usable and consistent.
+        system: `You are a senior design systems architect producing production-grade artifacts for engineering teams. Produce a Design System Starter as a STRUCTURED TOKEN CONTRACT. The output is consumed by downstream mockup generation, so every value must be machine-usable and consistent.
 
 Return a single JSON object matching the provided schema. Token namespaces:
 
@@ -231,10 +235,11 @@ Return a single JSON object matching the provided schema. Token namespaces:
 - rules: 5–8 short imperative rules describing how to apply the tokens (e.g. "Use brand.primary only for primary actions.", "Use state colors only for status, warning, success, error, info.").
 
 Constraints:
-- Choose tokens that match the PRD's product personality (e.g. healthcare → calm trust palette; consumer audio → vibrant energy; B2B SaaS → restrained neutrals + one accent). Do not default to a generic indigo-on-neutral system unless the PRD truly calls for it.
-- Keep typography practical: 1 or 2 fonts max. Don't pick decorative fonts for body.
-- Component recipes must reference tokens that exist in your output.
-- All required keys MUST be present.`,
+- Select tokens whose characteristics fit the product domain and audience, and justify the choice by that fit. For example: a healthcare product warrants a low-saturation, high-trust palette; a consumer audio product warrants a high-saturation, high-contrast palette; a B2B SaaS product warrants restrained neutrals with a single accent. Do not default to a generic indigo-on-neutral system unless the PRD requires it.
+- Keep typography practical: 1 or 2 fonts maximum. Do not select decorative fonts for body text.
+- Component recipes MUST reference tokens that exist in your output; do not reference undefined tokens.
+- All required keys MUST be present.
+- Apply the tokens literally and consistently. Do not reinterpret, rename, or substitute token values stylistically.`,
         userPrefix: 'Create a Design System Starter from this PRD. Produce structured token JSON only:',
     },
 };
@@ -510,7 +515,7 @@ export const refineCoreArtifact = async (
     const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
 
     if (subtype === 'screen_inventory') {
-        const system = `You are an expert product designer refining a structured Screen Inventory.
+        const system = `You are a senior product designer producing production-grade artifacts for engineering teams, refining a structured Screen Inventory. Use formal, professional, implementation-ready language.
 
 The current artifact may be either:
 - The post-upgrade JSON shape (sections[].screens[] with states, entryPoints, exitPaths, P0–P3 priority, etc.), OR
