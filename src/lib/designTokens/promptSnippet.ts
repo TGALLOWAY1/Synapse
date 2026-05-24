@@ -16,7 +16,7 @@ export function tokensToPromptSnippet(tokens: DesignTokens): string {
     const lines: string[] = [];
 
     lines.push('## Design system contract (MUST follow)');
-    lines.push('You have been given the project\'s design system as machine-readable tokens. Use these — do NOT invent unrelated colors, fonts, or component styles.');
+    lines.push('You have been given the project\'s design system as machine-readable tokens. These tokens are binding. You MUST use them exactly as defined. You MUST NOT invent, rename, substitute, or stylistically reinterpret any color, font, or component style.');
     lines.push('');
 
     lines.push('### Color tokens');
@@ -65,9 +65,9 @@ export function tokensToPromptSnippet(tokens: DesignTokens): string {
     lines.push('');
 
     lines.push('### Compliance instructions');
-    lines.push('- Use ONLY the colors listed above. Do not introduce additional brand or accent colors.');
-    lines.push('- Use the typography tokens for headings, labels, and body text.');
-    lines.push('- Use component recipes for buttons, cards, inputs, panels, and navigation surfaces.');
+    lines.push('- Use ONLY the colors listed above. You MUST NOT introduce additional brand or accent colors.');
+    lines.push('- Use the typography tokens for headings, labels, and body text. You MUST NOT substitute other fonts, sizes, or weights.');
+    lines.push('- Use the component recipes exactly for buttons, cards, inputs, panels, and navigation surfaces. You MUST NOT alter their token values.');
     lines.push('- For brand-specific values inside HTML mockups, prefer inline style references like `style="background: var(--color-brand-primary); border-radius: var(--radius-md)"`. Tailwind utility classes are still allowed for layout, sizing, and structural typography.');
     lines.push('- If a needed token is missing, choose the closest existing token and add a one-line note in the screen `notes` field describing the gap.');
 
@@ -89,7 +89,7 @@ export function tokensToImagePromptBrief(tokens: DesignTokens): string {
     const bodyFont = tokens.typography['body.md']?.font ?? 'sans-serif';
     const radiusMd = tokens.radius.md ?? 8;
     return [
-        `Use this design system strictly: palette ${palette}.`,
+        `You MUST follow this design system exactly: palette ${palette}.`,
         `Heading typography: ${headingFont}. Body typography: ${bodyFont}.`,
         `Corner radius around ${radiusMd}px on cards and buttons.`,
         `Primary actions in brand.primary; do not introduce additional accent colors.`,

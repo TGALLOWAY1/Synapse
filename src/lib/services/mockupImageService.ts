@@ -6,9 +6,9 @@ import type { DesignTokens, MockupPayload, MockupScreen, MockupSettings, MockupP
 import { tokensToImagePromptBrief } from '../designTokens';
 
 const FIDELITY_STYLE_HINTS: Record<string, string> = {
-    low: 'low-fidelity wireframe sketch, neutral grey palette, simple boxes and labels, hand-drawn feel',
-    mid: 'mid-fidelity flat UI mockup, structured layout with clear hierarchy, neutral palette with one accent color, no decorative imagery',
-    high: 'high-fidelity polished product UI screenshot, modern SaaS aesthetic, careful typography, soft shadows, accent color used sparingly',
+    low: 'low-fidelity wireframe, neutral grey palette, simple rectangular placeholders and labels, sketch-style linework, no imagery',
+    mid: 'mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, neutral palette with one accent color, no decorative imagery',
+    high: 'high-fidelity polished product UI screenshot, clean contemporary product styling, precise typography, soft shadows, accent color used sparingly',
 };
 
 /**

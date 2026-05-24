@@ -68,7 +68,7 @@ export const buildScreenInventoryImagePrompt = (
         navLine,
         stateLine,
         `Render as a ${platform}.`,
-        `Style: mid-fidelity flat UI mockup, structured layout with clear hierarchy, neutral palette with one accent color, no decorative imagery.`,
+        `Style: mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, neutral palette with one accent color, no decorative imagery.`,
         `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,
         `No watermarks, no logos of real companies, no photographic people.`,
     ].filter(Boolean).join(' ');
