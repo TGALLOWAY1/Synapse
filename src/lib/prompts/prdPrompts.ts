@@ -35,6 +35,10 @@ export const RUBRIC_DEFINITION = `QUALITY BAR — this is a hard requirement, no
 - acceptanceCriteria: 1=basic checkboxes; 3=some details; 5=success, edge, failure, and UI behavior all enumerated per major feature.
 - downstreamReadiness: 1=weak source artifact; 3=usable with edits; 5=strong enough to drive mockups, screen inventory, data model, implementation plan with no rework.`;
 
+// NOTE: currently unused at runtime. The live PRD path is the progressive
+// section pipeline (prdSectionPrompts.ts); this single-pass instruction is
+// retained for reference. Keep its guidance mirrored into the section prompts
+// rather than assuming edits here affect generation.
 export const buildStrategySystemInstruction = (platform?: ProjectPlatform): string => {
     const platformNote = platform ? `\n\n${PLATFORM_CONTEXT[platform]}` : '';
     return `You are a senior product strategist, staff UX engineer, and tech lead producing a high-fidelity Product Requirements Document.

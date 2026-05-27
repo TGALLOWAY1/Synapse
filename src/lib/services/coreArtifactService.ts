@@ -42,7 +42,7 @@ Rules:
    - P3 = nice-to-have / future
    Assign priority deterministically by the screen's role in the main product loop, not by perceived importance. Do NOT mark every screen P0. A typical inventory has a handful of P0s, several P1s, and a long tail of P2/P3.
 7. Use \`type\` to distinguish "screen" (full route) from "modal", "overlay", or "system-state".
-8. Populate \`risks[]\` with edge cases or failure modes worth surfacing ("camera permission denied", "low-light noise", "rate limit hit"). Populate \`outputData[]\` when a screen produces named data ("mood vector", "caption text", "uploaded photo URL").
+8. Populate \`risks[]\` with edge cases or failure modes worth surfacing, covering data, UX, permission, and API failure modes where relevant ("camera permission denied", "low-light noise", "rate limit hit"). Populate \`outputData[]\` for every named datum a screen produces ("mood vector", "caption text", "uploaded photo URL").
 9. Populate \`featureRefs[]\` with the canonical feature IDs each screen implements.
 10. Reuse exact PRD terminology for screen and feature names.`,
         userPrefix: 'Create a Screen Inventory from this PRD:',
@@ -67,6 +67,8 @@ For each flow, use this exact format:
 - [Error condition] → [How the system handles it]
 **Edge Cases:** Unusual but important scenarios.
 
+You may also include any of these optional sections when relevant, using the same bold-label format: **Entry Points:** (where the flow can be started from), **Assumptions:**, and **Open Questions:**. Keep step lines in the exact "[Screen Name] — User action → System response" form so each step parses into screen, action, and response.
+
 Cover at minimum: first-time user onboarding, the core value workflow, and one administrative/settings flow.
 
 Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
@@ -84,13 +86,12 @@ Group by category. For each component, use this exact format:
 **Props/Variants:**
 - \`variant\`: primary | secondary | ghost
 - \`size\`: sm | md | lg
-- (list key props)
+- (list key props, each with a one-line description of its purpose)
 **Used In:** [Screen 1], [Screen 2], ...
 **Complexity:** Simple | Moderate | Complex
 **Notes:** Any implementation considerations.
 
-Categories to cover: Navigation, Forms & Inputs, Data Display, Feedback & Status, Layout & Containers, Overlays & Modals.
-End with a dependency summary showing which components compose other components.`,
+Categories to cover: Navigation, Forms & Inputs, Data Display, Feedback & Status, Layout & Containers, Overlays & Modals.`,
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
@@ -117,13 +118,13 @@ Per task:
 - id: stable lower-snake-case identifier (e.g. "task_initialize_nextjs"). Unique across the whole plan.
 - title: short imperative (e.g. "Initialize Next.js SPA").
 - description: optional extra context, ONE sentence max.
-- status: ALWAYS "todo". You are generating a plan, not tracking execution.
+- status: ALWAYS "todo", without exception. You are generating a plan, not tracking execution; never emit any other status value.
 - dependencies: array of OTHER task ids (from this same plan) that must be done first. Empty array if none.
 - linkedArtifacts: { prd, dataModel, mockups }
   - prd: PRD feature names this task implements, drawn from the Canonical Feature Glossary in the user prompt.
   - dataModel: entity names from the data_model dependency context that this task touches.
   - mockups: screen names from the screen_inventory dependency context that this task implements.
-  - Omit (or use empty arrays) if there is no genuine reference. Don't invent artifact references.
+  - Link an artifact only when the task directly implements or modifies it. Omit (or use empty arrays) otherwise. Don't invent artifact references.
 
 Rules:
 - Task ids must be unique across the entire plan.
@@ -155,7 +156,7 @@ For each entity, populate:
   - "API / Integration" (webhook URLs, external IDs, integration payloads)
   - "Privacy / Safety" (PII, secrets, sensitive data subject to safety rules)
 - relationships: existing array of { type: has_many|belongs_to|has_one|many_to_many, target, description? }.
-- indexes: recommended database indexes for query performance.
+- indexes: recommended database indexes for query performance; name the field(s) each index covers.
 - constraints: business/database constraints (uniqueness, check constraints, cardinality limits) — NOT privacy concerns.
 - privacyRules: separate from constraints. Privacy/safety rules like "raw_input must be null when source = FACE_SCAN", "PII fields must be encrypted at rest", "soft-delete only — never hard delete". Use this for anything safety, privacy, or compliance related.
 - exampleRecord: optional. For the FIRST userFacing entity (and others only when illustrative), provide a compact example record as a JSON-encoded STRING (e.g., "{\\"joy_score\\": 0.7, \\"energy_level\\": 0.6, \\"vibe_title\\": \\"Warm Sunset Drift\\"}"). 4-8 fields max; keep it illustrative, not exhaustive.
@@ -164,7 +165,7 @@ Top-level apiEndpoints: existing array of { method, path, description, entity }.
 
 Top-level productMapping: an array of { field, uiBehavior } mapping the most product-relevant fields to visible UI behavior (e.g., { field: "vibe_title", uiBehavior: "Appears as the generated playlist name" }, { field: "energy_level", uiBehavior: "Affects track intensity" }). Aim for 5-10 entries covering the fields that most directly shape the user experience.
 
-Use stable names for entities and fields. Do not rename PRD concepts unless you provide an alias note. Keep terminology consistent across overview, fieldGroups, productMapping, and the entities themselves.`,
+Use stable names for entities and fields: reuse the PRD's exact entity and field names. Do not rename PRD concepts unless you provide an alias note. Keep terminology consistent across overview, fieldGroups, productMapping, and the entities themselves.`,
         userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
@@ -174,7 +175,7 @@ For each prompt, use this exact format:
 
 ### [N]. [Prompt Title]
 **Target Tool:** Cursor | Claude Code | ChatGPT | Copilot | Generic
-**Reason:** One short user-facing sentence (≤25 words) explaining why this target tool fits THIS prompt — e.g. "Cursor — best fit for applying multi-file code changes directly in the repo with diff preview." Keep it concrete; do not say "best AI tool".
+**Reason:** One short user-facing sentence (≤25 words) explaining why this target tool fits THIS prompt — e.g. "Cursor — best fit for applying multi-file code changes directly in the repo with diff preview." Keep it concrete; do not say "best AI tool". Select the tool by fit: Cursor for multi-file repo edits; Claude Code for repo-aware agentic tasks; ChatGPT or Generic for standalone reasoning, content, and critique; Copilot for inline code completion.
 **Category:** UI Implementation | UX Critique | Testing | API Design | Content | Accessibility
 **Prompt:**
 \`\`\`
@@ -206,7 +207,7 @@ For each prompt, use this exact format:
 - <bulleted; what artifacts/files/behaviors the recipient should produce>
 - ...
 \`\`\`
-**Expected Output:** What this prompt should produce.
+**Expected Output:** A one-line summary, outside the fenced block, of what the prompt above should produce.
 
 Hard rules — these are non-negotiable:
 
@@ -236,7 +237,7 @@ Return a single JSON object matching the provided schema. Token namespaces:
 
 Constraints:
 - Select tokens whose characteristics fit the product domain and audience, and justify the choice by that fit. For example: a healthcare product warrants a low-saturation, high-trust palette; a consumer audio product warrants a high-saturation, high-contrast palette; a B2B SaaS product warrants restrained neutrals with a single accent. Do not default to a generic indigo-on-neutral system unless the PRD requires it.
-- Keep typography practical: 1 or 2 fonts maximum. Do not select decorative fonts for body text.
+- Keep typography practical: 1 or 2 fonts maximum. The body font must be a widely available system or sans-serif UI face (e.g. Inter, Roboto, system-ui); do not select decorative fonts for body text.
 - Component recipes MUST reference tokens that exist in your output; do not reference undefined tokens.
 - All required keys MUST be present.
 - Apply the tokens literally and consistently. Do not reinterpret, rename, or substitute token values stylistically.`,
