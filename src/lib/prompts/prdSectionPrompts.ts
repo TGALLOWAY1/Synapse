@@ -1,6 +1,6 @@
 import type { ProjectPlatform, StructuredPRD } from '../../types';
 import type { SectionId } from '../schemas/prdSchemas';
-import { RUBRIC_DEFINITION } from './prdPrompts';
+import { RUBRIC_DEFINITION, PROMPT_CONTRACT } from './prdPrompts';
 
 export type SectionPromptContext = {
     idea: string;
@@ -9,11 +9,13 @@ export type SectionPromptContext = {
 };
 
 const PLATFORM_NOTE: Record<ProjectPlatform, string> = {
-    app: 'Target platform: native mobile app (iOS/Android). Bias toward touch UX, offline, push notifications, device APIs.',
-    web: 'Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, URL routing.',
+    app: 'Target platform: native mobile application (iOS/Android). Bias toward touch interaction, offline operation, push notifications, and device APIs.',
+    web: 'Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, and URL routing.',
 };
 
-const SHARED_PREAMBLE = `You are a senior product strategist and tech lead generating one section of a structured PRD JSON. Output ONLY the JSON object matching the provided schema — no markdown, no explanation, no extra fields. Every string value must be specific and opinionated: imagine you shipped this product yourself.
+const SHARED_PREAMBLE = `You are a senior product strategist and tech lead generating one section of a structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product.
+
+${PROMPT_CONTRACT}
 
 ${RUBRIC_DEFINITION}`;
 
@@ -44,7 +46,7 @@ You are generating the product_basics slice: productName, productCategory, execu
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
         user: `Product idea:\n${ctx.idea}
 
-Return JSON with: productName (string), productCategory (short label e.g. "B2C Marketplace"), executiveSummary (2–3 sentences), vision (1 aspirational sentence), targetUsers (3–5 specific user types as strings), coreProblem (the core pain solved).`,
+Return JSON with: productName (string), productCategory (short label e.g. "B2C Marketplace"), executiveSummary (2–3 sentences), vision (1 aspirational sentence), targetUsers (3–5 specific user types as strings), coreProblem (the core pain solved — state the user's current workaround, why existing solutions fail, and the consequence of leaving it unsolved).`,
     }),
 
     product_thesis: (ctx) => {
@@ -60,8 +62,8 @@ ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
 Context from product_basics: ${basics}
 
 Return JSON with:
-- productThesis: { whyExist, whyNow, differentiation, intentionalTradeoffs (array), nonGoals (array) }
-- principles: array of { name, description } — 3–5 design/product principles
+- productThesis: { whyExist, whyNow, differentiation, intentionalTradeoffs (array), nonGoals (array) } — nonGoals is critical: state explicitly what this product must NOT become.
+- principles: array of { name, description } — 3–5 design/product principles. Each principle must be able to guide a concrete product decision; do not state platitudes.
 - jtbd: array of { segment, motivation, painPoints (array), job, successMoment } — 2–4 jobs-to-be-done`,
         };
     },
@@ -79,7 +81,7 @@ ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
 Context: ${basics}
 
 Return JSON with:
-- domainEntities: array of { name, description, exampleValues (3–5 realistic examples) } — 4–8 core domain objects
+- domainEntities: array of { name, description, exampleValues (3–5 realistic examples) } — 4–8 core domain objects. Example values must be plausible real-world names, statuses, and IDs; never placeholders such as Foo/Bar or Lorem ipsum.
 - primaryActions: array of { verb, target } — 6–12 key user actions (e.g. { verb: "Create", target: "listing" })`,
         };
     },
@@ -92,7 +94,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the features slice: features, featureSystems. This is the most important section — be thorough and opinionated.
+You are generating the features slice: features, featureSystems. This is the most consequential section; be thorough, specific, and definitive. Every feature and system decision must include reasoning or a stated constraint that justifies it (user value, dependency, or scope rationale).
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
@@ -101,7 +103,9 @@ ${hasThesis ? `Product thesis: ${thesis}` : ''}
 
 Return JSON with:
 - features: array of 8–14 features, each: { id (f1, f2…), name, description, userValue, complexity (low/medium/high), priority (must/should/could), acceptanceCriteria (≥2 success-path checks), system?, successCriteria?, edgeCases?, failureModes?, uiAcceptanceCriteria?, analyticsEvents?, tier? (mvp/v1/later), dependencies? }
-- featureSystems: array of 2–4 system groups, each: { id (s1…), name, purpose, featureIds, endToEndBehavior, dependencies?, edgeCases?, mvpVsLater? }`,
+- featureSystems: array of 2–4 system groups, each: { id (s1…), name, purpose, featureIds, endToEndBehavior, dependencies?, edgeCases?, mvpVsLater? }
+
+For every must- and should-priority feature, populate successCriteria, edgeCases, failureModes, and uiAcceptanceCriteria — treat these as expected, not optional.`,
         };
     },
 
@@ -121,8 +125,8 @@ ${hasFeatures ? `Features: ${features}` : ''}
 Grounding entities: ${grounding}
 
 Return JSON with:
-- richDataModel: { entities: array of { name, description, fields (array of { name, type, required, notes? }), relationships?, constraints?, examples? } } — 4–8 entities
-- stateMachines: array of { entity, states: array of { name, trigger?, nextStates?, userVisible?: string[], systemBehavior?: string[] } } — for 2–3 stateful entities. userVisible and systemBehavior are arrays of 1–5 distinct short sentences (≤ 140 chars each); never one paragraph, never repeat the same sentence.`,
+- richDataModel: { entities: array of { name, description, fields (array of { name, type, required, notes? }), relationships?, constraints?, examples? } } — 4–8 entities. Examples must be realistic records using real-world names, statuses, and IDs.
+- stateMachines: array of { entity, states: array of { name, trigger?, nextStates?, userVisible?: string[], systemBehavior?: string[] } } — for 2–3 stateful entities. Provide trigger and nextStates for every non-terminal state. userVisible and systemBehavior are arrays of 1–5 distinct short sentences (≤ 140 chars each); never one paragraph, never repeat the same sentence.`,
         };
     },
 
@@ -143,7 +147,7 @@ ${thesis !== UNAVAILABLE ? `Product thesis: ${thesis}` : ''}
 
 Return JSON with:
 - userLoops: array of 2–4 retention loops, each: { name, trigger, action, systemResponse, reward, retentionMechanic }
-- uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (array), interactions (array), emptyState?, loadingState?, errorState?, responsiveNotes? }
+- uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (array), interactions (array), emptyState?, loadingState?, errorState?, responsiveNotes? }. Specify emptyState, loadingState, and errorState for every screen.
 - roles: array of user roles, each: { role, allowed (array), restricted?, dataVisibility?, notes? }`,
         };
     },
@@ -156,7 +160,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the architecture slice: architecture (narrative), architectureFlows, nonFunctionalRequirements, constraints.
+You are generating the architecture slice: architecture (narrative), architectureFlows, nonFunctionalRequirements, constraints. Every technology and architectural decision must include reasoning grounded in scalability, maintainability, ecosystem maturity, or performance — never stylistic descriptors. Prefer widely adopted, stable technologies unless the product requires otherwise.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
@@ -165,9 +169,9 @@ ${dataModel !== UNAVAILABLE ? `Data model: ${dataModel}` : ''}
 
 Return JSON with:
 - architecture: string — 2–4 paragraph technical architecture narrative covering tech stack, key components, integration points
-- architectureFlows: array of { name, steps (array of strings) } — 3–5 key system flows (auth, data write, notification, etc.)
-- nonFunctionalRequirements: array of strings — performance, security, scalability, availability requirements
-- constraints: array of strings — technical, regulatory, or resource constraints`,
+- architectureFlows: array of { name, steps (array of strings) } — 3–5 key system flows (auth, data write, notification, etc.). Express each flow's steps as an ordered, numbered sequence.
+- nonFunctionalRequirements: array of strings — testable requirements spanning performance, accessibility, security, privacy, reliability, scalability, observability, and cost
+- constraints: array of strings — budget, timeline, technical, regulatory, or integration constraints`,
         };
     },
 
@@ -189,7 +193,7 @@ ${hasArch ? `Architecture: ${arch}` : ''}
 Return JSON with:
 - risks: array of 4–8 risk strings (summary level)
 - risksDetailed: array of { risk, likelihood (low/med/high), impact, mitigation, owner? }
-- assumptions: array of { id (a1…), statement, confidence (low/med/high) } — 4–8 key product assumptions`,
+- assumptions: array of { id (a1…), statement, confidence (low/med/high) } — 4–8 product assumptions. Record every fact you inferred rather than were told. Calibrate confidence: high = directly implied by the idea; med = reasonable industry default; low = speculative.`,
         };
     },
 
@@ -206,8 +210,8 @@ ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
 ${features !== UNAVAILABLE ? `Features: ${features}` : ''}
 
 Return JSON with:
-- mvpScope: { mvp (array of feature names/descriptions), v1 (array), later (array), rationale? }
-- successMetrics: array of { name, target?, instrumentation? } — 5–8 measurable product success criteria`,
+- mvpScope: { mvp (array of feature names/descriptions), v1 (array), later (array), rationale? } — the MVP must be opinionated, coherent, and shippable; defer aggressively rather than listing every feature.
+- successMetrics: array of { name, target?, instrumentation? } — 5–8 measurable product success criteria spanning activation, engagement, conversion, quality, and operational metrics`,
         };
     },
 
@@ -222,7 +226,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the implementation_plan slice: a phased development roadmap.
+You are generating the implementation_plan slice: a phased development roadmap. Phases and their goals must be concrete and actionable, not abstract; each phase must state the reasoning or dependency that determines its ordering.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
@@ -236,7 +240,7 @@ Return JSON with:
     techStack: array of strings (key technologies),
     teamNotes?: string (team structure / hiring needs)
   }
-Produce 3–5 phases from MVP foundation through full launch.`,
+Produce 3–5 phases from MVP foundation through full launch. Every must- and should-priority feature should map to exactly one phase via featureIds.`,
         };
     },
 };
