@@ -113,7 +113,7 @@ export function UserFlowsRenderer({
     const drawerFeature = drawerRef ? featuresById?.get(drawerRef.id) : undefined;
 
     return (
-        <div className="flex gap-5 items-start">
+        <div className="md:flex md:gap-5 md:items-start">
             <FlowSidebar
                 flows={flows}
                 selectedIndex={safeIndex}
