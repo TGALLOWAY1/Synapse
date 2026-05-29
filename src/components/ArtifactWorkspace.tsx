@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight, ListChecks,
@@ -81,6 +81,9 @@ export function ArtifactWorkspace({
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
+    // The scrollable content pane. Reset to the top whenever the user switches
+    // pages so a new artifact never inherits the previous page's scroll offset.
+    const mainRef = useRef<HTMLElement>(null);
     // Mobile-only: the left rail is a slide-in drawer below the md breakpoint.
     // Closed by default so the content pane is fully visible on first paint.
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
@@ -102,6 +105,11 @@ export function ArtifactWorkspace({
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
     }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform]);
+
+    // Scroll the content pane back to the top on every page switch.
+    useEffect(() => {
+        mainRef.current?.scrollTo({ top: 0 });
+    }, [selected]);
 
     const slotStatusFor = (key: WorkspaceSelection): GenerationStatus => {
         if (key === 'prd') return 'done';
@@ -397,7 +405,7 @@ export function ArtifactWorkspace({
             </aside>
 
             {/* Main pane */}
-            <main className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
+            <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
                 {/* Mobile-only header with sidebar toggle and current artifact name */}
                 <div className="md:hidden sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-white border-b border-neutral-200">
                     <button
