@@ -435,6 +435,7 @@ export const componentInventorySchema = {
                                         properties: {
                                             name: { type: "STRING" },
                                             type: { type: "STRING" },
+                                            required: { type: "BOOLEAN" },
                                             description: { type: "STRING" },
                                         },
                                         required: ["name", "type"],
@@ -443,6 +444,20 @@ export const componentInventorySchema = {
                                 usedIn: { type: "ARRAY", items: { type: "STRING" } },
                                 complexity: { type: "STRING", enum: ["simple", "moderate", "complex"] },
                                 notes: { type: "STRING" },
+                                previewType: {
+                                    type: "STRING",
+                                    enum: ["accordion", "input", "toggle", "button", "custom"],
+                                },
+                                accessibility: {
+                                    type: "OBJECT",
+                                    properties: {
+                                        keyboard: { type: "BOOLEAN" },
+                                        focusManagement: { type: "BOOLEAN" },
+                                        screenReader: { type: "BOOLEAN" },
+                                        aria: { type: "ARRAY", items: { type: "STRING" } },
+                                        notes: { type: "STRING" },
+                                    },
+                                },
                             },
                             required: ["name", "purpose", "complexity"],
                         },

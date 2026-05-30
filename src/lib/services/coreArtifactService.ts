@@ -91,6 +91,10 @@ Group by category. For each component, use this exact format:
 **Complexity:** Simple | Moderate | Complex
 **Notes:** Any implementation considerations.
 
+For each prop, mark whether it is required. For each component, also provide:
+- previewType: one of "accordion", "input", "toggle", "button", or "custom" — the visual archetype that best represents how the component looks/behaves.
+- accessibility: which of keyboard navigation, focus management, and screen-reader support the component must implement, plus any required ARIA attributes/states. Be honest — only mark a capability when the component genuinely requires it.
+
 Categories to cover: Navigation, Forms & Inputs, Data Display, Feedback & Status, Layout & Containers, Overlays & Modals.`,
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
@@ -268,12 +272,25 @@ export function structuredArtifactToMarkdown(subtype: CoreArtifactSubtype, data:
                 lines.push(`### ${comp.name}`);
                 lines.push(`**Purpose:** ${comp.purpose}`);
                 lines.push(`**Complexity:** ${comp.complexity}`);
+                if (comp.previewType) {
+                    lines.push(`**Preview:** ${comp.previewType}`);
+                }
                 if (comp.props?.length) {
                     lines.push('**Props:**');
-                    comp.props.forEach(p => lines.push(`- \`${p.name}\`: ${p.type}${p.description ? ` — ${p.description}` : ''}`));
+                    comp.props.forEach(p => lines.push(`- \`${p.name}\`: ${p.type}${p.required ? ' (required)' : ''}${p.description ? ` — ${p.description}` : ''}`));
                 }
                 if (comp.usedIn?.length) {
                     lines.push(`**Used In:** ${comp.usedIn.join(', ')}`);
+                }
+                if (comp.accessibility) {
+                    const a = comp.accessibility;
+                    const flags: string[] = [];
+                    if (a.keyboard) flags.push('Keyboard');
+                    if (a.focusManagement) flags.push('Focus Management');
+                    if (a.screenReader) flags.push('Screen Reader');
+                    if (a.aria?.length) flags.push(`ARIA: ${a.aria.join(', ')}`);
+                    if (a.notes) flags.push(a.notes);
+                    if (flags.length) lines.push(`**Accessibility:** ${flags.join('; ')}`);
                 }
                 if (comp.notes) {
                     lines.push(`**Notes:** ${comp.notes}`);
