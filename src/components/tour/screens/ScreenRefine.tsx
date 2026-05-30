@@ -3,30 +3,31 @@ import { AnimatePresence, motion } from 'framer-motion';
 import { Check, FileText, PenLine, Sparkles } from 'lucide-react';
 import { ScreenShell, SkeletonLine } from '../components/ScreenShell';
 import { RefineMenu } from '../components/RefineMenu';
+import { useIsMobile } from '../../../lib/useIsMobile';
 import { REFINE_DEMO, type RefineAction } from '../tourData';
 import type { ScreenProps } from '../tourTypes';
-
-type Phase = 'idle' | 'menu' | 'conversation' | 'applied';
 
 const OTHER_SECTIONS = ['4. Core Problems', '5. Goals & Outcomes', '6. Key Features'];
 
 /**
- * Screen 3 — highlight a span, pick a refinement action, watch a scripted
- * conversation, then "Apply to PRD" to swap just that span. Teaches the
- * Highlight → Refine → Consolidate loop without touching a backend.
+ * Screen 3 — the highlighted span and the Clarify/Expand/Specify/Alternative/
+ * Replace menu are always visible (the menu floats over the document next to
+ * the highlight, as in the mockup). An action is pre-selected so the AI
+ * Conversation is populated; picking another action re-runs it, and "Apply to
+ * PRD" swaps just that span. Teaches the Highlight → Refine → Consolidate loop.
  */
 export default function ScreenRefine({ reducedMotion }: ScreenProps) {
-    // The screen remounts fresh each time it becomes active, so it always demos
-    // from the top — no isActive reset needed.
-    const [phase, setPhase] = useState<Phase>('idle');
-    const [action, setAction] = useState<RefineAction | null>(null);
+    const isMobile = useIsMobile();
+    // Pre-select Expand to mirror the mockup; the screen remounts fresh each
+    // time it becomes active so it always demos from this state.
+    const [action, setAction] = useState<RefineAction>('Expand');
+    const [applied, setApplied] = useState(false);
 
-    const script = action ? REFINE_DEMO.scripts[action] : null;
-    const isApplied = phase === 'applied';
+    const script = REFINE_DEMO.scripts[action];
 
     const handleSelect = (a: RefineAction) => {
         setAction(a);
-        setPhase('conversation');
+        setApplied(false);
     };
 
     return (
@@ -37,53 +38,49 @@ export default function ScreenRefine({ reducedMotion }: ScreenProps) {
         >
             <div className="grid gap-4 lg:grid-cols-2">
                 {/* PRD panel */}
-                <div className="rounded-2xl border border-neutral-700 bg-neutral-800/40 p-5">
+                <div className="relative rounded-2xl border border-neutral-700 bg-neutral-800/40 p-5">
                     <div className="mb-4 flex items-center gap-2">
                         <FileText size={18} className="text-indigo-300" />
                         <span className="text-sm font-semibold text-white">Product Requirements Document</span>
                     </div>
 
                     <p className="mb-1 text-sm font-medium text-neutral-200">{REFINE_DEMO.sectionHeading}</p>
-                    <div className="mb-4">
-                        <button
-                            type="button"
-                            onClick={() => phase === 'idle' && setPhase('menu')}
-                            disabled={phase !== 'idle'}
-                            className={`rounded text-left text-sm leading-relaxed transition ${
-                                isApplied
-                                    ? 'text-neutral-200'
-                                    : 'bg-indigo-500/25 text-indigo-100 decoration-indigo-400/60 underline-offset-4 hover:bg-indigo-500/35'
-                            } ${phase === 'idle' ? 'cursor-pointer underline' : ''}`}
-                        >
-                            {isApplied && script ? script.refined : REFINE_DEMO.original}
-                        </button>
-                        {phase === 'idle' && (
-                            <span className="mt-1 block text-xs text-neutral-500">Tap the highlighted text to refine it</span>
-                        )}
 
-                        <AnimatePresence>
-                            {phase === 'menu' && (
-                                <motion.div
-                                    initial={reducedMotion ? false : { opacity: 0, y: -4 }}
-                                    animate={{ opacity: 1, y: 0 }}
-                                    exit={{ opacity: 0 }}
-                                    className="mt-2 max-w-[15rem]"
-                                >
-                                    <RefineMenu onSelect={handleSelect} activeAction={action} />
-                                </motion.div>
-                            )}
-                        </AnimatePresence>
+                    {/* Highlighted span + always-visible refine menu */}
+                    <div className="relative mb-4">
+                        <span
+                            className={`inline rounded text-sm leading-relaxed transition ${
+                                applied
+                                    ? 'text-neutral-200'
+                                    : 'bg-indigo-500/25 text-indigo-100 underline decoration-indigo-400/60 underline-offset-4'
+                            }`}
+                        >
+                            {applied ? script.refined : REFINE_DEMO.original}
+                        </span>
+
+                        <div
+                            className={
+                                isMobile
+                                    ? 'mt-3 w-full max-w-[16rem]'
+                                    : 'absolute left-6 top-full z-20 mt-2 w-56'
+                            }
+                        >
+                            <RefineMenu onSelect={handleSelect} activeAction={action} />
+                        </div>
                     </div>
 
-                    {OTHER_SECTIONS.map((heading) => (
-                        <div key={heading} className="mb-4 opacity-70">
-                            <p className="mb-2 text-sm font-medium text-neutral-300">{heading}</p>
-                            <div className="space-y-2">
-                                <SkeletonLine width="w-10/12" />
-                                <SkeletonLine width="w-7/12" />
+                    {/* Context sections (menu floats over these on desktop) */}
+                    <div className={isMobile ? '' : 'pointer-events-none opacity-60'}>
+                        {OTHER_SECTIONS.map((heading) => (
+                            <div key={heading} className="mb-4 opacity-70">
+                                <p className="mb-2 text-sm font-medium text-neutral-300">{heading}</p>
+                                <div className="space-y-2">
+                                    <SkeletonLine width="w-10/12" />
+                                    <SkeletonLine width="w-7/12" />
+                                </div>
                             </div>
-                        </div>
-                    ))}
+                        ))}
+                    </div>
                 </div>
 
                 {/* Conversation panel */}
@@ -93,12 +90,15 @@ export default function ScreenRefine({ reducedMotion }: ScreenProps) {
                         <Sparkles size={16} className="text-indigo-300" />
                     </div>
 
-                    {!script ? (
-                        <div className="flex flex-1 items-center justify-center rounded-xl border border-dashed border-neutral-700 p-8 text-center text-sm text-neutral-500">
-                            Pick a refinement action to start a conversation about this section.
-                        </div>
-                    ) : (
-                        <div className="space-y-3">
+                    <AnimatePresence mode="wait">
+                        <motion.div
+                            key={action}
+                            initial={reducedMotion ? false : { opacity: 0, y: 6 }}
+                            animate={{ opacity: 1, y: 0 }}
+                            exit={reducedMotion ? undefined : { opacity: 0 }}
+                            transition={{ duration: 0.2 }}
+                            className="space-y-3"
+                        >
                             <div className="rounded-2xl rounded-tl-sm bg-neutral-700/50 px-3 py-2 text-sm text-neutral-200">
                                 How would you like to refine this section?
                             </div>
@@ -113,11 +113,11 @@ export default function ScreenRefine({ reducedMotion }: ScreenProps) {
                                 </div>
                                 <button
                                     type="button"
-                                    onClick={() => setPhase('applied')}
-                                    disabled={isApplied}
+                                    onClick={() => setApplied(true)}
+                                    disabled={applied}
                                     className="mt-3 inline-flex w-full items-center justify-center gap-2 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-medium text-white transition hover:bg-indigo-700 disabled:bg-emerald-600 disabled:opacity-100"
                                 >
-                                    {isApplied ? (
+                                    {applied ? (
                                         <>
                                             <Check size={15} /> Applied to PRD
                                         </>
@@ -126,8 +126,8 @@ export default function ScreenRefine({ reducedMotion }: ScreenProps) {
                                     )}
                                 </button>
                             </div>
-                        </div>
-                    )}
+                        </motion.div>
+                    </AnimatePresence>
                 </div>
             </div>
 
