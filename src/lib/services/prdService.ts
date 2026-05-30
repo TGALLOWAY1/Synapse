@@ -6,6 +6,8 @@ import type { PrdPipelineResult } from './prdPipeline';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
 import type { SectionId } from '../schemas/prdSchemas';
 import type { SectionStatusUpdate } from './progressivePrdPipeline';
+import { classifyProjectSafety, SafetyBlockedError, buildRestrictionDirective } from '../safety';
+import type { SafetyClassificationResult } from '../safety';
 
 export const enhancePrompt = async (rawPrompt: string): Promise<string> => {
     const system = `You are a senior product consultant. The user has written a rough product idea. Expand it into a clear, grounded product description that will support a high-quality PRD.
@@ -40,13 +42,39 @@ export const generateStructuredPRD = async (
         onProgress?: ProgressivePrdPipelineOptions['onProgress'];
         onSectionStatus?: (sectionId: SectionId, update: SectionStatusUpdate) => void;
         onResult?: (result: PrdPipelineResult) => void;
+        /**
+         * Fired once the pre-generation safety classification completes, for
+         * `allowed` and `allowed_with_restrictions` outcomes. `disallowed`
+         * does NOT fire this — it throws `SafetyBlockedError` instead so the
+         * pipeline hard-stops.
+         */
+        onSafety?: (result: SafetyClassificationResult) => void;
     },
     platform?: ProjectPlatform,
 ): Promise<StructuredPRD> => {
+    // --- Pre-generation safety gate (hard stop) -------------------------------
+    // Classify the request before any section runs. A `disallowed` verdict
+    // throws SafetyBlockedError, so no PRD sections are ever generated and the
+    // section-by-section refusal failure mode cannot occur.
+    options?.onStatus?.('Reviewing request…');
+    options?.onProgress?.('Reviewing request for safety…');
+    const safety = await classifyProjectSafety(promptText, { signal: options?.signal });
+    if (safety.classification === 'disallowed') {
+        throw new SafetyBlockedError(safety);
+    }
+    options?.onSafety?.(safety);
+
+    // For allowed_with_restrictions, constrain generation by appending a
+    // binding directive to the prompt forwarded to every section.
+    const effectivePrompt =
+        safety.classification === 'allowed_with_restrictions'
+            ? `${promptText}\n\n${buildRestrictionDirective(safety)}`
+            : promptText;
+
     options?.onStatus?.('Generating structured PRD with Gemini...');
 
     const result = await runProgressivePrdPipeline(
-        promptText,
+        effectivePrompt,
         {
             onStatus: options?.onStatus,
             onPartial: options?.onPartial,
