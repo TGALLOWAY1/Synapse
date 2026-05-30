@@ -11,6 +11,24 @@ const PLATFORM_CONTEXT: Record<ProjectPlatform, string> = {
     web: 'Target platform: a web application. Bias UX architecture and component decisions toward responsive layouts, browser compatibility, SEO, progressive enhancement, URL routing, and web deployment.',
 };
 
+// Highest-priority safety instruction. Placed AHEAD of all formatting and
+// rubric instructions so it takes precedence. This is defense-in-depth — the
+// authoritative guardrail is the code-level classifier in
+// src/lib/safety/classifyProjectSafety.ts, which hard-stops disallowed
+// requests before any section prompt runs. This block ensures the model never
+// fills template sections with refusal text if a disallowed request somehow
+// reaches generation.
+export const SAFETY_OVERRIDE = `## Safety Override
+Before generating any artifact, classify the user request as Allowed, Allowed With Restrictions, or Disallowed.
+If the request is Disallowed (its core purpose enables malware, spyware, credential theft, real-world phishing, keylogging, unauthorized surveillance, data exfiltration, persistence, evasion, exploit chaining, covert monitoring, unauthorized access, or bypassing security controls):
+1. Stop generation immediately.
+2. Do not generate the requested artifact.
+3. Do NOT fill template sections with refusal text (never write "I cannot fulfill this request" inside Vision, Product Thesis, Requirements, or any field).
+4. Return only a standalone Safety Review response.
+5. Clearly state that no project artifacts were generated.
+6. Suggest safe defensive alternatives when appropriate.
+Defensive, authorized, transparent, consent-based, and educational security products are Allowed (or Allowed With Restrictions) — never Disallowed on subject matter alone.`;
+
 // Global prompt contract. Augments (never replaces) the per-prompt
 // instructions to keep tone, rigor, and terminology consistent across every
 // generation in the system. Referenced via ${PROMPT_CONTRACT}.
