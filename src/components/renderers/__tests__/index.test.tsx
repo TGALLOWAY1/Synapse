@@ -257,4 +257,59 @@ A patient record.
         expect(container).toHaveTextContent('id');
         expect(container).toHaveTextContent('name');
     });
+
+    it('renders the component_inventory card library with badges, props table, and a11y block', () => {
+        const jsonContent = JSON.stringify({
+            categories: [{
+                name: 'Navigation',
+                components: [{
+                    name: 'SettingsAccordion',
+                    purpose: 'Collapsible container for advanced configuration options.',
+                    complexity: 'simple',
+                    usedIn: ['Endpoint Discovery', 'Device Setup', 'Settings'],
+                    props: [
+                        { name: 'title', type: 'string', required: true, description: 'Header text of the accordion.' },
+                        { name: 'isExpanded', type: 'boolean', required: true, description: 'Controls visibility of child content.' },
+                    ],
+                    accessibility: { keyboard: true, focusManagement: true, screenReader: true, aria: ['aria-expanded'] },
+                    previewType: 'accordion',
+                }],
+            }],
+        });
+        const { container } = render(
+            <ArtifactContentRenderer subtype="component_inventory" content={jsonContent} />
+        );
+        // Search toolbar present.
+        expect(container.querySelector('input[placeholder="Search components..."]')).toBeTruthy();
+        // Card content (first card is expanded by default).
+        expect(container).toHaveTextContent('SettingsAccordion');
+        expect(container).toHaveTextContent('Used in 3');
+        // Props rendered as a table, not prose.
+        const table = container.querySelector('table');
+        expect(table).toBeTruthy();
+        expect(table).toHaveTextContent('title');
+        expect(table).toHaveTextContent('Required');
+        // Dedicated accessibility block.
+        expect(container).toHaveTextContent('Accessibility');
+        expect(container).toHaveTextContent('Keyboard Navigation');
+    });
+
+    it('renders an old-shape component_inventory (no accessibility/previewType) with a review-needed a11y note', () => {
+        const jsonContent = JSON.stringify({
+            categories: [{
+                name: 'Forms',
+                components: [{
+                    name: 'AddressSearchInput',
+                    purpose: 'Geospatial search input with async autocomplete.',
+                    complexity: 'moderate',
+                    usedIn: ['Mapping'],
+                }],
+            }],
+        });
+        const { container } = render(
+            <ArtifactContentRenderer subtype="component_inventory" content={jsonContent} />
+        );
+        expect(container).toHaveTextContent('AddressSearchInput');
+        expect(container).toHaveTextContent('review needed');
+    });
 });
