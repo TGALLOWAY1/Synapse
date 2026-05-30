@@ -445,13 +445,32 @@ export interface DataModelContent {
     productMapping?: ProductMappingEntry[];
 }
 
+/** Visual preview archetype for a component card. Optional in stored data —
+ * inferred from the component name/props when absent. */
+export type ComponentPreviewType = 'accordion' | 'input' | 'toggle' | 'button' | 'custom';
+
+/** Accessibility contract for a component. All fields optional; older
+ * inventories have none, in which case the renderer derives a heuristic set
+ * and flags it as needing review. */
+export interface ComponentA11y {
+    keyboard?: boolean;
+    focusManagement?: boolean;
+    screenReader?: boolean;
+    aria?: string[];
+    notes?: string;
+}
+
 export interface ComponentItem {
     name: string;
     purpose: string;
-    props?: { name: string; type: string; description?: string }[];
+    props?: { name: string; type: string; required?: boolean; description?: string }[];
     usedIn?: string[];
     complexity: 'simple' | 'moderate' | 'complex';
     notes?: string;
+    /** Optional — added by newer generations; inferred at render time otherwise. */
+    accessibility?: ComponentA11y;
+    /** Optional — added by newer generations; inferred at render time otherwise. */
+    previewType?: ComponentPreviewType;
 }
 
 export interface ComponentInventoryContent {

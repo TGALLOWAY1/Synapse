@@ -100,6 +100,17 @@ otherwise have nothing in common — keep that distinction in mind:
     `schemas/artifactSchemas.ts`, then convert to markdown via
     `structuredArtifactToMarkdown()` for storage; renderers in
     `src/components/renderers/` parse that markdown back to card layouts.
+    The `component_inventory` renderer is a mobile-first, searchable
+    component library (sticky search + category/complexity/used-in
+    filters, expandable cards with live previews) decomposed under
+    `src/components/renderers/componentInventory/`. Its schema/types carry
+    optional `accessibility`, `previewType`, and per-prop `required`
+    fields (all backward-compatible — older saved inventories lack them);
+    when absent, `inferPreview.ts` derives a `previewType` and a
+    heuristic, review-flagged accessibility contract at render time so
+    every card still shows a preview and a dedicated a11y block.
+    `componentInventoryParse.ts` round-trips all these fields through
+    markdown.
   - `branchService.ts` — branch consolidation back into the spine.
   - `artifactJobController.ts` — concurrency control for artifact bundle
     generation.

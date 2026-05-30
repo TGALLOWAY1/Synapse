@@ -3,11 +3,55 @@
 // so downstream consumers like the mockup spec builder need a way to walk
 // back to component-name + usedIn pairs.
 
-import type { ComponentInventoryContent, ComponentItem } from '../types';
+import type { ComponentA11y, ComponentInventoryContent, ComponentItem, ComponentPreviewType } from '../types';
 
 const HEADING_CATEGORY = /^##\s+(.+?)\s*$/;
 const HEADING_COMPONENT = /^####?\s+(.+?)\s*$/;
 const FIELD_LINE = /^\*\*([A-Za-z][A-Za-z /]+?):\*\*\s*(.+?)\s*$/;
+// A props bullet emitted by structuredArtifactToMarkdown, e.g.
+//   - `title`: string (required) — Header text of the accordion.
+const PROP_LINE = /^-\s+`([^`]+)`:\s*(.+?)\s*$/;
+const PREVIEW_TYPES: ReadonlySet<string> = new Set(['accordion', 'input', 'toggle', 'button', 'custom']);
+
+/** Parse a single props bullet value like "string (required) — Header text". */
+function parsePropValue(name: string, value: string): NonNullable<ComponentItem['props']>[number] {
+    let rest = value;
+    let description: string | undefined;
+    const dashIdx = rest.indexOf(' — ');
+    if (dashIdx !== -1) {
+        description = rest.slice(dashIdx + 3).trim() || undefined;
+        rest = rest.slice(0, dashIdx);
+    }
+    let required = false;
+    rest = rest.replace(/\(required\)/i, () => {
+        required = true;
+        return '';
+    });
+    const type = rest.trim();
+    const prop: NonNullable<ComponentItem['props']>[number] = { name, type };
+    if (required) prop.required = true;
+    if (description) prop.description = description;
+    return prop;
+}
+
+/** Parse the inline accessibility summary line into a structured contract. */
+function parseAccessibility(value: string): ComponentA11y {
+    const a11y: ComponentA11y = {};
+    for (const rawSeg of value.split(';')) {
+        const seg = rawSeg.trim();
+        if (!seg) continue;
+        const lower = seg.toLowerCase();
+        if (lower === 'keyboard') a11y.keyboard = true;
+        else if (lower === 'focus management') a11y.focusManagement = true;
+        else if (lower === 'screen reader') a11y.screenReader = true;
+        else if (lower.startsWith('aria:')) {
+            a11y.aria = seg.slice(seg.indexOf(':') + 1).split(',').map(s => s.trim()).filter(Boolean);
+        } else {
+            a11y.notes = a11y.notes ? `${a11y.notes}; ${seg}` : seg;
+        }
+    }
+    return a11y;
+}
 
 /**
  * Parse the markdown form emitted by `structuredArtifactToMarkdown('component_inventory', ...)`.
@@ -65,6 +109,13 @@ export function parseComponentInventoryMarkdown(content: string): ComponentInven
 
         if (!currentComponent) continue;
 
+        const propMatch = line.match(PROP_LINE);
+        if (propMatch) {
+            const prop = parsePropValue(propMatch[1], propMatch[2]);
+            (currentComponent.props ??= []).push(prop);
+            continue;
+        }
+
         const fieldMatch = line.match(FIELD_LINE);
         if (!fieldMatch) continue;
         const key = fieldMatch[1].toLowerCase();
@@ -82,6 +133,13 @@ export function parseComponentInventoryMarkdown(content: string): ComponentInven
                 .split(/[,;]/)
                 .map(s => s.trim())
                 .filter(Boolean);
+        } else if (key === 'preview') {
+            const v = value.toLowerCase();
+            if (PREVIEW_TYPES.has(v)) {
+                currentComponent.previewType = v as ComponentPreviewType;
+            }
+        } else if (key === 'accessibility') {
+            currentComponent.accessibility = parseAccessibility(value);
         } else if (key === 'notes') {
             currentComponent.notes = value;
         }
