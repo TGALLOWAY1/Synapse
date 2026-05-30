@@ -88,9 +88,9 @@ const USER_MESSAGES: Record<Exclude<ErrorCategory, 'unknown' | 'project_access_d
         'Billing is not enabled on the Google Cloud project tied to this API key. Enable billing on ' +
         'that project (or switch to a key from a project that has billing enabled), then try again.',
     model_not_found:
-        'The selected Gemini model is not available to your project. Open Settings and switch to a ' +
-        'stable model like Gemini 2.5 Flash — preview model IDs (e.g. Gemini 3 Flash Preview) are ' +
-        'sometimes renamed or restricted.',
+        'Gemini Flash is configured, but the current API key could not access the selected model. ' +
+        'Check that the Gemini API key is valid and that the model is available for this account. ' +
+        'You can also open Settings and pick a different model.',
     bad_request:
         'Gemini rejected the request as malformed. This usually means the selected model does not ' +
         'support structured JSON output, or the prompt is too long. Try a different model in Settings.',

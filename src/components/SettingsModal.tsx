@@ -2,7 +2,7 @@ import { useState } from 'react';
 import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 
-const DEFAULT_FAST_MODEL = 'gemini-3-flash-preview';
+const DEFAULT_FAST_MODEL = 'gemini-3.5-flash';
 const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
 
 interface SettingsModalProps {
@@ -25,9 +25,9 @@ interface ModelOption {
 
 const MODEL_CATALOG: ModelOption[] = [
     {
-        id: 'gemini-3-flash-preview',
-        name: 'Gemini 3 Flash',
-        description: 'Recommended default. Frontier-class quality with capacity to spare.',
+        id: 'gemini-3.5-flash',
+        name: 'Gemini 3.5 Flash',
+        description: 'Recommended default. Latest GA Flash — frontier-class quality with full quotas.',
         tier: 'current',
     },
     {
@@ -43,6 +43,12 @@ const MODEL_CATALOG: ModelOption[] = [
         tier: 'current',
     },
     {
+        id: 'gemini-3-flash-preview',
+        name: 'Gemini 3 Flash',
+        description: 'Previous-generation Flash preview — prefer 3.5 Flash, which is GA.',
+        tier: 'legacy',
+    },
+    {
         id: 'gemini-2.5-pro',
         name: 'Gemini 2.5 Pro',
         description: 'Previous-generation high-reasoning model.',
@@ -51,7 +57,7 @@ const MODEL_CATALOG: ModelOption[] = [
     {
         id: 'gemini-2.5-flash',
         name: 'Gemini 2.5 Flash',
-        description: 'Previous-generation fast model. Often hits capacity limits — prefer 3 Flash.',
+        description: 'Previous-generation fast model. Often hits capacity limits — prefer 3.5 Flash.',
         tier: 'legacy',
     },
 ];
