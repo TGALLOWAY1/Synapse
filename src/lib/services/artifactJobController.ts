@@ -456,6 +456,12 @@ export const artifactJobController = {
      * completion only queues slots still missing.
      */
     startAll(args: StartArgs): void {
+        // Downstream protection: a spine blocked by safety review can never
+        // drive artifact generation, even if startAll is reached directly.
+        const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
+            .find(s => s.id === args.spineVersionId);
+        if (spine?.safetyReview?.status === 'blocked') return;
+
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted && existing.spineVersionId === args.spineVersionId) {
             return;
