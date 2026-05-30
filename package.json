@@ -21,6 +21,7 @@
     "@vercel/blob": "^2.3.3",
     "clsx": "^2.1.1",
     "date-fns": "^4.1.0",
+    "framer-motion": "^12.40.0",
     "lucide-react": "^0.575.0",
     "mark.js": "^8.11.1",
     "react": "^19.2.0",

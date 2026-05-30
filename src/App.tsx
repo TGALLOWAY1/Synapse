@@ -4,7 +4,7 @@ import { Loader2 } from 'lucide-react';
 import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
-import { MeetSynapsePage } from './components/MeetSynapsePage';
+import { TourPage } from './components/tour/TourPage';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
@@ -43,6 +43,9 @@ function migrateGeminiModel() {
       localStorage.setItem('GEMINI_MODEL', 'gemini-3-flash-preview');
     }
     localStorage.setItem(GEMINI_MODEL_MIGRATION_KEY, '1');
+    // Sweep the retired "Meet Synapse" banner-dismissal key — the interactive
+    // tour now owns its own completion state (`synapse-tour-completed`).
+    localStorage.removeItem('synapse-meet-dismissed');
   } catch {
     // localStorage unavailable (private mode, etc.) — skip migration.
   }
@@ -62,7 +65,8 @@ function App() {
       <BrowserRouter>
         <Routes>
           <Route path="/" element={<HomeRoute />} />
-          <Route path="/about" element={<MeetSynapsePage />} />
+          <Route path="/about" element={<TourPage />} />
+          <Route path="/tour" element={<TourPage />} />
           <Route path="/p/:projectId" element={<ProjectWorkspace />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />

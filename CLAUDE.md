@@ -44,9 +44,11 @@ Playwright suite despite the dev dependency.
 
 - React 19 + TypeScript + Vite 7
 - Tailwind CSS 3 + tailwind-merge + clsx
+- framer-motion (page/drag transitions in the interactive product tour)
 - Zustand 5 with `persist` middleware (debounced localStorage)
 - Google Gemini API called directly from the browser; key in localStorage
-- React Router v7 (workspace, recruiter portal, admin pages, /about, /privacy)
+- React Router v7 (workspace, recruiter portal, admin pages, the interactive
+  product tour at `/tour` + `/about` alias, /privacy)
 - Deployed to Vercel (SPA + Node serverless functions under `api/`)
 
 ## Architecture
@@ -291,6 +293,50 @@ When supplying `history`, the stage label strings in
 emitted via `onProgress` for the indicator to track. Don't include
 mutable detail (char counts, timestamps) in progress messages — that
 defeats the store's consecutive-dedupe and floods the history list.
+
+### Interactive product tour (`src/components/tour/`)
+
+"Meet Synapse" is a fully interactive product tour (mounted at `/tour`, with
+`/about` kept as a backward-compatible alias) — **not** a static infographic
+page. It rebuilds six onboarding screens as native UI and teaches the workflow
+through interaction. All content is demo-only (`tourData.ts`); it never touches
+the Gemini pipeline, the `api/` backend, or the Zustand project store.
+
+- **Two modes, one source of truth.** `src/lib/useTourState.ts` is a
+  `useReducer` (`tourReducer` + `initialTourState`, both exported for tests)
+  holding `{ activeIndex, mode, direction }`. **Guided** mode (first-timers)
+  is a linear story; **Overview** mode (returning users) shows
+  `TourProgressRail` to jump to any section. Every navigation input — `TourNav`
+  buttons, the dot rail, overview tabs, desktop Arrow keys (listener in
+  `TourPage`, ignored while typing), and mobile swipe — funnels through
+  `dispatch`. `RESTART` replays guided mode.
+- **Completion persistence** lives in `src/lib/tourPersistence.ts`
+  (`synapse-tour-completed` localStorage flag, defensive try/catch) —
+  deliberately *not* in the project store. Reaching the last screen marks it
+  completed; completed users default to Overview mode. The retired
+  `synapse-meet-dismissed` key is swept in `App.tsx`'s migration block.
+- **Transitions & gestures.** `TourContainer` uses framer-motion
+  `AnimatePresence` + a `motion.div` with direction-aware slide/fade variants;
+  `drag="x"` (mobile + motion-allowed only) commits via the pure
+  `shouldCommitSwipe()` in `src/lib/swipeMath.ts` (offset/velocity → next/prev).
+  Only the active screen is mounted; each `screens/Screen*.tsx` is
+  `React.lazy`-loaded so all six never load at once (verify: separate chunks in
+  `vite build` output). Because only the active screen mounts, screens reset by
+  remounting — do not add `isActive`-based reset effects (they trip the
+  `react-hooks/set-state-in-effect` lint rule); use async timer callbacks +
+  unmount cleanup for animated sequences.
+- **Reduced motion.** `src/lib/usePrefersReducedMotion.ts` (jsdom-safe, mirrors
+  `useIsMobile`) plus framer-motion's own handling: screens render their final
+  state instantly, drag is disabled, transitions collapse to a fade. Every
+  interaction must remain usable without animation.
+- **Screens** (`screens/`): Idea, SpecGeneration, Refine (reuses the
+  Clarify/Expand/Specify/Alternative/Replace action set mirrored from
+  `SELECTION_ACTIONS`), Versions, Assets (the hero — Mark as Final →
+  sequential asset generation → `ArtifactDrawer` previews), Connections
+  (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared
+  pieces in `components/`: `ScreenShell`, `GenerationStep`, `RefineMenu`,
+  `ArtifactDrawer` (mobile bottom-sheet / desktop side-drawer, mirrors
+  `SelectionActionDialog`'s responsive pattern), `NodeGraph`.
 
 ### Domain types
 

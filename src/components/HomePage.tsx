@@ -1,7 +1,7 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { Settings, List, Plus, ArrowUp, Sparkles, X, Smartphone, Monitor, Loader2 } from 'lucide-react';
+import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
 import { normalizeError, userMessage } from '../lib/errors';
@@ -44,8 +44,6 @@ const EXAMPLE_PROMPTS = [
     },
 ];
 
-const MEET_DISMISSED_KEY = 'synapse-meet-dismissed';
-
 export function HomePage() {
     const { createProject, loadDemoProject } = useProjectStore();
     const navigate = useNavigate();
@@ -85,9 +83,6 @@ export function HomePage() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isEnhancing, setIsEnhancing] = useState(false);
-    const [meetDismissed, setMeetDismissed] = useState(
-        () => localStorage.getItem(MEET_DISMISSED_KEY) === 'true'
-    );
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
@@ -250,12 +245,6 @@ export function HomePage() {
         textareaRef.current?.focus();
     };
 
-    const dismissMeet = (e: React.MouseEvent) => {
-        e.stopPropagation();
-        setMeetDismissed(true);
-        localStorage.setItem(MEET_DISMISSED_KEY, 'true');
-    };
-
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
         handleCreateProject();
@@ -302,23 +291,17 @@ export function HomePage() {
             {/* Main content — vertically centered */}
             <div className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
                 <div className="w-full max-w-2xl">
-                    {/* Meet Synapse banner */}
-                    {!meetDismissed && (
-                        <div className="flex justify-center mb-8">
-                            <div
-                                onClick={() => navigate('/about')}
-                                className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 cursor-pointer transition"
-                            >
-                                <span>Meet Synapse</span>
-                                <button
-                                    onClick={dismissMeet}
-                                    className="p-0.5 hover:bg-white/10 rounded transition"
-                                >
-                                    <X size={14} />
-                                </button>
-                            </div>
-                        </div>
-                    )}
+                    {/* Take the interactive tour */}
+                    <div className="flex justify-center mb-8">
+                        <button
+                            type="button"
+                            onClick={() => navigate('/tour')}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 cursor-pointer transition"
+                        >
+                            <Compass size={14} />
+                            <span>Take the tour</span>
+                        </button>
+                    </div>
 
                     {/* Hero title */}
                     <h2 className="text-4xl md:text-5xl font-bold text-center mb-8">

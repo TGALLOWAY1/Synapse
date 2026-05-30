@@ -174,14 +174,14 @@ export function LoginPage() {
                     </p>
                 </div>
 
-                {/* Meet Synapse + Demo actions */}
+                {/* Tour + Demo actions */}
                 <div className="flex items-center justify-center gap-3">
                     <button
                         type="button"
-                        onClick={() => navigate('/about')}
+                        onClick={() => navigate('/tour')}
                         className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition"
                     >
-                        Meet Synapse
+                        Take the tour
                     </button>
                     <button
                         type="button"
