@@ -275,6 +275,34 @@ export type GenerationMeta = {
     schemaVersion: number;                 // bump when the StructuredPRD shape changes
 };
 
+// --- Safety guardrail domain types ---
+
+export type SafetyClassification =
+    | 'allowed'
+    | 'allowed_with_restrictions'
+    | 'disallowed';
+
+export type SafetyConfidence = 'low' | 'medium' | 'high';
+
+/** Structured verdict from the pre-generation safety classifier. */
+export type SafetyClassificationResult = {
+    classification: SafetyClassification;
+    confidence: SafetyConfidence;
+    detectedConcerns: string[];
+    userFacingReason: string;   // user-safe; never leaks internal policy text
+    safeAlternatives: string[];
+};
+
+/** Persisted safety verdict on a SpineVersion. `status` drives UI + gating. */
+export type SpineSafetyReview = {
+    classification: SafetyClassification;
+    status: 'generated' | 'restricted' | 'blocked';
+    detectedConcerns: string[];
+    userFacingReason: string;
+    safeAlternatives: string[];
+    reviewedAt: number;
+};
+
 export type SpineVersion = {
     id: string; // e.g. "v1", "v2"
     projectId: string;
@@ -296,6 +324,10 @@ export type SpineVersion = {
     model?: string;                        // model used for generation
     generationMeta?: GenerationMeta;
     prdVersion?: number;                   // schema version (1 = legacy; 2 = premium)
+    // Pre-generation safety verdict. `status: 'blocked'` means the request was
+    // disallowed — the Safety Review screen is shown and all downstream
+    // generation (mark-final / workspace / artifacts) is gated off.
+    safetyReview?: SpineSafetyReview;
 };
 
 // --- Structured Artifact Content Types ---
