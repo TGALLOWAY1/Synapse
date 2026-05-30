@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useState } from 'react';
 import { Download, X, FileText, Package } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
 import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenInventoryNormalize';
@@ -24,6 +24,15 @@ interface ExportModalProps {
 export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const { getProject, getLatestSpine, getArtifacts, getArtifactVersions } = useProjectStore();
     const [exporting, setExporting] = useState(false);
+
+    // Allow dismissing the modal with the Escape key.
+    useEffect(() => {
+        const handleKeyDown = (e: KeyboardEvent) => {
+            if (e.key === 'Escape') onClose();
+        };
+        window.addEventListener('keydown', handleKeyDown);
+        return () => window.removeEventListener('keydown', handleKeyDown);
+    }, [onClose]);
 
     const project = getProject(projectId);
     const latestSpine = getLatestSpine(projectId);
@@ -107,16 +116,19 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     };
 
     return (
-        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4">
-            <div className="bg-white rounded-xl shadow-2xl w-full max-w-md overflow-hidden">
-                <div className="flex items-center justify-between p-4 border-b border-neutral-200">
+        <div className="fixed inset-0 bg-black/50 flex items-center justify-center z-50 p-4" onClick={onClose}>
+            <div
+                className="bg-white rounded-xl shadow-2xl w-full max-w-md max-h-[90vh] flex flex-col overflow-hidden"
+                onClick={e => e.stopPropagation()}
+            >
+                <div className="flex items-center justify-between p-4 border-b border-neutral-200 shrink-0">
                     <h3 className="font-bold text-neutral-900">Export Project</h3>
-                    <button onClick={onClose} className="p-1 hover:bg-neutral-100 rounded transition">
+                    <button onClick={onClose} className="p-2 hover:bg-neutral-100 rounded transition">
                         <X size={18} />
                     </button>
                 </div>
 
-                <div className="p-4 space-y-3">
+                <div className="p-4 space-y-3 overflow-y-auto min-h-0">
                     {/* PRD */}
                     <button
                         onClick={exportPRD}
