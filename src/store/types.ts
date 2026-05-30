@@ -4,7 +4,7 @@ import type {
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
     SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState,
     ArtifactSlotKey, ProjectJobState, SlotState,
-    QualityScores, GenerationMeta,
+    QualityScores, GenerationMeta, SpineSafetyReview,
 } from '../types';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 
@@ -73,6 +73,16 @@ export interface ProjectState {
 
     // Error handling
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => void;
+
+    // Safety guardrail. Persists the pre-generation verdict on a spine. When
+    // `responseText` is provided (blocked case) it replaces the spine's text
+    // with the Safety Review document and clears any "Generating PRD..." stub.
+    setSpineSafetyReview: (
+        projectId: string,
+        spineId: string,
+        review: SpineSafetyReview,
+        responseText?: string,
+    ) => void;
 
     // --- Artifact System Actions ---
     createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => { artifactId: string };

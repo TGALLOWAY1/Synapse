@@ -6,6 +6,12 @@ import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD } from '../lib/llmProvider';
 import { normalizeError, userMessage } from '../lib/errors';
+import {
+    SafetyBlockedError,
+    buildBlockedSafetyReview,
+    buildRestrictedSafetyReview,
+    buildSafetyReviewMarkdown,
+} from '../lib/safety';
 import { GenerationProgress } from './GenerationProgress';
 import { PRD_GENERATION_STAGES, PRD_REGENERATION_STAGES } from './generationStages';
 import { SelectableSpine } from './SelectableSpine';
@@ -14,6 +20,8 @@ import { ConsolidationModal } from './ConsolidationModal';
 import { SettingsModal } from './SettingsModal';
 import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
+import { SafetyReviewView } from './SafetyReviewView';
+import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
@@ -28,7 +36,7 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     const [isGenerating, setIsGenerating] = useState(false);
@@ -198,10 +206,29 @@ export function ProjectWorkspace() {
                             },
                         );
                     },
+                    onSafety: (safety) => {
+                        if (safety.classification === 'allowed_with_restrictions') {
+                            setSpineSafetyReview(
+                                projectId,
+                                newSpineId,
+                                buildRestrictedSafetyReview(safety),
+                            );
+                        }
+                    },
                 },
                 project?.platform,
             );
         } catch (e) {
+            // Disallowed → store a blocked Safety Review instead of an error.
+            if (e instanceof SafetyBlockedError && activeNewSpineId) {
+                setSpineSafetyReview(
+                    projectId,
+                    activeNewSpineId,
+                    buildBlockedSafetyReview(e.result),
+                    buildSafetyReviewMarkdown(e.result),
+                );
+                return;
+            }
             const err = normalizeError(e);
             console.error('[PRD regeneration failed]', err.raw);
             if (activeNewSpineId) {
@@ -228,6 +255,8 @@ export function ProjectWorkspace() {
 
     const handleToggleFinal = () => {
         if (!projectId || !activeSpine) return;
+        // Blocked spines can never advance to the workspace / artifact stage.
+        if (activeSpine.safetyReview?.status === 'blocked') return;
         const next = !activeSpine.isFinal;
         markSpineFinal(projectId, activeSpine.id, next);
         if (!next) return;
@@ -263,9 +292,11 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine
-                            ? activeSpine.generationError
+                            ? activeSpine.safetyReview?.status === 'blocked'
+                                ? 'Blocked'
+                                : activeSpine.generationError
                                 ? 'Generation Failed'
                                 : isPRDActivelyGenerating
                                     ? 'Generating...'
@@ -284,7 +315,7 @@ export function ProjectWorkspace() {
                         <Download size={14} />
                         <span className="hidden sm:inline">Export</span>
                     </button>
-                    {!isOldVersion && (
+                    {!isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
                         <button
                             onClick={handleToggleFinal}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${activeSpine?.isFinal ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
@@ -395,7 +426,7 @@ export function ProjectWorkspace() {
 
             {/* Main Workspace Area — flex-1 fills remaining height */}
             <div className="flex-1 flex overflow-hidden">
-                {pipelineStage === 'workspace' && activeSpine?.isFinal && activeSpine.structuredPRD ? (
+                {pipelineStage === 'workspace' && activeSpine?.isFinal && activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
                     <ArtifactWorkspace
                         projectId={projectId}
                         spineVersionId={activeSpine.id}
@@ -478,8 +509,13 @@ export function ProjectWorkspace() {
                                             )}
                                         </div>
 
-                                        {/* View toggle when structured PRD exists */}
-                                        {activeSpine.structuredPRD && (
+                                        {/* Safety Boundaries card for restricted (allowed_with_restrictions) PRDs */}
+                                        {activeSpine.safetyReview?.status === 'restricted' && (
+                                            <SafetyBoundariesCard review={activeSpine.safetyReview} />
+                                        )}
+
+                                        {/* View toggle when structured PRD exists (hidden for blocked spines) */}
+                                        {activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' && (
                                             <div className="flex items-center gap-2 mb-6">
                                                 <button
                                                     onClick={() => setShowStructuredView(true)}
@@ -496,8 +532,14 @@ export function ProjectWorkspace() {
                                             </div>
                                         )}
 
-                                        {/* Don't render SelectableSpine for the placeholder text */}
-                                        {activeSpine.generationError ? (
+                                        {/* Blocked: dedicated Safety Review screen instead of any PRD layout */}
+                                        {activeSpine.safetyReview?.status === 'blocked' ? (
+                                            <SafetyReviewView
+                                                review={activeSpine.safetyReview}
+                                                canRevise={!isOldVersion && !hasBranches && !isGenerating}
+                                                onRevise={handleRegenerate}
+                                            />
+                                        ) : activeSpine.generationError ? (
                                             <div className="rounded-xl border border-red-200 bg-red-50 p-6">
                                                 <div className="flex items-start gap-3">
                                                     <div className="shrink-0 mt-0.5 w-8 h-8 rounded-full bg-red-100 flex items-center justify-center">

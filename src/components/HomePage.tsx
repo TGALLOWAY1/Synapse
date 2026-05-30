@@ -5,6 +5,12 @@ import { Settings, List, Plus, ArrowUp, Sparkles, X, Smartphone, Monitor, Loader
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
 import { normalizeError, userMessage } from '../lib/errors';
+import {
+    SafetyBlockedError,
+    buildBlockedSafetyReview,
+    buildRestrictedSafetyReview,
+    buildSafetyReviewMarkdown,
+} from '../lib/safety';
 import type { ProjectPlatform } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
@@ -148,9 +154,33 @@ export function HomePage() {
                             },
                         );
                     },
+                    // allowed_with_restrictions: record the verdict so the PRD
+                    // renders with a Safety Boundaries card. (allowed records
+                    // nothing; disallowed never reaches here — it throws.)
+                    onSafety: (safety) => {
+                        if (safety.classification === 'allowed_with_restrictions') {
+                            useProjectStore.getState().setSpineSafetyReview(
+                                projectId,
+                                spineId,
+                                buildRestrictedSafetyReview(safety),
+                            );
+                        }
+                    },
                 },
                 platform,
             ).catch((e) => {
+                // Disallowed requests hard-stop here: store a blocked Safety
+                // Review (which shows the dedicated screen and gates downstream
+                // generation) instead of a generic generation error.
+                if (e instanceof SafetyBlockedError) {
+                    useProjectStore.getState().setSpineSafetyReview(
+                        projectId,
+                        spineId,
+                        buildBlockedSafetyReview(e.result),
+                        buildSafetyReviewMarkdown(e.result),
+                    );
+                    return;
+                }
                 const err = normalizeError(e);
                 console.error('[PRD generation failed]', err.raw);
                 useProjectStore.getState().setSpineError(projectId, spineId, {

@@ -1,6 +1,6 @@
 import type { ProjectPlatform, StructuredPRD } from '../../types';
 import type { SectionId } from '../schemas/prdSchemas';
-import { RUBRIC_DEFINITION, PROMPT_CONTRACT } from './prdPrompts';
+import { RUBRIC_DEFINITION, PROMPT_CONTRACT, SAFETY_OVERRIDE } from './prdPrompts';
 
 export type SectionPromptContext = {
     idea: string;
@@ -13,7 +13,9 @@ const PLATFORM_NOTE: Record<ProjectPlatform, string> = {
     web: 'Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, and URL routing.',
 };
 
-const SHARED_PREAMBLE = `You are a senior product strategist and tech lead generating one section of a structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product.
+const SHARED_PREAMBLE = `${SAFETY_OVERRIDE}
+
+You are a senior product strategist and tech lead generating one section of a structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product.
 
 ${PROMPT_CONTRACT}
 

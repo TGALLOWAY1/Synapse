@@ -105,7 +105,40 @@ otherwise have nothing in common — keep that distinction in mind:
     generation.
 - **`prompts/prdPrompts.ts`** — strategy system instruction; the
   `RUBRIC_DEFINITION` "quality bar" is appended so Pass A self-targets the
-  rubric in its first response.
+  rubric in its first response. `SAFETY_OVERRIDE` is prepended ahead of all
+  formatting/rubric text in every section preamble (`prdSectionPrompts.ts`) as
+  defense-in-depth.
+
+### Safety gate (`src/lib/safety/`)
+
+Every PRD generation path runs through one chokepoint —
+`generateStructuredPRD()` in `prdService.ts` — which calls
+`classifyProjectSafety()` **before** any section runs. This is a hard,
+**code-level** guardrail (not just a prompt): it stops Synapse from emitting a
+malformed PRD where each section independently refuses ("I cannot fulfill this
+request…").
+
+- The classifier (`classifyProjectSafety.ts`) returns a `SafetyClassificationResult`
+  (`allowed` | `allowed_with_restrictions` | `disallowed`) via Gemini JSON mode
+  (`schemas/safetySchemas.ts`). Transport is injectable for tests.
+- **`disallowed`** → `generateStructuredPRD` throws `SafetyBlockedError`; the
+  pipeline never runs. Call sites (`HomePage`, `ProjectWorkspace.handleRegenerate`)
+  catch it and persist a `blocked` `SpineVersion.safetyReview` (+ a canonical
+  Safety Review markdown as `responseText`) via `setSpineSafetyReview`.
+- **`allowed_with_restrictions`** → a restriction directive is appended to the
+  prompt; the run records a `restricted` review and the PRD renders with a
+  `SafetyBoundariesCard`.
+- **Fail-closed:** if classification can't be determined (non-config transport
+  error or unparseable output) the request is treated as `disallowed`. Genuine
+  *config* errors (api key / auth / billing / permissions) are re-thrown to the
+  normal error path.
+- **UI / downstream gating keys off `SpineVersion.safetyReview.status === 'blocked'`:**
+  `ProjectWorkspace` renders `SafetyReviewView` instead of the PRD,
+  `handleToggleFinal` no-ops, the workspace render guard excludes it, and
+  `artifactJobController.startAll` early-returns — so a blocked spine can never
+  drive workspace/screens/architecture/implementation artifacts. Domain types
+  (`SafetyClassification`, `SafetyClassificationResult`, `SpineSafetyReview`)
+  live in `src/types`; the safety module re-exports them.
 
 ### State (`src/store/`)
 
