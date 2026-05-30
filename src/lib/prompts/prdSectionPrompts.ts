@@ -267,3 +267,21 @@ export const SECTION_TITLES: Record<SectionId, string> = {
     metrics_scope: 'Metrics & Scope',
     implementation_plan: 'Implementation Plan',
 };
+
+/**
+ * Short, human-readable descriptions for each PRD section, used by the
+ * generation progress timeline UI. Kept terse (one clause) so timeline rows
+ * stay scannable on mobile.
+ */
+export const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
+    product_basics: 'Defining the core problem and target users',
+    product_thesis: 'Creating the product thesis and value proposition',
+    grounding: 'Identifying domain entities and primary actions',
+    features: 'Specifying core features and capabilities',
+    data_model: 'Designing the data model and entities',
+    ux_loops: 'Mapping key user flows and journeys',
+    architecture: 'Outlining the technical architecture',
+    quality_risks: 'Assessing risks and quality concerns',
+    metrics_scope: 'Defining success metrics and project scope',
+    implementation_plan: 'Assembling the implementation roadmap',
+};

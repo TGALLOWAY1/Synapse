@@ -229,8 +229,50 @@ pipeline; do not reintroduce per-component `onMouseUp` selection logic.
 `index.html` carries `viewport-fit=cover` so safe-area insets resolve on
 notched devices.
 
-### Progress UI (`src/components/GenerationProgress.tsx`)
+### PRD progress timeline (`src/components/progress/`)
 
+The PRD generation path renders a single **responsive** `ProgressTimeline`
+card (used on both mobile and desktop — there is no separate mobile/desktop
+component). It is driven directly by the live `prdSectionStatus` store slice
+(not by parsing the `prdProgress` message log):
+
+- **`buildGenerationSteps.ts`** — pure adapter. `computeWaves()` groups the
+  10 pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
+  (topological levels): a single-section wave is a sequential row, a
+  multi-section wave is a "Running concurrently" group whose children are the
+  parallel sections (labeled `2A`, `2B`, …). This is purely graph-derived, so
+  it supports arbitrary graphs, multiple concurrent groups, and any step
+  count. Overlays live status/timing/model onto the static waves;
+  `formatModelName()` renders the actual configured Gemini id (e.g.
+  `gemini-3-flash-preview` → "Gemini 3 Flash (preview)") — no hardcoded model
+  names. `summarizeSteps()` derives the header count/percent/status.
+- **`ProgressTimeline.tsx`** / `TimelineStep.tsx` / `ConcurrentGroup.tsx` —
+  presentation. Status icons (completed/in-progress/failed/pending), an
+  always-visible model chip, and explicitly-labeled times (`Actual:`/`Est.
+  ~`/`Elapsed:`). A 1s ticker injects live `Elapsed:` from `startedAt`.
+  Mobile collapses per-step detail behind chevrons and shows a `View full
+  history >` link (navigates to the History stage); desktop shows
+  description/model/status/est/actual/retry and concurrent groups without
+  expansion, plus inline `[Current Run] [History]` tabs (History renders the
+  `prdProgress` message log inline). Failed steps stay expanded with a red
+  `Run again` button.
+- **Single-section retry** (`src/lib/services/prdSectionRetry.ts`) —
+  `regeneratePrdSection()` re-runs **only** a failed section using the
+  current PRD as upstream context, shallow-overlays the new slice onto the
+  existing `StructuredPRD` (sections own disjoint top-level fields), and the
+  caller (`ProjectWorkspace.handleRetrySection`) writes it back via
+  `updateSpineStructuredPRD` — every other section stays intact. The shared
+  `parseSectionJson()` helper (in `progressivePrdGeneration.ts`) is reused by
+  both the DAG worker and the retry path. `SECTION_DESCRIPTIONS` (next to
+  `SECTION_TITLES` in `prdSectionPrompts.ts`) supplies the row descriptions.
+
+The card is shown while `isPRDActivelyGenerating || hasFailedSection`, so a
+partial-failure run (which returns a partial PRD without setting
+`generationError`) keeps its Run again affordance visible.
+
+### Other-flow progress UI (`src/components/GenerationProgress.tsx`)
+
+The mockup / artifact / consolidation flows still use `GenerationProgress`.
 Long-running LLM operations show a stages panel. The component supports
 three drive modes, in priority order:
 

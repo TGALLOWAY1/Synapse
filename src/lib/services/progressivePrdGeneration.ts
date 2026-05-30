@@ -133,6 +133,29 @@ export const applyAiUpdate = (section: PrdSectionJob, content: string): PrdSecti
     };
 };
 
+/**
+ * Parse a section's raw JSON response, applying truncation repair as a
+ * fallback. Per-section maxOutputTokens is bounded (8192) so complex sections
+ * like `features` can hit MAX_TOKENS and end mid-string. Returns `null` when
+ * the response is unparseable even after repair. Shared by the DAG worker and
+ * the single-section retry path so both stay in sync.
+ */
+export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => {
+    try {
+        return JSON.parse(raw) as Partial<StructuredPRD>;
+    } catch {
+        const { text: repairedText, repaired } = repairTruncatedJson(raw);
+        if (repaired) {
+            try {
+                return JSON.parse(repairedText) as Partial<StructuredPRD>;
+            } catch {
+                return null;
+            }
+        }
+        return null;
+    }
+};
+
 export const makeJsonProvider = (): ModelProvider => ({
     async generateText({ prompt, model, schema }) {
         return callGemini('', prompt, {
@@ -297,35 +320,15 @@ export async function generateProgressivePrd(params: {
         try {
             const raw = await provider.generateText({ prompt: `${system}\n\n${user}`, model, schema });
 
-            // Parse with truncation repair fallback. Per-section
-            // maxOutputTokens is bounded (8192) so complex sections like
-            // `features` can hit MAX_TOKENS and end mid-string. Try repair
-            // before giving up.
-            let parsed: Partial<StructuredPRD> | null = null;
-            let parseError: string | undefined;
-            try {
-                parsed = JSON.parse(raw) as Partial<StructuredPRD>;
-            } catch (parseErr) {
-                const { text: repairedText, repaired } = repairTruncatedJson(raw);
-                if (repaired) {
-                    try {
-                        parsed = JSON.parse(repairedText) as Partial<StructuredPRD>;
-                        console.warn(`[prd] section "${section.id}" recovered via JSON truncation repair`);
-                    } catch {
-                        parsed = null;
-                    }
-                }
-                if (!parsed) {
-                    parseError = parseErr instanceof Error ? parseErr.message : String(parseErr);
-                }
-            }
+            // Parse with truncation repair fallback (shared helper).
+            const parsed = parseSectionJson(raw);
 
             // Treat an unparsable response as a section failure: dropping
             // it silently while still firing `section_completed` would
             // mark the grid green with empty data and quietly omit the
             // section from the merged PRD.
             if (!parsed) {
-                throw new Error(`Section "${section.id}" returned unparseable JSON: ${parseError ?? 'unknown parse error'}`);
+                throw new Error(`Section "${section.id}" returned unparseable JSON`);
             }
 
             results[section.id] = parsed;
