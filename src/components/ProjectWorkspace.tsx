@@ -12,8 +12,9 @@ import {
     buildRestrictedSafetyReview,
     buildSafetyReviewMarkdown,
 } from '../lib/safety';
-import { GenerationProgress } from './GenerationProgress';
-import { PRD_GENERATION_STAGES, PRD_REGENERATION_STAGES } from './generationStages';
+import { ProgressTimeline } from './progress/ProgressTimeline';
+import { buildGenerationSteps } from './progress/buildGenerationSteps';
+import { regeneratePrdSection } from '../lib/services/prdSectionRetry';
 import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
@@ -30,6 +31,7 @@ import { FeedbackItemsList } from './FeedbackItemsList';
 import { BranchCanvas } from './BranchCanvas';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
+import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 
@@ -51,6 +53,7 @@ export function ProjectWorkspace() {
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
+    const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -127,6 +130,15 @@ export function ProjectWorkspace() {
         (s) => s && s.status !== 'complete' && s.status !== 'error',
     );
     const isPRDActivelyGenerating = isPRDGenerating || sectionsStillRunning;
+
+    // A settled run can still hold a failed section (the pipeline returns a
+    // partial PRD without setting generationError). Keep the progress timeline
+    // — and its Run again affordance — visible while any section is in error.
+    const hasFailedSection = !!prdSectionStatus && Object.values(prdSectionStatus).some(
+        (s) => s && s.status === 'error',
+    );
+    const showProgressTimeline = isPRDActivelyGenerating || hasFailedSection;
+    const timelineSteps = buildGenerationSteps(prdSectionStatus ?? {});
 
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
@@ -241,6 +253,47 @@ export function ProjectWorkspace() {
             }
         } finally {
             setIsGenerating(false);
+        }
+    };
+
+    // Re-run a single failed section, merging the new slice back into the
+    // current spine's PRD while leaving every other section intact.
+    const handleRetrySection = async (sectionId: string) => {
+        if (!projectId || !activeSpine?.structuredPRD || isOldVersion || retryingStepId) return;
+        const sourcePrompt = activeSpine.promptText;
+        const id = sectionId as SectionId;
+        const title = SECTION_TITLES[id] ?? sectionId;
+        try {
+            setRetryingStepId(sectionId);
+            appendPrdProgress(projectId, `↻ Retrying ${title}…`);
+            const { structuredPRD, markdown, model, ms } = await regeneratePrdSection(
+                id,
+                sourcePrompt,
+                activeSpine.structuredPRD,
+                {
+                    platform: project?.platform,
+                    onSectionStatus: (sid, update) => setSectionStatus(projectId, sid, update),
+                },
+            );
+            updateSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, markdown, {
+                sourcePrompt,
+                model,
+            });
+            if (id === 'product_basics' && (structuredPRD.productName || structuredPRD.productCategory)) {
+                updateProjectProductMetadata(projectId, {
+                    productName: structuredPRD.productName,
+                    productCategory: structuredPRD.productCategory,
+                });
+            }
+            appendPrdProgress(projectId, `✓ ${title} · ${(ms / 1000).toFixed(1)}s`);
+        } catch (e) {
+            // onSectionStatus already marked the section 'error', so the Run
+            // again button stays visible. Surface the message in the log.
+            const err = normalizeError(e);
+            console.error('[PRD section retry failed]', err.raw);
+            appendPrdProgress(projectId, `✕ ${title} failed`);
+        } finally {
+            setRetryingStepId(null);
         }
     };
 
@@ -462,32 +515,16 @@ export function ProjectWorkspace() {
 
                                 {activeSpine ? (
                                     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
-                                        {/* Regeneration progress overlay */}
-                                        {isGenerating && (
+                                        {/* PRD generation progress timeline (initial gen, regen, or a
+                                            settled run with a failed section awaiting retry). */}
+                                        {(isGenerating || showProgressTimeline) && (
                                             <div className="mb-6">
-                                                <GenerationProgress
-                                                    stages={PRD_REGENERATION_STAGES}
-                                                    variant="foundation"
-                                                    title="Regenerating PRD"
-                                                    subtitle="Creating a fresh draft from your original prompt"
-                                                    history={prdProgress?.messages}
-                                                    sectionStatus={prdSectionStatus}
-                                                    sectionTitles={SECTION_TITLES}
-                                                />
-                                            </div>
-                                        )}
-
-                                        {/* Initial generation progress */}
-                                        {!isGenerating && isPRDActivelyGenerating && (
-                                            <div className="mb-6">
-                                                <GenerationProgress
-                                                    stages={PRD_GENERATION_STAGES}
-                                                    variant="foundation"
-                                                    title="Building your PRD"
-                                                    subtitle="Transforming your product vision into a structured requirements document"
-                                                    history={prdProgress?.messages}
-                                                    sectionStatus={prdSectionStatus}
-                                                    sectionTitles={SECTION_TITLES}
+                                                <ProgressTimeline
+                                                    steps={timelineSteps}
+                                                    messages={prdProgress?.messages}
+                                                    onRetryStep={handleRetrySection}
+                                                    retryingStepId={retryingStepId ?? undefined}
+                                                    onViewHistory={() => setPipelineStage('history')}
                                                 />
                                             </div>
                                         )}
@@ -607,14 +644,12 @@ export function ProjectWorkspace() {
                                     </div>
                                 ) : (
                                     <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
-                                        <GenerationProgress
-                                            stages={PRD_GENERATION_STAGES}
-                                            variant="foundation"
-                                            title="Building your PRD"
-                                            subtitle="Transforming your product vision into a structured requirements document"
-                                            history={prdProgress?.messages}
-                                            sectionStatus={prdSectionStatus}
-                                            sectionTitles={SECTION_TITLES}
+                                        <ProgressTimeline
+                                            steps={timelineSteps}
+                                            messages={prdProgress?.messages}
+                                            onRetryStep={handleRetrySection}
+                                            retryingStepId={retryingStepId ?? undefined}
+                                            onViewHistory={() => setPipelineStage('history')}
                                         />
                                         <div className="mt-6 space-y-4 animate-pulse">
                                             <div className="h-5 bg-neutral-100 rounded w-2/5" />
