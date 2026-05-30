@@ -10,6 +10,7 @@ import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
 import { ToastContainer } from './components/ToastContainer';
 import { useAuthStore } from './store/authStore';
+import { migrateGeminiFlashModel } from './lib/modelMigration';
 import { Analytics } from '@vercel/analytics/react';
 
 function HomeRoute() {
@@ -52,6 +53,7 @@ function App() {
 
   useEffect(() => {
     migrateGeminiModel();
+    migrateGeminiFlashModel();
     refreshSession();
   }, [refreshSession]);
 

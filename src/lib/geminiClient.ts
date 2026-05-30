@@ -60,12 +60,13 @@ const getApiKey = () => {
 };
 
 /**
- * Default model. Gemini 3 Flash (preview) replaced 2.5 Flash as the recommended
- * everyday model in early 2026 — it has more capacity headroom and better
- * quality at a similar price. See SettingsModal for the full catalog + legacy
- * migration flag.
+ * Default model. Gemini 3.5 Flash (GA, announced at I/O May 2026) is the
+ * recommended everyday Flash model — it replaced the earlier Gemini 3 Flash
+ * preview, shipping as GA with full (non-preview) quotas and frontier-class
+ * quality at a similar price. See SettingsModal for the full catalog and
+ * `modelMigration.ts` for the one-shot upgrade of older Flash selections.
  */
-export const DEFAULT_GEMINI_MODEL = 'gemini-3-flash-preview';
+export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 
 const getModel = () => {
     return localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
@@ -163,8 +164,8 @@ const formatGeminiError = (status: string, errorData: unknown): string => {
             'Gemini quota error — your request hit the FREE-TIER quota even though you expect paid tier. ' +
             'Likely causes: (1) your API key is tied to a Google Cloud project without billing enabled — ' +
             'recreate the key in AI Studio on the project that has billing; (2) set your billing project ID ' +
-            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3 Flash Preview) ' +
-            'have reduced quotas even on paid tier — switch to a stable model like gemini-2.5-flash. ' +
+            'in Settings so Synapse sends x-goog-user-project; (3) preview models (e.g. Gemini 3.1 Flash-Lite Preview) ' +
+            'have reduced quotas even on paid tier — switch to a GA model like gemini-3.5-flash. ' +
             `Raw: ${message}`
         );
     }
