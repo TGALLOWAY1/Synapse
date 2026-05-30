@@ -1,8 +1,8 @@
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertTriangle, Check, Copy, Pencil, RotateCcw, Sparkles } from 'lucide-react';
-import { SectionTabs, type SectionTabItem } from '../SectionTabs';
+import { AlertTriangle, Check, Copy, Pencil, RotateCcw } from 'lucide-react';
+import { PromptPackSidebar, type PromptNavItem } from './PromptPackSidebar';
 import type { Feature } from '../../types';
 
 // Render a `prompt_pack` artifact as one card per `### N. Title` heading,
@@ -218,46 +218,30 @@ function PromptCardView({
     const hasWarning = unresolvedIds.length > 0;
     const copyDisabled = hasWarning;
     return (
-        <article
-            id={`prompt-${card.index}`}
-            className="bg-white rounded-xl border border-neutral-200 overflow-hidden scroll-mt-24"
-        >
-            <header className="px-4 py-3 border-b border-neutral-100 flex flex-wrap items-start gap-3 justify-between">
-                <div className="min-w-0 flex-1">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600">
-                        Prompt {card.index}
-                    </p>
-                    <h3 className="text-sm font-bold text-neutral-900 leading-snug mt-0.5">
-                        {card.title}
-                    </h3>
-                    {(card.targetTool || card.category || modified) && (
-                        <div className="flex flex-wrap gap-1.5 mt-2">
-                            {card.targetTool && (
-                                <span className="inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded bg-indigo-50 text-indigo-700 border border-indigo-100">
-                                    <Sparkles size={10} />
-                                    {card.targetTool}
-                                </span>
-                            )}
-                            {card.category && (
-                                <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700">
-                                    {card.category}
-                                </span>
-                            )}
-                            {modified && (
-                                <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                    Modified
-                                </span>
-                            )}
-                        </div>
-                    )}
-                    {card.targetReason && (
-                        <p className="text-[11px] text-neutral-500 leading-snug mt-1.5">
-                            <span className="font-medium text-neutral-600">Why this target:</span>{' '}
-                            {card.targetReason}
-                        </p>
-                    )}
-                </div>
-                <div className="flex flex-wrap items-center gap-1.5">
+        <article className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+
+            <header className="px-4 py-3 border-b border-neutral-100">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600">
+                    Prompt {card.index}
+                </p>
+                <h3 className="text-sm font-bold text-neutral-900 leading-snug mt-0.5">
+                    {card.title}
+                </h3>
+                {(card.category || modified) && (
+                    <div className="flex flex-wrap gap-1.5 mt-2">
+                        {card.category && (
+                            <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700">
+                                {card.category}
+                            </span>
+                        )}
+                        {modified && (
+                            <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                                Modified
+                            </span>
+                        )}
+                    </div>
+                )}
+                <div className="flex flex-wrap items-center gap-1.5 mt-3">
                     {canEdit && (
                         <>
                             <button
@@ -337,6 +321,9 @@ export function PromptPackRenderer({ content, features, edits, onUpdateEdits }: 
     const editsMap = edits ?? {};
     const canEdit = typeof onUpdateEdits === 'function';
 
+    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [mobileNavOpen, setMobileNavOpen] = useState(false);
+
     if (cards.length === 0) {
         return (
             <div className="prose prose-sm prose-neutral max-w-none">
@@ -344,44 +331,60 @@ export function PromptPackRenderer({ content, features, edits, onUpdateEdits }: 
             </div>
         );
     }
-    const tabs: SectionTabItem[] = cards.map(card => ({
-        id: `prompt-${card.index}`,
-        label: `${card.index}. ${card.title.length > 24 ? card.title.slice(0, 22) + '…' : card.title}`,
+
+    const safeIndex = Math.min(selectedIndex, cards.length - 1);
+    const card = cards[safeIndex];
+    const overlay = editsMap[card.index];
+    const effectiveBody = overlay !== undefined ? overlay : card.promptBody;
+    const modified = overlay !== undefined && overlay !== card.promptBody;
+    const unresolvedIds = findUnresolvedFeatureIds(effectiveBody, features ?? []);
+
+    const navItems: PromptNavItem[] = cards.map(c => ({
+        index: c.index,
+        title: c.title,
+        category: c.category,
     }));
+    const modifiedIndices = new Set(
+        cards
+            .filter(c => editsMap[c.index] !== undefined && editsMap[c.index] !== c.promptBody)
+            .map(c => c.index),
+    );
+
     return (
-        <div className="space-y-4">
-            <SectionTabs items={tabs} />
-            {preamble && (
-                <div className="prose prose-sm prose-neutral max-w-none">
-                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
-                </div>
-            )}
-            {cards.map(card => {
-                const overlay = editsMap[card.index];
-                const effectiveBody = overlay !== undefined ? overlay : card.promptBody;
-                const modified = overlay !== undefined && overlay !== card.promptBody;
-                const unresolvedIds = findUnresolvedFeatureIds(effectiveBody, features ?? []);
-                return (
-                    <PromptCardView
-                        key={card.index}
-                        card={card}
-                        effectiveBody={effectiveBody}
-                        modified={modified}
-                        unresolvedIds={unresolvedIds}
-                        canEdit={canEdit}
-                        onEdit={next => {
-                            if (!canEdit) return;
-                            onUpdateEdits!({ ...editsMap, [card.index]: next });
-                        }}
-                        onReset={() => {
-                            if (!canEdit) return;
-                            const { [card.index]: _omit, ...rest } = editsMap;
-                            void _omit;
-                            onUpdateEdits!(rest);
-                        }}
-                    />
-                );
-            })}
+        <div className="md:flex md:gap-5 md:items-start">
+            <PromptPackSidebar
+                items={navItems}
+                selectedIndex={safeIndex}
+                onSelect={setSelectedIndex}
+                isMobileOpen={mobileNavOpen}
+                onToggleMobile={setMobileNavOpen}
+                modifiedIndices={modifiedIndices}
+            />
+            <div className="flex-1 min-w-0 space-y-4">
+                {preamble && (
+                    <div className="prose prose-sm prose-neutral max-w-none">
+                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
+                    </div>
+                )}
+                <PromptCardView
+                    key={card.index}
+                    card={card}
+                    effectiveBody={effectiveBody}
+                    modified={modified}
+                    unresolvedIds={unresolvedIds}
+                    canEdit={canEdit}
+                    onEdit={next => {
+                        if (!canEdit) return;
+                        onUpdateEdits!({ ...editsMap, [card.index]: next });
+                    }}
+                    onReset={() => {
+                        if (!canEdit) return;
+                        const { [card.index]: _omit, ...rest } = editsMap;
+                        void _omit;
+                        onUpdateEdits!(rest);
+                    }}
+                />
+            </div>
         </div>
     );
 }
