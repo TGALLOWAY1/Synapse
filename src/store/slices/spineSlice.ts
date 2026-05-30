@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     SpineVersion, HistoryEvent, StructuredPRD,
-    QualityScores, GenerationMeta,
+    QualityScores, GenerationMeta, SpineSafetyReview,
 } from '../../types';
 import type { ProjectState, SpineGenerationMetaInput } from '../types';
 
@@ -18,6 +18,7 @@ export type SpineSlice = {
     updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     setSpineError: ProjectState['setSpineError'];
+    setSpineSafetyReview: ProjectState['setSpineSafetyReview'];
 };
 
 export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = (set, get) => ({
@@ -159,6 +160,54 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             if (meta.productName !== undefined) next.productName = meta.productName;
             if (meta.productCategory !== undefined) next.productCategory = meta.productCategory;
             return { projects: { ...state.projects, [projectId]: next } };
+        });
+    },
+
+    setSpineSafetyReview: (
+        projectId: string,
+        spineId: string,
+        review: SpineSafetyReview,
+        responseText?: string,
+    ) => {
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const spine = projectSpines.find(s => s.id === spineId);
+            if (!spine) return state;
+
+            const blocked = review.status === 'blocked';
+            const updatedSpines = projectSpines.map(s =>
+                s.id === spineId
+                    ? {
+                        ...s,
+                        safetyReview: review,
+                        // A blocked spine can never be final and must not retain
+                        // a half-built PRD or the "Generating…" placeholder.
+                        ...(blocked ? { isFinal: false, structuredPRD: undefined } : {}),
+                        ...(responseText !== undefined ? { responseText } : {}),
+                    }
+                    : s
+            );
+
+            const historyEvents = { ...state.historyEvents };
+            if (blocked) {
+                const events = historyEvents[projectId] || [];
+                historyEvents[projectId] = [
+                    ...events,
+                    {
+                        id: uuidv4(),
+                        projectId,
+                        spineVersionId: spineId,
+                        type: 'GenerationFailed' as const,
+                        description: 'Blocked by Synapse safety review',
+                        createdAt: review.reviewedAt,
+                    },
+                ];
+            }
+
+            return {
+                spineVersions: { ...state.spineVersions, [projectId]: updatedSpines },
+                historyEvents,
+            };
         });
     },
 
