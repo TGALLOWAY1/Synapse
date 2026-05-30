@@ -13,6 +13,17 @@ localStorage via Zustand. A separate Vercel-hosted backend (under `api/`)
 powers a recruiter-portal sub-product with OAuth, MongoDB, and snapshot
 storage; do not confuse it with the PRD workspace.
 
+## Documentation rule
+
+**Keep this file in sync with the code in the same change.** Whenever you
+add, remove, or meaningfully alter architecture, data flow, state slices,
+the LLM pipeline, domain types, or a cross-cutting pattern (e.g. the PRD
+selection pipeline), update the relevant section of CLAUDE.md as part of
+the same commit — do not leave it for a follow-up. If a change makes an
+existing description wrong, fix the description; if it introduces a
+pattern others must follow or must not break, document it here as a rule.
+Treat docs drift as a defect in the change itself.
+
 ## Commands
 
 ```bash
@@ -128,15 +139,51 @@ User prompt → HomePage.handleCreateProject() → generateStructuredPRD()
               Pass A streams structured JSON → onPartial paints draft
               ↓
               SpineVersion stored, currentStage='prd'
-  PRD stage:       SelectableSpine — text selection → branch creation →
-                   AI conversation → consolidateBranch() merges into
-                   spine (local or doc-wide scope, see ConsolidationModal)
+  PRD stage:       SelectableSpine / StructuredPRDView — text selection →
+                   branch creation → AI conversation → consolidateBranch()
+                   merges into spine (local or doc-wide scope, see
+                   ConsolidationModal). Selection → action dialog runs
+                   through the shared touch-aware pipeline (see "PRD
+                   highlight → branch selection pipeline" below).
   Workspace stage: ArtifactsView (bundle/individual gen, refine, validate)
                    + MockupsView (platform/fidelity/scope config)
                    + MarkupImageView (MarkupImageSpec → SVG via
                    MarkupImageRenderer)
   History stage:   HistoryView — chronological timeline with diffs
 ```
+
+### PRD highlight → branch selection pipeline
+
+The core PRD-refinement gesture — highlight PRD text, get a contextual
+action dialog (Clarify / Expand / Specify / Alternative / Replace), spawn
+a history-tracked branch — is detection-source-agnostic and works on
+both desktop and touch. Both PRD renderers (`SelectableSpine.tsx` for
+markdown PRDs, `StructuredPRDView.tsx` for structured PRDs) share one
+pipeline; do not reintroduce per-component `onMouseUp` selection logic.
+
+- **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
+  `isValidSelection` (rejects null / collapsed / empty / out-of-container
+  selections), `getSelectionInfo` (text + bounding rect), and
+  `computePopoverPosition` (viewport clamp + flip-above math for the
+  desktop popover). These are unit-tested in isolation.
+- **`src/lib/useSelectionPopover.ts`** — the React hook owning detection.
+  Listens on `document` for **`pointerup`** (mouse/pen/touch, short read
+  delay) *and* **`selectionchange`** (debounced — the mobile long-press +
+  drag-handle route, which never fires a matching `mouseup`). Validates
+  against a `containerRef`; a *collapsing* selection never auto-dismisses
+  an open dialog (focusing the mobile input collapses the native range) —
+  dismissal is explicit via `clear()`.
+- **`src/lib/useIsMobile.ts`** — `matchMedia` hook at the Tailwind `md`
+  breakpoint (jsdom-safe).
+- **`src/components/SelectionActionDialog.tsx`** — shared presentation:
+  desktop = floating popover anchored to the selection rect; mobile =
+  bottom sheet with `env(safe-area-inset-*)` insets and ≥44px tap
+  targets. Both call the same branch handlers — there is no parallel
+  edit path. The branch/history flow itself (`createBranch` →
+  `replyInBranch` → `addBranchMessage`) is unchanged by this layer.
+
+`index.html` carries `viewport-fit=cover` so safe-area insets resolve on
+notched devices.
 
 ### Progress UI (`src/components/GenerationProgress.tsx`)
 
