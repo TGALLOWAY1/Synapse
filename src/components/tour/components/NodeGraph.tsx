@@ -17,11 +17,17 @@ interface Edge {
 
 /**
  * Interactive PRD → assets dependency graph (screen 6). HTML nodes laid out in
- * a responsive grid with an SVG overlay whose edge coordinates are measured
- * from the live node positions (re-measured on resize). Selecting the PRD
- * highlights every downstream edge; selecting an asset highlights just its link
- * back to the PRD. framer-motion animates the path draw (skipped under reduced
- * motion).
+ * a fixed two-column grid with an SVG overlay whose edge coordinates are
+ * measured from the live node positions (re-measured on resize). Selecting the
+ * PRD highlights every downstream edge; selecting an asset highlights just its
+ * link back to the PRD. framer-motion animates the path draw (skipped under
+ * reduced motion).
+ *
+ * Edge routing is a central "spine": a vertical trunk drops from the PRD down
+ * the column gutter and each card connects via a rounded elbow into its *inner*
+ * edge (right edge for left-column cards, left edge for right-column ones). The
+ * trunk and elbows live entirely in the gutter, so connectors never sweep
+ * across the faces of the cards in lower rows.
  */
 export function NodeGraph({
     assets,
@@ -54,8 +60,9 @@ export function NodeGraph({
         setSize({ w: c.width, h: c.height });
 
         const prdRect = prd.getBoundingClientRect();
+        const centerX = prdRect.left - c.left + prdRect.width / 2;
         const from: Point = {
-            x: prdRect.left - c.left + prdRect.width / 2,
+            x: centerX,
             y: prdRect.bottom - c.top,
         };
 
@@ -64,10 +71,15 @@ export function NodeGraph({
             const el = nodeRefs.current.get(a.id);
             if (!el) return;
             const r = el.getBoundingClientRect();
+            const cardCenterX = r.left - c.left + r.width / 2;
+            // Connect to the card's gutter-facing (inner) edge so the trunk and
+            // elbows stay in the central gutter, never crossing a card face.
+            const innerX =
+                cardCenterX < centerX ? r.right - c.left : r.left - c.left;
             next.push({
                 id: a.id,
                 from,
-                to: { x: r.left - c.left + r.width / 2, y: r.top - c.top },
+                to: { x: innerX, y: r.top - c.top + r.height / 2 },
             });
         });
         setEdges(next);
@@ -100,8 +112,15 @@ export function NodeGraph({
                 aria-hidden="true"
             >
                 {edges.map((edge) => {
-                    const midY = (edge.from.y + edge.to.y) / 2;
-                    const d = `M ${edge.from.x} ${edge.from.y} C ${edge.from.x} ${midY}, ${edge.to.x} ${midY}, ${edge.to.x} ${edge.to.y}`;
+                    // Trunk straight down the gutter, then a rounded elbow out
+                    // into the card's inner edge at its vertical center.
+                    const r = Math.min(14, Math.abs(edge.to.x - edge.from.x) / 2);
+                    const dir = edge.to.x >= edge.from.x ? 1 : -1;
+                    const d =
+                        `M ${edge.from.x} ${edge.from.y} ` +
+                        `V ${edge.to.y - r} ` +
+                        `Q ${edge.from.x} ${edge.to.y}, ${edge.from.x + dir * r} ${edge.to.y} ` +
+                        `H ${edge.to.x}`;
                     const active = isEdgeActive(edge.id);
                     return (
                         <motion.path
@@ -151,7 +170,7 @@ export function NodeGraph({
             </div>
 
             {/* Asset nodes */}
-            <div className="relative z-10 mt-10 grid grid-cols-2 gap-3 sm:grid-cols-3 lg:grid-cols-4">
+            <div className="relative z-10 mt-8 grid grid-cols-2 gap-x-10 gap-y-4">
                 {assets.map((asset) => {
                     const active = isEdgeActive(asset.id);
                     return (
