@@ -8,6 +8,7 @@ import type { SectionId } from '../schemas/prdSchemas';
 import type { SectionStatusUpdate } from './progressivePrdPipeline';
 import { classifyProjectSafety, SafetyBlockedError, buildRestrictionDirective } from '../safety';
 import type { SafetyClassificationResult } from '../safety';
+import { buildClarificationPromptBlock, type PreflightContext } from '../prompts/preflightPrompts';
 
 export const enhancePrompt = async (rawPrompt: string): Promise<string> => {
     const system = `You are a senior product consultant. The user has written a rough product idea. Expand it into a clear, grounded product description that will support a high-quality PRD.
@@ -49,6 +50,14 @@ export const generateStructuredPRD = async (
          * pipeline hard-stops.
          */
         onSafety?: (result: SafetyClassificationResult) => void;
+        /**
+         * Optional preflight clarification context. When present (and
+         * `mode !== 'none'`), the answered/skipped responses and summary are
+         * appended to the prompt forwarded to every section, with an
+         * instruction to treat answers as authoritative intent and skipped
+         * questions as open unknowns.
+         */
+        preflight?: PreflightContext;
     },
     platform?: ProjectPlatform,
 ): Promise<StructuredPRD> => {
@@ -66,10 +75,17 @@ export const generateStructuredPRD = async (
 
     // For allowed_with_restrictions, constrain generation by appending a
     // binding directive to the prompt forwarded to every section.
-    const effectivePrompt =
+    const withRestrictions =
         safety.classification === 'allowed_with_restrictions'
             ? `${promptText}\n\n${buildRestrictionDirective(safety)}`
             : promptText;
+
+    // Append preflight clarification context (kept AFTER the safety gate so a
+    // disallowed idea can never reach this point).
+    const effectivePrompt =
+        options?.preflight && options.preflight.mode !== 'none'
+            ? `${withRestrictions}\n\n${buildClarificationPromptBlock(options.preflight)}`
+            : withRestrictions;
 
     options?.onStatus?.('Generating structured PRD with Gemini...');
 

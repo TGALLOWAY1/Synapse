@@ -1,0 +1,134 @@
+// Shared entry point for kicking off PRD generation against an existing spine.
+// Used by both the "Generate Immediately" path (HomePage) and the preflight
+// clarification path (PreflightView) so there is exactly one generation flow
+// with one set of store callbacks and error handling.
+
+import { useProjectStore } from '../store/projectStore';
+import { normalizeError, userMessage } from './errors';
+import {
+    SafetyBlockedError,
+    buildBlockedSafetyReview,
+    buildRestrictedSafetyReview,
+    buildSafetyReviewMarkdown,
+} from './safety';
+import type { ProjectPlatform } from '../types';
+import type { PreflightContext } from './llmProvider';
+
+export interface RunPrdGenerationParams {
+    projectId: string;
+    spineId: string;
+    /** The original user idea. Safety is classified on this text. */
+    sourcePrompt: string;
+    platform?: ProjectPlatform;
+    /** Optional preflight clarification context to inject into the prompt. */
+    preflight?: PreflightContext;
+}
+
+/**
+ * Runs PRD generation for a spine and wires the streaming results back into the
+ * store. Resolves when generation settles (success or handled failure); never
+ * rejects — disallowed/blocked and generation errors are persisted on the spine
+ * exactly as the prior inline call sites did.
+ */
+export async function runPrdGeneration({
+    projectId,
+    spineId,
+    sourcePrompt,
+    platform,
+    preflight,
+}: RunPrdGenerationParams): Promise<void> {
+    const store = useProjectStore.getState();
+    // Fresh run starts with a clean event log.
+    store.clearPrdProgress(projectId);
+    store.clearSectionStatus(projectId);
+
+    let generateStructuredPRD;
+    try {
+        ({ generateStructuredPRD } = await import('./llmProvider'));
+    } catch (e) {
+        const err = normalizeError(e);
+        console.error('[Module load failed]', err.raw);
+        useProjectStore.getState().setSpineError(projectId, spineId, {
+            message: 'Failed to load generation module. Try refreshing the page.',
+            category: err.category,
+            timestamp: err.timestamp,
+            raw: err.raw,
+        });
+        return;
+    }
+
+    try {
+        await generateStructuredPRD(
+            sourcePrompt,
+            {
+                preflight,
+                onProgress: (message) => {
+                    useProjectStore.getState().appendPrdProgress(projectId, message);
+                },
+                onSectionStatus: (sectionId, update) => {
+                    useProjectStore.getState().setSectionStatus(projectId, sectionId, update);
+                },
+                // Progressive render: paint the draft as soon as each section lands.
+                onPartial: ({ structuredPRD, markdown }) => {
+                    useProjectStore.getState().updateSpineStructuredPRD(
+                        projectId,
+                        spineId,
+                        structuredPRD,
+                        markdown,
+                        { sourcePrompt },
+                    );
+                    if (structuredPRD.productName || structuredPRD.productCategory) {
+                        useProjectStore.getState().updateProjectProductMetadata(projectId, {
+                            productName: structuredPRD.productName,
+                            productCategory: structuredPRD.productCategory,
+                        });
+                    }
+                },
+                onResult: ({ structuredPRD, markdown, generationMeta, model }) => {
+                    useProjectStore.getState().updateSpineStructuredPRD(
+                        projectId,
+                        spineId,
+                        structuredPRD,
+                        markdown,
+                        {
+                            sourcePrompt,
+                            generationMeta,
+                            model,
+                            prdVersion: generationMeta.schemaVersion,
+                        },
+                    );
+                },
+                onSafety: (safety) => {
+                    if (safety.classification === 'allowed_with_restrictions') {
+                        useProjectStore.getState().setSpineSafetyReview(
+                            projectId,
+                            spineId,
+                            buildRestrictedSafetyReview(safety),
+                        );
+                    }
+                },
+            },
+            platform,
+        );
+    } catch (e) {
+        // Disallowed requests hard-stop: store a blocked Safety Review (which
+        // shows the dedicated screen and gates downstream generation).
+        if (e instanceof SafetyBlockedError) {
+            useProjectStore.getState().setSpineSafetyReview(
+                projectId,
+                spineId,
+                buildBlockedSafetyReview(e.result),
+                buildSafetyReviewMarkdown(e.result),
+            );
+            return;
+        }
+        const err = normalizeError(e);
+        console.error('[PRD generation failed]', err.raw);
+        useProjectStore.getState().setSpineError(projectId, spineId, {
+            message: userMessage(err),
+            category: err.category,
+            timestamp: err.timestamp,
+            raw: err.raw,
+        });
+    }
+}

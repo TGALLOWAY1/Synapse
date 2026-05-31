@@ -23,6 +23,7 @@ import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
 import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
+import { PreflightView } from './preflight/PreflightView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
@@ -139,6 +140,14 @@ export function ProjectWorkspace() {
     );
     const showProgressTimeline = isPRDActivelyGenerating || hasFailedSection;
     const timelineSteps = buildGenerationSteps(prdSectionStatus ?? {});
+
+    // Optional preflight clarification: while a non-completed session exists and
+    // no PRD has been produced (and the request isn't blocked), the workspace
+    // hosts the clarification flow instead of the PRD/progress view.
+    const showPreflight = !!activeSpine?.preflightSession
+        && !activeSpine.preflightSession.completed
+        && !activeSpine.structuredPRD
+        && activeSpine.safetyReview?.status !== 'blocked';
 
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
@@ -505,7 +514,15 @@ export function ProjectWorkspace() {
 
                     <div className="max-w-4xl mx-auto mt-4">
                         {/* PRD Stage */}
-                        {pipelineStage === 'prd' && (
+                        {pipelineStage === 'prd' && showPreflight && activeSpine && (
+                            <PreflightView
+                                projectId={projectId}
+                                spineId={activeSpine.id}
+                                session={activeSpine.preflightSession!}
+                                platform={project?.platform}
+                            />
+                        )}
+                        {pipelineStage === 'prd' && !showPreflight && (
                             <>
                                 {/* Feedback items from mockups/artifacts */}
                                 <FeedbackItemsList

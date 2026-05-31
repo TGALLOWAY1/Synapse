@@ -114,6 +114,10 @@ otherwise have nothing in common — keep that distinction in mind:
     `componentInventoryParse.ts` round-trips all these fields through
     markdown.
   - `branchService.ts` — branch consolidation back into the spine.
+  - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
+    clarification" below). `generatePreflightQuestions()` (safety-gated) and
+    `generatePreflightSummary()`; both inject transports for tests and degrade
+    to fallbacks (generic question set / local recap) on non-safety failure.
   - `artifactJobController.ts` — concurrency control for artifact bundle
     generation.
 - **`prompts/prdPrompts.ts`** — strategy system instruction; the
@@ -153,6 +157,41 @@ request…").
   (`SafetyClassification`, `SafetyClassificationResult`, `SpineSafetyReview`)
   live in `src/types`; the safety module re-exports them.
 
+### Preflight clarification (`src/lib/services/preflightService.ts`, `src/components/preflight/`)
+
+An **optional** pre-PRD step. After entering an idea on `HomePage`, a
+`PreflightModeChoice` sheet offers **Generate Immediately** (unchanged path),
+**Quick** (5 questions), or **Deep** (10 questions). Quick/Deep create the
+project + spine, seed a `PreflightSession` via `initPreflightSession`, and
+navigate to `/p/:projectId` **without** starting PRD generation.
+
+- **State lives on the spine** — `SpineVersion.preflightSession`
+  (`PreflightMode`/`PreflightQuestion`/`PreflightStatus`/`PreflightSession` in
+  `src/types`), persisted with `spineVersions` (resumable across refresh; no
+  `partialize` change). Store actions are on `spineSlice`
+  (`initPreflightSession`, `setPreflightQuestions`, `setPreflightAnswer`,
+  `setPreflightIndex`, `setPreflightSummary`, `completePreflightSession`,
+  `setPreflightError`).
+- **Hosted in the workspace.** `ProjectWorkspace` renders `PreflightView`
+  (one question per card, progress, Skip/Back/Next, pinned safe-area CTA,
+  AI-generated summary → Edit answers / Generate PRD) instead of the PRD/
+  progress view while `preflightSession` exists, is not `completed`, has no
+  `structuredPRD`, and isn't `blocked`.
+- **Safety runs first.** `generatePreflightQuestions()` calls
+  `classifyProjectSafety()` before producing any questions — a `disallowed`
+  idea throws `SafetyBlockedError`, which `PreflightView` persists as a blocked
+  `safetyReview` so the existing `SafetyReviewView` shows and no questions/PRD
+  are produced. Non-safety failures fall back to a generic question set
+  (flagged `usedFallback`) / a deterministic local summary, never blocking.
+- **PRD integration.** Generation goes through the shared
+  `src/lib/runPrdGeneration.ts` helper (used by both HomePage and
+  `PreflightView`). On **Generate PRD**, `completePreflightSession` runs, then
+  `generateStructuredPRD` is called with an `options.preflight`
+  (`PreflightContext`) — answered/skipped responses + summary/assumptions/
+  unknowns. `prdService` appends `buildClarificationPromptBlock()` (the
+  authoritative-intent instruction; skipped → open unknowns) to the prompt
+  **after** the safety gate, so every section receives it via `ctx.idea`.
+
 ### State (`src/store/`)
 
 `useProjectStore` is one Zustand store composed from 8 slices in
@@ -180,7 +219,13 @@ persist. `onRehydrateStorage` migrates legacy `currentStage` values
 ### Pipeline flow
 
 ```
-User prompt → HomePage.handleCreateProject() → generateStructuredPRD()
+User prompt → HomePage.handleCreateProject() → PreflightModeChoice
+              ↓ (Generate Immediately) ──────────────┐
+              ↓ (Quick / Deep)                        │
+              PreflightView: questions → answers →     │
+              summary → Generate PRD                   │
+              ↓                                        ↓
+              runPrdGeneration() → generateStructuredPRD()
               ↓
               Pass A streams structured JSON → onPartial paints draft
               ↓

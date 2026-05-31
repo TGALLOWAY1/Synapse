@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type {
     SpineVersion, HistoryEvent, StructuredPRD,
     QualityScores, GenerationMeta, SpineSafetyReview,
+    PreflightSession,
 } from '../../types';
 import type { ProjectState, SpineGenerationMetaInput } from '../types';
 
@@ -19,7 +20,27 @@ export type SpineSlice = {
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     setSpineError: ProjectState['setSpineError'];
     setSpineSafetyReview: ProjectState['setSpineSafetyReview'];
+    initPreflightSession: ProjectState['initPreflightSession'];
+    setPreflightQuestions: ProjectState['setPreflightQuestions'];
+    setPreflightAnswer: ProjectState['setPreflightAnswer'];
+    setPreflightIndex: ProjectState['setPreflightIndex'];
+    setPreflightSummary: ProjectState['setPreflightSummary'];
+    completePreflightSession: ProjectState['completePreflightSession'];
+    setPreflightError: ProjectState['setPreflightError'];
 };
+
+// Update a single spine's preflight session in place. No-op when the spine has
+// no session yet (except init, which seeds one). Keeps the verbose
+// map-over-spines pattern used throughout this slice.
+const patchPreflight = (
+    spines: SpineVersion[],
+    spineId: string,
+    patch: (prev: PreflightSession) => PreflightSession,
+): SpineVersion[] =>
+    spines.map((s) => {
+        if (s.id !== spineId || !s.preflightSession) return s;
+        return { ...s, preflightSession: patch(s.preflightSession) };
+    });
 
 export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = (set, get) => ({
     spineVersions: {},
@@ -94,6 +115,112 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 }
             };
         });
+    },
+
+    // --- Preflight clarification --------------------------------------------
+    initPreflightSession: (projectId, spineId, mode, originalIdea) => {
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const updatedSpines = projectSpines.map((s) =>
+                s.id === spineId
+                    ? {
+                        ...s,
+                        preflightSession: {
+                            mode,
+                            originalIdea,
+                            questions: [],
+                            currentQuestionIndex: 0,
+                            status: 'awaiting_questions' as const,
+                            completed: false,
+                        },
+                    }
+                    : s,
+            );
+            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
+    setPreflightQuestions: (projectId, spineId, questions, usedFallback) => {
+        set((state) => ({
+            spineVersions: {
+                ...state.spineVersions,
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
+                    ...prev,
+                    questions,
+                    usedFallback: usedFallback ?? false,
+                    status: 'answering',
+                    error: undefined,
+                })),
+            },
+        }));
+    },
+
+    setPreflightAnswer: (projectId, spineId, questionId, answer, skipped) => {
+        set((state) => ({
+            spineVersions: {
+                ...state.spineVersions,
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
+                    ...prev,
+                    questions: prev.questions.map((q) =>
+                        q.id === questionId ? { ...q, answer, skipped } : q,
+                    ),
+                })),
+            },
+        }));
+    },
+
+    setPreflightIndex: (projectId, spineId, index) => {
+        set((state) => ({
+            spineVersions: {
+                ...state.spineVersions,
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
+                    ...prev,
+                    currentQuestionIndex: Math.max(0, index),
+                    // Returning to the questions from the summary re-enters answering.
+                    status: prev.status === 'summary' && index < prev.questions.length ? 'answering' : prev.status,
+                })),
+            },
+        }));
+    },
+
+    setPreflightSummary: (projectId, spineId, { summary, assumptions, unknowns }) => {
+        set((state) => ({
+            spineVersions: {
+                ...state.spineVersions,
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
+                    ...prev,
+                    summary,
+                    assumptions,
+                    unknowns,
+                    status: 'summary',
+                })),
+            },
+        }));
+    },
+
+    completePreflightSession: (projectId, spineId) => {
+        set((state) => ({
+            spineVersions: {
+                ...state.spineVersions,
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
+                    ...prev,
+                    completed: true,
+                    status: 'completed',
+                })),
+            },
+        }));
+    },
+
+    setPreflightError: (projectId, spineId, message) => {
+        set((state) => ({
+            spineVersions: {
+                ...state.spineVersions,
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
+                    ...prev,
+                    error: message ?? undefined,
+                })),
+            },
+        }));
     },
 
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => {
