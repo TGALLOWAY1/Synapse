@@ -303,6 +303,42 @@ export type SpineSafetyReview = {
     reviewedAt: number;
 };
 
+// --- Preflight clarification (optional pre-PRD interview) ---
+// When the user opts into Quick (5) or Deep (10) clarification, Synapse
+// generates idea-specific questions, collects answers one at a time, shows a
+// summary, then feeds the responses into PRD generation as authoritative
+// intent. State lives on the spine so progress is resumable across refresh.
+// Absent `preflightSession` = the legacy/"Generate Immediately" path.
+export type PreflightMode = 'none' | 'quick' | 'deep';
+
+export type PreflightQuestion = {
+    id: string;
+    question: string;
+    intent?: string; // short "why this matters" line shown under the question
+    answer?: string;
+    skipped?: boolean;
+};
+
+export type PreflightStatus =
+    | 'awaiting_questions' // questions not yet generated
+    | 'answering' // user is working through the questions
+    | 'summary' // all questions answered/skipped; reviewing the summary
+    | 'completed'; // PRD generation has been kicked off
+
+export type PreflightSession = {
+    mode: PreflightMode;
+    originalIdea: string;
+    questions: PreflightQuestion[];
+    currentQuestionIndex: number;
+    status: PreflightStatus;
+    completed: boolean;
+    summary?: string;
+    assumptions?: string[];
+    unknowns?: string[];
+    usedFallback?: boolean; // questions came from the generic fallback set
+    error?: string; // non-blocking question/summary generation error
+};
+
 export type SpineVersion = {
     id: string; // e.g. "v1", "v2"
     projectId: string;
@@ -312,6 +348,7 @@ export type SpineVersion = {
     isLatest: boolean;
     isFinal: boolean;
     structuredPRD?: StructuredPRD;
+    preflightSession?: PreflightSession;
     generationError?: {
         message: string;
         category: string;

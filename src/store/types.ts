@@ -5,6 +5,7 @@ import type {
     SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState,
     ArtifactSlotKey, ProjectJobState, SlotState,
     QualityScores, GenerationMeta, SpineSafetyReview,
+    PreflightMode, PreflightQuestion,
 } from '../types';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 
@@ -83,6 +84,15 @@ export interface ProjectState {
         review: SpineSafetyReview,
         responseText?: string,
     ) => void;
+
+    // --- Preflight clarification (persisted on the spine; resumable) ---
+    initPreflightSession: (projectId: string, spineId: string, mode: PreflightMode, originalIdea: string) => void;
+    setPreflightQuestions: (projectId: string, spineId: string, questions: PreflightQuestion[], usedFallback?: boolean) => void;
+    setPreflightAnswer: (projectId: string, spineId: string, questionId: string, answer: string, skipped: boolean) => void;
+    setPreflightIndex: (projectId: string, spineId: string, index: number) => void;
+    setPreflightSummary: (projectId: string, spineId: string, summary: { summary: string; assumptions: string[]; unknowns: string[] }) => void;
+    completePreflightSession: (projectId: string, spineId: string) => void;
+    setPreflightError: (projectId: string, spineId: string, message: string | null) => void;
 
     // --- Artifact System Actions ---
     createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => { artifactId: string };

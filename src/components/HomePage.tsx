@@ -4,14 +4,10 @@ import { useProjectStore } from '../store/projectStore';
 import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass } from 'lucide-react';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
-import { normalizeError, userMessage } from '../lib/errors';
-import {
-    SafetyBlockedError,
-    buildBlockedSafetyReview,
-    buildRestrictedSafetyReview,
-    buildSafetyReviewMarkdown,
-} from '../lib/safety';
-import type { ProjectPlatform } from '../types';
+import { PreflightModeChoice } from './preflight/PreflightModeChoice';
+import { runPrdGeneration } from '../lib/runPrdGeneration';
+import { normalizeError } from '../lib/errors';
+import type { ProjectPlatform, PreflightMode } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
@@ -45,7 +41,7 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export function HomePage() {
-    const { createProject, loadDemoProject } = useProjectStore();
+    const { createProject, initPreflightSession, loadDemoProject } = useProjectStore();
     const navigate = useNavigate();
     const user = useAuthStore((s) => s.user);
 
@@ -83,118 +79,42 @@ export function HomePage() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isEnhancing, setIsEnhancing] = useState(false);
+    const [isChoosingMode, setIsChoosingMode] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-    const handleCreateProject = async () => {
+    // Step 1: validate input + API key, then present the start-mode choice.
+    const handleCreateProject = () => {
         if (!projectName.trim() || !promptText.trim()) return;
 
         const apiKey = localStorage.getItem('GEMINI_API_KEY');
         if (!apiKey) { setIsSettingsOpen(true); return; }
 
-        const { projectId, spineId } = createProject(projectName.trim(), promptText.trim(), platform);
-        navigate(`/p/${projectId}`);
+        setIsChoosingMode(true);
+    };
 
+    // Step 2a: Generate Immediately — existing behavior, unchanged flow.
+    const startImmediateGeneration = () => {
         const sourcePrompt = promptText.trim();
+        const { projectId, spineId } = createProject(projectName.trim(), sourcePrompt, platform);
+        navigate(`/p/${projectId}`);
+        void runPrdGeneration({ projectId, spineId, sourcePrompt, platform });
+    };
 
-        // Reset transient progress state for this project — a fresh run starts
-        // with a clean event log so the workspace progress panel doesn't show
-        // stale messages from a prior generation.
-        useProjectStore.getState().clearPrdProgress(projectId);
-        useProjectStore.getState().clearSectionStatus(projectId);
+    // Step 2b: Quick/Deep — seed a preflight session and hand off to the
+    // workspace clarification flow. No PRD is generated yet.
+    const startPreflight = (mode: 'quick' | 'deep') => {
+        const sourcePrompt = promptText.trim();
+        const { projectId, spineId } = createProject(projectName.trim(), sourcePrompt, platform);
+        initPreflightSession(projectId, spineId, mode, sourcePrompt);
+        navigate(`/p/${projectId}`);
+    };
 
-        import('../lib/llmProvider').then(({ generateStructuredPRD }) => {
-            generateStructuredPRD(
-                sourcePrompt,
-                {
-                    onProgress: (message) => {
-                        useProjectStore.getState().appendPrdProgress(projectId, message);
-                    },
-                    onSectionStatus: (sectionId, update) => {
-                        useProjectStore.getState().setSectionStatus(projectId, sectionId, update);
-                    },
-                    // Progressive render: paint the Pass A draft as soon as it
-                    // lands so the user isn't staring at a placeholder for the
-                    // full 30–60s pipeline.
-                    onPartial: ({ structuredPRD, markdown }) => {
-                        useProjectStore.getState().updateSpineStructuredPRD(
-                            projectId,
-                            spineId,
-                            structuredPRD,
-                            markdown,
-                            { sourcePrompt },
-                        );
-                        if (structuredPRD.productName || structuredPRD.productCategory) {
-                            useProjectStore.getState().updateProjectProductMetadata(projectId, {
-                                productName: structuredPRD.productName,
-                                productCategory: structuredPRD.productCategory,
-                            });
-                        }
-                    },
-                    // Final result: persist the rendered markdown plus
-                    // generation metadata. Single-pass mode no longer
-                    // produces quality scores.
-                    onResult: ({ structuredPRD, markdown, generationMeta, model }) => {
-                        useProjectStore.getState().updateSpineStructuredPRD(
-                            projectId,
-                            spineId,
-                            structuredPRD,
-                            markdown,
-                            {
-                                sourcePrompt,
-                                generationMeta,
-                                model,
-                                prdVersion: generationMeta.schemaVersion,
-                            },
-                        );
-                    },
-                    // allowed_with_restrictions: record the verdict so the PRD
-                    // renders with a Safety Boundaries card. (allowed records
-                    // nothing; disallowed never reaches here — it throws.)
-                    onSafety: (safety) => {
-                        if (safety.classification === 'allowed_with_restrictions') {
-                            useProjectStore.getState().setSpineSafetyReview(
-                                projectId,
-                                spineId,
-                                buildRestrictedSafetyReview(safety),
-                            );
-                        }
-                    },
-                },
-                platform,
-            ).catch((e) => {
-                // Disallowed requests hard-stop here: store a blocked Safety
-                // Review (which shows the dedicated screen and gates downstream
-                // generation) instead of a generic generation error.
-                if (e instanceof SafetyBlockedError) {
-                    useProjectStore.getState().setSpineSafetyReview(
-                        projectId,
-                        spineId,
-                        buildBlockedSafetyReview(e.result),
-                        buildSafetyReviewMarkdown(e.result),
-                    );
-                    return;
-                }
-                const err = normalizeError(e);
-                console.error('[PRD generation failed]', err.raw);
-                useProjectStore.getState().setSpineError(projectId, spineId, {
-                    message: userMessage(err),
-                    category: err.category,
-                    timestamp: err.timestamp,
-                    raw: err.raw,
-                });
-            });
-        }).catch((e) => {
-            const err = normalizeError(e);
-            console.error('[Module load failed]', err.raw);
-            useProjectStore.getState().setSpineError(projectId, spineId, {
-                message: 'Failed to load generation module. Try refreshing the page.',
-                category: err.category,
-                timestamp: err.timestamp,
-                raw: err.raw,
-            });
-        });
+    const handleChooseMode = (mode: PreflightMode) => {
+        setIsChoosingMode(false);
+        if (mode === 'none') startImmediateGeneration();
+        else startPreflight(mode);
     };
 
     const handleEnhance = async () => {
@@ -461,6 +381,12 @@ export function HomePage() {
             </div>
 
             {/* Modals & Drawers */}
+            {isChoosingMode && (
+                <PreflightModeChoice
+                    onChoose={handleChooseMode}
+                    onClose={() => setIsChoosingMode(false)}
+                />
+            )}
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
             <ProjectDrawer isOpen={isDrawerOpen} onClose={() => setIsDrawerOpen(false)} />
         </div>
