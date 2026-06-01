@@ -24,6 +24,31 @@ existing description wrong, fix the description; if it introduces a
 pattern others must follow or must not break, document it here as a rule.
 Treat docs drift as a defect in the change itself.
 
+### README rule
+
+`README.md` is the **public-facing** description of Synapse and must not drift
+from reality. Whenever a change adds, removes, or meaningfully alters a
+**user-visible feature, capability, or workflow** — a new pipeline stage, a new
+artifact or asset type, a behavior shown in the interactive tour
+(`src/components/tour/`), a change to supported models/providers, the safety
+gate, preflight clarification, snapshots, or the getting-started flow — review
+`README.md` in the same change and update it:
+
+- Keep the feature tour aligned with the live product tour's six-beat narrative
+  (Idea → Spec generation → Refine → Versions → Assets → Connections) so the
+  README and `/tour` tell the same story.
+- Keep referenced screenshots in `public/screenshots/` and the screenshots a
+  feature describes consistent with the current UI; if a screenshot no longer
+  matches, flag it rather than leaving a misleading image.
+- Keep the tech-stack list (models, providers, libraries) accurate — e.g. the
+  default Gemini model id and any image model.
+
+If a change touches a user-visible feature but you are unsure whether the
+README needs an edit, **surface it to the user** ("this looks like a
+README-worthy change — want me to update it?") rather than silently letting the
+README go stale. Significant new features should never ship without a
+corresponding README update or an explicit decision to skip it.
+
 ## Commands
 
 ```bash
