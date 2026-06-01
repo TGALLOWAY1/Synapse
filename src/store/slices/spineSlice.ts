@@ -173,12 +173,20 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
-                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => ({
-                    ...prev,
-                    currentQuestionIndex: Math.max(0, index),
+                [projectId]: patchPreflight(state.spineVersions[projectId] || [], spineId, (prev) => {
                     // Returning to the questions from the summary re-enters answering.
-                    status: prev.status === 'summary' && index < prev.questions.length ? 'answering' : prev.status,
-                })),
+                    const reentering = prev.status === 'summary' && index < prev.questions.length;
+                    return {
+                        ...prev,
+                        currentQuestionIndex: Math.max(0, index),
+                        status: reentering ? 'answering' : prev.status,
+                        // Re-entering invalidates the prior summary; it will be
+                        // regenerated from the edited answers, never shown stale.
+                        ...(reentering
+                            ? { summary: undefined, assumptions: undefined, unknowns: undefined }
+                            : {}),
+                    };
+                }),
             },
         }));
     },
