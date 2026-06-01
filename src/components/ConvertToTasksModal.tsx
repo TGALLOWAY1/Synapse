@@ -123,7 +123,7 @@ export function ConvertToTasksModal({
             } else if (failed === 0) {
                 addToast({
                     type: 'success',
-                    title: exportResult.mock ? `Linear export prepared (mocked)` : `Exported ${succeeded} task${succeeded === 1 ? '' : 's'}`,
+                    title: `Exported ${succeeded} task${succeeded === 1 ? '' : 's'}`,
                 });
             } else {
                 addToast({
@@ -376,7 +376,6 @@ function ExportResultPanel({ result }: { result: ExportResult }) {
                 )}
                 <h3 className="text-sm font-semibold text-neutral-800">
                     Export result — {result.target}
-                    {result.mock && <span className="ml-1.5 text-[10px] uppercase tracking-wider text-amber-600 font-bold">(mock)</span>}
                 </h3>
                 <span className="text-xs text-neutral-500 ml-auto">
                     {result.succeeded.length} of {total} succeeded

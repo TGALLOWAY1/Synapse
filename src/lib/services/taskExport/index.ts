@@ -40,5 +40,5 @@ export async function exportTasks(
 }
 
 export { buildGithubIssueBody, buildGithubIssuePayload, exportTasksToGithub } from './githubExporter';
-export { buildLinearIssueInput, buildLinearIssueDescription } from './linearExporter';
+export { buildLinearIssueInput, buildLinearIssueDescription, exportTasksToLinear } from './linearExporter';
 export { renderTaskMarkdown, renderTasksMarkdown } from './markdownExporter';

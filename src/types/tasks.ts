@@ -63,8 +63,6 @@ export interface ExportResult {
     target: ExportTargetId;
     succeeded: TaskExportItemResult[];
     failed: TaskExportItemResult[];
-    /** True when the provider returned simulated success (Linear stub). */
-    mock?: boolean;
     /** Top-level error that prevented any task from being attempted. */
     fatalError?: string;
     /** Generic notes from the provider (e.g. "tasks.md downloaded"). */
