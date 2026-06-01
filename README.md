@@ -5,7 +5,7 @@ plain-language idea into a structured PRD, then carries that PRD forward into
 UI mockups, downstream engineering artifacts, and annotated visual feedback —
 all from a single client-side workspace.
 
-<img width="100%" alt="Synapse workspace — PRD canvas" src="public/screenshots/prd-view.png" />
+<img width="100%" alt="Synapse tour — start with a single idea" src="public/screenshots/tour-idea.png" />
 
 > **Take the interactive tour.** Synapse ships a fully interactive product
 > tour at **`/tour`** (aliased at `/about`) that rebuilds the whole workflow
@@ -42,7 +42,7 @@ the PRD prompt as authoritative intent.
 
 ### 2. AI builds the spec, section by section
 
-<img width="100%" alt="PRD generation progress timeline" src="public/screenshots/prd-view.png" />
+<img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" />
 
 The PRD is generated as structured JSON in a single streaming pass, and a live
 **progress timeline** shows exactly what's happening: the ten PRD sections are
@@ -68,9 +68,11 @@ Replace**, spawning a threaded branch scoped to just that passage.
   pen, and mobile long-press; the dialog is a floating popover on desktop and
   a safe-area bottom sheet on mobile.
 
+<img width="100%" alt="Refine a passage — Clarify / Expand / Specify / Alternative / Replace dialog and threaded branch" src="public/screenshots/tour-refine.png" />
+
 ### 4. Nothing gets lost — every change is versioned
 
-<img width="100%" alt="History timeline" src="public/screenshots/history-view.png" />
+<img width="100%" alt="Version timeline with side-by-side diff comparison" src="public/screenshots/tour-versions.png" />
 
 Every regeneration and consolidation becomes a new **spine version** you can
 revisit, compare, or build on. The History stage is a chronological audit log
@@ -79,7 +81,7 @@ feedback event — with diffs where it matters.
 
 ### 5. One finalized PRD powers the entire workspace
 
-<img width="100%" alt="Artifacts view" src="public/screenshots/artifacts-view.png" />
+<img width="100%" alt="Mark the PRD as final to generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" />
 
 Mark your PRD as final and Synapse generates all the assets you need to build —
 in parallel, from that single source of truth:
@@ -99,18 +101,16 @@ warnings** if the output looks truncated or malformed.
 
 #### Multi-fidelity UI mockups
 
-<img width="100%" alt="Mockups view" src="public/screenshots/mockups-view.png" />
+<img width="100%" alt="UI Mockups are one of the assets generated from the finalized PRD" src="public/screenshots/tour-assets.png" />
 
 Generate UI mockups directly from the finalized PRD with configurable platform
 (mobile / desktop), fidelity (wireframe / mid-fi / high-fi), and scope (single
 screen / multi-screen / key workflow). Every run is saved as a new version so
 you can diff iterations side-by-side.
 
-<img width="100%" alt="Mockup comparison" src="public/screenshots/mockups-compare.png" />
-
 #### Integrated feedback loop
 
-<img width="100%" alt="PRD feedback UI" src="public/screenshots/prd-feedback.png" />
+<img width="100%" alt="Feedback extracted from mockups feeds back into the PRD assets" src="public/screenshots/tour-assets.png" />
 
 Extract structured feedback items from generated mockups. Feedback surfaces as
 actionable cards on the PRD stage — applying one spawns a localized branch to
@@ -130,6 +130,8 @@ When the product changes, Synapse helps keep the rest of the project aligned.
 Artifacts carry source references back to the spine, so staleness is detected
 automatically when the PRD moves underneath them — and the History timeline
 records the ripple of every change across the workspace.
+
+<img width="100%" alt="Connections graph — the PRD wired to every artifact with up-to-date status" src="public/screenshots/tour-connections.png" />
 
 ---
 
