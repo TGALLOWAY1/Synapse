@@ -74,12 +74,35 @@ describe('preflight session store actions', () => {
             { id: 'q1', question: 'Q1' },
             { id: 'q2', question: 'Q2' },
         ]);
-        store.setPreflightSummary(projectId, spineId, { summary: 's', assumptions: [], unknowns: [] });
+        store.setPreflightSummary(projectId, spineId, {
+            summary: 's',
+            assumptions: ['a'],
+            unknowns: ['u'],
+        });
         expect(session(projectId)?.status).toBe('summary');
 
         store.setPreflightIndex(projectId, spineId, 0);
         expect(session(projectId)?.status).toBe('answering');
         expect(session(projectId)?.currentQuestionIndex).toBe(0);
+        // The stale summary is invalidated so it can't be shown out of date.
+        expect(session(projectId)?.summary).toBeUndefined();
+        expect(session(projectId)?.assumptions).toBeUndefined();
+        expect(session(projectId)?.unknowns).toBeUndefined();
+    });
+
+    it('keeps the summary intact when navigating between questions (not from summary)', () => {
+        const { projectId, spineId } = setup();
+        const store = useProjectStore.getState();
+        store.initPreflightSession(projectId, spineId, 'quick', 'idea');
+        store.setPreflightQuestions(projectId, spineId, [
+            { id: 'q1', question: 'Q1' },
+            { id: 'q2', question: 'Q2' },
+        ]);
+        // status is 'answering' here, not 'summary' — back/next navigation
+        // must not wipe any derived fields.
+        store.setPreflightIndex(projectId, spineId, 1);
+        expect(session(projectId)?.status).toBe('answering');
+        expect(session(projectId)?.currentQuestionIndex).toBe(1);
     });
 
     it('persists the session on the spine (survives serialization)', () => {

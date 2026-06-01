@@ -136,23 +136,25 @@ export function PreflightView({ projectId, spineId, session, platform }: Preflig
     const question = session.questions[index];
     const isLast = index === total - 1;
 
-    const advance = () => {
-        if (isLast) {
-            // Move to the summary; generate it from the answers.
-            setIsWorking(true);
-            (async () => {
-                const summary = await generatePreflightSummary(session.originalIdea, session.questions);
-                setPreflightSummary(projectId, spineId, summary);
-                setIsWorking(false);
-            })();
-        } else {
-            setPreflightIndex(projectId, spineId, index + 1);
-        }
-    };
-
     const commitAndAdvance = (answer: string, skipped: boolean) => {
         setPreflightAnswer(projectId, spineId, question.id, answer, skipped);
-        advance();
+        if (!isLast) {
+            setPreflightIndex(projectId, spineId, index + 1);
+            return;
+        }
+        // Move to the summary; generate it from the answers. The store update
+        // above is async and not yet reflected in `session`, so apply the
+        // just-committed answer locally — otherwise the final question is read
+        // as skipped and misfiled under "Open questions".
+        const updatedQuestions = session.questions.map((q) =>
+            q.id === question.id ? { ...q, answer, skipped } : q,
+        );
+        setIsWorking(true);
+        (async () => {
+            const summary = await generatePreflightSummary(session.originalIdea, updatedQuestions);
+            setPreflightSummary(projectId, spineId, summary);
+            setIsWorking(false);
+        })();
     };
 
     return (

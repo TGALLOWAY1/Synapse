@@ -4,6 +4,7 @@ import {
     fallbackQuestionsFor,
     formatAnswersForSummary,
     QUESTION_COUNT,
+    SUMMARY_SYSTEM_INSTRUCTION,
     type PreflightContext,
 } from '../prompts/preflightPrompts';
 import type { PreflightQuestion } from '../../types';
@@ -52,6 +53,12 @@ describe('fallback question sets', () => {
         expect(QUESTION_COUNT.deep).toBe(10);
         expect(fallbackQuestionsFor('quick')).toHaveLength(5);
         expect(fallbackQuestionsFor('deep')).toHaveLength(10);
+    });
+});
+
+describe('SUMMARY_SYSTEM_INSTRUCTION', () => {
+    it('instructs the model never to file answered questions as unknowns', () => {
+        expect(SUMMARY_SYSTEM_INSTRUCTION).toContain('must NEVER appear in unknowns');
     });
 });
 
