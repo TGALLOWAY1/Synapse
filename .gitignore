@@ -1,9 +1,10 @@
 # Dependencies
 node_modules
 
-# Build output
+# Build output & caches
 dist
 dist-ssr
+.vite
 *.local
 
 # Logs
