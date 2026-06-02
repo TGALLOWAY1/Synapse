@@ -9,7 +9,7 @@ interface PipelineStageBarProps {
 
 const stages: { key: PipelineStage; label: string; description: string; icon: typeof FileText }[] = [
     { key: 'prd', label: 'Project', description: 'The editable PRD and source of truth for downstream artifacts', icon: FileText },
-    { key: 'workspace', label: 'Workspace', description: 'Where you work through generated artifacts', icon: Package },
+    { key: 'workspace', label: 'Assets', description: 'Generated build assets — data model, flows, screens, components, and more', icon: Package },
     { key: 'history', label: 'History', description: 'Chronological timeline of changes', icon: Clock },
 ];
 

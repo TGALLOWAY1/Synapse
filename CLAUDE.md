@@ -261,12 +261,32 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
                    ConsolidationModal). Selection → action dialog runs
                    through the shared touch-aware pipeline (see "PRD
                    highlight → branch selection pipeline" below).
-  Workspace stage: ArtifactsView (bundle/individual gen, refine, validate)
+  Assets stage:    ArtifactWorkspace (bundle/individual gen, refine, validate)
                    + MockupsView (platform/fidelity/scope config)
                    + MarkupImageView (MarkupImageSpec → SVG via
-                   MarkupImageRenderer)
+                   MarkupImageRenderer). The `'workspace'` pipeline stage is
+                   labeled **"Assets"** in `PipelineStageBar` (label-only; the
+                   stage key/route is still `workspace`).
   History stage:   HistoryView — chronological timeline with diffs
 ```
+
+### Post-finalization transition (Mark Final → Assets)
+
+Marking a spine final must not dump the user back on something that looks like
+the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)
+starts artifact generation and shows `FinalizationSuccessModal` ("PRD
+Finalized" — *being created* vs *ready*, keyed off an `assetsReady` presence
+check of the 7 core artifacts + mockups) **without** switching stage. Its
+**Open Assets** action (`handleOpenAssets`) switches `currentStage` to
+`workspace` and arms a one-shot `finalizeAutoOpen` flag passed to
+`ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
+(via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
+preferring `done`, then `generating`, then `queued`, else the first slot in
+`CORE_ARTIFACT_DISPLAY_ORDER` (data_model → … → prompt_pack, then mockups) — and
+opens the mobile drawer (`useIsMobile`-gated, so it never reopens after the user
+closes it; desktop keeps the persistent side rail). While the overall run is in
+flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
+build assets…") instead of an empty state.
 
 ### PRD highlight → branch selection pipeline
 
