@@ -99,6 +99,28 @@ describe('progressive PRD generation', () => {
     expect(events).toContain('session_completed');
   });
 
+  it('forwards the AbortSignal down to the provider', async () => {
+    const controller = new AbortController();
+    const seenSignals: (AbortSignal | undefined)[] = [];
+    const provider = {
+      async generateText(input: { prompt: string; model: string; schema: object; signal?: AbortSignal }) {
+        seenSignals.push(input.signal);
+        return '{}';
+      },
+    };
+
+    await generateProgressivePrd({
+      prompt: 'Build a note app',
+      provider,
+      sections: [DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!],
+      config: baseConfig,
+      signal: controller.signal,
+    });
+
+    expect(seenSignals.length).toBe(1);
+    expect(seenSignals[0]).toBe(controller.signal);
+  });
+
   it('escalates low-confidence fast outputs to strong refinement', async () => {
     const calls: string[] = [];
     const provider = {
