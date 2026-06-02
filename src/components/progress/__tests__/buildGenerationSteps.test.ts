@@ -31,11 +31,11 @@ describe('formatModelName', () => {
 describe('computeWaves (default DAG)', () => {
     it('groups the 10 sections into dependency waves', () => {
         const waves = computeWaves();
-        expect(waves.map((w) => w.length)).toEqual([1, 2, 1, 3, 1, 2]);
+        expect(waves.map((w) => w.length)).toEqual([1, 3, 4, 1, 1]);
         expect(waves[0][0].id).toBe('product_basics');
-        expect(waves[1].map((s) => s.id)).toEqual(['product_thesis', 'grounding']);
-        expect(waves[3].map((s) => s.id)).toEqual(['data_model', 'ux_loops', 'metrics_scope']);
-        expect(waves[5].map((s) => s.id)).toEqual(['quality_risks', 'implementation_plan']);
+        expect(waves[1].map((s) => s.id)).toEqual(['product_thesis', 'grounding', 'features']);
+        expect(waves[2].map((s) => s.id)).toEqual(['data_model', 'ux_loops', 'quality_risks', 'metrics_scope']);
+        expect(waves[4].map((s) => s.id)).toEqual(['implementation_plan']);
     });
 });
 
@@ -56,7 +56,7 @@ describe('computeWaves (arbitrary graph — future-proofing)', () => {
 describe('buildGenerationSteps', () => {
     it('builds sequential rows and concurrent groups with labels', () => {
         const steps = buildGenerationSteps({}, MODELS);
-        expect(steps).toHaveLength(6);
+        expect(steps).toHaveLength(5);
         expect(steps[0].sectionId).toBe('product_basics');
         expect(steps[0].label).toBe('1');
         expect(steps[0].executionMode).toBe('sequential');
@@ -64,8 +64,8 @@ describe('buildGenerationSteps', () => {
         const group = steps[1];
         expect(group.executionMode).toBe('concurrent');
         expect(group.title).toBe('Running concurrently');
-        expect(group.children?.map((c) => c.label)).toEqual(['2A', '2B']);
-        expect(steps[3].children?.map((c) => c.label)).toEqual(['4A', '4B', '4C']);
+        expect(group.children?.map((c) => c.label)).toEqual(['2A', '2B', '2C']);
+        expect(steps[2].children?.map((c) => c.label)).toEqual(['3A', '3B', '3C', '3D']);
     });
 
     it('falls back to the tier model when no live model is present', () => {
@@ -92,11 +92,36 @@ describe('buildGenerationSteps', () => {
         const thesis = steps[1].children?.[0];
         expect(thesis?.status).toBe('in_progress');
 
-        const metrics = steps[3].children?.find((c) => c.sectionId === 'metrics_scope');
+        const metrics = steps[2].children?.find((c) => c.sectionId === 'metrics_scope');
         expect(metrics?.status).toBe('failed');
         expect(metrics?.canRetry).toBe(true);
         expect(metrics?.errorMessage).toBe('Model timeout exceeded');
         expect(metrics?.actualSeconds).toBeCloseTo(9.2);
+    });
+
+    it('maps the queued status distinctly from pending and in_progress', () => {
+        const status: SectionStatusMap = {
+            product_basics: { tier: 'fast', status: 'complete' },
+            // deps satisfied, waiting for a slot
+            product_thesis: { tier: 'strong', status: 'queued' },
+        };
+        const steps = buildGenerationSteps(status, MODELS);
+        const thesis = steps[1].children?.find((c) => c.sectionId === 'product_thesis');
+        expect(thesis?.status).toBe('queued');
+        // grounding has no status entry → still pending (waiting on deps)
+        const grounding = steps[1].children?.find((c) => c.sectionId === 'grounding');
+        expect(grounding?.status).toBe('pending');
+    });
+
+    it('carries dependsOn (resolved to titles) and retryCount onto leaves', () => {
+        const status: SectionStatusMap = {
+            features: { tier: 'strong', status: 'error', error: 'boom', retryCount: 2 },
+        };
+        const steps = buildGenerationSteps(status, MODELS);
+        const features = steps[1].children?.find((c) => c.sectionId === 'features');
+        expect(features?.retryCount).toBe(2);
+        // features depends on product_basics — resolved to its section title.
+        expect(features?.dependsOn).toContain('Product Basics');
     });
 });
 

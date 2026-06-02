@@ -67,7 +67,11 @@ export type ModelProvider = {
 
 export type ProgressiveEvent =
     | { type: 'session_started'; sections: PrdSectionJob[] }
-    | { type: 'section_queued'; sectionId: string }
+    // Emitted by the executor the moment a section's dependencies are all
+    // satisfied and it enters the ready queue. The section may still wait for a
+    // free concurrency slot before `section_started` fires, so this maps to the
+    // "queued — waiting for a slot" UI state (distinct from "waiting on deps").
+    | { type: 'section_ready'; sectionId: string }
     | { type: 'section_started'; sectionId: string; modelTier: ModelTier; model: string }
     | { type: 'section_completed'; sectionId: string; content: string; confidence?: number }
     | { type: 'section_refining'; sectionId: string }
@@ -80,15 +84,30 @@ export type ProgressiveEvent =
 // is merged client-side into the final document. Fast (Flash) sections run
 // independently; strong (Pro) sections depend on earlier results.
 
+// Dependencies are TRUE data dependencies only — a section lists another only
+// when it actually consumes that section's output as prompt context. Sections
+// are NOT sequenced just because they appear later in the document. Earlier
+// revisions over-constrained the graph (e.g. `features` waited on the slow
+// `product_thesis`, and `quality_risks` waited on the full architecture chain),
+// which serialized the two heaviest early calls and delayed fan-out. The graph
+// below relaxes those spurious edges so independent work overlaps. Prompt
+// builders degrade gracefully (via `missingNote()`) when an upstream field they
+// reference is not a declared dependency, so dropping an edge never breaks a
+// section — it just lets it start sooner.
 export const DEFAULT_PRD_SECTIONS: PrdSectionTemplate[] = [
     { id: 'product_basics',       title: SECTION_TITLES.product_basics,       order: 1,  risk: 'low',  estimatedSeconds: 8 },
     { id: 'product_thesis',       title: SECTION_TITLES.product_thesis,       order: 2,  risk: 'high', estimatedSeconds: 25, dependencies: ['product_basics'] },
     { id: 'grounding',            title: SECTION_TITLES.grounding,            order: 3,  risk: 'low',  estimatedSeconds: 10, dependencies: ['product_basics'] },
-    { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', estimatedSeconds: 35, dependencies: ['product_basics', 'product_thesis'] },
+    // features depends on product_basics only — it runs in parallel with the
+    // slow product_thesis call instead of waiting behind it.
+    { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', estimatedSeconds: 35, dependencies: ['product_basics'] },
     { id: 'data_model',           title: SECTION_TITLES.data_model,           order: 5,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'grounding'] },
-    { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'product_thesis'] },
+    // ux_loops only truly needs the feature set; thesis is incidental context.
+    { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', estimatedSeconds: 25, dependencies: ['features'] },
     { id: 'architecture',         title: SECTION_TITLES.architecture,         order: 7,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'data_model'] },
-    { id: 'quality_risks',        title: SECTION_TITLES.quality_risks,        order: 8,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features', 'architecture'] },
+    // quality_risks is derivable from the feature set; it no longer waits on the
+    // long architecture chain.
+    { id: 'quality_risks',        title: SECTION_TITLES.quality_risks,        order: 8,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
     { id: 'metrics_scope',        title: SECTION_TITLES.metrics_scope,        order: 9,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
     { id: 'implementation_plan',  title: SECTION_TITLES.implementation_plan,  order: 10, risk: 'high', estimatedSeconds: 30, dependencies: ['features', 'data_model', 'architecture'] },
 ];
@@ -169,6 +188,49 @@ export const makeJsonProvider = (): ModelProvider => ({
     },
 });
 
+// ─── Graph validation ─────────────────────────────────────────────────────────
+// Run before execution so a malformed graph fails fast and loudly instead of
+// silently deadlocking (sections that never run would be quietly dropped from
+// the merged PRD). Detects (a) dependencies referencing unknown section ids and
+// (b) circular dependencies (Kahn's algorithm — if fewer than all nodes can be
+// topologically processed, a cycle exists).
+export const validateGraph = (sections: PrdSectionTemplate[]): void => {
+    const ids = new Set(sections.map(s => s.id));
+    const inDegree: Record<string, number> = {};
+    const dependents: Record<string, string[]> = {};
+    for (const s of sections) {
+        inDegree[s.id] = 0;
+        dependents[s.id] = [];
+    }
+    for (const s of sections) {
+        for (const dep of (s.dependencies ?? [])) {
+            if (!ids.has(dep)) {
+                throw new Error(
+                    `Invalid PRD section graph: "${s.id}" depends on unknown section "${dep}"`,
+                );
+            }
+            inDegree[s.id]++;
+            dependents[dep].push(s.id);
+        }
+    }
+
+    const queue: string[] = sections.filter(s => inDegree[s.id] === 0).map(s => s.id);
+    let processed = 0;
+    while (queue.length > 0) {
+        const id = queue.shift()!;
+        processed++;
+        for (const dep of dependents[id]) {
+            if (--inDegree[dep] === 0) queue.push(dep);
+        }
+    }
+    if (processed < sections.length) {
+        const cyclic = sections.filter(s => inDegree[s.id] > 0).map(s => s.id);
+        throw new Error(
+            `Circular dependency detected in PRD section graph among: ${cyclic.join(', ')}`,
+        );
+    }
+};
+
 // ─── DAG executor ────────────────────────────────────────────────────────────
 // Runs sections respecting dependency ordering with separate per-tier
 // concurrency caps. Each section receives the already-merged partial PRD from
@@ -176,13 +238,20 @@ export const makeJsonProvider = (): ModelProvider => ({
 //
 // `results` is passed in by reference from the caller so both the worker and
 // buildUpstream share the same source of truth for completed section values.
+//
+// `onReady` fires when a section's dependencies are all satisfied and it enters
+// the ready queue (it may still wait for a free concurrency slot before the
+// worker actually starts it).
 
 async function runDag(
     sections: PrdSectionTemplate[],
     config: ProgressiveGenerationConfig,
     results: Record<string, Partial<StructuredPRD> | null>,
     worker: (section: PrdSectionTemplate, upstream: Partial<StructuredPRD>) => Promise<void>,
+    onReady?: (sectionId: string) => void,
 ): Promise<void> {
+    validateGraph(sections);
+
     const sectionMap = Object.fromEntries(sections.map(s => [s.id, s]));
 
     // Build the dependency graph.
@@ -206,6 +275,8 @@ async function runDag(
     const strongMax = config.maxStrongConcurrency;
 
     const ready: PrdSectionTemplate[] = sections.filter(s => (s.dependencies?.length ?? 0) === 0);
+    // Sections with no dependencies are ready immediately (awaiting only a slot).
+    for (const s of ready) onReady?.(s.id);
 
     // Notification gate: resolves whenever a section completes so the outer
     // loop can re-evaluate what's now runnable.
@@ -225,7 +296,10 @@ async function runDag(
         settled.add(sectionId);
         for (const depId of dependents[sectionId]) {
             inDegree[depId]--;
-            if (inDegree[depId] === 0) ready.push(sectionMap[depId]);
+            if (inDegree[depId] === 0) {
+                ready.push(sectionMap[depId]);
+                onReady?.(depId);
+            }
         }
         notifyTick();
     };
@@ -265,7 +339,14 @@ async function runDag(
         }
 
         const allIdle = fastRunning === 0 && strongRunning === 0;
-        if (!dispatched && allIdle) break; // deadlock guard (should not happen)
+        if (!dispatched && allIdle) {
+            // Nothing running and nothing dispatchable while sections remain
+            // unsettled — only possible with a cyclic/broken graph, which
+            // validateGraph should have rejected. Fail loudly rather than
+            // silently dropping the unreachable sections from the PRD.
+            const stuck = sections.filter(s => !settled.has(s.id)).map(s => s.id);
+            throw new Error(`PRD DAG deadlock: unreachable sections ${stuck.join(', ')}`);
+        }
         if (!dispatched || (ready.length > 0 && (fastRunning >= fastMax || strongRunning >= strongMax))) {
             await waitForTick();
         }
@@ -298,9 +379,6 @@ export async function generateProgressivePrd(params: {
 
     const worker = async (section: PrdSectionTemplate, upstream: Partial<StructuredPRD>) => {
         const job = jobs[section.id];
-        job.status = 'queued';
-        params.onEvent?.({ type: 'section_queued', sectionId: section.id });
-
         const tier = selectModelTier(section.risk);
         const model = selectModelForTier(tier, params.config);
         const schema = SECTION_SCHEMAS[section.id];
@@ -380,7 +458,13 @@ export async function generateProgressivePrd(params: {
         }
     };
 
-    await runDag(sections, params.config, results, worker);
+    await runDag(
+        sections,
+        params.config,
+        results,
+        worker,
+        (sectionId) => params.onEvent?.({ type: 'section_ready', sectionId }),
+    );
 
     params.onEvent?.({ type: 'session_completed' });
     return { jobs, results };

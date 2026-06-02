@@ -30,6 +30,15 @@ export function StatusIcon({ status, size = 'md' }: { status: GenerationStepStat
             </span>
         );
     }
+    if (status === 'queued') {
+        // Dependencies satisfied, waiting for a free slot — distinct from the
+        // plain "pending (waiting on deps)" ring.
+        return (
+            <span className={`${dim} shrink-0 rounded-full border-2 border-amber-400 flex items-center justify-center`}>
+                <span className="w-1.5 h-1.5 rounded-full bg-amber-400" />
+            </span>
+        );
+    }
     return <span className={`${dim} shrink-0 rounded-full border-2 border-neutral-300 bg-white`} />;
 }
 
@@ -38,9 +47,9 @@ export function StatusIcon({ status, size = 'md' }: { status: GenerationStepStat
 export function ModelChip({ model }: { model: string }) {
     if (!model) return null;
     return (
-        <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium px-2 py-0.5 whitespace-nowrap">
+        <span className="inline-flex items-center gap-1 rounded-md bg-indigo-50 text-indigo-700 text-xs font-medium px-2 py-0.5 max-w-full min-w-0">
             <Sparkles size={11} className="shrink-0" />
-            {model}
+            <span className="truncate">{model}</span>
         </span>
     );
 }
@@ -65,8 +74,12 @@ function TimeBlock({ step }: { step: GenerationStep }) {
         if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
         const a = fixed(step.actualSeconds);
         if (a) lines.push({ text: `Actual: ${a}`, cls: 'text-neutral-500' });
+    } else if (step.status === 'queued') {
+        lines.push({ text: 'Queued', cls: 'text-amber-600 font-medium' });
+        const est = roundEst(step.estimatedSeconds);
+        if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
     } else {
-        lines.push({ text: 'Pending', cls: 'text-neutral-400' });
+        lines.push({ text: 'Waiting', cls: 'text-neutral-400' });
         const est = roundEst(step.estimatedSeconds);
         if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
     }
@@ -104,16 +117,26 @@ export function StepBody({
         <div className="flex-1 min-w-0">
             <div className="flex items-start justify-between gap-3">
                 <div className="min-w-0">
-                    <div className="flex items-center gap-2">
+                    <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-sm font-semibold text-neutral-800">
                             <span className="text-neutral-400 font-medium mr-1.5">{step.label}.</span>
                             {step.title}
                         </span>
+                        {step.retryCount != null && step.retryCount > 0 && (
+                            <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold px-1.5 py-0.5">
+                                Retried ×{step.retryCount}
+                            </span>
+                        )}
                     </div>
                     {showDetails && step.description && (
                         <p className="text-xs text-neutral-500 mt-0.5">{step.description}</p>
                     )}
-                    <div className="mt-1.5">
+                    {(step.status === 'pending' || step.status === 'queued') && step.dependsOn && step.dependsOn.length > 0 && (
+                        <p className="text-xs text-neutral-400 mt-0.5 break-words">
+                            {step.status === 'queued' ? 'Ready — waiting for a slot' : `Waits on: ${step.dependsOn.join(', ')}`}
+                        </p>
+                    )}
+                    <div className="mt-1.5 min-w-0">
                         <ModelChip model={step.modelName} />
                     </div>
                 </div>

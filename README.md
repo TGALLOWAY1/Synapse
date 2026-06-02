@@ -44,12 +44,15 @@ the PRD prompt as authoritative intent.
 
 <img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" />
 
-The PRD is generated as structured JSON in a single streaming pass, and a live
-**progress timeline** shows exactly what's happening: the ten PRD sections are
-grouped into dependency *waves*, with independent sections rendered as
-"running concurrently" groups. Each step shows its status, the actual Gemini
-model in use, and elapsed/estimated timing. A failed section can be re-run on
-its own without touching the rest of the document.
+The PRD is generated as structured JSON by a **dependency-graph pipeline**:
+the ten sections run concurrently the moment their inputs are ready — they are
+never sequenced just because they appear later in the document. A live
+**progress timeline** shows exactly what's happening: sections are grouped into
+dependency *waves*, with independent sections rendered as "running
+concurrently" groups, and each step shows whether it's waiting on dependencies,
+queued for a free slot, or running — alongside the actual Gemini model in use
+and elapsed/estimated timing. A failed section can be re-run on its own without
+touching the rest of the document.
 
 You get back a structured PRD with vision, target users, core problems,
 features (with priority, acceptance criteria, and dependencies), architecture,

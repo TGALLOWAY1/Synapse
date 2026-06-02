@@ -8,6 +8,7 @@ import type {
     PreflightMode, PreflightQuestion,
 } from '../types';
 import type { SectionId } from '../lib/schemas/prdSchemas';
+import type { PrdSectionStatusEntry } from './slices/prdProgressSlice';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -153,20 +154,9 @@ export interface ProjectState {
     clearPrdProgress: (projectId: string) => void;
     getPrdProgress: (projectId: string) => { messages: string[]; updatedAt: number } | undefined;
 
-    // Per-section generation status grid (transient — excluded from persist)
-    prdSectionStatus: Record<string, Record<SectionId, {
-        tier: 'fast' | 'strong';
-        status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
-        model?: string;
-        ms?: number;
-        error?: string;
-    }> | undefined>;
-    setSectionStatus: (projectId: string, sectionId: SectionId, update: Partial<{
-        tier: 'fast' | 'strong';
-        status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
-        model?: string;
-        ms?: number;
-        error?: string;
-    }>) => void;
+    // Per-section generation status grid (transient — excluded from persist).
+    // Shape is the canonical PrdSectionStatusEntry from the slice.
+    prdSectionStatus: Record<string, Record<SectionId, PrdSectionStatusEntry> | undefined>;
+    setSectionStatus: (projectId: string, sectionId: SectionId, update: Partial<PrdSectionStatusEntry>) => void;
     clearSectionStatus: (projectId: string) => void;
 }

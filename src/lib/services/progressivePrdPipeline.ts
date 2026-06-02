@@ -7,6 +7,8 @@ import { getFastModel, getStrongModel } from '../geminiClient';
 import { generateProgressivePrd, DEFAULT_PRD_SECTIONS, selectModelTier } from './progressivePrdGeneration';
 import { parseSectionResults, mergeSectionsToStructuredPrd } from './prdSectionMerge';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
+import { reviewPrdConsistency } from './prdConsistencyReview';
+import { logPrd, type PrdLogSurface } from './prdGenerationLog';
 import type { PrdPipelineOptions, PrdPipelineResult } from './prdPipeline';
 import type { StructuredPRD, GenerationPassRecord } from '../../types';
 import type { SectionId } from '../schemas/prdSchemas';
@@ -22,6 +24,8 @@ export type SectionStatusUpdate = {
     error?: string;
     /** Rough wall-clock estimate (seconds) shown in the progress UI. */
     estimatedSeconds?: number;
+    /** Section ids this section depends on (for the "Waits on:" hint). */
+    dependsOn?: SectionId[];
 };
 
 export interface ProgressivePrdPipelineOptions extends PrdPipelineOptions {
@@ -30,14 +34,24 @@ export interface ProgressivePrdPipelineOptions extends PrdPipelineOptions {
      * per-section grid UI in prdProgressSlice.
      */
     onSectionStatus?: (sectionId: SectionId, update: SectionStatusUpdate) => void;
+    /**
+     * When true, run a final cross-section consistency-review pass after the
+     * DAG completes. Default false — the deterministic merge is the fast path;
+     * the review adds one extra model call. See prdConsistencyReview.ts.
+     */
+    enableConsistencyReview?: boolean;
+    /** Rendering surface, attached to structured logs for observability. */
+    surface?: PrdLogSurface;
 }
+
+const SECTION_BY_ID = Object.fromEntries(DEFAULT_PRD_SECTIONS.map(s => [s.id, s]));
 
 export const runProgressivePrdPipeline = async (
     promptText: string,
     options: ProgressivePrdPipelineOptions = {},
     platform?: ProjectPlatform,
 ): Promise<PrdPipelineResult> => {
-    const { onStatus, onPartial, onProgress, onSectionStatus, signal } = options;
+    const { onStatus, onPartial, onProgress, onSectionStatus, signal, enableConsistencyReview, surface } = options;
 
     const fastModel = getFastModel();
     const strongModel = getStrongModel();
@@ -51,6 +65,7 @@ export const runProgressivePrdPipeline = async (
 
     onStatus?.('Starting progressive PRD generation…');
     onProgress?.('Sending request to model…');
+    logPrd({ event: 'run_started', surface, model: `${fastModel} / ${strongModel}` });
 
     const { jobs, results } = await generateProgressivePrd({
         prompt: promptText,
@@ -79,13 +94,42 @@ export const runProgressivePrdPipeline = async (
             }
         },
         onEvent: (event) => {
-            if (event.type === 'section_started') {
+            if (event.type === 'session_started') {
+                // Seed the grid: every section starts 'pending' (waiting on deps)
+                // with its dependency list and estimate so the UI can render the
+                // full plan immediately.
+                for (const section of DEFAULT_PRD_SECTIONS) {
+                    onSectionStatus?.(section.id, {
+                        tier: selectModelTier(section.risk) === 'fast' ? 'fast' : 'strong',
+                        status: 'pending',
+                        estimatedSeconds: section.estimatedSeconds,
+                        dependsOn: section.dependencies ?? [],
+                    });
+                }
+            } else if (event.type === 'section_ready') {
+                // Dependencies satisfied — now waiting only for a concurrency slot.
+                const section = SECTION_BY_ID[event.sectionId];
+                const tier = section ? selectModelTier(section.risk) : 'strong';
+                logPrd({ event: 'section_queued', sectionId: event.sectionId, surface });
+                onSectionStatus?.(event.sectionId as SectionId, {
+                    tier: tier === 'fast' ? 'fast' : 'strong',
+                    status: 'queued',
+                });
+            } else if (event.type === 'section_started') {
                 sectionStarts[event.sectionId] = performance.now();
-                const startedSection = DEFAULT_PRD_SECTIONS.find(s => s.id === event.sectionId);
+                const startedSection = SECTION_BY_ID[event.sectionId];
                 const tierLabel = event.modelTier === 'fast' ? 'Flash' : 'Pro';
                 const estimate = startedSection?.estimatedSeconds;
                 const estimateSuffix = estimate ? ` · ~${estimate}s` : '';
                 onProgress?.(`Generating ${startedSection?.title ?? event.sectionId} (${tierLabel}${estimateSuffix})…`);
+                logPrd({
+                    event: 'section_started',
+                    sectionId: event.sectionId,
+                    tier: event.modelTier === 'fast' ? 'fast' : 'strong',
+                    model: event.model,
+                    estimatedSeconds: estimate,
+                    surface,
+                });
                 onSectionStatus?.(event.sectionId as SectionId, {
                     tier: event.modelTier === 'fast' ? 'fast' : 'strong',
                     status: 'generating',
@@ -94,9 +138,17 @@ export const runProgressivePrdPipeline = async (
                 });
             } else if (event.type === 'section_completed') {
                 const ms = performance.now() - (sectionStarts[event.sectionId] ?? overallStart);
-                const section = DEFAULT_PRD_SECTIONS.find(s => s.id === event.sectionId);
+                const section = SECTION_BY_ID[event.sectionId];
                 const tier = section ? selectModelTier(section.risk) : 'strong';
                 onProgress?.(`✓ ${section?.title ?? event.sectionId} (${tier === 'fast' ? 'Flash' : 'Pro'}) · ${(ms / 1000).toFixed(1)}s`);
+                logPrd({
+                    event: 'section_completed',
+                    sectionId: event.sectionId,
+                    tier: tier === 'fast' ? 'fast' : 'strong',
+                    estimatedSeconds: section?.estimatedSeconds,
+                    actualSeconds: ms / 1000,
+                    surface,
+                });
                 onSectionStatus?.(event.sectionId as SectionId, {
                     tier: tier === 'fast' ? 'fast' : 'strong',
                     status: 'complete',
@@ -105,8 +157,16 @@ export const runProgressivePrdPipeline = async (
                 passes.push({ stage: event.sectionId, ms, ok: true });
             } else if (event.type === 'section_error') {
                 const ms = performance.now() - (sectionStarts[event.sectionId] ?? overallStart);
-                const section = DEFAULT_PRD_SECTIONS.find(s => s.id === event.sectionId);
+                const section = SECTION_BY_ID[event.sectionId];
                 const tier = section ? selectModelTier(section.risk) : 'strong';
+                logPrd({
+                    event: 'section_failed',
+                    sectionId: event.sectionId,
+                    tier: tier === 'fast' ? 'fast' : 'strong',
+                    actualSeconds: ms / 1000,
+                    error: event.error,
+                    surface,
+                });
                 onSectionStatus?.(event.sectionId as SectionId, {
                     tier: tier === 'fast' ? 'fast' : 'strong',
                     status: 'error',
@@ -115,7 +175,7 @@ export const runProgressivePrdPipeline = async (
                 });
                 passes.push({ stage: event.sectionId, ms, ok: false });
             } else if (event.type === 'section_refining') {
-                const section = DEFAULT_PRD_SECTIONS.find(s => s.id === event.sectionId);
+                const section = SECTION_BY_ID[event.sectionId];
                 const tier = section ? selectModelTier(section.risk) : 'strong';
                 onSectionStatus?.(event.sectionId as SectionId, {
                     tier: tier === 'fast' ? 'fast' : 'strong',
@@ -128,11 +188,40 @@ export const runProgressivePrdPipeline = async (
     onProgress?.('Merging sections…');
 
     const sectionResults = parseSectionResults(results);
-    const structuredPRD = mergeSectionsToStructuredPrd(sectionResults);
-    const markdown = renderPremiumMarkdown(structuredPRD);
+    let structuredPRD = mergeSectionsToStructuredPrd(sectionResults);
 
     const allJobs = Object.values(jobs);
     const failedSections = allJobs.filter(j => j.status === 'error');
+
+    // Optional final consistency-review pass. Reconciles terminology, names,
+    // duplicates, and contradictions introduced by parallel generation. Skipped
+    // by default (extra model call) and never runs when every section failed
+    // (handled below) or on a heavily-degraded partial. Guarded against detail
+    // loss inside reviewPrdConsistency — a lossy revision is discarded.
+    let reviewed = false;
+    if (enableConsistencyReview && failedSections.length === 0) {
+        onProgress?.('Reviewing for consistency…');
+        const reviewStart = performance.now();
+        try {
+            const review = await reviewPrdConsistency(structuredPRD, { signal });
+            const reviewMs = performance.now() - reviewStart;
+            reviewed = review.applied;
+            if (review.applied) structuredPRD = review.prd;
+            passes.push({ stage: 'consistency_review', ms: reviewMs, ok: true });
+            logPrd({
+                event: 'consistency_review',
+                actualSeconds: reviewMs / 1000,
+                detail: review.applied ? (review.changeLog || 'applied') : 'discarded (no-op or detail-loss guard)',
+                surface,
+            });
+        } catch (e) {
+            // A review failure must never fail the whole generation — keep the
+            // deterministically-merged PRD.
+            console.warn('[prd] consistency review failed; keeping merged PRD.', e);
+        }
+    }
+
+    const markdown = renderPremiumMarkdown(structuredPRD);
 
     // If every section errored, the merged PRD is just stub fields — that's
     // not a "successful" result, it's a total outage (auth/quota/network).
@@ -154,6 +243,12 @@ export const runProgressivePrdPipeline = async (
     }
 
     const totalMs = performance.now() - overallStart;
+    logPrd({
+        event: 'run_completed',
+        totalMs,
+        surface,
+        detail: `${allJobs.length - failedSections.length}/${allJobs.length} sections ok${reviewed ? ', consistency-reviewed' : ''}`,
+    });
 
     return {
         structuredPRD,
@@ -161,7 +256,7 @@ export const runProgressivePrdPipeline = async (
         generationMeta: {
             passes,
             totalMs,
-            revised: false,
+            revised: reviewed,
             schemaVersion: PRD_SCHEMA_VERSION,
         },
         model: `${fastModel} / ${strongModel}`,

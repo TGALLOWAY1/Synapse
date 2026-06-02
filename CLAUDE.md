@@ -111,13 +111,35 @@ otherwise have nothing in common — keep that distinction in mind:
 
 - **`services/`** — one file per AI feature. Importing through the
   `llmProvider.ts` barrel keeps legacy call sites stable.
-  - `prdService.ts` + `prdPipeline.ts` — PRD generation. Pipeline is now
-    **single-pass**: Pass A streams a structured PRD (Gemini JSON mode with
-    `prdSchemas.structuredPRDSchema`) with the quality rubric baked into
-    the system prompt; markdown is rendered deterministically from the
-    JSON via `prdMarkdownRenderer.ts`. The legacy multi-pass scoring +
-    revision passes were removed — old projects in localStorage retain
-    their saved `qualityScores`, but no new generation writes them.
+  - `prdService.ts` → `progressivePrdPipeline.ts` → `progressivePrdGeneration.ts`
+    — PRD generation runs as a **dependency-graph (DAG) pipeline**, not in
+    document order. `DEFAULT_PRD_SECTIONS` (10 schema-aligned sections in
+    `progressivePrdGeneration.ts`) each declare `dependencies` that are **true
+    data dependencies only** — a section lists another solely when it consumes
+    that section's output as prompt context. `runDag()` runs every section whose
+    deps are satisfied concurrently, under separate per-tier concurrency caps
+    (`maxFastConcurrency` / `maxStrongConcurrency`); low-risk sections use the
+    fast (Flash) model, high-risk the strong (Pro) model. `validateGraph()` runs
+    first and throws on unknown-dependency references or cycles (Kahn's
+    algorithm) so a broken graph fails loudly instead of silently dropping
+    sections. Each section emits a typed slice of `StructuredPRD`; slices are
+    merged deterministically (`prdSectionMerge.ts`, disjoint top-level fields)
+    and markdown is rendered via `prdMarkdownRenderer.ts`. Do **not** re-add
+    edges to sequence sections by document position — only by real data flow.
+    The legacy multi-pass scoring + revision passes were removed — old projects
+    in localStorage retain their saved `qualityScores`, but no new generation
+    writes them.
+    - **Optional final consistency review** (`prdConsistencyReview.ts`): off by
+      default (one extra fast-model call). When enabled (localStorage
+      `synapse-prd-consistency-review === 'true'`, threaded through as
+      `enableConsistencyReview`), it reconciles terminology / names /
+      contradictions across the merged PRD. It **merges over the original**
+      (omitted fields preserved) and a **detail-loss guard** discards any
+      revision that would shrink/empty a key content array; on apply it sets
+      `generationMeta.revised` and adds a `consistency_review` pass record.
+    - **Observability** (`prdGenerationLog.ts`): structured, debug-gated logs
+      (`synapse-prd-debug` / `?prddebug`) for queued/started/completed/failed,
+      retry, run summary, model, est-vs-actual, and `surface` (mobile/web).
   - `mockupService.ts` + `mockupImageService.ts` — mockup HTML and image
     generation.
   - `coreArtifactService.ts` — the 7 core artifact types
@@ -355,10 +377,19 @@ component). It is driven directly by the live `prdSectionStatus` store slice
   `formatModelName()` renders the actual configured Gemini id (e.g.
   `gemini-3-flash-preview` → "Gemini 3 Flash (preview)") — no hardcoded model
   names. `summarizeSteps()` derives the header count/percent/status.
+  The executor emits a `section_ready` event when a section's deps are
+  satisfied, so the grid distinguishes two waiting states: **`pending`** =
+  waiting on dependencies (shows "Waits on: …"), **`queued`** = deps satisfied,
+  waiting for a free concurrency slot. `mapStatus()` keeps these distinct;
+  leaves also carry `dependsOn` (resolved to titles) and `retryCount`.
 - **`ProgressTimeline.tsx`** / `TimelineStep.tsx` / `ConcurrentGroup.tsx` —
-  presentation. Status icons (completed/in-progress/failed/pending), an
-  always-visible model chip, and explicitly-labeled times (`Actual:`/`Est.
-  ~`/`Elapsed:`). A 1s ticker injects live `Elapsed:` from `startedAt`.
+  presentation. Status icons (completed/in-progress/queued/failed/pending — the
+  amber `queued` ring is distinct from the plain `pending` ring), an
+  always-visible (truncating) model chip, a "Retried ×N" badge, and
+  explicitly-labeled times (`Actual:`/`Est. ~`/`Elapsed:`). A 1s ticker injects
+  live `Elapsed:` from `startedAt` (re-stamped on each `generating` transition,
+  so retries show fresh elapsed). Responsive rules (`min-w-0`, truncation, no
+  `whitespace-nowrap` on the model chip) keep narrow screens from overlapping.
   Mobile collapses per-step detail behind chevrons and shows a `View full
   history >` link (navigates to the History stage); desktop shows
   description/model/status/est/actual/retry and concurrent groups without

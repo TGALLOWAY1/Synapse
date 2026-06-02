@@ -9,6 +9,13 @@ export interface PrdProgressEntry {
 
 export interface PrdSectionStatusEntry {
     tier: 'fast' | 'strong';
+    /**
+     * - `pending`    — waiting on dependencies (an upstream section is not done)
+     * - `queued`     — dependencies satisfied, waiting for a free concurrency slot
+     * - `generating` — model call in flight
+     * - `refining`   — optional confidence refinement pass
+     * - `complete` / `error` — settled
+     */
     status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
     model?: string;
     ms?: number;
@@ -17,6 +24,10 @@ export interface PrdSectionStatusEntry {
     estimatedSeconds?: number;
     /** Wall-clock start timestamp (ms) — set when status flips to 'generating'. */
     startedAt?: number;
+    /** Section ids this section depends on (for the progress UI "Waits on:" hint). */
+    dependsOn?: SectionId[];
+    /** Number of manual retries applied to this section. */
+    retryCount?: number;
 }
 
 export type PrdProgressSlice = {
@@ -78,9 +89,11 @@ export const createPrdProgressSlice: StateCreator<
             const current = state.prdSectionStatus[projectId] ?? {} as Record<SectionId, PrdSectionStatusEntry>;
             const existing = current[sectionId] ?? { tier: update.tier ?? 'strong', status: 'pending' };
             const merged: PrdSectionStatusEntry = { ...existing, ...update };
-            // Stamp wall-clock start the first time a section flips to 'generating'
-            // so the live elapsed counter has a stable origin across re-renders.
-            if (update.status === 'generating' && !merged.startedAt) {
+            // Stamp wall-clock start whenever a section (re)enters 'generating'
+            // so the live elapsed counter has a fresh origin — including on
+            // retry, where a stale startedAt would otherwise show a huge elapsed.
+            // The update itself can override (e.g. carry an explicit startedAt).
+            if (update.status === 'generating' && update.startedAt === undefined) {
                 merged.startedAt = Date.now();
             }
             return {

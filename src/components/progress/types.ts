@@ -1,6 +1,12 @@
 import type { SectionId } from '../../lib/schemas/prdSchemas';
 
-export type GenerationStepStatus = 'pending' | 'in_progress' | 'completed' | 'failed';
+/**
+ * - `pending`     — waiting on dependencies (an upstream section isn't done)
+ * - `queued`      — dependencies satisfied, waiting for a free concurrency slot
+ * - `in_progress` — model call running
+ * - `completed` / `failed` — settled
+ */
+export type GenerationStepStatus = 'pending' | 'queued' | 'in_progress' | 'completed' | 'failed';
 
 /**
  * One node in the PRD generation timeline. A node is either a leaf section or a
@@ -28,4 +34,8 @@ export type GenerationStep = {
     executionMode?: 'sequential' | 'concurrent';
     /** Present on leaf rows that map to a real pipeline section (retry target). */
     sectionId?: SectionId;
+    /** Titles of the sections this step waits on (shown while pending). */
+    dependsOn?: string[];
+    /** Number of manual retries applied to this section (badge when > 0). */
+    retryCount?: number;
 };

@@ -5,7 +5,43 @@ import {
   generateProgressivePrd,
   makeSkeletonJobs,
   selectModelTier,
+  validateGraph,
+  type PrdSectionTemplate,
 } from '../services/progressivePrdGeneration';
+
+const baseConfig = {
+  fastModel: 'fast',
+  strongModel: 'strong',
+  maxFastConcurrency: 4,
+  maxStrongConcurrency: 3,
+  enableRefinementPass: false,
+};
+
+/**
+ * Provider that tracks peak simultaneous in-flight calls and lets each call's
+ * resolution be deferred, so concurrency can be asserted deterministically.
+ */
+const makeConcurrencyProvider = (delayMs = 5) => {
+  let inFlight = 0;
+  let peak = 0;
+  const order: string[] = [];
+  return {
+    get peak() { return peak; },
+    order,
+    provider: {
+      async generateText(input: { prompt: string; model: string; schema: object }) {
+        inFlight++;
+        peak = Math.max(peak, inFlight);
+        // Record which section by matching the unique "<id> slice" marker in the prompt.
+        const marker = DEFAULT_PRD_SECTIONS.find(s => input.prompt.includes(`${s.id} slice`));
+        if (marker) order.push(marker.id);
+        await new Promise(r => setTimeout(r, delayMs));
+        inFlight--;
+        return '{}';
+      },
+    },
+  };
+};
 
 describe('progressive PRD generation', () => {
   it('routes low risk tasks to fast tier', () => {
@@ -182,5 +218,122 @@ describe('progressive PRD generation', () => {
 
     expect(jobs.product_thesis.status).toBe('error');
     expect(jobs.features.status).toBe('complete');
+  });
+
+  // ─── DAG executor hardening ────────────────────────────────────────────────
+
+  it('runs independent sections concurrently (peak concurrency > 1)', async () => {
+    const tracker = makeConcurrencyProvider(10);
+    // product_thesis and grounding are both independent (depend only on
+    // product_basics) so after basics they should overlap.
+    const sections = [
+      DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!,
+      DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_thesis')!,
+      DEFAULT_PRD_SECTIONS.find(s => s.id === 'grounding')!,
+    ];
+    await generateProgressivePrd({
+      prompt: 'concurrent test',
+      provider: tracker.provider,
+      sections,
+      config: baseConfig,
+    });
+    expect(tracker.peak).toBeGreaterThan(1);
+  });
+
+  it('respects the per-tier max concurrency limit', async () => {
+    const tracker = makeConcurrencyProvider(10);
+    // 4 independent fast sections, but a fast cap of 2 → peak must be ≤ 2.
+    const sections: PrdSectionTemplate[] = ['a', 'b', 'c', 'd'].map((id, i) => ({
+      id: id as PrdSectionTemplate['id'],
+      title: id,
+      order: i + 1,
+      risk: 'low',
+      estimatedSeconds: 1,
+    }));
+    await generateProgressivePrd({
+      prompt: 'cap test',
+      provider: tracker.provider,
+      sections,
+      config: { ...baseConfig, maxFastConcurrency: 2 },
+    });
+    expect(tracker.peak).toBeLessThanOrEqual(2);
+  });
+
+  it('detects circular dependencies and throws', () => {
+    const cyclic: PrdSectionTemplate[] = [
+      { id: 'a' as PrdSectionTemplate['id'], title: 'a', order: 1, risk: 'low', estimatedSeconds: 1, dependencies: ['b' as PrdSectionTemplate['id']] },
+      { id: 'b' as PrdSectionTemplate['id'], title: 'b', order: 2, risk: 'low', estimatedSeconds: 1, dependencies: ['a' as PrdSectionTemplate['id']] },
+    ];
+    expect(() => validateGraph(cyclic)).toThrow(/circular dependency/i);
+  });
+
+  it('rejects a dependency referencing an unknown section', () => {
+    const broken: PrdSectionTemplate[] = [
+      { id: 'a' as PrdSectionTemplate['id'], title: 'a', order: 1, risk: 'low', estimatedSeconds: 1, dependencies: ['ghost' as PrdSectionTemplate['id']] },
+    ];
+    expect(() => validateGraph(broken)).toThrow(/unknown section/i);
+  });
+
+  it('a failed section does not block an unrelated independent branch', async () => {
+    const provider = {
+      async generateText(input: { prompt: string; model: string; schema: object }) {
+        if (input.prompt.includes('product_thesis slice')) throw new Error('boom');
+        return '{}';
+      },
+    };
+    // product_thesis and grounding are independent siblings (both depend only on
+    // product_basics). product_thesis failing must not stop grounding.
+    const sections = [
+      DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!,
+      DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_thesis')!,
+      DEFAULT_PRD_SECTIONS.find(s => s.id === 'grounding')!,
+    ];
+    const { jobs } = await generateProgressivePrd({
+      prompt: 'isolation test',
+      provider,
+      sections,
+      config: baseConfig,
+    });
+    expect(jobs.product_thesis.status).toBe('error');
+    expect(jobs.grounding.status).toBe('complete');
+  });
+
+  it('captures per-section start and completion timestamps', async () => {
+    const provider = { async generateText() { return '{}'; } };
+    const { jobs } = await generateProgressivePrd({
+      prompt: 'timing test',
+      provider,
+      sections: [DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!],
+      config: baseConfig,
+    });
+    expect(jobs.product_basics.startedAt).toBeTruthy();
+    expect(jobs.product_basics.completedAt).toBeTruthy();
+  });
+
+  it('emits section_ready before section_started for each section', async () => {
+    const provider = { async generateText() { return '{}'; } };
+    const events: Array<{ type: string; sectionId?: string }> = [];
+    await generateProgressivePrd({
+      prompt: 'transition test',
+      provider,
+      sections: [
+        DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!,
+        DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_thesis')!,
+      ],
+      config: baseConfig,
+      onEvent: (e) => {
+        if (e.type === 'section_ready' || e.type === 'section_started' || e.type === 'section_completed') {
+          events.push({ type: e.type, sectionId: (e as { sectionId?: string }).sectionId });
+        }
+      },
+    });
+    for (const id of ['product_basics', 'product_thesis']) {
+      const readyIdx = events.findIndex(e => e.type === 'section_ready' && e.sectionId === id);
+      const startedIdx = events.findIndex(e => e.type === 'section_started' && e.sectionId === id);
+      const completedIdx = events.findIndex(e => e.type === 'section_completed' && e.sectionId === id);
+      expect(readyIdx).toBeGreaterThanOrEqual(0);
+      expect(startedIdx).toBeGreaterThan(readyIdx);
+      expect(completedIdx).toBeGreaterThan(startedIdx);
+    }
   });
 });

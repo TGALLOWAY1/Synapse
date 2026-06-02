@@ -58,6 +58,10 @@ export const generateStructuredPRD = async (
          * questions as open unknowns.
          */
         preflight?: PreflightContext;
+        /** Run the optional final consistency-review pass (default false). */
+        enableConsistencyReview?: ProgressivePrdPipelineOptions['enableConsistencyReview'];
+        /** Rendering surface for observability logs. */
+        surface?: ProgressivePrdPipelineOptions['surface'];
     },
     platform?: ProjectPlatform,
 ): Promise<StructuredPRD> => {
@@ -97,6 +101,8 @@ export const generateStructuredPRD = async (
             onProgress: options?.onProgress,
             onSectionStatus: options?.onSectionStatus,
             signal: options?.signal,
+            enableConsistencyReview: options?.enableConsistencyReview,
+            surface: options?.surface,
         },
         platform,
     );

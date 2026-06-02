@@ -90,13 +90,17 @@ export const computeWaves = (
 const mapStatus = (s?: PrdSectionStatusEntry['status']): GenerationStepStatus => {
     if (s === 'complete') return 'completed';
     if (s === 'error') return 'failed';
-    if (s === 'generating' || s === 'queued' || s === 'refining') return 'in_progress';
+    if (s === 'generating' || s === 'refining') return 'in_progress';
+    // 'queued' = dependencies satisfied, waiting for a concurrency slot — kept
+    // distinct from 'pending' (waiting on deps) so the UI can label them apart.
+    if (s === 'queued') return 'queued';
     return 'pending';
 };
 
 const groupStatus = (children: GenerationStep[]): GenerationStepStatus => {
     if (children.some((c) => c.status === 'failed')) return 'failed';
     if (children.some((c) => c.status === 'in_progress')) return 'in_progress';
+    if (children.some((c) => c.status === 'queued')) return 'queued';
     if (children.length > 0 && children.every((c) => c.status === 'completed')) return 'completed';
     return 'pending';
 };
@@ -123,6 +127,9 @@ const buildLeaf = (
     const stepStatus = mapStatus(entry?.status);
     const tier = selectModelTier(template.risk);
     const modelName = formatModelName(entry?.model ?? (tier === 'fast' ? fastModel : strongModel));
+    // Resolve dependency ids to human titles for the "Waits on:" hint.
+    const depIds = entry?.dependsOn ?? template.dependencies ?? [];
+    const dependsOn = depIds.map((d) => SECTION_TITLES[d] ?? d);
     return {
         id: template.id,
         sectionId: template.id,
@@ -137,6 +144,8 @@ const buildLeaf = (
         errorMessage: entry?.error,
         canRetry: stepStatus === 'failed',
         executionMode,
+        dependsOn,
+        retryCount: entry?.retryCount,
     };
 };
 
