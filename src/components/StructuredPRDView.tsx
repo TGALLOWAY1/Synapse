@@ -5,7 +5,9 @@ import { useProjectStore } from '../store/projectStore';
 import { structuredPRDToMarkdown, replyInBranch, generateStructuredPRD } from '../lib/llmProvider';
 import { FeatureCard } from './FeatureCard';
 import { useSelectionPopover } from '../lib/useSelectionPopover';
+import { useIsMobile } from '../lib/useIsMobile';
 import { SelectionActionDialog } from './SelectionActionDialog';
+import { MobileSelectionToolbar } from './MobileSelectionToolbar';
 import { v4 as uuidv4 } from 'uuid';
 import type { StructuredPRD, Feature } from '../types';
 import {
@@ -58,11 +60,18 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
     const [isSubmitting, setIsSubmitting] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
 
+    // On mobile, gate selection behind an explicit "Select text to edit" mode so
+    // the Synapse sheet doesn't collide with the native iOS toolbar. Desktop is
+    // unchanged.
+    const isMobile = useIsMobile();
+    const [mobileSelectMode, setMobileSelectMode] = useState(false);
+
     // Shared, touch-aware selection pipeline. Disabled while inline-editing a
     // section so the textarea selection doesn't open the branch dialog.
-    const { selection, clear } = useSelectionPopover({
+    const { selection, pendingText, commit, clear } = useSelectionPopover({
         containerRef: contentRef,
-        enabled: !readOnly && !editingSection,
+        enabled: !readOnly && !editingSection && (!isMobile || mobileSelectMode),
+        manualCommit: isMobile && mobileSelectMode,
     });
 
     // Get active branches for this spine to highlight their anchors.
@@ -120,6 +129,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
     const dismiss = () => {
         clear();
         setIntent('');
+        setMobileSelectMode(false);
     };
 
     // Single branch-creation path shared by the typed-intent form (desktop) and
@@ -133,6 +143,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
             const { branchId } = createBranch(projectId, spineId, anchorText, userIntent);
             clear();
             setIntent('');
+            setMobileSelectMode(false);
             const response = await replyInBranch({ anchorText, intent: userIntent, threadHistory: [] });
             addBranchMessage(projectId, branchId, 'assistant', response);
         } finally {
@@ -637,6 +648,23 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     onSubmit={handleSubmit}
                     onQuickAction={handleQuickAction}
                     onDismiss={dismiss}
+                />
+            )}
+
+            {/* Mobile-only: explicit selection mode so the iOS toolbar and the
+                Synapse action sheet don't fight. Hidden while the sheet is open
+                or while inline-editing a section. */}
+            {isMobile && !readOnly && !editingSection && !selection && (
+                <MobileSelectionToolbar
+                    active={mobileSelectMode}
+                    hasSelection={!!pendingText}
+                    pendingText={pendingText}
+                    onActivate={() => setMobileSelectMode(true)}
+                    onEdit={commit}
+                    onCancel={() => {
+                        setMobileSelectMode(false);
+                        clear();
+                    }}
                 />
             )}
         </div>

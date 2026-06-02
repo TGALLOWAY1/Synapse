@@ -288,9 +288,26 @@ pipeline; do not reintroduce per-component `onMouseUp` selection logic.
   drag-handle route, which never fires a matching `mouseup`). Validates
   against a `containerRef`; a *collapsing* selection never auto-dismisses
   an open dialog (focusing the mobile input collapses the native range) —
-  dismissal is explicit via `clear()`.
+  dismissal is explicit via `clear()`. Supports a **`manualCommit`** mode
+  (the mobile path): instead of surfacing a valid selection immediately, it
+  only *tracks* it (exposed as `pendingText`) and waits for an explicit
+  `commit()` to surface it as `selection`. This stops the Synapse action
+  sheet from popping on the first selected word and fighting the native iOS
+  Copy/Look Up/Translate toolbar. Desktop (`manualCommit` omitted/false) is
+  unchanged — selections surface instantly.
 - **`src/lib/useIsMobile.ts`** — `matchMedia` hook at the Tailwind `md`
   breakpoint (jsdom-safe).
+- **`src/components/MobileSelectionToolbar.tsx`** — mobile-only control that
+  drives the manual-commit flow. **Idle:** a pinned "Select text to edit"
+  button (until tapped, the PRD is plain readable text with untouched native
+  iOS selection — the hook is `enabled: false`). **Active:** a persistent
+  footer ("Select text, then tap Edit selection") echoing `pendingText`, with
+  **Edit selection** (→ `commit()`) and **Cancel** (→ exit mode + `clear()`).
+  Both renderers wire it identically: `mobileSelectMode` state gates the hook
+  via `enabled: … && (!isMobile || mobileSelectMode)` and
+  `manualCommit: isMobile && mobileSelectMode`, and the toolbar is hidden while
+  the action sheet (or, in `StructuredPRDView`, an inline edit) is open. Mode
+  resets on dismiss / successful branch.
 - **`src/components/SelectionActionDialog.tsx`** — shared presentation:
   desktop = floating popover anchored to the selection rect; mobile =
   bottom sheet with `env(safe-area-inset-*)` insets and ≥44px tap

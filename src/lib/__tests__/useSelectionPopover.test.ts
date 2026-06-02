@@ -135,6 +135,88 @@ describe('useSelectionPopover', () => {
         expect(result.current.selection?.text).toBe('PRD');
     });
 
+    describe('manual-commit (mobile) mode', () => {
+        it('tracks but does not surface a selection until commit()', () => {
+            const node = container.firstChild;
+            vi.spyOn(window, 'getSelection').mockReturnValue(
+                makeFakeSelection({ text: 'world', node }),
+            );
+
+            const { result } = renderHook(() =>
+                useSelectionPopover({ containerRef: ref, enabled: true, manualCommit: true }),
+            );
+
+            act(() => {
+                document.dispatchEvent(new Event('selectionchange'));
+                vi.advanceTimersByTime(300);
+            });
+
+            // The action sheet must NOT auto-open — only the pending text is set.
+            expect(result.current.selection).toBeNull();
+            expect(result.current.pendingText).toBe('world');
+
+            act(() => {
+                result.current.commit();
+            });
+
+            expect(result.current.selection?.text).toBe('world');
+        });
+
+        it('commit() is a no-op when nothing is tracked', () => {
+            const { result } = renderHook(() =>
+                useSelectionPopover({ containerRef: ref, enabled: true, manualCommit: true }),
+            );
+
+            act(() => {
+                result.current.commit();
+            });
+
+            expect(result.current.selection).toBeNull();
+        });
+
+        it('clear() resets the tracked pending selection', () => {
+            const node = container.firstChild;
+            vi.spyOn(window, 'getSelection').mockReturnValue(
+                makeFakeSelection({ text: 'PRD', node }),
+            );
+
+            const { result } = renderHook(() =>
+                useSelectionPopover({ containerRef: ref, enabled: true, manualCommit: true }),
+            );
+
+            act(() => {
+                document.dispatchEvent(new Event('pointerup'));
+                vi.advanceTimersByTime(20);
+            });
+            expect(result.current.pendingText).toBe('PRD');
+
+            act(() => {
+                result.current.clear();
+            });
+            expect(result.current.pendingText).toBeNull();
+            expect(result.current.selection).toBeNull();
+        });
+
+        it('surfaces immediately when manualCommit is false (desktop regression guard)', () => {
+            const node = container.firstChild;
+            vi.spyOn(window, 'getSelection').mockReturnValue(
+                makeFakeSelection({ text: 'PRD', node }),
+            );
+
+            const { result } = renderHook(() =>
+                useSelectionPopover({ containerRef: ref, enabled: true, manualCommit: false }),
+            );
+
+            act(() => {
+                document.dispatchEvent(new Event('pointerup'));
+                vi.advanceTimersByTime(20);
+            });
+
+            expect(result.current.selection?.text).toBe('PRD');
+            expect(result.current.pendingText).toBeNull();
+        });
+    });
+
     it('clears when disabled', () => {
         const node = container.firstChild;
         vi.spyOn(window, 'getSelection').mockReturnValue(
