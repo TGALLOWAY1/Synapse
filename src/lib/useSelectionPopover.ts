@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useState, type RefObject } from 'react';
+import { useCallback, useEffect, useRef, useState, type RefObject } from 'react';
 import {
     getSelectionInfo,
     isValidSelection,
@@ -10,6 +10,16 @@ interface UseSelectionPopoverOptions {
     containerRef: RefObject<HTMLElement | null>;
     /** When false, no listeners are attached and no selection is surfaced. */
     enabled: boolean;
+    /**
+     * Manual-commit (mobile) mode. When true, a valid selection is *tracked*
+     * (exposed via `pendingText`) but is **not** surfaced as `selection` until
+     * `commit()` is called. This is what lets the user finish dragging the
+     * native iOS selection handles to a full phrase before the Synapse action
+     * sheet opens — instead of it popping on the first selected word and
+     * fighting the iOS Copy/Look Up toolbar. When false (desktop), a valid
+     * selection is surfaced immediately as before.
+     */
+    manualCommit?: boolean;
     /** Debounce (ms) for the `selectionchange` path — the mobile route. */
     selectionChangeDelay?: number;
     /** Delay (ms) after `pointerup` before reading the selection. */
@@ -18,6 +28,14 @@ interface UseSelectionPopoverOptions {
 
 interface UseSelectionPopoverResult {
     selection: SelectionInfo | null;
+    /**
+     * In manual-commit mode, the text of the latest tracked-but-uncommitted
+     * selection (for the mobile toolbar to echo). `null` when nothing is
+     * tracked or in immediate (desktop) mode.
+     */
+    pendingText: string | null;
+    /** Surface the tracked selection (manual-commit mode). No-op otherwise. */
+    commit: () => void;
     /** Imperatively dismiss the dialog and drop the native selection. */
     clear: () => void;
 }
@@ -48,16 +66,31 @@ interface UseSelectionPopoverResult {
 export function useSelectionPopover({
     containerRef,
     enabled,
+    manualCommit = false,
     selectionChangeDelay = 300,
     pointerUpDelay = 10,
 }: UseSelectionPopoverOptions): UseSelectionPopoverResult {
     const [selection, setSelection] = useState<SelectionInfo | null>(null);
+    // The latest valid selection tracked but not yet surfaced (manual-commit
+    // mode). A ref so `commit()` reads the freshest value without re-binding,
+    // mirrored into state so the toolbar re-renders as the selection grows.
+    const pendingRef = useRef<SelectionInfo | null>(null);
+    const [pendingText, setPendingText] = useState<string | null>(null);
 
     const clear = useCallback(() => {
         setSelection(null);
+        pendingRef.current = null;
+        setPendingText(null);
         if (typeof window !== 'undefined') {
             window.getSelection()?.removeAllRanges();
         }
+    }, []);
+
+    // Surface the tracked selection (manual-commit mode). Reads the tracked
+    // value rather than `window.getSelection()` so a button tap that collapses
+    // the native range can't lose the selection.
+    const commit = useCallback(() => {
+        if (pendingRef.current) setSelection(pendingRef.current);
     }, []);
 
     useEffect(() => {
@@ -72,7 +105,15 @@ export function useSelectionPopover({
             const sel = window.getSelection();
             if (isValidSelection(sel, containerRef.current)) {
                 const info = getSelectionInfo(sel);
-                if (info) setSelection(info);
+                if (info) {
+                    if (manualCommit) {
+                        // Track only — opening the action sheet waits for commit().
+                        pendingRef.current = info;
+                        setPendingText(info.text);
+                    } else {
+                        setSelection(info);
+                    }
+                }
             }
             // Invalid/collapsed selection: keep whatever is open. Dismissal is
             // explicit (see the dialog), which is what keeps mobile usable.
@@ -97,9 +138,14 @@ export function useSelectionPopover({
             document.removeEventListener('pointerup', onPointerUp);
             document.removeEventListener('selectionchange', onSelectionChange);
         };
-    }, [enabled, containerRef, selectionChangeDelay, pointerUpDelay]);
+    }, [enabled, manualCommit, containerRef, selectionChangeDelay, pointerUpDelay]);
 
     // Gate the surfaced value on `enabled` so toggling read-only / entering an
     // inline edit hides the dialog without a setState-in-effect.
-    return { selection: enabled ? selection : null, clear };
+    return {
+        selection: enabled ? selection : null,
+        pendingText: enabled ? pendingText : null,
+        commit,
+        clear,
+    };
 }

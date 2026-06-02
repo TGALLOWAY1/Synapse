@@ -66,7 +66,10 @@ Replace**, spawning a threaded branch scoped to just that passage.
   unified PRD iteration (local or document-wide scope).
 - **Touch-first** — the same highlight → action pipeline works with mouse,
   pen, and mobile long-press; the dialog is a floating popover on desktop and
-  a safe-area bottom sheet on mobile.
+  a safe-area bottom sheet on mobile. On phones, an explicit **Select text to
+  edit** mode lets you adjust the native selection to a full phrase before
+  tapping **Edit selection** — so the action sheet never fights the iOS
+  selection toolbar.
 
 <img width="100%" alt="Refine a passage — Clarify / Expand / Specify / Alternative / Replace dialog and threaded branch" src="public/screenshots/tour-refine.png" />
 

@@ -5,7 +5,9 @@ import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { replyInBranch } from '../lib/llmProvider';
 import { useSelectionPopover } from '../lib/useSelectionPopover';
+import { useIsMobile } from '../lib/useIsMobile';
 import { SelectionActionDialog } from './SelectionActionDialog';
+import { MobileSelectionToolbar } from './MobileSelectionToolbar';
 import { Callout } from './prd/Callout';
 
 interface SelectableSpineProps {
@@ -21,10 +23,17 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
     const spineRef = useRef<HTMLDivElement>(null);
     const { createBranch, addBranchMessage, branches } = useProjectStore();
 
+    // On mobile the selection sheet would collide with the native iOS toolbar,
+    // so we gate it behind an explicit "Select text to edit" mode (see
+    // MobileSelectionToolbar). Desktop is unchanged.
+    const isMobile = useIsMobile();
+    const [mobileSelectMode, setMobileSelectMode] = useState(false);
+
     // Shared, touch-aware selection pipeline (mouse + pointer + selectionchange).
-    const { selection, clear } = useSelectionPopover({
+    const { selection, pendingText, commit, clear } = useSelectionPopover({
         containerRef: spineRef,
-        enabled: !readOnly,
+        enabled: !readOnly && (!isMobile || mobileSelectMode),
+        manualCommit: isMobile && mobileSelectMode,
     });
 
     // Get active branches for this spine to highlight their anchors
@@ -56,6 +65,7 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
     const dismiss = () => {
         clear();
         setIntent('');
+        setMobileSelectMode(false);
     };
 
     // Single branch-creation path shared by the typed-intent form (desktop) and
@@ -73,6 +83,7 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
             // Clear selection UI immediately
             clear();
             setIntent('');
+            setMobileSelectMode(false);
 
             const response = await replyInBranch({ anchorText, intent: userIntent, threadHistory: [] });
             addBranchMessage(projectId, branchId, 'assistant', response);
@@ -125,6 +136,22 @@ export function SelectableSpine({ projectId, spineVersionId, text, readOnly }: S
                     onSubmit={handleSubmit}
                     onQuickAction={handleQuickAction}
                     onDismiss={dismiss}
+                />
+            )}
+
+            {/* Mobile-only: explicit selection mode so the iOS toolbar and the
+                Synapse action sheet don't fight. Hidden while the sheet is open. */}
+            {isMobile && !readOnly && !selection && (
+                <MobileSelectionToolbar
+                    active={mobileSelectMode}
+                    hasSelection={!!pendingText}
+                    pendingText={pendingText}
+                    onActivate={() => setMobileSelectMode(true)}
+                    onEdit={commit}
+                    onCancel={() => {
+                        setMobileSelectMode(false);
+                        clear();
+                    }}
                 />
             )}
         </div>
