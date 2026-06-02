@@ -6,6 +6,7 @@ import {
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
+import { useIsMobile } from '../lib/useIsMobile';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta } from '../lib/coreArtifactPipeline';
 import { ArtifactContentRenderer } from './renderers';
@@ -26,6 +27,12 @@ interface ArtifactWorkspaceProps {
     prdContent: string;
     structuredPRD: StructuredPRD;
     projectPlatform?: ProjectPlatform;
+    // One-shot signal that the user just arrived here by finalizing the PRD.
+    // When true, the panel auto-selects the first meaningful non-PRD artifact
+    // and opens the mobile drawer; consumed exactly once via onAutoOpenConsumed
+    // so closing the drawer never triggers a reopen.
+    autoOpenIntent?: boolean;
+    onAutoOpenConsumed?: () => void;
 }
 
 type WorkspaceSelection = 'prd' | ArtifactSlotKey;
@@ -73,7 +80,9 @@ function statusLabel(status: GenerationStatus): string {
 
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
+    autoOpenIntent, onAutoOpenConsumed,
 }: ArtifactWorkspaceProps) {
+    const isMobile = useIsMobile();
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
         updateArtifactVersionMetadata,
@@ -129,6 +138,25 @@ export function ArtifactWorkspace({
         if (key === 'prd') return undefined;
         return job?.slots[key]?.error;
     };
+
+    // Post-finalization auto-open. Runs once each time the parent arms
+    // autoOpenIntent: pick the first meaningful non-PRD artifact (prefer one
+    // that's already done, else generating, else queued, else the first slot
+    // in display order) so the user never lands on the PRD again, and open the
+    // mobile drawer so the asset list is visible. Consumed immediately so a
+    // user who closes the drawer is never re-interrupted.
+    useEffect(() => {
+        if (!autoOpenIntent) return;
+        const candidates = slotMetas.map(s => s.key).filter(k => k !== 'prd');
+        const firstWith = (s: GenerationStatus) => candidates.find(k => slotStatusFor(k) === s);
+        const pick = firstWith('done') ?? firstWith('generating') ?? firstWith('queued') ?? candidates[0];
+        if (pick) setSelected(pick);
+        if (isMobile) setMobileSidebarOpen(true);
+        onAutoOpenConsumed?.();
+        // slotStatusFor/slotMetas are stable for this purpose; we intentionally
+        // react only to the intent flag flipping on.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [autoOpenIntent]);
 
     // Derived counts for the right-rail header.
     const allKeys = slotMetas.map(s => s.key);
@@ -217,6 +245,14 @@ export function ArtifactWorkspace({
                     </div>
                 </div>
             );
+        }
+
+        // Idle while the overall run is still in flight means this slot hasn't
+        // started yet (e.g. cleared job, or waiting behind the concurrency
+        // limit). Show the global "creating your build assets" state rather
+        // than a bare "Not generated yet" so the workspace never looks empty.
+        if (status === 'idle' && isActive) {
+            return <BuildAssetsLoading />;
         }
 
         // status === 'done' or 'idle' — try to render the existing artifact.
@@ -570,6 +606,20 @@ function RightRail({
                 )}
             </div>
         </aside>
+    );
+}
+
+function BuildAssetsLoading() {
+    return (
+        <div className="max-w-lg mx-auto text-center py-16">
+            <Loader2 size={32} className="mx-auto mb-4 text-indigo-500 animate-spin" />
+            <h3 className="text-lg font-semibold text-neutral-900">Creating your build assets…</h3>
+            <p className="text-sm text-neutral-500 mt-2 leading-relaxed">
+                We&apos;re generating your data model, user flows, screen inventory, components,
+                design system, implementation plan, prompt pack, and mockups. Each appears in
+                the panel as it&apos;s ready.
+            </p>
+        </div>
     );
 }
 

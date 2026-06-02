@@ -25,6 +25,8 @@ import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
+import { FinalizationSuccessModal } from './FinalizationSuccessModal';
+import { CORE_ARTIFACT_DISPLAY_ORDER } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
@@ -39,7 +41,7 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     const [isGenerating, setIsGenerating] = useState(false);
@@ -55,6 +57,12 @@ export function ProjectWorkspace() {
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
     const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
+    // Post-finalization transition. `showFinalizeSuccess` drives the success
+    // modal shown immediately after Mark Final; `finalizeAutoOpen` is the
+    // one-shot intent handed to ArtifactWorkspace so it auto-opens the panel
+    // and selects the first non-PRD artifact on arrival from finalize.
+    const [showFinalizeSuccess, setShowFinalizeSuccess] = useState(false);
+    const [finalizeAutoOpen, setFinalizeAutoOpen] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -315,6 +323,18 @@ export function ProjectWorkspace() {
         setIsBranchesVisible(true);
     };
 
+    // True once every build asset (the 7 core artifacts + mockups) already has
+    // a generated version — i.e. nothing is left to create. Drives the success
+    // modal's "ready" vs "being created" copy. Cheap presence check; safe to
+    // run each render.
+    const assetsReady = !!activeSpine?.structuredPRD && (() => {
+        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER.every(meta =>
+            getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
+        );
+        const mockupReady = getArtifacts(projectId, 'mockup').some(a => a.currentVersionId);
+        return coreReady && mockupReady;
+    })();
+
     const handleToggleFinal = () => {
         if (!projectId || !activeSpine) return;
         // Blocked spines can never advance to the workspace / artifact stage.
@@ -323,7 +343,10 @@ export function ProjectWorkspace() {
         markSpineFinal(projectId, activeSpine.id, next);
         if (!next) return;
 
-        setProjectStage(projectId, 'workspace');
+        // Kick off artifact generation immediately so assets are underway
+        // while the success modal is visible. We deliberately do NOT switch
+        // to the Assets stage yet — the modal owns the transition, and its
+        // "Open Assets" action performs the navigation + panel auto-open.
         if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
             artifactJobController.startAll({
                 projectId,
@@ -333,6 +356,17 @@ export function ProjectWorkspace() {
                 projectPlatform: project?.platform,
             });
         }
+        setShowFinalizeSuccess(true);
+    };
+
+    // "Open Assets" from the success modal: navigate to the Assets stage and
+    // arm the one-shot auto-open intent so ArtifactWorkspace opens the panel
+    // and selects the first non-PRD artifact instead of defaulting to the PRD.
+    const handleOpenAssets = () => {
+        if (!projectId) return;
+        setShowFinalizeSuccess(false);
+        setFinalizeAutoOpen(true);
+        setProjectStage(projectId, 'workspace');
     };
 
     const handleExport = () => {
@@ -453,6 +487,13 @@ export function ProjectWorkspace() {
                 </div>
             </div>
 
+            {showFinalizeSuccess && (
+                <FinalizationSuccessModal
+                    assetsReady={assetsReady}
+                    onOpenAssets={handleOpenAssets}
+                    onClose={() => setShowFinalizeSuccess(false)}
+                />
+            )}
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
             {isExportOpen && projectId && <ExportModal projectId={projectId} onClose={() => setIsExportOpen(false)} />}
             {isSnapshotsOpen && projectId && (
@@ -495,6 +536,8 @@ export function ProjectWorkspace() {
                         prdContent={activeSpine.responseText}
                         structuredPRD={activeSpine.structuredPRD}
                         projectPlatform={project?.platform}
+                        autoOpenIntent={finalizeAutoOpen}
+                        onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
                     />
                 ) : (
                 <>
