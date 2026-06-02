@@ -2,7 +2,9 @@ import { useState, useEffect, useMemo, useRef } from 'react';
 import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2 } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
-import { structuredPRDToMarkdown, replyInBranch, generateStructuredPRD } from '../lib/llmProvider';
+import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
+import { regenerateGroundingFields } from '../lib/services/groundingService';
+import { SafetyBlockedError } from '../lib/safety';
 import { FeatureCard } from './FeatureCard';
 import { useSelectionPopover } from '../lib/useSelectionPopover';
 import { useIsMobile } from '../lib/useIsMobile';
@@ -226,7 +228,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
             if (structuredPRD.features?.length) {
                 summaryLines.push(`Features:\n${structuredPRD.features.slice(0, 8).map(f => `- ${f.name}: ${f.description}`).join('\n')}`);
             }
-            const regenerated = await generateStructuredPRD(summaryLines.join('\n\n'));
+            const regenerated = await regenerateGroundingFields(summaryLines.join('\n\n'));
             const merged: StructuredPRD = {
                 ...structuredPRD,
                 domainEntities: regenerated.domainEntities?.length
@@ -238,7 +240,14 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
             };
             savePRD(merged);
         } catch (e) {
-            setRefreshError(e instanceof Error ? e.message : 'Failed to refresh grounding fields.');
+            if (e instanceof SafetyBlockedError) {
+                setRefreshError(
+                    e.result.userFacingReason
+                    || 'This request was blocked by the safety review and cannot be processed.',
+                );
+            } else {
+                setRefreshError(e instanceof Error ? e.message : 'Failed to refresh grounding fields.');
+            }
         } finally {
             setIsRefreshingGrounding(false);
         }
