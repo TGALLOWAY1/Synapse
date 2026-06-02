@@ -275,13 +275,24 @@ export function ProjectWorkspace() {
         try {
             setRetryingStepId(sectionId);
             appendPrdProgress(projectId, `↻ Retrying ${title}…`);
+            // Carry the incremented retry count through this run so the progress
+            // UI can show a "Retried ×N" badge. Computed once from the current
+            // entry and stamped on the first ('generating') status emission.
+            const nextRetryCount = (prdSectionStatus?.[id]?.retryCount ?? 0) + 1;
+            let retryCountStamped = false;
             const { structuredPRD, markdown, model, ms } = await regeneratePrdSection(
                 id,
                 sourcePrompt,
                 activeSpine.structuredPRD,
                 {
                     platform: project?.platform,
-                    onSectionStatus: (sid, update) => setSectionStatus(projectId, sid, update),
+                    onSectionStatus: (sid, update) => {
+                        const enriched = !retryCountStamped
+                            ? { ...update, retryCount: nextRetryCount }
+                            : update;
+                        if (!retryCountStamped) retryCountStamped = true;
+                        setSectionStatus(projectId, sid, enriched);
+                    },
                 },
             );
             updateSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, markdown, {

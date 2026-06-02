@@ -20,6 +20,7 @@ const STATUS_PILL: Record<GenerationStepStatus, { label: string; cls: string }> 
     in_progress: { label: 'In progress', cls: 'bg-indigo-50 text-indigo-700' },
     completed: { label: 'Completed', cls: 'bg-green-50 text-green-700' },
     failed: { label: 'Failed', cls: 'bg-red-50 text-red-700' },
+    queued: { label: 'Queued', cls: 'bg-amber-50 text-amber-700' },
     pending: { label: 'Pending', cls: 'bg-neutral-100 text-neutral-600' },
 };
 

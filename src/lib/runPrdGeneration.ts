@@ -13,6 +13,21 @@ import {
 } from './safety';
 import type { ProjectPlatform } from '../types';
 import type { PreflightContext } from './llmProvider';
+import { detectSurface } from './services/prdGenerationLog';
+
+/**
+ * Read the opt-in consistency-review flag from localStorage. Default OFF —
+ * enabling adds a final reconciliation model call. Wrapped in try/catch for
+ * non-browser contexts.
+ */
+const consistencyReviewEnabled = (): boolean => {
+    try {
+        return typeof localStorage !== 'undefined'
+            && localStorage.getItem('synapse-prd-consistency-review') === 'true';
+    } catch {
+        return false;
+    }
+};
 
 export interface RunPrdGenerationParams {
     projectId: string;
@@ -62,6 +77,8 @@ export async function runPrdGeneration({
             sourcePrompt,
             {
                 preflight,
+                enableConsistencyReview: consistencyReviewEnabled(),
+                surface: detectSurface(),
                 onProgress: (message) => {
                     useProjectStore.getState().appendPrdProgress(projectId, message);
                 },
