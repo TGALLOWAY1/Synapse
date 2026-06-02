@@ -263,6 +263,22 @@ The store's `partialize` strips `jobs` and `prdProgress` so they don't
 persist. `onRehydrateStorage` migrates legacy `currentStage` values
 (`devplan`/`prompts`/`mockups`/`artifacts` → `prd` or `workspace`).
 
+**Concurrency rule:** store actions that append a version (e.g.
+`createArtifactVersion`, `regenerateSpine`, `mergeBranch`) must do **all** state
+reads (version counts, preferred-version unmarking, array maps) **inside** the
+`set((state) => …)` updater using the `state` arg — never from a `get()`
+snapshot taken before `set()` runs. The 7 core artifacts generate concurrently
+(`artifactJobController`), so a read-then-write against a stale snapshot loses
+the other in-flight slot's update. Validation that must `throw` may read via
+`get()` outside `set()`, but the mutation itself reads `state`.
+
+**Persistence (`storage.ts`):** the debounced localStorage writer wraps every
+`setItem` in try/catch — a `QuotaExceededError` surfaces a one-time sticky toast
+(via `toastStore`) instead of throwing and silently killing all future
+persistence. It flushes pending writes on `beforeunload`, `pagehide`, **and**
+`visibilitychange → hidden` (the last two are the reliable mobile lifecycle
+events).
+
 ### Pipeline flow
 
 ```

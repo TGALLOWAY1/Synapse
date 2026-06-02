@@ -56,41 +56,47 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     regenerateSpine: (projectId: string) => {
-        const state = get();
-        const currentVersions = state.spineVersions[projectId] || [];
-        const latest = currentVersions.find(v => v.isLatest);
-
+        // Validate against a snapshot, but perform the array derivations inside
+        // the set() updater against the fresh `state` so a concurrent spine
+        // mutation cannot be clobbered by a stale snapshot.
+        const latest = (get().spineVersions[projectId] || []).find(v => v.isLatest);
         if (!latest) throw new Error("No spine to regenerate");
 
-        const nextVersionNum = currentVersions.length + 1;
-        const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
-
         const now = Date.now();
-        const newSpine: SpineVersion = {
-            id: `v${nextVersionNum}`,
-            projectId,
-            promptText: latest.promptText,
-            responseText: 'Generating PRD...',
-            createdAt: now,
-            isLatest: true,
-            isFinal: false,
-        };
+        const historyEventId = uuidv4();
+        let newSpineId = '';
 
-        const regenEvent: HistoryEvent = {
-            id: uuidv4(),
-            projectId,
-            spineVersionId: newSpine.id,
-            type: "Regenerated",
-            description: "Regenerated spine",
-            createdAt: now,
-        };
+        set((state) => {
+            const currentVersions = state.spineVersions[projectId] || [];
+            newSpineId = `v${currentVersions.length + 1}`;
+            const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
 
-        set((state) => ({
-            spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
-            historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), regenEvent] },
-        }));
+            const newSpine: SpineVersion = {
+                id: newSpineId,
+                projectId,
+                promptText: latest.promptText,
+                responseText: 'Generating PRD...',
+                createdAt: now,
+                isLatest: true,
+                isFinal: false,
+            };
 
-        return { newSpineId: newSpine.id };
+            const regenEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                spineVersionId: newSpineId,
+                type: "Regenerated",
+                description: "Regenerated spine",
+                createdAt: now,
+            };
+
+            return {
+                spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
+                historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), regenEvent] },
+            };
+        });
+
+        return { newSpineId };
     },
 
     getSpineVersions: (projectId: string) => {

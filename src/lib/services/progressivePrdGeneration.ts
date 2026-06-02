@@ -62,7 +62,7 @@ export type ProgressiveGenerationConfig = {
 };
 
 export type ModelProvider = {
-    generateText: (input: { prompt: string; model: string; schema: object }) => Promise<string>;
+    generateText: (input: { prompt: string; model: string; schema: object; signal?: AbortSignal }) => Promise<string>;
 };
 
 export type ProgressiveEvent =
@@ -176,7 +176,7 @@ export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => 
 };
 
 export const makeJsonProvider = (): ModelProvider => ({
-    async generateText({ prompt, model, schema }) {
+    async generateText({ prompt, model, schema, signal }) {
         return callGemini('', prompt, {
             responseMimeType: 'application/json',
             responseSchema: schema,
@@ -184,7 +184,7 @@ export const makeJsonProvider = (): ModelProvider => ({
             maxOutputTokens: 8192,
             temperature: 0.4,
             topP: 0.9,
-        });
+        }, signal);
     },
 });
 
@@ -396,7 +396,7 @@ export async function generateProgressivePrd(params: {
         const { system, user } = buildSectionPrompt(section.id, ctx);
 
         try {
-            const raw = await provider.generateText({ prompt: `${system}\n\n${user}`, model, schema });
+            const raw = await provider.generateText({ prompt: `${system}\n\n${user}`, model, schema, signal: params.signal });
 
             // Parse with truncation repair fallback (shared helper).
             const parsed = parseSectionJson(raw);
@@ -431,6 +431,7 @@ export async function generateProgressivePrd(params: {
                     model: params.config.strongModel,
                     prompt: `Refine this PRD section. Increase specificity, remove all ambiguity and hedging, and replace any vague or informal phrasing with formal, professional, implementation-ready language. Preserve the structure and schema exactly — same fields, same shape — and return only the JSON object.\n\n${result.content}`,
                     schema,
+                    signal: params.signal,
                 });
                 const post = applyAiUpdate(jobs[section.id], refined);
                 jobs[section.id] = { ...post, confidence: Math.max(0.75, result.confidence) };

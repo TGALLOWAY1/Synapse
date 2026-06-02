@@ -96,68 +96,72 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     ) => {
         const versionId = uuidv4();
         const now = Date.now();
+        const historyEventId = uuidv4();
 
-        // Determine version number
-        const existingVersions = (get().artifactVersions[projectId] || [])
-            .filter(v => v.artifactId === artifactId);
-        const versionNumber = existingVersions.length + 1;
+        // All reads happen inside the set() updater against the fresh `state`
+        // so concurrent createArtifactVersion calls (the 7 core artifacts
+        // generate in parallel) cannot clobber each other's version arrays via
+        // a stale get() snapshot taken before set() ran.
+        let activityType = 'unknown';
+        set((state) => {
+            const allVersions = state.artifactVersions[projectId] || [];
+            const versionNumber = allVersions.filter(v => v.artifactId === artifactId).length + 1;
 
-        // Unmark previous preferred versions
-        const allVersions = get().artifactVersions[projectId] || [];
-        const updatedVersions = allVersions.map(v =>
-            v.artifactId === artifactId ? { ...v, isPreferred: false } : v
-        );
+            // Unmark previous preferred versions for this artifact.
+            const updatedVersions = allVersions.map(v =>
+                v.artifactId === artifactId ? { ...v, isPreferred: false } : v
+            );
 
-        const newVersion: ArtifactVersion = {
-            id: versionId,
-            artifactId,
-            versionNumber,
-            parentVersionId: parentVersionId ?? null,
-            content,
-            metadata,
-            sourceRefs,
-            generationPrompt,
-            isPreferred: true,
-            createdAt: now,
-        };
+            const newVersion: ArtifactVersion = {
+                id: versionId,
+                artifactId,
+                versionNumber,
+                parentVersionId: parentVersionId ?? null,
+                content,
+                metadata,
+                sourceRefs,
+                generationPrompt,
+                isPreferred: true,
+                createdAt: now,
+            };
 
-        // Update artifact's currentVersionId
-        const projectArtifacts = get().artifacts[projectId] || [];
-        const updatedArtifacts = projectArtifacts.map(a =>
-            a.id === artifactId ? { ...a, currentVersionId: versionId, status: 'active' as const, updatedAt: now } : a
-        );
+            const projectArtifacts = state.artifacts[projectId] || [];
+            const updatedArtifacts = projectArtifacts.map(a =>
+                a.id === artifactId ? { ...a, currentVersionId: versionId, status: 'active' as const, updatedAt: now } : a
+            );
 
-        // Create history event
-        const artifact = projectArtifacts.find(a => a.id === artifactId);
-        const historyEvent: HistoryEvent = {
-            id: uuidv4(),
-            projectId,
-            artifactId,
-            artifactVersionId: versionId,
-            type: versionNumber === 1 ? "ArtifactGenerated" : "ArtifactRegenerated",
-            description: `${artifact?.title || 'Artifact'} v${versionNumber} generated`,
-            createdAt: now,
-        };
+            const artifact = projectArtifacts.find(a => a.id === artifactId);
+            activityType = artifact?.type || 'unknown';
+            const historyEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                artifactId,
+                artifactVersionId: versionId,
+                type: versionNumber === 1 ? "ArtifactGenerated" : "ArtifactRegenerated",
+                description: `${artifact?.title || 'Artifact'} v${versionNumber} generated`,
+                createdAt: now,
+            };
 
-        set((state) => ({
-            artifactVersions: {
-                ...state.artifactVersions,
-                [projectId]: [...updatedVersions, newVersion]
-            },
-            artifacts: {
-                ...state.artifacts,
-                [projectId]: updatedArtifacts
-            },
-            historyEvents: {
-                ...state.historyEvents,
-                [projectId]: [...(state.historyEvents[projectId] || []), historyEvent]
-            },
-        }));
+            return {
+                artifactVersions: {
+                    ...state.artifactVersions,
+                    [projectId]: [...updatedVersions, newVersion]
+                },
+                artifacts: {
+                    ...state.artifacts,
+                    [projectId]: updatedArtifacts
+                },
+                historyEvents: {
+                    ...state.historyEvents,
+                    [projectId]: [...(state.historyEvents[projectId] || []), historyEvent]
+                },
+            };
+        });
         void trackActivity('generated_artifact', {
             projectId,
             artifactId,
             versionId,
-            type: artifact?.type || 'unknown',
+            type: activityType,
         });
 
         return { versionId };
