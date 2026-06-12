@@ -109,8 +109,25 @@ const buildHeaders = (apiKey: string): HeadersInit => {
 const MAX_FETCH_RETRIES = 3;
 const RETRY_BASE_MS = 1000;
 
+/**
+ * Hard ceiling on how long a single request may sit without producing any
+ * data. A hung connection (common on mobile Safari after a network handoff)
+ * otherwise waits forever — no error, no retry, no way for the UI to recover.
+ * Streaming calls reset the clock on every received chunk, so an actively
+ * streaming response is never killed mid-flight; only true silence trips it.
+ */
+export const GEMINI_TIMEOUT_MS = 120_000;
+
+export class GeminiTimeoutError extends Error {
+    constructor(ms: number) {
+        super(`Gemini did not respond within ${Math.round(ms / 1000)}s. The connection may have dropped — retrying usually fixes this.`);
+        this.name = 'GeminiTimeoutError';
+    }
+}
+
 export const isRetryableNetworkError = (e: unknown): boolean => {
     if (e instanceof DOMException && e.name === 'AbortError') return false;
+    if (e instanceof GeminiTimeoutError) return true;
     if (!(e instanceof Error)) return false;
     const msg = e.message.toLowerCase();
     return (
@@ -120,6 +137,39 @@ export const isRetryableNetworkError = (e: unknown): boolean => {
         msg.includes('network request failed') ||
         msg.startsWith('net::')
     );
+};
+
+/**
+ * Combine the caller's AbortSignal with an inactivity watchdog. The returned
+ * signal aborts when either the caller aborts or `ms` elapses without a
+ * `touch()`. `timedOut()` distinguishes the watchdog firing from a real user
+ * cancel so callers can rethrow a retryable GeminiTimeoutError instead of a
+ * terminal AbortError.
+ */
+const createWatchdog = (ms: number, upstream?: AbortSignal) => {
+    const controller = new AbortController();
+    let timedOut = false;
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const touch = () => {
+        clearTimeout(timer);
+        timer = setTimeout(() => {
+            timedOut = true;
+            controller.abort();
+        }, ms);
+    };
+    const onUpstreamAbort = () => controller.abort();
+    if (upstream?.aborted) controller.abort();
+    else upstream?.addEventListener('abort', onUpstreamAbort, { once: true });
+    touch();
+    return {
+        signal: controller.signal,
+        touch,
+        timedOut: () => timedOut,
+        dispose: () => {
+            clearTimeout(timer);
+            upstream?.removeEventListener('abort', onUpstreamAbort);
+        },
+    };
 };
 
 const sleepWithAbort = (ms: number, signal?: AbortSignal): Promise<void> =>
@@ -198,19 +248,28 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
         };
     }
 
-    const response = await fetchWithRetry(url, {
-        method: 'POST',
-        headers: buildHeaders(apiKey),
-        body: JSON.stringify(body),
-        signal,
-    });
+    const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
+    let data: { candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }> } | undefined;
+    try {
+        const response = await fetchWithRetry(url, {
+            method: 'POST',
+            headers: buildHeaders(apiKey),
+            body: JSON.stringify(body),
+            signal: watchdog.signal,
+        });
 
-    if (!response.ok) {
-        const errorData = await response.json().catch(() => null);
-        throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
+        if (!response.ok) {
+            const errorData = await response.json().catch(() => null);
+            throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
+        }
+
+        data = await response.json();
+    } catch (e) {
+        if (watchdog.timedOut()) throw new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
+        throw e;
+    } finally {
+        watchdog.dispose();
     }
-
-    const data = await response.json();
 
     // Safely extract text — Gemini may return no candidates (e.g. safety block)
     // or candidates with no content/parts.
@@ -263,29 +322,34 @@ export const callGeminiStream = async (
     // server. Errors propagate to the outer retry loop so a mid-stream
     // network drop can be retried from byte zero with a fresh fetch.
     const streamOnce = async (): Promise<{ fullText: string; finishReason?: string }> => {
-        const response = await fetchWithRetry(url, {
-            method: 'POST',
-            headers: buildHeaders(apiKey),
-            body: bodyJson,
-            signal,
-        });
-
-        if (!response.ok) {
-            const errorData = await response.json().catch(() => null);
-            throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
-        }
-
-        const reader = response.body?.getReader();
-        if (!reader) throw new Error('No response body for streaming');
-
-        const decoder = new TextDecoder();
-        let fullText = '';
-        let buffer = '';
-        let finishReason: string | undefined;
-
+        // Watchdog is per-attempt: each retry gets a fresh inactivity window,
+        // and every received chunk resets it — only true silence times out.
+        const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
+        let reader: ReadableStreamDefaultReader<Uint8Array<ArrayBuffer>> | undefined;
         try {
+            const response = await fetchWithRetry(url, {
+                method: 'POST',
+                headers: buildHeaders(apiKey),
+                body: bodyJson,
+                signal: watchdog.signal,
+            });
+
+            if (!response.ok) {
+                const errorData = await response.json().catch(() => null);
+                throw new Error(formatGeminiError(`${response.status} ${response.statusText}`.trim(), errorData));
+            }
+
+            reader = response.body?.getReader();
+            if (!reader) throw new Error('No response body for streaming');
+
+            const decoder = new TextDecoder();
+            let fullText = '';
+            let buffer = '';
+            let finishReason: string | undefined;
+
             while (true) {
                 const { done, value } = await reader.read();
+                watchdog.touch();
                 if (done) break;
 
                 buffer += decoder.decode(value, { stream: true });
@@ -313,15 +377,21 @@ export const callGeminiStream = async (
                     }
                 }
             }
+
+            return { fullText, finishReason };
         } catch (e) {
+            if (watchdog.timedOut()) {
+                reader?.cancel().catch(() => undefined);
+                throw new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
+            }
             if (signal?.aborted) {
-                reader.cancel();
+                reader?.cancel().catch(() => undefined);
                 throw new DOMException('Aborted', 'AbortError');
             }
             throw e;
+        } finally {
+            watchdog.dispose();
         }
-
-        return { fullText, finishReason };
     };
 
     // Retry the entire stream (fetch + reader) on transient network errors.
