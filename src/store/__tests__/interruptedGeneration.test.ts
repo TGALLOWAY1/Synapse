@@ -94,7 +94,9 @@ describe('markInterruptedGenerations', () => {
                 safetyReview: {
                     status: 'blocked',
                     classification: 'disallowed',
-                    reason: 'nope',
+                    detectedConcerns: [],
+                    userFacingReason: 'nope',
+                    safeAlternatives: [],
                     reviewedAt: 3,
                 },
             })],
