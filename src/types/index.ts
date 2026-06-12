@@ -273,6 +273,11 @@ export type GenerationMeta = {
     totalMs: number;
     revised: boolean;
     schemaVersion: number;                 // bump when the StructuredPRD shape changes
+    // Section ids that errored during the DAG run. A non-empty list means the
+    // stored PRD is partial (failed sections merged as empty stubs); the
+    // workspace surfaces an incomplete-PRD banner with per-section retry, and
+    // a successful single-section retry removes its id from this list.
+    failedSections?: string[];
 };
 
 // --- Safety guardrail domain types ---

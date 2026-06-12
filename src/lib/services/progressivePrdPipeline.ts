@@ -258,6 +258,7 @@ export const runProgressivePrdPipeline = async (
             totalMs,
             revised: reviewed,
             schemaVersion: PRD_SCHEMA_VERSION,
+            failedSections: failedSections.map(j => j.id),
         },
         model: `${fastModel} / ${strongModel}`,
     };

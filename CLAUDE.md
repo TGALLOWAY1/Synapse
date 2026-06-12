@@ -441,6 +441,15 @@ The card is shown while `isPRDActivelyGenerating || hasFailedSection`, so a
 partial-failure run (which returns a partial PRD without setting
 `generationError`) keeps its Run again affordance visible.
 
+**Partial-failure persistence:** the live section grid is transient, so the
+pipeline also records failed section ids in
+`generationMeta.failedSections` (set by `progressivePrdPipeline`, stored on
+the spine via the normal `onResult` path). When non-empty, `ProjectWorkspace`
+renders an amber "This PRD is incomplete" banner above the PRD with a
+per-section "Run again" button wired to the same `handleRetrySection` flow —
+this survives refresh, unlike the timeline. A successful single-section retry
+removes its id from the list (see `handleRetrySection`).
+
 ### Other-flow progress UI (`src/components/GenerationProgress.tsx`)
 
 The mockup / artifact / consolidation flows still use `GenerationProgress`.

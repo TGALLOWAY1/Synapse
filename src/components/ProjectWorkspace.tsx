@@ -165,6 +165,12 @@ export function ProjectWorkspace() {
     const showProgressTimeline = isPRDActivelyGenerating || hasFailedSection;
     const timelineSteps = buildGenerationSteps(prdSectionStatus ?? {});
 
+    // Failed sections persisted with the final result. Unlike the transient
+    // prdSectionStatus grid (stripped from persistence), this survives a
+    // refresh — it drives the incomplete-PRD banner with per-section retry.
+    const persistedFailedSections = (activeSpine?.generationMeta?.failedSections ?? [])
+        .filter((id): id is SectionId => id in SECTION_TITLES);
+
     // Optional preflight clarification: while a non-completed session exists and
     // no PRD has been produced (and the request isn't blocked), the workspace
     // hosts the clarification flow instead of the PRD/progress view.
@@ -323,6 +329,16 @@ export function ProjectWorkspace() {
             updateSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, markdown, {
                 sourcePrompt,
                 model,
+                // A successful retry resolves this section — drop it from the
+                // persisted failed list so the incomplete-PRD banner shrinks.
+                ...(activeSpine.generationMeta?.failedSections?.includes(id)
+                    ? {
+                        generationMeta: {
+                            ...activeSpine.generationMeta,
+                            failedSections: activeSpine.generationMeta.failedSections.filter(s => s !== id),
+                        },
+                    }
+                    : {}),
             });
             if (id === 'product_basics' && (structuredPRD.productName || structuredPRD.productCategory)) {
                 updateProjectProductMetadata(projectId, {
@@ -654,6 +670,38 @@ export function ProjectWorkspace() {
                                                 >
                                                     Markdown View
                                                 </button>
+                                            </div>
+                                        )}
+
+                                        {/* Partial result: some sections failed and were merged as
+                                            empty stubs. Surfaced from the persisted generationMeta so
+                                            the warning survives refresh; each button re-runs only
+                                            that section. */}
+                                        {activeSpine.safetyReview?.status !== 'blocked'
+                                            && !activeSpine.generationError
+                                            && activeSpine.structuredPRD
+                                            && !isPRDActivelyGenerating
+                                            && persistedFailedSections.length > 0 && (
+                                            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                                <p className="font-semibold text-amber-900 text-sm mb-1">
+                                                    This PRD is incomplete — {persistedFailedSections.length} section{persistedFailedSections.length > 1 ? 's' : ''} failed to generate
+                                                </p>
+                                                <p className="text-sm text-amber-800 mb-3">
+                                                    The rest of the document is intact. Re-run the missing sections below — each retry regenerates only that section.
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {persistedFailedSections.map((sid) => (
+                                                        <button
+                                                            key={sid}
+                                                            onClick={() => handleRetrySection(sid)}
+                                                            disabled={!!retryingStepId || isOldVersion}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition disabled:opacity-40"
+                                                        >
+                                                            <RefreshCcw size={12} className={retryingStepId === sid ? 'animate-spin' : ''} />
+                                                            {retryingStepId === sid ? 'Retrying…' : `Run again: ${SECTION_TITLES[sid]}`}
+                                                        </button>
+                                                    ))}
+                                                </div>
                                             </div>
                                         )}
 
