@@ -248,7 +248,11 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 - `spineSlice` — SpineVersion CRUD, structured PRD updates, generation
   errors. Branches fork from highlighted spine text and consolidate
   back via `branchService.consolidateBranch()`. Spine versioning uses
-  `isLatest`/`isFinal` flags. **Generation lifecycle:**
+  `isLatest`/`isFinal` flags. Spine ids are opaque — new versions
+  (`regenerateSpine`, `mergeBranch`) get UUIDs, while the first spine and
+  legacy localStorage data keep `v1`-style ids. Never parse a version
+  number out of the id; display labels ("Version N") derive from array
+  position. **Generation lifecycle:**
   `SpineVersion.generationPhase` (`'running' | 'complete'`, optional —
   legacy spines lack it) is stamped `'running'` by
   `markSpineGenerationStarted` when a PRD run actually begins (both

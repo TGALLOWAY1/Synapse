@@ -18,9 +18,17 @@ const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string
 };
 
 export function HistoryView({ projectId }: HistoryViewProps) {
-    const { getHistoryEvents } = useProjectStore();
+    const { getHistoryEvents, getSpineVersions } = useProjectStore();
     const events = getHistoryEvents(projectId);
     const sortedEvents = [...events].sort((a, b) => b.createdAt - a.createdAt);
+
+    // Spine ids are opaque (UUIDs for new versions) — show the positional
+    // "Version N" label the rest of the workspace uses.
+    const spines = getSpineVersions(projectId);
+    const spineLabel = (spineId: string) => {
+        const idx = spines.findIndex(s => s.id === spineId);
+        return idx >= 0 ? `Version ${idx + 1}` : spineId;
+    };
 
     // Group events by date
     const groupedByDate: Record<string, typeof sortedEvents> = {};
@@ -80,7 +88,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                                                 </div>
                                                 <div className="text-xs text-neutral-400 mt-1 flex items-center gap-2">
                                                     <span>{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
-                                                    {event.spineVersionId && <span>PRD {event.spineVersionId}</span>}
+                                                    {event.spineVersionId && <span>PRD {spineLabel(event.spineVersionId)}</span>}
                                                 </div>
 
                                                 {event.diff?.matches && (

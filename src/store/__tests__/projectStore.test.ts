@@ -38,6 +38,22 @@ describe('projectStore', () => {
         });
     });
 
+    describe('regenerateSpine', () => {
+        it('always appends with a unique id — never collides with an existing version', () => {
+            const { projectId } = useProjectStore.getState().createProject('Test', 'prompt');
+            const { newSpineId: a } = useProjectStore.getState().regenerateSpine(projectId);
+            const { newSpineId: b } = useProjectStore.getState().regenerateSpine(projectId);
+
+            const spines = useProjectStore.getState().spineVersions[projectId];
+            expect(spines).toHaveLength(3);
+            const ids = spines.map(s => s.id);
+            expect(new Set(ids).size).toBe(3);
+            expect(a).not.toBe(b);
+            // Exactly one latest, and it is the most recent append.
+            expect(spines.filter(s => s.isLatest).map(s => s.id)).toEqual([b]);
+        });
+    });
+
     describe('getLatestSpine', () => {
         it('returns the latest spine version', () => {
             const { projectId } = useProjectStore.getState().createProject('Test', 'prompt');

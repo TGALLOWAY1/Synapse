@@ -345,7 +345,10 @@ export type PreflightSession = {
 };
 
 export type SpineVersion = {
-    id: string; // e.g. "v1", "v2"
+    // Opaque unique id. New versions get UUIDs; the first spine and legacy
+    // localStorage data use "v1"-style ids — never parse or derive version
+    // numbers from this, use the array position instead.
+    id: string;
     projectId: string;
     promptText: string;
     responseText: string;

@@ -75,7 +75,11 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
 
         const now = Date.now();
         const historyEventId = uuidv4();
-        let newSpineId = '';
+        // UUID, not `v${length + 1}`: a length-derived id collides with an
+        // existing spine if two appends race or versions are ever pruned,
+        // silently turning the append into an overwrite. Display labels are
+        // derived from array position, never from the id.
+        const newSpineId = uuidv4();
 
         set((state) => {
             const projectBranches = state.branches[projectId] || [];
@@ -84,7 +88,6 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
             );
 
             const currentVersions = state.spineVersions[projectId] || [];
-            newSpineId = `v${currentVersions.length + 1}`;
             const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
 
             const newSpine: SpineVersion = {

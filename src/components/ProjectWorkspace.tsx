@@ -66,6 +66,8 @@ export function ProjectWorkspace() {
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
+    // Synchronous regeneration lock; see handleRegenerate.
+    const regenerateInFlight = useRef(false);
     const [overflowMenuPos, setOverflowMenuPos] = useState<{ top: number; right: number } | null>(null);
     const [animationParent] = useAutoAnimate();
 
@@ -212,7 +214,12 @@ export function ProjectWorkspace() {
     };
 
     const handleRegenerate = async () => {
+        // Ref guard, not just `isGenerating`: two clicks in the same tick both
+        // see the stale React state and would launch two concurrent pipelines
+        // whose results interleave on different spines.
+        if (regenerateInFlight.current) return;
         if (!projectId || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
+        regenerateInFlight.current = true;
         let activeNewSpineId: string | null = null;
         try {
             setIsGenerating(true);
@@ -292,6 +299,7 @@ export function ProjectWorkspace() {
                 });
             }
         } finally {
+            regenerateInFlight.current = false;
             setIsGenerating(false);
         }
     };
