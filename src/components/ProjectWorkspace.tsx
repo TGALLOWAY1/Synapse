@@ -108,6 +108,22 @@ export function ProjectWorkspace() {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [showNavOverflow]);
 
+    // A stale URL (deleted project, cleared storage, bookmark from another
+    // device) must not strand the user on a dead-end view — bounce home.
+    const projectExists = !!projectId && !!getProject(projectId);
+    useEffect(() => {
+        if (projectId && !projectExists) {
+            import('../store/toastStore').then(({ useToastStore }) => {
+                useToastStore.getState().addToast({
+                    type: 'info',
+                    title: 'Project not found',
+                    message: 'It may have been deleted or saved in a different browser.',
+                });
+            });
+            navigate('/', { replace: true });
+        }
+    }, [projectId, projectExists, navigate]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);

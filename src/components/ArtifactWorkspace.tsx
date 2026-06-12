@@ -343,6 +343,18 @@ export function ArtifactWorkspace({
                     </div>
                 )}
                 <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
+                    <MockupErrorBoundary
+                        resetKey={preferred.id}
+                        fallback={
+                            <div className="text-sm text-neutral-500 not-prose">
+                                <p className="font-medium text-neutral-700 mb-1">Unable to render this artifact</p>
+                                <p>
+                                    The saved content for this version could not be displayed. Try
+                                    regenerating the artifact or selecting a different version.
+                                </p>
+                            </div>
+                        }
+                    >
                     <ArtifactContentRenderer
                         subtype={subtype}
                         content={preferred.content}
@@ -361,6 +373,7 @@ export function ArtifactWorkspace({
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                     />
+                    </MockupErrorBoundary>
                 </div>
             </div>
         );
