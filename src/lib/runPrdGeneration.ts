@@ -53,9 +53,12 @@ export async function runPrdGeneration({
     preflight,
 }: RunPrdGenerationParams): Promise<void> {
     const store = useProjectStore.getState();
-    // Fresh run starts with a clean event log.
+    // Fresh run starts with a clean event log. Marking the spine 'running'
+    // lets rehydration detect an interrupted run if the page is closed
+    // mid-generation (see markInterruptedGenerations).
     store.clearPrdProgress(projectId);
     store.clearSectionStatus(projectId);
+    store.markSpineGenerationStarted(projectId, spineId);
 
     let generateStructuredPRD;
     try {

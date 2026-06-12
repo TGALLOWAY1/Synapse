@@ -216,6 +216,7 @@ export function ProjectWorkspace() {
             clearSectionStatus(projectId);
             const { newSpineId } = regenerateSpine(projectId);
             activeNewSpineId = newSpineId;
+            useProjectStore.getState().markSpineGenerationStarted(projectId, newSpineId);
             const sourcePrompt = latestSpine.promptText;
             await generateStructuredPRD(
                 sourcePrompt,

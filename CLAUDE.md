@@ -248,7 +248,15 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 - `spineSlice` — SpineVersion CRUD, structured PRD updates, generation
   errors. Branches fork from highlighted spine text and consolidate
   back via `branchService.consolidateBranch()`. Spine versioning uses
-  `isLatest`/`isFinal` flags.
+  `isLatest`/`isFinal` flags. **Generation lifecycle:**
+  `SpineVersion.generationPhase` (`'running' | 'complete'`, optional —
+  legacy spines lack it) is stamped `'running'` by
+  `markSpineGenerationStarted` when a PRD run actually begins (both
+  entry points: `runPrdGeneration.ts` and
+  `ProjectWorkspace.handleRegenerate`) and flipped to `'complete'` by
+  every settle path (`updateSpineStructuredPRD` with `generationMeta`,
+  `setSpineError`, blocked `setSpineSafetyReview`). New generation entry
+  points must stamp it too, or interrupted-run recovery won't see them.
 - `branchSlice` — Branches and their messages
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
   tracking; source-ref staleness detection against the current spine
@@ -261,7 +269,14 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 
 The store's `partialize` strips `jobs` and `prdProgress` so they don't
 persist. `onRehydrateStorage` migrates legacy `currentStage` values
-(`devplan`/`prompts`/`mockups`/`artifacts` → `prd` or `workspace`).
+(`devplan`/`prompts`/`mockups`/`artifacts` → `prd` or `workspace`) and runs
+`markInterruptedGenerations` (`src/store/interruptedGeneration.ts`): a page
+load kills any in-flight PRD pipeline, so spines still marked
+`generationPhase: 'running'` — or carrying the legacy `'Generating PRD...'`
+placeholder with no structured PRD — are converted into a settled
+`generationError` (`category: 'interrupted'`), which renders the existing
+error card with Try Again instead of an eternal "Generating…" state. Spines
+with an open preflight session or a blocked safety review are skipped.
 
 **Concurrency rule:** store actions that append a version (e.g.
 `createArtifactVersion`, `regenerateSpine`, `mergeBranch`) must do **all** state

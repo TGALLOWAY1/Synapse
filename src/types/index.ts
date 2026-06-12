@@ -355,6 +355,14 @@ export type SpineVersion = {
         timestamp: number;
         raw?: string;
     };
+    // Lifecycle marker for the async PRD pipeline. Set to 'running' when
+    // generation actually starts (not at spine creation — preflight spines
+    // wait) and flipped to 'complete' when the run settles (final result,
+    // error, or safety block). A spine still 'running' at rehydration time
+    // was interrupted (refresh / closed tab mid-generation); the store
+    // converts it to a generationError so the UI offers Try Again instead
+    // of showing "Generating…" forever. Optional: legacy spines lack it.
+    generationPhase?: 'running' | 'complete';
     // --- Premium PRD additions (all optional). ---
     sourcePrompt?: string;                 // original user prompt at generation time
     qualityScores?: QualityScores;

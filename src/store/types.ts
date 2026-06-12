@@ -73,6 +73,13 @@ export interface ProjectState {
         meta: { productName?: string; productCategory?: string },
     ) => void;
 
+    // Generation lifecycle. Stamps generationPhase: 'running' when a PRD run
+    // actually begins; the settle paths (updateSpineStructuredPRD with
+    // generationMeta, setSpineError, blocked setSpineSafetyReview) flip it to
+    // 'complete'. Rehydration converts still-'running' spines into an
+    // interrupted-generation error (see markInterruptedGenerations).
+    markSpineGenerationStarted: (projectId: string, spineId: string) => void;
+
     // Error handling
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => void;
 

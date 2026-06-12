@@ -10,6 +10,7 @@ import { createFeedbackSlice } from './slices/feedbackSlice';
 import { createStalenessSlice } from './slices/stalenessSlice';
 import { createGenerationJobsSlice } from './slices/generationJobsSlice';
 import { createPrdProgressSlice } from './slices/prdProgressSlice';
+import { markInterruptedGenerations } from './interruptedGeneration';
 
 export type { ProjectState } from './types';
 
@@ -39,6 +40,10 @@ export const useProjectStore = create<ProjectState>()(
             onRehydrateStorage: () => {
                 return (state) => {
                     if (!state) return;
+                    // A page load kills any in-flight PRD pipeline, so spines
+                    // persisted mid-generation must be converted to a settled
+                    // error — otherwise the UI shows "Generating…" forever.
+                    markInterruptedGenerations(state.spineVersions);
                     // Migrate legacy currentStage values. The active pipeline
                     // bar exposes only prd / workspace / history, so any
                     // lingering 'devplan' / 'prompts' / 'mockups' / 'artifacts'
