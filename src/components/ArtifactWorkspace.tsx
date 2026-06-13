@@ -559,7 +559,7 @@ function RightRail({
 
     if (!expanded) {
         return (
-            <aside className="hidden xl:flex flex-col w-12 shrink-0 border-l border-neutral-200 bg-white">
+            <aside className="hidden lg:flex flex-col w-12 shrink-0 border-l border-neutral-200 bg-white">
                 <button
                     type="button"
                     onClick={() => setUserToggled('open')}
@@ -578,7 +578,7 @@ function RightRail({
     }
 
     return (
-        <aside className="hidden xl:flex flex-col w-72 shrink-0 border-l border-neutral-200 bg-white overflow-y-auto">
+        <aside className="hidden lg:flex flex-col w-72 shrink-0 border-l border-neutral-200 bg-white overflow-y-auto">
             <div className="p-4 border-b border-neutral-200 flex items-start justify-between gap-2">
                 <div>
                     <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Generation Status</h3>

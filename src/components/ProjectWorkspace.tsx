@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -44,6 +44,8 @@ export function ProjectWorkspace() {
     const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
+    // Live asset-generation job for the post-finalize status pill.
+    const assetJob = useProjectStore((s) => (projectId ? s.jobs[projectId] : undefined));
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -387,6 +389,19 @@ export function ProjectWorkspace() {
         return coreReady && mockupReady;
     })();
 
+    // Post-finalize status pill. Once a spine is final, the user can dismiss the
+    // success modal ("Stay on the PRD") and be stranded with no obvious path to
+    // the assets that are now building. Show a persistent affordance in the top
+    // bar whenever we're final but not already viewing the Assets stage.
+    const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
+        (s) => s.status === 'generating' || s.status === 'queued',
+    );
+    const showAssetsPill = !!activeSpine?.isFinal
+        && !!activeSpine?.structuredPRD
+        && activeSpine?.safetyReview?.status !== 'blocked'
+        && !isOldVersion
+        && pipelineStage !== 'workspace';
+
     const handleToggleFinal = () => {
         if (!projectId || !activeSpine) return;
         // Blocked spines can never advance to the workspace / artifact stage.
@@ -455,6 +470,20 @@ export function ProjectWorkspace() {
 
                 {/* Primary nav actions — always visible */}
                 <div className="flex items-center gap-2 shrink-0">
+                    {showAssetsPill && (
+                        <button
+                            onClick={handleOpenAssets}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600/90 hover:bg-green-600 text-white rounded transition"
+                            title="Go to the build assets for this finalized PRD"
+                        >
+                            {assetsBuilding
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <ArrowRight size={14} />}
+                            <span className="hidden sm:inline">
+                                {assetsBuilding ? 'Building assets…' : 'Go to Assets'}
+                            </span>
+                        </button>
+                    )}
                     <button
                         onClick={handleExport}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition"
@@ -817,7 +846,7 @@ export function ProjectWorkspace() {
 
                 {/* Right Column: Combined Branches and History */}
                 {isBranchesVisible && (
-                    <div className="hidden lg:flex w-80 xl:w-96 shrink-0 bg-neutral-50 border-l border-neutral-200 flex-col shadow-sm z-10">
+                    <div className="hidden md:flex w-72 lg:w-80 xl:w-96 shrink-0 bg-neutral-50 border-l border-neutral-200 flex-col shadow-sm z-10">
                         {/* Tabs */}
                         <div className="flex items-center border-b border-neutral-200 bg-white shadow-sm shrink-0">
                             <button
