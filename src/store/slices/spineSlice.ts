@@ -18,6 +18,7 @@ export type SpineSlice = {
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
     updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
+    markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
     setSpineError: ProjectState['setSpineError'];
     setSpineSafetyReview: ProjectState['setSpineSafetyReview'];
     initPreflightSession: ProjectState['initPreflightSession'];
@@ -64,11 +65,14 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
 
         const now = Date.now();
         const historyEventId = uuidv4();
-        let newSpineId = '';
+        // UUID, not `v${length + 1}`: a length-derived id collides with an
+        // existing spine if two appends race or versions are ever pruned,
+        // silently turning the append into an overwrite. Display labels are
+        // derived from array position, never from the id.
+        const newSpineId = uuidv4();
 
         set((state) => {
             const currentVersions = state.spineVersions[projectId] || [];
-            newSpineId = `v${currentVersions.length + 1}`;
             const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
 
             const newSpine: SpineVersion = {
@@ -264,6 +268,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 if (meta?.generationMeta !== undefined) next.generationMeta = meta.generationMeta;
                 if (meta?.model !== undefined) next.model = meta.model;
                 if (meta?.prdVersion !== undefined) next.prdVersion = meta.prdVersion;
+                // generationMeta only arrives with the final onResult — partial
+                // (onPartial) updates leave the run marked as still running.
+                if (meta?.generationMeta !== undefined) next.generationPhase = 'complete';
                 return next;
             });
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
@@ -304,6 +311,16 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         });
     },
 
+    markSpineGenerationStarted: (projectId: string, spineId: string) => {
+        set((state) => {
+            const projectSpines = state.spineVersions[projectId] || [];
+            const updatedSpines = projectSpines.map(s =>
+                s.id === spineId ? { ...s, generationPhase: 'running' as const } : s
+            );
+            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
+        });
+    },
+
     setSpineSafetyReview: (
         projectId: string,
         spineId: string,
@@ -322,8 +339,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                         ...s,
                         safetyReview: review,
                         // A blocked spine can never be final and must not retain
-                        // a half-built PRD or the "Generating…" placeholder.
-                        ...(blocked ? { isFinal: false, structuredPRD: undefined } : {}),
+                        // a half-built PRD or the "Generating…" placeholder. The
+                        // run has settled, so it also stops counting as running.
+                        ...(blocked ? { isFinal: false, structuredPRD: undefined, generationPhase: 'complete' as const } : {}),
                         ...(responseText !== undefined ? { responseText } : {}),
                     }
                     : s
@@ -365,6 +383,8 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                         generationError: error ?? undefined,
                         // Clear placeholder so isPRDGenerating stops being true
                         responseText: error && s.responseText === 'Generating PRD...' ? '' : s.responseText,
+                        // An error settles the run; clearing an error re-arms nothing.
+                        ...(error ? { generationPhase: 'complete' as const } : {}),
                     }
                     : s
             );

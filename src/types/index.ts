@@ -273,6 +273,11 @@ export type GenerationMeta = {
     totalMs: number;
     revised: boolean;
     schemaVersion: number;                 // bump when the StructuredPRD shape changes
+    // Section ids that errored during the DAG run. A non-empty list means the
+    // stored PRD is partial (failed sections merged as empty stubs); the
+    // workspace surfaces an incomplete-PRD banner with per-section retry, and
+    // a successful single-section retry removes its id from this list.
+    failedSections?: string[];
 };
 
 // --- Safety guardrail domain types ---
@@ -340,7 +345,10 @@ export type PreflightSession = {
 };
 
 export type SpineVersion = {
-    id: string; // e.g. "v1", "v2"
+    // Opaque unique id. New versions get UUIDs; the first spine and legacy
+    // localStorage data use "v1"-style ids — never parse or derive version
+    // numbers from this, use the array position instead.
+    id: string;
     projectId: string;
     promptText: string;
     responseText: string;
@@ -355,6 +363,14 @@ export type SpineVersion = {
         timestamp: number;
         raw?: string;
     };
+    // Lifecycle marker for the async PRD pipeline. Set to 'running' when
+    // generation actually starts (not at spine creation — preflight spines
+    // wait) and flipped to 'complete' when the run settles (final result,
+    // error, or safety block). A spine still 'running' at rehydration time
+    // was interrupted (refresh / closed tab mid-generation); the store
+    // converts it to a generationError so the UI offers Try Again instead
+    // of showing "Generating…" forever. Optional: legacy spines lack it.
+    generationPhase?: 'running' | 'complete';
     // --- Premium PRD additions (all optional). ---
     sourcePrompt?: string;                 // original user prompt at generation time
     qualityScores?: QualityScores;
@@ -698,6 +714,48 @@ export type FeedbackItem = {
     targetArtifactType: ArtifactType;
     createdAt: number;
     updatedAt: number;
+};
+
+// --- Persisted implementation tasks --------------------------------------
+// `ImplementationTask` (src/types/tasks.ts) is the *transient* extraction
+// shape produced from an Implementation Plan. `ProjectTask` is its persisted
+// counterpart: once the user saves extracted tasks to a project, they live
+// here with tracking state (status, export refs) so progress survives
+// refresh and drives the implementation checklist. The shared enums are
+// imported from tasks.ts (one-way dependency; tasks.ts imports nothing).
+// `ProjectTask.status` reuses the existing `TaskStatus` union (defined with
+// the structured implementation plan below: todo/in_progress/done/blocked).
+
+/** A reference to an external item created by exporting a task. */
+export type TaskExternalRef = {
+    target: import('./tasks').ExportTargetId;
+    externalId?: string;
+    externalUrl?: string;
+    exportedAt: number;
+};
+
+export type ProjectTask = {
+    id: string;
+    projectId: string;
+    /** Implementation Plan artifact the task was extracted from. */
+    sourceArtifactId: string;
+    /** Spine version current when the task was saved (for staleness hints). */
+    sourceSpineVersionId?: string;
+    sourceSectionId?: string;
+    title: string;
+    summary: string;
+    priority?: import('./tasks').TaskPriority;
+    taskType?: import('./tasks').TaskType;
+    estimatedComplexity?: import('./tasks').TaskComplexity;
+    acceptanceCriteria: string[];
+    dependencies?: string[];
+    implementationNotes?: string[];
+    suggestedLabels?: string[];
+    status: TaskStatus;
+    createdAt: number;
+    updatedAt: number;
+    /** Populated when the task is exported to GitHub/Linear/markdown. */
+    externalRefs?: TaskExternalRef[];
 };
 
 // Mockup generation settings

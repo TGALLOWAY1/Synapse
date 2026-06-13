@@ -120,6 +120,14 @@ function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersi
     );
 }
 
+// Cap consecutive *failed* manual retries per slot. Without this a user can
+// hammer the retry button against a deterministic failure (bad key, exhausted
+// quota) and burn API calls indefinitely. A successful run clears the count;
+// the map is module state, so a page reload also resets it.
+const MAX_RETRY_FAILURES = 3;
+const retryFailures = new Map<string, number>();
+const retryFailureKey = (projectId: string, slot: ArtifactSlotKey) => `${projectId}:${slot}`;
+
 function recordError(projectId: string, slot: ArtifactSlotKey, e: unknown): void {
     const err = normalizeError(e);
     console.error(`[artifactJobController] ${slot} failed`, err.raw);
@@ -509,6 +517,19 @@ export const artifactJobController = {
      * race against it.
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
+        const failureKey = retryFailureKey(args.projectId, slot);
+        if ((retryFailures.get(failureKey) ?? 0) >= MAX_RETRY_FAILURES) {
+            useProjectStore.getState().setSlotStatus(args.projectId, slot, {
+                status: 'error',
+                finishedAt: Date.now(),
+                error: {
+                    message: `Retry stopped after ${MAX_RETRY_FAILURES} consecutive failures — the same error keeps recurring. Check your API key and quota in Settings, then reload the page to try again.`,
+                    category: 'unknown',
+                    timestamp: Date.now(),
+                },
+            });
+            return;
+        }
         const existingRun = runs.get(args.projectId);
         const reuseExisting = existingRun && !existingRun.controller.signal.aborted;
         const controller = reuseExisting ? existingRun!.controller : new AbortController();
@@ -536,8 +557,10 @@ export const artifactJobController = {
                 } else {
                     await runCoreArtifactSlot(args, slot, controller.signal, generatedArtifacts);
                 }
+                retryFailures.delete(failureKey);
             } catch (e) {
                 if (isAbortError(e) || controller.signal.aborted) return;
+                retryFailures.set(failureKey, (retryFailures.get(failureKey) ?? 0) + 1);
                 recordError(args.projectId, slot, e);
             }
         })().finally(() => {

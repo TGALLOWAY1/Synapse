@@ -1,8 +1,11 @@
 import { useEffect, useState } from 'react';
-import { Download, X, FileText, Package } from 'lucide-react';
+import { Download, X, FileText, Package, Copy, Check, Bot } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
+import { useToastStore } from '../store/toastStore';
 import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenInventoryNormalize';
 import { downloadFile } from '../lib/utils/downloadFile';
+import { copyToClipboard } from '../lib/utils/copyToClipboard';
+import { buildAgentHandoff } from '../lib/exportHandoff';
 import type { Artifact } from '../types';
 
 // Screen inventory is now persisted as JSON. For human-readable exports,
@@ -23,7 +26,25 @@ interface ExportModalProps {
 
 export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const { getProject, getLatestSpine, getArtifacts, getArtifactVersions } = useProjectStore();
+    const { addToast } = useToastStore();
     const [exporting, setExporting] = useState(false);
+    // Which card most recently showed a "Copied" confirmation.
+    const [copiedKey, setCopiedKey] = useState<string | null>(null);
+
+    const flashCopied = (key: string) => {
+        setCopiedKey(key);
+        window.setTimeout(() => setCopiedKey(prev => (prev === key ? null : prev)), 1500);
+    };
+
+    const copyText = async (key: string, text: string, label: string) => {
+        if (!text.trim()) return;
+        const ok = await copyToClipboard(text);
+        if (ok) {
+            flashCopied(key);
+        } else {
+            addToast({ type: 'error', title: 'Copy failed', message: `Could not copy ${label} to the clipboard.` });
+        }
+    };
 
     // Allow dismissing the modal with the Escape key.
     useEffect(() => {
@@ -75,41 +96,48 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         downloadFile(JSON.stringify(data, null, 2), `${project?.name || 'project'}-export.json`, 'application/json');
     };
 
+    // Preferred-version content for an artifact, run through the screen-inventory
+    // markdown converter where needed.
+    const artifactContent = (artifact: Artifact): string => {
+        const versions = getArtifactVersions(projectId, artifact.id);
+        const preferred = versions.find(v => v.isPreferred);
+        return preferred ? exportContentFor(artifact, preferred.content) : '';
+    };
+
+    const buildFullBundle = (): string => {
+        const sections: string[] = [];
+        if (latestSpine) {
+            sections.push('# Product Requirements Document\n', latestSpine.responseText, '\n---\n');
+        }
+        for (const artifact of coreArtifacts) {
+            const content = artifactContent(artifact);
+            if (content) sections.push(`# ${artifact.title}\n`, content, '\n---\n');
+        }
+        for (const mockup of mockupArtifacts) {
+            const versions = getArtifactVersions(projectId, mockup.id);
+            const preferred = versions.find(v => v.isPreferred);
+            if (preferred) sections.push(`# ${mockup.title}\n`, preferred.content, '\n---\n');
+        }
+        return sections.join('\n');
+    };
+
+    // Agent handoff: instruction preamble + PRD + build-relevant core artifacts
+    // (mockups excluded — image-heavy and not useful to a coding agent).
+    const buildHandoff = (): string =>
+        buildAgentHandoff({
+            projectName: project?.name || 'This product',
+            prdMarkdown: latestSpine?.responseText,
+            artifacts: coreArtifacts.map(a => ({
+                subtype: a.subtype ?? '',
+                title: a.title,
+                content: artifactContent(a),
+            })),
+        });
+
     const exportFullBundle = async () => {
         setExporting(true);
         try {
-            const sections: string[] = [];
-
-            // PRD
-            if (latestSpine) {
-                sections.push('# Product Requirements Document\n');
-                sections.push(latestSpine.responseText);
-                sections.push('\n---\n');
-            }
-
-            // Core Artifacts
-            for (const artifact of coreArtifacts) {
-                const versions = getArtifactVersions(projectId, artifact.id);
-                const preferred = versions.find(v => v.isPreferred);
-                if (preferred) {
-                    sections.push(`# ${artifact.title}\n`);
-                    sections.push(exportContentFor(artifact, preferred.content));
-                    sections.push('\n---\n');
-                }
-            }
-
-            // Mockups
-            for (const mockup of mockupArtifacts) {
-                const versions = getArtifactVersions(projectId, mockup.id);
-                const preferred = versions.find(v => v.isPreferred);
-                if (preferred) {
-                    sections.push(`# ${mockup.title}\n`);
-                    sections.push(preferred.content);
-                    sections.push('\n---\n');
-                }
-            }
-
-            downloadFile(sections.join('\n'), `${project?.name || 'project'}-full-bundle.md`);
+            downloadFile(buildFullBundle(), `${project?.name || 'project'}-full-bundle.md`);
         } finally {
             setExporting(false);
         }
@@ -129,18 +157,58 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                 </div>
 
                 <div className="p-4 space-y-3 overflow-y-auto min-h-0">
+                    {/* Agent handoff — the build-companion preset */}
+                    <div className="flex items-stretch gap-2">
+                        <button
+                            onClick={() => copyText('handoff', buildHandoff(), 'the agent handoff')}
+                            disabled={!latestSpine}
+                            className="flex-1 flex items-center gap-3 p-3 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg transition text-left disabled:opacity-50"
+                        >
+                            <Bot size={18} className="text-violet-600 shrink-0" />
+                            <div className="min-w-0">
+                                <div className="text-sm font-medium text-violet-900">Copy for coding agent</div>
+                                <div className="text-xs text-violet-700">PRD + plan + prompts, ready to paste into Claude Code / Cursor</div>
+                            </div>
+                            {copiedKey === 'handoff'
+                                ? <Check size={16} className="text-violet-600 shrink-0 ml-auto" />
+                                : <Copy size={16} className="text-violet-400 shrink-0 ml-auto" />}
+                        </button>
+                        <button
+                            onClick={() => downloadFile(buildHandoff(), `${project?.name || 'project'}-handoff.md`)}
+                            disabled={!latestSpine}
+                            aria-label="Download agent handoff as Markdown"
+                            title="Download as Markdown"
+                            className="shrink-0 flex items-center justify-center px-3 bg-violet-50 hover:bg-violet-100 border border-violet-200 rounded-lg transition disabled:opacity-50"
+                        >
+                            <Download size={16} className="text-violet-600" />
+                        </button>
+                    </div>
+
                     {/* PRD */}
-                    <button
-                        onClick={exportPRD}
-                        disabled={!latestSpine}
-                        className="w-full flex items-center gap-3 p-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition text-left disabled:opacity-50"
-                    >
-                        <FileText size={18} className="text-indigo-500 shrink-0" />
-                        <div>
-                            <div className="text-sm font-medium text-neutral-800">Export PRD</div>
-                            <div className="text-xs text-neutral-500">Download PRD as Markdown</div>
-                        </div>
-                    </button>
+                    <div className="flex items-stretch gap-2">
+                        <button
+                            onClick={exportPRD}
+                            disabled={!latestSpine}
+                            className="flex-1 flex items-center gap-3 p-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition text-left disabled:opacity-50"
+                        >
+                            <FileText size={18} className="text-indigo-500 shrink-0" />
+                            <div>
+                                <div className="text-sm font-medium text-neutral-800">Export PRD</div>
+                                <div className="text-xs text-neutral-500">Download PRD as Markdown</div>
+                            </div>
+                        </button>
+                        <button
+                            onClick={() => copyText('prd', latestSpine?.responseText ?? '', 'the PRD')}
+                            disabled={!latestSpine}
+                            aria-label="Copy PRD to clipboard"
+                            title="Copy to clipboard"
+                            className="shrink-0 flex items-center justify-center px-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition disabled:opacity-50"
+                        >
+                            {copiedKey === 'prd'
+                                ? <Check size={16} className="text-green-600" />
+                                : <Copy size={16} className="text-neutral-400" />}
+                        </button>
+                    </div>
 
                     {/* Individual Artifacts */}
                     {coreArtifacts.length > 0 && (
@@ -162,19 +230,32 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                     )}
 
                     {/* Full Bundle */}
-                    <button
-                        onClick={exportFullBundle}
-                        disabled={exporting}
-                        className="w-full flex items-center gap-3 p-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition text-left disabled:opacity-50"
-                    >
-                        <Package size={18} className="text-indigo-600 shrink-0" />
-                        <div>
-                            <div className="text-sm font-medium text-indigo-800">
-                                {exporting ? 'Exporting...' : 'Export Full Bundle'}
+                    <div className="flex items-stretch gap-2">
+                        <button
+                            onClick={exportFullBundle}
+                            disabled={exporting}
+                            className="flex-1 flex items-center gap-3 p-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition text-left disabled:opacity-50"
+                        >
+                            <Package size={18} className="text-indigo-600 shrink-0" />
+                            <div>
+                                <div className="text-sm font-medium text-indigo-800">
+                                    {exporting ? 'Exporting...' : 'Export Full Bundle'}
+                                </div>
+                                <div className="text-xs text-indigo-600">PRD + all artifacts + mockups as single Markdown</div>
                             </div>
-                            <div className="text-xs text-indigo-600">PRD + all artifacts + mockups as single Markdown</div>
-                        </div>
-                    </button>
+                        </button>
+                        <button
+                            onClick={() => copyText('bundle', buildFullBundle(), 'the full bundle')}
+                            disabled={!latestSpine}
+                            aria-label="Copy full bundle to clipboard"
+                            title="Copy to clipboard"
+                            className="shrink-0 flex items-center justify-center px-3 bg-indigo-50 hover:bg-indigo-100 border border-indigo-200 rounded-lg transition disabled:opacity-50"
+                        >
+                            {copiedKey === 'bundle'
+                                ? <Check size={16} className="text-green-600" />
+                                : <Copy size={16} className="text-indigo-500" />}
+                        </button>
+                    </div>
 
                     {/* Structured JSON */}
                     <button

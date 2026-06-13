@@ -122,6 +122,27 @@ Extract structured feedback items from generated mockups. Feedback surfaces as
 actionable cards on the PRD stage — applying one spawns a localized branch to
 address the critique without regenerating the whole document.
 
+#### Track implementation progress
+
+The Implementation Plan converts into a tracked task checklist — no LLM call,
+derived deterministically from the plan. Review and edit the extracted tasks,
+**save them to the project**, and a progress checklist appears on the
+Implementation Plan: a `done / total` progress bar, a per-task status toggle
+(to do → in progress → done), and expandable acceptance criteria. Export the
+tasks to **Markdown** or **GitHub issues**; created GitHub issues are linked
+back to each task so you can jump straight to them. Progress persists across
+refreshes, so Synapse answers "how far along am I?" — not just "what should I
+build?".
+
+#### Hand off to a coding agent
+
+Export isn't just a download. The **Export** dialog includes a one-click
+**"Copy for coding agent"** preset — an instruction preamble plus the PRD and
+the build-relevant artifacts (implementation plan, prompt pack, data model,
+design system), ready to paste straight into Claude Code, Cursor, or another
+agent. Copy-to-clipboard is available for the PRD and the full bundle too, and
+you can still download Markdown, a combined bundle, or structured JSON.
+
 #### Markup image artifacts
 
 Five annotation types — screenshot annotations, critique boards, wireframe
@@ -255,6 +276,10 @@ npm run build
 
 ## Documentation
 
+- [`CONTRIBUTING.md`](CONTRIBUTING.md) — local setup (workspace and recruiter
+  portal), commands, testing, and PR expectations
+- [`.env.example`](.env.example) — backend environment variables (the PRD
+  workspace needs none)
 - [`CLAUDE.md`](CLAUDE.md) — architecture, state slices, the LLM pipeline, and
   cross-cutting patterns (kept in sync with the code)
 - [`docs/architecture.md`](docs/architecture.md) — runtime stack, state layer,
@@ -277,5 +302,3 @@ in-browser &mdash; spine + artifact state in `localStorage`, mockup PNGs in
 IndexedDB, no telemetry, no cross-device sync. The owner can opt-in to
 Vercel-Blob-backed Cloud Snapshots (gated by `SYNAPSE_OWNER_TOKEN`) to persist
 real work across browsers and devices.
-</content>
-</invoke>

@@ -14,6 +14,7 @@ logs
 # Environment & deploy
 .env
 .env.*
+!.env.example
 .vercel
 
 # Editor & OS

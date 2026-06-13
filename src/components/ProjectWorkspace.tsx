@@ -1,6 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -44,6 +44,8 @@ export function ProjectWorkspace() {
     const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
+    // Live asset-generation job for the post-finalize status pill.
+    const assetJob = useProjectStore((s) => (projectId ? s.jobs[projectId] : undefined));
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -66,6 +68,8 @@ export function ProjectWorkspace() {
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
+    // Synchronous regeneration lock; see handleRegenerate.
+    const regenerateInFlight = useRef(false);
     const [overflowMenuPos, setOverflowMenuPos] = useState<{ top: number; right: number } | null>(null);
     const [animationParent] = useAutoAnimate();
 
@@ -108,6 +112,22 @@ export function ProjectWorkspace() {
         return () => document.removeEventListener('mousedown', handleClick);
     }, [showNavOverflow]);
 
+    // A stale URL (deleted project, cleared storage, bookmark from another
+    // device) must not strand the user on a dead-end view — bounce home.
+    const projectExists = !!projectId && !!getProject(projectId);
+    useEffect(() => {
+        if (projectId && !projectExists) {
+            import('../store/toastStore').then(({ useToastStore }) => {
+                useToastStore.getState().addToast({
+                    type: 'info',
+                    title: 'Project not found',
+                    message: 'It may have been deleted or saved in a different browser.',
+                });
+            });
+            navigate('/', { replace: true });
+        }
+    }, [projectId, projectExists, navigate]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -148,6 +168,12 @@ export function ProjectWorkspace() {
     );
     const showProgressTimeline = isPRDActivelyGenerating || hasFailedSection;
     const timelineSteps = buildGenerationSteps(prdSectionStatus ?? {});
+
+    // Failed sections persisted with the final result. Unlike the transient
+    // prdSectionStatus grid (stripped from persistence), this survives a
+    // refresh — it drives the incomplete-PRD banner with per-section retry.
+    const persistedFailedSections = (activeSpine?.generationMeta?.failedSections ?? [])
+        .filter((id): id is SectionId => id in SECTION_TITLES);
 
     // Optional preflight clarification: while a non-completed session exists and
     // no PRD has been produced (and the request isn't blocked), the workspace
@@ -190,7 +216,12 @@ export function ProjectWorkspace() {
     };
 
     const handleRegenerate = async () => {
+        // Ref guard, not just `isGenerating`: two clicks in the same tick both
+        // see the stale React state and would launch two concurrent pipelines
+        // whose results interleave on different spines.
+        if (regenerateInFlight.current) return;
         if (!projectId || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
+        regenerateInFlight.current = true;
         let activeNewSpineId: string | null = null;
         try {
             setIsGenerating(true);
@@ -200,6 +231,7 @@ export function ProjectWorkspace() {
             clearSectionStatus(projectId);
             const { newSpineId } = regenerateSpine(projectId);
             activeNewSpineId = newSpineId;
+            useProjectStore.getState().markSpineGenerationStarted(projectId, newSpineId);
             const sourcePrompt = latestSpine.promptText;
             await generateStructuredPRD(
                 sourcePrompt,
@@ -269,6 +301,7 @@ export function ProjectWorkspace() {
                 });
             }
         } finally {
+            regenerateInFlight.current = false;
             setIsGenerating(false);
         }
     };
@@ -306,6 +339,16 @@ export function ProjectWorkspace() {
             updateSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, markdown, {
                 sourcePrompt,
                 model,
+                // A successful retry resolves this section — drop it from the
+                // persisted failed list so the incomplete-PRD banner shrinks.
+                ...(activeSpine.generationMeta?.failedSections?.includes(id)
+                    ? {
+                        generationMeta: {
+                            ...activeSpine.generationMeta,
+                            failedSections: activeSpine.generationMeta.failedSections.filter(s => s !== id),
+                        },
+                    }
+                    : {}),
             });
             if (id === 'product_basics' && (structuredPRD.productName || structuredPRD.productCategory)) {
                 updateProjectProductMetadata(projectId, {
@@ -345,6 +388,19 @@ export function ProjectWorkspace() {
         const mockupReady = getArtifacts(projectId, 'mockup').some(a => a.currentVersionId);
         return coreReady && mockupReady;
     })();
+
+    // Post-finalize status pill. Once a spine is final, the user can dismiss the
+    // success modal ("Stay on the PRD") and be stranded with no obvious path to
+    // the assets that are now building. Show a persistent affordance in the top
+    // bar whenever we're final but not already viewing the Assets stage.
+    const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
+        (s) => s.status === 'generating' || s.status === 'queued',
+    );
+    const showAssetsPill = !!activeSpine?.isFinal
+        && !!activeSpine?.structuredPRD
+        && activeSpine?.safetyReview?.status !== 'blocked'
+        && !isOldVersion
+        && pipelineStage !== 'workspace';
 
     const handleToggleFinal = () => {
         if (!projectId || !activeSpine) return;
@@ -414,6 +470,20 @@ export function ProjectWorkspace() {
 
                 {/* Primary nav actions — always visible */}
                 <div className="flex items-center gap-2 shrink-0">
+                    {showAssetsPill && (
+                        <button
+                            onClick={handleOpenAssets}
+                            className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600/90 hover:bg-green-600 text-white rounded transition"
+                            title="Go to the build assets for this finalized PRD"
+                        >
+                            {assetsBuilding
+                                ? <Loader2 size={14} className="animate-spin" />
+                                : <ArrowRight size={14} />}
+                            <span className="hidden sm:inline">
+                                {assetsBuilding ? 'Building assets…' : 'Go to Assets'}
+                            </span>
+                        </button>
+                    )}
                     <button
                         onClick={handleExport}
                         className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-neutral-800 hover:bg-neutral-700 text-neutral-300 rounded transition"
@@ -640,6 +710,38 @@ export function ProjectWorkspace() {
                                             </div>
                                         )}
 
+                                        {/* Partial result: some sections failed and were merged as
+                                            empty stubs. Surfaced from the persisted generationMeta so
+                                            the warning survives refresh; each button re-runs only
+                                            that section. */}
+                                        {activeSpine.safetyReview?.status !== 'blocked'
+                                            && !activeSpine.generationError
+                                            && activeSpine.structuredPRD
+                                            && !isPRDActivelyGenerating
+                                            && persistedFailedSections.length > 0 && (
+                                            <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                                                <p className="font-semibold text-amber-900 text-sm mb-1">
+                                                    This PRD is incomplete — {persistedFailedSections.length} section{persistedFailedSections.length > 1 ? 's' : ''} failed to generate
+                                                </p>
+                                                <p className="text-sm text-amber-800 mb-3">
+                                                    The rest of the document is intact. Re-run the missing sections below — each retry regenerates only that section.
+                                                </p>
+                                                <div className="flex flex-wrap gap-2">
+                                                    {persistedFailedSections.map((sid) => (
+                                                        <button
+                                                            key={sid}
+                                                            onClick={() => handleRetrySection(sid)}
+                                                            disabled={!!retryingStepId || isOldVersion}
+                                                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-white border border-amber-300 text-amber-900 hover:bg-amber-100 transition disabled:opacity-40"
+                                                        >
+                                                            <RefreshCcw size={12} className={retryingStepId === sid ? 'animate-spin' : ''} />
+                                                            {retryingStepId === sid ? 'Retrying…' : `Run again: ${SECTION_TITLES[sid]}`}
+                                                        </button>
+                                                    ))}
+                                                </div>
+                                            </div>
+                                        )}
+
                                         {/* Blocked: dedicated Safety Review screen instead of any PRD layout */}
                                         {activeSpine.safetyReview?.status === 'blocked' ? (
                                             <SafetyReviewView
@@ -744,7 +846,7 @@ export function ProjectWorkspace() {
 
                 {/* Right Column: Combined Branches and History */}
                 {isBranchesVisible && (
-                    <div className="hidden lg:flex w-80 xl:w-96 shrink-0 bg-neutral-50 border-l border-neutral-200 flex-col shadow-sm z-10">
+                    <div className="hidden md:flex w-72 lg:w-80 xl:w-96 shrink-0 bg-neutral-50 border-l border-neutral-200 flex-col shadow-sm z-10">
                         {/* Tabs */}
                         <div className="flex items-center border-b border-neutral-200 bg-white shadow-sm shrink-0">
                             <button

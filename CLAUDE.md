@@ -241,14 +241,26 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 
 ### State (`src/store/`)
 
-`useProjectStore` is one Zustand store composed from 8 slices in
+`useProjectStore` is one Zustand store composed from 9 slices in
 `src/store/slices/`:
 
 - `projectSlice` — Project CRUD, current stage
 - `spineSlice` — SpineVersion CRUD, structured PRD updates, generation
   errors. Branches fork from highlighted spine text and consolidate
   back via `branchService.consolidateBranch()`. Spine versioning uses
-  `isLatest`/`isFinal` flags.
+  `isLatest`/`isFinal` flags. Spine ids are opaque — new versions
+  (`regenerateSpine`, `mergeBranch`) get UUIDs, while the first spine and
+  legacy localStorage data keep `v1`-style ids. Never parse a version
+  number out of the id; display labels ("Version N") derive from array
+  position. **Generation lifecycle:**
+  `SpineVersion.generationPhase` (`'running' | 'complete'`, optional —
+  legacy spines lack it) is stamped `'running'` by
+  `markSpineGenerationStarted` when a PRD run actually begins (both
+  entry points: `runPrdGeneration.ts` and
+  `ProjectWorkspace.handleRegenerate`) and flipped to `'complete'` by
+  every settle path (`updateSpineStructuredPRD` with `generationMeta`,
+  `setSpineError`, blocked `setSpineSafetyReview`). New generation entry
+  points must stamp it too, or interrupted-run recovery won't see them.
 - `branchSlice` — Branches and their messages
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
   tracking; source-ref staleness detection against the current spine
@@ -258,10 +270,24 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   from persistence)
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
   (transient; stripped from persistence). Consecutive-duplicate-deduped.
+- `tasksSlice` — Persisted implementation tasks (`ProjectTask[]` keyed by
+  projectId). `saveTasks` persists an extracted set for an Implementation
+  Plan artifact, replacing the prior set for that artifact while preserving
+  the `status`/`externalRefs` of tasks whose id still exists; `setTaskStatus`
+  (todo/in_progress/done) and `recordTaskExports` (attach created
+  GitHub/Linear issue refs) drive progress tracking. **Persisted** — not
+  stripped from localStorage.
 
 The store's `partialize` strips `jobs` and `prdProgress` so they don't
 persist. `onRehydrateStorage` migrates legacy `currentStage` values
-(`devplan`/`prompts`/`mockups`/`artifacts` → `prd` or `workspace`).
+(`devplan`/`prompts`/`mockups`/`artifacts` → `prd` or `workspace`) and runs
+`markInterruptedGenerations` (`src/store/interruptedGeneration.ts`): a page
+load kills any in-flight PRD pipeline, so spines still marked
+`generationPhase: 'running'` — or carrying the legacy `'Generating PRD...'`
+placeholder with no structured PRD — are converted into a settled
+`generationError` (`category: 'interrupted'`), which renders the existing
+error card with Try Again instead of an eternal "Generating…" state. Spines
+with an open preflight session or a blocked safety review are skipped.
 
 **Concurrency rule:** store actions that append a version (e.g.
 `createArtifactVersion`, `regenerateSpine`, `mergeBranch`) must do **all** state
@@ -325,6 +351,38 @@ opens the mobile drawer (`useIsMobile`-gated, so it never reopens after the user
 closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
+
+### Implementation tasks (plan → tracked checklist)
+
+The Implementation Plan artifact converts into trackable build tasks.
+`taskExtractor.ts` deterministically derives `ImplementationTask[]` (no LLM
+call) from the plan's structured JSON or legacy markdown. `ConvertToTasksModal`
+(opened from the Implementation Plan view) lets the user review/edit them, then:
+
+- **Save to project** persists them via `saveTasks` (`tasksSlice`) as
+  `ProjectTask[]` with `status: 'todo'`. Re-opening the modal seeds from the
+  saved set (preserving status), so editing and re-saving never resets
+  progress.
+- **Export** (`taskExport/` registry: markdown / github / linear) is unchanged;
+  after a github/linear export the modal calls `recordTaskExports` to attach
+  the created issue refs to the matching persisted tasks.
+
+`TaskChecklist` (`src/components/tasks/`) renders above the Implementation Plan
+content when saved tasks exist: a progress bar (`done / total`), a status
+toggle per row cycling todo → in_progress → done, expandable acceptance
+criteria, and a link to any exported GitHub issue. The "Convert to Tasks"
+button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
+`sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
+up in `deleteProject`.
+
+### Export (`ExportModal.tsx`)
+
+The Export dialog downloads the PRD, individual artifacts, a combined bundle,
+or structured JSON. It also offers a **"Copy for coding agent"** preset
+(`buildAgentHandoff` in `src/lib/exportHandoff.ts`): an instruction preamble +
+PRD + build-relevant core artifacts (mockups excluded), with copy and download.
+Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
+an `execCommand` fallback) is available on the PRD and full bundle too.
 
 ### PRD highlight → branch selection pipeline
 
@@ -425,6 +483,15 @@ component). It is driven directly by the live `prdSectionStatus` store slice
 The card is shown while `isPRDActivelyGenerating || hasFailedSection`, so a
 partial-failure run (which returns a partial PRD without setting
 `generationError`) keeps its Run again affordance visible.
+
+**Partial-failure persistence:** the live section grid is transient, so the
+pipeline also records failed section ids in
+`generationMeta.failedSections` (set by `progressivePrdPipeline`, stored on
+the spine via the normal `onResult` path). When non-empty, `ProjectWorkspace`
+renders an amber "This PRD is incomplete" banner above the PRD with a
+per-section "Run again" button wired to the same `handleRetrySection` flow —
+this survives refresh, unlike the timeline. A successful single-section retry
+removes its id from the list (see `handleRetrySection`).
 
 ### Other-flow progress UI (`src/components/GenerationProgress.tsx`)
 

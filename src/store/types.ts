@@ -6,7 +6,9 @@ import type {
     ArtifactSlotKey, ProjectJobState, SlotState,
     QualityScores, GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
+    ProjectTask, TaskStatus, TaskExternalRef,
 } from '../types';
+import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { PrdSectionStatusEntry } from './slices/prdProgressSlice';
 
@@ -28,6 +30,9 @@ export interface ProjectState {
     artifacts: Record<string, Artifact[]>;
     artifactVersions: Record<string, ArtifactVersion[]>;
     feedbackItems: Record<string, FeedbackItem[]>;
+
+    // Persisted implementation tasks, keyed by projectId.
+    tasks: Record<string, ProjectTask[]>;
 
     // Existing actions
     createProject: (name: string, promptText: string, platform?: ProjectPlatform) => { projectId: string, spineId: string };
@@ -72,6 +77,13 @@ export interface ProjectState {
         projectId: string,
         meta: { productName?: string; productCategory?: string },
     ) => void;
+
+    // Generation lifecycle. Stamps generationPhase: 'running' when a PRD run
+    // actually begins; the settle paths (updateSpineStructuredPRD with
+    // generationMeta, setSpineError, blocked setSpineSafetyReview) flip it to
+    // 'complete'. Rehydration converts still-'running' spines into an
+    // interrupted-generation error (see markInterruptedGenerations).
+    markSpineGenerationStarted: (projectId: string, spineId: string) => void;
 
     // Error handling
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => void;
@@ -134,6 +146,26 @@ export interface ProjectState {
     ) => { feedbackId: string };
     updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => void;
     getFeedbackItems: (projectId: string, status?: FeedbackStatus) => FeedbackItem[];
+
+    // Implementation task tracking. `saveTasks` persists an extracted set for a
+    // given Implementation Plan artifact, replacing any prior set for that
+    // artifact while preserving status/externalRefs of tasks whose id still
+    // exists (so re-saving after an edit never loses progress).
+    saveTasks: (
+        projectId: string,
+        sourceArtifactId: string,
+        tasks: ImplementationTask[],
+        sourceSpineVersionId?: string,
+    ) => { saved: number };
+    setTaskStatus: (projectId: string, taskId: string, status: TaskStatus) => void;
+    removeProjectTask: (projectId: string, taskId: string) => void;
+    /** Attach external refs (e.g. created GitHub issues) to saved tasks. */
+    recordTaskExports: (
+        projectId: string,
+        refs: Array<{ taskId: string; ref: TaskExternalRef }>,
+    ) => void;
+    getTasks: (projectId: string) => ProjectTask[];
+    getTasksForArtifact: (projectId: string, sourceArtifactId: string) => ProjectTask[];
 
     // Staleness
     getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;
