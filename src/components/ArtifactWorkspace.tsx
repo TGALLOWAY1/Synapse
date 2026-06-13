@@ -16,6 +16,7 @@ import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
 import { ConvertToTasksModal } from './ConvertToTasksModal';
+import { TaskChecklist } from './tasks/TaskChecklist';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
@@ -87,6 +88,9 @@ export function ArtifactWorkspace({
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
         updateArtifactVersionMetadata,
     } = useProjectStore();
+    // Subscribe to tasks so the Implementation Plan button label tracks saved
+    // count reactively (the checklist itself reads the store directly).
+    const projectTasks = useProjectStore(s => s.tasks[projectId] ?? []);
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
@@ -326,21 +330,28 @@ export function ArtifactWorkspace({
             : undefined;
         return (
             <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
+                {subtype === 'implementation_plan' && (() => {
+                    const savedCount = projectTasks.filter(t => t.sourceArtifactId === artifact.id).length;
+                    return (
+                        <div className="flex items-center justify-end">
+                            <button
+                                type="button"
+                                onClick={() =>
+                                    setTasksModalSource({
+                                        artifactId: artifact.id,
+                                        content: preferred.content,
+                                    })
+                                }
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                            >
+                                <ListChecks size={12} />
+                                {savedCount > 0 ? `Manage Tasks (${savedCount})` : 'Convert to Tasks'}
+                            </button>
+                        </div>
+                    );
+                })()}
                 {subtype === 'implementation_plan' && (
-                    <div className="flex items-center justify-end">
-                        <button
-                            type="button"
-                            onClick={() =>
-                                setTasksModalSource({
-                                    artifactId: artifact.id,
-                                    content: preferred.content,
-                                })
-                            }
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                        >
-                            <ListChecks size={12} /> Convert to Tasks
-                        </button>
-                    </div>
+                    <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} />
                 )}
                 <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
                     <MockupErrorBoundary
@@ -500,7 +511,9 @@ export function ArtifactWorkspace({
 
             {tasksModalSource && (
                 <ConvertToTasksModal
+                    projectId={projectId}
                     sourceArtifactId={tasksModalSource.artifactId}
+                    sourceSpineVersionId={spineVersionId}
                     artifactContent={tasksModalSource.content}
                     projectName={getProject(projectId)?.name}
                     onClose={() => setTasksModalSource(null)}

@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Trash2, Loader2, CheckCircle2, AlertTriangle, ExternalLink, FileDown, Github, KanbanSquare } from 'lucide-react';
+import { X, Trash2, Loader2, CheckCircle2, AlertTriangle, ExternalLink, FileDown, Github, KanbanSquare, Save } from 'lucide-react';
 import type {
     ExportResult,
     ExportTargetId,
@@ -8,13 +8,17 @@ import type {
     TaskPriority,
     TaskType,
 } from '../types/tasks';
+import type { ProjectTask, TaskExternalRef } from '../types';
 import { extractTasksFromMarkdown } from '../lib/services/taskExtractor';
 import { EXPORT_PROVIDERS, exportTasks } from '../lib/services/taskExport';
 import { useToastStore } from '../store/toastStore';
+import { useProjectStore } from '../store/projectStore';
 import { ErrorBanner } from './ErrorBanner';
 
 interface ConvertToTasksModalProps {
+    projectId: string;
     sourceArtifactId: string;
+    sourceSpineVersionId?: string;
     artifactContent: string;
     projectName?: string;
     onClose: () => void;
@@ -51,6 +55,25 @@ function toEditable(task: ImplementationTask): EditableTask {
     };
 }
 
+/** Persisted task → the modal's editable extraction shape. */
+function persistedToEditable(task: ProjectTask): EditableTask {
+    return {
+        id: task.id,
+        title: task.title,
+        summary: task.summary,
+        sourceArtifactId: task.sourceArtifactId,
+        sourceSectionId: task.sourceSectionId,
+        priority: task.priority,
+        taskType: task.taskType,
+        estimatedComplexity: task.estimatedComplexity,
+        dependencies: task.dependencies,
+        acceptanceCriteria: task.acceptanceCriteria,
+        implementationNotes: task.implementationNotes,
+        suggestedLabels: task.suggestedLabels,
+        criteriaText: task.acceptanceCriteria.join('\n'),
+    };
+}
+
 function fromEditable(task: EditableTask): ImplementationTask {
     const criteria = task.criteriaText
         .split('\n')
@@ -73,25 +96,68 @@ function fromEditable(task: EditableTask): ImplementationTask {
 }
 
 export function ConvertToTasksModal({
+    projectId,
     sourceArtifactId,
+    sourceSpineVersionId,
     artifactContent,
     projectName,
     onClose,
 }: ConvertToTasksModalProps) {
     const { addToast } = useToastStore();
-    const initialTasks = useMemo(
-        () => extractTasksFromMarkdown(artifactContent, { sourceArtifactId }).map(toEditable),
-        [artifactContent, sourceArtifactId],
-    );
+    const saveTasksToStore = useProjectStore(s => s.saveTasks);
+    const recordTaskExports = useProjectStore(s => s.recordTaskExports);
+    const getTasksForArtifact = useProjectStore(s => s.getTasksForArtifact);
+
+    // Seed from previously-saved tasks when present (so re-opening preserves
+    // edits and the saved set), otherwise extract fresh from the plan.
+    const initialTasks = useMemo(() => {
+        const existing = getTasksForArtifact(projectId, sourceArtifactId);
+        if (existing.length > 0) return existing.map(persistedToEditable);
+        return extractTasksFromMarkdown(artifactContent, { sourceArtifactId }).map(toEditable);
+        // eslint-disable-next-line react-hooks/exhaustive-deps -- seed once on open
+    }, [artifactContent, sourceArtifactId, projectId]);
 
     const [tasks, setTasks] = useState<EditableTask[]>(initialTasks);
     const [target, setTarget] = useState<ExportTargetId>('markdown');
     const [exporting, setExporting] = useState(false);
+    const [saved, setSaved] = useState(getTasksForArtifact(projectId, sourceArtifactId).length > 0);
     const [result, setResult] = useState<ExportResult | null>(null);
     const [readyError, setReadyError] = useState<string | null>(null);
 
     const provider = EXPORT_PROVIDERS[target];
     const targetReadyMessage = provider.checkReady();
+
+    const handleSave = () => {
+        const finalized = tasks.map(fromEditable);
+        const { saved: count } = saveTasksToStore(projectId, sourceArtifactId, finalized, sourceSpineVersionId);
+        setSaved(true);
+        addToast({
+            type: 'success',
+            title: `Saved ${count} task${count === 1 ? '' : 's'} to the project`,
+            message: 'Track progress from the Implementation Plan.',
+        });
+    };
+
+    // After a successful export to a tracking target, attach the created
+    // issue refs to the persisted tasks (no-op if the task isn't saved).
+    const recordRefsFromResult = (exportResult: ExportResult) => {
+        const refs: Array<{ taskId: string; ref: TaskExternalRef }> = [];
+        const exportTarget = exportResult.target;
+        if (exportTarget !== 'github' && exportTarget !== 'linear') return;
+        for (const item of exportResult.succeeded) {
+            if (!item.externalUrl && !item.externalId) continue;
+            refs.push({
+                taskId: item.taskId,
+                ref: {
+                    target: exportTarget,
+                    externalId: item.externalId,
+                    externalUrl: item.externalUrl,
+                    exportedAt: Date.now(),
+                },
+            });
+        }
+        if (refs.length > 0) recordTaskExports(projectId, refs);
+    };
 
     const updateTask = (index: number, patch: Partial<EditableTask>) => {
         setTasks(prev => prev.map((task, i) => (i === index ? { ...task, ...patch } : task)));
@@ -116,6 +182,7 @@ export function ConvertToTasksModal({
             const finalized = tasks.map(fromEditable);
             const exportResult = await exportTasks(finalized, { target, projectName });
             setResult(exportResult);
+            recordRefsFromResult(exportResult);
             const succeeded = exportResult.succeeded.length;
             const failed = exportResult.failed.length;
             if (exportResult.fatalError) {
@@ -345,6 +412,16 @@ export function ConvertToTasksModal({
                             className="px-4 py-2 text-sm text-neutral-500 hover:text-neutral-700 transition"
                         >
                             Close
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleSave}
+                            disabled={tasks.length === 0}
+                            className="inline-flex items-center gap-1.5 px-4 py-2 text-sm font-medium rounded-lg transition border disabled:opacity-40 border-indigo-200 text-indigo-700 bg-indigo-50 hover:bg-indigo-100"
+                            title="Save these tasks to the project and track progress"
+                        >
+                            {saved ? <CheckCircle2 size={14} /> : <Save size={14} />}
+                            {saved ? 'Update saved tasks' : 'Save to project'}
                         </button>
                         <button
                             type="button"

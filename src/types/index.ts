@@ -716,6 +716,48 @@ export type FeedbackItem = {
     updatedAt: number;
 };
 
+// --- Persisted implementation tasks --------------------------------------
+// `ImplementationTask` (src/types/tasks.ts) is the *transient* extraction
+// shape produced from an Implementation Plan. `ProjectTask` is its persisted
+// counterpart: once the user saves extracted tasks to a project, they live
+// here with tracking state (status, export refs) so progress survives
+// refresh and drives the implementation checklist. The shared enums are
+// imported from tasks.ts (one-way dependency; tasks.ts imports nothing).
+// `ProjectTask.status` reuses the existing `TaskStatus` union (defined with
+// the structured implementation plan below: todo/in_progress/done/blocked).
+
+/** A reference to an external item created by exporting a task. */
+export type TaskExternalRef = {
+    target: import('./tasks').ExportTargetId;
+    externalId?: string;
+    externalUrl?: string;
+    exportedAt: number;
+};
+
+export type ProjectTask = {
+    id: string;
+    projectId: string;
+    /** Implementation Plan artifact the task was extracted from. */
+    sourceArtifactId: string;
+    /** Spine version current when the task was saved (for staleness hints). */
+    sourceSpineVersionId?: string;
+    sourceSectionId?: string;
+    title: string;
+    summary: string;
+    priority?: import('./tasks').TaskPriority;
+    taskType?: import('./tasks').TaskType;
+    estimatedComplexity?: import('./tasks').TaskComplexity;
+    acceptanceCriteria: string[];
+    dependencies?: string[];
+    implementationNotes?: string[];
+    suggestedLabels?: string[];
+    status: TaskStatus;
+    createdAt: number;
+    updatedAt: number;
+    /** Populated when the task is exported to GitHub/Linear/markdown. */
+    externalRefs?: TaskExternalRef[];
+};
+
 // Mockup generation settings
 export type MockupPlatform = 'mobile' | 'desktop' | 'responsive';
 export type MockupFidelity = 'low' | 'mid' | 'high';

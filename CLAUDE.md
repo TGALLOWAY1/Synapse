@@ -241,7 +241,7 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 
 ### State (`src/store/`)
 
-`useProjectStore` is one Zustand store composed from 8 slices in
+`useProjectStore` is one Zustand store composed from 9 slices in
 `src/store/slices/`:
 
 - `projectSlice` — Project CRUD, current stage
@@ -270,6 +270,13 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   from persistence)
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
   (transient; stripped from persistence). Consecutive-duplicate-deduped.
+- `tasksSlice` — Persisted implementation tasks (`ProjectTask[]` keyed by
+  projectId). `saveTasks` persists an extracted set for an Implementation
+  Plan artifact, replacing the prior set for that artifact while preserving
+  the `status`/`externalRefs` of tasks whose id still exists; `setTaskStatus`
+  (todo/in_progress/done) and `recordTaskExports` (attach created
+  GitHub/Linear issue refs) drive progress tracking. **Persisted** — not
+  stripped from localStorage.
 
 The store's `partialize` strips `jobs` and `prdProgress` so they don't
 persist. `onRehydrateStorage` migrates legacy `currentStage` values
@@ -344,6 +351,29 @@ opens the mobile drawer (`useIsMobile`-gated, so it never reopens after the user
 closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
+
+### Implementation tasks (plan → tracked checklist)
+
+The Implementation Plan artifact converts into trackable build tasks.
+`taskExtractor.ts` deterministically derives `ImplementationTask[]` (no LLM
+call) from the plan's structured JSON or legacy markdown. `ConvertToTasksModal`
+(opened from the Implementation Plan view) lets the user review/edit them, then:
+
+- **Save to project** persists them via `saveTasks` (`tasksSlice`) as
+  `ProjectTask[]` with `status: 'todo'`. Re-opening the modal seeds from the
+  saved set (preserving status), so editing and re-saving never resets
+  progress.
+- **Export** (`taskExport/` registry: markdown / github / linear) is unchanged;
+  after a github/linear export the modal calls `recordTaskExports` to attach
+  the created issue refs to the matching persisted tasks.
+
+`TaskChecklist` (`src/components/tasks/`) renders above the Implementation Plan
+content when saved tasks exist: a progress bar (`done / total`), a status
+toggle per row cycling todo → in_progress → done, expandable acceptance
+criteria, and a link to any exported GitHub issue. The "Convert to Tasks"
+button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
+`sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
+up in `deleteProject`.
 
 ### PRD highlight → branch selection pipeline
 

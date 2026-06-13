@@ -10,6 +10,7 @@ import { createFeedbackSlice } from './slices/feedbackSlice';
 import { createStalenessSlice } from './slices/stalenessSlice';
 import { createGenerationJobsSlice } from './slices/generationJobsSlice';
 import { createPrdProgressSlice } from './slices/prdProgressSlice';
+import { createTasksSlice } from './slices/tasksSlice';
 import { markInterruptedGenerations } from './interruptedGeneration';
 
 export type { ProjectState } from './types';
@@ -25,6 +26,7 @@ export const useProjectStore = create<ProjectState>()(
             ...createStalenessSlice(...a),
             ...createGenerationJobsSlice(...a),
             ...createPrdProgressSlice(...a),
+            ...createTasksSlice(...a),
         }),
         {
             name: 'synapse-projects-storage',
