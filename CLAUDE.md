@@ -375,6 +375,15 @@ button becomes "Manage Tasks (N)" once tasks are saved. Tasks capture
 `sourceSpineVersionId` for future staleness hints. Persisted tasks are cleaned
 up in `deleteProject`.
 
+### Export (`ExportModal.tsx`)
+
+The Export dialog downloads the PRD, individual artifacts, a combined bundle,
+or structured JSON. It also offers a **"Copy for coding agent"** preset
+(`buildAgentHandoff` in `src/lib/exportHandoff.ts`): an instruction preamble +
+PRD + build-relevant core artifacts (mockups excluded), with copy and download.
+Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
+an `execCommand` fallback) is available on the PRD and full bundle too.
+
 ### PRD highlight → branch selection pipeline
 
 The core PRD-refinement gesture — highlight PRD text, get a contextual
