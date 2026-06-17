@@ -7,8 +7,12 @@ import {
   signupWithEmail,
 } from '../lib/recruiterApi';
 
-// DEV BYPASS: set to false to re-enable real authentication
-const DEV_SKIP_AUTH = true;
+// Real authentication is ON by default. For local development without the
+// MongoDB/session backend running, opt into a bypass by setting
+// `VITE_DEV_SKIP_AUTH=true` in `.env.local`. Production builds (`import.meta.env.DEV`
+// is false) NEVER bypass auth, regardless of the env var.
+const DEV_SKIP_AUTH =
+  import.meta.env.DEV && import.meta.env.VITE_DEV_SKIP_AUTH === 'true';
 
 const DEV_USER: RecruiterUser = {
   userId: 'dev-user',
