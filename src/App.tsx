@@ -1,10 +1,11 @@
 import { useEffect } from 'react';
 import type { ReactElement } from 'react';
-import { BrowserRouter, Routes, Route, Navigate } from 'react-router-dom';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
+import { DEMO_PROJECT_ID } from './data/demoProject';
 import { TourPage } from './components/tour/TourPage';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
@@ -51,6 +52,23 @@ function RequireAuth({ children }: { children: ReactElement }) {
 }
 
 /**
+ * Project route guard. The read-only demo project is public so recruiters can
+ * explore Synapse without an account or any paid API keys; every other project
+ * requires authentication (and the server enforces per-user ownership).
+ */
+function ProjectRoute() {
+  const { projectId } = useParams();
+  if (projectId === DEMO_PROJECT_ID) {
+    return <ProjectWorkspace />;
+  }
+  return (
+    <RequireAuth>
+      <ProjectWorkspace />
+    </RequireAuth>
+  );
+}
+
+/**
  * One-shot migration: move anyone still on `gemini-2.5-flash` to the new
  * default (`gemini-3-flash-preview`) which has better capacity headroom.
  * Gated by a sentinel localStorage key so it only runs once — a user who
@@ -89,14 +107,7 @@ function App() {
           <Route path="/" element={<HomeRoute />} />
           <Route path="/about" element={<TourPage />} />
           <Route path="/tour" element={<TourPage />} />
-          <Route
-            path="/p/:projectId"
-            element={
-              <RequireAuth>
-                <ProjectWorkspace />
-              </RequireAuth>
-            }
-          />
+          <Route path="/p/:projectId" element={<ProjectRoute />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
         </Routes>
