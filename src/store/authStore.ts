@@ -6,6 +6,7 @@ import {
   logout as logoutRequest,
   signupWithEmail,
 } from '../lib/recruiterApi';
+import { applyProjectUser } from './projectUserSync';
 
 // Real authentication is ON by default. For local development without the
 // MongoDB/session backend running, opt into a bypass by setting
@@ -34,49 +35,59 @@ type AuthState = {
   logout: () => Promise<void>;
 };
 
-export const useAuthStore = create<AuthState>((set) => ({
-  user: DEV_SKIP_AUTH ? DEV_USER : null,
-  loading: DEV_SKIP_AUTH ? false : true,
-  refreshSession: async () => {
-    if (DEV_SKIP_AUTH) {
-      set({ user: DEV_USER, loading: false });
-      return;
-    }
-    set({ loading: true });
-    try {
-      const session = await fetchSession();
-      set({ user: session.authenticated ? session.user : null, loading: false });
-    } catch {
-      set({ user: null, loading: false });
-    }
-  },
-  loginWithEmail: async (email, password) => {
-    if (DEV_SKIP_AUTH) {
-      set({ user: DEV_USER, loading: false });
-      return { ok: true as const, user: DEV_USER };
-    }
-    const result = await loginWithEmail({ email, password });
-    if (result.ok) {
-      set({ user: result.user, loading: false });
-    }
-    return result;
-  },
-  signupWithEmail: async (email, password, name) => {
-    if (DEV_SKIP_AUTH) {
-      set({ user: DEV_USER, loading: false });
-      return { ok: true as const, user: DEV_USER };
-    }
-    const result = await signupWithEmail({ email, password, name });
-    if (result.ok) {
-      set({ user: result.user, loading: false });
-    }
-    return result;
-  },
-  logout: async () => {
-    if (DEV_SKIP_AUTH) {
-      return; // no-op in dev mode
-    }
-    await logoutRequest();
-    set({ user: null, loading: false });
-  },
-}));
+export const useAuthStore = create<AuthState>((set) => {
+  // Every place the active user changes also retargets the project store to
+  // that user's namespace (login adopts any anonymous projects; logout/anon
+  // switches away), so accounts never share project data in one browser.
+  const setUser = (user: RecruiterUser | null) => {
+    applyProjectUser(user?.userId ?? null);
+    set({ user, loading: false });
+  };
+
+  return {
+    user: DEV_SKIP_AUTH ? DEV_USER : null,
+    loading: DEV_SKIP_AUTH ? false : true,
+    refreshSession: async () => {
+      if (DEV_SKIP_AUTH) {
+        setUser(DEV_USER);
+        return;
+      }
+      set({ loading: true });
+      try {
+        const session = await fetchSession();
+        setUser(session.authenticated ? session.user : null);
+      } catch {
+        setUser(null);
+      }
+    },
+    loginWithEmail: async (email, password) => {
+      if (DEV_SKIP_AUTH) {
+        setUser(DEV_USER);
+        return { ok: true as const, user: DEV_USER };
+      }
+      const result = await loginWithEmail({ email, password });
+      if (result.ok) {
+        setUser(result.user);
+      }
+      return result;
+    },
+    signupWithEmail: async (email, password, name) => {
+      if (DEV_SKIP_AUTH) {
+        setUser(DEV_USER);
+        return { ok: true as const, user: DEV_USER };
+      }
+      const result = await signupWithEmail({ email, password, name });
+      if (result.ok) {
+        setUser(result.user);
+      }
+      return result;
+    },
+    logout: async () => {
+      if (DEV_SKIP_AUTH) {
+        return; // no-op in dev mode
+      }
+      await logoutRequest();
+      setUser(null);
+    },
+  };
+});
