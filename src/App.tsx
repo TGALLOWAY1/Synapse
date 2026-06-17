@@ -1,9 +1,11 @@
 import { useEffect } from 'react';
-import { BrowserRouter, Routes, Route } from 'react-router-dom';
+import type { ReactElement } from 'react';
+import { BrowserRouter, Routes, Route, Navigate, useParams } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
+import { DEMO_PROJECT_ID } from './data/demoProject';
 import { TourPage } from './components/tour/TourPage';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
@@ -26,6 +28,44 @@ function HomeRoute() {
   }
 
   return user ? <HomePage /> : <LoginPage />;
+}
+
+/**
+ * Client-side guard for authenticated routes (e.g. a project workspace). While
+ * the session is resolving we show a spinner; an unauthenticated user is sent
+ * to `/`, which renders the login page. This is a UX gate only — the real
+ * ownership/authorization checks live on the server (`requireUser`).
+ */
+function RequireAuth({ children }: { children: ReactElement }) {
+  const user = useAuthStore((s) => s.user);
+  const loading = useAuthStore((s) => s.loading);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin text-neutral-400" size={24} />
+      </div>
+    );
+  }
+
+  return user ? children : <Navigate to="/" replace />;
+}
+
+/**
+ * Project route guard. The read-only demo project is public so recruiters can
+ * explore Synapse without an account or any paid API keys; every other project
+ * requires authentication (and the server enforces per-user ownership).
+ */
+function ProjectRoute() {
+  const { projectId } = useParams();
+  if (projectId === DEMO_PROJECT_ID) {
+    return <ProjectWorkspace />;
+  }
+  return (
+    <RequireAuth>
+      <ProjectWorkspace />
+    </RequireAuth>
+  );
 }
 
 /**
@@ -67,7 +107,7 @@ function App() {
           <Route path="/" element={<HomeRoute />} />
           <Route path="/about" element={<TourPage />} />
           <Route path="/tour" element={<TourPage />} />
-          <Route path="/p/:projectId" element={<ProjectWorkspace />} />
+          <Route path="/p/:projectId" element={<ProjectRoute />} />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
         </Routes>

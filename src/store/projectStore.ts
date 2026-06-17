@@ -2,6 +2,7 @@ import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectState } from './types';
 import { createDebouncedStorage } from './storage';
+import { resolveProjectStorageName } from './userScope';
 import { createProjectSlice } from './slices/projectSlice';
 import { createSpineSlice } from './slices/spineSlice';
 import { createBranchSlice } from './slices/branchSlice';
@@ -30,7 +31,9 @@ export const useProjectStore = create<ProjectState>()(
         }),
         {
             name: 'synapse-projects-storage',
-            storage: createDebouncedStorage(500),
+            // The resolver namespaces the persisted key by the active user so
+            // accounts don't share projects in one browser (see userScope.ts).
+            storage: createDebouncedStorage(500, () => resolveProjectStorageName()),
             partialize: (state) => {
                 // Strip transient generation status from persisted state.
                 const { jobs: _jobs, prdProgress: _prdProgress, prdSectionStatus: _prdSectionStatus, ...persisted } = state;

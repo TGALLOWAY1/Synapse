@@ -290,6 +290,9 @@ npm run build
   self-hosting
 - [`docs/auth.md`](docs/auth.md) — multi-provider auth (email/password, Google,
   GitHub, LinkedIn), user record schema, env vars, error codes
+- [`docs/AUTH_AND_PROVIDER_KEYS.md`](docs/AUTH_AND_PROVIDER_KEYS.md) — per-user
+  projects, the encrypted BYO provider-key vault, server-side model routing,
+  and the demo/recruiter mode
 - [`docs/linkedin-auth.md`](docs/linkedin-auth.md) — LinkedIn OAuth setup,
   recruiter capture fields, and compliance note
 - [`docs/archive/`](docs/archive/) — historical design notes and audits

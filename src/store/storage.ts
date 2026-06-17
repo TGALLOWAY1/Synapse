@@ -21,7 +21,17 @@ function isQuotaError(err: unknown): boolean {
     );
 }
 
-export function createDebouncedStorage<S>(delayMs: number = 500) {
+export function createDebouncedStorage<S>(
+    delayMs: number = 500,
+    // Optional override that decides the actual localStorage key, ignoring the
+    // static `name` Zustand was configured with. Used to namespace the project
+    // store per user (see userScope.ts) so accounts don't share project data in
+    // the same browser. The resolver is evaluated at every read/write so a user
+    // switch transparently retargets storage; a queued debounced write captures
+    // its target at enqueue time, so it always lands in the namespace it came
+    // from even if the active user changes before it flushes.
+    resolveName?: (configuredName: string) => string,
+) {
     let timeoutId: ReturnType<typeof setTimeout> | null = null;
     let pendingValue: string | null = null;
     let pendingName: string | null = null;
@@ -84,9 +94,11 @@ export function createDebouncedStorage<S>(delayMs: number = 500) {
         });
     }
 
+    const target = (name: string) => (resolveName ? resolveName(name) : name);
+
     return {
         getItem: (name: string): StorageValue<S> | null => {
-            const raw = localStorage.getItem(name);
+            const raw = localStorage.getItem(target(name));
             if (raw === null) return null;
             try {
                 return JSON.parse(raw) as StorageValue<S>;
@@ -97,7 +109,7 @@ export function createDebouncedStorage<S>(delayMs: number = 500) {
         setItem: (name: string, value: StorageValue<S>): void => {
             const serialized = JSON.stringify(value);
             pendingValue = serialized;
-            pendingName = name;
+            pendingName = target(name);
             if (timeoutId) clearTimeout(timeoutId);
             timeoutId = setTimeout(() => {
                 safeSetItem(pendingName!, pendingValue!);
@@ -110,7 +122,7 @@ export function createDebouncedStorage<S>(delayMs: number = 500) {
             if (timeoutId) clearTimeout(timeoutId);
             pendingValue = null;
             pendingName = null;
-            localStorage.removeItem(name);
+            localStorage.removeItem(target(name));
         },
     };
 }

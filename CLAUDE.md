@@ -305,6 +305,43 @@ persistence. It flushes pending writes on `beforeunload`, `pagehide`, **and**
 `visibilitychange → hidden` (the last two are the reliable mobile lifecycle
 events).
 
+### User accounts, per-user projects & encrypted provider keys
+
+See `docs/AUTH_AND_PROVIDER_KEYS.md` for the full design. Key cross-cutting
+rules:
+
+- **Auth is the existing recruiter-portal system, now enforced.** The client
+  bypass (`authStore.DEV_SKIP_AUTH`) is off by default — it only applies in
+  local dev when `VITE_DEV_SKIP_AUTH=true`. `RequireAuth`/`ProjectRoute` in
+  `App.tsx` gate the workspace (the read-only `DEMO_PROJECT_ID` stays public).
+  Every private API route resolves identity **only** through
+  `api/_lib/requireUser.js` (verified session cookie) — never a client-supplied
+  id.
+- **Projects are namespaced per user in localStorage.** `userScope.ts` maps the
+  active `userId` to the persist key (`createDebouncedStorage`'s `resolveName`
+  override); `projectUserSync.applyProjectUser()` wipes in-memory state and
+  rehydrates from the new namespace on every auth transition (wired in
+  `authStore`). First sign-in non-destructively adopts pre-existing anonymous
+  projects. **Do not** read the project store before `applyProjectUser` has run
+  for the current user, and keep `emptyPersistedState()` in `projectUserSync`
+  in sync with the persisted slice fields.
+- **Provider keys live in an encrypted server vault** (`api/_lib/cryptoVault.js`
+  AES-256-GCM, key from `SYNAPSE_KEY_ENCRYPTION_SECRET`; `providerKeys.js` Mongo
+  `provider_keys` collection, one doc per `(userId, provider)`, bound via
+  AES-GCM AAD `userId:provider`). `api/provider-keys.js` is the session-gated
+  CRUD + connection-test endpoint; it returns **masked status only** (`…last4`),
+  never key material. UI: `components/settings/ProviderKeysSection.tsx`.
+- **Model routing:** OpenAI image gen is **fully proxied** server-side
+  (`api/image/generate.js`; `openaiClient.ts` calls it, `hasOpenAIKey()` reads a
+  primed flag, not localStorage). **Gemini stays client-side** (streaming would
+  hit serverless `maxDuration`): `geminiKeyVault.ts` fetches the user's key into
+  memory via `GET /api/provider-keys?material=gemini` (never persisted), with a
+  legacy localStorage fallback. `providerSession.ts` primes/clears this runtime
+  state on auth changes and Settings edits. Missing-key errors are explicit
+  ("Add a Gemini API key in Settings to generate PRDs." / "…OpenAI…mockups.").
+  New provider call sites must route through the vault, never expose a key, and
+  never log one.
+
 ### Pipeline flow
 
 ```

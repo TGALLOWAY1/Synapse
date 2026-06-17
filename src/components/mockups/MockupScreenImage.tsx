@@ -91,6 +91,16 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     const hasHighQuality = records.some((r) => r.quality === 'high');
 
     const handleGenerate = (quality: MockupImageQuality) => {
+        // High quality is the expensive variant — confirm before spending. Paid
+        // OpenAI usage is billed to the user's own account via their key.
+        if (quality === 'high' && typeof window !== 'undefined') {
+            const ok = window.confirm(
+                'Generate a HIGH-quality image with OpenAI gpt-image-2?\n\n'
+                + 'This is a paid OpenAI operation billed to your own account '
+                + '(typically a few cents per image).',
+            );
+            if (!ok) return;
+        }
         clearError(versionId, screen.id);
         void generate({ projectId, artifactId, versionId, screen, payload, settings, quality });
     };
@@ -199,6 +209,11 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                     ? 'Tap retry below to try again.'
                     : 'Generate a quick draft image of this screen via OpenAI gpt-image-2. You can regenerate at high quality once you like the draft — both renders stay accessible.'}
             </div>
+            {!error && keyPresent && (
+                <div className="text-[11px] text-amber-700 mt-2 max-w-sm">
+                    Paid OpenAI operation — billed to your account via your key (usually a few cents per image).
+                </div>
+            )}
             {error && (
                 <div className="mt-3 inline-flex items-start gap-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded-md px-2 py-1.5 max-w-md">
                     <AlertTriangle size={12} className="mt-0.5 shrink-0" />

@@ -1,3 +1,5 @@
+import { getCachedGeminiKey } from './geminiKeyVault';
+
 export interface JsonModeConfig {
     responseMimeType: string;
     responseSchema: object;
@@ -52,9 +54,11 @@ export interface ProviderOptions {
 }
 
 const getApiKey = () => {
-    const key = localStorage.getItem('GEMINI_API_KEY');
+    // Prefer the user's vault key (fetched into memory at call time, never
+    // persisted client-side); fall back to a local key for dev/offline use.
+    const key = getCachedGeminiKey() || localStorage.getItem('GEMINI_API_KEY');
     if (!key) {
-        throw new Error('Missing Gemini API Key. Please click the Settings gear icon in the top right to add your key.');
+        throw new Error('Add a Gemini API key in Settings to generate PRDs.');
     }
     return key;
 };
