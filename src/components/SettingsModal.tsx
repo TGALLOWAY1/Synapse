@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
+import { ProviderKeysSection } from './settings/ProviderKeysSection';
 
 const DEFAULT_FAST_MODEL = 'gemini-3.5-flash';
 const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
@@ -175,6 +176,18 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 </div>
 
                 <form onSubmit={handleSave} className="p-8 space-y-8 overflow-y-auto max-h-[80vh]">
+                    {/* Encrypted, server-side provider key vault (recommended) */}
+                    <ProviderKeysSection />
+
+                    <div className="border-t border-white/5 pt-6 space-y-1">
+                        <h3 className="text-sm font-semibold text-neutral-400">Local browser keys (advanced fallback)</h3>
+                        <p className="text-[11px] text-neutral-500 leading-relaxed">
+                            These keys are stored only in this browser's localStorage. The encrypted
+                            vault above is preferred; local keys are used as a fallback when no vault key
+                            is configured (e.g. offline or local development).
+                        </p>
+                    </div>
+
                     {/* API Key Section */}
                     <div className="space-y-3">
                         <div className="flex items-center justify-between">
