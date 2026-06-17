@@ -7,6 +7,7 @@ import {
   signupWithEmail,
 } from '../lib/recruiterApi';
 import { applyProjectUser } from './projectUserSync';
+import { primeProviderSession, clearProviderSession } from '../lib/providerSession';
 
 // Real authentication is ON by default. For local development without the
 // MongoDB/session backend running, opt into a bypass by setting
@@ -41,6 +42,13 @@ export const useAuthStore = create<AuthState>((set) => {
   // switches away), so accounts never share project data in one browser.
   const setUser = (user: RecruiterUser | null) => {
     applyProjectUser(user?.userId ?? null);
+    // Prime/clear runtime provider-key state (Gemini in-memory key, OpenAI
+    // configured flag) so AI calls use the right account's credentials.
+    if (user) {
+      void primeProviderSession();
+    } else {
+      clearProviderSession();
+    }
     set({ user, loading: false });
   };
 

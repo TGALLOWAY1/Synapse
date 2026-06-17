@@ -17,6 +17,7 @@ import {
   type ProviderId,
   type ProviderKeyStatusMap,
 } from '../../lib/providerKeysApi';
+import { primeProviderSession } from '../../lib/providerSession';
 
 // Encrypted, server-side provider-key management. Talks only to
 // /api/provider-keys, which returns masked status (never key material). This is
@@ -221,6 +222,9 @@ export function ProviderKeysSection() {
       const res = await fetchProviderKeyStatus();
       setStatus(res.status);
       setVaultConfigured(res.vaultConfigured);
+      // Keep the runtime AI clients in sync with the latest vault state so a
+      // just-added/removed key takes effect without a page reload.
+      void primeProviderSession();
     } catch {
       setStatus(null);
     } finally {

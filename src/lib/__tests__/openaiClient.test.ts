@@ -11,8 +11,10 @@ const hangUntilAbort = (signal?: AbortSignal): Promise<Response> =>
         signal?.addEventListener('abort', () => reject(new DOMException('Aborted', 'AbortError')), { once: true });
     });
 
+// The image proxy returns `{ b64 }` (the server unwraps OpenAI's
+// `data[0].b64_json`), so the client reads `b64` off the response.
 const okImageResponse = (b64: string): Response =>
-    ({ ok: true, json: async () => ({ data: [{ b64_json: b64 }] }) } as unknown as Response);
+    ({ ok: true, json: async () => ({ b64 }) } as unknown as Response);
 
 const ATTEMPT_TIMEOUT_MS = 75_000;
 const opts = { quality: 'low' as const, size: '1024x1536' };

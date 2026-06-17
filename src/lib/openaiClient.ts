@@ -8,8 +8,10 @@
 import type { MockupImageQuality } from '../types';
 import { isRetryableNetworkError } from './geminiClient';
 
-const OPENAI_IMAGE_URL = 'https://api.openai.com/v1/images/generations';
-const OPENAI_IMAGE_MODEL = 'gpt-image-2';
+// Image generation is proxied through our own backend so the OpenAI key (held
+// encrypted in the server vault) is never exposed to the browser. The proxy
+// decrypts the authenticated user's key server-side and forwards to OpenAI.
+const IMAGE_PROXY_URL = '/api/image/generate';
 
 export interface OpenAIImageOptions {
     size: string;                  // e.g. '1024x1024', '1024x1536', '1536x1024'
@@ -17,19 +19,21 @@ export interface OpenAIImageOptions {
     signal?: AbortSignal;
 }
 
-const getOpenAIKey = (): string => {
-    const key = localStorage.getItem('OPENAI_API_KEY');
-    if (!key) {
-        throw new Error(
-            'Missing OpenAI API key. Open Settings (gear icon, top right) and add your OpenAI key under "OpenAI image preview".'
-        );
-    }
-    return key;
+// Whether the authenticated user has an OpenAI key configured in the encrypted
+// vault. Image generation can only run when this is true. The flag is primed
+// from the provider-key status endpoint (see setImageProviderConfigured),
+// because the browser can no longer read the key itself.
+let imageProviderConfigured = false;
+
+/** Update the cached "OpenAI image key configured" flag from vault status. */
+export const setImageProviderConfigured = (configured: boolean): void => {
+    imageProviderConfigured = configured;
 };
 
-export const hasOpenAIKey = (): boolean => {
-    return !!localStorage.getItem('OPENAI_API_KEY')?.trim();
-};
+export const hasOpenAIKey = (): boolean => imageProviderConfigured;
+
+/** Thrown when the user has no OpenAI key in the vault. */
+const NO_KEY_MESSAGE = 'Add an OpenAI API key in Settings to generate mockups.';
 
 // Mobile Safari surfaces transient connection drops as `TypeError: Load failed`
 // during a single in-flight fetch. Image generation can take 20–60s, so a
@@ -147,27 +151,24 @@ export const callOpenAIImage = async (
     opts: OpenAIImageOptions,
 ): Promise<string> => {
     const startTime = performance.now();
-    const apiKey = getOpenAIKey();
 
     const body = {
-        model: OPENAI_IMAGE_MODEL,
         prompt,
         size: opts.size,
         quality: opts.quality,
-        n: 1,
     };
 
     // fetchWithRetry owns the per-attempt timeout and retry-on-stall logic;
     // we just pass the caller's cancel signal through and translate the
-    // terminal failure modes into user-facing copy.
+    // terminal failure modes into user-facing copy. The request goes to our
+    // own backend proxy (same-origin, session cookie), which injects the
+    // decrypted key — the browser never sees it.
     let response: Response;
     try {
-        response = await fetchWithRetry(OPENAI_IMAGE_URL, {
+        response = await fetchWithRetry(IMAGE_PROXY_URL, {
             method: 'POST',
-            headers: {
-                'Content-Type': 'application/json',
-                'Authorization': `Bearer ${apiKey}`,
-            },
+            headers: { 'Content-Type': 'application/json' },
+            credentials: 'include',
             body: JSON.stringify(body),
         }, opts.signal);
     } catch (err) {
@@ -197,12 +198,27 @@ export const callOpenAIImage = async (
     }
 
     if (!response.ok) {
+        // 401 means the session expired; 400 with no_openai_key means the user
+        // hasn't configured a key. Both get clear, actionable copy.
+        if (response.status === 401) {
+            throw new Error('Your session expired. Sign in again to generate images.');
+        }
         const errorData = await response.json().catch(() => null);
-        throw new Error(formatOpenAIError(response.status, errorData));
+        if (errorData?.error === 'no_openai_key') {
+            throw new Error(errorData?.message || NO_KEY_MESSAGE);
+        }
+        // The proxy forwards a sanitized provider message (quota / moderation /
+        // bad key). Reuse the existing OpenAI error copy, wrapping the flat
+        // proxy shape back into what formatOpenAIError expects.
+        throw new Error(
+            formatOpenAIError(response.status, {
+                error: { message: errorData?.message, code: errorData?.code },
+            }),
+        );
     }
 
     const data = await response.json();
-    const b64: string | undefined = data?.data?.[0]?.b64_json;
+    const b64: string | undefined = data?.b64;
     if (!b64) {
         throw new Error('OpenAI image API returned no image data. Please try again.');
     }

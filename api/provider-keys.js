@@ -58,6 +58,24 @@ export default async function handler(req, res) {
 
   try {
     if (req.method === 'GET') {
+      // Runtime key material for the Gemini client. This is the one, narrowly
+      // scoped place a key is returned to the browser — a deliberate tradeoff
+      // documented in docs/AUTH_AND_PROVIDER_KEYS.md: the 60–90s Gemini
+      // streaming pipeline can't be proxied through serverless without hitting
+      // duration limits, so the authenticated user fetches their own key into
+      // memory at call time (never persisted client-side). Only `gemini` is
+      // exposed this way; the OpenAI key is fully proxied and never returned.
+      if (req.query?.material === 'gemini') {
+        let key = null;
+        try {
+          key = await getDecryptedProviderKey(user.userId, 'gemini');
+        } catch {
+          key = null;
+        }
+        // 200 with key:null when none is stored, so the client can fall back
+        // cleanly to a local key without treating it as an error.
+        return json(res, 200, { provider: 'gemini', key: key || null });
+      }
       const status = await getProviderKeyStatus(user.userId);
       return json(res, 200, { status, vaultConfigured: true });
     }
