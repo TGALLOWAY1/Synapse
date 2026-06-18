@@ -14,6 +14,43 @@ all from a single client-side workspace.
 
 ---
 
+## Live demo (portfolio-safe)
+
+The interactive product tour is a **public, standalone demo** you can link to
+directly from a portfolio or résumé:
+
+- **Public URL:** `https://<your-deployment>/tour` (alias: `/about`)
+- **No authentication** — the route is not behind the auth gate.
+- **Demo data only** — every screen renders local fixtures
+  (`src/components/tour/tourData.ts`). It never calls Gemini, never touches the
+  `api/` backend or the project store, and never reads or exposes an API key or
+  any user data.
+- **Deep-linkable** — open or refresh `/tour` directly; the SPA rewrite (see
+  [Deploying the tour](#deploying-the-tour-static-hosting)) serves
+  `index.html`, so there is no 404.
+- **Mobile-first** — responsive layout with swipe navigation and reduced-motion
+  support.
+
+### Paste-into-your-portfolio markdown
+
+```markdown
+### Synapse — AI-native product definition environment
+
+From a plain-language idea to a structured PRD, UI mockups, and downstream
+engineering artifacts — all in one client-side workspace.
+
+▶️ **[Try the interactive demo](https://<your-deployment>/tour)** ·
+📂 **[Source on GitHub](https://github.com/<you>/synapse)**
+
+*The demo runs entirely on local sample data — no sign-up, no API key, no
+backend calls.*
+```
+
+> Replace `<your-deployment>` with your live host (e.g. your Vercel URL) and
+> `<you>` with your GitHub username before publishing.
+
+---
+
 ## What it does
 
 A single prompt flows from a plain-language idea to a finalized blueprint and
@@ -271,6 +308,27 @@ at lower image quality.
 ```bash
 npm run build
 ```
+
+The build emits a fully static SPA to `dist/` — no server is required to serve
+the tour.
+
+### Deploying the tour (static hosting)
+
+Because Synapse is a client-side SPA, every host must fall back to
+`index.html` for unknown paths, or a direct load / refresh of `/tour` (or
+`/about`, `/p/:id`, `/privacy`) returns a 404. The repo ships the config for
+the common hosts:
+
+| Host | Config (already in repo) | Notes |
+| --- | --- | --- |
+| **Vercel** (recommended) | `vercel.json` → `rewrites` | The full app, including the recruiter-portal `api/` functions, deploys as-is. The negative-lookahead rewrite (`/((?!api/).*)`) keeps API routes server-side while sending everything else to `index.html`. |
+| **Netlify** | `public/_redirects` → `/*  /index.html  200` | Copied verbatim into `dist/` on build. Serves the static tour; the `api/` serverless functions are Vercel-specific. |
+| **GitHub Pages** | — | Static-only (no `api/`). Pages has no rewrite engine, so use the SPA fallback trick — copy `dist/index.html` to `dist/404.html` after build. If serving from a project subpath (`/<repo>/`), also set Vite's `base` accordingly. |
+
+**Recommendation:** deploy to **Vercel** — it's the configured target, supports
+the SPA rewrite and the backend functions, and serves `/tour` directly. For a
+**tour-only** portfolio link, Netlify or GitHub Pages also work since the tour
+needs no backend.
 
 ---
 
