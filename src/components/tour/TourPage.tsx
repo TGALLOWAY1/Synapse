@@ -1,5 +1,5 @@
 import { Suspense, lazy, useEffect, type ComponentType } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { Link, useNavigate } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useTourState } from '../../lib/useTourState';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -62,22 +62,41 @@ export function TourPage() {
 
     return (
         <div className="flex h-[100dvh] flex-col bg-neutral-900 text-neutral-100">
-            {/* Header */}
+            {/* Header — branded so the tour reads as a product demo, not an
+                internal step-through. The wordmark and the "Open Synapse" CTA
+                both lead back to the live app. */}
             <header className="flex items-center justify-between gap-3 px-5 pt-[calc(env(safe-area-inset-top)+1rem)] sm:px-8">
-                <div className="flex items-center gap-2.5">
-                    <span className="flex h-10 w-10 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white">
-                        {activeIndex + 1}
+                <div className="flex min-w-0 items-center gap-3">
+                    <Link
+                        to="/"
+                        aria-label="Synapse home"
+                        className="flex min-w-0 items-center gap-2.5 transition hover:opacity-90"
+                    >
+                        <span className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-indigo-600 text-lg font-bold text-white">
+                            S
+                        </span>
+                        <span className="flex min-w-0 flex-col leading-tight">
+                            <span className="text-sm font-semibold text-white">Synapse</span>
+                            <span className="hidden truncate text-[11px] text-neutral-500 sm:block">
+                                From plain-language to product blueprint
+                            </span>
+                        </span>
+                    </Link>
+                    <span className="hidden items-center rounded-full border border-indigo-500/30 bg-indigo-500/10 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-indigo-200 md:inline-flex">
+                        Interactive demo
                     </span>
-                    <span className="text-sm text-neutral-500">/ {TOTAL_STEPS}</span>
                 </div>
                 <div className="flex items-center gap-3">
+                    <span className="hidden text-xs text-neutral-500 sm:inline" aria-hidden="true">
+                        {activeIndex + 1} / {TOTAL_STEPS}
+                    </span>
                     <ModeToggle mode={mode} onChange={(m) => dispatch({ type: 'SET_MODE', mode: m })} />
                     <button
                         type="button"
                         onClick={finish}
                         className="text-sm font-medium text-neutral-400 transition hover:text-white"
                     >
-                        Skip
+                        Open Synapse
                     </button>
                 </div>
             </header>

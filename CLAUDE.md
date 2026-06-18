@@ -560,6 +560,14 @@ page. It rebuilds six onboarding screens as native UI and teaches the workflow
 through interaction. All content is demo-only (`tourData.ts`); it never touches
 the Gemini pipeline, the `api/` backend, or the Zustand project store.
 
+**Public portfolio demo:** `/tour` and `/about` are deliberately **outside the
+auth gate** in `App.tsx` (no `RequireAuth`), so the tour is a standalone,
+linkable demo that exposes no user data or keys. SPA fallback to `index.html`
+on direct load/refresh is provided by `vercel.json` `rewrites` (Vercel) and
+`public/_redirects` (Netlify / compatible static hosts) — keep both in sync if
+routing changes. `TourPage.tsx`'s header carries Synapse branding + an "Open
+Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
+
 - **Two modes, one source of truth.** `src/lib/useTourState.ts` is a
   `useReducer` (`tourReducer` + `initialTourState`, both exported for tests)
   holding `{ activeIndex, mode, direction }`. **Guided** mode (first-timers)

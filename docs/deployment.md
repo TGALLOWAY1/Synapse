@@ -1,9 +1,11 @@
 # Deployment
 
-Synapse is a fully static SPA. There are no server secrets, no managed
-database, and no serverless functions. Users bring their own Gemini API
-key, which is stored in their browser's `localStorage` via the in-app
-Settings modal.
+The Synapse product workspace is a fully client-side SPA: users bring their
+own Gemini API key, stored in their browser's `localStorage` (or the encrypted
+provider-key vault) via the in-app Settings modal. The public product tour at
+`/tour` needs no key at all — it runs on local demo data. A separate
+recruiter-portal sub-product adds Vercel serverless functions under `api/`
+(MongoDB-backed); those are Vercel-specific and unrelated to the tour.
 
 ## Local development
 
@@ -28,23 +30,43 @@ Projects and keys persist across reloads via `localStorage`.
 | `npm run test` | Vitest suite (jsdom environment) |
 | `npx tsc --noEmit` | Typecheck without emitting |
 
-## Vercel
+## Vercel (recommended)
 
-Deployment is a straight static upload. The entire configuration lives in
-`vercel.json`:
+Deployment configuration lives in `vercel.json`. The recruiter-portal backend
+runs as serverless functions under `api/`, so the SPA rewrite uses a
+negative-lookahead to leave `/api/*` server-side and send everything else to
+`index.html`:
 
 ```json
 {
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
-    { "source": "/(.*)", "destination": "/index.html" }
+    { "source": "/((?!api/).*)", "destination": "/index.html" }
   ]
 }
 ```
 
-The single SPA rewrite makes React Router's client-side routes (`/about`,
-`/p/:projectId`) work on direct navigation and page refresh.
+That rewrite makes React Router's client-side routes — including the public,
+unauthenticated product tour at `/tour` (aliased `/about`), plus
+`/p/:projectId` and `/privacy` — resolve on direct navigation and page refresh
+instead of 404ing.
+
+## Static SPA routing on other hosts
+
+The product tour is a fully client-side, demo-data-only route, so it can be
+served from any static host as a portfolio link. Every host just needs an
+SPA fallback to `index.html`:
+
+- **Netlify** — `public/_redirects` (shipped in the repo) is copied into
+  `dist/` on build and provides `/*  /index.html  200`.
+- **GitHub Pages** — has no rewrite engine; after `npm run build`, copy
+  `dist/index.html` to `dist/404.html` so unknown paths still load the SPA. If
+  you serve from a project subpath (`https://<user>.github.io/<repo>/`), set
+  Vite's `base` to `/<repo>/` as well.
+
+Note the `api/` serverless functions are Vercel-specific — Netlify and GitHub
+Pages serve the static front end (including the tour) only.
 
 ### Environment variables
 

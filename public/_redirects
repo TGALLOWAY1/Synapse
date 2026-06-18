@@ -1,0 +1,5 @@
+# SPA fallback for static hosts (Netlify and compatible).
+# Every non-asset path is served index.html so React Router can resolve
+# client-side routes — including /tour and /about — on direct load and refresh.
+# Vercel uses the equivalent "rewrites" rule in vercel.json instead.
+/*    /index.html   200
