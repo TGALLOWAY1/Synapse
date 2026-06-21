@@ -89,10 +89,9 @@ HMAC-SHA256 over a base64url-encoded JSON payload. Current claim shape:
 # Session signing (required for all providers)
 SESSION_SECRET=change-me
 
-# MongoDB Data API (required)
-MONGODB_DATA_API_URL=
-MONGODB_DATA_API_KEY=
-MONGODB_DATA_SOURCE=
+# MongoDB (required) — official driver connection string.
+# The Atlas Data API REST gateway was retired 2025-09-30; use a driver URI.
+MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
 MONGODB_DB_NAME=synapse
 
 # LinkedIn (optional)

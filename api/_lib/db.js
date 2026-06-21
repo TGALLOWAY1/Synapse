@@ -1,38 +1,106 @@
-const API_VERSION = 'application/ejson';
+import { MongoClient } from 'mongodb';
 
-function getConfig() {
-  const url = process.env.MONGODB_DATA_API_URL;
-  const apiKey = process.env.MONGODB_DATA_API_KEY;
-  const dataSource = process.env.MONGODB_DATA_SOURCE;
-  const database = process.env.MONGODB_DB_NAME || 'synapse';
+const DEFAULT_DB_NAME = 'synapse';
 
-  if (!url || !apiKey || !dataSource) {
-    throw new Error('Missing MongoDB Data API config. Set MONGODB_DATA_API_URL, MONGODB_DATA_API_KEY, MONGODB_DATA_SOURCE.');
+// The recruiter-portal backend used to talk to the MongoDB Atlas *Data API*
+// (a REST gateway). MongoDB retired the Data API on 2025-09-30, so that
+// transport no longer exists and every auth/session/provider-key write was
+// failing. We now use the official MongoDB Node driver directly while keeping
+// the exact `runMongoAction(action, payload)` call signature and Data-API-shaped
+// return values, so every existing call site (users.js, providerKeys.js,
+// session rows, activity, admin dashboard) keeps working unchanged.
+
+// Cache the connecting client on the module/global scope so warm serverless
+// invocations reuse one connection pool instead of opening a new one per
+// request (the standard Vercel + MongoDB pattern).
+let clientPromise = globalThis.__synapseMongoClientPromise || null;
+
+function getUri() {
+  const uri = process.env.MONGODB_URI;
+  if (!uri) {
+    throw new Error(
+      'Missing MongoDB configuration. Set MONGODB_URI to your Atlas connection string ' +
+        '(mongodb+srv://…). The retired MONGODB_DATA_API_* variables are no longer used.',
+    );
   }
-
-  return { url, apiKey, dataSource, database };
+  return uri;
 }
 
-export async function runMongoAction(action, payload) {
-  const config = getConfig();
-  const response = await fetch(`${config.url}/action/${action}`, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Accept: API_VERSION,
-      'api-key': config.apiKey,
-    },
-    body: JSON.stringify({
-      dataSource: config.dataSource,
-      database: config.database,
-      ...payload,
-    }),
-  });
+async function getDb() {
+  if (!clientPromise) {
+    const client = new MongoClient(getUri(), {
+      // Serverless functions are short-lived and concurrency-capped; a small
+      // pool avoids exhausting Atlas connections under burst traffic.
+      maxPoolSize: 5,
+    });
+    clientPromise = client.connect();
+    globalThis.__synapseMongoClientPromise = clientPromise;
+  }
+  const client = await clientPromise;
+  return client.db(process.env.MONGODB_DB_NAME || DEFAULT_DB_NAME);
+}
 
-  if (!response.ok) {
-    const errorText = await response.text();
-    throw new Error(`MongoDB Data API ${action} failed (${response.status}): ${errorText}`);
+/**
+ * Compatibility shim preserving the old Atlas Data API surface
+ * (`runMongoAction(action, payload)`) on top of the official MongoDB driver.
+ *
+ * Supported actions and their Data-API-compatible return shapes:
+ *   - findOne   → { document }
+ *   - find      → { documents }
+ *   - insertOne → { insertedId }
+ *   - updateOne → { matchedCount, modifiedCount, upsertedId }
+ *   - deleteOne → { deletedCount }
+ *   - aggregate → { documents }
+ */
+export async function runMongoAction(action, payload = {}) {
+  const collectionName = payload.collection;
+  if (!collectionName) {
+    throw new Error(`runMongoAction(${action}): missing "collection".`);
   }
 
-  return response.json();
+  const db = await getDb();
+  const collection = db.collection(collectionName);
+
+  switch (action) {
+    case 'findOne': {
+      const document = await collection.findOne(payload.filter || {}, {
+        projection: payload.projection,
+      });
+      return { document: document || null };
+    }
+    case 'find': {
+      let cursor = collection.find(payload.filter || {}, {
+        projection: payload.projection,
+      });
+      if (payload.sort) cursor = cursor.sort(payload.sort);
+      if (typeof payload.skip === 'number') cursor = cursor.skip(payload.skip);
+      if (typeof payload.limit === 'number') cursor = cursor.limit(payload.limit);
+      const documents = await cursor.toArray();
+      return { documents };
+    }
+    case 'insertOne': {
+      const result = await collection.insertOne(payload.document);
+      return { insertedId: result.insertedId };
+    }
+    case 'updateOne': {
+      const result = await collection.updateOne(payload.filter || {}, payload.update, {
+        upsert: Boolean(payload.upsert),
+      });
+      return {
+        matchedCount: result.matchedCount,
+        modifiedCount: result.modifiedCount,
+        upsertedId: result.upsertedId || null,
+      };
+    }
+    case 'deleteOne': {
+      const result = await collection.deleteOne(payload.filter || {});
+      return { deletedCount: result.deletedCount };
+    }
+    case 'aggregate': {
+      const documents = await collection.aggregate(payload.pipeline || []).toArray();
+      return { documents };
+    }
+    default:
+      throw new Error(`runMongoAction: unsupported action "${action}".`);
+  }
 }
