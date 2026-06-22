@@ -346,7 +346,7 @@ needs no backend.
   end-to-end pipeline run
 - [`docs/deployment.md`](docs/deployment.md) — commands, Vercel setup,
   self-hosting
-- [`docs/auth.md`](docs/auth.md) — multi-provider auth (email/password, Google,
+- [`docs/auth.md`](docs/auth.md) — multi-provider auth (email/password,
   GitHub, LinkedIn), user record schema, env vars, error codes
 - [`docs/AUTH_AND_PROVIDER_KEYS.md`](docs/AUTH_AND_PROVIDER_KEYS.md) — per-user
   projects, the encrypted BYO provider-key vault, server-side model routing,

@@ -18,7 +18,6 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
 function providerLabel(provider: AuthProvider | undefined): string {
     switch (provider) {
         case 'github': return 'GitHub';
-        case 'google': return 'Google';
         case 'linkedin': return 'LinkedIn';
         case 'email': return '';
         default: return '';

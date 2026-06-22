@@ -76,7 +76,7 @@ Only needed if you are working on `api/` or the `/admin/recruiters` portal.
 3. **Database:** create a MongoDB Atlas cluster and set `MONGODB_URI` to its
    driver connection string (plus optional `MONGODB_DB_NAME`). The retired Atlas
    Data API is no longer used — the backend connects with the official driver.
-4. **OAuth:** configure any providers you want (Google / GitHub / LinkedIn) by
+4. **OAuth:** configure any providers you want (GitHub / LinkedIn) by
    setting their client id/secret. Omit a provider to disable it.
 5. **Snapshots:** set `SYNAPSE_OWNER_TOKEN` (≥ 24 chars) for owner-only cloud
    snapshots; `BLOB_READ_WRITE_TOKEN` is auto-provisioned by Vercel Blob in

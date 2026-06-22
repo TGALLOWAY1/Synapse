@@ -1,15 +1,14 @@
 # Authentication
 
-Synapse supports four ways to sign in:
+Synapse supports three ways to sign in:
 
 | Provider | Flow | Notes |
 |---|---|---|
 | Email + password | `POST /api/auth/signup` / `POST /api/auth/login` | Password hashed with scrypt. |
-| Google | `GET /api/auth/google` → callback | OIDC userinfo. Email auto-verified. |
 | GitHub | `GET /api/auth/github` → callback | Primary verified email from `/user/emails`. |
 | LinkedIn | `GET /api/auth/linkedin` → callback | OIDC userinfo. Email auto-verified. |
 
-All four issue the same `synapse_session` HttpOnly cookie (30-day max-age,
+All three issue the same `synapse_session` HttpOnly cookie (30-day max-age,
 HMAC-SHA256 signed). `GET /api/session` reads the cookie and returns the
 canonical user record.
 
@@ -21,8 +20,8 @@ these fields:
 | Field | Type | Notes |
 |---|---|---|
 | `userId` | string (UUID) | Primary identifier, stable across providers. |
-| `authProvider` | `'linkedin' \| 'email' \| 'google' \| 'github'` | Set on every record. |
-| `providerUserId` | string | LinkedIn `sub`, Google `sub`, GitHub `id`, or email address. |
+| `authProvider` | `'linkedin' \| 'email' \| 'github'` | Set on every record. |
+| `providerUserId` | string | LinkedIn `sub`, GitHub `id`, or email address. |
 | `email` | string \| null | Always lowercased on write. |
 | `emailVerified` | boolean | `true` for OIDC providers, `false` for email signups. |
 | `passwordHash` | string \| null | `scrypt$<saltB64url>$<hashB64url>`. Only for `authProvider='email'`. |
@@ -70,7 +69,7 @@ HMAC-SHA256 over a base64url-encoded JSON payload. Current claim shape:
 ```json
 {
   "userId": "…uuid…",
-  "authProvider": "google",
+  "authProvider": "github",
   "name": "Alex Example",
   "email": "alex@example.com",
   "avatarUrl": "https://…",
@@ -99,11 +98,6 @@ LINKEDIN_CLIENT_ID=
 LINKEDIN_CLIENT_SECRET=
 LINKEDIN_REDIRECT_URI=   # optional; defaults to ${baseUrl}/api/auth/linkedin/callback
 
-# Google (optional)
-GOOGLE_CLIENT_ID=
-GOOGLE_CLIENT_SECRET=
-GOOGLE_REDIRECT_URI=     # optional; defaults to ${baseUrl}/api/auth/google/callback
-
 # GitHub (optional)
 GITHUB_CLIENT_ID=
 GITHUB_CLIENT_SECRET=
@@ -116,8 +110,6 @@ ADMIN_DASHBOARD_KEY=
 Add each OAuth app's redirect URI exactly as shown above to the provider's
 developer console:
 
-- Google Cloud Console → Credentials → OAuth 2.0 Client ID → Authorized
-  redirect URIs
 - GitHub → Settings → Developer settings → OAuth Apps → Authorization
   callback URL
 - LinkedIn Developer Portal → App → Auth → Redirect URLs
@@ -132,7 +124,6 @@ without starting the flow:
 
 ```
 GET /api/auth/linkedin?debug=1
-GET /api/auth/google?debug=1
 GET /api/auth/github?debug=1
 ```
 
@@ -157,7 +148,7 @@ Common causes:
 ## Account-linking policy
 
 If a user signs up with email `alex@example.com` and later tries to sign in
-with Google using the same address, the callback **rejects** the attempt and
+with GitHub using the same address, the callback **rejects** the attempt and
 redirects to `/?auth_error=email_in_use_other_provider`. The same applies to
 every cross-provider combination. Each email may only exist under one
 provider at a time.
@@ -165,7 +156,7 @@ provider at a time.
 Automatic linking is intentionally out of scope — it requires careful
 trust-on-verification logic (only linking when the *new* provider asserts the
 email is verified) and dedicated UX affordances (e.g. "we found an existing
-account for alex@… — sign in first to link Google to it"). We'll add it in a
+account for alex@… — sign in first to link GitHub to it"). We'll add it in a
 follow-up PR.
 
 ## Endpoints
@@ -175,8 +166,6 @@ follow-up PR.
 | `POST` | `/api/auth/signup` | Create email user, set session, return user. |
 | `POST` | `/api/auth/login` | Verify email password, set session, return user. |
 | `POST` | `/api/auth/logout` | Clear session cookie. |
-| `GET`  | `/api/auth/google` | Begin Google OAuth redirect. |
-| `GET`  | `/api/auth/google/callback` | Exchange code, upsert user, set session. |
 | `GET`  | `/api/auth/github` | Begin GitHub OAuth redirect. |
 | `GET`  | `/api/auth/github/callback` | Exchange code, upsert user, set session. |
 | `GET`  | `/api/auth/linkedin` | Begin LinkedIn OAuth redirect. |
@@ -211,5 +200,5 @@ OAuth redirects surface errors through the `?auth_error=…` query param on
 - Rate limiting on signup/login (Vercel has no built-in limiter; consider
   Upstash Ratelimit).
 - The `/admin/recruiters` dashboard still filters via `linkedinId` and only
-  surfaces LinkedIn-provider users; email/Google/GitHub users will show up as
+  surfaces LinkedIn-provider users; email/GitHub users will show up as
   separate records once the projection is generalized.

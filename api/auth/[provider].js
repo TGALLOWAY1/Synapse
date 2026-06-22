@@ -1,6 +1,5 @@
 import crypto from 'crypto';
 import * as github from '../_lib/github.js';
-import * as google from '../_lib/google.js';
 import * as linkedin from '../_lib/linkedin.js';
 import { getBaseUrl, methodNotAllowed, json } from '../_lib/response.js';
 import { enforceRateLimit } from '../_lib/rateLimit.js';
@@ -17,11 +16,6 @@ const PROVIDERS = {
     getConfig: github.getGitHubConfig,
     createAuthUrl: github.createGitHubAuthUrl,
     stateCookie: 'synapse_github_state',
-  },
-  google: {
-    getConfig: google.getGoogleConfig,
-    createAuthUrl: google.createGoogleAuthUrl,
-    stateCookie: 'synapse_google_state',
   },
   linkedin: {
     getConfig: linkedin.getLinkedInConfig,

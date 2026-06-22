@@ -13,7 +13,7 @@ user-owned AI provider credentials**.
 
 | Area | Before this change |
 |---|---|
-| **Auth** | Already existed: email+password (scrypt) and Google/GitHub/LinkedIn OAuth, HMAC-signed `synapse_session` cookie, MongoDB Data API backend (`api/_lib/`). **But the client bypassed it** (`DEV_SKIP_AUTH = true` in `authStore.ts`). |
+| **Auth** | Already existed: email+password (scrypt) and GitHub/LinkedIn OAuth, HMAC-signed `synapse_session` cookie, MongoDB Data API backend (`api/_lib/`). **But the client bypassed it** (`DEV_SKIP_AUTH = true` in `authStore.ts`). |
 | **Database** | MongoDB Atlas via the official **Node driver** (`api/_lib/db.js` exposes a `runMongoAction()` shim; the previous Atlas **Data API** REST gateway was retired by MongoDB on 2025-09-30). Vercel Blob for snapshots. |
 | **Projects** | 100% client-side — Zustand `persist` → `localStorage` key `synapse-projects-storage`. Not user-scoped. |
 | **Gemini calls** | Browser-direct (`src/lib/geminiClient.ts`), key in `localStorage.GEMINI_API_KEY`. 60–90s mobile-hardened streaming client. |
@@ -46,7 +46,7 @@ user-owned AI provider credentials**.
 ## 2. User & project ownership model
 
 **Auth** is the existing system (see `docs/auth.md`): email+password (scrypt) and
-Google/GitHub/LinkedIn OAuth, all issuing the HMAC-signed `synapse_session`
+GitHub/LinkedIn OAuth, all issuing the HMAC-signed `synapse_session`
 HttpOnly cookie. The client previously bypassed auth (`DEV_SKIP_AUTH`); that
 bypass is now off by default and only available in local dev via
 `VITE_DEV_SKIP_AUTH=true`. Production builds never bypass.
