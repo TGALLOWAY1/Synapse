@@ -122,6 +122,38 @@ developer console:
   callback URL
 - LinkedIn Developer Portal → App → Auth → Redirect URLs
 
+### Debugging "redirect_uri does not match the registered value"
+
+If the provider's OAuth page rejects the request with a redirect_uri
+mismatch, the `redirect_uri` Synapse generated does not exactly match the
+URL you registered in the provider's developer portal. Append `?debug=1`
+to the OAuth init endpoint to see the exact value Synapse would send,
+without starting the flow:
+
+```
+GET /api/auth/linkedin?debug=1
+GET /api/auth/google?debug=1
+GET /api/auth/github?debug=1
+```
+
+The response is JSON with `redirectUri`, the constructed `authUrl`,
+`baseUrl` (derived from the request's `x-forwarded-host`/`host`), and
+`envOverride` (whether `<PROVIDER>_REDIRECT_URI` is set in the
+environment). The same `redirect_uri` is also logged server-side on
+every real init (visible in Vercel function logs) as
+`[oauth init <provider>] redirect_uri=…`.
+
+Common causes:
+
+- **Vercel preview deployments** — each preview has its own
+  `*.vercel.app` host, and only the URLs you explicitly registered with
+  the provider are accepted. Either register the preview URL too, or set
+  `<PROVIDER>_REDIRECT_URI` to your canonical production URL so every
+  deployment sends the same value.
+- **Custom domain vs. `*.vercel.app`** — registering
+  `https://synapse.example.com/...` but visiting the raw Vercel URL.
+- **`www.` vs. apex domain**, or trailing slash differences.
+
 ## Account-linking policy
 
 If a user signs up with email `alex@example.com` and later tries to sign in

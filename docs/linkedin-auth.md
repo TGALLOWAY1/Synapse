@@ -51,3 +51,14 @@ Synapse requests only:
 - `email`
 
 No posting, messaging, or write scopes are requested.
+
+## Troubleshooting
+
+If LinkedIn's OAuth page rejects the request with **"The redirect_uri
+does not match the registered value"**, hit
+`GET /api/auth/linkedin?debug=1` to see the exact `redirect_uri` Synapse
+is sending, then register that URL in the LinkedIn Developer Portal
+under App → Auth → Authorized redirect URLs (or set
+`LINKEDIN_REDIRECT_URI` to one you have already registered). See the
+debugging section in [`docs/auth.md`](auth.md) for the full
+explanation.
