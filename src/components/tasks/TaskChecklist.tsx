@@ -5,6 +5,12 @@ import {
 import { useProjectStore } from '../../store/projectStore';
 import type { ProjectTask, TaskStatus } from '../../types';
 
+// Stable empty reference for the tasks selector. A fresh `[]` literal each
+// call makes Zustand's useSyncExternalStore see a snapshot change on every
+// render and triggers React #185 (Maximum update depth) for projects without
+// saved tasks.
+const EMPTY_TASKS: ProjectTask[] = [];
+
 interface TaskChecklistProps {
     projectId: string;
     sourceArtifactId: string;
@@ -50,7 +56,7 @@ function StatusButton({ status, onClick }: { status: TaskStatus; onClick: () => 
 }
 
 export function TaskChecklist({ projectId, sourceArtifactId }: TaskChecklistProps) {
-    const tasks = useProjectStore(s => s.tasks[projectId] ?? []);
+    const tasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
     const setTaskStatus = useProjectStore(s => s.setTaskStatus);
     const removeProjectTask = useProjectStore(s => s.removeProjectTask);
     const [expandedId, setExpandedId] = useState<string | null>(null);

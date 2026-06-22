@@ -20,7 +20,14 @@ import { TaskChecklist } from './tasks/TaskChecklist';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
+    ProjectTask,
 } from '../types';
+
+// Stable empty reference for the tasks selector. Returning `[]` literal each
+// call would make Zustand's useSyncExternalStore see a fresh snapshot on every
+// render and bail out with React #185 (Maximum update depth) for any project
+// without saved tasks — e.g. the demo project on first load.
+const EMPTY_TASKS: ProjectTask[] = [];
 
 interface ArtifactWorkspaceProps {
     projectId: string;
@@ -90,7 +97,7 @@ export function ArtifactWorkspace({
     } = useProjectStore();
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
-    const projectTasks = useProjectStore(s => s.tasks[projectId] ?? []);
+    const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
