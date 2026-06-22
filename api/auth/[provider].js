@@ -53,6 +53,36 @@ export default async function handler(req, res) {
     const state = crypto.randomBytes(16).toString('hex');
     const authUrl = provider.createAuthUrl(config, state);
 
+    // Surface the redirect_uri in server logs so configuration mismatches
+    // ("The redirect_uri does not match the registered value") can be
+    // diagnosed by checking Vercel function logs.
+    console.log(
+      `[oauth init ${providerName}] redirect_uri=${config.redirectUri} baseUrl=${baseUrl}`,
+    );
+
+    // ?debug=1 short-circuits the redirect and returns the values Synapse
+    // would have sent to the provider. Hit /api/auth/<provider>?debug=1 to
+    // confirm what URL to register in the provider's developer portal.
+    // None of the returned fields are secret (clientId and redirect_uri are
+    // sent unencrypted to the provider in the normal flow).
+    if (req.query?.debug === '1') {
+      const envKey = `${providerName.toUpperCase()}_REDIRECT_URI`;
+      return json(res, 200, {
+        provider: providerName,
+        baseUrl,
+        redirectUri: config.redirectUri,
+        clientId: config.clientId,
+        scopes: config.scopes,
+        authUrl,
+        envOverride: Boolean(process.env[envKey]),
+        envOverrideKey: envKey,
+        hint:
+          `Register "redirectUri" above (exactly) as an authorized redirect URL ` +
+          `in the ${providerName} app, or set ${envKey} to a URL you have already ` +
+          `registered. Remove ?debug=1 to start the real OAuth flow.`,
+      });
+    }
+
     const secure = process.env.NODE_ENV === 'production';
     res.setHeader(
       'Set-Cookie',
