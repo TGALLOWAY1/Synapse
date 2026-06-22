@@ -1,5 +1,6 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
+import { useAuthStore } from '../store/authStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -41,6 +42,8 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
+    const authUser = useAuthStore((s) => s.user);
+    const logout = useAuthStore((s) => s.logout);
     const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
@@ -561,6 +564,23 @@ export function ProjectWorkspace() {
                                     <LogOut size={14} />
                                     Abandon Session
                                 </button>
+                                {authUser && (
+                                    <button
+                                        onClick={async () => {
+                                            setShowNavOverflow(false);
+                                            try {
+                                                await logout();
+                                                // RequireAuth sends the now-signed-out user to "/".
+                                            } catch (err) {
+                                                console.error('[workspace sign out] failed', err);
+                                            }
+                                        }}
+                                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-t border-white/5"
+                                    >
+                                        <LogOut size={14} className="text-neutral-500" />
+                                        Sign out
+                                    </button>
+                                )}
                             </div>,
                             document.body,
                         )}

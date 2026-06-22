@@ -1,7 +1,8 @@
 import { useState, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass } from 'lucide-react';
+import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut } from 'lucide-react';
+import type { AuthProvider } from '../lib/recruiterApi';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
 import { PreflightModeChoice } from './preflight/PreflightModeChoice';
@@ -11,6 +12,18 @@ import type { ProjectPlatform, PreflightMode } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
+
+// Human-readable name for the account's sign-in method (the header used to
+// hardcode "via LinkedIn" regardless of the actual provider).
+function providerLabel(provider: AuthProvider | undefined): string {
+    switch (provider) {
+        case 'github': return 'GitHub';
+        case 'google': return 'Google';
+        case 'linkedin': return 'LinkedIn';
+        case 'email': return '';
+        default: return '';
+    }
+}
 
 const EXAMPLE_PROMPTS = [
     {
@@ -44,8 +57,28 @@ export function HomePage() {
     const { createProject, initPreflightSession, loadDemoProject } = useProjectStore();
     const navigate = useNavigate();
     const user = useAuthStore((s) => s.user);
+    const logout = useAuthStore((s) => s.logout);
 
     const [isLoadingDemo, setIsLoadingDemo] = useState(false);
+    const [isSigningOut, setIsSigningOut] = useState(false);
+
+    const handleSignOut = async () => {
+        if (isSigningOut) return;
+        setIsSigningOut(true);
+        try {
+            await logout();
+            // On success the auth store clears `user`, and the app's HomeRoute
+            // re-renders the LoginPage automatically — no manual navigation.
+        } catch (err) {
+            console.error('[handleSignOut] failed', err);
+            useToastStore.getState().addToast({
+                type: 'warning',
+                title: 'Sign out failed',
+                message: err instanceof Error ? err.message : 'Please try again.',
+            });
+            setIsSigningOut(false);
+        }
+    };
 
     const handleOpenDemo = async () => {
         if (isLoadingDemo) return;
@@ -188,7 +221,7 @@ export function HomePage() {
                 <div className="flex items-center gap-2">
                     {user && (
                         <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm">
-                            Signed in as {user.name} via LinkedIn
+                            Signed in as {user.name}{providerLabel(user.authProvider) ? ` via ${providerLabel(user.authProvider)}` : ''}
                         </div>
                     )}
                     <button
@@ -198,6 +231,16 @@ export function HomePage() {
                     >
                         <Settings size={18} />
                     </button>
+                    {user && (
+                        <button
+                            onClick={handleSignOut}
+                            disabled={isSigningOut}
+                            className="p-2.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10 disabled:opacity-60 disabled:cursor-wait"
+                            title="Sign out"
+                        >
+                            {isSigningOut ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />}
+                        </button>
+                    )}
                     <button
                         onClick={() => setIsDrawerOpen(true)}
                         className="p-2.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
