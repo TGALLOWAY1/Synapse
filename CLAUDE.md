@@ -92,7 +92,7 @@ otherwise have nothing in common — keep that distinction in mind:
    `src/components/RecruiterAdminPage.tsx`, mounted at `/admin/recruiters`
    plus the `/api/auth/*`, `/api/session`, `/api/activity`,
    `/api/snapshots`, `/api/admin/recruiters` endpoints. Server-side state
-   in MongoDB; OAuth via Google/GitHub/LinkedIn; auth glue lives in
+   in MongoDB; OAuth via GitHub/LinkedIn; auth glue lives in
    `src/lib/recruiterApi.ts` and `src/lib/snapshotClient.ts`. Backend
    handlers are in `api/` (Node serverless), with shared helpers in
    `api/_lib/`. **DB access:** `api/_lib/db.js` exposes `runMongoAction(action,

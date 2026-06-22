@@ -24,10 +24,10 @@ function clearStateCookie(res, name, existingSetCookie) {
 
 /**
  * Shared OAuth callback handler. Each provider supplies:
- *   - provider: 'linkedin' | 'google' | 'github'
+ *   - provider: 'linkedin' | 'github'
  *   - stateCookieName: name of the state cookie set during the redirect
- *   - successRedirect: path to redirect to on success (e.g. '/?auth=google_success')
- *   - errorRedirectBase: path prefix for errors (e.g. '/?auth_error=google_')
+ *   - successRedirect: path to redirect to on success (e.g. '/?auth=github_success')
+ *   - errorRedirectBase: path prefix for errors (e.g. '/?auth_error=github_')
  *   - exchangeCode(code, baseUrl): returns { access_token, ... }
  *   - fetchProfile(tokenResponse): returns raw profile object
  *   - normalizeProfile(profile): returns {
@@ -50,9 +50,9 @@ export async function handleOAuthCallback(req, res, opts) {
   const { code, state, error: providerError, error_description: providerErrorDescription } = req.query;
 
   // If the provider sent us back with ?error=… (LinkedIn's "Bummer, something
-  // went wrong" / Google's consent-denied / GitHub's app-blocked all do this),
-  // surface that reason instead of misreporting as "missing_code". Log the
-  // full description server-side so Vercel logs hold the actionable text.
+  // went wrong" / GitHub's app-blocked both do this), surface that reason
+  // instead of misreporting as "missing_code". Log the full description
+  // server-side so Vercel logs hold the actionable text.
   if (providerError) {
     console.error(
       `[${provider} callback] provider returned error=${providerError} description=${providerErrorDescription || ''}`,

@@ -1,4 +1,4 @@
-export type AuthProvider = 'linkedin' | 'email' | 'google' | 'github';
+export type AuthProvider = 'linkedin' | 'email' | 'github';
 
 export type RecruiterUser = {
   userId?: string;

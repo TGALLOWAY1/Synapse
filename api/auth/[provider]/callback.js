@@ -1,5 +1,4 @@
 import * as github from '../../_lib/github.js';
-import * as google from '../../_lib/google.js';
 import * as linkedin from '../../_lib/linkedin.js';
 import { handleOAuthCallback } from '../../_lib/oauthCallback.js';
 import { getBaseUrl, json } from '../../_lib/response.js';
@@ -36,13 +35,6 @@ const PROVIDERS = {
     fetchProfile: (token) => github.fetchGitHubProfile(token),
     normalizeProfile: github.normalizeGitHubProfile,
     stateCookie: 'synapse_github_state',
-  },
-  google: {
-    getConfig: google.getGoogleConfig,
-    exchangeCode: google.exchangeCodeForToken,
-    fetchProfile: (token) => google.fetchGoogleProfile(token),
-    normalizeProfile: google.normalizeGoogleProfile,
-    stateCookie: 'synapse_google_state',
   },
   linkedin: {
     getConfig: linkedin.getLinkedInConfig,
