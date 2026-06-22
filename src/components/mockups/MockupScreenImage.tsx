@@ -13,11 +13,12 @@
  */
 
 import { useEffect, useMemo, useState } from 'react';
-import { Sparkles, Loader2, Image as ImageIcon, AlertTriangle, RefreshCw, X, Settings as SettingsIcon } from 'lucide-react';
+import { Sparkles, Loader2, Image as ImageIcon, AlertTriangle, RefreshCw, X, Settings as SettingsIcon, Maximize2 } from 'lucide-react';
 import type { MockupImageQuality, MockupImageRecord, MockupPayload, MockupScreen, MockupSettings } from '../../types';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { buildScreenScopeKey } from '../../lib/mockupImageStore';
-import { hasOpenAIKey } from '../../lib/openaiClient';
+import { useHasOpenAIKey } from '../../lib/useHasOpenAIKey';
+import { ImageLightbox } from './ImageLightbox';
 
 interface Props {
     projectId: string;
@@ -69,6 +70,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     // Active quality: defaults to the highest available; user can flip back
     // to lower qualities via the quality switcher.
     const [activeQuality, setActiveQuality] = useState<MockupImageQuality | null>(null);
+    const [lightboxOpen, setLightboxOpen] = useState(false);
 
     const fallbackQuality = useMemo(() => pickInitialQuality(records), [records]);
     const effectiveQuality: MockupImageQuality | null =
@@ -86,7 +88,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
         void loadForVersion(versionId);
     }, [versionId, loadForVersion]);
 
-    const keyPresent = hasOpenAIKey();
+    const keyPresent = useHasOpenAIKey();
 
     const hasHighQuality = records.some((r) => r.quality === 'high');
 
@@ -129,13 +131,36 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     if (activeRecord) {
         return (
             <div className="bg-white rounded-lg border border-neutral-200 overflow-hidden">
-                <div className="relative bg-neutral-50 flex items-center justify-center">
-                    <img
+                <div className="relative bg-neutral-50 flex items-center justify-center group">
+                    <button
+                        type="button"
+                        onClick={() => setLightboxOpen(true)}
+                        aria-label="Enlarge image"
+                        className="block w-full cursor-zoom-in"
+                    >
+                        <img
+                            src={activeRecord.dataUrl}
+                            alt={`AI image preview of ${screen.name} (${activeRecord.quality} quality)`}
+                            className="max-w-full max-h-[680px] object-contain mx-auto"
+                        />
+                    </button>
+                    <button
+                        type="button"
+                        onClick={() => setLightboxOpen(true)}
+                        aria-label="Enlarge image"
+                        className="absolute top-2 right-2 inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded-md bg-black/55 text-white backdrop-blur-sm hover:bg-black/70 transition"
+                    >
+                        <Maximize2 size={12} />
+                        <span className="hidden sm:inline">Enlarge</span>
+                    </button>
+                </div>
+                {lightboxOpen && (
+                    <ImageLightbox
                         src={activeRecord.dataUrl}
                         alt={`AI image preview of ${screen.name} (${activeRecord.quality} quality)`}
-                        className="max-w-full max-h-[680px] object-contain"
+                        onClose={() => setLightboxOpen(false)}
                     />
-                </div>
+                )}
                 <div className="px-4 py-3 border-t border-neutral-100 flex items-center gap-2 flex-wrap">
                     <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium inline-flex items-center gap-1">
                         <Sparkles size={10} />

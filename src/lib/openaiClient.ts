@@ -23,14 +23,29 @@ export interface OpenAIImageOptions {
 // vault. Image generation can only run when this is true. The flag is primed
 // from the provider-key status endpoint (see setImageProviderConfigured),
 // because the browser can no longer read the key itself.
+//
+// Priming is async (primeProviderSession), so a component that reads this flag
+// at first render may see `false` and then never re-render when priming lands —
+// which left the high-quality / redo buttons stuck disabled on a fresh mobile
+// load. We expose a subscription so React can re-render via useSyncExternalStore
+// (see useHasOpenAIKey).
 let imageProviderConfigured = false;
+const keyListeners = new Set<() => void>();
 
 /** Update the cached "OpenAI image key configured" flag from vault status. */
 export const setImageProviderConfigured = (configured: boolean): void => {
+    if (imageProviderConfigured === configured) return;
     imageProviderConfigured = configured;
+    keyListeners.forEach((l) => l());
 };
 
 export const hasOpenAIKey = (): boolean => imageProviderConfigured;
+
+/** Subscribe to changes in the OpenAI-key-configured flag. Returns an unsubscribe. */
+export const subscribeOpenAIKey = (cb: () => void): (() => void) => {
+    keyListeners.add(cb);
+    return () => keyListeners.delete(cb);
+};
 
 /** Thrown when the user has no OpenAI key in the vault. */
 const NO_KEY_MESSAGE = 'Add an OpenAI API key in Settings to generate mockups.';

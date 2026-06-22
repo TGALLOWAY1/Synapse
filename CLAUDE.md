@@ -146,7 +146,10 @@ otherwise have nothing in common — keep that distinction in mind:
       (`synapse-prd-debug` / `?prddebug`) for queued/started/completed/failed,
       retry, run summary, model, est-vs-actual, and `surface` (mobile/web).
   - `mockupService.ts` + `mockupImageService.ts` — mockup HTML and image
-    generation.
+    generation. The rendered AI image preview (`MockupScreenImage.tsx`) is
+    tap-to-enlarge: the in-card image opens a fullscreen `ImageLightbox`
+    (tap-to-zoom + pan, safe-area insets, Escape/backdrop close) so mockups are
+    actually inspectable on mobile, where the card preview is tiny.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
     implementation_plan, prompt_pack, design_system). Three of these
@@ -359,7 +362,12 @@ rules:
   never key material. UI: `components/settings/ProviderKeysSection.tsx`.
 - **Model routing:** OpenAI image gen is **fully proxied** server-side
   (`api/image/generate.js`; `openaiClient.ts` calls it, `hasOpenAIKey()` reads a
-  primed flag, not localStorage). **Gemini stays client-side** (streaming would
+  primed flag, not localStorage). That flag is primed **asynchronously** by
+  `primeProviderSession()`, so UI that gates on it must subscribe reactively via
+  `useHasOpenAIKey()` (`useSyncExternalStore` over `subscribeOpenAIKey`) — a
+  one-shot `hasOpenAIKey()` read at first render captures `false` and never
+  re-enables when priming lands (this is what left the mockup high-quality /
+  redo buttons stuck disabled on a fresh mobile load). **Gemini stays client-side** (streaming would
   hit serverless `maxDuration`): `geminiKeyVault.ts` fetches the user's key into
   memory via `GET /api/provider-keys?material=gemini` (never persisted), with a
   legacy localStorage fallback. `providerSession.ts` primes/clears this runtime
