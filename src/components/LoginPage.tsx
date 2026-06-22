@@ -35,7 +35,17 @@ const ERROR_COPY: Record<string, string> = {
 
 function friendlyError(code: string | undefined, message?: string): string {
     if (!code) return message || 'Something went wrong. Please try again.';
-    return ERROR_COPY[code] || message || 'Something went wrong. Please try again.';
+    if (ERROR_COPY[code]) return ERROR_COPY[code];
+    // Synthetic codes from the OAuth callback when the provider returned
+    // ?error=… instead of ?code=… (e.g. linkedin_provider_error_unauthorized_scope_error).
+    // Surface the provider's own error label so the user/operator can act on it.
+    const providerErrorMatch = /^(linkedin|google|github)_provider_error_(.+)$/.exec(code);
+    if (providerErrorMatch) {
+        const [, provider, reason] = providerErrorMatch;
+        const providerLabel = provider === 'linkedin' ? 'LinkedIn' : provider === 'google' ? 'Google' : 'GitHub';
+        return `${providerLabel} sign-in failed: ${reason.replace(/_/g, ' ')}. Check server logs for details.`;
+    }
+    return message || 'Something went wrong. Please try again.';
 }
 
 function GoogleIcon({ size = 16 }: { size?: number }) {
