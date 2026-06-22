@@ -47,8 +47,24 @@ export async function handleOAuthCallback(req, res, opts) {
     normalizeProfile,
   } = opts;
 
-  const { code, state } = req.query;
+  const { code, state, error: providerError, error_description: providerErrorDescription } = req.query;
+
+  // If the provider sent us back with ?error=… (LinkedIn's "Bummer, something
+  // went wrong" / Google's consent-denied / GitHub's app-blocked all do this),
+  // surface that reason instead of misreporting as "missing_code". Log the
+  // full description server-side so Vercel logs hold the actionable text.
+  if (providerError) {
+    console.error(
+      `[${provider} callback] provider returned error=${providerError} description=${providerErrorDescription || ''}`,
+    );
+    const code = String(providerError).toLowerCase().replace(/[^a-z0-9_]/g, '_').slice(0, 64);
+    return res.redirect(`${errorRedirectBase}provider_error_${code}`);
+  }
+
   if (!code || !state) {
+    console.error(
+      `[${provider} callback] missing code/state. queryKeys=${Object.keys(req.query || {}).join(',')}`,
+    );
     return res.redirect(`${errorRedirectBase}missing_code`);
   }
 
