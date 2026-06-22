@@ -23,9 +23,7 @@ Data is used to identify who evaluated Synapse and support direct, manual follow
 ## Required environment variables
 
 ```bash
-MONGODB_DATA_API_URL=
-MONGODB_DATA_API_KEY=
-MONGODB_DATA_SOURCE=
+MONGODB_URI=mongodb+srv://USER:PASSWORD@cluster0.xxxxx.mongodb.net/?retryWrites=true&w=majority
 MONGODB_DB_NAME=synapse
 SESSION_SECRET=change-me
 LINKEDIN_CLIENT_ID=

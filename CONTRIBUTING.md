@@ -73,8 +73,9 @@ Only needed if you are working on `api/` or the `/admin/recruiters` portal.
 
 1. Copy `.env.example` to `.env` and fill in the values you need.
 2. **Sessions:** set `SESSION_SECRET` to a random string (≥ 32 chars).
-3. **Database:** provision a MongoDB Atlas Data API endpoint and set the four
-   `MONGODB_*` variables.
+3. **Database:** create a MongoDB Atlas cluster and set `MONGODB_URI` to its
+   driver connection string (plus optional `MONGODB_DB_NAME`). The retired Atlas
+   Data API is no longer used — the backend connects with the official driver.
 4. **OAuth:** configure any providers you want (Google / GitHub / LinkedIn) by
    setting their client id/secret. Omit a provider to disable it.
 5. **Snapshots:** set `SYNAPSE_OWNER_TOKEN` (≥ 24 chars) for owner-only cloud

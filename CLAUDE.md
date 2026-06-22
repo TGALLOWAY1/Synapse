@@ -95,7 +95,12 @@ otherwise have nothing in common — keep that distinction in mind:
    in MongoDB; OAuth via Google/GitHub/LinkedIn; auth glue lives in
    `src/lib/recruiterApi.ts` and `src/lib/snapshotClient.ts`. Backend
    handlers are in `api/` (Node serverless), with shared helpers in
-   `api/_lib/`.
+   `api/_lib/`. **DB access:** `api/_lib/db.js` exposes `runMongoAction(action,
+   payload)` (actions: findOne/find/insertOne/updateOne/deleteOne/aggregate)
+   backed by the official **MongoDB Node driver** with a cached connection
+   pool — configured via `MONGODB_URI` (+ optional `MONGODB_DB_NAME`). The old
+   Atlas Data API REST gateway was retired by MongoDB (2025-09-30); the shim
+   preserves the prior call/return shapes so call sites are unchanged.
 
 ### LLM layer (`src/lib/`)
 

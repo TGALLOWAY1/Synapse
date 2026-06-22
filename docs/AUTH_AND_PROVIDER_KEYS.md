@@ -14,7 +14,7 @@ user-owned AI provider credentials**.
 | Area | Before this change |
 |---|---|
 | **Auth** | Already existed: email+password (scrypt) and Google/GitHub/LinkedIn OAuth, HMAC-signed `synapse_session` cookie, MongoDB Data API backend (`api/_lib/`). **But the client bypassed it** (`DEV_SKIP_AUTH = true` in `authStore.ts`). |
-| **Database** | MongoDB Atlas **Data API** (REST, no ORM) via `runMongoAction()`. Vercel Blob for snapshots. |
+| **Database** | MongoDB Atlas via the official **Node driver** (`api/_lib/db.js` exposes a `runMongoAction()` shim; the previous Atlas **Data API** REST gateway was retired by MongoDB on 2025-09-30). Vercel Blob for snapshots. |
 | **Projects** | 100% client-side — Zustand `persist` → `localStorage` key `synapse-projects-storage`. Not user-scoped. |
 | **Gemini calls** | Browser-direct (`src/lib/geminiClient.ts`), key in `localStorage.GEMINI_API_KEY`. 60–90s mobile-hardened streaming client. |
 | **OpenAI image calls** | Browser-direct (`src/lib/openaiClient.ts`), `gpt-image-2`, key in `localStorage.OPENAI_API_KEY`. |
@@ -105,9 +105,10 @@ See `.env.example`. The new variable for this feature:
 SYNAPSE_KEY_ENCRYPTION_SECRET=
 ```
 
-`SESSION_SECRET` and the MongoDB Data API vars are also required (they already
-were, for auth). Recommended index: `db.provider_keys.createIndex({ userId: 1,
-provider: 1 }, { unique: true })`.
+`SESSION_SECRET` and `MONGODB_URI` (+ optional `MONGODB_DB_NAME`) are also
+required (they already were, for auth — `MONGODB_URI` replaces the retired
+`MONGODB_DATA_API_*` vars). Recommended index:
+`db.provider_keys.createIndex({ userId: 1, provider: 1 }, { unique: true })`.
 
 ## 5. Gemini key setup
 
