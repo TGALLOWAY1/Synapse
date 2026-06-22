@@ -321,7 +321,15 @@ rules:
   `App.tsx` gate the workspace (the read-only `DEMO_PROJECT_ID` stays public).
   Every private API route resolves identity **only** through
   `api/_lib/requireUser.js` (verified session cookie) — never a client-supplied
-  id.
+  id. **Sign-out** is exposed in the `HomePage` header and the
+  `ProjectWorkspace` overflow menu; `authStore.logout()` clears the session
+  cookie, the in-memory provider session, and (via
+  `providerSession.clearLocalProviderKeys()`) the **un-namespaced** local
+  credential keys (`GEMINI_API_KEY`/`OPENAI_API_KEY`/`GITHUB_TOKEN`) so a
+  different account signing in on the same browser can't inherit them. Local
+  keys are cleared only on an **explicit** logout, not on passive "no session"
+  resolution. The header signed-in label derives from `user.authProvider`
+  (`HomePage.providerLabel`) — don't hardcode a provider name.
 - **Projects are namespaced per user in localStorage.** `userScope.ts` maps the
   active `userId` to the persist key (`createDebouncedStorage`'s `resolveName`
   override); `projectUserSync.applyProjectUser()` wipes in-memory state and

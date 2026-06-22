@@ -7,7 +7,7 @@ import {
   signupWithEmail,
 } from '../lib/recruiterApi';
 import { applyProjectUser } from './projectUserSync';
-import { primeProviderSession, clearProviderSession } from '../lib/providerSession';
+import { primeProviderSession, clearProviderSession, clearLocalProviderKeys } from '../lib/providerSession';
 
 // Real authentication is ON by default. For local development without the
 // MongoDB/session backend running, opt into a bypass by setting
@@ -95,6 +95,10 @@ export const useAuthStore = create<AuthState>((set) => {
         return; // no-op in dev mode
       }
       await logoutRequest();
+      // Explicit sign-out: also wipe local-browser credential keys so the next
+      // account to sign in on this browser can't inherit them. The per-user
+      // encrypted server vault is unaffected (it's keyed by userId server-side).
+      clearLocalProviderKeys();
       setUser(null);
     },
   };
