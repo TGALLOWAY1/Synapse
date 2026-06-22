@@ -303,6 +303,19 @@ snapshot taken before `set()` runs. The 7 core artifacts generate concurrently
 the other in-flight slot's update. Validation that must `throw` may read via
 `get()` outside `set()`, but the mutation itself reads `state`.
 
+**Selector stability rule:** Zustand selectors must return a stable reference
+when the underlying state is unchanged — otherwise React's
+`useSyncExternalStore` sees a snapshot change on every render, schedules
+another update, and after ~50 nested updates aborts with the cryptic
+`Minified React error #185` (Maximum update depth exceeded). A literal
+`?? []` / `?? {}` fallback in a selector (e.g.
+`useProjectStore(s => s.tasks[projectId] ?? [])`) allocates a fresh empty
+container each call and is the canonical trigger. Use a **module-level**
+stable constant (`const EMPTY_TASKS: ProjectTask[] = []; … ?? EMPTY_TASKS`)
+or read via a getter outside the selector. This bit `ArtifactWorkspace` and
+`TaskChecklist` and broke the demo project, since the demo never has saved
+tasks. Regression: `src/components/__tests__/ArtifactWorkspaceTasksSelector.test.tsx`.
+
 **Persistence (`storage.ts`):** the debounced localStorage writer wraps every
 `setItem` in try/catch — a `QuotaExceededError` surfaces a one-time sticky toast
 (via `toastStore`) instead of throwing and silently killing all future
