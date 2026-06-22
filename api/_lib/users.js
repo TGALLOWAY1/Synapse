@@ -251,8 +251,11 @@ export async function upsertOAuthUser({
       $setOnInsert: {
         createdAt: now,
         firstLoginAt: now,
-        loginCount: 0,
       },
+      // $inc creates loginCount as 1 on insert and increments it on every
+      // subsequent login. Do NOT also seed loginCount via $setOnInsert — Mongo
+      // rejects the same field path in two update operators ("would create a
+      // conflict at 'loginCount'").
       $inc: { loginCount: 1 },
     },
     upsert: true,
