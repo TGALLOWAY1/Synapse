@@ -5,8 +5,8 @@ import type {
     TaskExportProvider,
     TaskExportItemResult,
 } from '../../../types/tasks';
+import { getLocalCredential, GITHUB_TOKEN } from '../../localCredentials';
 
-const GITHUB_TOKEN_KEY = 'GITHUB_TOKEN';
 const GITHUB_REPO_KEY = 'GITHUB_DEFAULT_REPO';
 
 interface GithubRepoCoords {
@@ -16,7 +16,7 @@ interface GithubRepoCoords {
 
 function readToken(): string | null {
     if (typeof localStorage === 'undefined') return null;
-    const raw = localStorage.getItem(GITHUB_TOKEN_KEY)?.trim();
+    const raw = getLocalCredential(GITHUB_TOKEN)?.trim();
     return raw ? raw : null;
 }
 

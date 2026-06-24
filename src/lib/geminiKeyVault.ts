@@ -7,6 +7,8 @@
 // localStorage. A legacy localStorage key remains a fallback for local dev /
 // offline use. See docs/AUTH_AND_PROVIDER_KEYS.md for the security tradeoff.
 
+import { getLocalCredential, GEMINI_API_KEY } from './localCredentials';
+
 let cachedVaultKey: string | null = null;
 let primed = false;
 let inflight: Promise<void> | null = null;
@@ -55,11 +57,7 @@ export function getCachedGeminiKey(): string | null {
  */
 export function hasGeminiKey(): boolean {
   if (cachedVaultKey) return true;
-  try {
-    return Boolean(localStorage.getItem('GEMINI_API_KEY'));
-  } catch {
-    return false;
-  }
+  return Boolean(getLocalCredential(GEMINI_API_KEY));
 }
 
 /** Clear the cached key (e.g. on logout). */

@@ -4,11 +4,15 @@ import {
   resolveProjectStorageName,
   setActiveProjectUser,
   getActiveProjectUser,
-  adoptLegacyProjectsForUser,
+  countLegacyProjects,
+  getLegacyImportOffer,
+  importLegacyProjectsForUser,
+  declineLegacyImport,
 } from '../userScope';
 
 const BASE = 'synapse-projects-storage';
 const CLAIM = 'synapse-projects-legacy-claimed-by';
+const LEGACY = '{"state":{"projects":{"p1":{},"p2":{}}}}';
 
 describe('userScope', () => {
   beforeEach(() => {
@@ -29,34 +33,58 @@ describe('userScope', () => {
     expect(namespaceFor('userA')).not.toBe(namespaceFor('userB'));
   });
 
-  it('adopts pre-existing anonymous projects into the first account, non-destructively', () => {
-    localStorage.setItem(BASE, '{"state":{"projects":{"p1":{}}}}');
+  it('counts anonymous projects available for import', () => {
+    expect(countLegacyProjects()).toBe(0);
+    localStorage.setItem(BASE, LEGACY);
+    expect(countLegacyProjects()).toBe(2);
+  });
 
-    const adopted = adoptLegacyProjectsForUser('userA');
-    expect(adopted).toBe(true);
+  it('offers import only when anonymous projects exist and nothing is claimed', () => {
+    expect(getLegacyImportOffer('userA')).toEqual({ available: false, projectCount: 0 });
+    localStorage.setItem(BASE, LEGACY);
+    expect(getLegacyImportOffer('userA')).toEqual({ available: true, projectCount: 2 });
+    // Never offered to an anonymous (signed-out) session.
+    expect(getLegacyImportOffer(null)).toEqual({ available: false, projectCount: 0 });
+  });
+
+  it('imports anonymous projects on explicit request, non-destructively', () => {
+    localStorage.setItem(BASE, LEGACY);
+
+    const imported = importLegacyProjectsForUser('userA');
+    expect(imported).toBe(true);
     // Copied into the user's namespace...
     expect(localStorage.getItem(namespaceFor('userA'))).toContain('p1');
     // ...and the original legacy data is left untouched.
-    expect(localStorage.getItem(BASE)).toContain('p1');
+    expect(localStorage.getItem(BASE)).toBe(LEGACY);
     expect(localStorage.getItem(CLAIM)).toBe('userA');
   });
 
-  it('does not let a second account inherit already-claimed legacy projects', () => {
-    localStorage.setItem(BASE, '{"state":{"projects":{"p1":{}}}}');
-    adoptLegacyProjectsForUser('userA');
+  it('does NOT silently adopt — a second account is never offered claimed projects', () => {
+    localStorage.setItem(BASE, LEGACY);
+    importLegacyProjectsForUser('userA');
 
-    const adoptedByB = adoptLegacyProjectsForUser('userB');
-    expect(adoptedByB).toBe(false);
+    // Once claimed by userA, userB is not offered and cannot import.
+    expect(getLegacyImportOffer('userB')).toEqual({ available: false, projectCount: 0 });
+    expect(importLegacyProjectsForUser('userB')).toBe(false);
     expect(localStorage.getItem(namespaceFor('userB'))).toBeNull();
   });
 
-  it('never overwrites an account that already has its own projects', () => {
-    localStorage.setItem(BASE, '{"state":{"projects":{"legacy":{}}}}');
+  it('stops offering after a user declines, but leaves data importable by others', () => {
+    localStorage.setItem(BASE, LEGACY);
+
+    declineLegacyImport('userA');
+    expect(getLegacyImportOffer('userA')).toEqual({ available: false, projectCount: 0 });
+    // Declining does not claim — the real owner can still import later.
+    expect(getLegacyImportOffer('userB')).toEqual({ available: true, projectCount: 2 });
+  });
+
+  it('never offers import to an account that already has its own projects', () => {
+    localStorage.setItem(BASE, LEGACY);
     localStorage.setItem(namespaceFor('userA'), '{"state":{"projects":{"mine":{}}}}');
 
-    const adopted = adoptLegacyProjectsForUser('userA');
-    expect(adopted).toBe(false);
+    expect(getLegacyImportOffer('userA')).toEqual({ available: false, projectCount: 0 });
+    expect(importLegacyProjectsForUser('userA')).toBe(false);
     expect(localStorage.getItem(namespaceFor('userA'))).toContain('mine');
-    expect(localStorage.getItem(namespaceFor('userA'))).not.toContain('legacy');
+    expect(localStorage.getItem(namespaceFor('userA'))).not.toContain('p1');
   });
 });

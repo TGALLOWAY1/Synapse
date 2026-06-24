@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut } from 'lucide-react';
+import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
+import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X } from 'lucide-react';
 import type { AuthProvider } from '../lib/recruiterApi';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
@@ -68,6 +69,40 @@ export function HomePage() {
 
     const [isLoadingDemo, setIsLoadingDemo] = useState(false);
     const [isSigningOut, setIsSigningOut] = useState(false);
+
+    // Offer to import projects created on this browser before the user signed
+    // in. Computed from localStorage (keyed on the user) — there is no silent
+    // adoption, so a different account never inherits these without a click.
+    const legacyOffer = useMemo(
+        () => (user?.userId ? getLegacyImportOffer(user.userId) : { available: false, projectCount: 0 }),
+        [user?.userId],
+    );
+    const [importHandled, setImportHandled] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const showImportBanner = legacyOffer.available && !importHandled;
+
+    const handleImportLegacy = () => {
+        if (!user?.userId || isImporting) return;
+        setIsImporting(true);
+        try {
+            const ok = importLegacyProjects(user.userId);
+            setImportHandled(true);
+            useToastStore.getState().addToast({
+                type: ok ? 'success' : 'warning',
+                title: ok ? 'Projects imported' : 'Nothing to import',
+                message: ok
+                    ? `${legacyOffer.projectCount} project${legacyOffer.projectCount === 1 ? '' : 's'} added to your account. Open them from the Projects list.`
+                    : 'These projects may have already been imported by another account on this browser.',
+            });
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const handleDismissImport = () => {
+        if (user?.userId) declineLegacyImport(user.userId);
+        setImportHandled(true);
+    };
 
     const handleSignOut = async () => {
         if (isSigningOut) return;
@@ -274,6 +309,49 @@ export function HomePage() {
                     </button>
                 </div>
             </div>
+
+            {/* Pre-sign-in project import offer (explicit opt-in — never silent) */}
+            {showImportBanner && (
+                <div className="px-6">
+                    <div className="mx-auto max-w-2xl flex items-start gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3">
+                        <Download size={18} className="mt-0.5 shrink-0 text-indigo-300" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm text-indigo-100">
+                                We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} created
+                                on this browser before you signed in. Import {legacyOffer.projectCount === 1 ? 'it' : 'them'} into
+                                your account?
+                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleImportLegacy}
+                                    disabled={isImporting}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-wait"
+                                >
+                                    {isImporting && <Loader2 size={14} className="animate-spin" />}
+                                    {isImporting ? 'Importing…' : 'Import projects'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDismissImport}
+                                    className="px-3 py-1.5 rounded-lg text-sm text-neutral-300 hover:text-white hover:bg-white/10 transition"
+                                >
+                                    Not mine
+                                </button>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleDismissImport}
+                            className="p-1 text-neutral-400 hover:text-white rounded-lg transition"
+                            title="Dismiss"
+                            aria-label="Dismiss"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Main content — vertically centered */}
             <div className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
