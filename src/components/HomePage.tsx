@@ -15,12 +15,15 @@ import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { hasGeminiKey, primeGeminiKey } from '../lib/geminiKeyVault';
 
-// Advisory soft cap for the idea prompt. There is no hard *technical* limit
-// (Gemini accepts far more), but a very long idea is injected into every PRD
-// section prompt, so we warn as the user nears the cap and block submit past
-// it. These are intentionally generous; tune freely.
+// Advisory soft cap for the idea prompt. There is no hard *technical* limit:
+// PRD generation runs client-side straight to Gemini, whose context window
+// (~1M tokens) is orders of magnitude larger than anything typed here. The cap
+// is a cost/quality guard — the idea is injected into every PRD section prompt,
+// so we warn as the user nears the soft threshold and block submit only at a
+// deliberately generous hard limit (well above a detailed brief or an uploaded
+// .md/.txt file) to stop pathological pastes. Tune freely.
 const PROMPT_WARN_THRESHOLD = 8000;
-const PROMPT_MAX_LENGTH = 12000;
+const PROMPT_MAX_LENGTH = 50000;
 
 // Human-readable name for the account's sign-in method (the header used to
 // hardcode "via LinkedIn" regardless of the actual provider).
@@ -440,8 +443,9 @@ export function HomePage() {
                                 />
                             </div>
 
-                            {/* Character counter — advisory: warns as the prompt nears the
-                                soft cap and blocks submission past the hard limit. */}
+                            {/* Character counter — advisory. The soft threshold is a cost
+                                nudge (the idea is injected into every PRD section), distinct
+                                from the generous hard limit that blocks submission. */}
                             {promptLength > 0 && (
                                 <div className="px-5 pb-1 flex items-center justify-between gap-3">
                                     <span
@@ -450,7 +454,7 @@ export function HomePage() {
                                         {isOverPromptLimit
                                             ? `Over the ${PROMPT_MAX_LENGTH.toLocaleString()}-character limit — shorten your prompt to continue.`
                                             : isApproachingLimit
-                                                ? 'Approaching the character limit.'
+                                                ? 'Long prompt — it’s added to every section, which raises cost.'
                                                 : ''}
                                     </span>
                                     <span
@@ -464,7 +468,9 @@ export function HomePage() {
                                                     : 'text-neutral-600'
                                         }`}
                                     >
-                                        {promptLength.toLocaleString()} / {PROMPT_MAX_LENGTH.toLocaleString()}
+                                        {isApproachingLimit
+                                            ? `${promptLength.toLocaleString()} / ${PROMPT_MAX_LENGTH.toLocaleString()}`
+                                            : `${promptLength.toLocaleString()} characters`}
                                     </span>
                                 </div>
                             )}
