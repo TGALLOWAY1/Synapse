@@ -366,7 +366,12 @@ rules:
   state on auth changes and Settings edits. Missing-key errors are explicit
   ("Add a Gemini API key in Settings to generate PRDs." / "…OpenAI…mockups.").
   New provider call sites must route through the vault, never expose a key, and
-  never log one.
+  never log one. **Pre-generation "has a key?" gates** (e.g. the HomePage
+  submit/enhance buttons) must call `hasGeminiKey()` (vault-in-memory **OR**
+  local fallback, mirroring `geminiClient`'s resolution), never check
+  `localStorage` alone — a vault-only user has no localStorage key, so a
+  localStorage-only gate wrongly routes them to Settings even though generation
+  would succeed.
 
 ### Pipeline flow
 

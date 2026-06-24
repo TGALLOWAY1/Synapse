@@ -44,6 +44,24 @@ export function getCachedGeminiKey(): string | null {
   return cachedVaultKey;
 }
 
+/**
+ * True when a Gemini key is resolvable right now — the in-memory vault key OR
+ * the legacy localStorage fallback. This mirrors the resolution order used by
+ * the actual transport (`geminiClient.ts`), so pre-generation gates (e.g. the
+ * HomePage submit/enhance buttons) agree with what generation will actually
+ * use. A vault-only user (key in the encrypted server vault, nothing in
+ * localStorage) must NOT be treated as "no key" — checking localStorage alone
+ * wrongly bounces them to Settings.
+ */
+export function hasGeminiKey(): boolean {
+  if (cachedVaultKey) return true;
+  try {
+    return Boolean(localStorage.getItem('GEMINI_API_KEY'));
+  } catch {
+    return false;
+  }
+}
+
 /** Clear the cached key (e.g. on logout). */
 export function clearGeminiKey(): void {
   cachedVaultKey = null;

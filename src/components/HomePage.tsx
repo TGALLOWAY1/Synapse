@@ -12,6 +12,14 @@ import type { ProjectPlatform, PreflightMode } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { hasGeminiKey, primeGeminiKey } from '../lib/geminiKeyVault';
+
+// Advisory soft cap for the idea prompt. There is no hard *technical* limit
+// (Gemini accepts far more), but a very long idea is injected into every PRD
+// section prompt, so we warn as the user nears the cap and block submit past
+// it. These are intentionally generous; tune freely.
+const PROMPT_WARN_THRESHOLD = 8000;
+const PROMPT_MAX_LENGTH = 12000;
 
 // Human-readable name for the account's sign-in method (the header used to
 // hardcode "via LinkedIn" regardless of the actual provider).
@@ -117,11 +125,20 @@ export function HomePage() {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Step 1: validate input + API key, then present the start-mode choice.
-    const handleCreateProject = () => {
+    const handleCreateProject = async () => {
         if (!projectName.trim() || !promptText.trim()) return;
+        if (promptText.length > PROMPT_MAX_LENGTH) return;
 
-        const apiKey = localStorage.getItem('GEMINI_API_KEY');
-        if (!apiKey) { setIsSettingsOpen(true); return; }
+        // The Gemini key may live in the encrypted server vault (held only in
+        // memory) or the legacy localStorage fallback — mirror geminiClient's
+        // resolution. If the vault hasn't finished priming yet, try once before
+        // bouncing a configured user to Settings. (The old code checked
+        // localStorage only, which wrongly routed every vault-only user to
+        // Settings even though generation would have worked.)
+        if (!hasGeminiKey()) {
+            await primeGeminiKey();
+            if (!hasGeminiKey()) { setIsSettingsOpen(true); return; }
+        }
 
         setIsChoosingMode(true);
     };
@@ -152,8 +169,10 @@ export function HomePage() {
     const handleEnhance = async () => {
         if (!promptText.trim() || isEnhancing) return;
 
-        const apiKey = localStorage.getItem('GEMINI_API_KEY');
-        if (!apiKey) { setIsSettingsOpen(true); return; }
+        if (!hasGeminiKey()) {
+            await primeGeminiKey();
+            if (!hasGeminiKey()) { setIsSettingsOpen(true); return; }
+        }
 
         setIsEnhancing(true);
         try {
@@ -199,16 +218,22 @@ export function HomePage() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        handleCreateProject();
+        void handleCreateProject();
     };
 
-    const canSubmit = projectName.trim() && promptText.trim();
+    const promptLength = promptText.length;
+    const isOverPromptLimit = promptLength > PROMPT_MAX_LENGTH;
+    const isApproachingLimit = promptLength >= PROMPT_WARN_THRESHOLD;
+
+    const canSubmit = projectName.trim() && promptText.trim() && !isOverPromptLimit;
     const needsProjectName = promptText.trim() && !projectName.trim();
     const submitTitle = !promptText.trim()
         ? 'Enter a prompt to generate a PRD'
-        : !projectName.trim()
-            ? 'Enter a project name to continue'
-            : 'Generate PRD';
+        : isOverPromptLimit
+            ? `Prompt is over the ${PROMPT_MAX_LENGTH.toLocaleString()}-character limit`
+            : !projectName.trim()
+                ? 'Enter a project name to continue'
+                : 'Generate PRD';
 
     return (
         <div className="min-h-screen flex flex-col">
@@ -333,8 +358,38 @@ export function HomePage() {
                                     className="w-full bg-transparent text-neutral-100 placeholder-neutral-500 focus:outline-none resize-none min-h-[160px] text-[15px] leading-relaxed"
                                     placeholder="What product shall we design?"
                                     rows={6}
+                                    aria-describedby="prompt-char-counter"
                                 />
                             </div>
+
+                            {/* Character counter — advisory: warns as the prompt nears the
+                                soft cap and blocks submission past the hard limit. */}
+                            {promptLength > 0 && (
+                                <div className="px-5 pb-1 flex items-center justify-between gap-3">
+                                    <span
+                                        className={`text-xs ${isOverPromptLimit ? 'text-red-400' : 'text-amber-400/90'}`}
+                                    >
+                                        {isOverPromptLimit
+                                            ? `Over the ${PROMPT_MAX_LENGTH.toLocaleString()}-character limit — shorten your prompt to continue.`
+                                            : isApproachingLimit
+                                                ? 'Approaching the character limit.'
+                                                : ''}
+                                    </span>
+                                    <span
+                                        id="prompt-char-counter"
+                                        aria-live="polite"
+                                        className={`text-xs tabular-nums shrink-0 ${
+                                            isOverPromptLimit
+                                                ? 'text-red-400'
+                                                : isApproachingLimit
+                                                    ? 'text-amber-400'
+                                                    : 'text-neutral-600'
+                                        }`}
+                                    >
+                                        {promptLength.toLocaleString()} / {PROMPT_MAX_LENGTH.toLocaleString()}
+                                    </span>
+                                </div>
+                            )}
 
                             {/* Bottom toolbar */}
                             <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-700/50">
