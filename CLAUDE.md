@@ -266,9 +266,23 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   every settle path (`updateSpineStructuredPRD` with `generationMeta`,
   `setSpineError`, blocked `setSpineSafetyReview`). New generation entry
   points must stamp it too, or interrupted-run recovery won't see them.
+  **Edits append versions (never overwrite):** all user PRD edits and
+  single-section retries go through `editSpineStructuredPRD` (clones the
+  current spine, applies the new `structuredPRD`/`responseText`, becomes the
+  new `isLatest`, stamps `provenance.changeSource`/`editSummary`, pushes an
+  `Edited` history event) — the in-place `updateSpineStructuredPRD`/
+  `updateSpineText` are now reserved for **live streaming generation** only.
+  `revertSpineToVersion` restores a historical spine by appending a new latest
+  clone (`changeSource: 'revert'`, `Reverted` event) — old versions are never
+  mutated or deleted. `VersionProvenance` (on `SpineVersion` and
+  `ArtifactVersion`, all-optional/back-compat) records change attribution.
 - `branchSlice` — Branches and their messages
 - `artifactSlice` — Artifacts + ArtifactVersions; preferred-version
-  tracking; source-ref staleness detection against the current spine
+  tracking; source-ref staleness detection against the current spine.
+  `revertArtifactToVersion` restores an older version by appending a **cloned**
+  `ArtifactVersion` (increments `versionNumber`, becomes preferred, carries
+  `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`
+  via `setPreferredVersion` — keeps the audit log honest.
 - `feedbackSlice` — FeedbackItems with intent classification
 - `stalenessSlice` — Staleness checks
 - `generationJobsSlice` — Per-project job tracking (transient; stripped
@@ -463,6 +477,31 @@ or structured JSON. It also offers a **"Copy for coding agent"** preset
 PRD + build-relevant core artifacts (mockups excluded), with copy and download.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
+
+### Version history & revert (`src/components/versions/`)
+
+Shared, presentation-only components for browsing, comparing, and restoring
+versions of **both** PRDs (spines) and artifacts:
+
+- `VersionHistoryPanel` — props-driven modal listing versions (label,
+  current/preferred badge, change-source badge, edit summary) with per-row
+  **Compare** / **Restore**; orchestrates the compare → confirm flow internally.
+- `VersionCompareView` — section-aware inline diff for PRDs, word diff for
+  artifact text. Read-only except for opening the restore confirmation.
+- `RevertConfirmModal` — non-destructive restore confirmation; the PRD variant
+  warns which downstream artifacts will be marked possibly outdated (computed by
+  the caller via `getArtifactStaleness`).
+
+Diffs are computed on the fly from stored snapshots by **`src/lib/versionDiff.ts`**
+(pure, jsdiff-backed: `diffText`, `diffStructuredPRD`, `getDiffSummary`) —
+nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
+**Version History** overflow-menu item) and adds **Compare with current** /
+**Restore this version** to the read-only historical-version banner;
+`ArtifactWorkspace` shows a **Version history** button + a "Generated from PRD
+Version X" chip + `StalenessBadge` above each generated artifact. Restores route
+to `revertSpineToVersion` / `revertArtifactToVersion`. **Revert always appends a
+new version and never deletes history.** See `docs/VERSIONING_AUDIT.md` for the
+full design (Phase 1 implemented).
 
 ### PRD highlight → branch selection pipeline
 

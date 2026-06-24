@@ -381,6 +381,9 @@ export type SpineVersion = {
     // disallowed — the Safety Review screen is shown and all downstream
     // generation (mark-final / workspace / artifacts) is gated off.
     safetyReview?: SpineSafetyReview;
+    // Change attribution for this version (user edit vs AI regen vs revert, …).
+    // Optional & backward-compatible: legacy spines have none.
+    provenance?: VersionProvenance;
 };
 
 // --- Structured Artifact Content Types ---
@@ -688,6 +691,8 @@ export type ArtifactVersion = {
     generationPrompt: string;
     isPreferred: boolean;
     createdAt: number;
+    // Change attribution (see VersionProvenance). Optional & backward-compatible.
+    provenance?: VersionProvenance;
 };
 
 // Feedback types
@@ -869,7 +874,30 @@ export type HistoryEventType =
     | 'ArtifactRegenerated'
     | 'FeedbackCreated'
     | 'FeedbackApplied'
-    | 'GenerationFailed';
+    | 'GenerationFailed'
+    | 'Edited'
+    | 'Reverted';
+
+// --- Version provenance ----------------------------------------------------
+// Attribution for "who/what produced this version". Attached to both
+// SpineVersion (PRD) and ArtifactVersion. All fields optional so legacy
+// localStorage records (no provenance) keep loading and rendering.
+export type VersionChangeSource =
+    | 'ai_generation'       // initial PRD / artifact generation
+    | 'ai_regeneration'     // full regenerate
+    | 'ai_section_retry'    // single PRD section re-run
+    | 'branch_merge'        // consolidation back into the spine
+    | 'user_edit'           // inline edit in the workspace
+    | 'revert'              // restore of an earlier version
+    | 'consistency_review'; // optional final reconciliation pass
+
+export type VersionProvenance = {
+    changeSource?: VersionChangeSource;
+    editSummary?: string;            // human-readable "what changed"
+    revertedFromVersionId?: string;  // set when changeSource === 'revert'
+    model?: string;                  // AI-generated versions
+    prompt?: string;                 // AI-generated versions
+};
 
 export type HistoryEvent = {
     id: string;

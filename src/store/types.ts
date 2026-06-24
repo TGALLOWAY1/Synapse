@@ -73,6 +73,25 @@ export interface ProjectState {
         scores: import('../types').QualityScores,
         generationMeta?: import('../types').GenerationMeta,
     ) => void;
+    // Versioning: append a NEW spine version from an edited structuredPRD
+    // (clones the source spine, applies the edit, becomes the new isLatest)
+    // instead of mutating in place — preserves history. Used for all user
+    // edits and single-section retries. `meta` overrides carry forward
+    // generation metadata (e.g. failedSections) onto the new version.
+    editSpineStructuredPRD: (
+        projectId: string,
+        spineId: string,
+        nextStructuredPRD: StructuredPRD,
+        opts?: {
+            responseText?: string;
+            editSummary?: string;
+            changeSource?: import('../types').VersionChangeSource;
+            meta?: SpineGenerationMetaInput;
+        },
+    ) => { newSpineId: string };
+    // Versioning: restore a historical spine by appending a new latest version
+    // cloning its content. Never mutates or deletes the source version.
+    revertSpineToVersion: (projectId: string, sourceSpineId: string) => { newSpineId: string };
     updateProjectProductMetadata: (
         projectId: string,
         meta: { productName?: string; productCategory?: string },
@@ -125,6 +144,10 @@ export interface ProjectState {
         parentVersionId?: string | null
     ) => { versionId: string };
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => void;
+    // Versioning: restore a historical artifact version by appending a cloned
+    // ArtifactVersion (increments versionNumber, becomes preferred) rather than
+    // only re-pointing isPreferred — keeps the audit log honest.
+    revertArtifactToVersion: (projectId: string, artifactId: string, sourceVersionId: string) => { versionId: string };
     getArtifactVersions: (projectId: string, artifactId: string) => ArtifactVersion[];
     getPreferredVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
     getLatestArtifactVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;

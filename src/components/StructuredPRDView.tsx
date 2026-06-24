@@ -54,8 +54,17 @@ type EditingSection =
     | 'primaryActions'
     | null;
 
+// Human labels for edit-summary provenance (e.g. "Updated section: Vision").
+const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'targetUsers' | 'risks', string> = {
+    vision: 'Vision',
+    coreProblem: 'Core Problem',
+    architecture: 'Architecture',
+    targetUsers: 'Target Users',
+    risks: 'Risks',
+};
+
 export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly }: StructuredPRDViewProps) {
-    const { updateSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
+    const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
     const [editingSection, setEditingSection] = useState<EditingSection>(null);
     const [editValue, setEditValue] = useState('');
     const [intent, setIntent] = useState('');
@@ -162,9 +171,16 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         submitBranch(tag + ': ');
     };
 
-    const savePRD = (updated: StructuredPRD) => {
+    // Edits must NOT overwrite the current version in place — append a new
+    // version (preserving history) via editSpineStructuredPRD. Each call site
+    // passes a useful default summary; no manual entry required.
+    const savePRD = (updated: StructuredPRD, editSummary: string) => {
         const markdown = structuredPRDToMarkdown(updated);
-        updateSpineStructuredPRD(projectId, spineId, updated, markdown);
+        editSpineStructuredPRD(projectId, spineId, updated, {
+            responseText: markdown,
+            changeSource: 'user_edit',
+            editSummary,
+        });
     };
 
     const startEditing = (section: EditingSection, currentValue: string) => {
@@ -180,26 +196,26 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
 
     const saveTextSection = (section: 'vision' | 'coreProblem' | 'architecture') => {
         const updated = { ...structuredPRD, [section]: editValue };
-        savePRD(updated);
+        savePRD(updated, `Updated section: ${SECTION_LABELS[section]}`);
         setEditingSection(null);
     };
 
     const saveListSection = (section: 'targetUsers' | 'risks') => {
         const items = editValue.split('\n').map(s => s.trim()).filter(Boolean);
         const updated = { ...structuredPRD, [section]: items };
-        savePRD(updated);
+        savePRD(updated, `Updated section: ${SECTION_LABELS[section]}`);
         setEditingSection(null);
     };
 
     const saveDomainEntities = () => {
         const updated = { ...structuredPRD, domainEntities: parseEntities(editValue) };
-        savePRD(updated);
+        savePRD(updated, 'Updated section: Domain Entities');
         setEditingSection(null);
     };
 
     const savePrimaryActions = () => {
         const updated = { ...structuredPRD, primaryActions: parseActions(editValue) };
-        savePRD(updated);
+        savePRD(updated, 'Updated section: Primary Actions');
         setEditingSection(null);
     };
 
@@ -238,7 +254,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     ? regenerated.primaryActions
                     : structuredPRD.primaryActions,
             };
-            savePRD(merged);
+            savePRD(merged, 'Updated grounding fields');
         } catch (e) {
             if (e instanceof SafetyBlockedError) {
                 setRefreshError(
@@ -258,7 +274,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
             ...structuredPRD,
             features: structuredPRD.features.map(f => f.id === updatedFeature.id ? updatedFeature : f),
         };
-        savePRD(updated);
+        savePRD(updated, `Edited feature: ${updatedFeature.name || 'Untitled'}`);
     };
 
     const handleAddFeature = () => {
@@ -270,15 +286,16 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
             complexity: 'medium',
         };
         const updated = { ...structuredPRD, features: [...structuredPRD.features, newFeature] };
-        savePRD(updated);
+        savePRD(updated, 'Added feature: New Feature');
     };
 
     const handleDeleteFeature = (featureId: string) => {
+        const removed = structuredPRD.features.find(f => f.id === featureId);
         const updated = {
             ...structuredPRD,
             features: structuredPRD.features.filter(f => f.id !== featureId),
         };
-        savePRD(updated);
+        savePRD(updated, `Removed feature: ${removed?.name || 'Untitled'}`);
     };
 
     const renderTextSection = (
