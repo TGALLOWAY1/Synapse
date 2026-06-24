@@ -1,6 +1,9 @@
 # Synapse Versioning & Revert — Audit and Implementation Proposal
 
-> Status: **Audit + proposal only.** No production code changed by this document.
+> Status: **Phase 1 MVP implemented** (was: audit + proposal). The MVP scope in
+> §10 has shipped — non-destructive edits, PRD + artifact version history,
+> compare/diff, restore-as-new-version, provenance, and downstream-staleness
+> warnings. Items under "Future enhancements" remain unbuilt.
 > Scope: PRD (spine) versioning, PRD section/inline edits, generated artifacts,
 > downstream-artifact staleness, project history/audit log, and snapshots.
 

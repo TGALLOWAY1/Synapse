@@ -16,6 +16,8 @@ export type SpineSlice = {
     getLatestSpine: ProjectState['getLatestSpine'];
     updateStructuredPRD: ProjectState['updateStructuredPRD'];
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
+    editSpineStructuredPRD: ProjectState['editSpineStructuredPRD'];
+    revertSpineToVersion: ProjectState['revertSpineToVersion'];
     updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
@@ -275,6 +277,125 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             });
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
         });
+    },
+
+    // Versioning: an edit must NOT overwrite the current spine in place. Clone
+    // the source version, apply the edited PRD, and append it as the new
+    // isLatest — old content is preserved and retrievable. Used by every inline
+    // PRD edit and by single-section retry. Reads happen inside set() against
+    // the fresh `state` (concurrency rule); the new id is a UUID and display
+    // labels derive from array position, never the id.
+    editSpineStructuredPRD: (projectId, spineId, nextStructuredPRD, opts) => {
+        // Validate against a snapshot; do array derivations inside set().
+        const source = (get().spineVersions[projectId] || []).find(s => s.id === spineId);
+        if (!source) throw new Error('No spine version to edit');
+
+        const now = Date.now();
+        const newSpineId = uuidv4();
+        const historyEventId = uuidv4();
+        const changeSource = opts?.changeSource ?? 'user_edit';
+        const editSummary = opts?.editSummary ?? 'Edited PRD';
+
+        set((state) => {
+            const currentVersions = state.spineVersions[projectId] || [];
+            const src = currentVersions.find(s => s.id === spineId);
+            if (!src) return state;
+
+            const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
+
+            // Clone the source spine fully so generation metadata carries
+            // forward, then apply the edit + provenance.
+            const newSpine: SpineVersion = {
+                ...src,
+                id: newSpineId,
+                createdAt: now,
+                isLatest: true,
+                isFinal: false,
+                structuredPRD: nextStructuredPRD,
+                responseText: opts?.responseText ?? src.responseText,
+                // A user edit / retry is a settled state, never an in-flight run.
+                generationPhase: 'complete',
+                // A historical edit must not inherit a stale error/safety stub.
+                generationError: undefined,
+                provenance: { changeSource, editSummary },
+            };
+            // Optional generation-meta overrides (e.g. updated failedSections).
+            if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
+            if (opts?.meta?.qualityScores !== undefined) newSpine.qualityScores = opts.meta.qualityScores;
+            if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
+            if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
+            if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
+
+            const editEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                spineVersionId: newSpineId,
+                type: 'Edited',
+                description: editSummary,
+                createdAt: now,
+            };
+
+            return {
+                spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
+                historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), editEvent] },
+            };
+        });
+
+        return { newSpineId };
+    },
+
+    // Versioning: restore a historical spine by appending a NEW latest version
+    // cloning its content. The source version is never mutated or deleted, so
+    // all history before the revert is preserved.
+    revertSpineToVersion: (projectId, sourceSpineId) => {
+        const versions = get().spineVersions[projectId] || [];
+        const sourceIdx = versions.findIndex(s => s.id === sourceSpineId);
+        if (sourceIdx < 0) throw new Error('No spine version to restore');
+        // Positional "Version N" label (matches the rest of the workspace).
+        const sourceLabel = `Version ${sourceIdx + 1}`;
+
+        const now = Date.now();
+        const newSpineId = uuidv4();
+        const historyEventId = uuidv4();
+
+        set((state) => {
+            const currentVersions = state.spineVersions[projectId] || [];
+            const src = currentVersions.find(s => s.id === sourceSpineId);
+            if (!src) return state;
+
+            const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
+
+            const newSpine: SpineVersion = {
+                ...src,
+                id: newSpineId,
+                createdAt: now,
+                isLatest: true,
+                isFinal: false,
+                generationPhase: 'complete',
+                generationError: undefined,
+                provenance: {
+                    changeSource: 'revert',
+                    revertedFromVersionId: sourceSpineId,
+                    editSummary: `Restored from ${sourceLabel}`,
+                },
+            };
+
+            const revertEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                spineVersionId: newSpineId,
+                type: 'Reverted',
+                description: `Restored PRD from ${sourceLabel}`,
+                createdAt: now,
+            };
+
+            return {
+                spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
+                historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), revertEvent] },
+            };
+        });
+
+        return { newSpineId };
     },
 
     updateSpineQualityScores: (

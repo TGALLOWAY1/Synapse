@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight, ListChecks,
+    RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight, ListChecks, History,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -17,6 +17,8 @@ import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
 import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
+import { StalenessBadge } from './StalenessBadge';
+import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
@@ -93,8 +95,11 @@ export function ArtifactWorkspace({
     const isMobile = useIsMobile();
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
-        updateArtifactVersionMetadata,
+        updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
+        revertArtifactToVersion,
     } = useProjectStore();
+    // Which artifact's version-history panel is open (null = none).
+    const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
@@ -194,6 +199,42 @@ export function ArtifactWorkspace({
         });
     };
 
+    // Resolve a spine source-ref id to its positional "Version N" label, matching
+    // the label the PRD workspace shows.
+    const resolveSpineLabel = (spineId?: string): string | undefined => {
+        if (!spineId) return undefined;
+        const idx = getSpineVersions(projectId).findIndex(s => s.id === spineId);
+        return idx >= 0 ? `Version ${idx + 1}` : undefined;
+    };
+
+    // Header strip shown above a generated artifact: provenance chip ("Generated
+    // from PRD Version X"), staleness badge, and a Version history entry point.
+    const renderVersionControls = (
+        artifactId: string,
+        preferred: { sourceRefs: { sourceType: string; sourceArtifactVersionId: string }[] },
+    ) => {
+        const staleness = getArtifactStaleness(projectId, artifactId);
+        const spineRef = preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
+        const prdLabel = resolveSpineLabel(spineRef);
+        return (
+            <div className="flex items-center gap-2 flex-wrap">
+                {prdLabel && (
+                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-medium">
+                        Generated from PRD {prdLabel}
+                    </span>
+                )}
+                <StalenessBadge staleness={staleness} />
+                <button
+                    type="button"
+                    onClick={() => setVersionHistoryArtifactId(artifactId)}
+                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                >
+                    <History size={12} /> Version history
+                </button>
+            </div>
+        );
+    };
+
     const renderMain = () => {
         if (selected === 'prd') {
             return (
@@ -285,7 +326,8 @@ export function ArtifactWorkspace({
             const staleness = getArtifactStaleness(projectId, mockup.id);
             return (
                 <div className="space-y-4">
-                    <div className="flex items-center justify-end">
+                    <div className="flex items-center justify-between gap-2 flex-wrap">
+                        {renderVersionControls(mockup.id, preferred)}
                         <button
                             type="button"
                             onClick={() => handleRetrySlot('mockup')}
@@ -337,6 +379,9 @@ export function ArtifactWorkspace({
             : undefined;
         return (
             <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
+                <div className="flex items-center justify-start">
+                    {renderVersionControls(artifact.id, preferred)}
+                </div>
                 {subtype === 'implementation_plan' && (() => {
                     const savedCount = projectTasks.filter(t => t.sourceArtifactId === artifact.id).length;
                     return (
@@ -526,6 +571,36 @@ export function ArtifactWorkspace({
                     onClose={() => setTasksModalSource(null)}
                 />
             )}
+
+            {versionHistoryArtifactId && (() => {
+                const artifactId = versionHistoryArtifactId;
+                const versions = getArtifactVersions(projectId, artifactId);
+                const preferred = getPreferredVersion(projectId, artifactId);
+                const entries: VersionEntry[] = [...versions]
+                    .sort((a, b) => b.versionNumber - a.versionNumber)
+                    .map(v => ({
+                        id: v.id,
+                        label: `Version ${v.versionNumber}`,
+                        isCurrent: v.isPreferred,
+                        createdAt: v.createdAt,
+                        changeSource: v.provenance?.changeSource,
+                        editSummary: v.provenance?.editSummary,
+                    }));
+                return (
+                    <VersionHistoryPanel
+                        title="Artifact version history"
+                        entries={entries}
+                        restoreKind="artifact"
+                        getCompareInput={(id) => ({
+                            kind: 'text',
+                            before: versions.find(v => v.id === id)?.content ?? '',
+                            after: preferred?.content ?? '',
+                        })}
+                        onRestore={(id) => revertArtifactToVersion(projectId, artifactId, id)}
+                        onClose={() => setVersionHistoryArtifactId(null)}
+                    />
+                );
+            })()}
         </div>
     );
 }

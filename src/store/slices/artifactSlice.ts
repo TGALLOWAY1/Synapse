@@ -14,6 +14,7 @@ export type ArtifactSlice = {
     getArtifact: ProjectState['getArtifact'];
     createArtifactVersion: ProjectState['createArtifactVersion'];
     setPreferredVersion: ProjectState['setPreferredVersion'];
+    revertArtifactToVersion: ProjectState['revertArtifactToVersion'];
     getArtifactVersions: ProjectState['getArtifactVersions'];
     getPreferredVersion: ProjectState['getPreferredVersion'];
     getLatestArtifactVersion: ProjectState['getLatestArtifactVersion'];
@@ -162,6 +163,76 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
             artifactId,
             versionId,
             type: activityType,
+        });
+
+        return { versionId };
+    },
+
+    // Versioning: user-facing "Restore" appends a CLONED version rather than
+    // only re-pointing isPreferred (setPreferredVersion), so versionNumber keeps
+    // incrementing and the timeline shows the revert as its own honest event.
+    // All reads happen inside set() against the fresh `state` (concurrency rule).
+    revertArtifactToVersion: (projectId: string, artifactId: string, sourceVersionId: string) => {
+        const allVersions = get().artifactVersions[projectId] || [];
+        const source = allVersions.find(v => v.id === sourceVersionId && v.artifactId === artifactId);
+        if (!source) throw new Error('No artifact version to restore');
+
+        const versionId = uuidv4();
+        const now = Date.now();
+        const historyEventId = uuidv4();
+
+        set((state) => {
+            const versions = state.artifactVersions[projectId] || [];
+            const src = versions.find(v => v.id === sourceVersionId && v.artifactId === artifactId);
+            if (!src) return state;
+
+            const projectArtifacts = state.artifacts[projectId] || [];
+            const artifact = projectArtifacts.find(a => a.id === artifactId);
+            // Parent = the version currently preferred for this artifact.
+            const currentPreferred = versions.find(v => v.artifactId === artifactId && v.isPreferred);
+            const versionNumber = versions.filter(v => v.artifactId === artifactId).length + 1;
+
+            const updatedVersions = versions.map(v =>
+                v.artifactId === artifactId ? { ...v, isPreferred: false } : v
+            );
+
+            const newVersion: ArtifactVersion = {
+                id: versionId,
+                artifactId,
+                versionNumber,
+                parentVersionId: currentPreferred?.id ?? null,
+                content: src.content,
+                metadata: src.metadata,
+                sourceRefs: src.sourceRefs,
+                generationPrompt: src.generationPrompt,
+                isPreferred: true,
+                createdAt: now,
+                provenance: {
+                    changeSource: 'revert',
+                    revertedFromVersionId: sourceVersionId,
+                    editSummary: `Restored from version ${src.versionNumber}`,
+                },
+            };
+
+            const updatedArtifacts = projectArtifacts.map(a =>
+                a.id === artifactId ? { ...a, currentVersionId: versionId, status: 'active' as const, updatedAt: now } : a
+            );
+
+            const historyEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                artifactId,
+                artifactVersionId: versionId,
+                type: 'Reverted',
+                description: `${artifact?.title || 'Artifact'} restored from v${src.versionNumber}`,
+                createdAt: now,
+            };
+
+            return {
+                artifactVersions: { ...state.artifactVersions, [projectId]: [...updatedVersions, newVersion] },
+                artifacts: { ...state.artifacts, [projectId]: updatedArtifacts },
+                historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), historyEvent] },
+            };
         });
 
         return { versionId };

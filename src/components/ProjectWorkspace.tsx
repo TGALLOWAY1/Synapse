@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -29,6 +29,7 @@ import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { CORE_ARTIFACT_DISPLAY_ORDER } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
+import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
@@ -44,7 +45,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -53,6 +54,11 @@ export function ProjectWorkspace() {
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
     const [viewedSpineId, setViewedSpineId] = useState<string | null>(null);
+    // PRD version-history UI: the full panel, plus the banner's standalone
+    // compare/restore against the latest version.
+    const [showPrdHistory, setShowPrdHistory] = useState(false);
+    const [bannerCompareOpen, setBannerCompareOpen] = useState(false);
+    const [bannerRestoreOpen, setBannerRestoreOpen] = useState(false);
     const [isPromptCollapsed, setIsPromptCollapsed] = useState(true);
     const [isBranchesVisible, setIsBranchesVisible] = useState(true);
     const [activeRightTab, setActiveRightTab] = useState<'branches' | 'history'>('branches');
@@ -190,6 +196,35 @@ export function ProjectWorkspace() {
     const getVersionLabel = (spineId: string) => {
         const idx = allSpines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : spineId;
+    };
+
+    // --- PRD version history / revert -------------------------------------
+    // Build the version list (current first) for the history panel.
+    const prdVersionEntries: VersionEntry[] = [...allSpines]
+        .map((s, idx) => ({
+            id: s.id,
+            label: `Version ${idx + 1}`,
+            isCurrent: s.isLatest,
+            createdAt: s.createdAt,
+            changeSource: s.provenance?.changeSource,
+            editSummary: s.provenance?.editSummary,
+        }))
+        .reverse();
+
+    // Downstream artifacts that would be marked possibly outdated if a different
+    // PRD version becomes latest — i.e. those currently in sync with the latest
+    // spine. Used to warn in the revert confirmation.
+    const getStaleArtifactTitles = (): string[] =>
+        getArtifacts(projectId)
+            .filter(a => a.type !== 'prd' && getArtifactStaleness(projectId, a.id) === 'current')
+            .map(a => a.title);
+
+    const handleRestoreSpine = (sourceSpineId: string) => {
+        revertSpineToVersion(projectId, sourceSpineId);
+        // Return to the (new) latest version after restoring.
+        setViewedSpineId(null);
+        setBannerRestoreOpen(false);
+        setBannerCompareOpen(false);
     };
 
     // Human-friendly label for artifact-based history events (e.g. mockups)
@@ -339,19 +374,26 @@ export function ProjectWorkspace() {
                     },
                 },
             );
-            updateSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, markdown, {
-                sourcePrompt,
-                model,
-                // A successful retry resolves this section — drop it from the
-                // persisted failed list so the incomplete-PRD banner shrinks.
-                ...(activeSpine.generationMeta?.failedSections?.includes(id)
-                    ? {
-                        generationMeta: {
-                            ...activeSpine.generationMeta,
-                            failedSections: activeSpine.generationMeta.failedSections.filter(s => s !== id),
-                        },
-                    }
-                    : {}),
+            // A section retry appends a new version (preserving the prior
+            // content) rather than mutating the spine in place.
+            editSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, {
+                responseText: markdown,
+                changeSource: 'ai_section_retry',
+                editSummary: `Regenerated section: ${title}`,
+                meta: {
+                    sourcePrompt,
+                    model,
+                    // A successful retry resolves this section — drop it from the
+                    // persisted failed list so the incomplete-PRD banner shrinks.
+                    ...(activeSpine.generationMeta?.failedSections?.includes(id)
+                        ? {
+                            generationMeta: {
+                                ...activeSpine.generationMeta,
+                                failedSections: activeSpine.generationMeta.failedSections.filter(s => s !== id),
+                            },
+                        }
+                        : {}),
+                },
             });
             if (id === 'product_basics' && (structuredPRD.productName || structuredPRD.productCategory)) {
                 updateProjectProductMetadata(projectId, {
@@ -550,6 +592,14 @@ export function ProjectWorkspace() {
                                     {isGenerating ? 'Regenerating...' : 'Regenerate Draft'}
                                 </button>
                                 <button
+                                    onClick={() => { setShowPrdHistory(true); setShowNavOverflow(false); }}
+                                    disabled={allSpines.length === 0}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5 disabled:opacity-30 disabled:hover:bg-transparent"
+                                >
+                                    <History size={14} className="text-indigo-400" />
+                                    Version History
+                                </button>
+                                <button
                                     onClick={() => { setIsBranchesVisible(!isBranchesVisible); setShowNavOverflow(false); }}
                                     className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition"
                                 >
@@ -597,6 +647,39 @@ export function ProjectWorkspace() {
             )}
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
             {isExportOpen && projectId && <ExportModal projectId={projectId} onClose={() => setIsExportOpen(false)} />}
+            {showPrdHistory && (
+                <VersionHistoryPanel
+                    title="PRD version history"
+                    entries={prdVersionEntries}
+                    restoreKind="prd"
+                    getCompareInput={(id) => ({
+                        kind: 'prd',
+                        before: allSpines.find(s => s.id === id)?.structuredPRD,
+                        after: latestSpine?.structuredPRD,
+                    })}
+                    getStaleArtifactTitles={getStaleArtifactTitles}
+                    onRestore={handleRestoreSpine}
+                    onClose={() => setShowPrdHistory(false)}
+                />
+            )}
+            {bannerCompareOpen && activeSpine && (
+                <VersionCompareView
+                    input={{ kind: 'prd', before: activeSpine.structuredPRD, after: latestSpine?.structuredPRD }}
+                    fromLabel={getVersionLabel(activeSpine.id)}
+                    toLabel="Current"
+                    onClose={() => setBannerCompareOpen(false)}
+                    onRestore={() => { setBannerCompareOpen(false); setBannerRestoreOpen(true); }}
+                />
+            )}
+            {bannerRestoreOpen && activeSpine && (
+                <RevertConfirmModal
+                    kind="prd"
+                    sourceLabel={getVersionLabel(activeSpine.id)}
+                    staleArtifactTitles={getStaleArtifactTitles()}
+                    onCancel={() => setBannerRestoreOpen(false)}
+                    onConfirm={() => handleRestoreSpine(activeSpine.id)}
+                />
+            )}
             {isSnapshotsOpen && projectId && (
                 <SnapshotsPanel
                     projectId={projectId}
@@ -645,14 +728,30 @@ export function ProjectWorkspace() {
                 {/* Left: Main Content Column */}
                 <div className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 lg:p-12 shadow-inner z-0 relative">
                     {isOldVersion && pipelineStage === 'prd' && (
-                        <div className="sticky top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex justify-between items-center z-10 -mx-4 md:-mx-8 lg:-mx-12 -mt-4 md:-mt-8 lg:-mt-12 mb-4">
+                        <div className="sticky top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex flex-wrap gap-2 justify-between items-center z-10 -mx-4 md:-mx-8 lg:-mx-12 -mt-4 md:-mt-8 lg:-mt-12 mb-4">
                             <span>You are viewing a historical version (Read-Only).</span>
-                            <button
-                                onClick={() => setViewedSpineId(null)}
-                                className="font-semibold underline hover:text-yellow-900 shrink-0 ml-4"
-                            >
-                                Return to Latest
-                            </button>
+                            <div className="flex items-center gap-3 shrink-0">
+                                {activeSpine?.structuredPRD && latestSpine?.structuredPRD && (
+                                    <button
+                                        onClick={() => setBannerCompareOpen(true)}
+                                        className="font-semibold underline hover:text-yellow-900"
+                                    >
+                                        Compare with current
+                                    </button>
+                                )}
+                                <button
+                                    onClick={() => setBannerRestoreOpen(true)}
+                                    className="font-semibold underline hover:text-yellow-900"
+                                >
+                                    Restore this version
+                                </button>
+                                <button
+                                    onClick={() => setViewedSpineId(null)}
+                                    className="font-semibold underline hover:text-yellow-900"
+                                >
+                                    Return to Latest
+                                </button>
+                            </div>
                         </div>
                     )}
 

@@ -117,9 +117,16 @@ Replace**, spawning a threaded branch scoped to just that passage.
 
 <img width="100%" alt="Version timeline with side-by-side diff comparison" src="public/screenshots/tour-versions.png" />
 
-Every regeneration and consolidation becomes a new **spine version** you can
-revisit, compare, or build on. The History stage is a chronological audit log
-of every spine regeneration, branch consolidation, artifact derivation, and
+Every regeneration, consolidation, **and inline edit** becomes a new **spine
+version** you can revisit, compare, or build on — edits never overwrite the
+previous version in place. Open **Version History** to see each version's change
+source (edit, regenerate, section retry, branch merge, restore), **compare** any
+version against the current one with a section-aware diff, and **restore** an
+earlier version (which appends a new version — history is never deleted, and any
+downstream artifacts that fall out of date are flagged). Artifacts carry their
+own version history and restore too, and show which PRD version they were
+generated from. The History stage is a chronological audit log of every spine
+regeneration, edit, restore, branch consolidation, artifact derivation, and
 feedback event — with diffs where it matters.
 
 ### 5. One finalized PRD powers the entire workspace
