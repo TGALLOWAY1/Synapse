@@ -1,16 +1,14 @@
-import { describe, it, expect, beforeEach, afterEach } from 'vitest';
+import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 import { hasGeminiKey, primeGeminiKey, clearGeminiKey } from '../geminiKeyVault';
 
 describe('hasGeminiKey', () => {
-  const originalFetch = global.fetch;
-
   beforeEach(() => {
     localStorage.clear();
     clearGeminiKey();
   });
 
   afterEach(() => {
-    global.fetch = originalFetch;
+    vi.unstubAllGlobals();
   });
 
   it('is false when neither the vault nor a local key is present', () => {
@@ -26,10 +24,10 @@ describe('hasGeminiKey', () => {
     // Regression: a vault-only user (key in the encrypted server vault, nothing
     // in localStorage) must be recognized as having a key, or the HomePage gate
     // wrongly routes them to Settings.
-    global.fetch = (async () => ({
+    vi.stubGlobal('fetch', vi.fn(async () => ({
       ok: true,
       json: async () => ({ provider: 'gemini', key: 'vault-key' }),
-    })) as unknown as typeof fetch;
+    })));
 
     await primeGeminiKey(true);
 
