@@ -7,6 +7,8 @@
 // localStorage. A legacy localStorage key remains a fallback for local dev /
 // offline use. See docs/AUTH_AND_PROVIDER_KEYS.md for the security tradeoff.
 
+import { getLocalCredential, GEMINI_API_KEY } from './localCredentials';
+
 let cachedVaultKey: string | null = null;
 let primed = false;
 let inflight: Promise<void> | null = null;
@@ -42,6 +44,20 @@ export async function primeGeminiKey(force = false): Promise<void> {
 /** The in-memory vault key, or null if not primed / not configured. */
 export function getCachedGeminiKey(): string | null {
   return cachedVaultKey;
+}
+
+/**
+ * True when a Gemini key is resolvable right now — the in-memory vault key OR
+ * the legacy localStorage fallback. This mirrors the resolution order used by
+ * the actual transport (`geminiClient.ts`), so pre-generation gates (e.g. the
+ * HomePage submit/enhance buttons) agree with what generation will actually
+ * use. A vault-only user (key in the encrypted server vault, nothing in
+ * localStorage) must NOT be treated as "no key" — checking localStorage alone
+ * wrongly bounces them to Settings.
+ */
+export function hasGeminiKey(): boolean {
+  if (cachedVaultKey) return true;
+  return Boolean(getLocalCredential(GEMINI_API_KEY));
 }
 
 /** Clear the cached key (e.g. on logout). */

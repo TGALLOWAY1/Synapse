@@ -9,6 +9,7 @@
 import { fetchProviderKeyStatus } from './providerKeysApi';
 import { setImageProviderConfigured } from './openaiClient';
 import { primeGeminiKey, clearGeminiKey } from './geminiKeyVault';
+import { clearLocalCredentialsForActiveUser } from './localCredentials';
 
 export async function primeProviderSession(): Promise<void> {
   try {
@@ -25,28 +26,14 @@ export function clearProviderSession(): void {
   clearGeminiKey();
 }
 
-// localStorage keys holding credential material for the optional "local browser
-// keys" fallback. These are NOT user-namespaced (unlike projects), so they are
-// shared by anyone using the same browser profile. We wipe them on an explicit
-// sign-out so a different account signing in afterward never inherits the
-// previous user's keys. (The encrypted server vault is per-user and unaffected.)
-const LOCAL_CREDENTIAL_KEYS = [
-  'GEMINI_API_KEY',
-  'OPENAI_API_KEY',
-  'GITHUB_TOKEN',
-];
-
 /**
- * Remove local-browser credential material from this browser. Called on an
+ * Remove local-browser credential material for the active user. Called on an
  * explicit logout only — not on passive "no session" resolution — so anonymous
- * page loads don't wipe a user's offline fallback keys.
+ * page loads don't wipe a user's offline fallback keys. Local credential keys
+ * are now namespaced per user (see localCredentials.ts), so this clears the
+ * signing-out user's namespaced keys (and sweeps any legacy global copies).
+ * The encrypted server vault is per-user server-side and unaffected.
  */
 export function clearLocalProviderKeys(): void {
-  try {
-    for (const key of LOCAL_CREDENTIAL_KEYS) {
-      localStorage.removeItem(key);
-    }
-  } catch {
-    // localStorage unavailable (private mode, etc.) — nothing to clear.
-  }
+  clearLocalCredentialsForActiveUser();
 }

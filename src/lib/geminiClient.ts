@@ -1,4 +1,5 @@
 import { getCachedGeminiKey } from './geminiKeyVault';
+import { getLocalCredential, GEMINI_API_KEY } from './localCredentials';
 
 export interface JsonModeConfig {
     responseMimeType: string;
@@ -56,7 +57,7 @@ export interface ProviderOptions {
 const getApiKey = () => {
     // Prefer the user's vault key (fetched into memory at call time, never
     // persisted client-side); fall back to a local key for dev/offline use.
-    const key = getCachedGeminiKey() || localStorage.getItem('GEMINI_API_KEY');
+    const key = getCachedGeminiKey() || getLocalCredential(GEMINI_API_KEY);
     if (!key) {
         throw new Error('Add a Gemini API key in Settings to generate PRDs.');
     }

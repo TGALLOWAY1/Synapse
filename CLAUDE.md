@@ -337,20 +337,32 @@ rules:
   id. **Sign-out** is exposed in the `HomePage` header and the
   `ProjectWorkspace` overflow menu; `authStore.logout()` clears the session
   cookie, the in-memory provider session, and (via
-  `providerSession.clearLocalProviderKeys()`) the **un-namespaced** local
-  credential keys (`GEMINI_API_KEY`/`OPENAI_API_KEY`/`GITHUB_TOKEN`) so a
-  different account signing in on the same browser can't inherit them. Local
-  keys are cleared only on an **explicit** logout, not on passive "no session"
-  resolution. The header signed-in label derives from `user.authProvider`
-  (`HomePage.providerLabel`) — don't hardcode a provider name.
+  `providerSession.clearLocalProviderKeys()`) the active user's local credential
+  keys. The local credential keys (`GEMINI_API_KEY`/`OPENAI_API_KEY`/
+  `GITHUB_TOKEN`) are **namespaced per user** in `localCredentials.ts` (suffixed
+  `::u:<userId>`, mirroring the project store) so one account's local keys are
+  never readable by another on the same browser; a one-time per-key migration
+  moves any pre-existing un-namespaced key into the active user's namespace and
+  deletes the shared global copy. **All credential reads/writes must go through
+  `localCredentials.ts`** (`getLocalCredential`/`setLocalCredential`/
+  `removeLocalCredential`) — never `localStorage.getItem('GEMINI_API_KEY')`
+  directly (that reads the wrong/shared key). Logout clears them on an
+  **explicit** logout only, not on passive "no session" resolution. The header
+  signed-in label derives from `user.authProvider` (`HomePage.providerLabel`) —
+  don't hardcode a provider name.
 - **Projects are namespaced per user in localStorage.** `userScope.ts` maps the
   active `userId` to the persist key (`createDebouncedStorage`'s `resolveName`
   override); `projectUserSync.applyProjectUser()` wipes in-memory state and
   rehydrates from the new namespace on every auth transition (wired in
-  `authStore`). First sign-in non-destructively adopts pre-existing anonymous
-  projects. **Do not** read the project store before `applyProjectUser` has run
-  for the current user, and keep `emptyPersistedState()` in `projectUserSync`
-  in sync with the persisted slice fields.
+  `authStore`). **Pre-sign-in anonymous projects are NOT silently adopted** —
+  silent first-signer adoption handed one user's projects to whichever account
+  signed in first. Adoption is now **explicit opt-in**: `getLegacyImportOffer()`
+  surfaces a `HomePage` banner, and only an informed click runs
+  `importLegacyProjects()` (copy + claim, non-destructive); `declineLegacyImport()`
+  suppresses re-prompts without claiming. **Do not** read the project store
+  before `applyProjectUser` has run for the current user, and keep
+  `emptyPersistedState()` in `projectUserSync` in sync with the persisted slice
+  fields.
 - **Provider keys live in an encrypted server vault** (`api/_lib/cryptoVault.js`
   AES-256-GCM, key from `SYNAPSE_KEY_ENCRYPTION_SECRET`; `providerKeys.js` Mongo
   `provider_keys` collection, one doc per `(userId, provider)`, bound via
@@ -366,7 +378,12 @@ rules:
   state on auth changes and Settings edits. Missing-key errors are explicit
   ("Add a Gemini API key in Settings to generate PRDs." / "…OpenAI…mockups.").
   New provider call sites must route through the vault, never expose a key, and
-  never log one.
+  never log one. **Pre-generation "has a key?" gates** (e.g. the HomePage
+  submit/enhance buttons) must call `hasGeminiKey()` (vault-in-memory **OR**
+  local fallback, mirroring `geminiClient`'s resolution), never check
+  `localStorage` alone — a vault-only user has no localStorage key, so a
+  localStorage-only gate wrongly routes them to Settings even though generation
+  would succeed.
 
 ### Pipeline flow
 

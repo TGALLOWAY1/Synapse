@@ -1,7 +1,8 @@
-import { useState, useRef } from 'react';
+import { useState, useRef, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
-import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut } from 'lucide-react';
+import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
+import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X } from 'lucide-react';
 import type { AuthProvider } from '../lib/recruiterApi';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
@@ -12,6 +13,17 @@ import type { ProjectPlatform, PreflightMode } from '../types';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { hasGeminiKey, primeGeminiKey } from '../lib/geminiKeyVault';
+
+// Advisory soft cap for the idea prompt. There is no hard *technical* limit:
+// PRD generation runs client-side straight to Gemini, whose context window
+// (~1M tokens) is orders of magnitude larger than anything typed here. The cap
+// is a cost/quality guard — the idea is injected into every PRD section prompt,
+// so we warn as the user nears the soft threshold and block submit only at a
+// deliberately generous hard limit (well above a detailed brief or an uploaded
+// .md/.txt file) to stop pathological pastes. Tune freely.
+const PROMPT_WARN_THRESHOLD = 8000;
+const PROMPT_MAX_LENGTH = 50000;
 
 // Human-readable name for the account's sign-in method (the header used to
 // hardcode "via LinkedIn" regardless of the actual provider).
@@ -60,6 +72,40 @@ export function HomePage() {
 
     const [isLoadingDemo, setIsLoadingDemo] = useState(false);
     const [isSigningOut, setIsSigningOut] = useState(false);
+
+    // Offer to import projects created on this browser before the user signed
+    // in. Computed from localStorage (keyed on the user) — there is no silent
+    // adoption, so a different account never inherits these without a click.
+    const legacyOffer = useMemo(
+        () => (user?.userId ? getLegacyImportOffer(user.userId) : { available: false, projectCount: 0 }),
+        [user?.userId],
+    );
+    const [importHandled, setImportHandled] = useState(false);
+    const [isImporting, setIsImporting] = useState(false);
+    const showImportBanner = legacyOffer.available && !importHandled;
+
+    const handleImportLegacy = () => {
+        if (!user?.userId || isImporting) return;
+        setIsImporting(true);
+        try {
+            const ok = importLegacyProjects(user.userId);
+            setImportHandled(true);
+            useToastStore.getState().addToast({
+                type: ok ? 'success' : 'warning',
+                title: ok ? 'Projects imported' : 'Nothing to import',
+                message: ok
+                    ? `${legacyOffer.projectCount} project${legacyOffer.projectCount === 1 ? '' : 's'} added to your account. Open them from the Projects list.`
+                    : 'These projects may have already been imported by another account on this browser.',
+            });
+        } finally {
+            setIsImporting(false);
+        }
+    };
+
+    const handleDismissImport = () => {
+        if (user?.userId) declineLegacyImport(user.userId);
+        setImportHandled(true);
+    };
 
     const handleSignOut = async () => {
         if (isSigningOut) return;
@@ -117,11 +163,20 @@ export function HomePage() {
     const textareaRef = useRef<HTMLTextAreaElement>(null);
 
     // Step 1: validate input + API key, then present the start-mode choice.
-    const handleCreateProject = () => {
+    const handleCreateProject = async () => {
         if (!projectName.trim() || !promptText.trim()) return;
+        if (promptText.length > PROMPT_MAX_LENGTH) return;
 
-        const apiKey = localStorage.getItem('GEMINI_API_KEY');
-        if (!apiKey) { setIsSettingsOpen(true); return; }
+        // The Gemini key may live in the encrypted server vault (held only in
+        // memory) or the legacy localStorage fallback — mirror geminiClient's
+        // resolution. If the vault hasn't finished priming yet, try once before
+        // bouncing a configured user to Settings. (The old code checked
+        // localStorage only, which wrongly routed every vault-only user to
+        // Settings even though generation would have worked.)
+        if (!hasGeminiKey()) {
+            await primeGeminiKey();
+            if (!hasGeminiKey()) { setIsSettingsOpen(true); return; }
+        }
 
         setIsChoosingMode(true);
     };
@@ -152,8 +207,10 @@ export function HomePage() {
     const handleEnhance = async () => {
         if (!promptText.trim() || isEnhancing) return;
 
-        const apiKey = localStorage.getItem('GEMINI_API_KEY');
-        if (!apiKey) { setIsSettingsOpen(true); return; }
+        if (!hasGeminiKey()) {
+            await primeGeminiKey();
+            if (!hasGeminiKey()) { setIsSettingsOpen(true); return; }
+        }
 
         setIsEnhancing(true);
         try {
@@ -199,16 +256,22 @@ export function HomePage() {
 
     const handleSubmit = (e: React.FormEvent) => {
         e.preventDefault();
-        handleCreateProject();
+        void handleCreateProject();
     };
 
-    const canSubmit = projectName.trim() && promptText.trim();
+    const promptLength = promptText.length;
+    const isOverPromptLimit = promptLength > PROMPT_MAX_LENGTH;
+    const isApproachingLimit = promptLength >= PROMPT_WARN_THRESHOLD;
+
+    const canSubmit = projectName.trim() && promptText.trim() && !isOverPromptLimit;
     const needsProjectName = promptText.trim() && !projectName.trim();
     const submitTitle = !promptText.trim()
         ? 'Enter a prompt to generate a PRD'
-        : !projectName.trim()
-            ? 'Enter a project name to continue'
-            : 'Generate PRD';
+        : isOverPromptLimit
+            ? `Prompt is over the ${PROMPT_MAX_LENGTH.toLocaleString()}-character limit`
+            : !projectName.trim()
+                ? 'Enter a project name to continue'
+                : 'Generate PRD';
 
     return (
         <div className="min-h-screen flex flex-col">
@@ -249,6 +312,49 @@ export function HomePage() {
                     </button>
                 </div>
             </div>
+
+            {/* Pre-sign-in project import offer (explicit opt-in — never silent) */}
+            {showImportBanner && (
+                <div className="px-6">
+                    <div className="mx-auto max-w-2xl flex items-start gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3">
+                        <Download size={18} className="mt-0.5 shrink-0 text-indigo-300" />
+                        <div className="flex-1 min-w-0">
+                            <p className="text-sm text-indigo-100">
+                                We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} created
+                                on this browser before you signed in. Import {legacyOffer.projectCount === 1 ? 'it' : 'them'} into
+                                your account?
+                            </p>
+                            <div className="mt-2 flex items-center gap-2">
+                                <button
+                                    type="button"
+                                    onClick={handleImportLegacy}
+                                    disabled={isImporting}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 rounded-lg bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition disabled:opacity-60 disabled:cursor-wait"
+                                >
+                                    {isImporting && <Loader2 size={14} className="animate-spin" />}
+                                    {isImporting ? 'Importing…' : 'Import projects'}
+                                </button>
+                                <button
+                                    type="button"
+                                    onClick={handleDismissImport}
+                                    className="px-3 py-1.5 rounded-lg text-sm text-neutral-300 hover:text-white hover:bg-white/10 transition"
+                                >
+                                    Not mine
+                                </button>
+                            </div>
+                        </div>
+                        <button
+                            type="button"
+                            onClick={handleDismissImport}
+                            className="p-1 text-neutral-400 hover:text-white rounded-lg transition"
+                            title="Dismiss"
+                            aria-label="Dismiss"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                </div>
+            )}
 
             {/* Main content — vertically centered */}
             <div className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
@@ -333,8 +439,41 @@ export function HomePage() {
                                     className="w-full bg-transparent text-neutral-100 placeholder-neutral-500 focus:outline-none resize-none min-h-[160px] text-[15px] leading-relaxed"
                                     placeholder="What product shall we design?"
                                     rows={6}
+                                    aria-describedby="prompt-char-counter"
                                 />
                             </div>
+
+                            {/* Character counter — advisory. The soft threshold is a cost
+                                nudge (the idea is injected into every PRD section), distinct
+                                from the generous hard limit that blocks submission. */}
+                            {promptLength > 0 && (
+                                <div className="px-5 pb-1 flex items-center justify-between gap-3">
+                                    <span
+                                        className={`text-xs ${isOverPromptLimit ? 'text-red-400' : 'text-amber-400/90'}`}
+                                    >
+                                        {isOverPromptLimit
+                                            ? `Over the ${PROMPT_MAX_LENGTH.toLocaleString()}-character limit — shorten your prompt to continue.`
+                                            : isApproachingLimit
+                                                ? 'Long prompt — it’s added to every section, which raises cost.'
+                                                : ''}
+                                    </span>
+                                    <span
+                                        id="prompt-char-counter"
+                                        aria-live="polite"
+                                        className={`text-xs tabular-nums shrink-0 ${
+                                            isOverPromptLimit
+                                                ? 'text-red-400'
+                                                : isApproachingLimit
+                                                    ? 'text-amber-400'
+                                                    : 'text-neutral-600'
+                                        }`}
+                                    >
+                                        {isApproachingLimit
+                                            ? `${promptLength.toLocaleString()} / ${PROMPT_MAX_LENGTH.toLocaleString()}`
+                                            : `${promptLength.toLocaleString()} characters`}
+                                    </span>
+                                </div>
+                            )}
 
                             {/* Bottom toolbar */}
                             <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-700/50">

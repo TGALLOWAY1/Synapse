@@ -2,6 +2,14 @@ import { useState } from 'react';
 import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
+import {
+    getLocalCredential,
+    setLocalCredential,
+    removeLocalCredential,
+    GEMINI_API_KEY,
+    OPENAI_API_KEY,
+    GITHUB_TOKEN,
+} from '../lib/localCredentials';
 
 const DEFAULT_FAST_MODEL = 'gemini-3.5-flash';
 const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
@@ -101,13 +109,13 @@ function ModelRadio({
 }
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
-    const [apiKey, setApiKey] = useState(() => localStorage.getItem('GEMINI_API_KEY') || '');
+    const [apiKey, setApiKey] = useState(() => getLocalCredential(GEMINI_API_KEY) || '');
     const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
-    const [openaiKey, setOpenaiKey] = useState(() => localStorage.getItem('OPENAI_API_KEY') || '');
+    const [openaiKey, setOpenaiKey] = useState(() => getLocalCredential(OPENAI_API_KEY) || '');
     const [fastModel, setFastModel] = useState(() => localStorage.getItem('GEMINI_FAST_MODEL') || DEFAULT_FAST_MODEL);
     const [strongModel, setStrongModel] = useState(() => localStorage.getItem('GEMINI_STRONG_MODEL') || DEFAULT_STRONG_MODEL);
-    const [githubToken, setGithubToken] = useState(() => localStorage.getItem('GITHUB_TOKEN') || '');
+    const [githubToken, setGithubToken] = useState(() => getLocalCredential(GITHUB_TOKEN) || '');
     const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem('GITHUB_DEFAULT_REPO') || '');
 
     // Expand the legacy section automatically if the user is currently on a
@@ -119,7 +127,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
 
     const handleSave = (e: React.FormEvent) => {
         e.preventDefault();
-        localStorage.setItem('GEMINI_API_KEY', apiKey.trim());
+        setLocalCredential(GEMINI_API_KEY, apiKey.trim());
         localStorage.setItem('GEMINI_MODEL', model);
         localStorage.setItem('GEMINI_FAST_MODEL', fastModel);
         localStorage.setItem('GEMINI_STRONG_MODEL', strongModel);
@@ -131,15 +139,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         }
         const trimmedOpenai = openaiKey.trim();
         if (trimmedOpenai) {
-            localStorage.setItem('OPENAI_API_KEY', trimmedOpenai);
+            setLocalCredential(OPENAI_API_KEY, trimmedOpenai);
         } else {
-            localStorage.removeItem('OPENAI_API_KEY');
+            removeLocalCredential(OPENAI_API_KEY);
         }
         const trimmedGithubToken = githubToken.trim();
         if (trimmedGithubToken) {
-            localStorage.setItem('GITHUB_TOKEN', trimmedGithubToken);
+            setLocalCredential(GITHUB_TOKEN, trimmedGithubToken);
         } else {
-            localStorage.removeItem('GITHUB_TOKEN');
+            removeLocalCredential(GITHUB_TOKEN);
         }
         const trimmedGithubRepo = githubRepo.trim();
         if (trimmedGithubRepo) {
