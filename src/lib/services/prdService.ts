@@ -68,6 +68,12 @@ export const generateStructuredPRD = async (
         enableConsistencyReview?: ProgressivePrdPipelineOptions['enableConsistencyReview'];
         /** Rendering surface for observability logs. */
         surface?: ProgressivePrdPipelineOptions['surface'];
+        /**
+         * The user-chosen project name. When meaningful (not a generic
+         * placeholder), it becomes the PRD's authoritative `productName` so the
+         * name the user typed carries through to the PRD and downstream assets.
+         */
+        projectName?: ProgressivePrdPipelineOptions['projectName'];
     },
     platform?: ProjectPlatform,
 ): Promise<StructuredPRD> => {
@@ -110,6 +116,7 @@ export const generateStructuredPRD = async (
             enableConsistencyReview: options?.enableConsistencyReview,
             surface: options?.surface,
             onWorkflowRun: options?.onWorkflowRun,
+            projectName: options?.projectName,
         },
         platform,
     );

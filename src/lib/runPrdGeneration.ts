@@ -53,6 +53,9 @@ export async function runPrdGeneration({
     preflight,
 }: RunPrdGenerationParams): Promise<void> {
     const store = useProjectStore.getState();
+    // The name the user gave the project is forwarded into generation so the
+    // PRD's productName reflects it (see prdSectionPrompts.product_basics).
+    const projectName = store.getProject(projectId)?.name;
     // Fresh run starts with a clean event log. Marking the spine 'running'
     // lets rehydration detect an interrupted run if the page is closed
     // mid-generation (see markInterruptedGenerations).
@@ -80,6 +83,7 @@ export async function runPrdGeneration({
             sourcePrompt,
             {
                 preflight,
+                projectName,
                 enableConsistencyReview: consistencyReviewEnabled(),
                 surface: detectSurface(),
                 onWorkflowRun: (run) => {
