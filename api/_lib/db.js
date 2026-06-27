@@ -51,6 +51,8 @@ async function getDb() {
  *   - updateOne → { matchedCount, modifiedCount, upsertedId }
  *   - deleteOne → { deletedCount }
  *   - aggregate → { documents }
+ *   - createIndexes → { ok: true } (idempotent; payload.indexes is a list of
+ *                      driver index specs: { key, ...options })
  */
 export async function runMongoAction(action, payload = {}) {
   const collectionName = payload.collection;
@@ -99,6 +101,16 @@ export async function runMongoAction(action, payload = {}) {
     case 'aggregate': {
       const documents = await collection.aggregate(payload.pipeline || []).toArray();
       return { documents };
+    }
+    case 'createIndexes': {
+      // Idempotent: createIndex is a no-op when an identical index already
+      // exists, so callers can run this lazily on every warm instance.
+      const indexes = Array.isArray(payload.indexes) ? payload.indexes : [];
+      for (const spec of indexes) {
+        const { key, ...options } = spec;
+        await collection.createIndex(key, options);
+      }
+      return { ok: true };
     }
     default:
       throw new Error(`runMongoAction: unsupported action "${action}".`);
