@@ -7,6 +7,7 @@ import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { DEMO_PROJECT_ID } from './data/demoProject';
 import { TourPage } from './components/tour/TourPage';
+import { MetricsPage } from './components/metrics/MetricsPage';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
@@ -108,6 +109,14 @@ function App() {
           <Route path="/about" element={<TourPage />} />
           <Route path="/tour" element={<TourPage />} />
           <Route path="/p/:projectId" element={<ProjectRoute />} />
+          <Route
+            path="/metrics"
+            element={
+              <RequireAuth>
+                <MetricsPage />
+              </RequireAuth>
+            }
+          />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />
           <Route path="/admin/recruiters" element={<RecruiterAdminPage />} />
         </Routes>

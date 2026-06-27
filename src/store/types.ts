@@ -7,6 +7,7 @@ import type {
     QualityScores, GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
     ProjectTask, TaskStatus, TaskExternalRef,
+    WorkflowRun,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
@@ -189,6 +190,15 @@ export interface ProjectState {
     ) => void;
     getTasks: (projectId: string) => ProjectTask[];
     getTasksForArtifact: (projectId: string, sourceArtifactId: string) => ProjectTask[];
+
+    // Orchestration metrics — persisted WorkflowRun history keyed by projectId.
+    // Records what the concurrent DAG executor actually achieved per run
+    // (runtime, speedup, concurrency, tokens, cost) for the Metrics dashboard.
+    workflowRuns: Record<string, WorkflowRun[]>;
+    recordWorkflowRun: (run: WorkflowRun) => void;
+    getWorkflowRuns: (projectId: string) => WorkflowRun[];
+    getAllWorkflowRuns: () => WorkflowRun[];
+    clearWorkflowRuns: (projectId: string) => void;
 
     // Staleness
     getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;

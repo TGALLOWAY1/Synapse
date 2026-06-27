@@ -95,6 +95,15 @@ You get back a structured PRD with vision, target users, core problems,
 features (with priority, acceptance criteria, and dependencies), architecture,
 metrics, risks, and non-functional requirements.
 
+That concurrency is **measured, not just claimed**. An **Orchestration
+Metrics** dashboard (`/metrics`, linked from Settings and the workspace menu)
+records each PRD generation and artifact-bundle run and shows real telemetry:
+sequential estimate vs. actual runtime, **parallel speedup** and time saved,
+max/average concurrency, critical path, per-section token usage, and estimated
+AI cost — with a per-run Gantt timeline that visualizes which agents ran in
+parallel. Cost figures are clearly labeled estimates; there's no synthetic
+data, so a fresh account shows an empty state until the first real run.
+
 ### 3. Refine specific parts of the document
 
 Highlight any passage and improve it without rewriting everything. A
@@ -358,6 +367,10 @@ needs no backend.
 - [`docs/AUTH_AND_PROVIDER_KEYS.md`](docs/AUTH_AND_PROVIDER_KEYS.md) — per-user
   projects, the encrypted BYO provider-key vault, server-side model routing,
   and the demo/recruiter mode
+- [`docs/ORCHESTRATION_AND_METRICS.md`](docs/ORCHESTRATION_AND_METRICS.md) —
+  how the concurrent multi-agent workflows run, the `/metrics` dashboard, and
+  what each metric means (sequential estimate vs. actual runtime, speedup,
+  concurrency, critical path, cost estimates)
 - [`docs/linkedin-auth.md`](docs/linkedin-auth.md) — LinkedIn OAuth setup,
   recruiter capture fields, and compliance note
 - [`docs/archive/`](docs/archive/) — historical design notes and audits

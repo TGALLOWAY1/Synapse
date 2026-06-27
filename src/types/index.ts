@@ -280,6 +280,89 @@ export type GenerationMeta = {
     failedSections?: string[];
 };
 
+// --- Workflow orchestration metrics domain types ---
+//
+// A WorkflowRun captures one end-to-end multi-agent run (a PRD generation, or
+// a downstream-artifact bundle) so the Metrics dashboard can show how much the
+// concurrent DAG executor actually saved over a hypothetical sequential run.
+// All fields are derived deterministically from per-node start/end timings —
+// nothing here changes generation behavior. These are persisted (per user,
+// keyed by projectId) in `metricsSlice`; keep every field present so older
+// stored runs stay renderable.
+
+/** Token counts for a single model call. */
+export type TokenUsage = {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+};
+
+export type WorkflowType = 'prd' | 'artifacts';
+
+export type WorkflowNodeStatus = 'complete' | 'error';
+
+/** One agent/section call within a workflow run. */
+export type WorkflowNodeRun = {
+    id: string;
+    /** Stable key for the unit of work (e.g. a PRD section id or artifact slot). */
+    nodeId: string;
+    /** Human-readable label shown in the timeline. */
+    nodeName: string;
+    /** Optional logical agent name (e.g. 'PRD Section Agent'). */
+    agentName?: string;
+    provider: string;                       // 'gemini' | 'openai' | …
+    model: string;
+    status: WorkflowNodeStatus;
+    /** nodeIds this node consumed as upstream context (true data deps only). */
+    dependencyIds: string[];
+    /** Topological wave index — nodes sharing one are eligible to run together. */
+    parallelGroupId?: number;
+    /** Wall-clock ms relative to the run start (so detail views can lay out bars). */
+    startedAt: number;
+    completedAt: number;
+    durationMs: number;
+    inputTokens?: number;
+    outputTokens?: number;
+    totalTokens?: number;
+    estimatedCost?: number;                 // USD, estimate (see modelPricing.ts)
+    retryCount?: number;
+    errorMessage?: string;
+};
+
+export type WorkflowRunStatus = 'complete' | 'partial' | 'error';
+
+/** Aggregate metrics for one multi-agent workflow run. */
+export type WorkflowRun = {
+    id: string;
+    projectId: string;
+    projectName?: string;
+    workflowType: WorkflowType;
+    status: WorkflowRunStatus;
+    /** Epoch ms when the run started / settled. */
+    startedAt: number;
+    completedAt: number;
+    actualRuntimeMs: number;
+    /** Σ node.durationMs — the hypothetical one-after-another runtime. */
+    sequentialEstimateMs: number;
+    parallelTimeSavedMs: number;
+    speedupRatio: number;
+    maxConcurrency: number;
+    averageConcurrency: number;
+    criticalPathMs: number;
+    totalNodeRuntimeMs: number;
+    totalInputTokens: number;
+    totalOutputTokens: number;
+    totalTokens: number;
+    estimatedCost: number;                  // USD, estimate
+    retryCount: number;
+    failureCount: number;
+    nodeCount: number;
+    parallelGroupCount: number;
+    nodes: WorkflowNodeRun[];
+    /** Free-form extras (e.g. consistency-review ms, model pair). */
+    metadata?: Record<string, unknown>;
+};
+
 // --- Safety guardrail domain types ---
 
 export type SafetyClassification =

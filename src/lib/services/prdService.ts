@@ -44,6 +44,12 @@ export const generateStructuredPRD = async (
         onSectionStatus?: (sectionId: SectionId, update: SectionStatusUpdate) => void;
         onResult?: (result: PrdPipelineResult) => void;
         /**
+         * Fired once at completion with the assembled orchestration WorkflowRun
+         * (per-section timings, tokens, concurrency/speedup metrics). Purely
+         * observational — feeds the Metrics dashboard.
+         */
+        onWorkflowRun?: ProgressivePrdPipelineOptions['onWorkflowRun'];
+        /**
          * Fired once the pre-generation safety classification completes, for
          * `allowed` and `allowed_with_restrictions` outcomes. `disallowed`
          * does NOT fire this — it throws `SafetyBlockedError` instead so the
@@ -103,6 +109,7 @@ export const generateStructuredPRD = async (
             signal: options?.signal,
             enableConsistencyReview: options?.enableConsistencyReview,
             surface: options?.surface,
+            onWorkflowRun: options?.onWorkflowRun,
         },
         platform,
     );

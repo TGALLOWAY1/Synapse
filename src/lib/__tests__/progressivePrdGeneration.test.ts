@@ -262,6 +262,29 @@ describe('progressive PRD generation', () => {
     expect(tracker.peak).toBeGreaterThan(1);
   });
 
+  it('completes the section graph in parallel wall-clock time (fails if serialized)', async () => {
+    // Run the real 10-section graph through a fixed-delay provider. Executed
+    // one-after-another this is 10×delay; the dependency-aware concurrent
+    // executor overlaps independent sections, so the measured wall-clock time
+    // must be well under the sequential sum. This is a direct regression guard
+    // against an accidental await-in-loop serialization of the DAG.
+    const delay = 20;
+    const tracker = makeConcurrencyProvider(delay);
+    const start = performance.now();
+    await generateProgressivePrd({
+      prompt: 'wall-clock test',
+      provider: tracker.provider,
+      sections: DEFAULT_PRD_SECTIONS,
+      config: baseConfig,
+    });
+    const elapsed = performance.now() - start;
+    const sequential = delay * DEFAULT_PRD_SECTIONS.length; // 200ms
+    // Multiple sections genuinely overlapped…
+    expect(tracker.peak).toBeGreaterThan(1);
+    // …and the run finished well under the sequential sum.
+    expect(elapsed).toBeLessThan(sequential * 0.7);
+  });
+
   it('respects the per-tier max concurrency limit', async () => {
     const tracker = makeConcurrencyProvider(10);
     // 4 independent fast sections, but a fast cap of 2 → peak must be ≤ 2.

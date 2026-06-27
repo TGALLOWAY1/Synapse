@@ -32,6 +32,7 @@ function emptyPersistedState() {
     artifactVersions: {},
     feedbackItems: {},
     tasks: {},
+    workflowRuns: {},
   };
 }
 

@@ -78,6 +78,8 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newFeedbackItems[projectId];
             const newTasks = { ...state.tasks };
             delete newTasks[projectId];
+            const newWorkflowRuns = { ...state.workflowRuns };
+            delete newWorkflowRuns[projectId];
             return {
                 projects: newProjects,
                 spineVersions: newSpines,
@@ -87,6 +89,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 artifactVersions: newArtifactVersions,
                 feedbackItems: newFeedbackItems,
                 tasks: newTasks,
+                workflowRuns: newWorkflowRuns,
             };
         });
     },

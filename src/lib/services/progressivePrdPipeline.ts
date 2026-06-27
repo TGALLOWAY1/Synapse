@@ -10,9 +10,10 @@ import { renderPremiumMarkdown } from './prdMarkdownRenderer';
 import { reviewPrdConsistency } from './prdConsistencyReview';
 import { logPrd, type PrdLogSurface } from './prdGenerationLog';
 import type { PrdPipelineOptions, PrdPipelineResult } from './prdPipeline';
-import type { StructuredPRD, GenerationPassRecord } from '../../types';
+import type { StructuredPRD, GenerationPassRecord, WorkflowRun } from '../../types';
 import type { SectionId } from '../schemas/prdSchemas';
 import type { ProjectPlatform } from '../../types';
+import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
 
 export const PRD_SCHEMA_VERSION = 2;
 
@@ -42,6 +43,17 @@ export interface ProgressivePrdPipelineOptions extends PrdPipelineOptions {
     enableConsistencyReview?: boolean;
     /** Rendering surface, attached to structured logs for observability. */
     surface?: PrdLogSurface;
+    /**
+     * Fired once at completion with the assembled orchestration WorkflowRun
+     * (per-section node timings + aggregate speedup/concurrency/cost metrics).
+     * Observational only — never affects generation. Errors thrown by the
+     * callback are swallowed so metrics can never break a PRD run.
+     */
+    onWorkflowRun?: (run: WorkflowRun) => void;
+    /** Project id stamped onto the WorkflowRun (for the metrics dashboard). */
+    projectId?: string;
+    /** Project name stamped onto the WorkflowRun (display only). */
+    projectName?: string;
 }
 
 const SECTION_BY_ID = Object.fromEntries(DEFAULT_PRD_SECTIONS.map(s => [s.id, s]));
@@ -51,11 +63,19 @@ export const runProgressivePrdPipeline = async (
     options: ProgressivePrdPipelineOptions = {},
     platform?: ProjectPlatform,
 ): Promise<PrdPipelineResult> => {
-    const { onStatus, onPartial, onProgress, onSectionStatus, signal, enableConsistencyReview, surface } = options;
+    const { onStatus, onPartial, onProgress, onSectionStatus, signal, enableConsistencyReview, surface,
+        onWorkflowRun, projectId, projectName } = options;
 
     const fastModel = getFastModel();
     const strongModel = getStrongModel();
     const overallStart = performance.now();
+    // Epoch anchor so the WorkflowRun carries absolute wall-clock timestamps
+    // (for the dashboard's date column + Gantt layout) while still using the
+    // monotonic performance clock for durations.
+    const runStartedAtEpoch = Date.now();
+    const nowEpoch = () => runStartedAtEpoch + (performance.now() - overallStart);
+    // Per-section observations accumulated for the orchestration WorkflowRun.
+    const nodeObs: Record<string, NodeObservation> = {};
     const passes: GenerationPassRecord[] = [];
 
     // Per-section start times for duration tracking.
@@ -117,6 +137,18 @@ export const runProgressivePrdPipeline = async (
                 });
             } else if (event.type === 'section_started') {
                 sectionStarts[event.sectionId] = performance.now();
+                const started = SECTION_BY_ID[event.sectionId];
+                nodeObs[event.sectionId] = {
+                    nodeId: event.sectionId,
+                    nodeName: started?.title ?? event.sectionId,
+                    agentName: 'PRD Section Agent',
+                    model: event.model,
+                    provider: 'gemini',
+                    status: 'complete',
+                    dependencyIds: started?.dependencies ?? [],
+                    startedAt: nowEpoch(),
+                    completedAt: nowEpoch(),
+                };
                 const startedSection = SECTION_BY_ID[event.sectionId];
                 const tierLabel = event.modelTier === 'fast' ? 'Flash' : 'Pro';
                 const estimate = startedSection?.estimatedSeconds;
@@ -138,6 +170,14 @@ export const runProgressivePrdPipeline = async (
                 });
             } else if (event.type === 'section_completed') {
                 const ms = performance.now() - (sectionStarts[event.sectionId] ?? overallStart);
+                const obs = nodeObs[event.sectionId];
+                if (obs) {
+                    obs.status = 'complete';
+                    obs.completedAt = nowEpoch();
+                    obs.inputTokens = event.usage?.inputTokens;
+                    obs.outputTokens = event.usage?.outputTokens;
+                    obs.totalTokens = event.usage?.totalTokens;
+                }
                 const section = SECTION_BY_ID[event.sectionId];
                 const tier = section ? selectModelTier(section.risk) : 'strong';
                 onProgress?.(`✓ ${section?.title ?? event.sectionId} (${tier === 'fast' ? 'Flash' : 'Pro'}) · ${(ms / 1000).toFixed(1)}s`);
@@ -157,6 +197,12 @@ export const runProgressivePrdPipeline = async (
                 passes.push({ stage: event.sectionId, ms, ok: true });
             } else if (event.type === 'section_error') {
                 const ms = performance.now() - (sectionStarts[event.sectionId] ?? overallStart);
+                const obs = nodeObs[event.sectionId];
+                if (obs) {
+                    obs.status = 'error';
+                    obs.completedAt = nowEpoch();
+                    obs.errorMessage = event.error;
+                }
                 const section = SECTION_BY_ID[event.sectionId];
                 const tier = section ? selectModelTier(section.risk) : 'strong';
                 logPrd({
@@ -199,14 +245,30 @@ export const runProgressivePrdPipeline = async (
     // (handled below) or on a heavily-degraded partial. Guarded against detail
     // loss inside reviewPrdConsistency — a lossy revision is discarded.
     let reviewed = false;
+    let consistencyMs: number | undefined;
     if (enableConsistencyReview && failedSections.length === 0) {
         onProgress?.('Reviewing for consistency…');
         const reviewStart = performance.now();
+        const reviewStartEpoch = nowEpoch();
         try {
             const review = await reviewPrdConsistency(structuredPRD, { signal });
             const reviewMs = performance.now() - reviewStart;
+            consistencyMs = reviewMs;
             reviewed = review.applied;
             if (review.applied) structuredPRD = review.prd;
+            // Record the consistency pass as a final, all-sections-dependent
+            // node so the Gantt shows it sequentially after the parallel wave.
+            nodeObs['consistency_review'] = {
+                nodeId: 'consistency_review',
+                nodeName: 'Consistency Review',
+                agentName: 'Consistency Agent',
+                model: getFastModel(),
+                provider: 'gemini',
+                status: 'complete',
+                dependencyIds: Object.keys(nodeObs),
+                startedAt: reviewStartEpoch,
+                completedAt: nowEpoch(),
+            };
             passes.push({ stage: 'consistency_review', ms: reviewMs, ok: true });
             logPrd({
                 event: 'consistency_review',
@@ -249,6 +311,29 @@ export const runProgressivePrdPipeline = async (
         surface,
         detail: `${allJobs.length - failedSections.length}/${allJobs.length} sections ok${reviewed ? ', consistency-reviewed' : ''}`,
     });
+
+    // Assemble + emit the orchestration WorkflowRun. Wrapped so a metrics bug
+    // can never surface as a generation failure.
+    if (onWorkflowRun) {
+        try {
+            const run = buildWorkflowRun({
+                projectId: projectId ?? 'unknown',
+                projectName,
+                workflowType: 'prd',
+                startedAt: runStartedAtEpoch,
+                completedAt: runStartedAtEpoch + totalMs,
+                nodes: Object.values(nodeObs),
+                metadata: {
+                    models: `${fastModel} / ${strongModel}`,
+                    consistencyReviewMs: consistencyMs,
+                    consistencyReviewed: reviewed,
+                },
+            });
+            onWorkflowRun(run);
+        } catch (e) {
+            console.warn('[prd] failed to assemble workflow metrics run.', e);
+        }
+    }
 
     return {
         structuredPRD,
