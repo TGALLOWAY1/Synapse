@@ -39,7 +39,16 @@ describe('authStore.refreshSession', () => {
     expect(s.user).toEqual(USER);
     expect(s.loading).toBe(false);
     expect(s.authError).toBeNull();
-    expect(applyProjectUser).toHaveBeenCalledWith('u1');
+    expect(applyProjectUser).toHaveBeenCalledWith('u1', []);
+  });
+
+  it('threads mergedUserIds through to the project store for namespace recovery', async () => {
+    fetchSession.mockResolvedValue({
+      authenticated: true,
+      user: { ...USER, mergedUserIds: ['old-acct'] },
+    });
+    await useAuthStore.getState().refreshSession();
+    expect(applyProjectUser).toHaveBeenCalledWith('u1', ['old-acct']);
   });
 
   it('resolves to signed-out (no error) on an unauthenticated session', async () => {
@@ -48,7 +57,7 @@ describe('authStore.refreshSession', () => {
     const s = useAuthStore.getState();
     expect(s.user).toBeNull();
     expect(s.authError).toBeNull();
-    expect(applyProjectUser).toHaveBeenCalledWith(null);
+    expect(applyProjectUser).toHaveBeenCalledWith(null, []);
   });
 
   it('records authError on a transport/server failure WITHOUT masquerading as signed-out', async () => {

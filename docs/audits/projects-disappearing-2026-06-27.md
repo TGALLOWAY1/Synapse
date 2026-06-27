@@ -148,7 +148,7 @@ fetch — the projects are recoverable. The bugs are about *visibility* and
 | **R8** | **Critical (confirmed bug, fixed)** | `applyProjectUser` queues a debounced persist write of the EMPTY wipe state to the target namespace, then `rehydrate()` loads the real data into memory **without persisting** (Zustand uses the raw setter during hydration). ~500ms later the queued empty write flushes and **overwrites the namespace's stored projects with `{}`** — so a returning user who signs in and doesn't immediately mutate the store loses their localStorage projects on the next refresh. Caught by a new regression test. |
 | R1 | **Critical (by design)** | No server persistence → projects are device/browser-local; cannot appear across mobile/web or survive site-data clears. |
 | R2 | **High** | Per-user namespacing stranded pre-existing (base-key) projects; the import offer is one-shot and disappears once the user has any namespaced data or dismisses it. |
-| R3 | **High** | Different sign-in providers ⇒ different `userId` ⇒ different namespace ⇒ projects "disappear" when switching login method. |
+| R3 | **High, fixed** | Different sign-in providers ⇒ different `userId` ⇒ different namespace ⇒ projects "disappear" when switching login method. Now resolved via account linking (see below). |
 | R4 | **Medium** | Transient `/api/session` failure is swallowed and rendered as "signed out" + empty list; no retry/error UI. |
 | R5 | **Low** | Pending debounced write for user A can be dropped on a fast auth switch. |
 | R6 | **Low** | Quota-exceeded silently stops all persistence after one toast. |
@@ -178,11 +178,52 @@ fetch — the projects are recoverable. The bugs are about *visibility* and
 - **Observability:** debug-gated lifecycle logging (`synapse-projects-debug`)
   around create / namespace switch / rehydrate counts / auth resolution.
 
+## R3 resolution — account linking (one human → one stable account)
+
+R3 is fixed by making sign-in resolve to a **stable account `userId`** that is
+independent of which provider was used, plus recovering projects from any
+previously-divergent account. Implementation:
+
+- **Stable identity model** (`api/_lib/users.js`). A user doc can now carry
+  additional `linkedIdentities: [{authProvider, providerUserId, email}]` and a
+  `mergedUserIds: []` list, alongside its primary identity. Provider lookups
+  (`findUserByProviderIdentity`) match the primary **or** any linked identity and
+  skip accounts tombstoned with `mergedInto`, so a linked provider always
+  resolves to the surviving account (and therefore the same client namespace).
+- **Auto-link by verified email.** When an OAuth sign-in's verified email
+  matches an existing account whose email is **verified**, `upsertOAuthUser`
+  reuses that account's `userId` and attaches the new provider identity instead
+  of minting a divergent one. An **unverified** existing account (e.g. an
+  email/password signup with no verification flow) is **not** auto-linked — that
+  would be an account-takeover vector — so that case still blocks and is handled
+  by explicit linking.
+- **Explicit linking while signed in.** `GET /api/auth/link/:provider`
+  (`requireUser`-gated) sets a short-lived, HMAC-signed link-intent cookie
+  (`api/_lib/linkState.js`) and runs the normal OAuth redirect. The shared
+  callback (`oauthCallback.js`) detects the intent, re-verifies the live session
+  matches it, and attaches the just-authenticated identity to the current
+  account via `linkProviderIdentity` — safe because the user proves control of
+  both the session and the provider. If that identity already belonged to a
+  different account, it is **non-destructively merged** (identities move over,
+  the old `userId` is recorded in `mergedUserIds`, the old doc is tombstoned with
+  `mergedInto`). UI: Settings → "Connected sign-in methods"
+  (`ConnectedAccountsSection`).
+- **Client namespace recovery.** `/api/session` exposes `mergedUserIds`;
+  `applyProjectUser(userId, mergedUserIds)` merges each absorbed account's
+  `::u:<id>` namespace into the canonical one (additive, existing ids win,
+  idempotent — `mergeNamespaceInto`) so projects created under a divergent
+  userId before linking reappear automatically.
+
+**Known limitation (deferred):** account merge moves *project* data (client
+localStorage) but does not migrate the absorbed account's **server-side** data
+(snapshots, encrypted provider keys keyed by the old `userId`). Tracked in
+`tasks/TODO.md`.
+
 ## Deferred (see `tasks/TODO.md`)
 
-- **R1/R3** require a real server-side project store keyed by a stable account
-  id (so projects sync across devices and across sign-in methods). This is the
-  only durable fix for the cross-device complaint and is out of scope for a
-  safe, non-destructive change.
+- **R1** still requires a real server-side project store keyed by the (now
+  stable) account id so projects sync across devices and survive a browser-data
+  clear. This is the only durable fix for the cross-device complaint and is out
+  of scope for a safe, non-destructive change.
 </content>
 </invoke>

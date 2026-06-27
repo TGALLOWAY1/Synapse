@@ -83,6 +83,27 @@ describe('project persistence lifecycle', () => {
     expect(stored.state.projects.keep).toBeDefined();
   });
 
+  it('recovers projects from a merged (linked) account into the canonical namespace (R3)', () => {
+    // Simulate a divergent account from a past sign-in with another provider.
+    localStorage.setItem(
+      namespaceFor('old-provider-userid'),
+      JSON.stringify({ state: { projects: { recovered: { id: 'recovered', name: 'From GitHub', createdAt: 1 } } }, version: 0 }),
+    );
+    // The signed-in canonical account already has its own project.
+    localStorage.setItem(
+      namespaceFor('canonical'),
+      JSON.stringify({ state: { projects: { mine: { id: 'mine', name: 'Mine', createdAt: 2 } } }, version: 0 }),
+    );
+
+    // Auth resolves with the server reporting the old account as merged-in.
+    applyProjectUser('canonical', ['old-provider-userid']);
+    flushPersist();
+
+    const projects = useProjectStore.getState().projects;
+    expect(projects.mine).toBeDefined();
+    expect(projects.recovered).toBeDefined(); // recovered from the linked account
+  });
+
   it('switching users back and forth never overwrites a namespace with an empty list', () => {
     applyProjectUser('userA');
     useProjectStore.getState().createProject('A', 'idea');

@@ -178,43 +178,79 @@ export function importLegacyProjectsForUser(userId: string): boolean {
   // Merge path: union each project-keyed collection, keeping the user's own
   // entries on any id collision. Fall back to claim-only (no data change) if
   // either blob can't be parsed, so a corrupt blob never destroys data.
-  let merged: unknown;
-  let added = 0;
-  try {
-    const own = JSON.parse(ownRaw);
-    const legacy = JSON.parse(legacyRaw);
-    const ownState = own?.state ?? {};
-    const legacyState = legacy?.state ?? {};
-
-    for (const key of MERGEABLE_COLLECTIONS) {
-      const legacyMap = legacyState[key];
-      if (!legacyMap || typeof legacyMap !== 'object') continue;
-      const ownMap = (ownState[key] && typeof ownState[key] === 'object') ? ownState[key] : {};
-      const nextMap: Record<string, unknown> = { ...ownMap };
-      for (const id of Object.keys(legacyMap)) {
-        if (!(id in nextMap)) {
-          nextMap[id] = legacyMap[id];
-          if (key === 'projects') added += 1;
-        }
-      }
-      ownState[key] = nextMap;
-    }
-    own.state = ownState;
-    merged = own;
-  } catch {
+  const merged = mergeStoredBlobs(ownRaw, legacyRaw);
+  if (!merged) {
     safeSet(CLAIM_KEY, userId);
     return false;
   }
-
-  if (added === 0) {
+  if (merged.addedProjects === 0) {
     // Nothing new to add (every legacy project already present) — just claim so
     // the offer stops without rewriting the user's blob.
     safeSet(CLAIM_KEY, userId);
     return false;
   }
 
-  safeSet(nsKey, JSON.stringify(merged));
+  safeSet(nsKey, merged.json);
   safeSet(CLAIM_KEY, userId);
+  return true;
+}
+
+/**
+ * Additively merge a `source` persisted blob into a `target` persisted blob,
+ * unioning every project-keyed collection. Existing ids in `target` always win,
+ * so a merge can only ADD entries, never overwrite/delete one. Returns the
+ * serialized merged blob and how many *projects* were added, or null if either
+ * blob can't be parsed (so a corrupt blob never destroys data).
+ */
+function mergeStoredBlobs(targetRaw: string, sourceRaw: string): { json: string; addedProjects: number } | null {
+  try {
+    const target = JSON.parse(targetRaw);
+    const source = JSON.parse(sourceRaw);
+    const targetState = target?.state ?? {};
+    const sourceState = source?.state ?? {};
+    let added = 0;
+    for (const key of MERGEABLE_COLLECTIONS) {
+      const sourceMap = sourceState[key];
+      if (!sourceMap || typeof sourceMap !== 'object') continue;
+      const targetMap = (targetState[key] && typeof targetState[key] === 'object') ? targetState[key] : {};
+      const nextMap: Record<string, unknown> = { ...targetMap };
+      for (const id of Object.keys(sourceMap)) {
+        if (!(id in nextMap)) {
+          nextMap[id] = sourceMap[id];
+          if (key === 'projects') added += 1;
+        }
+      }
+      targetState[key] = nextMap;
+    }
+    target.state = targetState;
+    return { json: JSON.stringify(target), addedProjects: added };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Merge the project namespace of `sourceUserId` into `canonicalUserId`'s
+ * namespace (additive; existing ids win). Used when the server reports that an
+ * account was merged into this one (`mergedUserIds`) so projects created under a
+ * now-defunct divergent userId — e.g. from signing in with a different provider
+ * before the accounts were linked — are recovered. Non-destructive: the source
+ * namespace is left untouched, so the merge is idempotent across reloads.
+ * Returns true if the canonical namespace was changed.
+ */
+export function mergeNamespaceInto(canonicalUserId: string | null, sourceUserId: string): boolean {
+  if (!canonicalUserId || !sourceUserId || canonicalUserId === sourceUserId) return false;
+  const sourceRaw = safeGet(namespaceFor(sourceUserId));
+  if (sourceRaw === null) return false;
+  const targetKey = namespaceFor(canonicalUserId);
+  const targetRaw = safeGet(targetKey);
+  if (targetRaw === null) {
+    safeSet(targetKey, sourceRaw);
+    return true;
+  }
+  const merged = mergeStoredBlobs(targetRaw, sourceRaw);
+  if (!merged || merged.addedProjects === 0) return false;
+  safeSet(targetKey, merged.json);
   return true;
 }
 

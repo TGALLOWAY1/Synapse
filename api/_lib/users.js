@@ -66,6 +66,7 @@ function publicUserProjection() {
     _id: 0,
     userId: 1,
     authProvider: 1,
+    providerUserId: 1,
     linkedinId: 1,
     name: 1,
     profileUrl: 1,
@@ -75,6 +76,11 @@ function publicUserProjection() {
     email: 1,
     emailVerified: 1,
     lastActiveAt: 1,
+    // Account-linking fields (see "Stable account identity" below). Optional /
+    // back-compat: older docs lack them.
+    linkedIdentities: 1,
+    mergedUserIds: 1,
+    mergedInto: 1,
   };
 }
 
@@ -103,8 +109,56 @@ export function findUserByLinkedinId(linkedinId) {
   return findOne({ linkedinId });
 }
 
+/**
+ * Resolve the account that owns a given provider identity, recognizing BOTH the
+ * account's primary identity (top-level authProvider/providerUserId) and any
+ * additional identities linked into it (`linkedIdentities`). Accounts that were
+ * merged into another (tombstoned with `mergedInto`) are excluded so a linked
+ * identity always resolves to the surviving account.
+ *
+ * This is what makes one human map to one stable `userId` across sign-in
+ * methods: once a provider is linked, signing in with it returns the SAME
+ * account (and therefore the same client project namespace).
+ */
+export function findUserByProviderIdentity(authProvider, providerUserId) {
+  return findOne({
+    mergedInto: { $exists: false },
+    $or: [
+      { authProvider, providerUserId },
+      { linkedIdentities: { $elemMatch: { authProvider, providerUserId } } },
+    ],
+  });
+}
+
+/** Back-compat alias — now identity-aware (recognizes linked identities). */
 export function findUserByProvider(authProvider, providerUserId) {
-  return findOne({ authProvider, providerUserId });
+  return findUserByProviderIdentity(authProvider, providerUserId);
+}
+
+/** Whether `account` (primary or linked) already owns the given provider id. */
+function accountOwnsIdentity(account, authProvider, providerUserId) {
+  if (!account) return false;
+  if (account.authProvider === authProvider && account.providerUserId === providerUserId) return true;
+  return Array.isArray(account.linkedIdentities)
+    && account.linkedIdentities.some(
+      (i) => i && i.authProvider === authProvider && i.providerUserId === providerUserId,
+    );
+}
+
+/** A client-facing summary of every sign-in method linked to an account. */
+function buildLinkedProviders(user) {
+  const out = [];
+  const seen = new Set();
+  const push = (authProvider, email) => {
+    if (!authProvider || seen.has(authProvider)) return;
+    seen.add(authProvider);
+    out.push({ authProvider, email: email || null });
+  };
+  if (user?.authProvider) push(user.authProvider, user.email);
+  if (Array.isArray(user?.linkedIdentities)) {
+    for (const i of user.linkedIdentities) push(i?.authProvider, i?.email);
+  }
+  return out;
 }
 
 /**
@@ -210,13 +264,34 @@ export async function upsertOAuthUser({
   company = safeCompany || null;
   const now = new Date();
 
-  // Is there already a record for this provider + providerUserId?
-  const existing = await findUserByProvider(authProvider, providerUserId);
+  // Is there already an account that owns this provider identity (as its
+  // primary identity OR a linked one)?
+  const existing = await findUserByProviderIdentity(authProvider, providerUserId);
 
-  // Cross-provider collision: email already used by a different provider.
+  // Found via a LINKED identity (this provider was previously linked into an
+  // account whose primary sign-in is a different provider). Resolve to that
+  // canonical account — do NOT create a second doc — so the user keeps one
+  // stable userId (and one project namespace) across sign-in methods.
+  if (existing && !(existing.authProvider === authProvider && existing.providerUserId === providerUserId)) {
+    return await touchLinkedSignIn(existing, authProvider);
+  }
+
+  // No account owns this identity yet. If a verified-email account exists under
+  // a DIFFERENT provider, auto-link into it (safe: both sides email-verified)
+  // rather than minting a divergent userId. An UNVERIFIED existing account
+  // (e.g. an email/password signup with no verification flow) is NOT safe to
+  // auto-link — that would be an account-takeover vector — so we keep blocking
+  // it; the user can connect the methods explicitly while signed in instead.
   if (!existing && normalizedEmail) {
     const byEmail = await findAnyUserByEmail(normalizedEmail);
     if (byEmail && byEmail.authProvider !== authProvider) {
+      if (byEmail.emailVerified) {
+        return await attachIdentityToAccount(byEmail, {
+          authProvider,
+          providerUserId,
+          email: normalizedEmail,
+        });
+      }
       throw new EmailInUseByOtherProviderError(byEmail.authProvider);
     }
   }
@@ -274,6 +349,147 @@ export async function upsertOAuthUser({
     emailVerified: true,
     lastActiveAt: now,
     linkedinId: authProvider === 'linkedin' ? providerUserId : undefined,
+    // Carry through any pre-existing linking state so the session reflects it.
+    linkedIdentities: existing?.linkedIdentities || [],
+    mergedUserIds: existing?.mergedUserIds || [],
+  };
+}
+
+export class IdentityAlreadyLinkedError extends Error {
+  constructor() {
+    super('identity_already_linked');
+    this.name = 'IdentityAlreadyLinkedError';
+    this.code = 'identity_already_linked';
+  }
+}
+
+/**
+ * Record a sign-in that arrived via a provider LINKED into `account` (whose
+ * primary provider differs). Touches lastActive/loginCount only — the account's
+ * primary profile is left intact — and returns the canonical account with the
+ * just-used provider as the active one for session display.
+ */
+async function touchLinkedSignIn(account, activeProvider) {
+  const now = new Date();
+  await runMongoAction('updateOne', {
+    collection: COLLECTION,
+    filter: { userId: account.userId },
+    update: { $set: { lastActiveAt: now, updatedAt: now }, $inc: { loginCount: 1 } },
+  });
+  return { ...accountToSessionUser(account), authProvider: activeProvider, lastActiveAt: now };
+}
+
+/**
+ * Attach a new provider identity to an existing account (auto-link by verified
+ * email, or explicit linking). Idempotent via $addToSet. Returns the canonical
+ * account with the newly-linked provider active for session display.
+ */
+export async function attachIdentityToAccount(account, { authProvider, providerUserId, email = null }) {
+  const now = new Date();
+  if (!accountOwnsIdentity(account, authProvider, providerUserId)) {
+    await runMongoAction('updateOne', {
+      collection: COLLECTION,
+      filter: { userId: account.userId },
+      update: {
+        $addToSet: {
+          linkedIdentities: { authProvider, providerUserId, email: normalizeEmail(email) },
+        },
+        $set: { lastActiveAt: now, updatedAt: now },
+        $inc: { loginCount: 1 },
+      },
+    });
+  }
+  const merged = {
+    ...account,
+    linkedIdentities: [
+      ...(account.linkedIdentities || []),
+      { authProvider, providerUserId, email: normalizeEmail(email) },
+    ],
+  };
+  return { ...accountToSessionUser(merged), authProvider, lastActiveAt: now };
+}
+
+/**
+ * Explicitly link a provider identity (just authenticated via OAuth) into the
+ * already-signed-in `account`. Safe because the caller proves control of BOTH:
+ * a verified session for `account` AND a completed OAuth handshake for the
+ * provider. If the identity already belongs to a DIFFERENT account, that account
+ * is merged into `account` non-destructively (its identities move over, its
+ * userId is recorded in `mergedUserIds`, and it is tombstoned with `mergedInto`
+ * so its sign-in resolves to the survivor). Returns the canonical account.
+ */
+export async function linkProviderIdentity(account, { authProvider, providerUserId, email = null }) {
+  if (accountOwnsIdentity(account, authProvider, providerUserId)) {
+    return { ...accountToSessionUser(account), authProvider };
+  }
+  const owner = await findUserByProviderIdentity(authProvider, providerUserId);
+  if (owner && owner.userId === account.userId) {
+    return { ...accountToSessionUser(account), authProvider };
+  }
+  if (owner && owner.userId !== account.userId) {
+    return await mergeAccountInto(account, owner, authProvider);
+  }
+  return await attachIdentityToAccount(account, { authProvider, providerUserId, email });
+}
+
+/**
+ * Non-destructively merge `absorbed` into `survivor`: move every identity of the
+ * absorbed account into the survivor's `linkedIdentities`, record the absorbed
+ * `userId` in `survivor.mergedUserIds` (the client uses this to merge the
+ * absorbed project namespace), and tombstone the absorbed doc with `mergedInto`
+ * so future sign-ins resolve to the survivor. The absorbed doc is kept (not
+ * deleted) so its server-side data is never destroyed.
+ */
+async function mergeAccountInto(survivor, absorbed, activeProvider) {
+  const now = new Date();
+  const absorbedIdentities = [
+    { authProvider: absorbed.authProvider, providerUserId: absorbed.providerUserId, email: absorbed.email || null },
+    ...(absorbed.linkedIdentities || []),
+  ].filter((i) => i.authProvider && i.providerUserId);
+
+  await runMongoAction('updateOne', {
+    collection: COLLECTION,
+    filter: { userId: survivor.userId },
+    update: {
+      $addToSet: {
+        linkedIdentities: { $each: absorbedIdentities },
+        mergedUserIds: absorbed.userId,
+      },
+      $set: { lastActiveAt: now, updatedAt: now },
+    },
+  });
+  // Tombstone the absorbed account so it no longer resolves on sign-in.
+  await runMongoAction('updateOne', {
+    collection: COLLECTION,
+    filter: { userId: absorbed.userId },
+    update: { $set: { mergedInto: survivor.userId, updatedAt: now } },
+  });
+
+  const merged = {
+    ...survivor,
+    linkedIdentities: [...(survivor.linkedIdentities || []), ...absorbedIdentities],
+    mergedUserIds: [...(survivor.mergedUserIds || []), absorbed.userId],
+  };
+  return { ...accountToSessionUser(merged), authProvider: activeProvider, lastActiveAt: now };
+}
+
+/** Shape an account doc into the object shared by every auth return path. */
+function accountToSessionUser(account) {
+  return {
+    userId: account.userId,
+    authProvider: account.authProvider,
+    providerUserId: account.providerUserId,
+    name: account.name || '',
+    profileUrl: account.profileUrl || null,
+    headline: account.headline || '',
+    company: account.company || null,
+    avatarUrl: account.avatarUrl || null,
+    email: account.email || null,
+    emailVerified: account.emailVerified ?? false,
+    lastActiveAt: account.lastActiveAt || null,
+    linkedinId: account.linkedinId,
+    linkedIdentities: account.linkedIdentities || [],
+    mergedUserIds: account.mergedUserIds || [],
   };
 }
 
@@ -333,5 +549,11 @@ export function toPublicUser(user) {
     email: user.email || null,
     emailVerified: user.emailVerified ?? false,
     lastActiveAt: user.lastActiveAt || null,
+    // Account-linking surface: every connected sign-in method, plus the ids of
+    // any accounts merged into this one (the client merges their project
+    // namespaces so already-split projects are recovered). Both default to a
+    // single-provider / empty shape for legacy docs.
+    linkedProviders: buildLinkedProviders(user),
+    mergedUserIds: Array.isArray(user.mergedUserIds) ? user.mergedUserIds : [],
   };
 }

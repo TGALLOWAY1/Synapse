@@ -47,8 +47,12 @@ export const useAuthStore = create<AuthState>((set) => {
   // that user's namespace (login adopts any anonymous projects; logout/anon
   // switches away), so accounts never share project data in one browser.
   const setUser = (user: RecruiterUser | null) => {
-    projectsDebug('auth: resolved user', { userId: user?.userId ?? null, provider: user?.authProvider });
-    applyProjectUser(user?.userId ?? null);
+    projectsDebug('auth: resolved user', {
+      userId: user?.userId ?? null,
+      provider: user?.authProvider,
+      mergedUserIds: user?.mergedUserIds?.length ?? 0,
+    });
+    applyProjectUser(user?.userId ?? null, user?.mergedUserIds ?? []);
     // Prime/clear runtime provider-key state (Gemini in-memory key, OpenAI
     // configured flag) so AI calls use the right account's credentials.
     if (user) {

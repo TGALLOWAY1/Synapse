@@ -50,11 +50,22 @@ below are the durable follow-ups that need backend work.
       and mobile") and is impossible without server storage. Suggested shape:
       a `projects` collection mirroring the persisted Zustand slices, with the
       client treating localStorage as a cache and the server as source of truth.
-- [ ] **(R3)** Account linking: let one human link email + GitHub + LinkedIn to
-      a single stable `userId` (or merge namespaces on link) so switching sign-in
-      method doesn't change which project namespace is read. Until R1 lands,
-      at minimum warn the user that projects are tied to the sign-in method used
-      to create them.
+- [x] **(R3 — resolved)** Account linking: one human → one stable `userId`
+      across email/GitHub/LinkedIn. Auto-link by verified email + explicit
+      "Connect another sign-in method" in Settings, with non-destructive account
+      merge and client-side project-namespace recovery (`mergedUserIds`). See
+      `docs/audits/projects-disappearing-2026-06-27.md`.
+- [ ] **(R3 follow-up)** When two populated accounts merge, migrate the absorbed
+      account's **server-side** data (snapshots, encrypted `provider_keys` keyed
+      by the old `userId`) to the survivor. Today only client-side project data
+      (localStorage namespace) is merged; server data stays under the
+      tombstoned `userId` and becomes unreachable via sign-in.
+- [ ] **(R3 follow-up)** Add an email-verification flow so an email/password
+      account can be safely auto-linked by email (currently it must be linked
+      explicitly while signed in, because unverified emails can't be trusted for
+      auto-link).
+- [ ] **(R3 follow-up)** Let a user UNLINK a sign-in method (and surface which
+      providers are connected with their emails) from Settings.
 - [ ] **(R5)** Flush the pending debounced localStorage write before
       `applyProjectUser` retargets the storage key, so a fast auth switch can't
       drop user A's last in-flight write.

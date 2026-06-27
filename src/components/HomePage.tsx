@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
@@ -106,6 +106,33 @@ export function HomePage() {
         if (user?.userId) declineLegacyImport(user.userId);
         setImportHandled(true);
     };
+
+    // Surface the result of an account-link OAuth round-trip (the user returns
+    // here signed in, so LoginPage's ?auth_error handler never sees it).
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const linked = params.get('auth') === 'linked';
+        const linkError = params.get('auth_error');
+        const isLinkError = linkError && linkError.includes('link');
+        if (!linked && !isLinkError) return;
+        useToastStore.getState().addToast(
+            linked
+                ? {
+                    type: 'success',
+                    title: 'Sign-in method connected',
+                    message: 'Your accounts are now linked. Any projects from the other sign-in method have been merged in.',
+                }
+                : {
+                    type: 'warning',
+                    title: 'Could not connect that sign-in method',
+                    message: 'Please try again from Settings → Connected sign-in methods.',
+                },
+        );
+        params.delete('auth');
+        params.delete('auth_error');
+        const qs = params.toString();
+        window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }, []);
 
     const handleSignOut = async () => {
         if (isSigningOut) return;

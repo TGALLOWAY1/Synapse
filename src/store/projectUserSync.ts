@@ -13,6 +13,7 @@ import {
   getActiveProjectUser,
   setActiveProjectUser,
   importLegacyProjectsForUser,
+  mergeNamespaceInto,
 } from './userScope';
 import { projectsDebug } from '../lib/projectsDebug';
 
@@ -66,9 +67,44 @@ function repersistCurrentState(): void {
   });
 }
 
-export function applyProjectUser(userId: string | null): void {
+/**
+ * Recover projects that live under accounts the server has merged into this one
+ * (account linking — see R3). Merges each absorbed userId's namespace into the
+ * canonical one (additive; idempotent). Returns true if anything was merged.
+ */
+function recoverMergedNamespaces(userId: string | null, mergedUserIds: string[]): boolean {
+  if (!userId || mergedUserIds.length === 0) return false;
+  let changed = false;
+  for (const mergedId of mergedUserIds) {
+    try {
+      if (mergeNamespaceInto(userId, mergedId)) {
+        changed = true;
+        projectsDebug('recovered merged-account namespace', { from: mergedId, into: userId });
+      }
+    } catch {
+      // Non-fatal — never let namespace recovery break sign-in.
+    }
+  }
+  return changed;
+}
+
+export function applyProjectUser(userId: string | null, mergedUserIds: string[] = []): void {
+  // Recover absorbed-account projects first, regardless of whether the active
+  // namespace is changing — a link can add mergedUserIds without changing the
+  // signed-in userId.
+  const recovered = recoverMergedNamespaces(userId, mergedUserIds);
+
   const previous = getActiveProjectUser();
-  if (userId === previous) return;
+  if (userId === previous) {
+    // Same user already active. If we just recovered merged projects into the
+    // namespace, rehydrate so they appear without a manual refresh.
+    if (recovered) {
+      const r = useProjectStore.persist.rehydrate() as { then?: (cb: () => void) => void } | undefined;
+      if (r && typeof r.then === 'function') r.then(() => repersistCurrentState());
+      else repersistCurrentState();
+    }
+    return;
+  }
 
   setActiveProjectUser(userId);
 

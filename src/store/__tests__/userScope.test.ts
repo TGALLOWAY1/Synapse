@@ -8,6 +8,7 @@ import {
   getLegacyImportOffer,
   importLegacyProjectsForUser,
   declineLegacyImport,
+  mergeNamespaceInto,
 } from '../userScope';
 
 const BASE = 'synapse-projects-storage';
@@ -138,5 +139,41 @@ describe('userScope', () => {
     // Importing claims (so the offer stops) but reports no data added.
     expect(importLegacyProjectsForUser('userA')).toBe(false);
     expect(localStorage.getItem(CLAIM)).toBe('userA');
+  });
+});
+
+describe('mergeNamespaceInto (account-linking recovery — R3)', () => {
+  beforeEach(() => {
+    localStorage.clear();
+    setActiveProjectUser(null);
+  });
+
+  it('copies the source namespace wholesale when the target has none yet', () => {
+    localStorage.setItem(namespaceFor('old'), '{"state":{"projects":{"p1":{}}}}');
+    expect(mergeNamespaceInto('canonical', 'old')).toBe(true);
+    expect(localStorage.getItem(namespaceFor('canonical'))).toContain('p1');
+    // Source left untouched (non-destructive / idempotent).
+    expect(localStorage.getItem(namespaceFor('old'))).toContain('p1');
+  });
+
+  it('merges additively, keeping the canonical account\'s own entries on collision', () => {
+    localStorage.setItem(namespaceFor('canonical'), '{"state":{"projects":{"mine":{"name":"keep"},"dup":{"name":"current"}}}}');
+    localStorage.setItem(namespaceFor('old'), '{"state":{"projects":{"p1":{},"dup":{"name":"old"}}}}');
+
+    expect(mergeNamespaceInto('canonical', 'old')).toBe(true);
+    const projects = JSON.parse(localStorage.getItem(namespaceFor('canonical'))!).state.projects;
+    expect(Object.keys(projects).sort()).toEqual(['dup', 'mine', 'p1']);
+    expect(projects.dup.name).toBe('current'); // canonical wins
+  });
+
+  it('is a no-op when there is nothing new to merge', () => {
+    localStorage.setItem(namespaceFor('canonical'), '{"state":{"projects":{"p1":{}}}}');
+    localStorage.setItem(namespaceFor('old'), '{"state":{"projects":{"p1":{}}}}');
+    expect(mergeNamespaceInto('canonical', 'old')).toBe(false);
+  });
+
+  it('ignores a missing source and a self-merge', () => {
+    expect(mergeNamespaceInto('canonical', 'nonexistent')).toBe(false);
+    expect(mergeNamespaceInto('same', 'same')).toBe(false);
   });
 });
