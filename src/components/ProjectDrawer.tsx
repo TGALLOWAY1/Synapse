@@ -3,6 +3,8 @@ import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
 import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
+import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
+import { useProjectSyncStore } from '../store/projectSyncStore';
 
 interface ProjectDrawerProps {
     isOpen: boolean;
@@ -13,7 +15,12 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
     const { projects, deleteProject, getLatestSpine } = useProjectStore();
     const user = useAuthStore((s) => s.user);
     const authError = useAuthStore((s) => s.authError);
+    const authLoading = useAuthStore((s) => s.loading);
+    const syncPhase = useProjectSyncStore((s) => s.phase);
     const navigate = useNavigate();
+    // Don't flash a "no projects yet" empty state while we're still resolving the
+    // session or pulling the user's projects from the server.
+    const isResolving = authLoading || (!!user && syncPhase === 'loading');
 
     const projectList = Object.values(projects).sort((a, b) => b.createdAt - a.createdAt);
 
@@ -57,9 +64,16 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
                 </div>
 
                 <div className="overflow-y-auto h-[calc(100%-57px)] p-3 space-y-2">
+                    {user && (
+                        <div className="mb-1">
+                            <SyncStatusBanner signedIn={!!user} />
+                        </div>
+                    )}
                     {projectList.length === 0 && (
                         <div className="text-sm text-neutral-500 text-center py-8 px-3 space-y-1">
-                            {authError && !user ? (
+                            {isResolving ? (
+                                <p className="text-neutral-400">Loading your projects…</p>
+                            ) : authError && !user ? (
                                 <>
                                     <p className="text-neutral-400">Couldn't load your projects</p>
                                     <p className="text-xs">
@@ -114,6 +128,7 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
                                             <span className={`text-[10px] px-1.5 py-0.5 rounded border ${badge.color}`}>
                                                 {badge.label}
                                             </span>
+                                            <ProjectSyncDot projectId={p.id} />
                                         </div>
                                     </div>
                                     <button
