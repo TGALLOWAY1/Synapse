@@ -23,6 +23,20 @@ export interface JsonModeConfig {
      * changing the global default.
      */
     model?: string;
+    /**
+     * Optional usage sink. When provided, it is invoked once with the token
+     * counts reported by Gemini's `usageMetadata` after a successful response.
+     * Purely observational (powers the orchestration Metrics dashboard) — the
+     * call still resolves to the response text, so no existing caller breaks.
+     */
+    onUsage?: (usage: GeminiTokenUsage) => void;
+}
+
+/** Token counts extracted from a Gemini response's `usageMetadata`. */
+export interface GeminiTokenUsage {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
 }
 
 export interface StreamCallbacks {
@@ -254,7 +268,10 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     }
 
     const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
-    let data: { candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }> } | undefined;
+    let data: {
+        candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>;
+        usageMetadata?: { promptTokenCount?: number; candidatesTokenCount?: number; totalTokenCount?: number };
+    } | undefined;
     try {
         const response = await fetchWithRetry(url, {
             method: 'POST',
@@ -287,6 +304,17 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     if (!text) {
         const reason = finishReason ? ` (finishReason: ${finishReason})` : '';
         throw new Error(`Gemini returned an empty response${reason}. Please try again.`);
+    }
+    // Surface token usage to any observer (Metrics dashboard). Gemini returns
+    // these on the top-level `usageMetadata`; absent on some error/partial
+    // responses, in which case we simply skip the callback.
+    if (jsonMode?.onUsage && data?.usageMetadata) {
+        const u = data.usageMetadata;
+        jsonMode.onUsage({
+            inputTokens: u.promptTokenCount ?? 0,
+            outputTokens: u.candidatesTokenCount ?? 0,
+            totalTokens: u.totalTokenCount ?? (u.promptTokenCount ?? 0) + (u.candidatesTokenCount ?? 0),
+        });
     }
     const durationMs = performance.now() - startTime;
     console.log(`[GEN] callGemini: ${durationMs.toFixed(0)}ms (${text.length} chars)`);

@@ -82,6 +82,16 @@ export async function runPrdGeneration({
                 preflight,
                 enableConsistencyReview: consistencyReviewEnabled(),
                 surface: detectSurface(),
+                onWorkflowRun: (run) => {
+                    // The pipeline doesn't know the project — stamp identity here
+                    // where we do, so the Metrics dashboard can group by project.
+                    const project = useProjectStore.getState().getProject(projectId);
+                    useProjectStore.getState().recordWorkflowRun({
+                        ...run,
+                        projectId,
+                        projectName: project?.name,
+                    });
+                },
                 onProgress: (message) => {
                     useProjectStore.getState().appendPrdProgress(projectId, message);
                 },

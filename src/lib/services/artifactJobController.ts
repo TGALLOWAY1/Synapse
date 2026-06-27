@@ -18,6 +18,8 @@ import {
     getArtifactMeta,
 } from '../coreArtifactPipeline';
 import { isAbortError } from '../concurrency';
+import { getStrongModel } from '../geminiClient';
+import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
 import { buildAutoMockupSettings } from '../mockupDefaults';
 import { normalizeError } from '../errors';
 import { useMockupImageStore } from '../../store/mockupImageStore';
@@ -383,6 +385,13 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
 
     const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
 
+    // Per-slot observations for the orchestration WorkflowRun (artifact bundle).
+    // Captures wall-clock start/end + dependency edges so the Metrics dashboard
+    // can show the layered concurrency / speedup of artifact generation. Token
+    // capture for artifacts is a known TODO (see tasks/TODO.md).
+    const artifactRunStart = Date.now();
+    const nodeObs: NodeObservation[] = [];
+
     // Seed `generatedArtifacts` from the store for any core slot already done
     // for this spine — later layers may consume them as dependency context.
     for (const meta of CORE_ARTIFACT_PIPELINE) {
@@ -402,10 +411,34 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
             const tasks = layer
                 .filter(meta => coreSubtypes.has(meta.subtype))
                 .map(meta => async () => {
+                    const startedAt = Date.now();
                     try {
                         await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts);
+                        nodeObs.push({
+                            nodeId: meta.subtype,
+                            nodeName: meta.title,
+                            agentName: 'Artifact Agent',
+                            model: getStrongModel(),
+                            provider: 'gemini',
+                            status: 'complete',
+                            dependencyIds: meta.dependsOn,
+                            startedAt,
+                            completedAt: Date.now(),
+                        });
                     } catch (e) {
                         if (isAbortError(e) || signal.aborted) return;
+                        nodeObs.push({
+                            nodeId: meta.subtype,
+                            nodeName: meta.title,
+                            agentName: 'Artifact Agent',
+                            model: getStrongModel(),
+                            provider: 'gemini',
+                            status: 'error',
+                            dependencyIds: meta.dependsOn,
+                            startedAt,
+                            completedAt: Date.now(),
+                            errorMessage: e instanceof Error ? e.message : 'Unknown error',
+                        });
                         recordError(projectId, meta.subtype, e);
                     }
                 });
@@ -424,7 +457,19 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
             try {
                 await corePromise;
                 if (signal.aborted) return;
+                const startedAt = Date.now();
                 await runMockupSlot(args, signal);
+                nodeObs.push({
+                    nodeId: 'mockup',
+                    nodeName: 'Mockup',
+                    agentName: 'Mockup Agent',
+                    model: getStrongModel(),
+                    provider: 'gemini',
+                    status: 'complete',
+                    dependencyIds: MOCKUP_DEPENDENCIES,
+                    startedAt,
+                    completedAt: Date.now(),
+                });
             } catch (e) {
                 if (isAbortError(e) || signal.aborted) return;
                 recordError(projectId, 'mockup', e);
@@ -437,6 +482,26 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
     if (signal.aborted) {
         useProjectStore.getState().markAllInterrupted(projectId);
         return;
+    }
+
+    // Record the artifact-bundle WorkflowRun for the Metrics dashboard. Wrapped
+    // so a metrics failure can never break artifact generation.
+    if (nodeObs.length > 0) {
+        try {
+            const project = useProjectStore.getState().getProject(projectId);
+            const run = buildWorkflowRun({
+                projectId,
+                projectName: project?.name,
+                workflowType: 'artifacts',
+                startedAt: artifactRunStart,
+                completedAt: Date.now(),
+                nodes: nodeObs,
+                metadata: { slots: slotKeys },
+            });
+            useProjectStore.getState().recordWorkflowRun(run);
+        } catch (e) {
+            console.warn('[artifactJobController] failed to record workflow metrics.', e);
+        }
     }
 
     const job = useProjectStore.getState().getJob(projectId);

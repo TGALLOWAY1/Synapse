@@ -246,7 +246,7 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 
 ### State (`src/store/`)
 
-`useProjectStore` is one Zustand store composed from 9 slices in
+`useProjectStore` is one Zustand store composed from 10 slices in
 `src/store/slices/`:
 
 - `projectSlice` — Project CRUD, current stage
@@ -296,6 +296,13 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   (todo/in_progress/done) and `recordTaskExports` (attach created
   GitHub/Linear issue refs) drive progress tracking. **Persisted** — not
   stripped from localStorage.
+- `metricsSlice` — Persisted orchestration metrics (`WorkflowRun[]` keyed by
+  projectId, newest-first, capped at 50/project). `recordWorkflowRun` appends a
+  run; `getWorkflowRuns`/`getAllWorkflowRuns`/`clearWorkflowRuns` read/clear.
+  Append-only and **persisted** — the metric math lives in `src/lib/metrics/`
+  (pure) before a run is recorded. Cleaned up in `deleteProject` and included
+  in `emptyPersistedState()` (`projectUserSync.ts`). See "Orchestration metrics"
+  below.
 
 The store's `partialize` strips `jobs` and `prdProgress` so they don't
 persist. `onRehydrateStorage` migrates legacy `currentStage` values
@@ -685,6 +692,41 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
   pieces in `components/`: `ScreenShell`, `GenerationStep`, `RefineMenu`,
   `ArtifactDrawer` (mobile bottom-sheet / desktop side-drawer, mirrors
   `SelectionActionDialog`'s responsive pattern), `NodeGraph`.
+
+### Orchestration metrics (`src/lib/metrics/`, `src/components/metrics/`)
+
+A measurable view of the concurrent multi-agent workflows. **Important context:
+PRD section generation was already genuinely concurrent** (the DAG executor —
+see the LLM layer) before this; the metrics layer makes that concurrency
+*visible*, it did not introduce it. See `docs/ORCHESTRATION_AND_METRICS.md`.
+
+- **Token capture.** `callGemini` reads Gemini's `usageMetadata` and surfaces it
+  via an optional `JsonModeConfig.onUsage` callback (callGemini still returns the
+  same `string` — no call site breaks). The PRD section worker threads it
+  through `ModelProvider.generateText` → `makeJsonProvider` and emits it on the
+  `section_completed` event. **New provider call sites that want token metrics
+  must forward `onUsage`.** (Artifact services don't yet — a documented TODO.)
+- **Pure metric math** (`src/lib/metrics/`, unit-tested, no store/LLM access):
+  `workflowMetrics.ts` (sequential estimate, actual runtime, speedup, max/avg
+  concurrency via interval sweep, critical path via memoized DFS),
+  `modelPricing.ts` (approximate per-model $/1M-token table → cost **estimates**,
+  surfaced as "est."), and `buildWorkflowRun.ts` (assembles a `WorkflowRun` from
+  per-node observations; derives `parallelGroupId` as a topological wave when not
+  supplied). Both pipelines feed `buildWorkflowRun` so PRD and artifact runs are
+  computed identically.
+- **Recording is decoupled + defensive.** `progressivePrdPipeline` accumulates
+  per-section node observations from the lifecycle events it already emits and
+  fires `onWorkflowRun(run)` once at completion (threaded through `prdService`);
+  `artifactJobController.executeJob` does the same for the artifact bundle.
+  Identity (projectId/projectName) is stamped at the call site
+  (`runPrdGeneration.ts`, `ProjectWorkspace.handleRegenerate`) before
+  `recordWorkflowRun`. **All run assembly is wrapped in try/catch — metrics can
+  never break a generation run.**
+- **Dashboard** at `/metrics` (auth-gated route in `App.tsx`, linked from the
+  Settings modal and the workspace overflow menu): `MetricsPage` (stable
+  `EMPTY_RUNS` selector fallback per the Selector-stability rule),
+  `MetricsOverviewCards`, `WorkflowRunsTable`, `WorkflowRunDetail` (Gantt bars +
+  node table). **No synthetic/demo data** — a fresh user sees an empty state.
 
 ### Domain types
 

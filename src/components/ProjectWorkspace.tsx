@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -276,6 +276,13 @@ export function ProjectWorkspace() {
                 {
                     onProgress: (message) => appendPrdProgress(projectId, message),
                     onSectionStatus: (sectionId, update) => setSectionStatus(projectId, sectionId, update),
+                    onWorkflowRun: (run) => {
+                        useProjectStore.getState().recordWorkflowRun({
+                            ...run,
+                            projectId,
+                            projectName: project?.name,
+                        });
+                    },
                     onPartial: ({ structuredPRD, markdown }) => {
                         updateSpineStructuredPRD(
                             projectId,
@@ -598,6 +605,13 @@ export function ProjectWorkspace() {
                                 >
                                     <History size={14} className="text-indigo-400" />
                                     Version History
+                                </button>
+                                <button
+                                    onClick={() => { navigate('/metrics'); setShowNavOverflow(false); }}
+                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                >
+                                    <Activity size={14} className="text-indigo-400" />
+                                    Orchestration Metrics
                                 </button>
                                 <button
                                     onClick={() => { setIsBranchesVisible(!isBranchesVisible); setShowNavOverflow(false); }}

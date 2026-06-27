@@ -61,8 +61,22 @@ export type ProgressiveGenerationConfig = {
     enableRefinementPass: boolean;
 };
 
+/** Token counts captured from a model call (observational; for metrics). */
+export type NodeTokenUsage = {
+    inputTokens: number;
+    outputTokens: number;
+    totalTokens: number;
+};
+
 export type ModelProvider = {
-    generateText: (input: { prompt: string; model: string; schema: object; signal?: AbortSignal }) => Promise<string>;
+    generateText: (input: {
+        prompt: string;
+        model: string;
+        schema: object;
+        signal?: AbortSignal;
+        /** Optional sink for token usage — forwarded to the transport. */
+        onUsage?: (usage: NodeTokenUsage) => void;
+    }) => Promise<string>;
 };
 
 export type ProgressiveEvent =
@@ -73,7 +87,7 @@ export type ProgressiveEvent =
     // "queued — waiting for a slot" UI state (distinct from "waiting on deps").
     | { type: 'section_ready'; sectionId: string }
     | { type: 'section_started'; sectionId: string; modelTier: ModelTier; model: string }
-    | { type: 'section_completed'; sectionId: string; content: string; confidence?: number }
+    | { type: 'section_completed'; sectionId: string; content: string; confidence?: number; usage?: NodeTokenUsage }
     | { type: 'section_refining'; sectionId: string }
     | { type: 'section_refined'; sectionId: string; content: string; confidence?: number }
     | { type: 'section_error'; sectionId: string; error: string }
@@ -176,7 +190,7 @@ export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => 
 };
 
 export const makeJsonProvider = (): ModelProvider => ({
-    async generateText({ prompt, model, schema, signal }) {
+    async generateText({ prompt, model, schema, signal, onUsage }) {
         return callGemini('', prompt, {
             responseMimeType: 'application/json',
             responseSchema: schema,
@@ -184,6 +198,7 @@ export const makeJsonProvider = (): ModelProvider => ({
             maxOutputTokens: 8192,
             temperature: 0.4,
             topP: 0.9,
+            onUsage,
         }, signal);
     },
 });
@@ -395,8 +410,15 @@ export async function generateProgressivePrd(params: {
         };
         const { system, user } = buildSectionPrompt(section.id, ctx);
 
+        let usage: NodeTokenUsage | undefined;
         try {
-            const raw = await provider.generateText({ prompt: `${system}\n\n${user}`, model, schema, signal: params.signal });
+            const raw = await provider.generateText({
+                prompt: `${system}\n\n${user}`,
+                model,
+                schema,
+                signal: params.signal,
+                onUsage: (u) => { usage = u; },
+            });
 
             // Parse with truncation repair fallback (shared helper).
             const parsed = parseSectionJson(raw);
@@ -422,6 +444,7 @@ export async function generateProgressivePrd(params: {
                 sectionId: section.id,
                 content: updated.content,
                 confidence: updated.confidence,
+                usage,
             });
 
             if (params.config.enableRefinementPass && result.confidence < 0.72 && tier === 'fast') {

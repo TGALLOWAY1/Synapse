@@ -1,5 +1,6 @@
 import { useState } from 'react';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github } from 'lucide-react';
+import { useNavigate } from 'react-router-dom';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github, ChevronRight } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
 import {
@@ -109,6 +110,7 @@ function ModelRadio({
 }
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
+    const navigate = useNavigate();
     const [apiKey, setApiKey] = useState(() => getLocalCredential(GEMINI_API_KEY) || '');
     const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
@@ -422,6 +424,26 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 </div>
                             )}
                         </div>
+                    </div>
+
+                    {/* Orchestration Metrics link */}
+                    <div className="pt-4 border-t border-white/5">
+                        <button
+                            type="button"
+                            onClick={() => { onClose(); navigate('/metrics'); }}
+                            className="w-full bg-white/5 rounded-2xl p-4 flex items-center justify-between border border-white/5 hover:bg-white/10 transition-all text-left"
+                        >
+                            <div className="flex items-center gap-3">
+                                <div className="p-2 rounded-lg bg-indigo-500/10 text-indigo-400">
+                                    <Activity size={14} />
+                                </div>
+                                <div>
+                                    <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-0.5">Metrics</p>
+                                    <p className="text-xs text-neutral-300 font-medium">Orchestration & AI workflow telemetry</p>
+                                </div>
+                            </div>
+                            <ChevronRight size={16} className="text-neutral-500" />
+                        </button>
                     </div>
 
                     {/* Meta Info */}
