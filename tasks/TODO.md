@@ -36,6 +36,35 @@ dashboard) is implemented; the items below are deferred follow-ups.
       <date>" note; consider reading prices from a config rather than code.
 - [ ] Account for context caching / batch discounts in the estimate.
 
+## Project Persistence / "projects disappearing" TODOs
+
+See `docs/audits/projects-disappearing-2026-06-27.md` for the full root-cause
+analysis. The recovery + observability fixes (R2, R4, R7) shipped; the items
+below are the durable follow-ups that need backend work.
+
+- [ ] **(R1 — the real cross-device fix)** Persist PRD projects server-side
+      (MongoDB, keyed by `userId`) so they sync across mobile/web and survive a
+      browser-data clear. Today the PRD workspace is 100% `localStorage`, so
+      projects are device-local and can never appear on a second device. This is
+      the single most-requested behavior ("see all previous projects across web
+      and mobile") and is impossible without server storage. Suggested shape:
+      a `projects` collection mirroring the persisted Zustand slices, with the
+      client treating localStorage as a cache and the server as source of truth.
+- [ ] **(R3)** Account linking: let one human link email + GitHub + LinkedIn to
+      a single stable `userId` (or merge namespaces on link) so switching sign-in
+      method doesn't change which project namespace is read. Until R1 lands,
+      at minimum warn the user that projects are tied to the sign-in method used
+      to create them.
+- [ ] **(R5)** Flush the pending debounced localStorage write before
+      `applyProjectUser` retargets the storage key, so a fast auth switch can't
+      drop user A's last in-flight write.
+- [ ] **(R6)** When `localStorage` quota is exceeded, offer an actionable
+      recovery path (export + delete oldest, or prompt to enable server sync)
+      rather than only a one-time toast that then silently drops writes.
+- [ ] Consider an explicit "Export all projects" / "Import projects file"
+      backup affordance so users have a manual cross-device escape hatch until
+      R1 ships.
+
 ## Workflow Reliability TODOs
 
 - [ ] Capture streaming first-token latency where streaming is used.
