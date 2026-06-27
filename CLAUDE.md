@@ -7,11 +7,13 @@ This file provides guidance to Claude Code (claude.ai/code) when working with co
 Synapse — "From plain-language to product blueprint" — is an AI-native product
 definition environment that transforms a plain-language prompt into a
 structured PRD, then into UI mockups, downstream artifacts (screen inventory,
-data model, etc.), and visual annotations. The product workspace is a fully
-client-side React SPA — all PRD/branch/artifact state persists in
-localStorage via Zustand. A separate Vercel-hosted backend (under `api/`)
-powers a recruiter-portal sub-product with OAuth, MongoDB, and snapshot
-storage; do not confuse it with the PRD workspace.
+data model, etc.), and visual annotations. The product workspace is a
+local-first React SPA — all PRD/branch/artifact state lives in localStorage via
+Zustand and that remains the live cache, but signed-in users' projects also
+**sync to a server `projects` collection** so they follow the user across
+devices (see "Server-side project storage" below). A Vercel-hosted backend
+(under `api/`) powers both that project sync and a separate recruiter-portal
+sub-product with OAuth, MongoDB, and snapshot storage.
 
 ## Documentation rule
 
@@ -85,8 +87,11 @@ otherwise have nothing in common — keep that distinction in mind:
 
 1. **PRD workspace** (the "real" Synapse product) — `src/components/HomePage.tsx`
    and `src/components/ProjectWorkspace.tsx` mounted at `/` and
-   `/p/:projectId`. State is 100% client-side localStorage. Calls Gemini
-   directly. Never touches the `api/` backend.
+   `/p/:projectId`. State is local-first: localStorage via Zustand is the live
+   cache, and Gemini is still called directly from the browser. For signed-in
+   users it **also syncs projects to the `api/` backend** (`/api/projects`) so
+   they're durable and cross-device — see "Server-side project storage" below.
+   (Anonymous/dev-skip-auth use stays fully local.)
 
 2. **Recruiter portal** — `src/components/LoginPage.tsx`,
    `src/components/RecruiterAdminPage.tsx`, mounted at `/admin/recruiters`
@@ -96,11 +101,65 @@ otherwise have nothing in common — keep that distinction in mind:
    `src/lib/recruiterApi.ts` and `src/lib/snapshotClient.ts`. Backend
    handlers are in `api/` (Node serverless), with shared helpers in
    `api/_lib/`. **DB access:** `api/_lib/db.js` exposes `runMongoAction(action,
-   payload)` (actions: findOne/find/insertOne/updateOne/deleteOne/aggregate)
-   backed by the official **MongoDB Node driver** with a cached connection
-   pool — configured via `MONGODB_URI` (+ optional `MONGODB_DB_NAME`). The old
-   Atlas Data API REST gateway was retired by MongoDB (2025-09-30); the shim
-   preserves the prior call/return shapes so call sites are unchanged.
+   payload)` (actions: findOne/find/insertOne/updateOne/deleteOne/aggregate/
+   createIndexes) backed by the official **MongoDB Node driver** with a cached
+   connection pool — configured via `MONGODB_URI` (+ optional `MONGODB_DB_NAME`).
+   The old Atlas Data API REST gateway was retired by MongoDB (2025-09-30); the
+   shim preserves the prior call/return shapes so call sites are unchanged.
+
+### Server-side project storage (`api/projects.js`, `api/_lib/projectsStore.js`, `src/store/projectServerSync.ts`)
+
+PRD projects sync to a MongoDB `projects` collection so a signed-in user sees the
+same projects on every device. **Architecture is local-first**: the Zustand store
++ localStorage is unchanged and remains the live, offline-capable cache; a sync
+layer pulls server projects in on sign-in and pushes local changes out. See
+`docs/SERVER_PROJECT_STORAGE.md` for the root-cause (localStorage is
+device-scoped and never syncs) and full design.
+
+- **Server.** `api/_lib/projectsStore.js` is the owner-scoped data layer — one
+  doc per project keyed by the client UUID (`id`), with denormalized
+  `title`/`idea`/`status`/`archived`/`deletedAt` for list/index queries and the
+  full nine-collection bundle in `data`. **Access control is RLS-equivalent:**
+  every function takes `userId` first and pins `{ userId }` into the Mongo
+  filter, so one user's query can never match another's row; `userId` always
+  comes from the verified session (`requireUser`), never the request body.
+  `ensureProjectIndexes()` (idempotent, cached per warm instance) creates the
+  `{userId,id}` unique + `{userId,updatedAt}` / `{userId,status}` /
+  `{userId,deletedAt}` indexes via the new `createIndexes` db action.
+  `api/projects.js` is the session-gated, rate-limited CRUD endpoint (list,
+  fetch-one, PUT upsert — covers PRD/artifact saves, bulk import, soft-delete/
+  restore, archive toggles, hard-delete). No public/shared access exists.
+- **Client serialization.** A **ProjectBundle** (`src/lib/projectBundle.ts`,
+  pure) is the transport unit: `extractProjectBundle` gathers a project's nine
+  store slices; `mergeBundlesIntoSource` merges server bundles back **additively
+  — local always wins on id collision** (a pull only ADDs projects this device
+  lacks; it never clobbers local in-progress work — per-project server-newer
+  reconciliation is deferred, see `tasks/TODO.md`). `src/lib/projectsClient.ts`
+  is the `/api/projects` transport (`credentials: 'include'`; throws on non-2xx
+  so a failure never silently drops projects).
+- **Sync orchestrator** (`src/store/projectServerSync.ts`). `startProjectSync`/
+  `stopProjectSync` are driven from `authStore.setUser`. On sign-in it
+  **reconciles** (pull server projects this device is missing → apply; upload
+  local-only projects → migrate) then subscribes to the store to **push**
+  changed projects (debounced, per-project) and remote-delete locally-deleted
+  ones. **A failed save never drops local data** — it stays in localStorage and
+  surfaces a per-project `error` sync state. `suspendPush` silences the echo
+  while applying pulled bundles. The read-only demo project
+  (`DEMO_PROJECT_ID`) is never synced.
+- **Sync UI state** (`src/store/projectSyncStore.ts`,
+  `src/components/sync/ProjectSyncStatus.tsx`). Overall `phase`
+  (idle/loading/ready/error) + `online` + per-project saving/saved/error/dirty,
+  surfaced in `ProjectDrawer` (a `SyncStatusBanner` with a retry on failure, a
+  per-row `ProjectSyncDot`, and a loading guard so the drawer never flashes a
+  false "no projects" state while the session or initial pull is resolving).
+- **Migration markers** (`src/lib/projectMigration.ts`). A per-user localStorage
+  set (`synapse-projects-server-migrated::u:<userId>`) of project ids already
+  pushed. The server upsert is idempotent on the stable UUID, so duplicates are
+  impossible regardless; the markers power the "N local projects uploaded"
+  state and avoid redundant re-uploads. **Local projects are never deleted on
+  import.** This is distinct from the anonymous→account *legacy* import
+  (`userScope.ts`); after a legacy import, `HomePage` triggers a server
+  reconcile so the newly-claimed projects upload to the account.
 
 ### LLM layer (`src/lib/`)
 

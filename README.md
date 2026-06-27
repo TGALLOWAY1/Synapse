@@ -294,9 +294,12 @@ npm run dev
 ```
 
 Open `http://localhost:5173`, click the Settings gear, and paste your key.
-Workspace state (projects, spines, artifacts) persists to `localStorage`;
-AI-generated mockup PNGs persist to **IndexedDB** (typically gigabytes of
-headroom, so high-quality images don't blow the localStorage 5-10 MB cap).
+Workspace state (projects, spines, artifacts) persists to `localStorage` as the
+live cache; **for signed-in users projects also sync to the server** (a MongoDB
+`projects` collection scoped to your account) so they follow you across web and
+mobile and survive a browser-data clear. AI-generated mockup PNGs persist to
+**IndexedDB** (typically gigabytes of headroom, so high-quality images don't
+blow the localStorage 5-10 MB cap) and are device-local for now.
 
 Prefer to look before you build? Visit `http://localhost:5173/tour` for the
 interactive product tour — it runs entirely on demo data with no API key.
@@ -378,8 +381,10 @@ needs no backend.
 
 ## Project status
 
-Portfolio project. Single-user by design. Demo visitors run the workspace fully
-in-browser &mdash; spine + artifact state in `localStorage`, mockup PNGs in
-IndexedDB, no telemetry, no cross-device sync. The owner can opt-in to
-Vercel-Blob-backed Cloud Snapshots (gated by `SYNAPSE_OWNER_TOKEN`) to persist
-real work across browsers and devices.
+Portfolio project. Demo visitors (and the public `/tour`) run the workspace
+fully in-browser &mdash; spine + artifact state in `localStorage`, mockup PNGs in
+IndexedDB, no telemetry. **Signed-in users get cross-device project sync**:
+projects persist to a per-account server collection and reconcile onto any device
+on sign-in, with localStorage kept as the offline cache. (Mockup images remain
+device-local for now — see `tasks/TODO.md`.) The owner can additionally opt-in to
+Vercel-Blob-backed Cloud Snapshots (gated by `SYNAPSE_OWNER_TOKEN`).
