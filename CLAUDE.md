@@ -229,6 +229,19 @@ device-scoped and never syncs) and full design.
     The legacy multi-pass scoring + revision passes were removed — old projects
     in localStorage retain their saved `qualityScores`, but no new generation
     writes them.
+    - **User project name → `productName`.** The name the user types when
+      creating a project is threaded into generation as an optional
+      `projectName` (call site `runPrdGeneration`/`ProjectWorkspace.handleRegenerate`
+      → `generateStructuredPRD` → pipeline → `generateProgressivePrd` →
+      `SectionPromptContext.projectName`). The `product_basics` builder
+      (`prdSectionPrompts.ts`) makes it the **authoritative** `productName` so the
+      PRD (and every downstream artifact/mockup, which read `productName`) use the
+      name the user chose instead of one the model invents. A generic-placeholder
+      guard (`isMeaningfulProjectName` / `GENERIC_PROJECT_NAMES`: "untitled",
+      "test", "my app", …) drops names with no product intent so the model is
+      still free to coin one. `runPrdGeneration` reads the name from the store by
+      `projectId`; pass it explicitly from any new direct `generateStructuredPRD`
+      call site.
     - **Optional final consistency review** (`prdConsistencyReview.ts`): off by
       default (one extra fast-model call). When enabled (localStorage
       `synapse-prd-consistency-review === 'true'`, threaded through as

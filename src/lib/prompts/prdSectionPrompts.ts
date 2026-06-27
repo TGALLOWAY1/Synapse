@@ -6,6 +6,30 @@ export type SectionPromptContext = {
     idea: string;
     platform?: ProjectPlatform;
     upstream: Partial<StructuredPRD>;
+    /**
+     * The name the user gave the project when creating it. When present and not
+     * a generic placeholder, it is treated as the authoritative product name so
+     * the generated PRD (and every downstream artifact/mockup) uses the name the
+     * user chose rather than one the model invents. Only `product_basics`
+     * consumes it (it owns `productName`).
+     */
+    projectName?: string;
+};
+
+// Generic project names users type to get past the required-name field carry no
+// product intent — "untitled", "test", "my app", "new project", etc. When the
+// name looks like one of these, we don't force it onto the PRD as the product
+// name; the model is free to coin a fitting one instead.
+const GENERIC_PROJECT_NAMES = new Set([
+    'untitled', 'untitled project', 'new project', 'project', 'my project',
+    'test', 'test project', 'demo', 'example', 'app', 'my app', 'new app',
+    'website', 'my website', 'web app', 'prototype', 'mvp', 'draft', 'temp',
+]);
+
+const isMeaningfulProjectName = (name: string | undefined): name is string => {
+    const trimmed = name?.trim();
+    if (!trimmed) return false;
+    return !GENERIC_PROJECT_NAMES.has(trimmed.toLowerCase());
 };
 
 const PLATFORM_NOTE: Record<ProjectPlatform, string> = {
@@ -41,15 +65,24 @@ const missingNote = (sectionName: string): string =>
 type SectionPrompt = { system: string; user: string };
 
 const builders: Record<SectionId, (ctx: SectionPromptContext) => SectionPrompt> = {
-    product_basics: (ctx) => ({
-        system: `${SHARED_PREAMBLE}
+    product_basics: (ctx) => {
+        const named = isMeaningfulProjectName(ctx.projectName);
+        const nameDirective = named
+            ? `\n\nThe user named this product "${ctx.projectName!.trim()}". Use this exact name as the productName — it is the authoritative product name. Do NOT invent a different one. (Only override it if it is clearly an offensive or unusable string.)`
+            : '';
+        const productNameInstruction = named
+            ? `productName (string — use the user's product name "${ctx.projectName!.trim()}" verbatim)`
+            : 'productName (string)';
+        return {
+            system: `${SHARED_PREAMBLE}
 
 You are generating the product_basics slice: productName, productCategory, executiveSummary, vision, targetUsers, coreProblem.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
-        user: `Product idea:\n${ctx.idea}
+            user: `Product idea:\n${ctx.idea}${nameDirective}
 
-Return JSON with: productName (string), productCategory (short label e.g. "B2C Marketplace"), executiveSummary (2–3 sentences), vision (1 aspirational sentence), targetUsers (3–5 specific user types as strings), coreProblem (the core pain solved — state the user's current workaround, why existing solutions fail, and the consequence of leaving it unsolved).`,
-    }),
+Return JSON with: ${productNameInstruction}, productCategory (short label e.g. "B2C Marketplace"), executiveSummary (2–3 sentences), vision (1 aspirational sentence), targetUsers (3–5 specific user types as strings), coreProblem (the core pain solved — state the user's current workaround, why existing solutions fail, and the consequence of leaving it unsolved).`,
+        };
+    },
 
     product_thesis: (ctx) => {
         const basics = pick(ctx.upstream, 'vision', 'coreProblem', 'targetUsers');

@@ -375,6 +375,8 @@ async function runDag(
 export async function generateProgressivePrd(params: {
     prompt: string;
     platform?: ProjectPlatform;
+    /** User-chosen project name, surfaced to product_basics as the productName. */
+    projectName?: string;
     config: ProgressiveGenerationConfig;
     provider?: ModelProvider;
     onEvent?: (event: ProgressiveEvent) => void;
@@ -407,6 +409,7 @@ export async function generateProgressivePrd(params: {
             idea: params.prompt,
             platform: params.platform,
             upstream,
+            projectName: params.projectName,
         };
         const { system, user } = buildSectionPrompt(section.id, ctx);
 

@@ -47,6 +47,34 @@ describe('buildSectionPrompt', () => {
         });
         expect(system.toLowerCase()).toContain('mobile');
     });
+
+    it('forces the user-chosen project name as the productName in product_basics', () => {
+        const { user } = buildSectionPrompt('product_basics', {
+            idea: 'A budgeting app',
+            projectName: 'PennyWise',
+            upstream: {},
+        });
+        expect(user).toContain('PennyWise');
+        expect(user.toLowerCase()).toContain('authoritative');
+    });
+
+    it('ignores a generic placeholder project name', () => {
+        const { user } = buildSectionPrompt('product_basics', {
+            idea: 'A budgeting app',
+            projectName: 'Untitled Project',
+            upstream: {},
+        });
+        expect(user).not.toContain('Untitled Project');
+        expect(user.toLowerCase()).not.toContain('authoritative');
+    });
+
+    it('does not reference a project name when none is provided', () => {
+        const { user } = buildSectionPrompt('product_basics', {
+            idea: 'A budgeting app',
+            upstream: {},
+        });
+        expect(user.toLowerCase()).not.toContain('authoritative');
+    });
 });
 
 describe('SECTION_TITLES', () => {

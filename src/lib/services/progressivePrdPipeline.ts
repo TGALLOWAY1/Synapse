@@ -90,6 +90,7 @@ export const runProgressivePrdPipeline = async (
     const { jobs, results } = await generateProgressivePrd({
         prompt: promptText,
         platform,
+        projectName,
         config: {
             fastModel,
             strongModel,

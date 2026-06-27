@@ -274,6 +274,7 @@ export function ProjectWorkspace() {
             await generateStructuredPRD(
                 sourcePrompt,
                 {
+                    projectName: project?.name,
                     onProgress: (message) => appendPrdProgress(projectId, message),
                     onSectionStatus: (sectionId, update) => setSectionStatus(projectId, sectionId, update),
                     onWorkflowRun: (run) => {
