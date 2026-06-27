@@ -61,7 +61,7 @@ export const useAuthStore = create<AuthState>((set) => {
       // Begin server-side project sync: pull this user's server projects onto
       // this device and push local changes out. Runs after applyProjectUser so
       // the namespace is already pointed at this user. Never throws into auth.
-      startProjectSync(user.userId);
+      startProjectSync(user.userId ?? null);
     } else {
       clearProviderSession();
       stopProjectSync();

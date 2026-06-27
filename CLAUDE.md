@@ -61,11 +61,36 @@ npm run lint         # ESLint flat config, TS/TSX only
 npm run preview      # Preview production build
 npm test             # vitest run (one-shot)
 npx vitest <file>    # Run a single test file in watch mode
-npx tsc --noEmit     # Type-check without emitting
 ```
 
-Tests live in `src/lib/__tests__/` and `api/_lib/__tests__/`. There is no
-Playwright suite despite the dev dependency.
+### Required pre-push gate (do not skip — this is what Vercel runs)
+
+**Before committing/pushing, you MUST run `npm run build` and `npm run lint`
+and both MUST pass.** Vercel's PR deployment check runs `npm run build`
+(`tsc -b && vite build`), so a type error anywhere under `src/` (including test
+files, which are part of the `tsconfig.app.json` project) **fails the Vercel
+check and blocks the PR** — even if the app code is fine.
+
+- **Do NOT validate types with `tsc --noEmit`.** The root `tsconfig.json` is a
+  solution-style file (`files: []` + project `references`), so `tsc --noEmit`
+  type-checks *nothing* and reports a false "clean". It is a trap. The only
+  authoritative type check is **`tsc -b`** (what `npm run build` runs) — it
+  builds the referenced `tsconfig.app.json` / `tsconfig.node.json` projects and
+  is stricter (e.g. it rejects `X as Record<…>` casts that need
+  `X as unknown as Record<…>`, and flags `string | undefined` passed where
+  `string | null` is required).
+- **Test files are type-checked by the build.** Tests under `src/**/__tests__/`
+  compile with the app, so a typing slip in a test (e.g. destructuring a Vitest
+  `mock.calls[0]` tuple, or an over-narrow `as` cast) breaks the Vercel build
+  exactly like app code. Keep test TS as strict as production TS. `api/`
+  serverless files are plain JS and aren't type-checked, but their tests still
+  run under `npm test`.
+- ESLint has **no `_`-prefix unused-arg exemption** — don't add unused
+  underscore-prefixed params to satisfy types; cast the access site instead.
+
+Tests live in `src/lib/__tests__/`, `src/store/__tests__/`,
+`src/components/__tests__/`, and `api/_lib/__tests__/` (+ `api/__tests__/`).
+There is no Playwright suite despite the dev dependency.
 
 ## Tech Stack
 

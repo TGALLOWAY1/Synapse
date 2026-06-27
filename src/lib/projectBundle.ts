@@ -61,7 +61,7 @@ export function extractProjectBundle(source: BundleSource, projectId: string): P
   const bundle = { project } as ProjectBundle;
   for (const key of ARRAY_COLLECTIONS) {
     const map = source[key] as Record<string, unknown[]> | undefined;
-    (bundle as Record<string, unknown>)[key] = Array.isArray(map?.[projectId]) ? map[projectId] : [];
+    (bundle as unknown as Record<string, unknown>)[key] = Array.isArray(map?.[projectId]) ? map[projectId] : [];
   }
   return bundle;
 }
@@ -102,7 +102,7 @@ export function mergeBundlesIntoSource(
     if (id in next.projects) continue; // existing local project wins
     next.projects[id] = bundle.project;
     for (const key of ARRAY_COLLECTIONS) {
-      const value = (bundle as Record<string, unknown>)[key];
+      const value = (bundle as unknown as Record<string, unknown>)[key];
       (next[key] as Record<string, unknown[]>)[id] = Array.isArray(value) ? (value as unknown[]) : [];
     }
     addedIds.push(id);

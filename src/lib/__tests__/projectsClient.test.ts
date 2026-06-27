@@ -40,7 +40,7 @@ describe('projectsClient', () => {
     vi.stubGlobal('fetch', fetchMock);
     const out = await fetchProjectList();
     expect(out).toEqual([{ id: 'p1' }]);
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     // Mobile and desktop both hit this exact endpoint — one backing source.
     expect(url).toBe('/api/projects');
     expect((init as RequestInit).credentials).toBe('include');
@@ -56,7 +56,7 @@ describe('projectsClient', () => {
     vi.stubGlobal('fetch', fetchMock);
     const out = await saveProject('p1', bundle);
     expect(out).toEqual({ id: 'p1', revision: 2 });
-    const [url, init] = fetchMock.mock.calls[0];
+    const [url, init] = fetchMock.mock.calls[0] as unknown as [string, RequestInit];
     expect(url).toBe('/api/projects?id=p1');
     expect((init as RequestInit).method).toBe('PUT');
     expect(JSON.parse((init as RequestInit).body as string)).toEqual({ bundle });
@@ -77,7 +77,7 @@ describe('projectsClient', () => {
     vi.stubGlobal('fetch', fetchMock);
     const out = await importProjects([bundle]);
     expect(out.imported).toEqual([{ id: 'p1', created: true }]);
-    const [url] = fetchMock.mock.calls[0];
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
     expect(url).toBe('/api/projects?action=import');
   });
 });
