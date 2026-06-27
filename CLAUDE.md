@@ -88,6 +88,17 @@ check and blocks the PR** — even if the app code is fine.
 - ESLint has **no `_`-prefix unused-arg exemption** — don't add unused
   underscore-prefixed params to satisfy types; cast the access site instead.
 
+**Vercel Hobby serverless-function cap (hard limit: 12).** Every `.js` file
+under `api/` (excluding `_lib/` and `__tests__/`, which are underscore-prefixed
+and ignored) is one serverless function, and the deployment **fails** if there
+are more than 12. The repo currently sits at **11** — so adding a new top-level
+`api/*.js` endpoint is the kind of change that can break the deploy. If you need
+a new endpoint and you're at the cap, **consolidate**: fold cohesive routes into
+one handler that dispatches on a `?action=` (or method) param, and preserve the
+original public URLs with `vercel.json` `rewrites` (e.g. the email-auth trio
+login/signup/logout is one function, `api/auth/email.js`, behind rewrites). Do
+not exceed 12.
+
 Tests live in `src/lib/__tests__/`, `src/store/__tests__/`,
 `src/components/__tests__/`, and `api/_lib/__tests__/` (+ `api/__tests__/`).
 There is no Playwright suite despite the dev dependency.
