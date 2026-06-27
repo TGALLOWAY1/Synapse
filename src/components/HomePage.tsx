@@ -1,4 +1,4 @@
-import { useState, useRef, useMemo } from 'react';
+import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
@@ -106,6 +106,33 @@ export function HomePage() {
         if (user?.userId) declineLegacyImport(user.userId);
         setImportHandled(true);
     };
+
+    // Surface the result of an account-link OAuth round-trip (the user returns
+    // here signed in, so LoginPage's ?auth_error handler never sees it).
+    useEffect(() => {
+        const params = new URLSearchParams(window.location.search);
+        const linked = params.get('auth') === 'linked';
+        const linkError = params.get('auth_error');
+        const isLinkError = linkError && linkError.includes('link');
+        if (!linked && !isLinkError) return;
+        useToastStore.getState().addToast(
+            linked
+                ? {
+                    type: 'success',
+                    title: 'Sign-in method connected',
+                    message: 'Your accounts are now linked. Any projects from the other sign-in method have been merged in.',
+                }
+                : {
+                    type: 'warning',
+                    title: 'Could not connect that sign-in method',
+                    message: 'Please try again from Settings → Connected sign-in methods.',
+                },
+        );
+        params.delete('auth');
+        params.delete('auth_error');
+        const qs = params.toString();
+        window.history.replaceState({}, '', `${window.location.pathname}${qs ? `?${qs}` : ''}`);
+    }, []);
 
     const handleSignOut = async () => {
         if (isSigningOut) return;
@@ -320,9 +347,9 @@ export function HomePage() {
                         <Download size={18} className="mt-0.5 shrink-0 text-indigo-300" />
                         <div className="flex-1 min-w-0">
                             <p className="text-sm text-indigo-100">
-                                We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} created
-                                on this browser before you signed in. Import {legacyOffer.projectCount === 1 ? 'it' : 'them'} into
-                                your account?
+                                We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} saved
+                                on this browser that {legacyOffer.projectCount === 1 ? "isn't" : "aren't"} linked to your
+                                account yet. Recover {legacyOffer.projectCount === 1 ? 'it' : 'them'} into your account?
                             </p>
                             <div className="mt-2 flex items-center gap-2">
                                 <button

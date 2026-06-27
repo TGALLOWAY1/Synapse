@@ -2,8 +2,16 @@ import {
   upsertOAuthUser,
   issueSessionForUser,
   EmailInUseByOtherProviderError,
+  findUserByUserId,
+  linkProviderIdentity,
 } from './users.js';
 import { methodNotAllowed } from './response.js';
+import { parseSessionCookie, verifySessionToken } from './session.js';
+import {
+  readLinkIntentCookie,
+  verifyLinkIntentToken,
+  buildLinkIntentClearCookie,
+} from './linkState.js';
 
 function readCookie(req, name) {
   const raw = req.headers.cookie || '';
@@ -12,14 +20,16 @@ function readCookie(req, name) {
   return match ? decodeURIComponent(match.split('=')[1]) : null;
 }
 
-function clearStateCookie(res, name, existingSetCookie) {
-  const cleared = `${name}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`;
-  const header = existingSetCookie
-    ? Array.isArray(existingSetCookie)
-      ? [cleared, ...existingSetCookie]
-      : [cleared, String(existingSetCookie)]
-    : cleared;
-  res.setHeader('Set-Cookie', header);
+/** Append cleared cookies (state + optional link-intent) to whatever the
+ * session step already queued, so all are sent in one Set-Cookie header. */
+function appendClearedCookies(res, stateCookieName, extra = []) {
+  const cleared = [
+    `${stateCookieName}=; Path=/; Max-Age=0; HttpOnly; SameSite=Lax`,
+    ...extra,
+  ];
+  const existing = res.getHeader('Set-Cookie');
+  const existingArr = existing ? (Array.isArray(existing) ? existing : [String(existing)]) : [];
+  res.setHeader('Set-Cookie', [...existingArr, ...cleared]);
 }
 
 /**
@@ -73,6 +83,16 @@ export async function handleOAuthCallback(req, res, opts) {
     return res.redirect(`${errorRedirectBase}invalid_state`);
   }
 
+  // Is this round-trip a "connect another sign-in method" link, started by an
+  // already-signed-in user from Settings? A signed link-intent cookie says so.
+  const linkIntent = (() => {
+    const raw = readLinkIntentCookie(req);
+    if (!raw) return null;
+    const claims = verifyLinkIntentToken(raw);
+    if (!claims || claims.provider !== provider) return null;
+    return claims;
+  })();
+
   try {
     const tokenResponse = await exchangeCode(String(code));
     const profile = await fetchProfile(tokenResponse);
@@ -82,7 +102,7 @@ export async function handleOAuthCallback(req, res, opts) {
       throw new Error(`${provider} profile missing providerUserId`);
     }
 
-    const user = await upsertOAuthUser({
+    const identity = {
       authProvider: provider,
       providerUserId: String(normalized.providerUserId),
       email: normalized.email || null,
@@ -91,20 +111,44 @@ export async function handleOAuthCallback(req, res, opts) {
       profileUrl: normalized.profileUrl || null,
       headline: normalized.headline || '',
       company: normalized.company || null,
-    });
+    };
+
+    if (linkIntent) {
+      // Linking path: the new identity is attached to the CURRENTLY signed-in
+      // account. Re-verify the live session and require it to match the intent
+      // so a stale/forged intent can't bind the identity to the wrong account.
+      const sessionClaims = verifySessionToken(parseSessionCookie(req));
+      if (!sessionClaims?.userId || sessionClaims.userId !== linkIntent.userId) {
+        appendClearedCookies(res, stateCookieName, [buildLinkIntentClearCookie()]);
+        return res.redirect(`${errorRedirectBase}link_session_mismatch`);
+      }
+      const account = await findUserByUserId(linkIntent.userId);
+      if (!account) {
+        appendClearedCookies(res, stateCookieName, [buildLinkIntentClearCookie()]);
+        return res.redirect(`${errorRedirectBase}link_account_missing`);
+      }
+      const linked = await linkProviderIdentity(account, identity);
+      await issueSessionForUser(req, res, linked);
+      appendClearedCookies(res, stateCookieName, [buildLinkIntentClearCookie()]);
+      return res.redirect('/?auth=linked');
+    }
+
+    const user = await upsertOAuthUser(identity);
 
     await issueSessionForUser(req, res, user);
 
     // Clear the state cookie alongside the session cookie that was just set.
-    const existing = res.getHeader('Set-Cookie');
-    clearStateCookie(res, stateCookieName, existing);
+    appendClearedCookies(res, stateCookieName);
 
     return res.redirect(successRedirect);
   } catch (error) {
     if (error instanceof EmailInUseByOtherProviderError) {
+      const extra = linkIntent ? [buildLinkIntentClearCookie()] : [];
+      appendClearedCookies(res, stateCookieName, extra);
       return res.redirect('/?auth_error=email_in_use_other_provider');
     }
     console.error(`[${provider} callback failed]`, error);
+    if (linkIntent) appendClearedCookies(res, stateCookieName, [buildLinkIntentClearCookie()]);
     return res.redirect(`${errorRedirectBase}callback_failed`);
   }
 }

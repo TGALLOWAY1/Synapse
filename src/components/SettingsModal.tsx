@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github, ChevronRight } from 'lucide-react';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
+import { ConnectedAccountsSection } from './settings/ConnectedAccountsSection';
 import {
     getLocalCredential,
     setLocalCredential,
@@ -186,6 +187,9 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                 </div>
 
                 <form onSubmit={handleSave} className="p-8 space-y-8 overflow-y-auto max-h-[80vh]">
+                    {/* Connected sign-in methods (account linking — resolves R3) */}
+                    <ConnectedAccountsSection />
+
                     {/* Encrypted, server-side provider key vault (recommended) */}
                     <ProviderKeysSection />
 

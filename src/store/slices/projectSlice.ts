@@ -5,6 +5,8 @@ import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
 import { DEMO_PROJECT_ID } from '../../data/demoProject';
 import { loadDemoSnapshotPublic, restoreSnapshotAs } from '../../lib/snapshotClient';
+import { projectsDebug } from '../../lib/projectsDebug';
+import { resolveProjectStorageName } from '../userScope';
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -56,6 +58,12 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             historyEvents: { ...state.historyEvents, [projectId]: [initEvent] },
         }));
         void trackActivity('clicked_section', { section: 'create_project', projectId });
+        projectsDebug('project created', {
+            projectId,
+            name,
+            namespace: resolveProjectStorageName(),
+            totalProjects: Object.keys(get().projects).length,
+        });
 
         return { projectId, spineId: initialSpine.id };
     },

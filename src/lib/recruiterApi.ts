@@ -1,5 +1,8 @@
 export type AuthProvider = 'linkedin' | 'email' | 'github';
 
+/** A sign-in method connected to an account (account linking — see R3). */
+export type LinkedProvider = { authProvider: AuthProvider; email: string | null };
+
 export type RecruiterUser = {
   userId?: string;
   authProvider?: AuthProvider;
@@ -13,7 +16,24 @@ export type RecruiterUser = {
   email?: string | null;
   emailVerified?: boolean;
   lastActiveAt?: string;
+  /** Every sign-in method linked to this account (defaults to just the primary). */
+  linkedProviders?: LinkedProvider[];
+  /**
+   * Ids of accounts the server has merged into this one. The client merges
+   * their project namespaces so projects created under a divergent userId
+   * (e.g. before linking two providers) are recovered. All-optional/back-compat.
+   */
+  mergedUserIds?: string[];
 };
+
+/**
+ * Begin connecting an additional sign-in method to the CURRENT account. This is
+ * a full-page navigation (OAuth redirect), not fetch — the server requires the
+ * active session cookie and round-trips through the provider.
+ */
+export function startProviderLink(provider: Exclude<AuthProvider, 'email'>): void {
+  window.location.href = `/api/auth/link/${provider}`;
+}
 
 /** Forward-looking alias — favor `User` in new code. */
 export type User = RecruiterUser;
@@ -31,6 +51,13 @@ export type AuthResult =
 
 export async function fetchSession() {
   const response = await fetch('/api/session', { credentials: 'include' });
+  // A non-2xx response (e.g. the session endpoint 500s, or a gateway error)
+  // is NOT the same as "signed out". Throw so the caller can surface a
+  // distinct "couldn't reach the server" state instead of silently dropping
+  // the user to the login page with an empty project list.
+  if (!response.ok) {
+    throw new Error(`session_request_failed_${response.status}`);
+  }
   return response.json();
 }
 

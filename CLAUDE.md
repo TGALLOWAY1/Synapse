@@ -379,11 +379,56 @@ rules:
   silent first-signer adoption handed one user's projects to whichever account
   signed in first. Adoption is now **explicit opt-in**: `getLegacyImportOffer()`
   surfaces a `HomePage` banner, and only an informed click runs
-  `importLegacyProjects()` (copy + claim, non-destructive); `declineLegacyImport()`
-  suppresses re-prompts without claiming. **Do not** read the project store
-  before `applyProjectUser` has run for the current user, and keep
-  `emptyPersistedState()` in `projectUserSync` in sync with the persisted slice
-  fields.
+  `importLegacyProjects()`; `declineLegacyImport()` suppresses re-prompts
+  without claiming. The offer **persists for recovery** — it stays available
+  while there are unclaimed, undeclined base-key projects the user does not
+  already have (it is no longer suppressed merely because the user has some
+  namespaced data of their own), and the import **merges additively** (existing
+  ids always win, so a re-import can only add projects, never overwrite/delete
+  one the user already has). **Do not** read the project store before
+  `applyProjectUser` has run for the current user, and keep
+  `emptyPersistedState()` in `projectUserSync` in sync with **both** the
+  persisted slice fields **and** the slices re-persisted by
+  `repersistCurrentState()`.
+  - **Namespace-switch data-loss guard:** `applyProjectUser` wipes in-memory
+    state (`setState(emptyPersistedState())`, which queues a *debounced* persist
+    write of the empty state to the target namespace) and then calls
+    `rehydrate()`. Zustand's `rehydrate()` loads stored data via the raw setter
+    and does **not** persist, so `applyProjectUser` **must** re-persist the
+    rehydrated state immediately after (`repersistCurrentState()`); otherwise the
+    queued empty write flushes ~500ms later and clobbers the namespace's stored
+    projects. Never remove that re-persist, and never add a code path that
+    leaves an empty-wipe as the last queued write for a populated namespace.
+  - **Auth-failure ≠ signed-out:** `fetchSession()` throws on a non-OK
+    response, and `authStore` records `authError` (distinct from a clean
+    sign-out) **without** calling `setUser(null)` — a transient session-fetch
+    failure must not swap the project namespace or render the user as logged
+    out, which makes projects look like they vanished. `HomeRoute` shows a
+    retry panel and `ProjectDrawer` distinguishes signed-out / failed / empty.
+    Opt-in lifecycle logging lives in `src/lib/projectsDebug.ts`
+    (`synapse-projects-debug` / `?projectsdebug`).
+  - **Account linking — one human → one stable `userId`:** because the project
+    namespace is keyed by `userId`, the same person signing in with a different
+    provider must resolve to the **same** account or their projects appear to
+    vanish. The server identity model (`api/_lib/users.js`) supports this: a doc
+    carries its primary identity plus `linkedIdentities[]` and `mergedUserIds[]`;
+    `findUserByProviderIdentity` matches primary **or** linked identities and
+    skips `mergedInto` tombstones. `upsertOAuthUser` **auto-links** an OAuth
+    sign-in into an existing account when emails match **and the existing account
+    is `emailVerified`** (never into an unverified account — takeover guard).
+    **Explicit linking** while signed in goes through
+    `GET /api/auth/link/:provider` (sets an HMAC-signed link-intent cookie,
+    `api/_lib/linkState.js`) → the shared OAuth callback re-verifies the live
+    session matches the intent and calls `linkProviderIdentity` (which
+    non-destructively **merges** another owning account: moves its identities,
+    records its id in `mergedUserIds`, tombstones it with `mergedInto`).
+    `/api/session` exposes `mergedUserIds`, and `applyProjectUser(userId,
+    mergedUserIds)` merges each absorbed account's namespace into the canonical
+    one (`mergeNamespaceInto`, additive/idempotent) so already-split projects are
+    recovered. UI: Settings → `ConnectedAccountsSection`. New auth return paths
+    must go through `accountToSessionUser`/`toPublicUser` so linking fields are
+    carried; account merge does **not** yet migrate server-side data (snapshots /
+    `provider_keys`) — see `tasks/TODO.md`.
 - **Provider keys live in an encrypted server vault** (`api/_lib/cryptoVault.js`
   AES-256-GCM, key from `SYNAPSE_KEY_ENCRYPTION_SECRET`; `providerKeys.js` Mongo
   `provider_keys` collection, one doc per `(userId, provider)`, bound via

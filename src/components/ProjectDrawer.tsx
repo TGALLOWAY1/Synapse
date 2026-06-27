@@ -1,5 +1,6 @@
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
+import { useAuthStore } from '../store/authStore';
 import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
 
@@ -10,6 +11,8 @@ interface ProjectDrawerProps {
 
 export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
     const { projects, deleteProject, getLatestSpine } = useProjectStore();
+    const user = useAuthStore((s) => s.user);
+    const authError = useAuthStore((s) => s.authError);
     const navigate = useNavigate();
 
     const projectList = Object.values(projects).sort((a, b) => b.createdAt - a.createdAt);
@@ -55,9 +58,31 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
 
                 <div className="overflow-y-auto h-[calc(100%-57px)] p-3 space-y-2">
                     {projectList.length === 0 && (
-                        <p className="text-sm text-neutral-500 text-center py-8">
-                            No projects yet
-                        </p>
+                        <div className="text-sm text-neutral-500 text-center py-8 px-3 space-y-1">
+                            {authError && !user ? (
+                                <>
+                                    <p className="text-neutral-400">Couldn't load your projects</p>
+                                    <p className="text-xs">
+                                        We couldn't confirm your session. Your projects are safe on
+                                        this device — reload to try again.
+                                    </p>
+                                </>
+                            ) : !user ? (
+                                <>
+                                    <p className="text-neutral-400">Sign in to see your projects</p>
+                                    <p className="text-xs">
+                                        Projects are saved per account on this device.
+                                    </p>
+                                </>
+                            ) : (
+                                <>
+                                    <p className="text-neutral-400">No projects yet</p>
+                                    <p className="text-xs">
+                                        Create one from the home screen to get started.
+                                    </p>
+                                </>
+                            )}
+                        </div>
                     )}
 
                     {projectList.map((p) => {
