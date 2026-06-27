@@ -25,6 +25,23 @@ const CLAIM_KEY = 'synapse-projects-legacy-claimed-by';
 // owner can still import it later from another sign-in.
 const DECLINED_KEY = 'synapse-projects-legacy-declined-by';
 
+// Persisted Zustand collections that are keyed by project id (or, for
+// `projects`, by project id). A legacy-import merges these additively so a
+// user can recover pre-namespacing projects without overwriting any project
+// they already own (existing ids always win). Keep in sync with
+// `emptyPersistedState()` in projectUserSync.ts.
+const MERGEABLE_COLLECTIONS = [
+  'projects',
+  'spineVersions',
+  'historyEvents',
+  'branches',
+  'artifacts',
+  'artifactVersions',
+  'feedbackItems',
+  'tasks',
+  'workflowRuns',
+] as const;
+
 let activeUserId: string | null = null;
 
 function safeGet(key: string): string | null {
@@ -72,59 +89,131 @@ function readDeclined(): string[] {
   }
 }
 
-/** Number of anonymous/legacy projects available under BASE_NAME (0 if none). */
-export function countLegacyProjects(): number {
-  const raw = safeGet(BASE_NAME);
-  if (!raw) return 0;
+/** Parse a persisted Zustand blob's project-id map for a given collection. */
+function readProjectsMap(raw: string | null): Record<string, unknown> {
+  if (!raw) return {};
   try {
     const parsed = JSON.parse(raw);
     const projects = parsed?.state?.projects;
-    return projects && typeof projects === 'object' ? Object.keys(projects).length : 0;
+    return projects && typeof projects === 'object' ? (projects as Record<string, unknown>) : {};
   } catch {
-    return 0;
+    return {};
   }
 }
 
+/** Number of anonymous/legacy projects available under BASE_NAME (0 if none). */
+export function countLegacyProjects(): number {
+  return Object.keys(readProjectsMap(safeGet(BASE_NAME))).length;
+}
+
 /**
- * Whether `userId` should be offered the "import projects created before you
- * signed in" prompt. Available only when:
- *   - there are anonymous projects under BASE_NAME, and
- *   - this user has no namespaced data of their own yet, and
- *   - no account has already claimed (imported) the anonymous data, and
- *   - this user hasn't already declined the offer.
+ * Number of legacy (base-key) projects that are NOT already present in
+ * `userId`'s namespace — i.e. the count a merge-import would actually add. This
+ * is what we surface in the offer so a user who already has some of their
+ * projects isn't told there are more to import when there aren't.
+ */
+function countImportableForUser(userId: string): number {
+  const legacyProjects = readProjectsMap(safeGet(BASE_NAME));
+  const legacyIds = Object.keys(legacyProjects);
+  if (legacyIds.length === 0) return 0;
+  const ownProjects = readProjectsMap(safeGet(namespaceFor(userId)));
+  return legacyIds.filter((id) => !(id in ownProjects)).length;
+}
+
+/**
+ * Whether `userId` should be offered the "import/recover projects created
+ * before you signed in" prompt. Available when:
+ *   - there are base-key projects this user does NOT already have, and
+ *   - no OTHER account has already claimed the base-key data, and
+ *   - this user hasn't already imported (claimed) or declined the offer.
  *
- * Crucially there is NO silent adoption — a different account can never inherit
+ * Unlike the original implementation this NO LONGER bails just because the user
+ * has some namespaced data of their own — that one-shot rule permanently
+ * stranded pre-namespacing projects the moment a user created a single new
+ * project. The import is additive (see importLegacyProjectsForUser), so it is
+ * safe to keep offering recovery until the data is claimed or declined.
+ *
+ * There is still NO silent adoption — a different account can never inherit
  * another user's pre-sign-in projects without an explicit, informed click.
  */
 export function getLegacyImportOffer(userId: string | null): { available: boolean; projectCount: number } {
   if (!userId) return { available: false, projectCount: 0 };
-  if (safeGet(namespaceFor(userId)) !== null) return { available: false, projectCount: 0 };
-  if (safeGet(CLAIM_KEY)) return { available: false, projectCount: 0 };
+  const claimedBy = safeGet(CLAIM_KEY);
+  // Claimed by this same user already ⇒ they've imported; claimed by another ⇒
+  // not theirs to take. Either way, don't offer.
+  if (claimedBy) return { available: false, projectCount: 0 };
   if (readDeclined().includes(userId)) return { available: false, projectCount: 0 };
-  const projectCount = countLegacyProjects();
+  const projectCount = countImportableForUser(userId);
   return { available: projectCount > 0, projectCount };
 }
 
 /**
- * Explicit, user-initiated import: non-destructively copy the anonymous
+ * Explicit, user-initiated import: non-destructively MERGE the base-key
  * projects into `userId`'s namespace and claim them so no other account is
- * offered them. The original legacy data under BASE_NAME is left untouched.
+ * offered them. Existing ids in the user's namespace always win — an import can
+ * only ADD projects, never overwrite or delete one the user already has. The
+ * original legacy data under BASE_NAME is left untouched.
  *
- * Returns true if data was imported (the store should rehydrate afterwards).
+ * Returns true if anything was imported (the store should rehydrate afterwards).
  */
 export function importLegacyProjectsForUser(userId: string): boolean {
   if (!userId) return false;
-  const nsKey = namespaceFor(userId);
-  // Already has its own namespaced data — nothing to import.
-  if (safeGet(nsKey) !== null) return false;
 
-  const legacy = safeGet(BASE_NAME);
-  if (legacy === null) return false;
+  const legacyRaw = safeGet(BASE_NAME);
+  if (legacyRaw === null) return false;
 
   const claimedBy = safeGet(CLAIM_KEY);
   if (claimedBy && claimedBy !== userId) return false;
 
-  safeSet(nsKey, legacy);
+  const nsKey = namespaceFor(userId);
+  const ownRaw = safeGet(nsKey);
+
+  // Fast path: the user has no namespaced data yet — copy the whole blob.
+  if (ownRaw === null) {
+    safeSet(nsKey, legacyRaw);
+    safeSet(CLAIM_KEY, userId);
+    return true;
+  }
+
+  // Merge path: union each project-keyed collection, keeping the user's own
+  // entries on any id collision. Fall back to claim-only (no data change) if
+  // either blob can't be parsed, so a corrupt blob never destroys data.
+  let merged: unknown;
+  let added = 0;
+  try {
+    const own = JSON.parse(ownRaw);
+    const legacy = JSON.parse(legacyRaw);
+    const ownState = own?.state ?? {};
+    const legacyState = legacy?.state ?? {};
+
+    for (const key of MERGEABLE_COLLECTIONS) {
+      const legacyMap = legacyState[key];
+      if (!legacyMap || typeof legacyMap !== 'object') continue;
+      const ownMap = (ownState[key] && typeof ownState[key] === 'object') ? ownState[key] : {};
+      const nextMap: Record<string, unknown> = { ...ownMap };
+      for (const id of Object.keys(legacyMap)) {
+        if (!(id in nextMap)) {
+          nextMap[id] = legacyMap[id];
+          if (key === 'projects') added += 1;
+        }
+      }
+      ownState[key] = nextMap;
+    }
+    own.state = ownState;
+    merged = own;
+  } catch {
+    safeSet(CLAIM_KEY, userId);
+    return false;
+  }
+
+  if (added === 0) {
+    // Nothing new to add (every legacy project already present) — just claim so
+    // the offer stops without rewriting the user's blob.
+    safeSet(CLAIM_KEY, userId);
+    return false;
+  }
+
+  safeSet(nsKey, JSON.stringify(merged));
   safeSet(CLAIM_KEY, userId);
   return true;
 }

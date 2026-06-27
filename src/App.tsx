@@ -19,11 +19,38 @@ import { Analytics } from '@vercel/analytics/react';
 function HomeRoute() {
   const user = useAuthStore((s) => s.user);
   const loading = useAuthStore((s) => s.loading);
+  const authError = useAuthStore((s) => s.authError);
+  const refreshSession = useAuthStore((s) => s.refreshSession);
 
   if (loading) {
     return (
       <div className="min-h-screen flex items-center justify-center">
         <Loader2 className="animate-spin text-neutral-400" size={24} />
+      </div>
+    );
+  }
+
+  // A transport/server failure resolving the session is distinct from being
+  // signed out. Don't drop the user to the login page (which makes their saved
+  // projects look gone) — show a retry so a transient blip is recoverable.
+  if (authError && !user) {
+    return (
+      <div className="min-h-screen flex items-center justify-center px-6">
+        <div className="max-w-md w-full text-center space-y-4">
+          <h2 className="text-xl font-semibold">Couldn't reach the server</h2>
+          <p className="text-sm text-neutral-400">
+            We couldn't confirm your session, so your projects aren't shown right
+            now. Your saved projects are safe on this device — this is usually a
+            temporary connection issue.
+          </p>
+          <button
+            type="button"
+            onClick={() => { void refreshSession(); }}
+            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition"
+          >
+            Retry
+          </button>
+        </div>
       </div>
     );
   }

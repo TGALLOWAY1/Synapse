@@ -78,13 +78,65 @@ describe('userScope', () => {
     expect(getLegacyImportOffer('userB')).toEqual({ available: true, projectCount: 2 });
   });
 
-  it('never offers import to an account that already has its own projects', () => {
-    localStorage.setItem(BASE, LEGACY);
+  it('still offers recovery when the user has their own projects but unclaimed legacy projects remain', () => {
+    // Regression for "projects disappearing": before this, the moment a user
+    // created any namespaced project the import offer vanished forever, leaving
+    // pre-namespacing projects permanently stranded.
+    localStorage.setItem(BASE, LEGACY); // p1, p2
     localStorage.setItem(namespaceFor('userA'), '{"state":{"projects":{"mine":{}}}}');
 
+    // p1 + p2 are both missing from userA's namespace, so 2 are importable.
+    expect(getLegacyImportOffer('userA')).toEqual({ available: true, projectCount: 2 });
+  });
+
+  it('merges legacy projects additively without overwriting the user\'s own', () => {
+    // Legacy has p1, p2 and a colliding id "mine" with different data; the
+    // user's own "mine" must win, and p1/p2 must be added.
+    localStorage.setItem(BASE, '{"state":{"projects":{"p1":{},"p2":{},"mine":{"name":"legacy"}}}}');
+    localStorage.setItem(
+      namespaceFor('userA'),
+      '{"state":{"projects":{"mine":{"name":"current"}}}}',
+    );
+
+    expect(importLegacyProjectsForUser('userA')).toBe(true);
+
+    const blob = JSON.parse(localStorage.getItem(namespaceFor('userA'))!);
+    const projects = blob.state.projects;
+    expect(Object.keys(projects).sort()).toEqual(['mine', 'p1', 'p2']);
+    // Existing entry wins on collision — the user's data is never clobbered.
+    expect(projects.mine.name).toBe('current');
+    // Claimed so the offer stops afterward.
+    expect(localStorage.getItem(CLAIM)).toBe('userA');
     expect(getLegacyImportOffer('userA')).toEqual({ available: false, projectCount: 0 });
+  });
+
+  it('merges all project-keyed collections, not just the projects map', () => {
+    localStorage.setItem(
+      BASE,
+      JSON.stringify({
+        state: {
+          projects: { p1: {} },
+          spineVersions: { p1: [{ id: 'v1' }] },
+          historyEvents: { p1: [{ id: 'h1' }] },
+        },
+      }),
+    );
+    localStorage.setItem(namespaceFor('userA'), '{"state":{"projects":{"mine":{}}}}');
+
+    expect(importLegacyProjectsForUser('userA')).toBe(true);
+    const blob = JSON.parse(localStorage.getItem(namespaceFor('userA'))!);
+    expect(blob.state.spineVersions.p1).toEqual([{ id: 'v1' }]);
+    expect(blob.state.historyEvents.p1).toEqual([{ id: 'h1' }]);
+  });
+
+  it('does not re-offer once every legacy project is already present', () => {
+    localStorage.setItem(BASE, '{"state":{"projects":{"p1":{}}}}');
+    localStorage.setItem(namespaceFor('userA'), '{"state":{"projects":{"p1":{}}}}');
+
+    // Nothing importable (p1 already owned).
+    expect(getLegacyImportOffer('userA')).toEqual({ available: false, projectCount: 0 });
+    // Importing claims (so the offer stops) but reports no data added.
     expect(importLegacyProjectsForUser('userA')).toBe(false);
-    expect(localStorage.getItem(namespaceFor('userA'))).toContain('mine');
-    expect(localStorage.getItem(namespaceFor('userA'))).not.toContain('p1');
+    expect(localStorage.getItem(CLAIM)).toBe('userA');
   });
 });

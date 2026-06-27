@@ -14,6 +14,7 @@ import {
   setActiveProjectUser,
   importLegacyProjectsForUser,
 } from './userScope';
+import { projectsDebug } from '../lib/projectsDebug';
 
 // Re-export the offer/decline helpers so UI imports a single store-facing
 // module rather than reaching into userScope directly.
@@ -45,16 +46,58 @@ function emptyPersistedState() {
  * in first. Adoption is now an explicit, opt-in action (see
  * `getLegacyImportOffer` / `importLegacyProjects`).
  */
+/**
+ * Re-issue a persist write of the current in-memory persisted slices. Used
+ * right after a rehydrate to supersede the debounced "empty wipe" write queued
+ * by `setState(emptyPersistedState())` (see applyProjectUser).
+ */
+function repersistCurrentState(): void {
+  const s = useProjectStore.getState();
+  useProjectStore.setState({
+    projects: s.projects,
+    spineVersions: s.spineVersions,
+    historyEvents: s.historyEvents,
+    branches: s.branches,
+    artifacts: s.artifacts,
+    artifactVersions: s.artifactVersions,
+    feedbackItems: s.feedbackItems,
+    tasks: s.tasks,
+    workflowRuns: s.workflowRuns,
+  });
+}
+
 export function applyProjectUser(userId: string | null): void {
-  if (userId === getActiveProjectUser()) return;
+  const previous = getActiveProjectUser();
+  if (userId === previous) return;
 
   setActiveProjectUser(userId);
 
   // Clear current in-memory state, then rehydrate from the new namespace.
   // rehydrate() merges persisted data over current state, so wiping first is
   // what guarantees isolation when the new namespace is empty.
+  //
+  // IMPORTANT — data-loss guard: `setState(emptyPersistedState())` queues a
+  // *debounced* persist write of the EMPTY state to the new namespace. Zustand's
+  // rehydrate() loads the stored data into memory using the raw setter and does
+  // NOT itself persist, so without the re-persist below the queued empty write
+  // would flush ~500ms later and clobber this namespace's stored projects
+  // whenever the user switched in without immediately mutating the store. We
+  // re-persist the freshly-rehydrated state so the correct data is the last
+  // queued write. (rehydrate() resolves synchronously for our sync storage.)
   useProjectStore.setState(emptyPersistedState());
-  void useProjectStore.persist.rehydrate();
+
+  const finish = () => {
+    repersistCurrentState();
+    const count = Object.keys(useProjectStore.getState().projects).length;
+    projectsDebug('namespace switched', { from: previous, to: userId, projectsLoaded: count });
+  };
+
+  const result = useProjectStore.persist.rehydrate() as { then?: (cb: () => void) => void } | undefined;
+  if (result && typeof result.then === 'function') {
+    result.then(finish);
+  } else {
+    finish();
+  }
 }
 
 /**

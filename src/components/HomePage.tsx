@@ -320,9 +320,9 @@ export function HomePage() {
                         <Download size={18} className="mt-0.5 shrink-0 text-indigo-300" />
                         <div className="flex-1 min-w-0">
                             <p className="text-sm text-indigo-100">
-                                We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} created
-                                on this browser before you signed in. Import {legacyOffer.projectCount === 1 ? 'it' : 'them'} into
-                                your account?
+                                We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} saved
+                                on this browser that {legacyOffer.projectCount === 1 ? "isn't" : "aren't"} linked to your
+                                account yet. Recover {legacyOffer.projectCount === 1 ? 'it' : 'them'} into your account?
                             </p>
                             <div className="mt-2 flex items-center gap-2">
                                 <button

@@ -145,6 +145,7 @@ fetch — the projects are recoverable. The bugs are about *visibility* and
 
 | # | Severity | Issue |
 |---|----------|-------|
+| **R8** | **Critical (confirmed bug, fixed)** | `applyProjectUser` queues a debounced persist write of the EMPTY wipe state to the target namespace, then `rehydrate()` loads the real data into memory **without persisting** (Zustand uses the raw setter during hydration). ~500ms later the queued empty write flushes and **overwrites the namespace's stored projects with `{}`** — so a returning user who signs in and doesn't immediately mutate the store loses their localStorage projects on the next refresh. Caught by a new regression test. |
 | R1 | **Critical (by design)** | No server persistence → projects are device/browser-local; cannot appear across mobile/web or survive site-data clears. |
 | R2 | **High** | Per-user namespacing stranded pre-existing (base-key) projects; the import offer is one-shot and disappears once the user has any namespaced data or dismisses it. |
 | R3 | **High** | Different sign-in providers ⇒ different `userId` ⇒ different namespace ⇒ projects "disappear" when switching login method. |
@@ -153,8 +154,15 @@ fetch — the projects are recoverable. The bugs are about *visibility* and
 | R6 | **Low** | Quota-exceeded silently stops all persistence after one toast. |
 | R7 | **Low/UX** | Empty states don't distinguish loading / signed-out / empty / failed / filtered. |
 
+**R8 is the most likely acute cause of "I suddenly don't see my projects anymore"**: it silently empties the signed-in user's namespace in the background. Combined with R2 (the recovery offer having already been dismissed/consumed), the projects then have no surviving copy in that namespace and no offer to recover them.
+
 ## Fixes implemented in this change
 
+- **R8 (data-loss, the acute cause):** `applyProjectUser` now re-persists the
+  freshly-rehydrated state immediately after `rehydrate()`, so the debounced
+  empty-wipe write can never be the last queued write and can never clobber a
+  namespace. Proven by `projectPersistence.test.ts`
+  ("does NOT clobber a pre-existing namespace…").
 - **R2 (recovery):** make the legacy-project offer resilient — it is now
   available whenever there are **unclaimed, undeclined** base-key projects, even
   if the user already has their own namespaced data, and the import **merges**

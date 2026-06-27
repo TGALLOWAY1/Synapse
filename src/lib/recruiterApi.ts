@@ -31,6 +31,13 @@ export type AuthResult =
 
 export async function fetchSession() {
   const response = await fetch('/api/session', { credentials: 'include' });
+  // A non-2xx response (e.g. the session endpoint 500s, or a gateway error)
+  // is NOT the same as "signed out". Throw so the caller can surface a
+  // distinct "couldn't reach the server" state instead of silently dropping
+  // the user to the login page with an empty project list.
+  if (!response.ok) {
+    throw new Error(`session_request_failed_${response.status}`);
+  }
   return response.json();
 }
 
