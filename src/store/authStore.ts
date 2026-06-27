@@ -7,6 +7,7 @@ import {
   signupWithEmail,
 } from '../lib/recruiterApi';
 import { applyProjectUser } from './projectUserSync';
+import { startProjectSync, stopProjectSync } from './projectServerSync';
 import { primeProviderSession, clearProviderSession, clearLocalProviderKeys } from '../lib/providerSession';
 import { projectsDebug } from '../lib/projectsDebug';
 
@@ -57,8 +58,13 @@ export const useAuthStore = create<AuthState>((set) => {
     // configured flag) so AI calls use the right account's credentials.
     if (user) {
       void primeProviderSession();
+      // Begin server-side project sync: pull this user's server projects onto
+      // this device and push local changes out. Runs after applyProjectUser so
+      // the namespace is already pointed at this user. Never throws into auth.
+      startProjectSync(user.userId ?? null);
     } else {
       clearProviderSession();
+      stopProjectSync();
     }
     set({ user, loading: false, authError: null });
   };

@@ -2,6 +2,7 @@ import { useState, useRef, useMemo, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
+import { refreshProjectsFromServer } from '../store/projectServerSync';
 import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X } from 'lucide-react';
 import type { AuthProvider } from '../lib/recruiterApi';
 import { SettingsModal } from './SettingsModal';
@@ -90,11 +91,15 @@ export function HomePage() {
         try {
             const ok = importLegacyProjects(user.userId);
             setImportHandled(true);
+            // Push the freshly-imported local projects to the server so they're
+            // available on the user's other devices. Reconcile is idempotent and
+            // non-destructive — a failure leaves the local copies untouched.
+            if (ok) refreshProjectsFromServer();
             useToastStore.getState().addToast({
                 type: ok ? 'success' : 'warning',
                 title: ok ? 'Projects imported' : 'Nothing to import',
                 message: ok
-                    ? `${legacyOffer.projectCount} project${legacyOffer.projectCount === 1 ? '' : 's'} added to your account. Open them from the Projects list.`
+                    ? `${legacyOffer.projectCount} project${legacyOffer.projectCount === 1 ? '' : 's'} added to your account and syncing to your other devices.`
                     : 'These projects may have already been imported by another account on this browser.',
             });
         } finally {

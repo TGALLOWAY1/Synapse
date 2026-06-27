@@ -2,6 +2,9 @@
   "buildCommand": "npm run build",
   "outputDirectory": "dist",
   "rewrites": [
+    { "source": "/api/auth/login", "destination": "/api/auth/email?action=login" },
+    { "source": "/api/auth/signup", "destination": "/api/auth/email?action=signup" },
+    { "source": "/api/auth/logout", "destination": "/api/auth/email?action=logout" },
     { "source": "/((?!api/).*)", "destination": "/index.html" }
   ],
   "headers": [

@@ -42,14 +42,41 @@ See `docs/audits/projects-disappearing-2026-06-27.md` for the full root-cause
 analysis. The recovery + observability fixes (R2, R4, R7) shipped; the items
 below are the durable follow-ups that need backend work.
 
-- [ ] **(R1 — the real cross-device fix)** Persist PRD projects server-side
-      (MongoDB, keyed by `userId`) so they sync across mobile/web and survive a
-      browser-data clear. Today the PRD workspace is 100% `localStorage`, so
-      projects are device-local and can never appear on a second device. This is
-      the single most-requested behavior ("see all previous projects across web
-      and mobile") and is impossible without server storage. Suggested shape:
-      a `projects` collection mirroring the persisted Zustand slices, with the
-      client treating localStorage as a cache and the server as source of truth.
+- [x] **(R1 — the real cross-device fix) — shipped.** PRD projects now persist
+      server-side (MongoDB `projects` collection, keyed by `userId`), syncing
+      across mobile/web and surviving a browser-data clear. localStorage is kept
+      as the live cache/offline fallback; the server is the cross-device source.
+      See `docs/SERVER_PROJECT_STORAGE.md`. Implemented as: `api/_lib/projectsStore.js`
+      (owner-scoped data layer + indexes), `api/projects.js` (session-gated CRUD),
+      and the client sync layer (`projectBundle.ts`, `projectsClient.ts`,
+      `projectServerSync.ts`, `projectSyncStore.ts`, `projectMigration.ts`).
+
+  Deferred follow-ups for server project storage:
+  - [ ] **Conflict resolution.** Pull is currently *additive* — a server project
+        only loads onto a device that doesn't already have it locally; an
+        existing local copy is never overwritten from the server. So editing the
+        same project on two devices leaves each device with its own copy until a
+        push reconciles. Add per-project version/`updatedAt` vectoring (or a
+        last-writer-wins with a visible "this device is behind" prompt) so a
+        newer server revision can safely refresh a stale-but-clean local copy.
+  - [ ] **Offline write queue.** Pushes that fail while offline currently retry
+        on the next local change or manual "Retry". Add a durable outbound queue
+        that flushes automatically on reconnect, independent of further edits.
+  - [ ] **Image/asset bodies.** Mockup and screen-inventory images live in
+        separate localStorage stores and are NOT in the project bundle, so they
+        don't yet sync. Move them to Vercel Blob (like snapshots) and reference
+        them from the bundle so generated visuals follow the project across
+        devices.
+  - [ ] **Granular saves.** The client pushes the whole project bundle on any
+        change (debounced). For very large projects, switch to per-collection
+        PATCH (e.g. only the changed spine/artifact) to cut payload size.
+  - [ ] **Shared workspaces / collaboration.** Access is strictly single-owner
+        today (every query is `userId`-scoped). A future shared-project model
+        would add a membership/ACL collection and relax the owner-only filter.
+  - [ ] **Public project links.** No public/shared read path exists yet (the
+        endpoint never serves a project to a non-owner). A future read-only
+        public-link feature would add an explicit, opt-in share token separate
+        from owner access.
 - [x] **(R3 — resolved)** Account linking: one human → one stable `userId`
       across email/GitHub/LinkedIn. Auto-link by verified email + explicit
       "Connect another sign-in method" in Settings, with non-destructive account
