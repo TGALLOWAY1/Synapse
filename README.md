@@ -398,8 +398,9 @@ Portfolio project. Demo visitors (and the public `/tour`) run the workspace
 fully in-browser &mdash; spine + artifact state in `localStorage`, mockup PNGs in
 IndexedDB, no telemetry. **Signed-in users get cross-device project sync**:
 projects persist to a per-account server collection and reconcile onto any device
-on sign-in, with localStorage kept as the offline cache. **Mockup images sync
-across devices too** — bytes live in Vercel Blob, only small refs travel with the
-project, and they hydrate lazily on view (Screen Inventory upload images are not
-synced yet — see `tasks/TODO.md`). The owner can additionally opt-in to
-Vercel-Blob-backed Cloud Snapshots (gated by `SYNAPSE_OWNER_TOKEN`).
+on sign-in, with localStorage kept as the offline cache. **AI-generated mockup
+images sync across devices too** — bytes live in Vercel Blob, only small refs
+travel with the project, and they hydrate lazily on view (user-uploaded mockup
+images and Screen Inventory uploads are not synced yet — see `tasks/TODO.md`).
+The owner can additionally opt-in to Vercel-Blob-backed Cloud Snapshots (gated by
+`SYNAPSE_OWNER_TOKEN`).

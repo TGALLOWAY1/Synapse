@@ -176,7 +176,11 @@ restores it under the stable `DEMO_PROJECT_ID`.
   `users/<userId>/mockup-images/…`), different ref models, different auth gates
   (owner token vs per-user session). Do not entangle them. Screen Inventory
   images remain a documented gap on the project-sync path too — the ref layer is
-  built generic (`kind`/`meta`) so they can be wired in later.
+  built generic (`kind`/`meta`) so they can be wired in later. **Note:** the
+  `user_uploaded` **mockup image source mode** (the OpenAI-key-free path that
+  lets the user upload their own mockup) persists to `screenInventoryImageStore`,
+  **not** `mockupImageStore` — so those uploads ride on this same not-yet-synced
+  gap. Only the `gpt_image` (AI-generated) mockups sync across devices today.
 
 ### Server-side project storage (`api/projects.js`, `api/_lib/projectsStore.js`, `src/store/projectServerSync.ts`)
 

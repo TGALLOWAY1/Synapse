@@ -124,7 +124,10 @@ see CLAUDE.md "Cross-device mockup image sync"). Follow-ups:
       'screen_inventory'`, opaque `meta`); needs a push/pull path analogous to
       `projectImageSync.ts` and a hydration hook in the screen-inventory image
       consumer. Blob path prefix can stay `users/<userId>/mockup-images/` or be
-      generalized to `users/<userId>/images/`.
+      generalized to `users/<userId>/images/`. **This also covers the
+      `user_uploaded` mockup image source mode** (PR #168): user-uploaded mockups
+      persist to `screenInventoryImageStore`, so they only become cross-device
+      once this store is wired. Today only `gpt_image` (AI-generated) mockups sync.
 - [ ] **Eager GC for per-image overwrite / version regen.** Today a new render
       (new hash → new blob) leaves the prior blob/ref until project hard-delete.
       Add a sweep (or wire `deleteProjectImageRefs` into `deleteImagesForVersion`
