@@ -1,6 +1,8 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
-import { callGemini, callGeminiStream, getFastModel, getStrongModel } from '../geminiClient';
+import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
+import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
+import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
@@ -23,40 +25,21 @@ export interface CoreArtifactGenerationResult {
     metadata?: Record<string, unknown>;
 }
 
-/**
- * Complexity-based model routing for the core artifacts, mirroring the PRD
- * pipeline's Fast/Expert tiering (see `progressivePrdGeneration.ts`
- * `selectModelTier`). Low-complexity artifacts — largely derivative of upstream
- * artifacts or template-shaped — run on the **Fast (Flash)** model
- * (`GEMINI_FAST_MODEL`); high-complexity artifacts that require deeper reasoning
- * over the whole PRD run on the **Expert (Pro)** model (`GEMINI_STRONG_MODEL`).
- * Both are configured in Settings → "PRD Generation Models" and shared across
- * the PRD pipeline and artifacts. When the user hasn't picked tier models, both
- * resolvers fall back to the single "Intelligence Level" model (`getModel`).
- *
- * Keep this map in sync with any new `CoreArtifactSubtype`.
- */
-export type ArtifactComplexity = 'low' | 'high';
-
-export const CORE_ARTIFACT_COMPLEXITY: Record<CoreArtifactSubtype, ArtifactComplexity> = {
-    // High — deep reasoning / structural design over the full PRD.
-    screen_inventory: 'high',
-    user_flows: 'high',
-    data_model: 'high',
-    implementation_plan: 'high',
-    // Low — derivative of upstream artifacts or template-shaped.
-    component_inventory: 'low',
-    design_system: 'low',
-    prompt_pack: 'low',
-};
+// Per-artifact model routing now lives in `artifactModelSettings.ts` so the
+// Settings UI and the generation pipeline share one source of truth. Re-export
+// the complexity map and type for back-compat with existing importers.
+export { CORE_ARTIFACT_COMPLEXITY };
+export type { ArtifactComplexity };
 
 /**
- * Resolve the Gemini model id a given core artifact should generate with,
- * based on its complexity tier. Exported so the artifact orchestrator can
- * record the *actual* model in workflow metrics (rather than assuming Pro).
+ * Resolve the Gemini model id a given core artifact should generate with.
+ * Honors an explicit per-artifact override (Settings → "Artifact Generation
+ * Models") and otherwise falls back to the complexity recommendation. Exported
+ * so the artifact orchestrator can record the *actual* model in workflow
+ * metrics.
  */
 export const selectArtifactModel = (subtype: CoreArtifactSubtype): string =>
-    CORE_ARTIFACT_COMPLEXITY[subtype] === 'high' ? getStrongModel() : getFastModel();
+    getArtifactModel(subtype);
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
