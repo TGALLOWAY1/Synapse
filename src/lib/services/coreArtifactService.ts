@@ -1,5 +1,5 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
-import { callGemini, callGeminiStream } from '../geminiClient';
+import { callGemini, callGeminiStream, getFastModel, getStrongModel } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
@@ -22,6 +22,41 @@ export interface CoreArtifactGenerationResult {
      */
     metadata?: Record<string, unknown>;
 }
+
+/**
+ * Complexity-based model routing for the core artifacts, mirroring the PRD
+ * pipeline's Fast/Expert tiering (see `progressivePrdGeneration.ts`
+ * `selectModelTier`). Low-complexity artifacts — largely derivative of upstream
+ * artifacts or template-shaped — run on the **Fast (Flash)** model
+ * (`GEMINI_FAST_MODEL`); high-complexity artifacts that require deeper reasoning
+ * over the whole PRD run on the **Expert (Pro)** model (`GEMINI_STRONG_MODEL`).
+ * Both are configured in Settings → "PRD Generation Models" and shared across
+ * the PRD pipeline and artifacts. When the user hasn't picked tier models, both
+ * resolvers fall back to the single "Intelligence Level" model (`getModel`).
+ *
+ * Keep this map in sync with any new `CoreArtifactSubtype`.
+ */
+export type ArtifactComplexity = 'low' | 'high';
+
+export const CORE_ARTIFACT_COMPLEXITY: Record<CoreArtifactSubtype, ArtifactComplexity> = {
+    // High — deep reasoning / structural design over the full PRD.
+    screen_inventory: 'high',
+    user_flows: 'high',
+    data_model: 'high',
+    implementation_plan: 'high',
+    // Low — derivative of upstream artifacts or template-shaped.
+    component_inventory: 'low',
+    design_system: 'low',
+    prompt_pack: 'low',
+};
+
+/**
+ * Resolve the Gemini model id a given core artifact should generate with,
+ * based on its complexity tier. Exported so the artifact orchestrator can
+ * record the *actual* model in workflow metrics (rather than assuming Pro).
+ */
+export const selectArtifactModel = (subtype: CoreArtifactSubtype): string =>
+    CORE_ARTIFACT_COMPLEXITY[subtype] === 'high' ? getStrongModel() : getFastModel();
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
@@ -380,6 +415,9 @@ export const generateCoreArtifact = async (
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     const onProgress = options?.onProgress;
+    // Route by complexity: high-reasoning artifacts → Expert (Pro), the rest →
+    // Fast (Flash). Mirrors the PRD pipeline's per-section tiering.
+    const model = selectArtifactModel(subtype);
 
     const featureList = structuredPRD.features.map(f => {
         let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
@@ -469,7 +507,7 @@ Architecture: ${structuredPRD.architecture}${
                 onError: () => {},
             },
             options?.signal,
-            { responseMimeType: 'application/json', responseSchema: schema },
+            { responseMimeType: 'application/json', responseSchema: schema, model },
         );
         onProgress?.('Validating output…');
 
@@ -515,6 +553,7 @@ Architecture: ${structuredPRD.architecture}${
             onError: () => {},
         },
         options?.signal,
+        { model },
     );
     onProgress?.('Validating output…');
     return { content: normalizeArtifactMarkdown(result) };
@@ -530,6 +569,8 @@ export const refineCoreArtifact = async (
 ): Promise<string> => {
     options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
 
+    // Refine on the same complexity tier the artifact was generated with.
+    const model = selectArtifactModel(subtype);
     const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
 
     if (subtype === 'screen_inventory') {
@@ -549,7 +590,7 @@ Rules:
         const result = await callGemini(
             system,
             `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-            { responseMimeType: 'application/json', responseSchema: screenInventorySchema },
+            { responseMimeType: 'application/json', responseSchema: screenInventorySchema, model },
             options?.signal,
         );
 
@@ -574,7 +615,7 @@ Rules:
     return callGemini(
         system,
         `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-        undefined,
+        { model },
         options?.signal,
     );
 };

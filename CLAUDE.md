@@ -257,7 +257,20 @@ device-scoped and never syncs) and full design.
     generation.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
-    implementation_plan, prompt_pack, design_system). Three of these
+    implementation_plan, prompt_pack, design_system). **Complexity-based model
+    routing (mirrors the PRD pipeline):** each subtype is tagged in
+    `CORE_ARTIFACT_COMPLEXITY` as `low`/`high`, and `selectArtifactModel()`
+    resolves a `high` artifact (screen_inventory, user_flows, data_model,
+    implementation_plan) to the Expert/Pro model (`getStrongModel`) and a `low`
+    artifact (component_inventory, design_system, prompt_pack) to the Fast/Flash
+    model (`getFastModel`) — both configured in Settings → "PRD Generation
+    Models" and shared with the PRD pipeline (when tier models are unset, both
+    resolvers fall back to the single "Intelligence Level" `GEMINI_MODEL`). The
+    resolved model is threaded into every generate **and** refine call, and
+    `artifactJobController` records that same per-subtype model in workflow
+    metrics (previously it always reported the strong model). Keep
+    `CORE_ARTIFACT_COMPLEXITY` in sync when adding a `CoreArtifactSubtype`.
+    Three of these
     (screen/data/component inventory) use Gemini JSON mode with schemas in
     `schemas/artifactSchemas.ts`, then convert to markdown via
     `structuredArtifactToMarkdown()` for storage; renderers in

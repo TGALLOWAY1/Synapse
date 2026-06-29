@@ -8,7 +8,7 @@ import type {
 } from '../../types';
 import { MOCKUP_SPEC_V1 } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
-import { generateCoreArtifact } from './coreArtifactService';
+import { generateCoreArtifact, selectArtifactModel } from './coreArtifactService';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
@@ -418,7 +418,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             nodeId: meta.subtype,
                             nodeName: meta.title,
                             agentName: 'Artifact Agent',
-                            model: getStrongModel(),
+                            model: selectArtifactModel(meta.subtype),
                             provider: 'gemini',
                             status: 'complete',
                             dependencyIds: meta.dependsOn,
@@ -431,7 +431,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             nodeId: meta.subtype,
                             nodeName: meta.title,
                             agentName: 'Artifact Agent',
-                            model: getStrongModel(),
+                            model: selectArtifactModel(meta.subtype),
                             provider: 'gemini',
                             status: 'error',
                             dependencyIds: meta.dependsOn,
