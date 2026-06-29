@@ -737,6 +737,18 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 ### Post-finalization transition (Mark Final → Assets)
 
+The artifact sidebar is organized into four workflow-named sections —
+**Project Foundation** (PRD), **UX & Design** (User Flows, Screen Inventory,
+Mockups, UI Components, Design System), **Architecture** (Data Model), and
+**Development** (Developer Prompts, Build Plan) — driven by `ARTIFACT_GROUPS` in
+`ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
+(`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
+`'implementation_plan'`) are unchanged so persisted artifacts, generation, and
+per-artifact model overrides keep working. `title`/`description` in
+`CORE_ARTIFACT_PIPELINE` are display-only labels that may be renamed freely; the
+sidebar's iteration order (and the right-rail / mobile-header / auto-open order)
+all derive from `ARTIFACT_GROUPS`, not `displayOrder`.
+
 Marking a spine final must not dump the user back on something that looks like
 the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)
 starts artifact generation and shows `FinalizationSuccessModal` ("PRD
@@ -747,9 +759,9 @@ check of the 7 core artifacts + mockups) **without** switching stage. Its
 `ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
-`CORE_ARTIFACT_DISPLAY_ORDER` (data_model → … → prompt_pack, then mockups) — and
-opens the mobile drawer (`useIsMobile`-gated, so it never reopens after the user
-closes it; desktop keeps the persistent side rail). While the overall run is in
+`ARTIFACT_GROUPS` order (user_flows → screen_inventory → mockup → … →
+implementation_plan) — and opens the mobile drawer (`useIsMobile`-gated, so it
+never reopens after the user closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
 

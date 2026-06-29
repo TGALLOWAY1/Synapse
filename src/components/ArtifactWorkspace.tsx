@@ -2,6 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight, ListChecks, History,
+    Layers, Database, Code2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -54,17 +55,45 @@ interface SlotMeta {
     icon: typeof FileText;
 }
 
+interface ArtifactGroup {
+    id: string;
+    title: string;
+    icon: typeof FileText;
+    items: WorkspaceSelection[];
+}
+
+// Sidebar grouping is purely visual — subtype IDs are unchanged. Order within
+// a group is the order rows render in. The "Project Foundation → UX & Design
+// → Architecture → Development" sequence tells the product-build story; keep
+// it in sync with the README/tour if either changes.
+const ARTIFACT_GROUPS: ArtifactGroup[] = [
+    { id: 'foundation', title: 'Project Foundation', icon: FileText, items: ['prd'] },
+    {
+        id: 'design',
+        title: 'UX & Design',
+        icon: Layers,
+        items: ['user_flows', 'screen_inventory', 'mockup', 'component_inventory', 'design_system'],
+    },
+    { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
+    { id: 'development', title: 'Development', icon: Code2, items: ['prompt_pack', 'implementation_plan'] },
+];
+
 function buildSlotMetas(): SlotMeta[] {
-    return [
-        { key: 'prd', title: 'PRD', description: 'Final product requirements document', icon: FileText },
-        ...CORE_ARTIFACT_DISPLAY_ORDER.map(meta => ({
+    const base: Record<WorkspaceSelection, SlotMeta> = {
+        prd: { key: 'prd', title: 'PRD', description: 'Final product requirements document', icon: FileText },
+        mockup: { key: 'mockup', title: 'Mockups', description: 'Interactive UI mockups', icon: Image },
+    } as Record<WorkspaceSelection, SlotMeta>;
+    for (const meta of CORE_ARTIFACT_DISPLAY_ORDER) {
+        base[meta.subtype as WorkspaceSelection] = {
             key: meta.subtype as WorkspaceSelection,
             title: meta.title,
             description: meta.description,
             icon: Package,
-        })),
-        { key: 'mockup' as WorkspaceSelection, title: 'Mockups', description: 'Interactive UI mockups', icon: Image },
-    ];
+        };
+    }
+    // Materialize in the group order so the right rail / counts / mobile
+    // header iterate in the same order the sidebar shows.
+    return ARTIFACT_GROUPS.flatMap(group => group.items.map(key => base[key]));
 }
 
 function StatusDot({ status }: { status: GenerationStatus }) {
@@ -487,39 +516,65 @@ export function ArtifactWorkspace({
                         <X size={18} />
                     </button>
                 </div>
-                <ul className="py-2">
-                    {slotMetas.map(slot => {
-                        const status = slotStatusFor(slot.key);
-                        const isSel = selected === slot.key;
-                        const Icon = slot.icon;
+                <nav aria-label="Artifacts" className="py-2">
+                    {ARTIFACT_GROUPS.map((group, groupIdx) => {
+                        const SectionIcon = group.icon;
+                        const groupSlots = group.items
+                            .map(key => slotMetas.find(s => s.key === key))
+                            .filter((s): s is SlotMeta => Boolean(s));
+                        if (groupSlots.length === 0) return null;
                         return (
-                            <li key={slot.key}>
-                                <button
-                                    type="button"
-                                    onClick={() => handleSelect(slot.key)}
-                                    className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition border-l-2 ${
-                                        isSel
-                                            ? 'bg-indigo-50 border-indigo-500'
-                                            : 'border-transparent hover:bg-neutral-50'
-                                    }`}
-                                >
-                                    <Icon size={16} className={`shrink-0 mt-0.5 ${isSel ? 'text-indigo-600' : 'text-neutral-400'}`} />
-                                    <div className="flex-1 min-w-0">
-                                        <div className="flex items-center gap-2">
-                                            <span className={`text-sm font-medium truncate ${isSel ? 'text-indigo-900' : 'text-neutral-800'}`}>
-                                                {slot.title}
-                                            </span>
-                                            <StatusDot status={status} />
-                                        </div>
-                                        <div className="text-[11px] text-neutral-500 leading-tight truncate">
-                                            {slot.description}
-                                        </div>
-                                    </div>
-                                </button>
-                            </li>
+                            <div
+                                key={group.id}
+                                className={
+                                    groupIdx > 0
+                                        ? 'mt-3 pt-3 border-t border-neutral-200/70'
+                                        : undefined
+                                }
+                            >
+                                <div className="px-4 pb-1.5 flex items-center gap-2">
+                                    <SectionIcon size={14} className="shrink-0 text-indigo-500" aria-hidden="true" />
+                                    <span className="text-[11px] font-semibold text-indigo-600 uppercase tracking-wider">
+                                        {group.title}
+                                    </span>
+                                </div>
+                                <ul>
+                                    {groupSlots.map(slot => {
+                                        const status = slotStatusFor(slot.key);
+                                        const isSel = selected === slot.key;
+                                        const Icon = slot.icon;
+                                        return (
+                                            <li key={slot.key}>
+                                                <button
+                                                    type="button"
+                                                    onClick={() => handleSelect(slot.key)}
+                                                    className={`w-full flex items-start gap-3 px-4 py-2.5 text-left transition border-l-2 ${
+                                                        isSel
+                                                            ? 'bg-indigo-50 border-indigo-500'
+                                                            : 'border-transparent hover:bg-neutral-50'
+                                                    }`}
+                                                >
+                                                    <Icon size={16} className={`shrink-0 mt-0.5 ${isSel ? 'text-indigo-600' : 'text-neutral-400'}`} />
+                                                    <div className="flex-1 min-w-0">
+                                                        <div className="flex items-center gap-2">
+                                                            <span className={`text-sm font-medium truncate ${isSel ? 'text-indigo-900' : 'text-neutral-800'}`}>
+                                                                {slot.title}
+                                                            </span>
+                                                            <StatusDot status={status} />
+                                                        </div>
+                                                        <div className="text-[11px] text-neutral-500 leading-tight truncate">
+                                                            {slot.description}
+                                                        </div>
+                                                    </div>
+                                                </button>
+                                            </li>
+                                        );
+                                    })}
+                                </ul>
+                            </div>
                         );
                     })}
-                </ul>
+                </nav>
             </aside>
 
             {/* Main pane */}
