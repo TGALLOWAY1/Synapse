@@ -24,7 +24,7 @@ import type {
     Artifact, ArtifactVersion, FeedbackItem, MockupImageRecord,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
-import { listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
+import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -131,13 +131,19 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
 // versions. The store keys artifactVersions by projectId, so the bundle's
 // version list already represents this project exhaustively. The IDB index
 // is keyed by versionId, so we walk that for each version.
+//
+// We deliberately do NOT filter on `record.projectId`. Artifact version ids
+// are unique per project (and the demo restore namespaces them — see
+// `namespaceSnapshotForRestore`), so a version id unambiguously identifies the
+// owning project. Filtering on the stored `projectId` used to silently drop
+// images whose tag had drifted (e.g. records left tagged with the demo project
+// id by the old restore path), which is exactly how snapshots ended up
+// "losing" mockup images.
 const collectProjectImages = async (bundle: SnapshotProjectBundle): Promise<MockupImageRecord[]> => {
     const out: MockupImageRecord[] = [];
     for (const v of bundle.artifactVersions) {
         const records = await listImagesForVersion(v.id);
-        for (const r of records) {
-            if (r.projectId === bundle.project.id) out.push(r);
-        }
+        out.push(...records);
     }
     return out;
 };
@@ -330,25 +336,70 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
     return projectId;
 };
 
-// Deep-clone a bundle while rewriting every string occurrence of `fromId` to
-// `toId`. We use this when restoring a snapshot as the demo project so the
-// project URL is stable across visitors (always /p/<DEMO_PROJECT_ID>) and
-// independent of whichever real project id was saved.
-const rewriteProjectId = <T,>(value: T, fromId: string, toId: string): T => {
+// Deep-clone a value while replacing every string that EXACTLY equals a key in
+// `idMap` with its mapped value. Exact-string matching (never substring) keeps
+// this safe to run over PRD prose / markdown — only standalone id fields are
+// rewritten, never an id that happens to appear inside a longer string.
+const rewriteIds = <T,>(value: T, idMap: Map<string, string>): T => {
     if (Array.isArray(value)) {
-        return value.map((v) => rewriteProjectId(v, fromId, toId)) as unknown as T;
+        return value.map((v) => rewriteIds(v, idMap)) as unknown as T;
     }
     if (value && typeof value === 'object') {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-            out[k] = rewriteProjectId(v, fromId, toId);
+            out[k] = rewriteIds(v, idMap);
         }
         return out as T;
     }
-    if (typeof value === 'string' && value === fromId) {
-        return toId as unknown as T;
+    if (typeof value === 'string' && idMap.has(value)) {
+        return idMap.get(value) as unknown as T;
     }
     return value;
+};
+
+// Produce a copy of a snapshot whose ids are namespaced under `targetProjectId`
+// so the restored project shares NO ids — and therefore no IndexedDB image
+// keys — with any real project already on this device.
+//
+// This is the crux of the "setting a project as demo wiped its mockup images"
+// bug. Mockup images are keyed in IndexedDB by `versionId` (the artifact
+// version id). The demo restore reuses the source project's bundle, so without
+// remapping, the demo and its source project reference the *same* artifact
+// version ids — and `restoreSnapshotAs` would `deleteImagesForVersion()` and
+// overwrite the source project's own images. Remapping every artifact version
+// id (and rebuilding each image's composite key) isolates the demo completely.
+//
+// Pure: no IndexedDB / store access, so it is unit-testable in isolation.
+export const namespaceSnapshotForRestore = (
+    snapshot: SnapshotPayload,
+    targetProjectId: string,
+): { bundle: SnapshotProjectBundle; images: MockupImageRecord[] } => {
+    const sourceId = snapshot.project.project.id;
+
+    const idMap = new Map<string, string>();
+    if (sourceId !== targetProjectId) {
+        idMap.set(sourceId, targetProjectId);
+        // Namespace every artifact version id deterministically so repeated
+        // restores are idempotent and never collide with a real project's
+        // bare-UUID version ids.
+        for (const v of snapshot.project.artifactVersions) {
+            if (v.id) idMap.set(v.id, `${targetProjectId}:${v.id}`);
+        }
+    }
+
+    if (idMap.size === 0) {
+        return { bundle: snapshot.project, images: snapshot.images };
+    }
+
+    const bundle = rewriteIds(snapshot.project, idMap);
+    const images = snapshot.images.map((record) => {
+        const next = rewriteIds(record, idMap);
+        // The composite `key` embeds the versionId, so rebuild it from the
+        // remapped fields rather than relying on exact-string replacement.
+        return { ...next, key: buildImageKey(next.versionId, next.screenId, next.quality) };
+    });
+
+    return { bundle, images };
 };
 
 // Restore a snapshot into the store under a fixed `targetProjectId` instead
@@ -359,21 +410,14 @@ export const restoreSnapshotAs = async (
     snapshot: SnapshotPayload,
     targetProjectId: string,
 ): Promise<string> => {
-    const sourceId = snapshot.project.project.id;
-    const remapped: SnapshotProjectBundle = sourceId === targetProjectId
-        ? snapshot.project
-        : rewriteProjectId(snapshot.project, sourceId, targetProjectId);
+    const { bundle: remapped, images } = namespaceSnapshotForRestore(snapshot, targetProjectId);
 
-    const versionIds = new Set(snapshot.images.map((r) => r.versionId));
+    const versionIds = new Set(images.map((r) => r.versionId));
     for (const vid of versionIds) {
         await deleteImagesForVersion(vid);
     }
-    for (const record of snapshot.images) {
-        // Image records also embed projectId, so remap before persisting.
-        const remappedRecord = sourceId === targetProjectId
-            ? record
-            : rewriteProjectId(record, sourceId, targetProjectId);
-        await putImage(remappedRecord);
+    for (const record of images) {
+        await putImage(record);
     }
 
     useProjectStore.setState((state) => ({

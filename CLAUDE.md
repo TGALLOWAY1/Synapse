@@ -143,6 +143,35 @@ otherwise have nothing in common — keep that distinction in mind:
    The old Atlas Data API REST gateway was retired by MongoDB (2025-09-30); the
    shim preserves the prior call/return shapes so call sites are unchanged.
 
+### Snapshots & the demo project (`src/lib/snapshotClient.ts`, `api/snapshots.js`)
+
+Owner-only project snapshots bundle a project's Zustand slice **plus its
+IndexedDB-backed mockup images** (base64 PNGs from `src/lib/mockupImageStore.ts`,
+keyed `versionId:screenId:quality` where `versionId` is the **artifact version
+id**) and push them to Vercel Blob behind a `SYNAPSE_OWNER_TOKEN` gate. Images
+are split out of the JSON envelope and shipped one request each so neither
+upload nor download crosses Vercel's ~4.5 MB cap. One snapshot can be pinned as
+**the demo** (`_demo.json` pointer + public `?demo=1` read); `loadDemoProject`
+restores it under the stable `DEMO_PROJECT_ID`.
+
+- **Restoring under a *different* project id MUST namespace the artifact version
+  ids** (`namespaceSnapshotForRestore` → `rewriteIds`), not just the project id.
+  Mockup images are keyed in IndexedDB by `versionId` with **no projectId in the
+  key**, so a demo restored from a real project's snapshot would otherwise share
+  version ids — and `restoreSnapshotAs`'s `deleteImagesForVersion()` would wipe
+  and re-tag the **source project's** images. Version ids are namespaced as
+  `${targetProjectId}:${versionId}` (deterministic → idempotent re-restores) and
+  each image's composite `key` is rebuilt from the remapped fields. Never restore
+  a snapshot under a foreign project id without this remap.
+- **`collectProjectImages` must not filter images by the stored `record.projectId`.**
+  A version id uniquely identifies its owning project, so collect by version id
+  only; filtering on a (possibly drifted) `projectId` tag is what silently
+  dropped mockup images from snapshots.
+- Note: user-uploaded Screen Inventory images
+  (`src/lib/screenInventoryImageStore.ts`, a separate IndexedDB store) are **not
+  yet** captured in snapshots, and `/api/projects` cross-device sync is
+  text-only (no images) — both are documented gaps, not bugs to "fix" silently.
+
 ### Server-side project storage (`api/projects.js`, `api/_lib/projectsStore.js`, `src/store/projectServerSync.ts`)
 
 PRD projects sync to a MongoDB `projects` collection so a signed-in user sees the
