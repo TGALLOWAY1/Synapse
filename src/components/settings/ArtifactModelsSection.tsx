@@ -19,18 +19,6 @@ interface ArtifactModelsSectionProps {
     onMockupModeChange: (mode: MockupImageMode) => void;
 }
 
-function ComplexityBadge({ complexity }: { complexity: 'low' | 'high' }) {
-    return complexity === 'high' ? (
-        <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-indigo-500/15 text-indigo-300 border border-indigo-500/30">
-            Complex
-        </span>
-    ) : (
-        <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-2 py-0.5 rounded-md bg-emerald-500/15 text-emerald-300 border border-emerald-500/30">
-            Simple
-        </span>
-    );
-}
-
 const selectClass =
     'w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 text-xs transition-all';
 
@@ -45,7 +33,7 @@ function ArtifactRow({
     title: string;
     description: string;
     children: React.ReactNode;
-    badge: React.ReactNode;
+    badge?: React.ReactNode;
 }) {
     return (
         <div className="bg-white/5 border border-white/5 rounded-2xl p-4 space-y-3">
@@ -58,7 +46,7 @@ function ArtifactRow({
             </div>
             <div className="space-y-2">
                 {children}
-                <div>{badge}</div>
+                {badge && <div>{badge}</div>}
             </div>
         </div>
     );
@@ -134,11 +122,8 @@ export function ArtifactModelsSection({
                                         <span className="text-[11px] text-neutral-300 min-w-0 truncate">
                                             {section.title}
                                         </span>
-                                        <span className="flex items-center gap-2 shrink-0">
-                                            <ComplexityBadge complexity={section.risk} />
-                                            <span className="text-[11px] text-neutral-400">
-                                                {modelDisplayName(model)}
-                                            </span>
+                                        <span className="text-[11px] text-neutral-400 shrink-0">
+                                            {modelDisplayName(model)}
                                         </span>
                                     </div>
                                 );
@@ -153,7 +138,6 @@ export function ArtifactModelsSection({
 
                 {/* Text artifacts — one model selector each. */}
                 {CORE_ARTIFACT_DISPLAY_ORDER.map((meta) => {
-                    const complexity = CORE_ARTIFACT_COMPLEXITY[meta.subtype];
                     const value = overrides[meta.subtype] ?? recommendedModel(meta.subtype);
                     return (
                         <ArtifactRow
@@ -161,7 +145,6 @@ export function ArtifactModelsSection({
                             icon={<Box size={18} />}
                             title={meta.title}
                             description={meta.description}
-                            badge={<ComplexityBadge complexity={complexity} />}
                         >
                             <select
                                 value={value}
