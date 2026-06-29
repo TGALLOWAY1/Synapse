@@ -374,9 +374,17 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     <div className="space-y-4">
                         <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
                             <Cpu size={14} className="text-indigo-400" />
-                            Intelligence Level
-                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Other features</span>
+                            Default model
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Refine & enhance</span>
                         </label>
+                        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
+                            Used for everything that isn't tiered above — the PRD refinement
+                            conversations (highlight &rarr; branch &rarr; consolidate) and the
+                            "Enhance" prompt helper. PRD sections and the core artifacts route
+                            automatically between the Fast and Expert models by complexity (see
+                            "PRD Generation Models"); this also acts as the fallback for those
+                            tiers when they're left unset.
+                        </p>
 
                         <div className="grid grid-cols-1 gap-3">
                             {CURRENT_MODELS.map((option) => (
@@ -463,8 +471,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-0.5">V1.2.0-PRO</p>
-                                <p className="text-xs text-neutral-300 font-medium select-none">Build: 031626</p>
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-0.5">v{__APP_VERSION__}</p>
+                                <p className="text-xs text-neutral-300 font-medium select-none">Build: {__BUILD_DATE__}</p>
                             </div>
                         </div>
                     </div>
