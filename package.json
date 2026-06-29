@@ -12,7 +12,8 @@
     "mockup:harness": "node scripts/mockup-eval-harness.mjs",
     "mockup:harness:sample": "node scripts/mockup-eval-harness.mjs --runs 2 --max-attempts 2 --outdir harness/sample-results",
     "mockup-css:build": "node scripts/build-mockup-css.mjs",
-    "capture:screenshots": "node scripts/capture-tour-screenshots.mjs"
+    "capture:screenshots": "node scripts/capture-tour-screenshots.mjs",
+    "capture:demo": "node scripts/capture-demo-screenshots.mjs"
   },
   "dependencies": {
     "@formkit/auto-animate": "^0.9.0",
