@@ -146,10 +146,10 @@ Mark your PRD as final and Synapse generates all the assets you need to build �
 in parallel, from that single source of truth:
 
 - **Screen Inventory** and **User Flows**
-- **Component Inventory** (a searchable, filterable component library with live
+- **UI Components** (a searchable, filterable component library with live
   previews and per-component accessibility contracts) and **Design System**
 - **Data Model** schemas with entities, fields, and relationships
-- **Implementation Plan** and **Prompt Pack**
+- **Build Plan** and **Developer Prompts**
 
 Three of them (`screen_inventory`, `data_model`, `component_inventory`) use
 Gemini JSON mode with explicit schemas and render as card grids, entity tables,
@@ -187,10 +187,10 @@ address the critique without regenerating the whole document.
 
 #### Track implementation progress
 
-The Implementation Plan converts into a tracked task checklist — no LLM call,
+The Build Plan converts into a tracked task checklist — no LLM call,
 derived deterministically from the plan. Review and edit the extracted tasks,
 **save them to the project**, and a progress checklist appears on the
-Implementation Plan: a `done / total` progress bar, a per-task status toggle
+Build Plan: a `done / total` progress bar, a per-task status toggle
 (to do → in progress → done), and expandable acceptance criteria. Export the
 tasks to **Markdown** or **GitHub issues**; created GitHub issues are linked
 back to each task so you can jump straight to them. Progress persists across
@@ -274,8 +274,8 @@ graph TD
 
     H --> J(Screen Inventory)
     H --> K(Data Model)
-    H --> L(Component Library)
-    H --> M(Implementation Plan)
+    H --> L(UI Components)
+    H --> M(Build Plan)
 ```
 
 ## Tech stack

@@ -18,54 +18,60 @@ export interface CoreArtifactMeta {
 // prompt, so most artifacts can be generated independently from it. Spurious
 // deps serialize the pipeline — buildDependencyLayers turns them into wait
 // gates — which kneecaps parallelism with little quality benefit.
+// `subtype` is the stable internal id and must not change — generation,
+// routing, persisted artifacts, and per-artifact model overrides all key off
+// it. `title`/`description` are display-only labels (shown in the artifact
+// sidebar, settings model picker, and progress messages) and may be renamed
+// freely. The grouping that drives the sidebar's visual sections lives in
+// ArtifactWorkspace's ARTIFACT_GROUPS, which keys off subtype.
 export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
-    {
-        subtype: 'screen_inventory',
-        title: 'Screen Inventory',
-        description: 'Structured list of screens and views implied by the PRD',
-        dependsOn: [],
-        displayOrder: 3,
-    },
     {
         subtype: 'user_flows',
         title: 'User Flows',
-        description: 'Primary user journeys and key flow sequences',
+        description: 'Primary user journeys and key flows',
         dependsOn: ['screen_inventory'],
+        displayOrder: 1,
+    },
+    {
+        subtype: 'screen_inventory',
+        title: 'Screen Inventory',
+        description: 'Structured list of screens and views',
+        dependsOn: [],
         displayOrder: 2,
     },
     {
         subtype: 'component_inventory',
-        title: 'Component Inventory',
-        description: 'Reusable components implied by the product design',
+        title: 'UI Components',
+        description: 'Reusable components and patterns',
         dependsOn: ['screen_inventory'],
+        displayOrder: 3,
+    },
+    {
+        subtype: 'design_system',
+        title: 'Design System',
+        description: 'Foundational UI system and styles',
+        dependsOn: [],
         displayOrder: 4,
     },
     {
         subtype: 'data_model',
-        title: 'Data Model Draft',
-        description: 'Primary entities, relationships, and data needs',
-        dependsOn: [],
-        displayOrder: 1,
-    },
-    {
-        subtype: 'implementation_plan',
-        title: 'Implementation Plan',
-        description: 'High-level build sequence and milestone-oriented dev plan',
-        dependsOn: [],
-        displayOrder: 6,
-    },
-    {
-        subtype: 'design_system',
-        title: 'Design System Starter',
-        description: 'Foundational UI system draft with patterns and components',
+        title: 'Data Model',
+        description: 'Entities, relationships, and data schema',
         dependsOn: [],
         displayOrder: 5,
     },
     {
         subtype: 'prompt_pack',
-        title: 'Prompt Pack',
-        description: 'Downstream prompts for design, coding, critique, and testing',
+        title: 'Developer Prompts',
+        description: 'AI prompts for downstream tasks',
         dependsOn: ['implementation_plan', 'design_system', 'data_model'],
+        displayOrder: 6,
+    },
+    {
+        subtype: 'implementation_plan',
+        title: 'Build Plan',
+        description: 'High-level build sequence and milestones',
+        dependsOn: [],
         displayOrder: 7,
     },
 ];
