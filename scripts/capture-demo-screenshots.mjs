@@ -18,6 +18,11 @@
 //   404s and nothing loads. Use `--local` only together with a dev proxy that
 //   forwards `/api/*` to a real deployment.
 //
+// SYNAPSE_OWNER_TOKEN (optional env var): capturing the demo needs NO auth, but
+//   if this is set the script first verifies a demo snapshot is actually pinned
+//   on the target deployment (clearer, faster failure if it isn't). The token is
+//   only sent to the configured base URL's owner API and is never logged.
+//
 // WHAT IT DOES per viewport (desktop 1440x920, mobile 390x844, both @2x):
 //   1. open `/` (signed out → LoginPage) and click "Demo project"
 //   2. wait for navigation to /p/<DEMO_PROJECT_ID>
@@ -125,6 +130,46 @@ async function waitForServer(url, timeoutMs = 60000) {
 }
 
 // ---------------------------------------------------------------------------
+// Optional owner-token preflight
+// ---------------------------------------------------------------------------
+// Capturing the demo needs NO auth — `?demo=1` is a public read. But if a
+// SYNAPSE_OWNER_TOKEN is provided (e.g. as a CI secret), use it to confirm a
+// demo snapshot is actually pinned before we spin up a browser, so a
+// misconfigured deployment fails fast with a clear message instead of a cryptic
+// "Demo project never loaded" timeout. The token is only ever sent to the
+// configured BASE_URL's owner API and is never logged.
+async function preflightDemoPinned(token) {
+    try {
+        const res = await fetch(`${BASE_URL}/api/snapshots`, {
+            headers: { authorization: `Bearer ${token}` },
+        });
+        if (res.status === 401) {
+            throw new Error(
+                'SYNAPSE_OWNER_TOKEN was rejected by the deployment (401). Check the ' +
+                'secret matches the value set in the Vercel project env.',
+            );
+        }
+        if (!res.ok) {
+            console.warn(`Preflight skipped: owner list returned HTTP ${res.status}.`);
+            return;
+        }
+        const body = await res.json().catch(() => ({}));
+        if (!body.demoSnapshotId) {
+            throw new Error(
+                'No demo snapshot is pinned on this deployment. Open the app as the ' +
+                'owner → Cloud Snapshots → pin one as the demo, then re-run.',
+            );
+        }
+        console.log(`Preflight OK — demo snapshot pinned (id ${body.demoSnapshotId}).`);
+    } catch (err) {
+        // A genuine "not pinned" / "token rejected" should stop the run; a bare
+        // network blip on the diagnostic call should not block the public capture.
+        if (err instanceof Error && /pinned|rejected/.test(err.message)) throw err;
+        console.warn(`Preflight check could not run (${err?.message || err}); continuing.`);
+    }
+}
+
+// ---------------------------------------------------------------------------
 // Capture
 // ---------------------------------------------------------------------------
 async function openDemo(page) {
@@ -222,6 +267,9 @@ async function main() {
     try {
         if (args.local) await waitForServer(`${BASE_URL}/`);
         console.log(`Capturing demo artifacts from ${BASE_URL} → ${outDir}`);
+
+        const ownerToken = process.env.SYNAPSE_OWNER_TOKEN;
+        if (ownerToken) await preflightDemoPinned(ownerToken);
 
         const executablePath = findChromiumExecutable();
         browser = await chromium.launch(executablePath ? { executablePath } : undefined);
