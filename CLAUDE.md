@@ -369,7 +369,38 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     generation.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
-    implementation_plan, prompt_pack, design_system). Three of these
+    implementation_plan, prompt_pack, design_system). **Per-artifact model
+    routing (`src/lib/artifactModelSettings.ts`):** the routing brain lives in
+    `artifactModelSettings.ts` (not coreArtifactService) so the Settings UI and
+    the generation pipeline share one source of truth. Each subtype is tagged in
+    `CORE_ARTIFACT_COMPLEXITY` (`low`/`high`); `getArtifactModel(subtype)`
+    resolves **(1)** an explicit per-artifact override (Settings → "Artifact
+    Generation Models", persisted as the `GEMINI_ARTIFACT_MODELS` JSON map),
+    else **(2)** the complexity recommendation — `high` (screen_inventory,
+    user_flows, data_model, implementation_plan) → Expert/Pro (`getStrongModel`),
+    `low` (component_inventory, design_system, prompt_pack) → Fast/Flash
+    (`getFastModel`), else **(3)** the tier fallback to the single Default model
+    (`getModel`) → `DEFAULT_GEMINI_MODEL`. `coreArtifactService.selectArtifactModel`
+    delegates to `getArtifactModel` and re-exports `CORE_ARTIFACT_COMPLEXITY` for
+    back-compat. Existing projects have no override key, so behaviour is
+    unchanged until the user picks a model (no migration). The resolved model is
+    threaded into every generate **and** refine call, and `artifactJobController`
+    records that same per-subtype model in workflow metrics. Keep
+    `CORE_ARTIFACT_COMPLEXITY` in sync when adding a `CoreArtifactSubtype`.
+    **Mockups are image artifacts, not text:** `artifactModelSettings` also owns
+    the mockup **image source mode** (`getMockupImageMode`/`setMockupImageMode`,
+    `SYNAPSE_MOCKUP_IMAGE_MODE`: `gpt_image` | `user_uploaded`, default
+    `gpt_image`). `resolveMockupRender(mode, hasOpenAiKey)` decides per screen:
+    `user_uploaded` (or `gpt_image` with **no** OpenAI key — a non-silent forced
+    fallback) → the manual prompt+upload sheet (`MockupScreenUpload`, reusing the
+    IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
+    otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
+    `MockupImageStatusChip` summarizes per-version status (AI-generated /
+    uploaded / awaiting). The Settings section is `settings/ArtifactModelsSection.tsx`
+    (PRD shown as expandable "Multi", text artifacts with Complex/Simple badges,
+    Mockups with an "Image Source" select); the model list is the shared
+    `src/lib/modelCatalog.ts`.
+    Three of these
     (screen/data/component inventory) use Gemini JSON mode with schemas in
     `schemas/artifactSchemas.ts`, then convert to markdown via
     `structuredArtifactToMarkdown()` for storage; renderers in

@@ -2,6 +2,7 @@ import { useState } from 'react';
 import type { MockupPayload, MockupSettings, StalenessState } from '../../types';
 import { StalenessBadge } from '../StalenessBadge';
 import { MockupScreenImage } from './MockupScreenImage';
+import { MockupImageStatusChip } from './MockupImageStatusChip';
 
 type Props = {
     payload: MockupPayload;
@@ -73,6 +74,7 @@ export function MockupViewer({
                     <span className={CHIP}>{FIDELITY_LABELS[settings.fidelity] ?? settings.fidelity}</span>
                     <span className={CHIP}>{SCOPE_LABELS[settings.scope] ?? settings.scope}</span>
                     <StalenessBadge staleness={staleness} />
+                    {versionId && <MockupImageStatusChip versionId={versionId} screens={payload.screens} />}
                     <span className="text-[10px] text-neutral-400 ml-auto tabular-nums">
                         v{versionNumber} · {formatDate(createdAt)}
                     </span>

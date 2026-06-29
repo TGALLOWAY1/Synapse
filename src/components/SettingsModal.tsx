@@ -4,6 +4,16 @@ import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
 import { ConnectedAccountsSection } from './settings/ConnectedAccountsSection';
+import { ArtifactModelsSection } from './settings/ArtifactModelsSection';
+import { MODEL_CATALOG, CURRENT_MODELS, LEGACY_MODELS, type ModelOption } from '../lib/modelCatalog';
+import {
+    getArtifactModelOverrides,
+    setArtifactModelOverrides,
+    getMockupImageMode,
+    setMockupImageMode,
+    type MockupImageMode,
+} from '../lib/artifactModelSettings';
+import type { CoreArtifactSubtype } from '../types';
 import {
     getLocalCredential,
     setLocalCredential,
@@ -19,62 +29,6 @@ const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
 interface SettingsModalProps {
     onClose: () => void;
 }
-
-/**
- * Model catalog. Order within each tier = display order in the UI. `current`
- * models render expanded; `legacy` models render inside a collapsed section.
- * The `id` is passed straight into the Gemini REST URL, so it must match what
- * Google's API accepts (see https://ai.google.dev/gemini-api/docs/models).
- */
-type ModelTier = 'current' | 'legacy';
-interface ModelOption {
-    id: string;
-    name: string;
-    description: string;
-    tier: ModelTier;
-}
-
-const MODEL_CATALOG: ModelOption[] = [
-    {
-        id: 'gemini-3.5-flash',
-        name: 'Gemini 3.5 Flash',
-        description: 'Recommended default. Latest GA Flash — frontier-class quality with full quotas.',
-        tier: 'current',
-    },
-    {
-        id: 'gemini-3.1-pro-preview',
-        name: 'Gemini 3.1 Pro',
-        description: 'Maximum reasoning power for the most complex PRDs.',
-        tier: 'current',
-    },
-    {
-        id: 'gemini-3.1-flash-lite-preview',
-        name: 'Gemini 3.1 Flash-Lite',
-        description: 'Cheapest option. Good for quick drafts and iteration.',
-        tier: 'current',
-    },
-    {
-        id: 'gemini-3-flash-preview',
-        name: 'Gemini 3 Flash',
-        description: 'Previous-generation Flash preview — prefer 3.5 Flash, which is GA.',
-        tier: 'legacy',
-    },
-    {
-        id: 'gemini-2.5-pro',
-        name: 'Gemini 2.5 Pro',
-        description: 'Previous-generation high-reasoning model.',
-        tier: 'legacy',
-    },
-    {
-        id: 'gemini-2.5-flash',
-        name: 'Gemini 2.5 Flash',
-        description: 'Previous-generation fast model. Often hits capacity limits — prefer 3.5 Flash.',
-        tier: 'legacy',
-    },
-];
-
-const CURRENT_MODELS = MODEL_CATALOG.filter((m) => m.tier === 'current');
-const LEGACY_MODELS = MODEL_CATALOG.filter((m) => m.tier === 'legacy');
 
 function ModelRadio({
     option,
@@ -120,6 +74,10 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
     const [strongModel, setStrongModel] = useState(() => localStorage.getItem('GEMINI_STRONG_MODEL') || DEFAULT_STRONG_MODEL);
     const [githubToken, setGithubToken] = useState(() => getLocalCredential(GITHUB_TOKEN) || '');
     const [githubRepo, setGithubRepo] = useState(() => localStorage.getItem('GITHUB_DEFAULT_REPO') || '');
+    const [artifactOverrides, setArtifactOverrides] = useState<Partial<Record<CoreArtifactSubtype, string>>>(
+        () => getArtifactModelOverrides(),
+    );
+    const [mockupMode, setMockupMode] = useState<MockupImageMode>(() => getMockupImageMode());
 
     // Expand the legacy section automatically if the user is currently on a
     // legacy model — otherwise keep it collapsed to reduce visual noise.
@@ -134,6 +92,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
         localStorage.setItem('GEMINI_MODEL', model);
         localStorage.setItem('GEMINI_FAST_MODEL', fastModel);
         localStorage.setItem('GEMINI_STRONG_MODEL', strongModel);
+        setArtifactModelOverrides(artifactOverrides);
+        setMockupImageMode(mockupMode);
         const trimmedProjectId = projectId.trim();
         if (trimmedProjectId) {
             localStorage.setItem('GEMINI_PROJECT_ID', trimmedProjectId);
@@ -370,13 +330,31 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                         </div>
                     </div>
 
+                    {/* Per-artifact model routing */}
+                    <ArtifactModelsSection
+                        fastModel={fastModel}
+                        strongModel={strongModel}
+                        overrides={artifactOverrides}
+                        onOverridesChange={setArtifactOverrides}
+                        mockupMode={mockupMode}
+                        onMockupModeChange={setMockupMode}
+                    />
+
                     {/* Model Selection */}
                     <div className="space-y-4">
                         <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
                             <Cpu size={14} className="text-indigo-400" />
-                            Intelligence Level
-                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Other features</span>
+                            Default model
+                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Refine & enhance</span>
                         </label>
+                        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
+                            Used for everything that isn't tiered above — the PRD refinement
+                            conversations (highlight &rarr; branch &rarr; consolidate) and the
+                            "Enhance" prompt helper. PRD sections and the core artifacts route
+                            automatically between the Fast and Expert models by complexity (see
+                            "PRD Generation Models"); this also acts as the fallback for those
+                            tiers when they're left unset.
+                        </p>
 
                         <div className="grid grid-cols-1 gap-3">
                             {CURRENT_MODELS.map((option) => (
@@ -463,8 +441,8 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 </div>
                             </div>
                             <div className="text-right">
-                                <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-0.5">V1.2.0-PRO</p>
-                                <p className="text-xs text-neutral-300 font-medium select-none">Build: 031626</p>
+                                <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-0.5">v{__APP_VERSION__}</p>
+                                <p className="text-xs text-neutral-300 font-medium select-none">Build: {__BUILD_DATE__}</p>
                             </div>
                         </div>
                     </div>

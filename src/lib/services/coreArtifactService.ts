@@ -1,6 +1,8 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
+import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
+import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
@@ -22,6 +24,22 @@ export interface CoreArtifactGenerationResult {
      */
     metadata?: Record<string, unknown>;
 }
+
+// Per-artifact model routing now lives in `artifactModelSettings.ts` so the
+// Settings UI and the generation pipeline share one source of truth. Re-export
+// the complexity map and type for back-compat with existing importers.
+export { CORE_ARTIFACT_COMPLEXITY };
+export type { ArtifactComplexity };
+
+/**
+ * Resolve the Gemini model id a given core artifact should generate with.
+ * Honors an explicit per-artifact override (Settings → "Artifact Generation
+ * Models") and otherwise falls back to the complexity recommendation. Exported
+ * so the artifact orchestrator can record the *actual* model in workflow
+ * metrics.
+ */
+export const selectArtifactModel = (subtype: CoreArtifactSubtype): string =>
+    getArtifactModel(subtype);
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
@@ -380,6 +398,9 @@ export const generateCoreArtifact = async (
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     const onProgress = options?.onProgress;
+    // Route by complexity: high-reasoning artifacts → Expert (Pro), the rest →
+    // Fast (Flash). Mirrors the PRD pipeline's per-section tiering.
+    const model = selectArtifactModel(subtype);
 
     const featureList = structuredPRD.features.map(f => {
         let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
@@ -469,7 +490,7 @@ Architecture: ${structuredPRD.architecture}${
                 onError: () => {},
             },
             options?.signal,
-            { responseMimeType: 'application/json', responseSchema: schema },
+            { responseMimeType: 'application/json', responseSchema: schema, model },
         );
         onProgress?.('Validating output…');
 
@@ -515,6 +536,7 @@ Architecture: ${structuredPRD.architecture}${
             onError: () => {},
         },
         options?.signal,
+        { model },
     );
     onProgress?.('Validating output…');
     return { content: normalizeArtifactMarkdown(result) };
@@ -530,6 +552,8 @@ export const refineCoreArtifact = async (
 ): Promise<string> => {
     options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
 
+    // Refine on the same complexity tier the artifact was generated with.
+    const model = selectArtifactModel(subtype);
     const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
 
     if (subtype === 'screen_inventory') {
@@ -549,7 +573,7 @@ Rules:
         const result = await callGemini(
             system,
             `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-            { responseMimeType: 'application/json', responseSchema: screenInventorySchema },
+            { responseMimeType: 'application/json', responseSchema: screenInventorySchema, model },
             options?.signal,
         );
 
@@ -574,7 +598,7 @@ Rules:
     return callGemini(
         system,
         `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-        undefined,
+        { model },
         options?.signal,
     );
 };

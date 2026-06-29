@@ -18,6 +18,8 @@ import type { MockupImageQuality, MockupImageRecord, MockupPayload, MockupScreen
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { buildScreenScopeKey } from '../../lib/mockupImageStore';
 import { hasOpenAIKey } from '../../lib/openaiClient';
+import { getMockupImageMode, resolveMockupRender } from '../../lib/artifactModelSettings';
+import { MockupScreenUpload } from './MockupScreenUpload';
 
 interface Props {
     projectId: string;
@@ -87,6 +89,26 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     }, [versionId, loadForVersion]);
 
     const keyPresent = hasOpenAIKey();
+
+    // Image source routing (Settings → Artifact Generation Models → Mockups):
+    //  - 'user_uploaded'             → always the manual upload sheet
+    //  - 'gpt_image' without a key   → fall back to the manual sheet (never
+    //                                  silently fail) and explain why
+    //  - 'gpt_image' with a key      → the OpenAI generator below
+    const { manual, forcedFallback } = resolveMockupRender(getMockupImageMode(), keyPresent);
+    if (manual) {
+        return (
+            <MockupScreenUpload
+                projectId={projectId}
+                artifactId={artifactId}
+                versionId={versionId}
+                screen={screen}
+                payload={payload}
+                settings={settings}
+                forcedFallback={forcedFallback}
+            />
+        );
+    }
 
     const hasHighQuality = records.some((r) => r.quality === 'high');
 
