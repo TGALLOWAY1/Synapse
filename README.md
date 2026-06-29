@@ -158,6 +158,11 @@ and categorized component cards rather than raw markdown. Every artifact tracks
 refinement** ("add error states to each screen"), and surfaces **quality
 warnings** if the output looks truncated or malformed.
 
+Each artifact is routed to the right model by complexity — Flash for simpler
+artifacts, Pro for complex reasoning — and you can override the model **per
+artifact** in Settings → **Artifact Generation Models** (the PRD itself routes
+per-section). Sensible defaults mean you never have to touch it.
+
 #### Multi-fidelity UI mockups
 
 <img width="100%" alt="UI Mockups are one of the assets generated from the finalized PRD" src="public/screenshots/tour-assets.png" />
@@ -165,7 +170,12 @@ warnings** if the output looks truncated or malformed.
 Generate UI mockups directly from the finalized PRD with configurable platform
 (mobile / desktop), fidelity (wireframe / mid-fi / high-fi), and scope (single
 screen / multi-screen / key workflow). Every run is saved as a new version so
-you can diff iterations side-by-side.
+you can diff iterations side-by-side. Per-screen images come from one of two
+sources (chosen in Settings → **Artifact Generation Models → Mockups**): OpenAI
+`gpt-image-2`, or **your own uploads** — the latter shows a generated prompt for
+each screen (goal, layout, visual style, expected format) to guide what you
+create and upload. If GPT Image is selected without an OpenAI key, Synapse falls
+back to the upload sheet rather than failing silently.
 
 #### Integrated feedback loop
 
