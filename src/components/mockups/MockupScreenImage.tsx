@@ -110,8 +110,6 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
         );
     }
 
-    const hasHighQuality = records.some((r) => r.quality === 'high');
-
     const handleGenerate = (quality: MockupImageQuality) => {
         // High quality is the expensive variant — confirm before spending. Paid
         // OpenAI usage is billed to the user's own account via their key.
@@ -149,8 +147,13 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     }
 
     if (activeRecord) {
+        // Quality is now chosen in Settings, not per-card — the old "Generate
+        // high quality" inline upgrade button was removed to keep the artifact
+        // surface focused on a single primary action. Multiple quality
+        // variants can still exist (e.g. from older sessions), and we keep the
+        // small toggle so the user can flip between them.
         return (
-            <div className="bg-white rounded-lg border border-neutral-200 overflow-hidden">
+            <div className="overflow-hidden">
                 <div className="relative bg-neutral-50 flex items-center justify-center">
                     <img
                         src={activeRecord.dataUrl}
@@ -158,15 +161,8 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                         className="max-w-full max-h-[680px] object-contain"
                     />
                 </div>
-                <div className="px-4 py-3 border-t border-neutral-100 flex items-center gap-2 flex-wrap">
-                    <span className="text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium inline-flex items-center gap-1">
-                        <Sparkles size={10} />
-                        gpt-image-2 · {activeRecord.quality}
-                    </span>
-                    <span className="text-[11px] text-neutral-400">
-                        {new Date(activeRecord.generatedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
-                    </span>
-                    {records.length > 1 && (
+                {records.length > 1 && (
+                    <div className="px-4 py-2 border-t border-neutral-100 flex items-center justify-end">
                         <div className="inline-flex items-center bg-neutral-100 rounded-md p-0.5 text-[11px] font-medium" role="group" aria-label="Switch quality">
                             {records.map((r) => {
                                 const selected = r.quality === effectiveQuality;
@@ -187,31 +183,19 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                                 );
                             })}
                         </div>
-                    )}
-                    <div className="ml-auto flex items-center gap-1.5">
-                        {!hasHighQuality && (
-                            <button
-                                type="button"
-                                disabled={!keyPresent}
-                                onClick={() => handleGenerate('high')}
-                                className="inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                                title={keyPresent ? 'Generate at high quality (slower, ~30-60s) — your low-quality render is preserved' : 'Add an OpenAI API key in Settings to enable'}
-                            >
-                                <Sparkles size={12} />
-                                Generate high quality
-                            </button>
-                        )}
-                        <button
-                            type="button"
-                            disabled={!keyPresent}
-                            onClick={() => handleGenerate(activeRecord.quality)}
-                            className="inline-flex items-center gap-1.5 text-xs px-2 py-1.5 rounded-md text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                            title={`Re-run gpt-image-2 at ${activeRecord.quality} quality (replaces this render)`}
-                        >
-                            <RefreshCw size={12} />
-                            Redo {activeRecord.quality}
-                        </button>
                     </div>
+                )}
+                <div className="px-4 py-2 border-t border-neutral-100 flex items-center justify-end">
+                    <button
+                        type="button"
+                        disabled={!keyPresent}
+                        onClick={() => handleGenerate(activeRecord.quality)}
+                        className="inline-flex items-center gap-1.5 text-xs px-2.5 py-1.5 rounded-md text-neutral-600 hover:bg-neutral-100 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        title={keyPresent ? 'Re-run this screen at the same quality (replaces this render)' : 'Add an OpenAI API key in Settings to enable'}
+                    >
+                        <RefreshCw size={12} />
+                        Regenerate
+                    </button>
                 </div>
             </div>
         );

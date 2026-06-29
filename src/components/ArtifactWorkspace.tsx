@@ -118,6 +118,12 @@ export function ArtifactWorkspace({
     const [tasksModalSource, setTasksModalSource] = useState<
         { artifactId: string; content: string } | null
     >(null);
+    // Mockup regenerate confirm — surfaces "Creates Version N. Current
+    // version remains available." before kicking off a new run so the user
+    // doesn't fear losing their existing render.
+    const [mockupRegenConfirm, setMockupRegenConfirm] = useState<
+        { nextVersion: number } | null
+    >(null);
 
     const job = getJob(projectId);
 
@@ -330,7 +336,7 @@ export function ArtifactWorkspace({
                         {renderVersionControls(mockup.id, preferred)}
                         <button
                             type="button"
-                            onClick={() => handleRetrySlot('mockup')}
+                            onClick={() => setMockupRegenConfirm({ nextVersion: preferred.versionNumber + 1 })}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
                         >
                             <RefreshCcw size={12} /> Regenerate Mockup
@@ -570,6 +576,53 @@ export function ArtifactWorkspace({
                     projectName={getProject(projectId)?.name}
                     onClose={() => setTasksModalSource(null)}
                 />
+            )}
+
+            {mockupRegenConfirm && (
+                <div
+                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
+                    onClick={() => setMockupRegenConfirm(null)}
+                    role="presentation"
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="mockup-regen-title"
+                    >
+                        <div className="px-5 pt-5 pb-3">
+                            <h3 id="mockup-regen-title" className="text-base font-bold text-neutral-900">
+                                Regenerate Mockup
+                            </h3>
+                            <p className="text-sm text-neutral-700 mt-1">
+                                Creates Version {mockupRegenConfirm.nextVersion}.
+                            </p>
+                            <p className="text-xs text-neutral-500 mt-1">
+                                Current version remains available in version history.
+                            </p>
+                        </div>
+                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMockupRegenConfirm(null)}
+                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setMockupRegenConfirm(null);
+                                    handleRetrySlot('mockup');
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
+                            >
+                                <RefreshCcw size={13} /> Regenerate
+                            </button>
+                        </div>
+                    </div>
+                </div>
             )}
 
             {versionHistoryArtifactId && (() => {
