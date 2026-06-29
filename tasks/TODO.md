@@ -112,3 +112,30 @@ below are the durable follow-ups that need backend work.
       workspace is client-only today, so metrics are per-browser).
 - [ ] Record interrupted/aborted runs as a distinct status instead of dropping
       them.
+
+## Cross-device image sync TODOs
+
+Image durability for the per-user `/api/projects` path is implemented for
+**mockup** images (bytes → Vercel Blob, refs → `project_images`, lazy hydration;
+see CLAUDE.md "Cross-device mockup image sync"). Follow-ups:
+
+- [ ] Wire **Screen Inventory** upload images (`screenInventoryImageStore.ts`)
+      onto the same ref layer. The ref store is already generic (`kind:
+      'screen_inventory'`, opaque `meta`); needs a push/pull path analogous to
+      `projectImageSync.ts` and a hydration hook in the screen-inventory image
+      consumer. Blob path prefix can stay `users/<userId>/mockup-images/` or be
+      generalized to `users/<userId>/images/`. **This also covers the
+      `user_uploaded` mockup image source mode** (PR #168): user-uploaded mockups
+      persist to `screenInventoryImageStore`, so they only become cross-device
+      once this store is wired. Today only `gpt_image` (AI-generated) mockups sync.
+- [ ] **Eager GC for per-image overwrite / version regen.** Today a new render
+      (new hash → new blob) leaves the prior blob/ref until project hard-delete.
+      Add a sweep (or wire `deleteProjectImageRefs` into `deleteImagesForVersion`
+      / regen paths) that refcount-GCs blobs no longer referenced by any live
+      key. `image-ref-delete` already exists for this.
+- [ ] Reconcile server-newer images per-key (today push is local-keys-out,
+      pull is refs-in for hydration; there's no per-image conflict resolution,
+      matching the text-bundle "local wins" stance).
+- [ ] Consider switching to signed/expiring read URLs if mockups ever carry
+      sensitive content (current decision: public + unguessable content-addressed
+      path, for direct browser downloads).

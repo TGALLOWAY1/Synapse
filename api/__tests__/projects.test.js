@@ -17,9 +17,25 @@ const dataLayer = {
   importProjects: vi.fn(),
 };
 
+// Image-ref data layer + Blob SDK — mocked so the handler's image-sync routing
+// can be exercised without Mongo or Vercel Blob.
+const imageRefs = {
+  isValidImageKey: vi.fn((k) => typeof k === 'string' && k.length > 0 && k.length <= 512),
+  isValidRef: vi.fn((r) => Boolean(r && r.key && r.hash && r.blobUrl)),
+  listImageRefs: vi.fn(),
+  upsertImageRef: vi.fn(),
+  deleteImageRefs: vi.fn(),
+  deleteRefsForProject: vi.fn(),
+};
+const handleUpload = vi.fn();
+const del = vi.fn();
+
 vi.mock('../_lib/requireUser.js', () => ({ requireUser: (...a) => requireUser(...a) }));
 vi.mock('../_lib/rateLimit.js', () => ({ enforceRateLimit: (...a) => enforceRateLimit(...a) }));
 vi.mock('../_lib/projectsStore.js', () => dataLayer);
+vi.mock('../_lib/imageRefsStore.js', () => imageRefs);
+vi.mock('@vercel/blob/client', () => ({ handleUpload: (...a) => handleUpload(...a) }));
+vi.mock('@vercel/blob', () => ({ del: (...a) => del(...a) }));
 
 let handler;
 
@@ -41,9 +57,15 @@ beforeEach(async () => {
   requireUser.mockReset().mockResolvedValue({ userId: 'user-a' });
   enforceRateLimit.mockReset().mockReturnValue(false);
   Object.values(dataLayer).forEach((fn) => fn.mockReset());
+  Object.values(imageRefs).forEach((fn) => fn.mockReset());
+  handleUpload.mockReset();
+  del.mockReset();
+  imageRefs.isValidImageKey.mockImplementation((k) => typeof k === 'string' && k.length > 0 && k.length <= 512);
+  imageRefs.isValidRef.mockImplementation((r) => Boolean(r && r.key && r.hash && r.blobUrl));
   dataLayer.isValidProjectId.mockImplementation(
     (id) => typeof id === 'string' && /^[A-Za-z0-9_-]{1,64}$/.test(id),
   );
+  process.env.BLOB_READ_WRITE_TOKEN = 'test-token';
   ({ default: handler } = await import('../projects.js'));
 });
 
@@ -156,5 +178,81 @@ describe('POST actions', () => {
     await handler({ method: 'POST', query: { action: 'restore', id: 'p1' }, headers: {} }, res);
     expect(res.statusCode).toBe(200);
     expect(parsed(res).restored).toBe(true);
+  });
+});
+
+describe('image sync actions', () => {
+  it('GET image-refs lists the session user\'s refs for the project', async () => {
+    imageRefs.listImageRefs.mockResolvedValue([{ key: 'k1' }]);
+    const res = mockRes();
+    await handler({ method: 'GET', query: { action: 'image-refs', id: 'p1' }, headers: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(parsed(res)).toEqual({ refs: [{ key: 'k1' }] });
+    expect(imageRefs.listImageRefs).toHaveBeenCalledWith('user-a', 'p1');
+  });
+
+  it('image-ref-put upserts under the session user when the blob URL is in their prefix', async () => {
+    imageRefs.upsertImageRef.mockResolvedValue({ key: 'k1' });
+    const res = mockRes();
+    const ref = { key: 'k1', hash: 'h', blobUrl: 'https://blob/users/user-a/mockup-images/h.png' };
+    await handler({ method: 'POST', query: { action: 'image-ref-put', id: 'p1' }, headers: {}, body: { ref } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(imageRefs.upsertImageRef).toHaveBeenCalledWith('user-a', 'p1', ref);
+  });
+
+  it('image-ref-put rejects a blob URL outside the caller\'s prefix', async () => {
+    const res = mockRes();
+    const ref = { key: 'k1', hash: 'h', blobUrl: 'https://blob/users/SOMEONE_ELSE/mockup-images/h.png' };
+    await handler({ method: 'POST', query: { action: 'image-ref-put', id: 'p1' }, headers: {}, body: { ref } }, res);
+    expect(res.statusCode).toBe(403);
+    expect(parsed(res).error).toBe('forbidden_blob_url');
+    expect(imageRefs.upsertImageRef).not.toHaveBeenCalled();
+  });
+
+  it('image-ref-delete deletes refs and GCs the orphaned blobs', async () => {
+    imageRefs.deleteImageRefs.mockResolvedValue({ deletedCount: 2, orphanedBlobUrls: ['url1', 'url2'] });
+    const res = mockRes();
+    await handler({ method: 'POST', query: { action: 'image-ref-delete', id: 'p1' }, headers: {}, body: { keys: ['k1', 'k2'] } }, res);
+    expect(res.statusCode).toBe(200);
+    expect(parsed(res)).toEqual({ deletedCount: 2, orphanedBlobs: 2 });
+    expect(imageRefs.deleteImageRefs).toHaveBeenCalledWith('user-a', 'p1', ['k1', 'k2']);
+    expect(del).toHaveBeenCalledWith(['url1', 'url2']);
+  });
+
+  it('hard-delete also GCs the project\'s image refs + orphan blobs', async () => {
+    dataLayer.hardDeleteProject.mockResolvedValue(true);
+    imageRefs.deleteRefsForProject.mockResolvedValue({ deletedCount: 1, orphanedBlobUrls: ['url1'] });
+    const res = mockRes();
+    await handler({ method: 'DELETE', query: { id: 'p1', hard: '1' }, headers: {} }, res);
+    expect(res.statusCode).toBe(200);
+    expect(imageRefs.deleteRefsForProject).toHaveBeenCalledWith('user-a', 'p1');
+    expect(del).toHaveBeenCalledWith(['url1']);
+  });
+
+  it('image-upload-token authenticates the browser token request and calls handleUpload', async () => {
+    handleUpload.mockResolvedValue({ type: 'blob.generate-client-token', clientToken: 'tok' });
+    const res = mockRes();
+    await handler(
+      { method: 'POST', query: { action: 'image-upload-token' }, headers: {}, body: { type: 'blob.generate-client-token' } },
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    expect(parsed(res)).toEqual({ type: 'blob.generate-client-token', clientToken: 'tok' });
+    expect(requireUser).toHaveBeenCalled();
+    expect(handleUpload).toHaveBeenCalled();
+  });
+
+  it('image-upload-token does NOT require a session for the signed completion callback', async () => {
+    handleUpload.mockResolvedValue({ type: 'blob.upload-completed', response: 'ok' });
+    const res = mockRes();
+    await handler(
+      { method: 'POST', query: { action: 'image-upload-token' }, headers: {}, body: { type: 'blob.upload-completed', payload: {} } },
+      res,
+    );
+    expect(res.statusCode).toBe(200);
+    // The callback is a server-to-server request with no cookie — auth is the
+    // handleUpload signature check, not requireUser.
+    expect(requireUser).not.toHaveBeenCalled();
+    expect(handleUpload).toHaveBeenCalled();
   });
 });
