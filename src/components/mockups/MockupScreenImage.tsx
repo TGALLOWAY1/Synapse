@@ -83,19 +83,49 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
 
     // Hydrate this version's records from IDB on mount so reload / tab
     // switches surface every cached quality variant. We seed once per
-    // versionId; loadForVersion is itself idempotent.
+    // versionId; loadForVersion is itself idempotent. `hydrated` gates the
+    // forced-fallback routing below so we don't briefly flash the manual
+    // upload sheet before existing AI images load (e.g. the public demo).
+    const [hydratedVersion, setHydratedVersion] = useState<string | null>(null);
     useEffect(() => {
-        void loadForVersion(versionId);
+        let cancelled = false;
+        void loadForVersion(versionId).finally(() => {
+            if (!cancelled) setHydratedVersion(versionId);
+        });
+        return () => { cancelled = true; };
     }, [versionId, loadForVersion]);
+    // Until this version's load settles, hydratedVersion still points at the
+    // prior version, so a version switch correctly reads as not-yet-hydrated.
+    const hydrated = hydratedVersion === versionId;
 
     const keyPresent = hasOpenAIKey();
 
     // Image source routing (Settings → Artifact Generation Models → Mockups):
     //  - 'user_uploaded'             → always the manual upload sheet
     //  - 'gpt_image' without a key   → fall back to the manual sheet (never
-    //                                  silently fail) and explain why
+    //                                  silently fail) and explain why — BUT only
+    //                                  when there are no AI images to show.
+    //                                  Already-generated renders (e.g. the public
+    //                                  demo project, cross-device sync, or images
+    //                                  made in an earlier keyed session) must
+    //                                  still render even without a key, otherwise
+    //                                  the manual sheet — which reads a different
+    //                                  store (screenInventoryImageStore) — hides
+    //                                  them and the mockups appear to vanish.
     //  - 'gpt_image' with a key      → the OpenAI generator below
-    const { manual, forcedFallback } = resolveMockupRender(getMockupImageMode(), keyPresent);
+    const mode = getMockupImageMode();
+    const { forcedFallback } = resolveMockupRender(mode, keyPresent);
+    const hasAiImages = records.length > 0;
+    // While a forced-fallback version is still hydrating we don't yet know if AI
+    // images exist; render the loading state until we do rather than guessing.
+    if (forcedFallback && !hydrated && !hasAiImages) {
+        return (
+            <div className="bg-white rounded-lg border border-neutral-200 p-8 flex items-center justify-center min-h-[420px]">
+                <Loader2 size={24} className="text-neutral-300 animate-spin" />
+            </div>
+        );
+    }
+    const manual = mode === 'user_uploaded' || (forcedFallback && !hasAiImages);
     if (manual) {
         return (
             <MockupScreenUpload
