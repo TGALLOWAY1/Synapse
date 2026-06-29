@@ -1,0 +1,54 @@
+name: Capture demo screenshots
+
+# Manually triggered from the GitHub Actions tab ("Run workflow"). Drives the
+# live demo project with Playwright and captures every artifact (PRD + the 7
+# core artifacts + Mockups) on desktop and mobile, then uploads the PNGs as a
+# downloadable workflow artifact.
+#
+# The demo data is read from the target deployment's PUBLIC `?demo=1` endpoint,
+# so this needs NO secret to work. The optional SYNAPSE_OWNER_TOKEN repo secret
+# is used only for a pre-capture check that confirms a demo snapshot is pinned
+# (clearer failure if it isn't). Add it under:
+#   Settings → Secrets and variables → Actions → New repository secret
+#   Name: SYNAPSE_OWNER_TOKEN   (paste the token here, never into chat/code)
+
+on:
+  workflow_dispatch:
+    inputs:
+      base_url:
+        description: 'Deployment URL to capture (where the demo is pinned)'
+        required: true
+        default: 'https://synapse-prd.vercel.app'
+
+jobs:
+  capture:
+    name: Capture demo artifacts
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Install Playwright Chromium
+        run: npx playwright install --with-deps chromium
+
+      - name: Capture demo screenshots
+        env:
+          # Optional — enables the "is a demo pinned?" preflight. Capture works
+          # without it. Empty string when the secret isn't set.
+          SYNAPSE_OWNER_TOKEN: ${{ secrets.SYNAPSE_OWNER_TOKEN }}
+        run: npm run capture:demo -- --base-url="${{ inputs.base_url }}"
+
+      - name: Upload screenshots
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: demo-screenshots
+          path: screenshots-demo/
+          if-no-files-found: error
