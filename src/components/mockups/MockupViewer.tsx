@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp, MessageSquareText } from 'lucide-react';
 import type { MockupImageRecord, MockupPayload, MockupScreen, MockupSettings, StalenessState } from '../../types';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
@@ -7,6 +7,7 @@ import { buildScreenScopeKey } from '../../lib/mockupImageStore';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 import { StalenessBadge } from '../StalenessBadge';
 import { MockupScreenImage } from './MockupScreenImage';
+import { MockupPromptDialog } from './MockupPromptDialog';
 import { useIsMobile } from '../../lib/useIsMobile';
 
 type Props = {
@@ -86,14 +87,15 @@ function PageThumb({ versionId, screen }: { versionId?: string; screen: MockupSc
 }
 
 /**
- * Per-page footer: simple "AI Generated · date · Regenerate". Only shown when
- * an image actually exists for this screen — empty/loading states are rendered
- * by MockupScreenImage itself. The "Regenerate" here re-runs the same quality
- * on the current screen; it does not bump the artifact version.
+ * Per-page footer: simple "AI Generated · date" plus a "view prompt" icon
+ * button that opens the prompt used to create the image. Only shown when an
+ * image actually exists for this screen — empty/loading states are rendered
+ * by MockupScreenImage itself.
  */
 function PageImageFooter({ versionId, screen }: { versionId?: string; screen: MockupScreen }) {
     const aiImages = useMockupImageStore((s) => s.images);
     const uploads = useScreenInventoryImageStore((s) => s.images);
+    const [promptOpen, setPromptOpen] = useState(false);
 
     const info = useMemo(() => {
         if (!versionId) return null;
@@ -102,7 +104,7 @@ function PageImageFooter({ versionId, screen }: { versionId?: string; screen: Mo
             (u) => u.artifactVersionId === versionId && u.screenSlug === slug && u.isPreferred,
         );
         if (upload) {
-            return { label: 'Uploaded', generatedAt: upload.generatedAt };
+            return { label: 'Uploaded', generatedAt: upload.generatedAt, prompt: upload.prompt ?? '' };
         }
         const aiScope = buildScreenScopeKey(versionId, screen.id);
         const matching: MockupImageRecord[] = [];
@@ -111,18 +113,38 @@ function PageImageFooter({ versionId, screen }: { versionId?: string; screen: Mo
         }
         const best = pickPreviewRecord(matching);
         if (!best) return null;
-        return { label: 'AI Generated', generatedAt: best.generatedAt };
+        return { label: 'AI Generated', generatedAt: best.generatedAt, prompt: best.prompt ?? '' };
     }, [versionId, aiImages, uploads, screen.id, screen.name]);
 
     if (!info) return null;
+    const hasPrompt = info.prompt.length > 0;
     return (
-        <div className="px-5 py-2.5 border-t border-neutral-100 bg-neutral-50/60 flex items-center gap-2 flex-wrap text-[11px]">
-            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium">
-                <Sparkles size={10} />
-                {info.label}
-            </span>
-            <span className="text-neutral-500">{formatDateTime(info.generatedAt)}</span>
-        </div>
+        <>
+            <div className="px-5 py-2.5 border-t border-neutral-100 bg-neutral-50/60 flex items-center gap-2 flex-wrap text-[11px]">
+                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium">
+                    <Sparkles size={10} />
+                    {info.label}
+                </span>
+                <span className="text-neutral-500">{formatDateTime(info.generatedAt)}</span>
+                <button
+                    type="button"
+                    onClick={() => setPromptOpen(true)}
+                    disabled={!hasPrompt}
+                    className="ml-auto inline-flex items-center gap-1 px-1.5 py-1 rounded-md text-neutral-500 hover:text-indigo-700 hover:bg-indigo-50 disabled:opacity-40 disabled:cursor-not-allowed transition"
+                    aria-label={`View prompt for ${screen.name}`}
+                    title={hasPrompt ? 'View image prompt' : 'No prompt recorded for this image'}
+                >
+                    <MessageSquareText size={13} />
+                    <span className="text-[11px] font-medium hidden sm:inline">Prompt</span>
+                </button>
+            </div>
+            <MockupPromptDialog
+                open={promptOpen}
+                onClose={() => setPromptOpen(false)}
+                screenName={screen.name}
+                prompt={info.prompt}
+            />
+        </>
     );
 }
 
