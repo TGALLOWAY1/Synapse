@@ -299,7 +299,10 @@ live cache; **for signed-in users projects also sync to the server** (a MongoDB
 `projects` collection scoped to your account) so they follow you across web and
 mobile and survive a browser-data clear. AI-generated mockup PNGs persist to
 **IndexedDB** (typically gigabytes of headroom, so high-quality images don't
-blow the localStorage 5-10 MB cap) and are device-local for now.
+blow the localStorage 5-10 MB cap) as the local cache, and for signed-in users
+**now also sync across devices** via Vercel Blob (image bytes go to Blob, only
+small references travel with the project) so mockups appear on your other
+devices too — hydrated lazily on view.
 
 Prefer to look before you build? Visit `http://localhost:5173/tour` for the
 interactive product tour — it runs entirely on demo data with no API key.
@@ -313,7 +316,7 @@ variables:
 | Variable | Where it comes from |
 | --- | --- |
 | `SYNAPSE_OWNER_TOKEN` | Any random string &geq; 24 chars. The server compares with `crypto.timingSafeEqual`; the client stores it in `localStorage`. |
-| `BLOB_READ_WRITE_TOKEN` | Created automatically when you provision Vercel Blob for the project. No manual setup needed. |
+| `BLOB_READ_WRITE_TOKEN` | Created automatically when you provision Vercel Blob for the project. No manual setup needed. Also powers per-user **cross-device mockup image sync** (independent of snapshots). |
 
 The owner-token gate is single-tenant: there is no signup, no per-user
 isolation, no demo access. It exists so the project owner can persist real work
@@ -385,6 +388,8 @@ Portfolio project. Demo visitors (and the public `/tour`) run the workspace
 fully in-browser &mdash; spine + artifact state in `localStorage`, mockup PNGs in
 IndexedDB, no telemetry. **Signed-in users get cross-device project sync**:
 projects persist to a per-account server collection and reconcile onto any device
-on sign-in, with localStorage kept as the offline cache. (Mockup images remain
-device-local for now — see `tasks/TODO.md`.) The owner can additionally opt-in to
+on sign-in, with localStorage kept as the offline cache. **Mockup images sync
+across devices too** — bytes live in Vercel Blob, only small refs travel with the
+project, and they hydrate lazily on view (Screen Inventory upload images are not
+synced yet — see `tasks/TODO.md`). The owner can additionally opt-in to
 Vercel-Blob-backed Cloud Snapshots (gated by `SYNAPSE_OWNER_TOKEN`).

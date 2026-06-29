@@ -169,8 +169,14 @@ restores it under the stable `DEMO_PROJECT_ID`.
   dropped mockup images from snapshots.
 - Note: user-uploaded Screen Inventory images
   (`src/lib/screenInventoryImageStore.ts`, a separate IndexedDB store) are **not
-  yet** captured in snapshots, and `/api/projects` cross-device sync is
-  text-only (no images) — both are documented gaps, not bugs to "fix" silently.
+  yet** captured in snapshots. `/api/projects` cross-device sync **does** now
+  carry **mockup** images (via a separate Blob ref layer — see "Cross-device
+  mockup image sync" below). The snapshot feature and the project-sync image
+  layer are **independent**: different Blob prefixes (`snapshots/<id>/…` vs
+  `users/<userId>/mockup-images/…`), different ref models, different auth gates
+  (owner token vs per-user session). Do not entangle them. Screen Inventory
+  images remain a documented gap on the project-sync path too — the ref layer is
+  built generic (`kind`/`meta`) so they can be wired in later.
 
 ### Server-side project storage (`api/projects.js`, `api/_lib/projectsStore.js`, `src/store/projectServerSync.ts`)
 
@@ -225,6 +231,83 @@ device-scoped and never syncs) and full design.
   import.** This is distinct from the anonymous→account *legacy* import
   (`userScope.ts`); after a legacy import, `HomePage` triggers a server
   reconcile so the newly-claimed projects upload to the account.
+
+### Cross-device mockup image sync (`api/_lib/imageRefsStore.js`, `src/store/projectImageSync.ts`)
+
+AI-generated **mockup** images follow a signed-in user's projects across devices.
+The `/api/projects` bundle stays **text-only**; image BYTES go to **Vercel Blob**
+and only small **reference** records live in Mongo. This is the per-user sync
+path and is **independent of the owner-only snapshot feature** (`api/snapshots.js`)
+— different Blob prefix, ref model, and auth gate; don't entangle them.
+
+- **Local-first, unchanged render path.** IndexedDB (`src/lib/mockupImageStore.ts`)
+  remains the source of truth / render cache; generation still writes there.
+  `MockupScreenImage` renders from the Zustand cache exactly as before.
+- **Content-addressing.** Images are addressed by `sha256(dataUrl)`
+  (`src/lib/imageBlobHash.ts`) and stored at the per-user, deterministic path
+  `users/<userId>/mockup-images/<hash>.<ext>` (`addRandomSuffix:false`,
+  `allowOverwrite:true`). Identical renders dedup to one blob; the hash → blob is
+  1:1, which makes refcount GC exact. **Blob access is `public`** (unguessable
+  uuid userId + sha256 path) — a deliberate decision: the architecture requires
+  the browser to download bytes **directly** from the Blob URL (no function
+  proxy), and a `private` blob would need a per-download function call to mint a
+  signed URL. Mockups are low-sensitivity, so public + unguessable is the
+  chosen trade-off. If image sensitivity ever rises, switch to signed URLs.
+- **Client-direct upload.** Bytes go browser → Blob via `@vercel/blob/client`
+  `upload()` (`src/lib/imageRefsClient.ts`), so they never traverse a serverless
+  body (dodging Vercel's ~4.5 MB cap). The function only mints a signed token.
+- **Ref store** (`api/_lib/imageRefsStore.js`, collection `project_images`). One
+  doc per `(userId, projectId, key)`. A ref carries `{ key, hash, blobUrl,
+  byteSize, kind, versionId?, screenId?, quality?, meta }` where `meta` is the
+  dataUrl-less image record (so the client can reconstruct it on pull) — generic
+  over `kind` (`mockup` | `screen_inventory`) so a second image type can reuse
+  it. **RLS-equivalent** exactly like `projectsStore.js`: every function pins
+  `{ userId }` (from `requireUser`, never the body). Indexes
+  (`ensureImageRefIndexes`): `{userId,projectId,key}` unique, `{userId,projectId}`,
+  `{userId,hash}`.
+- **Endpoints — folded into `api/projects.js` via `?action=` (NO new function;
+  the repo is at 11/12).** `image-upload-token` (POST, `handleUpload` token
+  issuer — `onBeforeGenerateToken` restricts the pathname to the caller's
+  `users/<userId>/…` prefix + allowed image types; `onUploadCompleted` persists a
+  backup ref). `image-refs` (GET, list a project's refs). `image-ref-put` (POST,
+  authoritative ref persist after upload — rejects a `blobUrl` outside the
+  caller's prefix). `image-ref-delete` (POST, refcount-GCs orphan blobs).
+  **`image-upload-token` runs BEFORE the global `requireUser`**: the
+  upload-completed callback is a signed server-to-server request with no session
+  cookie — `handleUpload` verifies its signature, and the userId comes from the
+  `tokenPayload` stamped (from the verified session) at token-gen time. Never
+  move it behind `requireUser`.
+- **Dual ref-persist (both idempotent).** The client's `image-ref-put` is the
+  **authoritative** path (works everywhere, incl. localhost where Vercel can't
+  reach `onUploadCompleted`). `onUploadCompleted` is a best-effort backup for the
+  tab-closed-early case and persists a minimal ref (routing parsed from the key).
+- **Push** (`pushProjectImages`, fired after each text save AND from
+  `mockupImageStore.generate` via `notifyMockupImageGenerated` — generation
+  writes IDB directly and would otherwise never trigger a push). Diffs local
+  image keys against a per-user uploaded-marker set
+  (`synapse-mockup-images-uploaded::u:<userId>`, `src/lib/imageUploadMarker.ts`,
+  mirrors `projectMigration.ts`) + the server refs, uploads the missing ones,
+  persists refs, marks them. **Image sync NEVER blocks text sync** and every
+  failure is non-fatal (the image is left unmarked and retried next push); a
+  failed image never reverts local data.
+- **Pull = refs only, hydrate lazily.** Reconcile pulls refs into an in-memory
+  registry (`src/lib/imageRefRegistry.ts`, keyed by versionId). `loadForVersion`
+  in the mockup image store, on an IndexedDB cache **miss** where a ref exists,
+  fetches the Blob URL directly (concurrency-limited, mirrors snapshot
+  `hydrateImages`), writes it into IndexedDB, then renders. **No bulk download on
+  sign-in.**
+- **GC.** Project **hard-delete** (`api/projects.js`) calls
+  `deleteRefsForProject` then `del()`s the returned **orphaned** blob URLs —
+  refcount-aware: a blob is deleted only once NO remaining ref for that user
+  points at its hash (`findOrphanedHashes`; pure mirror in
+  `src/lib/imageSyncDiff.ts`). Soft-delete keeps refs (recoverable). GC failures
+  are logged, never fatal. **Known gap (sweep TODO):** per-image overwrite /
+  version regen can orphan a blob until project hard-delete (a new render = new
+  hash = new blob; the old ref/blob isn't eagerly collected). `image-ref-delete`
+  exists for a future fine-grained sweep.
+- **CSP.** `vercel.json` `connect-src` must include `https://*.vercel-storage.com`
+  for the browser's upload/download fetches — without it the feature breaks in
+  prod.
 
 ### LLM layer (`src/lib/`)
 

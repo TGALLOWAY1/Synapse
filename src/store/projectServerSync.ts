@@ -25,6 +25,12 @@ import {
 } from '../lib/projectsClient';
 import { markProjectsMigrated, getMigratedProjectIds } from '../lib/projectMigration';
 import { projectsDebug } from '../lib/projectsDebug';
+import { clearImageRefRegistry } from '../lib/imageRefRegistry';
+import {
+  setImageSyncUser,
+  pushProjectImages,
+  pullProjectImageRefs,
+} from './projectImageSync';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 
 const PUSH_DEBOUNCE_MS = 1500;
@@ -69,6 +75,11 @@ async function pushProjectNow(projectId: string): Promise<void> {
     if (activeUserId) markProjectsMigrated(activeUserId, [projectId]);
     useProjectSyncStore.getState().setProjectSync(projectId, { state: 'saved', updatedAt: Date.now() });
     projectsDebug('project pushed to server', { projectId });
+    // Image sync runs AFTER (and never blocks) the text save. Fire-and-forget:
+    // a Blob failure is non-fatal and retried on the next push.
+    if (activeUserId) {
+      void pushProjectImages(activeUserId, projectId, bundle.artifactVersions.map((v) => v.id));
+    }
   } catch (error) {
     const message = error instanceof Error ? error.message : 'sync_failed';
     // A failed save NEVER drops local data — it stays in localStorage. Surface
@@ -166,6 +177,14 @@ async function reconcile(userId: string): Promise<void> {
 
     knownProjectIds = new Set(syncableIds(useProjectStore.getState()));
     useProjectSyncStore.getState().markPulled(migratedCount);
+
+    // Pull image refs for every syncable project into the registry so the mockup
+    // image store can hydrate bytes lazily on view. Refs only (no bytes), and
+    // best-effort — never blocks the reconcile.
+    for (const id of knownProjectIds) {
+      void pullProjectImageRefs(id);
+    }
+
     projectsDebug('project sync reconciled', {
       userId,
       pulled: addedIds.length,
@@ -220,6 +239,7 @@ export function startProjectSync(userId: string | null): void {
   if (activeUserId === userId && unsubscribe) return; // already syncing this user
   stopProjectSync();
   activeUserId = userId;
+  setImageSyncUser(userId);
   knownProjectIds = new Set(syncableIds(useProjectStore.getState()));
 
   void reconcile(userId).then(() => {
@@ -239,6 +259,8 @@ export function stopProjectSync(): void {
   for (const timer of pushTimers.values()) clearTimeout(timer);
   pushTimers.clear();
   activeUserId = null;
+  setImageSyncUser(null);
+  clearImageRefRegistry();
   knownProjectIds = new Set();
   useProjectSyncStore.getState().reset();
 }

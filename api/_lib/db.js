@@ -50,6 +50,7 @@ async function getDb() {
  *   - insertOne → { insertedId }
  *   - updateOne → { matchedCount, modifiedCount, upsertedId }
  *   - deleteOne → { deletedCount }
+ *   - deleteMany → { deletedCount }
  *   - aggregate → { documents }
  *   - createIndexes → { ok: true } (idempotent; payload.indexes is a list of
  *                      driver index specs: { key, ...options })
@@ -96,6 +97,10 @@ export async function runMongoAction(action, payload = {}) {
     }
     case 'deleteOne': {
       const result = await collection.deleteOne(payload.filter || {});
+      return { deletedCount: result.deletedCount };
+    }
+    case 'deleteMany': {
+      const result = await collection.deleteMany(payload.filter || {});
       return { deletedCount: result.deletedCount };
     }
     case 'aggregate': {
