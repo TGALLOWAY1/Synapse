@@ -6,6 +6,7 @@ import rehypeRaw from 'rehype-raw';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
+import { getDesignSystemPresetLabel } from '../../lib/designSystemPresets';
 import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
 import { useArtifactOutline } from '../../lib/useArtifactOutline';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -88,6 +89,8 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
                 onSelect={scrollTo}
             />
 
+            <DesignDirectionNote projectId={projectId} />
+
             <Section id="ds-colors" title="Color Tokens">
                 <ColorTokens tokens={tokens} />
             </Section>
@@ -111,6 +114,28 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
             <Section id="ds-downstream" title="Downstream Usage">
                 <DownstreamUsage projectId={projectId} />
             </Section>
+        </div>
+    );
+}
+
+// Explains the design system's role as the project's single visual source of
+// truth: internal mockups and the prompts users copy for external image tools
+// both follow it, and regenerating it can shift those downstream assets. Shows
+// the chosen preset direction when one was set.
+function DesignDirectionNote({ projectId }: { projectId?: string }) {
+    const presetId = useProjectStore(s => (projectId ? s.projects[projectId]?.designSystemPreset : undefined));
+    const presetLabel = getDesignSystemPresetLabel(presetId);
+    return (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-xs text-indigo-900">
+            <p>
+                <span className="font-semibold">This design system is your project's visual source of truth.</span>{' '}
+                Internal mockups and the prompts you copy for external image tools both follow it, so they
+                stay consistent.
+                {presetLabel ? <> Direction: <span className="font-medium">{presetLabel}</span>.</> : null}
+            </p>
+            <p className="mt-1 text-indigo-700/90">
+                Regenerating the design system may change your mockups and screen-level prompts.
+            </p>
         </div>
     );
 }

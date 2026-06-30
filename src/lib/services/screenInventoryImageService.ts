@@ -4,7 +4,8 @@
 // onto the screen card. No API calls happen in here — this module is
 // strictly prompt assembly so the renderer / store stay thin.
 
-import type { ScreenItem } from '../../types';
+import type { DesignTokens, ScreenItem } from '../../types';
+import { buildDesignSystemBrief } from '../designTokens';
 
 interface ScreenImagePromptContext {
     /** Product title for grounding the mockup. */
@@ -13,6 +14,15 @@ interface ScreenImagePromptContext {
     productSummary: string;
     /** Optional platform hint — defaults to "responsive web app screen". */
     platformHint?: 'mobile' | 'desktop' | 'responsive';
+    /**
+     * The project's active Design System tokens, when available. When present
+     * the prompt embeds a concise Design System Brief (the SAME brief the
+     * internal gpt-image-2 mockup path uses) so externally generated mockups
+     * follow the project's intended visual language instead of drifting to a
+     * generic "neutral palette" look. Legacy projects without a design system
+     * still get a complete, working prompt.
+     */
+    designTokens?: DesignTokens;
 }
 
 const PLATFORM_HINTS: Record<NonNullable<ScreenImagePromptContext['platformHint']>, string> = {
@@ -26,11 +36,16 @@ const PLATFORM_HINTS: Record<NonNullable<ScreenImagePromptContext['platformHint'
  * row. Tool-agnostic — the same string works in any modern image model
  * (Nano Banana / Gemini Imagen, GPT image, Midjourney, etc.).
  *
- * The structure mirrors `buildScreenImagePrompt` in `mockupImageService.ts`
- * but works from the screen-inventory data shape (which has no
- * `MockupSettings`), so we use sensible defaults for fidelity and platform.
+ * Two halves, neither duplicated elsewhere:
+ *   - Screen context (name, purpose, intent, product framing, key UI
+ *     elements, navigation, state, responsive target, alternate states)
+ *     drawn from the screen-inventory data shape.
+ *   - A Design System Brief from `buildDesignSystemBrief` — the SAME shared
+ *     source the internal mockup image path uses — so the two stay visually
+ *     consistent. Omitted only when the project has no design system yet, in
+ *     which case a neutral fallback style hint keeps the prompt usable.
  */
-export const buildScreenInventoryImagePrompt = (
+export const buildExternalMockupPrompt = (
     screen: ScreenItem,
     context: ScreenImagePromptContext,
 ): string => {
@@ -59,6 +74,16 @@ export const buildScreenInventoryImagePrompt = (
         ? `Render the default / primary state. Other states modeled: ${screen.states.map(s => s.name).join(', ')}.`
         : '';
 
+    // When the project has a design system, the brief dictates the palette,
+    // typography, radius, etc. — so we drop the generic "neutral palette with
+    // one accent color" claim that would otherwise contradict it. Without a
+    // design system we keep that neutral fallback so the prompt still works.
+    const tokens = context.designTokens;
+    const styleLine = tokens
+        ? `Style: mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, no decorative imagery.`
+        : `Style: mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, neutral palette with one accent color, no decorative imagery.`;
+    const designBriefLine = tokens ? buildDesignSystemBrief(tokens) : '';
+
     return [
         `UI mockup of "${screen.name}" for the product "${context.productTitle}".`,
         `Screen purpose: ${screen.purpose}`,
@@ -68,7 +93,8 @@ export const buildScreenInventoryImagePrompt = (
         navLine,
         stateLine,
         `Render as a ${platform}.`,
-        `Style: mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, neutral palette with one accent color, no decorative imagery.`,
+        styleLine,
+        designBriefLine,
         `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,
         `No watermarks, no logos of real companies, no photographic people.`,
     ].filter(Boolean).join(' ');

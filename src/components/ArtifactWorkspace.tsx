@@ -21,6 +21,7 @@ import { TaskChecklist } from './tasks/TaskChecklist';
 import { StalenessBadge } from './StalenessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
+import { selectPreferredDesignTokens } from '../lib/designTokens';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
     ProjectTask,
@@ -121,6 +122,10 @@ export function ArtifactWorkspace({
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
+    // Active design tokens, so the Screen Inventory copy-prompt embeds the same
+    // Design System Brief the internal mockups use. selectPreferredDesignTokens
+    // is reference-stable per ArtifactVersion, so it's safe inside a selector.
+    const designTokens = useProjectStore(s => selectPreferredDesignTokens(s, projectId));
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
@@ -379,6 +384,12 @@ export function ArtifactWorkspace({
                 artifactVersionId: preferred.id,
                 productTitle: structuredPRD.productName ?? getProject(projectId)?.name ?? 'this product',
                 productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
+                designTokens,
+                platformHint: (projectPlatform === 'app'
+                    ? 'mobile'
+                    : projectPlatform === 'web'
+                        ? 'desktop'
+                        : 'responsive') as 'mobile' | 'desktop' | 'responsive',
             }
             : undefined;
         const promptEdits = subtype === 'prompt_pack'

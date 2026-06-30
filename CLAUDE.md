@@ -383,6 +383,38 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       retry, run summary, model, est-vs-actual, and `surface` (mobile/web).
   - `mockupService.ts` + `mockupImageService.ts` — mockup HTML and image
     generation.
+  - **Shared design-system brief (single source of visual truth for image
+    prompts).** `buildDesignSystemBrief(tokens)` (`designTokens/promptSnippet.ts`,
+    replaced the old `tokensToImagePromptBrief`) is the ONE concise-but-complete
+    Design System Brief embedded into every prompt that drives a mockup/screen
+    image. Both the internal gpt-image-2 path (`mockupImageService.buildScreenImagePrompt`)
+    and the user-copied external prompt on the Screen Inventory page
+    (`screenInventoryImageService.buildExternalMockupPrompt`, formerly
+    `buildScreenInventoryImagePrompt`) call it, so an externally generated mockup
+    follows the same visual language as the internal one instead of drifting to a
+    generic "neutral palette" look. The brief covers palette, typography,
+    spacing/density, radius, elevation, button/card/form/modal conventions,
+    navigation, responsive behavior, and accessibility — token data verbatim,
+    the rest as derived conventions. `buildExternalMockupPrompt` takes optional
+    `designTokens` (threaded from `ArtifactWorkspace` via `selectPreferredDesignTokens`
+    into `ScreenImageGalleryContext`); with no design system it falls back to the
+    neutral style hint so legacy projects still get a working prompt. Do **not**
+    re-duplicate design-system prose into a prompt builder — reuse the brief.
+  - **Design System Presets (`src/lib/designSystemPresets.ts`).** A one-time
+    visual-direction choice (`SaaS Minimal`, `AI Workspace`, `Editorial /
+    Learning`, `Developer Tool`, `Consumer Mobile`, `Custom / Generate for me`)
+    surfaced by `DesignSystemPresetChoice` on the Mark-as-Final edge in
+    `ProjectWorkspace` (only when a real project hasn't picked one yet). The
+    chosen id is stored on `Project.designSystemPreset`
+    (`setProjectDesignSystemPreset`) and read at generation time by
+    `artifactJobController.runCoreArtifactSlot` off the project (NOT threaded
+    through every call site) and passed to `generateCoreArtifact`, which injects
+    `getDesignSystemPresetDirective(id)` into the **design_system** prompt only.
+    `custom`/unknown/missing → empty directive → original PRD-only behavior. The
+    preset steers design_system generation and therefore both internal mockups
+    and the external copy-prompt, keeping the project visually consistent. The
+    `DesignSystemRenderer` shows a banner explaining this coupling and that
+    regenerating may shift downstream mockups/screen prompts.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
     implementation_plan, prompt_pack, design_system). **Per-artifact model

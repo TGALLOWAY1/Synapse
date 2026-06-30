@@ -1,8 +1,8 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { Copy, Check, Upload, Image as ImageIcon, X, AlertTriangle, Loader2 } from 'lucide-react';
-import type { ScreenItem } from '../../types';
+import type { DesignTokens, ScreenItem } from '../../types';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
-import { buildScreenInventoryImagePrompt } from '../../lib/services/screenInventoryImageService';
+import { buildExternalMockupPrompt } from '../../lib/services/screenInventoryImageService';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 
 export interface ScreenImageGalleryContext {
@@ -11,6 +11,14 @@ export interface ScreenImageGalleryContext {
     artifactVersionId: string;
     productTitle: string;
     productSummary: string;
+    /**
+     * Active project design system tokens, when present. Threaded into the
+     * copied external prompt so it matches the internal mockup's visual
+     * language. Optional — legacy projects / pre-design-system states omit it.
+     */
+    designTokens?: DesignTokens;
+    /** Platform hint for the rendered mockup (app → mobile, web → desktop). */
+    platformHint?: 'mobile' | 'desktop' | 'responsive';
 }
 
 interface Props {
@@ -19,7 +27,7 @@ interface Props {
 }
 
 export function ScreenImageGallery({ screen, context }: Props) {
-    const { projectId, artifactId, artifactVersionId, productTitle, productSummary } = context;
+    const { projectId, artifactId, artifactVersionId, productTitle, productSummary, designTokens, platformHint } = context;
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [copied, setCopied] = useState(false);
     const [lightboxKey, setLightboxKey] = useState<string | null>(null);
@@ -43,7 +51,7 @@ export function ScreenImageGallery({ screen, context }: Props) {
     const setPreferred = useScreenInventoryImageStore(s => s.setPreferred);
     const clearError = useScreenInventoryImageStore(s => s.clearError);
 
-    const prompt = buildScreenInventoryImagePrompt(screen, { productTitle, productSummary });
+    const prompt = buildExternalMockupPrompt(screen, { productTitle, productSummary, designTokens, platformHint });
     const preferred = versions.find(v => v.isPreferred);
     const lightboxRecord = lightboxKey ? versions.find(v => v.key === lightboxKey) : null;
 

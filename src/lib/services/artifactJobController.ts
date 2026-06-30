@@ -162,9 +162,14 @@ async function runCoreArtifactSlot(
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
         });
+        // Read the chosen design-system preset off the project here (rather than
+        // threading it through every startAll/regenerate/resume call site) so
+        // ALL generation paths consistently honor it. Only design_system uses it.
+        const designSystemPreset = store.getProject(projectId)?.designSystemPreset;
         const result = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
             generatedArtifacts,
             signal,
+            designSystemPreset,
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
         content = result.content;

@@ -27,6 +27,7 @@ import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
+import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { CORE_ARTIFACT_DISPLAY_ORDER } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
@@ -45,7 +46,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -74,6 +75,9 @@ export function ProjectWorkspace() {
     // and selects the first non-PRD artifact on arrival from finalize.
     const [showFinalizeSuccess, setShowFinalizeSuccess] = useState(false);
     const [finalizeAutoOpen, setFinalizeAutoOpen] = useState(false);
+    // Gate shown on the finalize edge when the project hasn't picked a
+    // design-system direction yet. Choosing one stores it, then finalizes.
+    const [showPresetChoice, setShowPresetChoice] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -460,8 +464,28 @@ export function ProjectWorkspace() {
         // Blocked spines can never advance to the workspace / artifact stage.
         if (activeSpine.safetyReview?.status === 'blocked') return;
         const next = !activeSpine.isFinal;
-        markSpineFinal(projectId, activeSpine.id, next);
-        if (!next) return;
+        if (!next) {
+            // Un-finalizing — just flip the flag, no generation involved.
+            markSpineFinal(projectId, activeSpine.id, false);
+            return;
+        }
+
+        // Finalizing. If this real project will generate assets but hasn't
+        // picked a design-system direction yet, ask first — the choice steers
+        // the design system (and therefore mockups + copied prompts). The demo
+        // never generates and skips straight through.
+        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID && !project?.designSystemPreset) {
+            setShowPresetChoice(true);
+            return;
+        }
+        finalizeAndGenerate();
+    };
+
+    // Performs the actual finalize + asset kickoff. Split out so it can run
+    // either directly (preset already chosen / demo) or after the preset gate.
+    const finalizeAndGenerate = () => {
+        if (!projectId || !activeSpine) return;
+        markSpineFinal(projectId, activeSpine.id, true);
 
         // Kick off artifact generation immediately so assets are underway
         // while the success modal is visible. We deliberately do NOT switch
@@ -477,6 +501,15 @@ export function ProjectWorkspace() {
             });
         }
         setShowFinalizeSuccess(true);
+    };
+
+    const handleChooseDesignSystemPreset = (presetId: string) => {
+        if (!projectId) return;
+        // Persist the choice synchronously so the generation pipeline reads it
+        // off the project when design_system runs.
+        setProjectDesignSystemPreset(projectId, presetId);
+        setShowPresetChoice(false);
+        finalizeAndGenerate();
     };
 
     // "Open Assets" from the success modal: navigate to the Assets stage and
@@ -653,6 +686,12 @@ export function ProjectWorkspace() {
                 </div>
             </div>
 
+            {showPresetChoice && (
+                <DesignSystemPresetChoice
+                    onChoose={handleChooseDesignSystemPreset}
+                    onClose={() => setShowPresetChoice(false)}
+                />
+            )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
                     assetsReady={assetsReady}

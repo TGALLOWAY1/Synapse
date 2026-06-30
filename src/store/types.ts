@@ -54,6 +54,9 @@ export interface ProjectState {
     // Pipeline stage
     setProjectStage: (projectId: string, stage: PipelineStage) => void;
 
+    // Stores the chosen design-system preset id (see DESIGN_SYSTEM_PRESETS).
+    setProjectDesignSystemPreset: (projectId: string, presetId: string) => void;
+
     // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
     // a demo snapshot was available. When `available` is false, the home
     // page surfaces a friendly "no demo set" message.
