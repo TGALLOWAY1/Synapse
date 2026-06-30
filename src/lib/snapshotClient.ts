@@ -264,6 +264,27 @@ const hydrateImages = async (
     return out;
 };
 
+// Public, lightweight: read just the demo pointer so callers can decide
+// whether their cached demo project is still current without paying the
+// full bundle+image download. Returns null when no demo has been pinned
+// or the probe fails — the caller is expected to fall back to its cache.
+export type DemoPointer = { snapshotId: string; updatedAt: string | null };
+
+export const loadDemoSnapshotPointer = async (): Promise<DemoPointer | null> => {
+    const resp = await fetch(`${API_BASE}?demo=1&pointer=1`);
+    if (!resp.ok) return null;
+    const body = await resp.json().catch(() => null) as
+        | { snapshotId?: unknown; updatedAt?: unknown }
+        | null;
+    if (!body || typeof body.snapshotId !== 'string' || body.snapshotId.length === 0) {
+        return null;
+    }
+    return {
+        snapshotId: body.snapshotId,
+        updatedAt: typeof body.updatedAt === 'string' ? body.updatedAt : null,
+    };
+};
+
 // Public: fetch the snapshot the owner has marked as the demo. No auth.
 // Returns null when no demo has been set (server returns 404 in that case).
 export const loadDemoSnapshotPublic = async (): Promise<SnapshotPayload | null> => {

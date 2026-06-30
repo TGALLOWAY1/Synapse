@@ -15,6 +15,7 @@ import { requireOwner } from './_lib/ownerAuth.js';
 //   GET    /api/snapshots?id=...&image=<key>  -> load one image (owner)
 //   DELETE /api/snapshots?id=...              -> remove one snapshot (owner)
 //   GET    /api/snapshots?demo=1              -> load the demo snapshot (PUBLIC)
+//   GET    /api/snapshots?demo=1&pointer=1    -> read the demo pointer (PUBLIC)
 //   GET    /api/snapshots?demo=1&image=<key>  -> load one demo image (PUBLIC)
 //   PUT    /api/snapshots?demo=1&id=          -> mark a snapshot as the demo (owner)
 //   PUT    /api/snapshots?demo=1              -> clear the demo pointer (owner)
@@ -328,6 +329,19 @@ async function handleGetDemoImage(key, res) {
   return await handleGetImage(pointer.snapshotId, key, res);
 }
 
+// Public, lightweight: return JUST the current demo pointer so clients can
+// invalidate a cached demo project without paying the cost of downloading the
+// full bundle + per-image blobs. Returns 200 with `{ snapshotId: null }` when
+// no demo has been pinned so callers can distinguish "no demo" from a network
+// failure without parsing 404s.
+async function handleGetDemoPointer(res) {
+  const pointer = await readDemoPointer();
+  return json(res, 200, {
+    snapshotId: pointer?.snapshotId ?? null,
+    updatedAt: pointer?.updatedAt ?? null,
+  });
+}
+
 async function handlePutDemo(id, res) {
   // PUT /api/snapshots?demo=1&id=<id>  -> set pointer
   // PUT /api/snapshots?demo=1          -> clear pointer
@@ -431,9 +445,14 @@ export default async function handler(req, res) {
     ? imageQuery
     : null;
 
+  // `pointer=1` is the lightweight demo-pointer probe — see
+  // `handleGetDemoPointer`. Only meaningful on the demo channel.
+  const isPointerProbe = req.query?.pointer === '1' || req.query?.pointer === 'true';
+
   try {
     if (isDemoChannel) {
       if (req.method === 'GET') {
+        if (isPointerProbe) return await handleGetDemoPointer(res);
         if (imageReadKey !== null) return await handleGetDemoImage(imageReadKey, res);
         return await handleGetDemo(res);
       }
