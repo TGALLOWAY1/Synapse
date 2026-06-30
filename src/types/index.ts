@@ -19,6 +19,12 @@ export type Project = {
     // has pinned a newer demo snapshot and re-fetch instead of serving stale
     // local cache. Optional so legacy persisted projects keep working.
     demoSourceSnapshotId?: string;
+    // The user-chosen design-system direction (a `DESIGN_SYSTEM_PRESETS` id,
+    // e.g. 'saas_minimal' or 'custom'), picked once before artifact generation.
+    // Steers design_system generation and, through it, the visual language of
+    // mockups and the Screen Inventory copy-prompt. Optional — legacy projects
+    // and the demo have none and behave exactly as before.
+    designSystemPreset?: string;
 };
 
 export type BranchMessage = {

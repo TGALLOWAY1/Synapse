@@ -1,7 +1,7 @@
 export { normalizeDesignTokens } from './normalize';
 export { hashDesignTokens } from './hash';
 export { tokensToCssVariables, tokensToCssStyleBlock } from './cssVariables';
-export { tokensToPromptSnippet, tokensToImagePromptBrief } from './promptSnippet';
+export { tokensToPromptSnippet, buildDesignSystemBrief } from './promptSnippet';
 export { designSystemTokensToMarkdown } from './markdownRenderer';
 export {
     selectPreferredDesignSystem,

@@ -12,6 +12,7 @@ import {
     hashDesignTokens,
     designSystemTokensToMarkdown,
 } from '../designTokens';
+import { getDesignSystemPresetDirective } from '../designSystemPresets';
 
 export interface CoreArtifactGenerationResult {
     /** Canonical markdown body, stored in `ArtifactVersion.content`. */
@@ -394,6 +395,12 @@ export const generateCoreArtifact = async (
         generatedArtifacts?: Partial<Record<CoreArtifactSubtype, string>>;
         signal?: AbortSignal;
         onProgress?: (message: string) => void;
+        /**
+         * The project's chosen design-system preset id (see
+         * DESIGN_SYSTEM_PRESETS). Consumed only by the `design_system` subtype;
+         * other subtypes ignore it. Absent/unknown/'custom' → no steering.
+         */
+        designSystemPreset?: string;
     },
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
@@ -437,6 +444,16 @@ Architecture: ${structuredPRD.architecture}${
         ? `\n\n---\n\nMockup Context (reference for screens, components, and layout):\n${options.mockupContext.slice(0, 3000)}`
         : '';
 
+    // Design-system preset steering. Only the design_system subtype consumes
+    // it; an absent/unknown/'custom' preset yields '' (no steering → original
+    // PRD-only behavior). The model still adapts the direction to the domain.
+    const presetDirective = subtype === 'design_system'
+        ? getDesignSystemPresetDirective(options?.designSystemPreset)
+        : '';
+    const presetSection = presetDirective
+        ? `\n\n---\n\nSELECTED DESIGN DIRECTION (the user explicitly chose this preset — honor it while still fitting the product's domain and audience):\n${presetDirective}\n\nEnsure your token choices (palette, typography, radius, spacing, component recipes) clearly reflect this direction, and include one \`rules\` entry that names the resulting design direction and briefly explains why it fits this product.`
+        : '';
+
     // Use JSON mode for supported artifact types
     const jsonSchemas: Partial<Record<CoreArtifactSubtype, object>> = {
         screen_inventory: screenInventorySchema,
@@ -446,7 +463,7 @@ Architecture: ${structuredPRD.architecture}${
         implementation_plan: implementationPlanSchema,
     };
 
-    const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+    const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}${presetSection}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
 
     // Cap progress messages at ~3/s; emit every 250 chars OR 350ms to keep the
     // UI feeling alive without thrashing the store.

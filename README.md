@@ -143,7 +143,14 @@ feedback event — with diffs where it matters.
 <img width="100%" alt="Mark the PRD as final to generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" />
 
 Mark your PRD as final and Synapse generates all the assets you need to build —
-in parallel, from that single source of truth:
+in parallel, from that single source of truth. Just before generation, you pick
+a **Design System Preset** (SaaS Minimal, AI Workspace, Editorial / Learning,
+Developer Tool, Consumer Mobile, or *Custom / Generate for me*) that sets the
+project's visual direction. The choice is stored on the project and steers the
+**Design System** artifact — and through it, both the internal mockups and the
+prompts you copy for external image tools, so everything stays visually
+consistent. You can regenerate the design system later, but doing so may shift
+your mockups and screen-level prompts.
 
 - **Screen Inventory** and **User Flows**
 - **UI Components** (a searchable, filterable component library with live
@@ -176,6 +183,13 @@ sources (chosen in Settings → **Artifact Generation Models → Mockups**): Ope
 each screen (goal, layout, visual style, expected format) to guide what you
 create and upload. If GPT Image is selected without an OpenAI key, Synapse falls
 back to the upload sheet rather than failing silently.
+
+The Screen Inventory page also offers a **Copy image prompt** action per screen
+for generating a mockup in any external tool. That copied prompt embeds the
+**same** Design System Brief the internal mockups use (palette, typography,
+spacing, radius, component conventions, accessibility) alongside the screen's
+specifics, so externally generated mockups match your project's visual
+language instead of drifting.
 
 #### Integrated feedback loop
 

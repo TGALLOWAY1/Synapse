@@ -20,6 +20,7 @@ export type ProjectSlice = {
     getProject: ProjectState['getProject'];
     getHistoryEvents: ProjectState['getHistoryEvents'];
     setProjectStage: ProjectState['setProjectStage'];
+    setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
     loadDemoProject: ProjectState['loadDemoProject'];
 };
 
@@ -122,6 +123,19 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             }
         }));
         void trackActivity(stage === 'mockups' ? 'viewed_mockups' : 'clicked_section', { section: stage, projectId });
+    },
+
+    setProjectDesignSystemPreset: (projectId: string, presetId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: { ...project, designSystemPreset: presetId },
+                },
+            };
+        });
     },
 
     // Hydrates the store with the demo project. The demo is a cloud snapshot

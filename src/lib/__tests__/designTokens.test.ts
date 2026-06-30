@@ -5,7 +5,7 @@ import {
     tokensToCssVariables,
     tokensToCssStyleBlock,
     tokensToPromptSnippet,
-    tokensToImagePromptBrief,
+    buildDesignSystemBrief,
     designSystemTokensToMarkdown,
 } from '../designTokens';
 
@@ -177,13 +177,32 @@ describe('tokensToPromptSnippet', () => {
     });
 });
 
-describe('tokensToImagePromptBrief', () => {
+describe('buildDesignSystemBrief', () => {
     it('includes palette and typography descriptions', () => {
         const tokens = normalizeDesignTokens({});
-        const brief = tokensToImagePromptBrief(tokens);
+        const brief = buildDesignSystemBrief(tokens);
         expect(brief).toMatch(/brand\.primary/);
-        expect(brief).toMatch(/Heading typography/);
-        expect(brief).toMatch(/brand\.primary/);
+        expect(brief).toMatch(/[Tt]ypography/);
+    });
+
+    it('covers the core design-system aspects without ballooning in length', () => {
+        const tokens = normalizeDesignTokens({});
+        const brief = buildDesignSystemBrief(tokens);
+        // Completeness: each listed aspect is represented.
+        expect(brief).toMatch(/Color palette/i);
+        expect(brief).toMatch(/typography/i);
+        expect(brief).toMatch(/density/i);
+        expect(brief).toMatch(/radius/i);
+        expect(brief).toMatch(/[Ee]levation|shadow/);
+        expect(brief).toMatch(/button/i);
+        expect(brief).toMatch(/[Cc]ards?/);
+        expect(brief).toMatch(/[Ff]orms?/);
+        expect(brief).toMatch(/[Mm]odals?/);
+        expect(brief).toMatch(/[Nn]avigation/);
+        expect(brief).toMatch(/[Rr]esponsive/);
+        expect(brief).toMatch(/[Aa]ccessibility|WCAG/);
+        // Conciseness: a brief, not a spec dump.
+        expect(brief.length).toBeLessThan(1600);
     });
 });
 
