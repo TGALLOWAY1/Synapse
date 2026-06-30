@@ -148,11 +148,24 @@ otherwise have nothing in common — keep that distinction in mind:
 Owner-only project snapshots bundle a project's Zustand slice **plus its
 IndexedDB-backed mockup images** (base64 PNGs from `src/lib/mockupImageStore.ts`,
 keyed `versionId:screenId:quality` where `versionId` is the **artifact version
-id**) and push them to Vercel Blob behind a `SYNAPSE_OWNER_TOKEN` gate. Images
-are split out of the JSON envelope and shipped one request each so neither
-upload nor download crosses Vercel's ~4.5 MB cap. One snapshot can be pinned as
-**the demo** (`_demo.json` pointer + public `?demo=1` read); `loadDemoProject`
-restores it under the stable `DEMO_PROJECT_ID`.
+id**) **and its user-uploaded Screen Inventory images** (from
+`src/lib/screenInventoryImageStore.ts`, a separate IDB store, keyed
+`artifactVersionId:screenSlug:versionNumber`) and push them to Vercel Blob
+behind a `SYNAPSE_OWNER_TOKEN` gate. The bundle also carries the project's
+**implementation tasks** (`tasks` slice) and **orchestration metrics**
+(`workflowRuns` slice) — every *persisted* store slice for the project, so a
+restored snapshot is a faithful copy. Both image kinds split out of the JSON
+envelope and ship one request each (reusing the **same** per-image blob channel
+— each blob is keyed by a hash of the image key, and the two key shapes never
+collide) so neither upload nor download crosses Vercel's ~4.5 MB cap. The wire
+format carries mockup images in `payload.images` and screen-inventory images in
+`payload.screenImages`. One snapshot can be pinned as **the demo** (`_demo.json`
+pointer + public `?demo=1` read); `loadDemoProject` restores it under the stable
+`DEMO_PROJECT_ID`. Snapshot fields (`tasks`/`workflowRuns`/`screenImages`) are
+all **optional on the wire** — pre-existing snapshots lack them and restore
+defaults each to `[]`. When adding a new persisted slice or IDB image store,
+add it to `collectProjectBundle`/`collectScreenImages`, the restore writers, and
+`namespaceSnapshotForRestore`, or it silently won't travel in snapshots.
 
 - **Demo cache freshness — never short-circuit on a `DEMO_PROJECT_ID` cache hit
   alone.** Each restored demo project stores its source snapshot id in the
@@ -168,31 +181,39 @@ restores it under the stable `DEMO_PROJECT_ID`.
   stale demo while mobile (with no cache) silently saw the latest.
 - **Restoring under a *different* project id MUST namespace the artifact version
   ids** (`namespaceSnapshotForRestore` → `rewriteIds`), not just the project id.
-  Mockup images are keyed in IndexedDB by `versionId` with **no projectId in the
-  key**, so a demo restored from a real project's snapshot would otherwise share
-  version ids — and `restoreSnapshotAs`'s `deleteImagesForVersion()` would wipe
-  and re-tag the **source project's** images. Version ids are namespaced as
-  `${targetProjectId}:${versionId}` (deterministic → idempotent re-restores) and
-  each image's composite `key` is rebuilt from the remapped fields. Never restore
-  a snapshot under a foreign project id without this remap.
+  Both mockup images AND screen-inventory images are keyed in IndexedDB by the
+  artifact version id with **no projectId in the key**, so a demo restored from a
+  real project's snapshot would otherwise share version ids — and
+  `restoreSnapshotAs`'s `deleteImagesForVersion()` /
+  `deleteScreenImagesForArtifactVersion()` would wipe and re-tag the **source
+  project's** images. Version ids are namespaced as `${targetProjectId}:${versionId}`
+  (deterministic → idempotent re-restores) and each image's composite `key` is
+  rebuilt from the remapped fields (`buildImageKey` for mockups,
+  `buildScreenImageKey` for screen-inventory). `rewriteIds` runs over the whole
+  bundle, so `tasks`/`workflowRuns` (which carry `projectId`) are remapped too.
+  Never restore a snapshot under a foreign project id without this remap.
 - **`collectProjectImages` must not filter images by the stored `record.projectId`.**
   A version id uniquely identifies its owning project, so collect by version id
   only; filtering on a (possibly drifted) `projectId` tag is what silently
   dropped mockup images from snapshots.
+- **`collectScreenImages` (like `collectProjectImages`) must not filter by the
+  stored `record.projectId`** — collect by artifact version id only, for the same
+  drift reason.
 - Note: user-uploaded Screen Inventory images
-  (`src/lib/screenInventoryImageStore.ts`, a separate IndexedDB store) are **not
-  yet** captured in snapshots. `/api/projects` cross-device sync **does** now
-  carry **mockup** images (via a separate Blob ref layer — see "Cross-device
-  mockup image sync" below). The snapshot feature and the project-sync image
-  layer are **independent**: different Blob prefixes (`snapshots/<id>/…` vs
-  `users/<userId>/mockup-images/…`), different ref models, different auth gates
-  (owner token vs per-user session). Do not entangle them. Screen Inventory
-  images remain a documented gap on the project-sync path too — the ref layer is
-  built generic (`kind`/`meta`) so they can be wired in later. **Note:** the
-  `user_uploaded` **mockup image source mode** (the OpenAI-key-free path that
-  lets the user upload their own mockup) persists to `screenInventoryImageStore`,
-  **not** `mockupImageStore` — so those uploads ride on this same not-yet-synced
-  gap. Only the `gpt_image` (AI-generated) mockups sync across devices today.
+  (`src/lib/screenInventoryImageStore.ts`, a separate IndexedDB store) **are now
+  captured in snapshots** (and therefore the demo) via `payload.screenImages`.
+  They are **still a gap on the `/api/projects` cross-device sync path**, which
+  only carries **mockup** images (via a separate Blob ref layer — see
+  "Cross-device mockup image sync" below). The snapshot feature and the
+  project-sync image layer are **independent**: different Blob prefixes
+  (`snapshots/<id>/…` vs `users/<userId>/mockup-images/…`), different ref models,
+  different auth gates (owner token vs per-user session). Do not entangle them.
+  The project-sync ref layer is built generic (`kind`/`meta`) so screen-inventory
+  images can be wired into it later. **Note:** the `user_uploaded` **mockup image
+  source mode** (the OpenAI-key-free path that lets the user upload their own
+  mockup) persists to `screenInventoryImageStore`, **not** `mockupImageStore` — so
+  those uploads now travel in snapshots but still ride the cross-device-sync gap.
+  Only the `gpt_image` (AI-generated) mockups sync across devices today.
 
 ### Server-side project storage (`api/projects.js`, `api/_lib/projectsStore.js`, `src/store/projectServerSync.ts`)
 

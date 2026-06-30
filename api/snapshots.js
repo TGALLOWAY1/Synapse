@@ -156,6 +156,7 @@ async function handlePost(req, res) {
 
   const project = body?.project;
   const rawImages = Array.isArray(body?.images) ? body.images : [];
+  const rawScreenImages = Array.isArray(body?.screenImages) ? body.screenImages : [];
   if (!project || typeof project !== 'object') {
     return json(res, 400, { error: 'missing_project' });
   }
@@ -163,9 +164,15 @@ async function handlePost(req, res) {
   // Drop any dataUrl that snuck through — image blobs are uploaded
   // individually via `?id=...&image=1`. Storing dataUrl inline would just
   // bring back the size problem this split was meant to solve.
-  const imageRefs = rawImages
-    .map(imageMetadata)
-    .filter((m) => m && typeof m.key === 'string' && m.key.length > 0 && m.key.length <= IMAGE_KEY_MAX);
+  const toRefs = (arr) =>
+    arr
+      .map(imageMetadata)
+      .filter((m) => m && typeof m.key === 'string' && m.key.length > 0 && m.key.length <= IMAGE_KEY_MAX);
+  const imageRefs = toRefs(rawImages);
+  // Screen Inventory images live in a separate client IDB store and travel as
+  // their own array, but they reuse the exact same per-image blob channel
+  // (keyed by a hash of the image key, which never collides with a mockup key).
+  const screenImageRefs = toRefs(rawScreenImages);
 
   const id = crypto.randomUUID();
   const manifest = {
@@ -175,6 +182,7 @@ async function handlePost(req, res) {
     createdAt: nowIso(),
     schemaVersion: CURRENT_SCHEMA_VERSION,
     imageCount: imageRefs.length,
+    screenImageCount: screenImageRefs.length,
   };
 
   const data = {
@@ -185,6 +193,7 @@ async function handlePost(req, res) {
     // separate blob under snapshots/<id>/images/<hash>.json so that no
     // single request crosses the 4.5 MB serverless body cap.
     images: imageRefs,
+    screenImages: screenImageRefs,
   };
   const dataJson = JSON.stringify(data);
   const manifestJson = JSON.stringify({ ...manifest, sizeBytes: dataJson.length });

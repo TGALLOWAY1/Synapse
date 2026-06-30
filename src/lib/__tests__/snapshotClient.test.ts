@@ -1,8 +1,9 @@
 import { describe, it, expect } from 'vitest';
 import { namespaceSnapshotForRestore } from '../snapshotClient';
 import type { SnapshotPayload } from '../snapshotClient';
-import type { MockupImageRecord } from '../../types';
+import type { MockupImageRecord, ScreenInventoryImageRecord } from '../../types';
 import { buildImageKey } from '../mockupImageStore';
+import { buildScreenImageKey } from '../screenInventoryImageStore';
 
 // Builds a minimal-but-realistic snapshot for a source project that has one
 // mockup artifact version with two AI image records. Only the fields the
@@ -82,5 +83,60 @@ describe('namespaceSnapshotForRestore', () => {
         expect(bundle).toBe(snapshot.project);
         expect(images).toBe(snapshot.images);
         expect(images[0].versionId).toBe(VERSION_ID);
+    });
+
+    it('defaults screenImages to [] for snapshots saved before screen-image capture', () => {
+        const { screenImages } = namespaceSnapshotForRestore(makeSnapshot(), DEMO_PROJECT_ID);
+        expect(screenImages).toEqual([]);
+    });
+});
+
+const makeScreenImage = (versionNumber: number): ScreenInventoryImageRecord => ({
+    key: buildScreenImageKey(VERSION_ID, 'login', versionNumber),
+    projectId: SOURCE_PROJECT_ID,
+    artifactId: 'artifact-1',
+    artifactVersionId: VERSION_ID,
+    screenSlug: 'login',
+    screenName: 'Login',
+    versionNumber,
+    isPreferred: versionNumber === 1,
+    dataUrl: `data:image/png;base64,si${versionNumber}`,
+    mimeType: 'image/png',
+    prompt: 'p',
+    generatedAt: 1,
+});
+
+describe('namespaceSnapshotForRestore — screen images, tasks, metrics', () => {
+    const withExtras = (): SnapshotPayload => {
+        const snap = makeSnapshot();
+        return {
+            ...snap,
+            project: {
+                ...snap.project,
+                tasks: [{ id: 'task-1', projectId: SOURCE_PROJECT_ID }],
+                workflowRuns: [{ id: 'run-1', projectId: SOURCE_PROJECT_ID }],
+            } as unknown as SnapshotPayload['project'],
+            screenImages: [makeScreenImage(1), makeScreenImage(2)],
+        };
+    };
+
+    it('namespaces screen-inventory images by artifactVersionId and rebuilds the key', () => {
+        const { screenImages } = namespaceSnapshotForRestore(withExtras(), DEMO_PROJECT_ID);
+        const namespacedVersionId = `${DEMO_PROJECT_ID}:${VERSION_ID}`;
+        expect(screenImages).toHaveLength(2);
+        for (const img of screenImages) {
+            expect(img.artifactVersionId).toBe(namespacedVersionId);
+            expect(img.projectId).toBe(DEMO_PROJECT_ID);
+            expect(img.key).toBe(buildScreenImageKey(namespacedVersionId, img.screenSlug, img.versionNumber));
+            // Never reuse the source version id, so restore can't wipe the
+            // source project's screen images.
+            expect(img.artifactVersionId).not.toBe(VERSION_ID);
+        }
+    });
+
+    it('rewrites the projectId on bundled tasks and workflow runs', () => {
+        const { bundle } = namespaceSnapshotForRestore(withExtras(), DEMO_PROJECT_ID);
+        expect(bundle.tasks?.[0].projectId).toBe(DEMO_PROJECT_ID);
+        expect(bundle.workflowRuns?.[0].projectId).toBe(DEMO_PROJECT_ID);
     });
 });

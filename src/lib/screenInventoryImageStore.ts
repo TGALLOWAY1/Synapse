@@ -101,6 +101,36 @@ export const listScreenImagesForArtifactVersion = async (
     }
 };
 
+// Delete every record for one artifact version. Mirrors
+// `mockupImageStore.deleteImagesForVersion`; used by the snapshot restore path
+// to clear a version's stale screen-inventory images before repopulating them.
+export const deleteScreenImagesForArtifactVersion = async (
+    artifactVersionId: string,
+): Promise<void> => {
+    try {
+        const db = await openDb();
+        await new Promise<void>((resolve, reject) => {
+            const tx = db.transaction(STORE_NAME, 'readwrite');
+            const idx = tx.objectStore(STORE_NAME).index(VERSION_INDEX);
+            const req = idx.openCursor(IDBKeyRange.only(artifactVersionId));
+            req.onsuccess = () => {
+                const cursor = req.result;
+                if (cursor) {
+                    cursor.delete();
+                    cursor.continue();
+                }
+            };
+            tx.oncomplete = () => resolve();
+            tx.onerror = () => reject(tx.error ?? new Error('IDB delete failed'));
+            tx.onabort = () => reject(tx.error ?? new Error('IDB delete aborted'));
+        });
+    } catch {
+        for (const [k, r] of memoryFallback.entries()) {
+            if (r.artifactVersionId === artifactVersionId) memoryFallback.delete(k);
+        }
+    }
+};
+
 // Transactional preferred-flip: clears `isPreferred` on every record in the
 // `(artifactVersionId, screenSlug)` bucket, then sets it on the target.
 // Returns the updated set so callers can reflect it in their reactive cache
