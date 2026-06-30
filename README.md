@@ -149,8 +149,9 @@ Developer Tool, Consumer Mobile, or *Custom / Generate for me*) that sets the
 project's visual direction. The choice is stored on the project and steers the
 **Design System** artifact — and through it, both the internal mockups and the
 prompts you copy for external image tools, so everything stays visually
-consistent. You can regenerate the design system later, but doing so may shift
-your mockups and screen-level prompts.
+consistent. You can change the visual direction later from the **Design System**
+artifact and regenerate it; when its tokens change, Synapse flags the affected
+mockups and offers to regenerate them so they pick up the new direction.
 
 - **Screen Inventory** and **User Flows**
 - **UI Components** (a searchable, filterable component library with live
