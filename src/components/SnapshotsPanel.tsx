@@ -210,7 +210,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                     </button>
                                 </div>
                                 <p className="text-xs text-neutral-400 mb-3">
-                                    Bundles this project&rsquo;s spine versions, branches, artifacts, and any AI-generated mockup images, then stores it in Vercel Blob.
+                                    Bundles this project&rsquo;s spine versions, branches, artifacts, implementation tasks, orchestration metrics, and both AI-generated mockup images and uploaded screen-inventory images, then stores it in Vercel Blob.
                                 </p>
                                 <div className="flex gap-2">
                                     <input
@@ -276,7 +276,10 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                                                             )}
                                                         </div>
                                                         <div className="text-[11px] text-neutral-500 mt-0.5">
-                                                            {s.projectName} &middot; {formatDate(s.createdAt)} &middot; {s.imageCount} image{s.imageCount === 1 ? '' : 's'} &middot; {formatBytes(s.sizeBytes)}
+                                                            {(() => {
+                                                                const total = s.imageCount + (s.screenImageCount ?? 0);
+                                                                return `${s.projectName} · ${formatDate(s.createdAt)} · ${total} image${total === 1 ? '' : 's'} · ${formatBytes(s.sizeBytes)}`;
+                                                            })()}
                                                         </div>
                                                     </div>
                                                     <div className="flex items-center gap-1 shrink-0">
