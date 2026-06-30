@@ -7,7 +7,9 @@ import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
 import { hashDesignTokens } from '../../lib/designTokens';
-import { SectionTabs, type SectionTabItem } from '../SectionTabs';
+import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
+import { useArtifactOutline } from '../../lib/useArtifactOutline';
+import { useIsMobile } from '../../lib/useIsMobile';
 
 // Render a `design_system` artifact. The renderer prefers a structured
 // token contract on `metadata.tokens` (new generations) and falls back
@@ -55,20 +57,39 @@ function useTokensFromMetadata(metadata: Record<string, unknown> | undefined): D
 
 // ─── Tokenized renderer ───────────────────────────────────────────────────
 
+function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
+    return `${n} ${n === 1 ? singular : pluralForm}`;
+}
+
 function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; projectId?: string }) {
-    const tabs: SectionTabItem[] = [
-        { id: 'ds-summary', label: 'Summary' },
-        { id: 'ds-colors', label: 'Colors' },
-        { id: 'ds-typography', label: 'Typography' },
-        { id: 'ds-spacing', label: 'Spacing & Radius' },
-        { id: 'ds-components', label: 'Components' },
-        { id: 'ds-rules', label: 'Rules' },
-        { id: 'ds-downstream', label: 'Downstream' },
-    ];
+    const isMobile = useIsMobile();
+
+    const items: ArtifactOutlineItem[] = useMemo(() => {
+        const spacingCount = Object.keys(tokens.spacing).length + Object.keys(tokens.radius).length;
+        return [
+            { id: 'ds-summary', label: 'Summary', description: 'Token overview & hash' },
+            { id: 'ds-colors', label: 'Colors', countLabel: plural(Object.keys(tokens.colors).length, 'token') },
+            { id: 'ds-typography', label: 'Typography', countLabel: plural(Object.keys(tokens.typography).length, 'role') },
+            { id: 'ds-spacing', label: 'Spacing & Radius', countLabel: plural(spacingCount, 'token') },
+            { id: 'ds-components', label: 'Components', countLabel: plural(Object.keys(tokens.components).length, 'component') },
+            { id: 'ds-rules', label: 'Rules', countLabel: plural(tokens.rules.length, 'rule') },
+            { id: 'ds-downstream', label: 'Downstream Effects' },
+        ];
+    }, [tokens]);
+
+    const ids = useMemo(() => items.map(i => i.id), [items]);
+    const { activeId, scrollTo } = useArtifactOutline(ids);
 
     return (
         <div className="space-y-6">
-            <SectionTabs items={tabs} />
+            <ArtifactOutlineNav
+                title="Sections"
+                items={items}
+                activeId={activeId}
+                activeLabel="Current section"
+                collapseOnSelect={isMobile}
+                onSelect={scrollTo}
+            />
 
             <Section id="ds-summary" title="Token Summary">
                 <TokenSummary tokens={tokens} />
@@ -810,14 +831,27 @@ function FallbackMarkdown({ body }: { body: string }) {
 }
 
 function LegacyMarkdownDesignSystem({ content }: { content: string }) {
+    const isMobile = useIsMobile();
     const sections = useMemo(() => splitByH3(content), [content]);
-    const tabs: SectionTabItem[] = sections
-        .filter(s => s.title)
-        .map(s => ({ id: `ds-${slug(s.title)}`, label: s.title }));
+    const items: ArtifactOutlineItem[] = useMemo(
+        () => sections.filter(s => s.title).map(s => ({ id: `ds-${slug(s.title)}`, label: s.title })),
+        [sections],
+    );
+    const ids = useMemo(() => items.map(i => i.id), [items]);
+    const { activeId, scrollTo } = useArtifactOutline(ids);
 
     return (
         <div className="space-y-6">
-            <SectionTabs items={tabs} />
+            {items.length > 1 && (
+                <ArtifactOutlineNav
+                    title="Sections"
+                    items={items}
+                    activeId={activeId}
+                    activeLabel="Current section"
+                    collapseOnSelect={isMobile}
+                    onSelect={scrollTo}
+                />
+            )}
             {sections.map((section, i) => {
                 const title = section.title.toLowerCase();
                 let body: React.ReactNode;

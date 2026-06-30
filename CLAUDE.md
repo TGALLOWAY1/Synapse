@@ -432,6 +432,19 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     every card still shows a preview and a dedicated a11y block.
     `componentInventoryParse.ts` round-trips all these fields through
     markdown.
+    **Artifact in-page navigation** is a shared, collapsible **Artifact
+    Outline** — `src/components/ArtifactOutlineNav.tsx` (presentational/
+    controlled) + `src/lib/useArtifactOutline.ts` (scroll-spy via
+    IntersectionObserver, smooth-scroll, and hash `history.pushState` so
+    back/forward steps through sections). It mirrors the Mockups "Pages"
+    navigator: a numbered list/card, subtle purple active highlight + a
+    "Current section/entity" badge, `collapseOnSelect` on mobile (passed
+    `isMobile`) with a floating re-open button. Used by the **Design System**
+    (sections) and **Data Model** (entities) renderers, which anchor each
+    section with a `scroll-mt-*` id matching an outline item. This **replaced
+    the old wrapping "pill" nav** (`SectionTabs`) on those two pages — do not
+    reintroduce pills there; `SectionTabs` survives only for the Implementation
+    Plan renderer.
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and
