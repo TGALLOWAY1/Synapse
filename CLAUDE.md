@@ -746,8 +746,11 @@ Mockups, UI Components, Design System), **Architecture** (Data Model), and
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
 per-artifact model overrides keep working. `title`/`description` in
 `CORE_ARTIFACT_PIPELINE` are display-only labels that may be renamed freely; the
-sidebar's iteration order (and the right-rail / mobile-header / auto-open order)
-all derive from `ARTIFACT_GROUPS`, not `displayOrder`.
+sidebar's iteration order (and the mobile-header / auto-open order)
+all derive from `ARTIFACT_GROUPS`, not `displayOrder`. There is no
+separate generation-status panel on the right — per-slot status lives
+inline on each sidebar row (the `StatusDot` next to the title) and in
+the mobile header beside the selected artifact name.
 
 Marking a spine final must not dump the user back on something that looks like
 the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)

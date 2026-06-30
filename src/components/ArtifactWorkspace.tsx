@@ -1,7 +1,7 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, StopCircle, Menu, X, ChevronLeft, ChevronRight, ListChecks, History,
+    RefreshCcw, Menu, X, ListChecks, History,
     Layers, Database, Code2,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -106,17 +106,6 @@ function StatusDot({ status }: { status: GenerationStatus }) {
     return <Circle size={14} className="text-neutral-300 shrink-0" />;
 }
 
-function statusLabel(status: GenerationStatus): string {
-    switch (status) {
-        case 'done': return 'Ready';
-        case 'generating': return 'Generating…';
-        case 'queued': return 'Queued';
-        case 'error': return 'Failed';
-        case 'interrupted': return 'Paused';
-        default: return 'Idle';
-    }
-}
-
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
     autoOpenIntent, onAutoOpenConsumed,
@@ -209,27 +198,15 @@ export function ArtifactWorkspace({
         // eslint-disable-next-line react-hooks/exhaustive-deps
     }, [autoOpenIntent]);
 
-    // Derived counts for the right-rail header.
-    const allKeys = slotMetas.map(s => s.key);
-    const totalSlots = allKeys.length;
-    const doneCount = allKeys.filter(k => slotStatusFor(k) === 'done').length;
-    const generatingCount = allKeys.filter(k => slotStatusFor(k) === 'generating').length;
-    const errorCount = allKeys.filter(k => slotStatusFor(k) === 'error').length;
-    const interruptedCount = allKeys.filter(k => slotStatusFor(k) === 'interrupted').length;
-    const isActive = generatingCount > 0 || allKeys.some(k => slotStatusFor(k) === 'queued');
+    // Drives the in-pane "Creating your build assets…" placeholder so an
+    // idle slot doesn't read as empty while siblings are still in flight.
+    const isActive = slotMetas.some(s => {
+        const status = slotStatusFor(s.key);
+        return status === 'generating' || status === 'queued';
+    });
 
     const handleRetrySlot = (slot: ArtifactSlotKey) => {
         artifactJobController.retrySlot(slot, {
-            projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
-        });
-    };
-
-    const handleCancelAll = () => {
-        artifactJobController.cancelAll(projectId);
-    };
-
-    const handleResumeAll = () => {
-        artifactJobController.startAll({
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
     };
@@ -603,25 +580,6 @@ export function ArtifactWorkspace({
                 </div>
             </main>
 
-            {/* Right rail — Generation Status. Collapses to a slim strip
-                once all artifacts are ready; auto-expands while anything
-                is in flight or has errored. The user can also toggle
-                manually via the chevron. Hidden below xl; status remains
-                visible inline through the left-rail StatusDots and mobile
-                header. */}
-            <RightRail
-                slotMetas={slotMetas}
-                slotStatusFor={slotStatusFor}
-                doneCount={doneCount}
-                totalSlots={totalSlots}
-                generatingCount={generatingCount}
-                errorCount={errorCount}
-                interruptedCount={interruptedCount}
-                isActive={isActive}
-                onCancelAll={handleCancelAll}
-                onResumeAll={handleResumeAll}
-            />
-
             {tasksModalSource && (
                 <ConvertToTasksModal
                     projectId={projectId}
@@ -710,118 +668,6 @@ export function ArtifactWorkspace({
                 );
             })()}
         </div>
-    );
-}
-
-interface RightRailProps {
-    slotMetas: SlotMeta[];
-    slotStatusFor: (key: WorkspaceSelection) => GenerationStatus;
-    doneCount: number;
-    totalSlots: number;
-    generatingCount: number;
-    errorCount: number;
-    interruptedCount: number;
-    isActive: boolean;
-    onCancelAll: () => void;
-    onResumeAll: () => void;
-}
-
-function RightRail({
-    slotMetas,
-    slotStatusFor,
-    doneCount,
-    totalSlots,
-    generatingCount,
-    errorCount,
-    interruptedCount,
-    isActive,
-    onCancelAll,
-    onResumeAll,
-}: RightRailProps) {
-    const allReady = doneCount === totalSlots && generatingCount === 0 && errorCount === 0 && interruptedCount === 0;
-    // User-controlled override; defaults to expanded except when all-ready,
-    // in which case it auto-collapses. The collapse chevron only appears
-    // when allReady, so userToggled === 'closed' can only be set in that
-    // state; while work is in flight !allReady forces expanded back open
-    // without us needing a setState-in-effect dance.
-    const [userToggled, setUserToggled] = useState<null | 'open' | 'closed'>(null);
-    const expanded = !allReady || userToggled === 'open';
-
-    if (!expanded) {
-        return (
-            <aside className="hidden lg:flex flex-col w-12 shrink-0 border-l border-neutral-200 bg-white">
-                <button
-                    type="button"
-                    onClick={() => setUserToggled('open')}
-                    title="Expand generation status"
-                    aria-label="Expand generation status"
-                    className="h-full flex flex-col items-center justify-start gap-3 pt-4 pb-4 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-50"
-                >
-                    <ChevronLeft size={16} />
-                    <CheckCircle2 size={16} className="text-emerald-600" />
-                    <span className="[writing-mode:vertical-rl] rotate-180 text-[11px] font-semibold uppercase tracking-wider text-emerald-700">
-                        All ready · {doneCount}/{totalSlots}
-                    </span>
-                </button>
-            </aside>
-        );
-    }
-
-    return (
-        <aside className="hidden lg:flex flex-col w-72 shrink-0 border-l border-neutral-200 bg-white overflow-y-auto">
-            <div className="p-4 border-b border-neutral-200 flex items-start justify-between gap-2">
-                <div>
-                    <h3 className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Generation Status</h3>
-                    <p className="text-sm text-neutral-700 mt-1">
-                        {doneCount} of {totalSlots} ready
-                        {generatingCount > 0 && <span className="text-neutral-500"> · {generatingCount} generating</span>}
-                    </p>
-                </div>
-                {allReady && (
-                    <button
-                        type="button"
-                        onClick={() => setUserToggled('closed')}
-                        title="Collapse generation status"
-                        aria-label="Collapse generation status"
-                        className="shrink-0 p-1 -mr-1 text-neutral-400 hover:text-neutral-700"
-                    >
-                        <ChevronRight size={16} />
-                    </button>
-                )}
-            </div>
-            <ul className="py-2">
-                {slotMetas.map(slot => {
-                    const status = slotStatusFor(slot.key);
-                    return (
-                        <li key={slot.key} className="px-4 py-2 flex items-center gap-3">
-                            <StatusDot status={status} />
-                            <span className="text-sm text-neutral-700 flex-1 truncate">{slot.title}</span>
-                            <span className="text-[11px] text-neutral-400">{statusLabel(status)}</span>
-                        </li>
-                    );
-                })}
-            </ul>
-            <div className="px-4 py-3 border-t border-neutral-200 space-y-2">
-                {isActive && (
-                    <button
-                        type="button"
-                        onClick={onCancelAll}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs bg-red-50 text-red-700 border border-red-200 rounded-md hover:bg-red-100 transition"
-                    >
-                        <StopCircle size={12} /> Cancel All
-                    </button>
-                )}
-                {(errorCount > 0 || interruptedCount > 0) && !isActive && (
-                    <button
-                        type="button"
-                        onClick={onResumeAll}
-                        className="w-full flex items-center justify-center gap-1.5 px-3 py-2 text-xs bg-indigo-50 text-indigo-700 border border-indigo-200 rounded-md hover:bg-indigo-100 transition"
-                    >
-                        <RefreshCcw size={12} /> Resume {errorCount + interruptedCount}
-                    </button>
-                )}
-            </div>
-        </aside>
     );
 }
 
