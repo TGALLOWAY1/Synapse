@@ -11,7 +11,9 @@ import {
     type ParsedDataModel,
     type ParsedEntity,
 } from '../../lib/services/dataModelMarkdown';
-import { SectionTabs, type SectionTabItem } from '../SectionTabs';
+import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
+import { useArtifactOutline } from '../../lib/useArtifactOutline';
+import { useIsMobile } from '../../lib/useIsMobile';
 
 interface Props {
     content: string;
@@ -235,7 +237,13 @@ function markEntityGroupsAuto(parsed: ParsedDataModel, sourceMarkdown: string): 
     }
 }
 
+function entityFieldCount(entity: ParsedEntity): number {
+    return entity.fieldGroups.reduce((sum, g) => sum + g.fields.length, 0);
+}
+
 export function DataModelRenderer({ content }: Props) {
+    const isMobile = useIsMobile();
+
     const { parsed, sourceMarkdown } = useMemo(() => {
         const json = tryParseAsJson(content);
         if (json) {
@@ -247,6 +255,20 @@ export function DataModelRenderer({ content }: Props) {
         return { parsed: result, sourceMarkdown: content };
     }, [content]);
 
+    const outlineItems: ArtifactOutlineItem[] = useMemo(() => {
+        if (!parsed) return [];
+        return parsed.entities.map(e => {
+            const count = entityFieldCount(e);
+            return {
+                id: entityAnchorId(e.name),
+                label: e.name,
+                countLabel: `${count} ${count === 1 ? 'field' : 'fields'}`,
+            };
+        });
+    }, [parsed]);
+    const outlineIds = useMemo(() => outlineItems.map(i => i.id), [outlineItems]);
+    const { activeId, scrollTo } = useArtifactOutline(outlineIds);
+
     if (!parsed) {
         return (
             <div className="prose prose-sm prose-neutral max-w-none">
@@ -257,14 +279,18 @@ export function DataModelRenderer({ content }: Props) {
 
     markEntityGroupsAuto(parsed, sourceMarkdown);
 
-    const tabItems: SectionTabItem[] = parsed.entities.map(e => ({
-        id: entityAnchorId(e.name),
-        label: e.name,
-    }));
-
     return (
         <div className="space-y-6">
-            {parsed.entities.length > 3 && <SectionTabs items={tabItems} />}
+            {parsed.entities.length > 1 && (
+                <ArtifactOutlineNav
+                    title="Entities"
+                    items={outlineItems}
+                    activeId={activeId}
+                    activeLabel="Current entity"
+                    collapseOnSelect={isMobile}
+                    onSelect={scrollTo}
+                />
+            )}
 
             {parsed.overview && (
                 <section className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">
