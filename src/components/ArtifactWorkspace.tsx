@@ -447,6 +447,8 @@ export function ArtifactWorkspace({
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
+                        generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
+                        versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
                     />
                     </MockupErrorBoundary>
                 </div>

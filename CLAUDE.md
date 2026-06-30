@@ -432,6 +432,26 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     every card still shows a preview and a dedicated a11y block.
     `componentInventoryParse.ts` round-trips all these fields through
     markdown.
+    The `prompt_pack` (**Developer Prompts**) renderer
+    (`PromptPackRenderer.tsx`) is a vertical **document**: a Mockups-style
+    collapsible top navigator (`src/components/artifact/CollapsibleArtifactNav.tsx`)
+    scroll-spies/scrolls between one card per `### N. Title`, so the prompt
+    body uses the full page width instead of a permanent left rail. Each card
+    has a light header (Prompt N · Title · Category · "Generated <date>"),
+    only **Edit** + **Copy Prompt** actions (Reset surfaces inside edit mode
+    when modified), the prompt body rendered exactly as before (mono
+    `whitespace-pre-wrap`, unchanged), and reorganized supporting cards below
+    it — **User Intent** (`**Reason:**`), **Expected Output**
+    (trailing `**Expected Output:**`), **Dependencies** (feature names parsed
+    from the body's `## Features In Scope`), **Key Implementation Areas**
+    (Category + Target Tool) — each rendered only when its data exists, plus a
+    subtle "Safe to regenerate / Creates Version X" callout. `generatedAt`
+    (version `createdAt`) and `versionNumber` thread through
+    `ArtifactContentRenderer`. `CollapsibleArtifactNav` is the shared,
+    reusable navigator for document-style artifacts (owns the collapsible
+    shell, scroll-spy active tracking, smooth scroll-to-section, mobile
+    collapse-on-select + floating reopen pill); `MockupViewer`'s inline
+    "Pages" navigator is the sibling implementation of the same pattern.
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and

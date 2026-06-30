@@ -40,6 +40,10 @@ interface DispatchProps {
     promptEdits?: Record<number, string>;
     /** Only consumed by `prompt_pack`; persists the new edit overlay. */
     onUpdatePromptEdits?: (next: Record<number, string>) => void;
+    /** Only consumed by `prompt_pack`; creation timestamp of the artifact version. */
+    generatedAt?: number;
+    /** Only consumed by `prompt_pack`; current artifact version number. */
+    versionNumber?: number;
 }
 
 /**
@@ -80,6 +84,8 @@ export function ArtifactContentRenderer({
     implementationPlan,
     promptEdits,
     onUpdatePromptEdits,
+    generatedAt,
+    versionNumber,
 }: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
@@ -115,6 +121,8 @@ export function ArtifactContentRenderer({
                 features={features}
                 edits={promptEdits}
                 onUpdateEdits={onUpdatePromptEdits}
+                generatedAt={generatedAt}
+                versionNumber={versionNumber}
             />
         );
     }
