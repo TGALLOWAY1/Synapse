@@ -14,6 +14,11 @@ export type Project = {
     // the user-chosen `name`.
     productName?: string;
     productCategory?: string;
+    // Only set on the cached demo project: the snapshot id this device's demo
+    // was hydrated from. Used by `loadDemoProject` to detect when the owner
+    // has pinned a newer demo snapshot and re-fetch instead of serving stale
+    // local cache. Optional so legacy persisted projects keep working.
+    demoSourceSnapshotId?: string;
 };
 
 export type BranchMessage = {

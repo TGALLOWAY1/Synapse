@@ -154,6 +154,18 @@ upload nor download crosses Vercel's ~4.5 MB cap. One snapshot can be pinned as
 **the demo** (`_demo.json` pointer + public `?demo=1` read); `loadDemoProject`
 restores it under the stable `DEMO_PROJECT_ID`.
 
+- **Demo cache freshness — never short-circuit on a `DEMO_PROJECT_ID` cache hit
+  alone.** Each restored demo project stores its source snapshot id in the
+  optional `Project.demoSourceSnapshotId` (so it travels with the per-user
+  project namespace). On every `loadDemoProject` call, the client first probes
+  the lightweight public `GET /api/snapshots?demo=1&pointer=1`
+  (`loadDemoSnapshotPointer`) and only reuses the cached demo when the stamped
+  id matches the live pointer. When the owner pins a newer snapshot the
+  pointer differs → the full bundle is re-fetched and `restoreSnapshotAs`
+  overwrites the cache. If the pointer probe itself fails (offline / proxy
+  error) the cache is preferred over an empty state. **Do not** re-add an
+  early `if (existing) return` — that's exactly what made the desktop serve a
+  stale demo while mobile (with no cache) silently saw the latest.
 - **Restoring under a *different* project id MUST namespace the artifact version
   ids** (`namespaceSnapshotForRestore` → `rewriteIds`), not just the project id.
   Mockup images are keyed in IndexedDB by `versionId` with **no projectId in the
