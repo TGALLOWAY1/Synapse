@@ -6,7 +6,6 @@ import rehypeRaw from 'rehype-raw';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
-import { hashDesignTokens } from '../../lib/designTokens';
 import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
 import { useArtifactOutline } from '../../lib/useArtifactOutline';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -17,13 +16,12 @@ import { useIsMobile } from '../../lib/useIsMobile';
 // (older projects in localStorage).
 //
 // New token-aware sections (when metadata.tokens is present):
-//   1. Token Summary (counts + tokensHash badge)
-//   2. Color Tokens (grouped by namespace)
-//   3. Typography Tokens (live previews)
-//   4. Spacing + Radius (proportional bars)
-//   5. Component Tokens (recipe cards)
-//   6. Usage Rules (verbatim from tokens.rules)
-//   7. Downstream Usage Status (mockup / HTML mockup / component_inventory)
+//   1. Color Tokens (grouped by namespace)
+//   2. Typography Tokens (live previews)
+//   3. Spacing + Radius (proportional bars)
+//   4. Component Tokens (recipe cards)
+//   5. Usage Rules (verbatim from tokens.rules)
+//   6. Downstream Usage Status (mockup / HTML mockup / component_inventory)
 //
 // Legacy markdown rendering preserved unchanged for back-compat.
 
@@ -67,7 +65,6 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
     const items: ArtifactOutlineItem[] = useMemo(() => {
         const spacingCount = Object.keys(tokens.spacing).length + Object.keys(tokens.radius).length;
         return [
-            { id: 'ds-summary', label: 'Summary', description: 'Token overview & hash' },
             { id: 'ds-colors', label: 'Colors', countLabel: plural(Object.keys(tokens.colors).length, 'token') },
             { id: 'ds-typography', label: 'Typography', countLabel: plural(Object.keys(tokens.typography).length, 'role') },
             { id: 'ds-spacing', label: 'Spacing & Radius', countLabel: plural(spacingCount, 'token') },
@@ -90,10 +87,6 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
                 collapseOnSelect={isMobile}
                 onSelect={scrollTo}
             />
-
-            <Section id="ds-summary" title="Token Summary">
-                <TokenSummary tokens={tokens} />
-            </Section>
 
             <Section id="ds-colors" title="Color Tokens">
                 <ColorTokens tokens={tokens} />
@@ -130,39 +123,6 @@ function Section({ id, title, children }: { id: string; title: string; children:
             </h3>
             {children}
         </section>
-    );
-}
-
-function TokenSummary({ tokens }: { tokens: DesignTokens }) {
-    const hash = useMemo(() => hashDesignTokens(tokens), [tokens]);
-    const counts = [
-        { label: 'Colors', value: Object.keys(tokens.colors).length },
-        { label: 'Typography roles', value: Object.keys(tokens.typography).length },
-        { label: 'Spacing slots', value: Object.keys(tokens.spacing).length },
-        { label: 'Radius slots', value: Object.keys(tokens.radius).length },
-        { label: 'Components', value: Object.keys(tokens.components).length },
-        { label: 'Rules', value: tokens.rules.length },
-    ];
-    return (
-        <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-                {counts.map(c => (
-                    <span
-                        key={c.label}
-                        className="text-[11px] uppercase tracking-wider px-2.5 py-1 rounded-md border border-neutral-200 bg-neutral-50 text-neutral-600 font-medium"
-                    >
-                        {c.value} {c.label}
-                    </span>
-                ))}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-neutral-500">
-                <span>Token hash:</span>
-                <code className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-neutral-100 border border-neutral-200 text-neutral-700">
-                    {hash}
-                </code>
-                <span className="text-neutral-400">— used to detect downstream staleness when tokens change.</span>
-            </div>
-        </div>
     );
 }
 
