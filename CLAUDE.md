@@ -440,11 +440,29 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     navigator: a numbered list/card, subtle purple active highlight + a
     "Current section/entity" badge, `collapseOnSelect` on mobile (passed
     `isMobile`) with a floating re-open button. Used by the **Design System**
-    (sections) and **Data Model** (entities) renderers, which anchor each
-    section with a `scroll-mt-*` id matching an outline item. This **replaced
-    the old wrapping "pill" nav** (`SectionTabs`) on those two pages — do not
-    reintroduce pills there; `SectionTabs` survives only for the Implementation
-    Plan renderer.
+    (sections), **Data Model** (entities), and **Developer Prompts**
+    (`prompt_pack`, prompts) renderers, which anchor each section with a
+    `scroll-mt-*` id matching an outline item. This **replaced the old
+    wrapping "pill" nav** (`SectionTabs`) on the first two pages and the old
+    permanent left rail on Developer Prompts — do not reintroduce pills or a
+    side rail there; `SectionTabs` survives only for the Implementation Plan
+    renderer. When a document-style artifact needs in-page nav, reuse
+    `ArtifactOutlineNav`/`useArtifactOutline` rather than introducing another
+    navigation style.
+    The `prompt_pack` (**Developer Prompts**) renderer
+    (`PromptPackRenderer.tsx`) is now a vertical **document** driven by the
+    shared outline (one card per `### N. Title`), so the prompt body uses the
+    full page width instead of a permanent left rail. Each card has a light
+    header (Prompt N · Title · Category · "Generated <date>"), only **Edit** +
+    **Copy Prompt** actions (Reset surfaces inside edit mode when modified),
+    the prompt body rendered exactly as before (mono `whitespace-pre-wrap`,
+    unchanged), and reorganized supporting cards below it — **User Intent**
+    (`**Reason:**`), **Expected Output** (trailing `**Expected Output:**`),
+    **Dependencies** (feature names parsed from the body's `## Features In
+    Scope`), **Key Implementation Areas** (Category + Target Tool) — each
+    rendered only when its data exists, plus a subtle "Safe to regenerate /
+    Creates Version X" callout. `generatedAt` (version `createdAt`) and
+    `versionNumber` thread through `ArtifactContentRenderer`.
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and

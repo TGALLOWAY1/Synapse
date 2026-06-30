@@ -1,15 +1,22 @@
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertTriangle, Check, Copy, Pencil, RotateCcw } from 'lucide-react';
-import { PromptPackSidebar, type PromptNavItem } from './PromptPackSidebar';
+import { AlertTriangle, Check, Copy, Pencil, RotateCcw, ShieldCheck } from 'lucide-react';
+import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
+import { useArtifactOutline } from '../../lib/useArtifactOutline';
+import { useIsMobile } from '../../lib/useIsMobile';
 import type { Feature } from '../../types';
 
-// Render a `prompt_pack` artifact as one card per `### N. Title` heading,
-// extracting `**Target Tool:**` / `**Reason:**` / `**Category:**` chips and
-// the fenced code block that holds the actual prompt body. Each card has a
-// "Copy prompt" button and an editable mode. User edits are stored as a
-// per-prompt overlay on the version's metadata; copy uses the edited body.
+// Render a `prompt_pack` artifact as a vertical document — one card per
+// `### N. Title` heading — with the shared collapsible `ArtifactOutlineNav`
+// on top (same navigator used by Data Model and Design System) so the prompt
+// content gets the full page width instead of competing with a permanent left
+// rail. Each card extracts
+// `**Target Tool:**` / `**Reason:**` / `**Category:**` chips and the fenced
+// code block that holds the actual prompt body, then surfaces supporting
+// context (User Intent / Expected Output / Dependencies / Key Implementation
+// Areas) below the body. User edits are stored as a per-prompt overlay on the
+// version's metadata; copy uses the edited body.
 
 interface Props {
     content: string;
@@ -19,6 +26,10 @@ interface Props {
     edits?: Record<number, string>;
     /** Persist new edit overlay. Pass-through omitted = read-only render. */
     onUpdateEdits?: (next: Record<number, string>) => void;
+    /** Creation timestamp of the artifact version, shown as "Generated <date>". */
+    generatedAt?: number;
+    /** Current artifact version number; powers the "Creates Version X" hint. */
+    versionNumber?: number;
 }
 
 type PromptCard = {
@@ -29,6 +40,8 @@ type PromptCard = {
     category?: string;
     promptBody: string;
     expected?: string;
+    /** Feature names this prompt declares under "## Features In Scope". */
+    dependencies: string[];
 };
 
 const PROMPT_HEADING = /^###\s+(\d+)\.?\s+(.+?)\s*$/;
@@ -63,6 +76,7 @@ function buildCard(active: { rawLines: string[]; index: number; title: string })
         index: active.index,
         title: active.title,
         promptBody: '',
+        dependencies: [],
     };
     let inFence = false;
     const promptLines: string[] = [];
@@ -107,7 +121,36 @@ function buildCard(active: { rawLines: string[]; index: number; title: string })
     if (expectedLines.length > 0) {
         card.expected = expectedLines.join('\n').trim();
     }
+    card.dependencies = parseFeaturesInScope(card.promptBody);
     return card;
+}
+
+// Pull the feature names a prompt declares under its "## Features In Scope"
+// section. Lines look like `- f1 — Feature Name` (id prefix + em dash) with
+// indented detail bullets beneath; we keep the top-level names only.
+function parseFeaturesInScope(body: string): string[] {
+    if (!body) return [];
+    const lines = body.split('\n');
+    let inScope = false;
+    const names: string[] = [];
+    for (const raw of lines) {
+        const heading = raw.match(/^##\s+(.+?)\s*$/);
+        if (heading) {
+            const name = heading[1].toLowerCase();
+            inScope = name.includes('features in scope') || name.includes('feature in scope');
+            continue;
+        }
+        if (!inScope) continue;
+        // Top-level bullet only (indented detail bullets start with spaces).
+        const bullet = raw.match(/^[-*]\s+(.+)$/);
+        if (!bullet) continue;
+        const text = bullet[1].trim();
+        // Strip a leading `f1 —` / `F-014 -` id prefix when present.
+        const withId = text.match(/^[fF]-?\d+\s*[—–-]\s*(.+)$/);
+        const cleaned = (withId ? withId[1] : text).replace(/[*_`]/g, '').trim();
+        if (cleaned) names.push(cleaned);
+    }
+    return Array.from(new Set(names));
 }
 
 // Find feature IDs (e.g. f1, F-014) that appear OUTSIDE a "## Features In
@@ -153,6 +196,18 @@ function findUnresolvedFeatureIds(body: string, features: Feature[]): string[] {
     });
 }
 
+function promptAnchorId(index: number): string {
+    return `prompt-pack-prompt-${index}`;
+}
+
+function formatDate(ts: number): string {
+    return new Date(ts).toLocaleDateString(undefined, {
+        month: 'short',
+        day: 'numeric',
+        year: 'numeric',
+    });
+}
+
 interface CopyButtonProps {
     text: string;
     disabled?: boolean;
@@ -188,10 +243,47 @@ function CopyButton({ text, disabled, disabledReason }: CopyButtonProps) {
                 </>
             ) : (
                 <>
-                    <Copy size={12} /> Copy prompt
+                    <Copy size={12} /> Copy Prompt
                 </>
             )}
         </button>
+    );
+}
+
+// A labelled supporting-context card shown below the prompt body. Renders
+// nothing when it has no content, so older prompts (which may lack a field)
+// degrade gracefully.
+function SupportingCard({
+    label,
+    accent,
+    children,
+}: {
+    label: string;
+    accent: string;
+    children: React.ReactNode;
+}) {
+    return (
+        <div className="px-4 py-3 border-t border-neutral-100">
+            <p className={`text-[11px] font-semibold uppercase tracking-wider mb-1.5 ${accent}`}>
+                {label}
+            </p>
+            {children}
+        </div>
+    );
+}
+
+function ChipRow({ items }: { items: string[] }) {
+    return (
+        <div className="flex flex-wrap gap-1.5">
+            {items.map((item, i) => (
+                <span
+                    key={`${item}-${i}`}
+                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700 border border-neutral-200"
+                >
+                    {item}
+                </span>
+            ))}
+        </div>
     );
 }
 
@@ -201,6 +293,7 @@ interface PromptCardViewProps {
     modified: boolean;
     unresolvedIds: string[];
     canEdit: boolean;
+    generatedAt?: number;
     onEdit: (next: string) => void;
     onReset: () => void;
 }
@@ -211,35 +304,44 @@ function PromptCardView({
     modified,
     unresolvedIds,
     canEdit,
+    generatedAt,
     onEdit,
     onReset,
 }: PromptCardViewProps) {
     const [editing, setEditing] = useState(false);
     const hasWarning = unresolvedIds.length > 0;
     const copyDisabled = hasWarning;
+    const implementationAreas = [
+        ...(card.category ? [card.category] : []),
+        ...(card.targetTool ? [card.targetTool] : []),
+    ];
     return (
         <article className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
 
+            {/* --- Lightweight header: number, title, category, date ------- */}
             <header className="px-4 py-3 border-b border-neutral-100">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600">
-                    Prompt {card.index}
-                </p>
-                <h3 className="text-sm font-bold text-neutral-900 leading-snug mt-0.5">
-                    {card.title}
-                </h3>
-                {(card.category || modified) && (
-                    <div className="flex flex-wrap gap-1.5 mt-2">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600">
+                            Prompt {card.index}
+                        </p>
+                        <h3 className="text-sm font-bold text-neutral-900 leading-snug mt-0.5">
+                            {card.title}
+                        </h3>
                         {card.category && (
-                            <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-700">
-                                {card.category}
-                            </span>
-                        )}
-                        {modified && (
-                            <span className="text-[11px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                Modified
-                            </span>
+                            <p className="text-xs text-neutral-500 mt-0.5">{card.category}</p>
                         )}
                     </div>
+                    {modified && (
+                        <span className="shrink-0 text-[11px] font-medium px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
+                            Modified
+                        </span>
+                    )}
+                </div>
+                {generatedAt !== undefined && (
+                    <p className="text-[11px] text-neutral-400 mt-1.5">
+                        Generated {formatDate(generatedAt)}
+                    </p>
                 )}
                 <div className="flex flex-wrap items-center gap-1.5 mt-3">
                     {canEdit && (
@@ -252,7 +354,7 @@ function PromptCardView({
                                 {editing ? <Check size={12} /> : <Pencil size={12} />}
                                 {editing ? 'Done' : 'Edit'}
                             </button>
-                            {modified && (
+                            {editing && modified && (
                                 <button
                                     type="button"
                                     onClick={() => {
@@ -277,6 +379,7 @@ function PromptCardView({
                     )}
                 </div>
             </header>
+
             {hasWarning && (
                 <div className="px-4 py-2 bg-rose-50 border-b border-rose-100 flex items-start gap-2">
                     <AlertTriangle size={14} className="text-rose-600 flex-shrink-0 mt-0.5" />
@@ -288,6 +391,8 @@ function PromptCardView({
                     </p>
                 </div>
             )}
+
+            {/* --- Prompt body: rendering preserved exactly as before ------ */}
             {editing && canEdit ? (
                 <textarea
                     value={effectiveBody}
@@ -302,27 +407,49 @@ function PromptCardView({
                     </div>
                 )
             )}
+
+            {/* --- Supporting context (reorganized below the body) --------- */}
+            {card.targetReason && (
+                <SupportingCard label="User Intent" accent="text-indigo-600">
+                    <p className="text-sm text-neutral-700 leading-relaxed">{card.targetReason}</p>
+                </SupportingCard>
+            )}
             {card.expected && (
-                <div className="px-4 py-3 border-t border-neutral-100 bg-emerald-50/40">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
-                        Expected output
-                    </p>
+                <SupportingCard label="Expected Output" accent="text-emerald-700">
                     <div className="prose prose-sm prose-neutral max-w-none">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{card.expected}</ReactMarkdown>
                     </div>
-                </div>
+                </SupportingCard>
+            )}
+            {card.dependencies.length > 0 && (
+                <SupportingCard label="Dependencies" accent="text-neutral-500">
+                    <ChipRow items={card.dependencies} />
+                </SupportingCard>
+            )}
+            {implementationAreas.length > 0 && (
+                <SupportingCard label="Key Implementation Areas" accent="text-neutral-500">
+                    <ChipRow items={implementationAreas} />
+                </SupportingCard>
             )}
         </article>
     );
 }
 
-export function PromptPackRenderer({ content, features, edits, onUpdateEdits }: Props) {
+export function PromptPackRenderer({
+    content,
+    features,
+    edits,
+    onUpdateEdits,
+    generatedAt,
+    versionNumber,
+}: Props) {
     const { preamble, cards } = useMemo(() => parsePromptPack(content), [content]);
     const editsMap = edits ?? {};
     const canEdit = typeof onUpdateEdits === 'function';
+    const isMobile = useIsMobile();
 
-    const [selectedIndex, setSelectedIndex] = useState(0);
-    const [mobileNavOpen, setMobileNavOpen] = useState(false);
+    const outlineIds = useMemo(() => cards.map(c => promptAnchorId(c.index)), [cards]);
+    const { activeId, scrollTo } = useArtifactOutline(outlineIds);
 
     if (cards.length === 0) {
         return (
@@ -332,58 +459,80 @@ export function PromptPackRenderer({ content, features, edits, onUpdateEdits }: 
         );
     }
 
-    const safeIndex = Math.min(selectedIndex, cards.length - 1);
-    const card = cards[safeIndex];
-    const overlay = editsMap[card.index];
-    const effectiveBody = overlay !== undefined ? overlay : card.promptBody;
-    const modified = overlay !== undefined && overlay !== card.promptBody;
-    const unresolvedIds = findUnresolvedFeatureIds(effectiveBody, features ?? []);
-
-    const navItems: PromptNavItem[] = cards.map(c => ({
-        index: c.index,
-        title: c.title,
-        category: c.category,
-    }));
-    const modifiedIndices = new Set(
-        cards
-            .filter(c => editsMap[c.index] !== undefined && editsMap[c.index] !== c.promptBody)
-            .map(c => c.index),
-    );
+    const nextVersion = versionNumber !== undefined ? versionNumber + 1 : undefined;
+    const outlineItems: ArtifactOutlineItem[] = cards.map(c => {
+        const rowModified = editsMap[c.index] !== undefined && editsMap[c.index] !== c.promptBody;
+        return {
+            id: promptAnchorId(c.index),
+            label: c.title,
+            description: c.category,
+            countLabel: rowModified ? 'Edited' : undefined,
+        };
+    });
 
     return (
-        <div className="md:flex md:gap-5 md:items-start">
-            <PromptPackSidebar
-                items={navItems}
-                selectedIndex={safeIndex}
-                onSelect={setSelectedIndex}
-                isMobileOpen={mobileNavOpen}
-                onToggleMobile={setMobileNavOpen}
-                modifiedIndices={modifiedIndices}
-            />
-            <div className="flex-1 min-w-0 space-y-4">
-                {preamble && (
-                    <div className="prose prose-sm prose-neutral max-w-none">
-                        <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
-                    </div>
-                )}
-                <PromptCardView
-                    key={card.index}
-                    card={card}
-                    effectiveBody={effectiveBody}
-                    modified={modified}
-                    unresolvedIds={unresolvedIds}
-                    canEdit={canEdit}
-                    onEdit={next => {
-                        if (!canEdit) return;
-                        onUpdateEdits!({ ...editsMap, [card.index]: next });
-                    }}
-                    onReset={() => {
-                        if (!canEdit) return;
-                        const { [card.index]: _omit, ...rest } = editsMap;
-                        void _omit;
-                        onUpdateEdits!(rest);
-                    }}
+        <div className="space-y-4">
+            {preamble && (
+                <div className="prose prose-sm prose-neutral max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{preamble}</ReactMarkdown>
+                </div>
+            )}
+
+            {cards.length > 1 && (
+                <ArtifactOutlineNav
+                    title="Prompts"
+                    items={outlineItems}
+                    activeId={activeId}
+                    activeLabel="Current prompt"
+                    collapseOnSelect={isMobile}
+                    onSelect={scrollTo}
                 />
+            )}
+
+            {/* Document layout: every prompt rendered in order. */}
+            {cards.map(card => {
+                const overlay = editsMap[card.index];
+                const effectiveBody = overlay !== undefined ? overlay : card.promptBody;
+                const modified = overlay !== undefined && overlay !== card.promptBody;
+                const unresolvedIds = findUnresolvedFeatureIds(effectiveBody, features ?? []);
+                return (
+                    <section
+                        key={card.index}
+                        id={promptAnchorId(card.index)}
+                        className="scroll-mt-20"
+                    >
+                        <PromptCardView
+                            card={card}
+                            effectiveBody={effectiveBody}
+                            modified={modified}
+                            unresolvedIds={unresolvedIds}
+                            canEdit={canEdit}
+                            generatedAt={generatedAt}
+                            onEdit={next => {
+                                if (!canEdit) return;
+                                onUpdateEdits!({ ...editsMap, [card.index]: next });
+                            }}
+                            onReset={() => {
+                                if (!canEdit) return;
+                                const { [card.index]: _omit, ...rest } = editsMap;
+                                void _omit;
+                                onUpdateEdits!(rest);
+                            }}
+                        />
+                    </section>
+                );
+            })}
+
+            {/* Subtle, informational "Safe to regenerate" callout. */}
+            <div className="flex items-start gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2.5">
+                <ShieldCheck size={15} className="text-neutral-400 shrink-0 mt-0.5" aria-hidden="true" />
+                <p className="text-xs text-neutral-500 leading-relaxed">
+                    <span className="font-medium text-neutral-600">Safe to regenerate.</span>{' '}
+                    {nextVersion !== undefined
+                        ? `Regenerating creates Version ${nextVersion}. `
+                        : ''}
+                    Your current prompts remain available in version history.
+                </p>
             </div>
         </div>
     );
