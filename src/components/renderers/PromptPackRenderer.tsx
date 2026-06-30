@@ -1,14 +1,17 @@
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { AlertTriangle, Check, Copy, FileCode2, Pencil, RotateCcw, ShieldCheck } from 'lucide-react';
-import { CollapsibleArtifactNav } from '../artifact/CollapsibleArtifactNav';
+import { AlertTriangle, Check, Copy, Pencil, RotateCcw, ShieldCheck } from 'lucide-react';
+import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
+import { useArtifactOutline } from '../../lib/useArtifactOutline';
+import { useIsMobile } from '../../lib/useIsMobile';
 import type { Feature } from '../../types';
 
 // Render a `prompt_pack` artifact as a vertical document — one card per
-// `### N. Title` heading — with a Mockups-style collapsible navigator on top
-// (CollapsibleArtifactNav) so the prompt content gets the full page width
-// instead of competing with a permanent left rail. Each card extracts
+// `### N. Title` heading — with the shared collapsible `ArtifactOutlineNav`
+// on top (same navigator used by Data Model and Design System) so the prompt
+// content gets the full page width instead of competing with a permanent left
+// rail. Each card extracts
 // `**Target Tool:**` / `**Reason:**` / `**Category:**` chips and the fenced
 // code block that holds the actual prompt body, then surfaces supporting
 // context (User Intent / Expected Output / Dependencies / Key Implementation
@@ -443,6 +446,10 @@ export function PromptPackRenderer({
     const { preamble, cards } = useMemo(() => parsePromptPack(content), [content]);
     const editsMap = edits ?? {};
     const canEdit = typeof onUpdateEdits === 'function';
+    const isMobile = useIsMobile();
+
+    const outlineIds = useMemo(() => cards.map(c => promptAnchorId(c.index)), [cards]);
+    const { activeId, scrollTo } = useArtifactOutline(outlineIds);
 
     if (cards.length === 0) {
         return (
@@ -452,8 +459,16 @@ export function PromptPackRenderer({
         );
     }
 
-    const sectionIds = cards.map(c => promptAnchorId(c.index));
     const nextVersion = versionNumber !== undefined ? versionNumber + 1 : undefined;
+    const outlineItems: ArtifactOutlineItem[] = cards.map(c => {
+        const rowModified = editsMap[c.index] !== undefined && editsMap[c.index] !== c.promptBody;
+        return {
+            id: promptAnchorId(c.index),
+            label: c.title,
+            description: c.category,
+            countLabel: rowModified ? 'Edited' : undefined,
+        };
+    });
 
     return (
         <div className="space-y-4">
@@ -463,47 +478,16 @@ export function PromptPackRenderer({
                 </div>
             )}
 
-            <CollapsibleArtifactNav
-                label="Prompts"
-                icon={FileCode2}
-                sectionIds={sectionIds}
-                renderRow={(idx, active) => {
-                    const c = cards[idx];
-                    const rowModified = editsMap[c.index] !== undefined && editsMap[c.index] !== c.promptBody;
-                    return (
-                        <>
-                            <span
-                                className={`shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-md text-xs font-semibold tabular-nums ${
-                                    active ? 'bg-indigo-100 text-indigo-700' : 'bg-neutral-100 text-neutral-500'
-                                }`}
-                            >
-                                {c.index}
-                            </span>
-                            <span className="flex-1 min-w-0">
-                                <span className="flex items-center gap-1.5">
-                                    <span
-                                        className={`block text-sm font-semibold truncate ${
-                                            active ? 'text-indigo-900' : 'text-neutral-900'
-                                        }`}
-                                    >
-                                        {c.title}
-                                    </span>
-                                    {rowModified && (
-                                        <span className="shrink-0 text-[9px] font-medium px-1 py-0.5 rounded bg-amber-100 text-amber-800 border border-amber-200">
-                                            Edited
-                                        </span>
-                                    )}
-                                </span>
-                                {c.category && (
-                                    <span className="block text-xs text-neutral-500 truncate">
-                                        {c.category}
-                                    </span>
-                                )}
-                            </span>
-                        </>
-                    );
-                }}
-            />
+            {cards.length > 1 && (
+                <ArtifactOutlineNav
+                    title="Prompts"
+                    items={outlineItems}
+                    activeId={activeId}
+                    activeLabel="Current prompt"
+                    collapseOnSelect={isMobile}
+                    onSelect={scrollTo}
+                />
+            )}
 
             {/* Document layout: every prompt rendered in order. */}
             {cards.map(card => {
