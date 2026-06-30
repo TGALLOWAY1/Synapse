@@ -421,7 +421,7 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     into `ScreenImageGalleryContext`); with no design system it falls back to the
     neutral style hint so legacy projects still get a working prompt. Do **not**
     re-duplicate design-system prose into a prompt builder — reuse the brief.
-  - **Design System Presets (`src/lib/designSystemPresets.ts`).** A one-time
+  - **Design System Presets (`src/lib/designSystemPresets.ts`).** A
     visual-direction choice (`SaaS Minimal`, `AI Workspace`, `Editorial /
     Learning`, `Developer Tool`, `Consumer Mobile`, `Custom / Generate for me`)
     surfaced by `DesignSystemPresetChoice` on the Mark-as-Final edge in
@@ -436,6 +436,27 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     and the external copy-prompt, keeping the project visually consistent. The
     `DesignSystemRenderer` shows a banner explaining this coupling and that
     regenerating may shift downstream mockups/screen prompts.
+    - **Post-finalization re-selection.** The preset is **no longer one-time**.
+      Because the Mark-as-Final gate only fires once (and never for projects
+      finalized before presets existed), the **Design System artifact** carries a
+      `DesignDirectionControl` (`src/components/DesignDirectionControl.tsx`,
+      presentational) above its content in `ArtifactWorkspace`: it shows the
+      current direction (or an "AI decides" fallback) and offers **Change
+      direction** (re-opens `DesignSystemPresetChoice`, now accepting
+      `currentPresetId`/`title`/`description` props so it doubles as a change
+      dialog) and **Regenerate**. Choosing a new direction persists it via
+      `setProjectDesignSystemPreset` then opens a regenerate-confirm that calls
+      `artifactJobController.retrySlot('design_system')` — which re-reads the
+      preset off the project, so the new direction actually reaches generation.
+    - **Mockup-drift prompt.** Regenerating the design system produces a new
+      `tokensHash`, which `stalenessSlice` already uses to flip dependent mockups
+      to `possibly_outdated` (the auto-flag). On top of that, the Mockups view in
+      `ArtifactWorkspace` renders an amber **"Design system changed … Regenerate
+      the mockups"** banner when the mockup's recorded design_system
+      `anchorInfo` (tokensHash) differs from the project's current preferred
+      design system (`selectPreferredDesignSystem`), wired to the existing mockup
+      regenerate-confirm. Mockup *images* are keyed by the new mockup version id,
+      so the user must regenerate to pull the new visual direction through.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
     implementation_plan, prompt_pack, design_system). **Per-artifact model

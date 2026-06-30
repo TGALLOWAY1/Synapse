@@ -20,8 +20,10 @@ import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
 import { StalenessBadge } from './StalenessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
+import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
+import { DesignDirectionControl } from './DesignDirectionControl';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
-import { selectPreferredDesignTokens } from '../lib/designTokens';
+import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
     ProjectTask,
@@ -115,8 +117,11 @@ export function ArtifactWorkspace({
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
-        revertArtifactToVersion,
+        revertArtifactToVersion, setProjectDesignSystemPreset,
     } = useProjectStore();
+    // Reactive read of the project's chosen visual direction, so the Design
+    // System "Design direction" control re-renders when it changes.
+    const designSystemPreset = useProjectStore(s => s.projects[projectId]?.designSystemPreset);
     // Which artifact's version-history panel is open (null = none).
     const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
@@ -145,6 +150,12 @@ export function ArtifactWorkspace({
     // version remains available." before kicking off a new run so the user
     // doesn't fear losing their existing render.
     const [mockupRegenConfirm, setMockupRegenConfirm] = useState<
+        { nextVersion: number } | null
+    >(null);
+    // Post-finalization "design direction" flow on the Design System artifact:
+    // the preset picker, and the confirm before regenerating the design system.
+    const [showDirectionPicker, setShowDirectionPicker] = useState(false);
+    const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
 
@@ -214,6 +225,17 @@ export function ArtifactWorkspace({
         artifactJobController.retrySlot(slot, {
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
+    };
+
+    // Persist a newly-chosen visual direction, then surface the regenerate
+    // confirm — the preset only takes effect when the design system is
+    // regenerated, so we lead the user straight into that step.
+    const handleChooseDirection = (presetId: string) => {
+        setProjectDesignSystemPreset(projectId, presetId);
+        setShowDirectionPicker(false);
+        const ds = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === 'design_system');
+        const preferred = ds ? getPreferredVersion(projectId, ds.id) : undefined;
+        setDesignRegenConfirm({ nextVersion: (preferred?.versionNumber ?? 0) + 1 });
     };
 
     // Resolve a spine source-ref id to its positional "Version N" label, matching
@@ -341,6 +363,19 @@ export function ArtifactWorkspace({
             }
             const settings = extractMockupSettings(preferred);
             const staleness = getArtifactStaleness(projectId, mockup.id);
+            // Did the design system's tokens change since these mockups were
+            // generated? Mirrors stalenessSlice's mockup check: compare the
+            // tokensHash recorded on the mockup's design_system source ref
+            // against the project's current preferred design system. When they
+            // differ, prompt the user to regenerate so the new visual direction
+            // actually reaches the images.
+            const designRef = preferred.sourceRefs.find(
+                r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
+            );
+            const currentDesign = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
+            const designSystemDrift = !!designRef
+                && !!currentDesign?.tokensHash
+                && currentDesign.tokensHash !== designRef.anchorInfo;
             return (
                 <div className="space-y-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -353,6 +388,28 @@ export function ArtifactWorkspace({
                             <RefreshCcw size={12} /> Regenerate Mockup
                         </button>
                     </div>
+                    {designSystemDrift && (
+                        <div className="flex items-start justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div className="flex items-start gap-2 min-w-0">
+                                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-amber-900">
+                                        Design system changed since these mockups were generated
+                                    </p>
+                                    <p className="text-xs text-amber-700 mt-0.5">
+                                        Regenerate the mockups to apply the new visual direction.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setMockupRegenConfirm({ nextVersion: preferred.versionNumber + 1 })}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-md transition shrink-0"
+                            >
+                                <RefreshCcw size={12} /> Regenerate Mockup
+                            </button>
+                        </div>
+                    )}
                     <MockupErrorBoundary resetKey={preferred.id}>
                         <MockupViewer
                             payload={payload}
@@ -405,6 +462,15 @@ export function ArtifactWorkspace({
                 <div className="flex items-center justify-start">
                     {renderVersionControls(artifact.id, preferred)}
                 </div>
+                {subtype === 'design_system' && (
+                    <DesignDirectionControl
+                        presetId={designSystemPreset}
+                        onChangeDirection={() => setShowDirectionPicker(true)}
+                        onRegenerate={() =>
+                            setDesignRegenConfirm({ nextVersion: preferred.versionNumber + 1 })
+                        }
+                    />
+                )}
                 {subtype === 'implementation_plan' && (() => {
                     const savedCount = projectTasks.filter(t => t.sourceArtifactId === artifact.id).length;
                     return (
@@ -641,6 +707,64 @@ export function ArtifactWorkspace({
                                 onClick={() => {
                                     setMockupRegenConfirm(null);
                                     handleRetrySlot('mockup');
+                                }}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
+                            >
+                                <RefreshCcw size={13} /> Regenerate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {showDirectionPicker && (
+                <DesignSystemPresetChoice
+                    currentPresetId={designSystemPreset}
+                    title="Change your visual direction"
+                    description="Pick a new direction for this project's design system. Internal mockups and the prompts you copy for external image tools both follow it, so everything stays consistent."
+                    onChoose={handleChooseDirection}
+                    onClose={() => setShowDirectionPicker(false)}
+                />
+            )}
+
+            {designRegenConfirm && (
+                <div
+                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
+                    onClick={() => setDesignRegenConfirm(null)}
+                    role="presentation"
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="design-regen-title"
+                    >
+                        <div className="px-5 pt-5 pb-3">
+                            <h3 id="design-regen-title" className="text-base font-bold text-neutral-900">
+                                Regenerate design system
+                            </h3>
+                            <p className="text-sm text-neutral-700 mt-1">
+                                Creates Version {designRegenConfirm.nextVersion} using your chosen direction.
+                            </p>
+                            <p className="text-xs text-neutral-500 mt-1">
+                                This may make your existing mockups out of date — you can regenerate them
+                                afterward. The current version remains in version history.
+                            </p>
+                        </div>
+                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setDesignRegenConfirm(null)}
+                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => {
+                                    setDesignRegenConfirm(null);
+                                    handleRetrySlot('design_system');
                                 }}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
                             >
