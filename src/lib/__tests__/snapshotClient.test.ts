@@ -1,5 +1,5 @@
-import { describe, it, expect } from 'vitest';
-import { namespaceSnapshotForRestore } from '../snapshotClient';
+import { afterEach, beforeEach, describe, it, expect, vi } from 'vitest';
+import { loadDemoSnapshotPublic, namespaceSnapshotForRestore } from '../snapshotClient';
 import type { SnapshotPayload } from '../snapshotClient';
 import type { MockupImageRecord, ScreenInventoryImageRecord } from '../../types';
 import { buildImageKey } from '../mockupImageStore';
@@ -138,5 +138,109 @@ describe('namespaceSnapshotForRestore — screen images, tasks, metrics', () => 
         const { bundle } = namespaceSnapshotForRestore(withExtras(), DEMO_PROJECT_ID);
         expect(bundle.tasks?.[0].projectId).toBe(DEMO_PROJECT_ID);
         expect(bundle.workflowRuns?.[0].projectId).toBe(DEMO_PROJECT_ID);
+    });
+});
+
+// --- loadDemoSnapshotPublic image hydration -------------------------------
+//
+// The public demo load is a burst of `2 + imageCount + screenImageCount`
+// fetches, so per-image failures (rate limit 429s, flaky mobile networks)
+// are a normal event, not an exception. These tests pin the resilience
+// contract: transient failures are retried, permanent failures drop only the
+// affected image and flag the payload incomplete — they must never reject
+// the whole snapshot (which used to silently serve a stale cached demo).
+
+// Strip the dataUrl so a record doubles as its v2 wire-format metadata ref.
+const imageMetadataOf = <T extends { dataUrl: string }>(img: T): Omit<T, 'dataUrl'> => {
+    const { dataUrl: _omit, ...meta } = img;
+    void _omit;
+    return meta;
+};
+
+type FetchResponder = (url: string, callCount: number) => { status: number; body: unknown };
+
+const okJson = (body: unknown) => ({ status: 200, body });
+
+const installFetchMock = (respond: FetchResponder) => {
+    const counts = new Map<string, number>();
+    const mock = vi.fn(async (input: RequestInfo | URL) => {
+        const url = String(input);
+        const n = (counts.get(url) ?? 0) + 1;
+        counts.set(url, n);
+        const { status, body } = respond(url, n);
+        return {
+            ok: status >= 200 && status < 300,
+            status,
+            json: async () => body,
+        } as Response;
+    });
+    vi.stubGlobal('fetch', mock);
+    return mock;
+};
+
+describe('loadDemoSnapshotPublic — hydration resilience', () => {
+    const mockupMeta = imageMetadataOf(makeImage('high'));
+    const screenMeta = imageMetadataOf(makeScreenImage(1));
+    const demoBundle: SnapshotPayload = {
+        ...makeSnapshot(),
+        images: [mockupMeta] as unknown as SnapshotPayload['images'],
+        screenImages: [screenMeta] as unknown as SnapshotPayload['screenImages'],
+    };
+    const imageUrl = (key: string) => `/api/snapshots?demo=1&image=${encodeURIComponent(key)}`;
+
+    beforeEach(() => {
+        vi.useFakeTimers();
+    });
+
+    afterEach(() => {
+        vi.useRealTimers();
+        vi.unstubAllGlobals();
+    });
+
+    const runLoad = async (): Promise<SnapshotPayload | null> => {
+        const promise = loadDemoSnapshotPublic();
+        // Flush the retry backoff timers (500ms + 1500ms per image, at most).
+        await vi.advanceTimersByTimeAsync(10_000);
+        return await promise;
+    };
+
+    it('retries a transiently failing image fetch and reports a complete payload', async () => {
+        const fetchMock = installFetchMock((url, callCount) => {
+            if (url === '/api/snapshots?demo=1') return okJson(demoBundle);
+            if (url === imageUrl(screenMeta.key)) {
+                // First attempt is rate-limited; the retry succeeds.
+                if (callCount === 1) return { status: 429, body: { error: 'rate_limited' } };
+                return okJson({ image: makeScreenImage(1) });
+            }
+            if (url === imageUrl(mockupMeta.key)) return okJson({ image: makeImage('high') });
+            throw new Error(`unexpected fetch: ${url}`);
+        });
+
+        const payload = await runLoad();
+
+        expect(payload?.imagesComplete).toBe(true);
+        expect(payload?.images).toHaveLength(1);
+        expect(payload?.screenImages).toHaveLength(1);
+        expect(payload?.screenImages?.[0].dataUrl).toBe(makeScreenImage(1).dataUrl);
+        // 1 bundle + 1 mockup + 2 screen-image attempts.
+        expect(fetchMock).toHaveBeenCalledTimes(4);
+    });
+
+    it('drops a permanently failing image instead of rejecting the whole demo', async () => {
+        installFetchMock((url) => {
+            if (url === '/api/snapshots?demo=1') return okJson(demoBundle);
+            if (url === imageUrl(screenMeta.key)) return { status: 429, body: { error: 'rate_limited' } };
+            if (url === imageUrl(mockupMeta.key)) return okJson({ image: makeImage('high') });
+            throw new Error(`unexpected fetch: ${url}`);
+        });
+
+        const payload = await runLoad();
+
+        // The healthy mockup image survives; the failing screen image is
+        // dropped and the payload is flagged incomplete so loadDemoProject
+        // skips stamping the cache and self-heals on the next open.
+        expect(payload?.images).toHaveLength(1);
+        expect(payload?.screenImages).toHaveLength(0);
+        expect(payload?.imagesComplete).toBe(false);
     });
 });

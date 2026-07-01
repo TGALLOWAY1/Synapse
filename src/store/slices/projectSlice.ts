@@ -184,7 +184,15 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         // when the pointer is unchanged. Pull from the freshly-restored
         // payload's manifest, falling back to the pointer if the manifest
         // didn't carry an id (defensive — older bundles always did).
-        const sourceId = payload.manifest?.id ?? pointer?.snapshotId ?? null;
+        //
+        // EXCEPT when the load dropped images (`imagesComplete === false`:
+        // some per-image fetches kept failing — flaky network / rate limit).
+        // We still restore what we have (fresh-partial beats stale cache) but
+        // leave the stamp off so the next demo open re-fetches and self-heals
+        // to the full image set instead of pinning the partial copy forever.
+        const sourceId = payload.imagesComplete === false
+            ? null
+            : payload.manifest?.id ?? pointer?.snapshotId ?? null;
         if (sourceId) {
             set((state) => {
                 const restored = state.projects[DEMO_PROJECT_ID];
