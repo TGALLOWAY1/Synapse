@@ -161,4 +161,21 @@ describe('loadDemoProject — freshness check', () => {
         const project = useProjectStore.getState().projects[DEMO_PROJECT_ID];
         expect(project?.demoSourceSnapshotId).toBe('snap-A');
     });
+
+    it('restores but does NOT stamp the source id when the load dropped images', async () => {
+        mockedPointer.mockResolvedValue({ snapshotId: 'snap-A', updatedAt: null });
+        // Some per-image fetches failed permanently (flaky network / rate
+        // limit) — the payload arrives fresh but incomplete.
+        mockedPublic.mockResolvedValue({ ...fakePayload('snap-A'), imagesComplete: false });
+
+        const result = await useProjectStore.getState().loadDemoProject();
+
+        // Fresh-partial still beats stale cache — the demo restores and opens…
+        expect(result).toEqual({ projectId: DEMO_PROJECT_ID, available: true });
+        expect(mockedRestore).toHaveBeenCalledTimes(1);
+        // …but no stamp, so the NEXT open re-fetches and self-heals instead of
+        // pinning the partial copy as "current".
+        const project = useProjectStore.getState().projects[DEMO_PROJECT_ID];
+        expect(project?.demoSourceSnapshotId).toBeUndefined();
+    });
 });

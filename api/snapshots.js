@@ -410,22 +410,24 @@ export default async function handler(req, res) {
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) {
     return methodNotAllowed(res, ['GET', 'POST', 'PUT', 'DELETE']);
   }
-  if (
-    enforceRateLimit(req, res, {
-      scope: 'snapshots',
-      limit: 60,
-      windowMs: 60_000,
-      errorBody: { error: 'rate_limited' },
-    })
-  ) {
-    return;
-  }
 
   // `?demo=1` is the public-demo channel. GET is anonymous (so any visitor
   // can load the demo), but PUT (set/clear pointer) is owner-only. Every
   // other route stays owner-gated as before.
   const isDemoChannel = req.query?.demo === '1' || req.query?.demo === 'true';
   const isPublicDemoRead = isDemoChannel && req.method === 'GET';
+
+  // The public demo read gets its own, larger budget: one cache-less demo
+  // load is a legitimate burst of `2 + imageCount + screenImageCount`
+  // requests (pointer + bundle + one fetch per image), so an image-rich demo
+  // would trip a 60/min cap on exactly the devices with no cache (mobile) and
+  // silently fall back to a stale copy. Owner-token routes keep the tight cap.
+  const rateOptions = isPublicDemoRead
+    ? { scope: 'snapshots-demo', limit: 300, windowMs: 60_000 }
+    : { scope: 'snapshots', limit: 60, windowMs: 60_000 };
+  if (enforceRateLimit(req, res, { ...rateOptions, errorBody: { error: 'rate_limited' } })) {
+    return;
+  }
   if (!isPublicDemoRead && requireOwner(req, res)) return;
 
   // @vercel/blob reads BLOB_READ_WRITE_TOKEN from the env. Just creating a

@@ -179,6 +179,23 @@ add it to `collectProjectBundle`/`collectScreenImages`, the restore writers, and
   error) the cache is preferred over an empty state. **Do not** re-add an
   early `if (existing) return` — that's exactly what made the desktop serve a
   stale demo while mobile (with no cache) silently saw the latest.
+- **Demo image hydration is retried and failure-tolerant — never all-or-nothing.**
+  A cache-less demo load is a burst of `2 + imageCount + screenImageCount`
+  requests (pointer + bundle + one fetch per mockup/screen image). Per-image
+  fetches in `snapshotClient` retry transient failures with backoff
+  (`fetchImageWithRetry`); on the public demo path (`loadDemoSnapshotPublic`)
+  an image that still fails is **dropped** (`imagesComplete: false` on the
+  returned payload, a client-only field) instead of rejecting the whole
+  snapshot. `loadDemoProject` restores an incomplete payload (fresh-partial
+  beats stale cache) but skips stamping `demoSourceSnapshotId`, so the next
+  open re-fetches and self-heals. This is the fix for "mobile shows the demo
+  without its screen-inventory images": one failed image fetch used to reject
+  the entire fresh snapshot and silently fall back to the stale cached demo.
+  Owner-token `loadSnapshot` keeps strict all-or-nothing semantics (a restore
+  over real data must not be partial). Server side, the public demo GET
+  channel has its own rate-limit scope (`snapshots-demo`, 300/min in
+  `api/snapshots.js`) so an image-rich demo can't 429 its own hydration burst;
+  owner routes stay at 60/min.
 - **Restoring under a *different* project id MUST namespace the artifact version
   ids** (`namespaceSnapshotForRestore` → `rewriteIds`), not just the project id.
   Both mockup images AND screen-inventory images are keyed in IndexedDB by the

@@ -73,6 +73,11 @@ export type SnapshotPayload = {
     // store from mockup images (`screenInventoryImageStore`), so it travels as
     // its own array. Optional on the wire — older snapshots won't have it.
     screenImages?: ScreenInventoryImageRecord[];
+    // Client-side only (never on the wire): false when the demo load had to
+    // drop one or more images whose per-image fetch kept failing (flaky mobile
+    // network / rate limit). `loadDemoProject` uses it to skip stamping
+    // `demoSourceSnapshotId`, so the next demo open re-fetches and self-heals.
+    imagesComplete?: boolean;
 };
 
 export type SnapshotListItem = SnapshotManifest & { isDemo?: boolean };
@@ -282,47 +287,97 @@ const isFullyInlined = (images: unknown[]): boolean => {
     );
 };
 
-// Pull each image blob into a full MockupImageRecord. Runs the fetches
-// with a small concurrency limit so a project with dozens of screens
-// doesn't try to open a fetch for every one simultaneously.
+// Backoff between per-image fetch attempts. A transient 429 (the demo load is
+// a burst of N+2 requests against one rate-limit scope) or a mobile-network
+// blip on one image must not cost the whole snapshot.
+const IMAGE_RETRY_DELAYS_MS = [500, 1500];
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Fetch one image record, retrying transient failures (non-2xx responses and
+// thrown network errors). A malformed body is permanent — retrying won't fix
+// it — so it fails immediately.
+const fetchImageWithRetry = async <T extends { key: string; dataUrl: string }>(
+    fetchOne: (key: string) => Promise<Response>,
+    key: string,
+): Promise<T> => {
+    let lastError: Error = new Error(`load_image_failed: ${key}`);
+    for (let attempt = 0; attempt <= IMAGE_RETRY_DELAYS_MS.length; attempt++) {
+        if (attempt > 0) await sleep(IMAGE_RETRY_DELAYS_MS[attempt - 1]);
+        try {
+            const resp = await fetchOne(key);
+            if (!resp.ok) {
+                lastError = await errorFromResponse(resp, 'load_image_failed');
+                continue;
+            }
+            const body = await resp.json() as { image?: T };
+            if (!body?.image || typeof body.image.dataUrl !== 'string') {
+                throw new Error(`load_image_failed: malformed image record for ${key}`);
+            }
+            return body.image;
+        } catch (err) {
+            if (err instanceof Error && err.message.startsWith('load_image_failed: malformed')) {
+                throw err;
+            }
+            lastError = err instanceof Error ? err : new Error(String(err));
+        }
+    }
+    throw lastError;
+};
+
+type HydrateResult<T> = { images: T[]; failedKeys: string[] };
+
+// Pull each image blob into a full record. Runs the fetches with a small
+// concurrency limit so a project with dozens of screens doesn't try to open a
+// fetch for every one simultaneously. With `tolerateFailures`, an image whose
+// fetch permanently fails is dropped (reported in `failedKeys`) instead of
+// rejecting the whole hydration — the public demo path uses this so one bad
+// image on a flaky mobile connection can't discard the entire fresh snapshot.
 const hydrateImages = async <T extends { key: string; dataUrl: string }>(
     fetchOne: (key: string) => Promise<Response>,
     refs: Array<Omit<T, 'dataUrl'>>,
-): Promise<T[]> => {
+    options?: { tolerateFailures?: boolean },
+): Promise<HydrateResult<T>> => {
     const CONCURRENCY = 4;
-    const out: T[] = new Array(refs.length);
+    const out: Array<T | undefined> = new Array(refs.length);
+    const failedKeys: string[] = [];
     let cursor = 0;
     const workers = Array.from({ length: Math.min(CONCURRENCY, refs.length) }, async () => {
         while (true) {
             const idx = cursor++;
             if (idx >= refs.length) return;
             const ref = refs[idx];
-            const resp = await fetchOne(ref.key);
-            if (!resp.ok) throw await errorFromResponse(resp, 'load_image_failed');
-            const body = await resp.json() as { image?: T };
-            if (!body?.image || typeof body.image.dataUrl !== 'string') {
-                throw new Error(`load_image_failed: malformed image record for ${ref.key}`);
+            try {
+                out[idx] = await fetchImageWithRetry<T>(fetchOne, ref.key);
+            } catch (err) {
+                if (!options?.tolerateFailures) throw err;
+                console.warn(`[snapshots] dropping image ${ref.key} after retries`, err);
+                failedKeys.push(ref.key);
             }
-            out[idx] = body.image;
         }
     });
     await Promise.all(workers);
-    return out;
+    return { images: out.filter((img): img is T => img !== undefined), failedKeys };
 };
 
 // Hydrate the optional `screenImages` array of a payload using the same
-// per-image fetch the mockup images use. Returns the payload unchanged when it
-// carries no screen images (legacy snapshots) or they are already inlined.
+// per-image fetch the mockup images use. Returns the payload's array unchanged
+// when it carries no screen images (legacy snapshots) or they are already
+// inlined.
 const hydrateScreenImages = async (
     payload: SnapshotPayload,
     fetchOne: (key: string) => Promise<Response>,
-): Promise<ScreenInventoryImageRecord[] | undefined> => {
+    options?: { tolerateFailures?: boolean },
+): Promise<{ images: ScreenInventoryImageRecord[] | undefined; failedKeys: string[] }> => {
     const screenImages = payload.screenImages;
-    if (!Array.isArray(screenImages) || screenImages.length === 0) return screenImages;
-    if (isFullyInlined(screenImages)) return screenImages;
+    if (!Array.isArray(screenImages) || screenImages.length === 0) {
+        return { images: screenImages, failedKeys: [] };
+    }
+    if (isFullyInlined(screenImages)) return { images: screenImages, failedKeys: [] };
     return await hydrateImages<ScreenInventoryImageRecord>(
         fetchOne,
         screenImages as unknown as Array<Omit<ScreenInventoryImageRecord, 'dataUrl'>>,
+        options,
     );
 };
 
@@ -349,22 +404,37 @@ export const loadDemoSnapshotPointer = async (): Promise<DemoPointer | null> => 
 
 // Public: fetch the snapshot the owner has marked as the demo. No auth.
 // Returns null when no demo has been set (server returns 404 in that case).
+//
+// Image hydration is failure-tolerant here: an image that keeps failing after
+// retries is dropped and `imagesComplete` is set false, so a single flaky
+// fetch on a mobile connection serves a fresh (mostly complete) demo instead
+// of silently falling back to a stale cached one.
 export const loadDemoSnapshotPublic = async (): Promise<SnapshotPayload | null> => {
     const resp = await fetch(`${API_BASE}?demo=1`);
     if (resp.status === 404) return null;
     if (!resp.ok) throw await errorFromResponse(resp, 'load_demo_failed');
     const payload = await resp.json() as SnapshotPayload;
     const fetchOne = (key: string) => fetch(`${API_BASE}?demo=1&image=${encodeURIComponent(key)}`);
-    const images = isFullyInlined(payload.images)
-        ? payload.images
+    const tolerate = { tolerateFailures: true };
+    const mockups = isFullyInlined(payload.images)
+        ? { images: payload.images, failedKeys: [] as string[] }
         : await hydrateImages<MockupImageRecord>(
             fetchOne,
             payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+            tolerate,
         );
-    const screenImages = await hydrateScreenImages(payload, fetchOne);
-    return { ...payload, images, screenImages };
+    const screens = await hydrateScreenImages(payload, fetchOne, tolerate);
+    return {
+        ...payload,
+        images: mockups.images,
+        screenImages: screens.images,
+        imagesComplete: mockups.failedKeys.length === 0 && screens.failedKeys.length === 0,
+    };
 };
 
+// Owner-only load. Hydration retries transient failures but stays strict —
+// an owner restore should fail loudly rather than restore an incomplete
+// snapshot over real data.
 export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
     const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, { headers: authHeaders() });
     if (!resp.ok) throw await errorFromResponse(resp, 'load_failed');
@@ -373,14 +443,14 @@ export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
         `${API_BASE}?id=${encodeURIComponent(id)}&image=${encodeURIComponent(key)}`,
         { headers: authHeaders() },
     );
-    const images = isFullyInlined(payload.images)
-        ? payload.images
+    const mockups = isFullyInlined(payload.images)
+        ? { images: payload.images }
         : await hydrateImages<MockupImageRecord>(
             fetchOne,
             payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
         );
-    const screenImages = await hydrateScreenImages(payload, fetchOne);
-    return { ...payload, images, screenImages };
+    const screens = await hydrateScreenImages(payload, fetchOne);
+    return { ...payload, images: mockups.images, screenImages: screens.images };
 };
 
 export const deleteSnapshot = async (id: string): Promise<void> => {
