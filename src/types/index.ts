@@ -25,6 +25,11 @@ export type Project = {
     // mockups and the Screen Inventory copy-prompt. Optional — legacy projects
     // and the demo have none and behave exactly as before.
     designSystemPreset?: string;
+    // True while the setup-stage design selection step (DesignSetupStep) is
+    // still owed for this project. Stamped by `createProject`, cleared when a
+    // preset is chosen (any path) or the user explicitly skips. Optional —
+    // legacy projects and the demo have none and never see the setup step.
+    needsDesignSetup?: boolean;
 };
 
 export type BranchMessage = {
