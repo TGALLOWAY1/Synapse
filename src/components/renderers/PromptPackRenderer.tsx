@@ -11,11 +11,10 @@ import type { Feature } from '../../types';
 // `### N. Title` heading — with the shared collapsible `ArtifactOutlineNav`
 // on top (same navigator used by Data Model and Design System) so the prompt
 // content gets the full page width instead of competing with a permanent left
-// rail. Each card extracts
-// `**Target Tool:**` / `**Reason:**` / `**Category:**` chips and the fenced
-// code block that holds the actual prompt body, then surfaces supporting
-// context (User Intent / Expected Output / Dependencies / Key Implementation
-// Areas) below the body. User edits are stored as a per-prompt overlay on the
+// rail. Each card extracts a `**Category:**` label and the fenced code block
+// that holds the actual prompt body, then surfaces the Expected Output summary
+// below the body. Prompts are agent-agnostic — no target-tool / recommendation
+// context is shown. User edits are stored as a per-prompt overlay on the
 // version's metadata; copy uses the edited body.
 
 interface Props {
@@ -35,13 +34,9 @@ interface Props {
 type PromptCard = {
     index: number;
     title: string;
-    targetTool?: string;
-    targetReason?: string;
     category?: string;
     promptBody: string;
     expected?: string;
-    /** Feature names this prompt declares under "## Features In Scope". */
-    dependencies: string[];
 };
 
 const PROMPT_HEADING = /^###\s+(\d+)\.?\s+(.+?)\s*$/;
@@ -76,7 +71,6 @@ function buildCard(active: { rawLines: string[]; index: number; title: string })
         index: active.index,
         title: active.title,
         promptBody: '',
-        dependencies: [],
     };
     let inFence = false;
     const promptLines: string[] = [];
@@ -90,16 +84,6 @@ function buildCard(active: { rawLines: string[]; index: number; title: string })
         }
         if (inFence) {
             promptLines.push(line);
-            continue;
-        }
-        const tool = line.match(/^\*\*Target Tool:\*\*\s*(.+)$/i);
-        if (tool) {
-            card.targetTool = tool[1].trim();
-            continue;
-        }
-        const reason = line.match(/^\*\*Reason:\*\*\s*(.+)$/i);
-        if (reason) {
-            card.targetReason = reason[1].trim();
             continue;
         }
         const cat = line.match(/^\*\*Category:\*\*\s*(.+)$/i);
@@ -121,36 +105,7 @@ function buildCard(active: { rawLines: string[]; index: number; title: string })
     if (expectedLines.length > 0) {
         card.expected = expectedLines.join('\n').trim();
     }
-    card.dependencies = parseFeaturesInScope(card.promptBody);
     return card;
-}
-
-// Pull the feature names a prompt declares under its "## Features In Scope"
-// section. Lines look like `- f1 — Feature Name` (id prefix + em dash) with
-// indented detail bullets beneath; we keep the top-level names only.
-function parseFeaturesInScope(body: string): string[] {
-    if (!body) return [];
-    const lines = body.split('\n');
-    let inScope = false;
-    const names: string[] = [];
-    for (const raw of lines) {
-        const heading = raw.match(/^##\s+(.+?)\s*$/);
-        if (heading) {
-            const name = heading[1].toLowerCase();
-            inScope = name.includes('features in scope') || name.includes('feature in scope');
-            continue;
-        }
-        if (!inScope) continue;
-        // Top-level bullet only (indented detail bullets start with spaces).
-        const bullet = raw.match(/^[-*]\s+(.+)$/);
-        if (!bullet) continue;
-        const text = bullet[1].trim();
-        // Strip a leading `f1 —` / `F-014 -` id prefix when present.
-        const withId = text.match(/^[fF]-?\d+\s*[—–-]\s*(.+)$/);
-        const cleaned = (withId ? withId[1] : text).replace(/[*_`]/g, '').trim();
-        if (cleaned) names.push(cleaned);
-    }
-    return Array.from(new Set(names));
 }
 
 // Find feature IDs (e.g. f1, F-014) that appear OUTSIDE a "## Features In
@@ -272,21 +227,6 @@ function SupportingCard({
     );
 }
 
-function ChipRow({ items }: { items: string[] }) {
-    return (
-        <div className="flex flex-wrap gap-1.5">
-            {items.map((item, i) => (
-                <span
-                    key={`${item}-${i}`}
-                    className="text-[11px] font-medium px-2 py-0.5 rounded-md bg-neutral-100 text-neutral-700 border border-neutral-200"
-                >
-                    {item}
-                </span>
-            ))}
-        </div>
-    );
-}
-
 interface PromptCardViewProps {
     card: PromptCard;
     effectiveBody: string;
@@ -311,10 +251,6 @@ function PromptCardView({
     const [editing, setEditing] = useState(false);
     const hasWarning = unresolvedIds.length > 0;
     const copyDisabled = hasWarning;
-    const implementationAreas = [
-        ...(card.category ? [card.category] : []),
-        ...(card.targetTool ? [card.targetTool] : []),
-    ];
     return (
         <article className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
 
@@ -408,27 +344,12 @@ function PromptCardView({
                 )
             )}
 
-            {/* --- Supporting context (reorganized below the body) --------- */}
-            {card.targetReason && (
-                <SupportingCard label="User Intent" accent="text-indigo-600">
-                    <p className="text-sm text-neutral-700 leading-relaxed">{card.targetReason}</p>
-                </SupportingCard>
-            )}
+            {/* --- Supporting context: Expected Output only ---------------- */}
             {card.expected && (
                 <SupportingCard label="Expected Output" accent="text-emerald-700">
                     <div className="prose prose-sm prose-neutral max-w-none">
                         <ReactMarkdown remarkPlugins={[remarkGfm]}>{card.expected}</ReactMarkdown>
                     </div>
-                </SupportingCard>
-            )}
-            {card.dependencies.length > 0 && (
-                <SupportingCard label="Dependencies" accent="text-neutral-500">
-                    <ChipRow items={card.dependencies} />
-                </SupportingCard>
-            )}
-            {implementationAreas.length > 0 && (
-                <SupportingCard label="Key Implementation Areas" accent="text-neutral-500">
-                    <ChipRow items={implementationAreas} />
                 </SupportingCard>
             )}
         </article>

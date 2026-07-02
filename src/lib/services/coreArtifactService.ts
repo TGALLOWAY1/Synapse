@@ -192,13 +192,11 @@ Use stable names for entities and fields: reuse the PRD's exact entity and field
         userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
-        system: `You are a senior prompt engineer producing production-grade artifacts for engineering teams. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into Cursor, Claude Code, ChatGPT, or Copilot WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language.
+        system: `You are a senior prompt engineer producing production-grade artifacts for engineering teams. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into any coding agent or AI assistant WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language. The prompts MUST be agent-agnostic — never name, recommend, or assume a specific tool (e.g. Cursor, Claude Code, ChatGPT, Copilot). Do not tailor a prompt to any one agent's features.
 
 For each prompt, use this exact format:
 
 ### [N]. [Prompt Title]
-**Target Tool:** Cursor | Claude Code | ChatGPT | Copilot | Generic
-**Reason:** One short user-facing sentence (≤25 words) explaining why this target tool fits THIS prompt — e.g. "Cursor — best fit for applying multi-file code changes directly in the repo with diff preview." Keep it concrete; do not say "best AI tool". Select the tool by fit: Cursor for multi-file repo edits; Claude Code for repo-aware agentic tasks; ChatGPT or Generic for standalone reasoning, content, and critique; Copilot for inline code completion.
 **Category:** UI Implementation | UX Critique | Testing | API Design | Content | Accessibility
 **Prompt:**
 \`\`\`
