@@ -184,21 +184,29 @@ export function FlowSidebar({
                 {renderList(onSelect)}
             </aside>
 
-            {/* Mobile trigger */}
-            <div className="md:hidden mb-3 flex items-center justify-between gap-2">
+            {/* Mobile trigger — full-width current-flow selector that opens the drawer */}
+            <div className="md:hidden mb-3">
                 <button
                     type="button"
                     onClick={() => onToggleMobile(true)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium bg-white border border-neutral-300 rounded-md text-neutral-700 hover:bg-neutral-50"
+                    aria-label="Browse flows"
+                    className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border border-neutral-300 rounded-lg text-left hover:bg-neutral-50 active:bg-neutral-100 transition"
                 >
-                    <Menu size={14} /> Flows
-                    <span className="text-neutral-400">({flows.length})</span>
-                </button>
-                {selected && (
-                    <span className="text-xs text-neutral-500 truncate flex-1 text-right">
-                        {selected.title}
+                    <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold">
+                        {selectedIndex + 1}
                     </span>
-                )}
+                    <span className="min-w-0 flex-1">
+                        <span className="block text-[10px] font-semibold uppercase tracking-wider text-neutral-400 truncate">
+                            {selected
+                                ? `${selected.category} · ${selectedIndex + 1} of ${flows.length}`
+                                : `${flows.length} ${flows.length === 1 ? 'flow' : 'flows'}`}
+                        </span>
+                        <span className="block text-sm font-medium text-neutral-800 truncate">
+                            {selected?.title ?? 'Select a flow'}
+                        </span>
+                    </span>
+                    <Menu size={16} className="shrink-0 text-neutral-400" />
+                </button>
             </div>
 
             {/* Mobile drawer overlay + panel */}

@@ -96,7 +96,7 @@ export function FlowSummaryCard({
     const hasEntryPoints = flow.entryPoints.length > 0;
 
     return (
-        <section className="bg-white rounded-xl border border-neutral-200 p-5 mb-4">
+        <section className="bg-white rounded-xl border border-neutral-200 p-4 sm:p-5 mb-4">
             <header className="flex items-start gap-3 pb-3 mb-4 border-b border-neutral-100">
                 <div className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-md bg-indigo-50 text-indigo-600">
                     <GitBranch size={18} />
