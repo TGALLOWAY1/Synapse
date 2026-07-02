@@ -17,25 +17,52 @@ interface Props {
     onSelectFeature: (refToken: FeatureRef) => void;
 }
 
-const RISK_META: Record<FlowRiskLevel, { label: string; classes: string }> = {
-    low: { label: 'Low risk', classes: 'bg-emerald-50 border-emerald-200 text-emerald-800' },
-    medium: { label: 'Medium risk', classes: 'bg-amber-50 border-amber-200 text-amber-800' },
-    high: { label: 'High risk', classes: 'bg-red-50 border-red-200 text-red-800' },
+type StatTone = 'neutral' | 'amber' | 'sky' | 'emerald' | 'red';
+
+const RISK_LEVEL_LABEL: Record<FlowRiskLevel, string> = {
+    low: 'Low',
+    medium: 'Medium',
+    high: 'High',
 };
 
-function MetadataChip({
-    icon, label, tone,
-}: { icon: ReactNode; label: string; tone?: 'neutral' | 'amber' | 'emerald' }) {
-    const palette = tone === 'amber'
-        ? 'bg-amber-50 border-amber-200 text-amber-800'
-        : tone === 'emerald'
-            ? 'bg-emerald-50 border-emerald-200 text-emerald-800'
-            : 'bg-neutral-50 border-neutral-200 text-neutral-700';
+const RISK_TONE: Record<FlowRiskLevel, StatTone> = {
+    low: 'emerald',
+    medium: 'amber',
+    high: 'red',
+};
+
+const STAT_VALUE_COLOR: Record<StatTone, string> = {
+    neutral: 'text-neutral-900',
+    amber: 'text-amber-700',
+    sky: 'text-sky-700',
+    emerald: 'text-emerald-700',
+    red: 'text-red-700',
+};
+
+const STAT_ICON_COLOR: Record<StatTone, string> = {
+    neutral: 'text-neutral-400',
+    amber: 'text-amber-500',
+    sky: 'text-sky-500',
+    emerald: 'text-emerald-500',
+    red: 'text-red-500',
+};
+
+/** A single aligned metric in the flow's stat grid. */
+function StatCell({
+    icon, value, label, tone = 'neutral',
+}: { icon: ReactNode; value: string; label: string; tone?: StatTone }) {
     return (
-        <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${palette}`}>
-            {icon}
-            <span>{label}</span>
-        </span>
+        <div className="flex items-center gap-2 rounded-lg border border-neutral-200 bg-neutral-50/70 px-2.5 py-2">
+            <span className={`shrink-0 ${STAT_ICON_COLOR[tone]}`}>{icon}</span>
+            <div className="min-w-0 leading-tight">
+                <div className={`text-sm font-semibold truncate ${STAT_VALUE_COLOR[tone]}`} title={value}>
+                    {value}
+                </div>
+                <div className="text-[10px] font-medium uppercase tracking-wider text-neutral-500">
+                    {label}
+                </div>
+            </div>
+        </div>
     );
 }
 
@@ -86,7 +113,6 @@ export function FlowSummaryCard({
     const renderText = (text: string) =>
         inlineWithFeatures(text, { featuresById, onSelectFeature });
 
-    const risk = RISK_META[flow.risk];
     const showRisk = flow.risk !== 'low' || flow.issues.length > 0;
 
     // Drop preconditions block entirely when there's nothing useful to add —
@@ -97,7 +123,7 @@ export function FlowSummaryCard({
 
     return (
         <section className="bg-white rounded-xl border border-neutral-200 p-4 sm:p-5 mb-4">
-            <header className="flex items-start gap-3 pb-3 mb-4 border-b border-neutral-100">
+            <header className="flex items-start gap-3 pb-3 mb-3 border-b border-neutral-100">
                 <div className="shrink-0 inline-flex items-center justify-center w-10 h-10 rounded-md bg-indigo-50 text-indigo-600">
                     <GitBranch size={18} />
                 </div>
@@ -113,56 +139,6 @@ export function FlowSummaryCard({
                     <h3 className="text-base font-bold text-neutral-900 leading-snug mt-1">
                         {flow.title}
                     </h3>
-                    <div className="mt-2 flex flex-wrap items-center gap-1.5">
-                        <MetadataChip
-                            icon={<ListChecks size={11} />}
-                            label={`${stepCount} ${stepCount === 1 ? 'step' : 'steps'}`}
-                        />
-                        {altPaths > 0 && (
-                            <MetadataChip
-                                icon={<GitBranch size={11} />}
-                                label={`${altPaths} alternate ${altPaths === 1 ? 'path' : 'paths'}`}
-                                tone="amber"
-                            />
-                        )}
-                        {edgeCount > 0 && (
-                            <span
-                                className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] bg-sky-50 border-sky-200 text-sky-800"
-                                title={`${edgeCount} edge case${edgeCount === 1 ? '' : 's'}`}
-                            >
-                                <AlertTriangle size={11} />
-                                <span>{edgeCount} edge {edgeCount === 1 ? 'case' : 'cases'}</span>
-                            </span>
-                        )}
-                        {timeToValue && (
-                            <MetadataChip
-                                icon={<Clock size={11} />}
-                                label={`${timeToValue} to value`}
-                                tone="emerald"
-                            />
-                        )}
-                        {showRisk && (
-                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] ${risk.classes}`}>
-                                <span className="inline-block w-1.5 h-1.5 rounded-full bg-current" />
-                                <span>{risk.label}</span>
-                            </span>
-                        )}
-                    </div>
-                    {flow.featureRefs.length > 0 && (
-                        <div className="mt-2.5 flex flex-wrap items-center gap-1.5">
-                            <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mr-0.5">
-                                Related features
-                            </span>
-                            {flow.featureRefs.map(ref => (
-                                <FeatureReferenceChip
-                                    key={ref.id}
-                                    refToken={ref}
-                                    feature={featuresById?.get(ref.id)}
-                                    onSelect={onSelectFeature}
-                                />
-                            ))}
-                        </div>
-                    )}
                 </div>
                 <div className="hidden sm:flex items-center gap-1 shrink-0">
                     <button
@@ -191,6 +167,65 @@ export function FlowSummaryCard({
                     </button>
                 </div>
             </header>
+
+            {/* Metrics + related features — an aligned grid instead of loose chips */}
+            <div className="mb-4">
+                <div className="grid grid-cols-2 sm:grid-cols-4 gap-2">
+                    <StatCell
+                        icon={<ListChecks size={14} />}
+                        value={String(stepCount)}
+                        label={stepCount === 1 ? 'Step' : 'Steps'}
+                    />
+                    {altPaths > 0 && (
+                        <StatCell
+                            icon={<GitBranch size={14} />}
+                            value={String(altPaths)}
+                            label={altPaths === 1 ? 'Alt path' : 'Alt paths'}
+                            tone="amber"
+                        />
+                    )}
+                    {edgeCount > 0 && (
+                        <StatCell
+                            icon={<AlertTriangle size={14} />}
+                            value={String(edgeCount)}
+                            label={edgeCount === 1 ? 'Edge case' : 'Edge cases'}
+                            tone="sky"
+                        />
+                    )}
+                    {timeToValue && (
+                        <StatCell
+                            icon={<Clock size={14} />}
+                            value={timeToValue}
+                            label="To value"
+                            tone="emerald"
+                        />
+                    )}
+                    {showRisk && (
+                        <StatCell
+                            icon={<span className="inline-block w-2.5 h-2.5 rounded-full bg-current" />}
+                            value={RISK_LEVEL_LABEL[flow.risk]}
+                            label="Risk"
+                            tone={RISK_TONE[flow.risk]}
+                        />
+                    )}
+                </div>
+
+                {flow.featureRefs.length > 0 && (
+                    <div className="mt-3 flex flex-wrap items-center gap-1.5">
+                        <span className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mr-0.5">
+                            Related features
+                        </span>
+                        {flow.featureRefs.map(ref => (
+                            <FeatureReferenceChip
+                                key={ref.id}
+                                refToken={ref}
+                                feature={featuresById?.get(ref.id)}
+                                onSelect={onSelectFeature}
+                            />
+                        ))}
+                    </div>
+                )}
+            </div>
 
             <div className="space-y-3">
                 {flow.goal && (

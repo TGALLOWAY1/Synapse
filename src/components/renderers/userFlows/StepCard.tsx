@@ -4,6 +4,13 @@ import type { Feature } from '../../../types';
 import type { FeatureRef, FlowIssue, ParsedStep } from './types';
 import { ISSUE_KIND_META } from './issueMeta';
 import { inlineWithFeatures } from './inlineWithFeatures';
+import { inlineMd } from './markdown';
+
+/** Strip surrounding markdown code backticks from a short label (e.g. a
+ * screen name like `` `Import Dashboard` `` → "Import Dashboard"). */
+function stripBackticks(text: string): string {
+    return text.replace(/^`+|`+$/g, '').trim();
+}
 
 interface Props {
     flowIndex: number;
@@ -19,11 +26,11 @@ function FieldRow({
 }: { label: string; tone: 'indigo' | 'neutral'; children: ReactNode }) {
     const labelColor = tone === 'indigo' ? 'text-indigo-600' : 'text-neutral-500';
     return (
-        <div className="flex gap-2">
-            <dt className={`shrink-0 w-16 text-[10px] font-semibold uppercase tracking-wider mt-0.5 ${labelColor}`}>
+        <div>
+            <dt className={`text-[10px] font-semibold uppercase tracking-wider ${labelColor}`}>
                 {label}
             </dt>
-            <dd className="text-neutral-800 min-w-0 flex-1">{children}</dd>
+            <dd className="text-neutral-800 mt-0.5">{children}</dd>
         </div>
     );
 }
@@ -53,11 +60,11 @@ export function StepCard({
                         <>
                             {step.title && (
                                 <h4 className="text-sm font-semibold text-neutral-900 leading-snug">
-                                    {step.title}
+                                    {inlineMd(stripBackticks(step.title))}
                                 </h4>
                             )}
                             {(step.userAction || step.systemBehavior || step.uiFeedback) && (
-                                <dl className="mt-2 space-y-1.5 text-sm">
+                                <dl className="mt-2 space-y-2.5 text-sm">
                                     {step.userAction && (
                                         <FieldRow label="User" tone="indigo">
                                             {renderText(step.userAction)}
@@ -134,7 +141,7 @@ export function StepCard({
                                         key={i}
                                         className="text-[11px] bg-white border border-neutral-200 text-neutral-800 px-1.5 py-0.5 rounded"
                                     >
-                                        {ref}
+                                        {stripBackticks(ref)}
                                     </code>
                                 ))}
                             </div>
