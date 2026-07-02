@@ -78,8 +78,9 @@ const ARTIFACTS = [
     { slug: 'ui-components', label: 'UI Components' },
     { slug: 'design-system', label: 'Design System' },
     { slug: 'data-model', label: 'Data Model' },
-    { slug: 'developer-prompts', label: 'Developer Prompts' },
-    { slug: 'build-plan', label: 'Build Plan' },
+    // Developer Prompts + Build Plan consolidated into one Implementation
+    // Plan artifact (milestones + prompt packs + quality gates).
+    { slug: 'implementation-plan', label: 'Implementation Plan' },
 ];
 
 // Mockups render images and can be slow; give them extra settle time.

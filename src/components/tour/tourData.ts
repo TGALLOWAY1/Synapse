@@ -5,7 +5,6 @@ import {
     Boxes,
     Terminal,
     Palette,
-    MessageSquare,
     type LucideIcon,
 } from 'lucide-react';
 
@@ -233,13 +232,21 @@ export const TOUR_ASSETS: TourAsset[] = [
         preview: ['Button', 'Waveform', 'TrackRow', 'Transport bar', 'Mixer fader'],
     },
     {
+        // Consolidated Development artifact: milestones now carry their own
+        // prompt packs and quality gates (the old standalone Prompt Pack card
+        // folded into this one).
         id: 'implementation_plan',
         name: 'Implementation Plan',
-        tagline: 'Tech stack & architecture',
+        tagline: 'Milestones, prompt packs & quality gates',
         icon: Terminal,
         accent: 'text-amber-300 bg-amber-500/10',
         previewKind: 'roadmap',
-        preview: ['Phase 1 — Capture & projects', 'Phase 2 — Arrangement', 'Phase 3 — Collaboration', 'Phase 4 — Export'],
+        preview: [
+            'M1 — Capture & projects · 2 prompt packs',
+            'M2 — Arrangement · 2 prompt packs',
+            'M3 — Collaboration · 1 prompt pack',
+            'M4 — Export & launch · quality gates',
+        ],
     },
     {
         id: 'design_system',
@@ -249,19 +256,6 @@ export const TOUR_ASSETS: TourAsset[] = [
         accent: 'text-pink-300 bg-pink-500/10',
         previewKind: 'palette',
         preview: ['Indigo / primary', 'Neutral / surface', 'Emerald / success', 'Display / heading', 'Body / text'],
-    },
-    {
-        id: 'prompt_pack',
-        name: 'Prompt Pack',
-        tagline: 'AI prompts for future updates',
-        icon: MessageSquare,
-        accent: 'text-teal-300 bg-teal-500/10',
-        previewKind: 'prompt',
-        preview: [
-            'Add a metronome to the song editor.',
-            'Generate onboarding copy for first-time creators.',
-            'Draft release notes for v2.',
-        ],
     },
 ];
 

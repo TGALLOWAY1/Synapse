@@ -102,8 +102,8 @@ Seven core artifact types ship in the bundle:
 | `component_inventory` | Categorized cards (`renderers/ComponentInventoryRenderer.tsx`) |
 | `user_flows` | Markdown |
 | `design_system` | Markdown |
-| `implementation_plan` | Markdown |
-| `prompt_pack` | Markdown |
+| `implementation_plan` | Consolidated plan view — milestones, prompt packs, quality gates, traceability (`renderers/implementationPlan/ConsolidatedPlanView.tsx`, adapted by `lib/services/implementationPlanAdapter.ts`) |
+| `prompt_pack` | **Retired** (`RETIRED_ARTIFACT_SUBTYPES`) — no longer generated; legacy artifacts render via `PromptPackRenderer` and are consumed into the Implementation Plan view |
 
 Clicking **Generate All** now executes a dependency-aware pipeline using
 `CORE_ARTIFACT_PIPELINE` from `src/lib/coreArtifactPipeline.ts`.
@@ -113,9 +113,11 @@ Artifacts are generated in a deterministic order:
 2. `user_flows`
 3. `component_inventory`
 4. `data_model`
-5. `implementation_plan`
-6. `design_system`
-7. `prompt_pack`
+5. `design_system`
+6. `implementation_plan` (depends on `screen_inventory` + `data_model`)
+
+`prompt_pack` is retired from new runs — the Implementation Plan carries
+milestone-centered prompt packs natively.
 
 Each call to `generateCoreArtifact()` receives context from already
 generated dependencies (`generatedArtifacts`) so prompts are grounded in
@@ -152,9 +154,10 @@ Each generation creates an `ArtifactVersion` linked to its source
 | 2 | `user_flows` | PRD + `screen_inventory` excerpt | Goal/preconditions/steps/success/error paths | Cross-artifact check for feature propagation + error coverage |
 | 3 | `component_inventory` | PRD + `screen_inventory` + `user_flows` | Reusable component catalog with usage mapping | Structural + cross-artifact consistency warnings |
 | 4 | `data_model` | PRD + `user_flows` | Entities, fields, relationships, API endpoint implications | Structural + explicit API-surface check |
-| 5 | `implementation_plan` | PRD + `component_inventory` + `data_model` | Milestones, dependencies, DoD, feature traceability map | Feature-traceability coverage warning |
+| 5 | `implementation_plan` | PRD + `screen_inventory` + `data_model` | Milestones with objectives, priorities, linked artifacts, prompt packs, quality gates, validation commands, DoD | Feature-traceability coverage warning |
 | 6 | `design_system` | PRD + `component_inventory` | Tokens/patterns/states/layout guidance | Structural format checks |
-| 7 | `prompt_pack` | PRD + `implementation_plan` + `design_system` + `data_model` | Downstream prompts with canonical feature/entity references | Cross-artifact genericness + traceability warnings |
+
+(`prompt_pack` retired — prompt packs are generated inside `implementation_plan` milestones.)
 
 ### Audit-derived quality controls
 

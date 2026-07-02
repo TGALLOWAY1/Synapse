@@ -518,7 +518,11 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       so the user must regenerate to pull the new visual direction through.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
-    implementation_plan, prompt_pack, design_system). **Per-artifact model
+    implementation_plan, prompt_pack, design_system). **`prompt_pack` is
+    RETIRED from new generation** (see "Consolidated Implementation Plan"
+    below): it stays in the subtype union, pipeline, and complexity map so
+    legacy persisted artifacts keep working, but new runs never generate it.
+    **Per-artifact model
     routing (`src/lib/artifactModelSettings.ts`):** the routing brain lives in
     `artifactModelSettings.ts` (not coreArtifactService) so the Settings UI and
     the generation pipeline share one source of truth. Each subtype is tagged in
@@ -578,26 +582,25 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     `scroll-mt-*` id matching an outline item. This **replaced the old
     wrapping "pill" nav** (`SectionTabs`) on the first two pages and the old
     permanent left rail on Developer Prompts — do not reintroduce pills or a
-    side rail there; `SectionTabs` survives only for the Implementation Plan
-    renderer. When a document-style artifact needs in-page nav, reuse
+    side rail there; `SectionTabs` survives only in the Implementation Plan
+    renderer's legacy-markdown fallback path. When a document-style artifact
+    needs in-page nav, reuse
     `ArtifactOutlineNav`/`useArtifactOutline` rather than introducing another
     navigation style.
     The `prompt_pack` (**Developer Prompts**) renderer
-    (`PromptPackRenderer.tsx`) is now a vertical **document** driven by the
-    shared outline (one card per `### N. Title`), so the prompt body uses the
-    full page width instead of a permanent left rail. Each card has a light
-    header (Prompt N · Title · Category · "Generated <date>"), only **Edit** +
-    **Copy Prompt** actions (Reset surfaces inside edit mode when modified),
-    the prompt body rendered exactly as before (mono `whitespace-pre-wrap`,
-    unchanged), and a single supporting card below it — **Expected Output**
-    (trailing `**Expected Output:**`), rendered only when present — plus a
-    subtle "Safe to regenerate / Creates Version X" callout. **The generated
-    prompts are agent-agnostic** — the `prompt_pack` generation prompt
-    (`coreArtifactService.ts`) must never name or recommend a specific coding
-    agent (Cursor, Claude Code, ChatGPT, Copilot), and the renderer no longer
-    parses/shows a Target Tool, Reason/User Intent, Dependencies, or Key
-    Implementation Areas block. `generatedAt` (version `createdAt`) and
-    `versionNumber` thread through `ArtifactContentRenderer`.
+    (`PromptPackRenderer.tsx`) survives only for legacy persisted artifacts
+    (the subtype is retired — no sidebar row, no new generation): a vertical
+    document driven by the shared outline (one card per `### N. Title`), with
+    Edit + Copy Prompt actions and a per-prompt `promptEdits` metadata
+    overlay. Its markdown parser lives in
+    `src/lib/services/promptPackParser.ts`, shared with the implementation-
+    plan adapter (which is how legacy Developer Prompts surface inside the
+    consolidated view). **Generated prompts are agent-agnostic** — neither
+    the legacy prompt_pack prompt nor the implementation_plan prompt-pack
+    instructions (`coreArtifactService.ts`) may name or recommend a specific
+    coding agent (Cursor, Claude Code, ChatGPT, Copilot). `generatedAt`
+    (version `createdAt`) and `versionNumber` thread through
+    `ArtifactContentRenderer`.
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and
@@ -922,9 +925,9 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 The artifact sidebar is organized into five workflow-named sections —
 **Project Foundation** (PRD), **Experience** (User Flows, Screens — see "The
 Experience workspace" below), **Design** (Design System), **Architecture**
-(Data Model), and **Development** (Developer Prompts, Build Plan) — driven by
-`ARTIFACT_GROUPS` in `ArtifactWorkspace.tsx`. Grouping is purely visual;
-`CoreArtifactSubtype` ids
+(Data Model), and **Development** (Implementation Plan — see "Consolidated
+Implementation Plan" below) — driven by `ARTIFACT_GROUPS` in
+`ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
 per-artifact model overrides keep working. **`component_inventory` (UI Components)
@@ -943,7 +946,15 @@ slots so an errored hidden slot isn't retried invisibly on every remount — but
 `startAll` still includes hidden slots in its pending set, so they're best-effort
 generated alongside visible ones. A hidden artifact must never gate readiness or
 be the sole reason a run resumes. To re-expose one, remove it from
-`HIDDEN_ARTIFACT_SUBTYPES`. See `docs/backlog/BACKLOG.md` §6. `title`/`description` in
+`HIDDEN_ARTIFACT_SUBTYPES`. See `docs/backlog/BACKLOG.md` §6.
+**`prompt_pack` (Developer Prompts) is a *retired* artifact**
+(`RETIRED_ARTIFACT_SUBTYPES` / `isRetiredArtifactSubtype`, same module) —
+stronger than hidden: retired subtypes are excluded from new generation runs
+(`pendingSlotsForSpine`), from `assetsReady`, from `buildSlotMetas`, and from
+the Settings model list, while the pipeline meta / renderer / export path stay
+for legacy persisted artifacts. A retired subtype must never be a dependency
+of an active one (its dep would starve in the layer filter — regression test
+in `coreArtifactPipeline.test.ts`). `title`/`description` in
 `CORE_ARTIFACT_PIPELINE` are display-only labels that may be renamed freely; the
 sidebar's iteration order (and the mobile-header / auto-open order)
 all derive from `ARTIFACT_GROUPS`, not `displayOrder`. There is no
@@ -955,7 +966,8 @@ Marking a spine final must not dump the user back on something that looks like
 the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)
 starts artifact generation and shows `FinalizationSuccessModal` ("PRD
 Finalized" — *being created* vs *ready*, keyed off an `assetsReady` presence
-check of the 7 core artifacts + mockups) **without** switching stage. Its
+check of the non-hidden, non-retired core artifacts + mockups) **without**
+switching stage. Its
 **Open Assets** action (`handleOpenAssets`) switches `currentStage` to
 `workspace` and arms a one-shot `finalizeAutoOpen` flag passed to
 `ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
@@ -966,6 +978,63 @@ implementation_plan) — and opens the mobile drawer (`useIsMobile`-gated, so it
 never reopens after the user closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
+
+### Consolidated Implementation Plan (Development section)
+
+The old **Developer Prompts** (`prompt_pack`) and **Build Plan**
+(`implementation_plan`) rows are consolidated into one **Implementation Plan**
+artifact (subtype id still `implementation_plan` — no new subtype, so
+persisted artifacts, version history, snapshots, sync, model routing, and
+Convert-to-Tasks all keep working). See
+`docs/IMPLEMENTATION_PLAN_CONSOLIDATION.md` for the audit + design.
+
+- **Data shape.** `StructuredImplementationPlan` (in `src/types`) gained
+  all-optional consolidated fields: plan `summary`
+  (`ImplementationPlanSummary`), `globalQualityGates`, and per-milestone
+  `objective`/`priority`/`estimatedEffort`/`dependencies`/`linkedArtifacts`/
+  `promptPacks` (`ImplementationPromptPack`)/`qualityGates`
+  (`ImplementationQualityGate`)/`validationCommands`/`definitionOfDone`.
+  Storage format is unchanged: markdown + trailing ```` ```json synapse-plan ````
+  fence; the readable markdown keeps the legacy
+  Milestone/Goal/Deliverables/Dependencies headings (artifactValidation and
+  the legacy parser depend on them) and full prompt bodies live only in the
+  fence JSON.
+- **Adapter, not migration.** `src/lib/services/implementationPlanAdapter.ts`
+  (`buildConsolidatedPlan`, pure, unit-tested) builds the render-time
+  `ConsolidatedImplementationPlan` view model from any combination of: native
+  consolidated plan, legacy structured plan, legacy markdown-only plan,
+  and/or a legacy `prompt_pack` artifact. Legacy prompts become prompt packs
+  attached to milestones by conservative token matching (≥2 shared meaningful
+  tokens; unmatched → a labeled **Unassigned Prompt Packs** group); legacy
+  plan-wide Definition of Done → categorized global quality gates; legacy
+  Architecture → summary stack; Risks → readiness warnings. `readiness` and
+  `traceability` are always **derived, never persisted/generated**. The
+  legacy prompt-card parser is shared via
+  `src/lib/services/promptPackParser.ts` (extracted from
+  `PromptPackRenderer`).
+- **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
+  `renderers/implementationPlan/ConsolidatedPlanView.tsx` (tabs: Overview /
+  Milestones / Prompt Packs / Quality Gates / Traceability + copy actions:
+  per-prompt, per-milestone, all packs, whole plan as markdown via the
+  adapter's helpers). Fence-less, milestone-less content falls back to the
+  old timeline / plain markdown. `ArtifactWorkspace` threads the legacy
+  standalone prompt_pack artifact's preferred content in as
+  `promptPackContent` (via `ArtifactContentRenderer`).
+- **Generation.** The `implementation_plan` prompt + Gemini schema
+  (`artifactSchemas.ts`) emit the consolidated shape with **milestone-centered
+  prompt packs** (self-contained, agent-agnostic, fixed heading structure:
+  Goal / Relevant Synapse Artifacts / Scope / Out of Scope / Implementation
+  Steps / Acceptance Criteria / Quality Gates / Validation Commands / Commit
+  Guidance; no triple backticks inside bodies — they'd collide with the
+  markdown fences). It has true data deps on `screen_inventory` +
+  `data_model` (NOT `user_flows` — that edge would make the active pipeline 3
+  layers deep; the pipeline-shape tests assert ≥3-wide layer 1 and ≤2 layers
+  over the **active** pipeline). New runs never generate `prompt_pack` (see
+  the retired-subtype rules above).
+- The demo project is a **cloud snapshot** and carries the legacy
+  two-artifact shape until the owner re-pins a regenerated snapshot; the
+  adapter is what keeps it rendering consolidated in the meantime. Do not add
+  persisted state for the consolidated view.
 
 ### The Experience workspace (Screens) — read-side consolidation
 
