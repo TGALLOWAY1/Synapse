@@ -25,6 +25,8 @@ import { StructuredPRDView } from './StructuredPRDView';
 import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
+import { DesignSetupStep } from './setup/DesignSetupStep';
+import { shouldShowDesignSetup } from '../lib/designSetup';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
@@ -215,6 +217,24 @@ export function ProjectWorkspace() {
         && !activeSpine.preflightSession.completed
         && !activeSpine.structuredPRD
         && activeSpine.safetyReview?.status !== 'blocked';
+
+    // Setup-stage design selection: right after clarification (or immediately,
+    // on the Generate Immediately path), while PRD generation runs in the
+    // background, a fresh project picks its visual direction. Replaces the
+    // PRD/progress view until the user chooses or skips; never shown for
+    // legacy projects, the demo, blocked spines, or failed runs (see
+    // shouldShowDesignSetup).
+    const showDesignSetup = !showPreflight && !isOldVersion
+        && shouldShowDesignSetup(project, activeSpine);
+
+    // Idea + clarification text feeding the rule-based preset recommendation.
+    const designRecommendationText = showDesignSetup
+        ? [
+            activeSpine?.promptText,
+            activeSpine?.preflightSession?.summary,
+            ...(activeSpine?.preflightSession?.questions.map((q) => q.answer ?? '') ?? []),
+        ].filter(Boolean).join('\n')
+        : '';
 
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
@@ -845,7 +865,14 @@ export function ProjectWorkspace() {
                                 platform={project?.platform}
                             />
                         )}
-                        {pipelineStage === 'prd' && !showPreflight && (
+                        {pipelineStage === 'prd' && showDesignSetup && activeSpine && (
+                            <DesignSetupStep
+                                projectId={projectId}
+                                recommendationText={designRecommendationText}
+                                prdGenerating={isPRDActivelyGenerating}
+                            />
+                        )}
+                        {pipelineStage === 'prd' && !showPreflight && !showDesignSetup && (
                             <>
                                 {/* Feedback items from mockups/artifacts */}
                                 <FeedbackItemsList
