@@ -167,7 +167,13 @@ so they pick up the new direction.
 - **Screen Inventory** and **User Flows**
 - **Design System**
 - **Data Model** schemas with entities, fields, and relationships
-- **Build Plan** and **Developer Prompts**
+- **Implementation Plan** — a consolidated build guide: small milestones, each
+  with linked screens/entities, implementation tasks, **copy-ready prompt
+  packs** for your coding agent, **quality gates**, validation commands, and a
+  definition of done, plus a traceability view connecting milestones →
+  screens → data models → prompt packs → gates. (Projects generated before the
+  consolidation had separate *Build Plan* and *Developer Prompts* artifacts;
+  they're merged into this view automatically — nothing is lost or migrated.)
 
 Two of them (`screen_inventory`, `data_model`) use Gemini JSON mode with explicit
 schemas and render as card grids and entity tables rather than raw markdown. Every artifact tracks
@@ -233,10 +239,10 @@ address the critique without regenerating the whole document.
 
 #### Track implementation progress
 
-The Build Plan converts into a tracked task checklist — no LLM call,
+The Implementation Plan converts into a tracked task checklist — no LLM call,
 derived deterministically from the plan. Review and edit the extracted tasks,
 **save them to the project**, and a progress checklist appears on the
-Build Plan: a `done / total` progress bar, a per-task status toggle
+Implementation Plan: a `done / total` progress bar, a per-task status toggle
 (to do → in progress → done), and expandable acceptance criteria. Export the
 tasks to **Markdown** or **GitHub issues**; created GitHub issues are linked
 back to each task so you can jump straight to them. Progress persists across
@@ -321,7 +327,7 @@ graph TD
     H --> J(Screen Inventory)
     H --> K(Data Model)
     H --> L(Design System)
-    H --> M(Build Plan)
+    H --> M(Implementation Plan)
 ```
 
 ## Tech stack

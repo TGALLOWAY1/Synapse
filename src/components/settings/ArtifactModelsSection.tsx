@@ -1,7 +1,7 @@
 import { useState } from 'react';
 import { Box, FileText, Image as ImageIcon, ChevronDown, Sparkles } from 'lucide-react';
 import { MODEL_CATALOG, modelDisplayName } from '../../lib/modelCatalog';
-import { CORE_ARTIFACT_DISPLAY_ORDER } from '../../lib/coreArtifactPipeline';
+import { CORE_ARTIFACT_DISPLAY_ORDER, isRetiredArtifactSubtype } from '../../lib/coreArtifactPipeline';
 import { CORE_ARTIFACT_COMPLEXITY } from '../../lib/artifactModelSettings';
 import type { MockupImageMode } from '../../lib/artifactModelSettings';
 import { DEFAULT_PRD_SECTIONS, selectModelTier } from '../../lib/services/progressivePrdGeneration';
@@ -136,8 +136,10 @@ export function ArtifactModelsSection({
                     )}
                 </ArtifactRow>
 
-                {/* Text artifacts — one model selector each. */}
-                {CORE_ARTIFACT_DISPLAY_ORDER.map((meta) => {
+                {/* Text artifacts — one model selector each. Retired subtypes
+                    (prompt_pack, folded into the Implementation Plan) no longer
+                    generate, so they get no model row. */}
+                {CORE_ARTIFACT_DISPLAY_ORDER.filter((meta) => !isRetiredArtifactSubtype(meta.subtype)).map((meta) => {
                     const value = overrides[meta.subtype] ?? recommendedModel(meta.subtype);
                     return (
                         <ArtifactRow

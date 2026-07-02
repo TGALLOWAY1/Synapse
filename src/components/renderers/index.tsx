@@ -40,6 +40,9 @@ interface DispatchProps {
      * journey nodes can open the matching Screen Detail view. */
     onNavigateToScreen?: (screenSlug: string) => void;
     availableScreenSlugs?: ReadonlySet<string>;
+    /** Only consumed by `implementation_plan`: content of the project's legacy
+     * standalone prompt_pack artifact, adapted into the consolidated view. */
+    promptPackContent?: string;
     /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
     promptEdits?: Record<number, string>;
     /** Only consumed by `prompt_pack`; persists the new edit overlay. */
@@ -88,6 +91,7 @@ export function ArtifactContentRenderer({
     implementationPlan,
     onNavigateToScreen,
     availableScreenSlugs,
+    promptPackContent,
     promptEdits,
     onUpdatePromptEdits,
     generatedAt,
@@ -120,7 +124,7 @@ export function ArtifactContentRenderer({
         );
     }
     if (subtype === 'implementation_plan') {
-        return <ImplementationPlanRenderer content={content} />;
+        return <ImplementationPlanRenderer content={content} promptPackContent={promptPackContent} />;
     }
     if (subtype === 'prompt_pack') {
         return (

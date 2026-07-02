@@ -61,6 +61,11 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
         displayOrder: 5,
     },
     {
+        // RETIRED (see RETIRED_ARTIFACT_SUBTYPES): standalone Developer
+        // Prompts no longer generate — the implementation_plan artifact now
+        // carries milestone-centered prompt packs. The meta stays so legacy
+        // persisted prompt_pack artifacts keep their title, renderer, and
+        // export path, and getArtifactMeta never throws for them.
         subtype: 'prompt_pack',
         title: 'Developer Prompts',
         description: 'AI prompts for downstream tasks',
@@ -69,9 +74,15 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
     },
     {
         subtype: 'implementation_plan',
-        title: 'Build Plan',
-        description: 'High-level build sequence and milestones',
-        dependsOn: [],
+        title: 'Implementation Plan',
+        description: 'Milestones, prompt packs, and quality gates',
+        // True data deps: the consolidated plan links milestones to screen and
+        // entity names and writes prompt packs that reference them, so it
+        // needs those artifacts' output as prompt context. user_flows is
+        // deliberately NOT a dep — flow links are nice-to-have and adding the
+        // edge would make the active pipeline 3 layers deep (see the depth
+        // test in coreArtifactPipeline.test.ts).
+        dependsOn: ['screen_inventory', 'data_model'],
         displayOrder: 7,
     },
 ];
@@ -95,6 +106,20 @@ export const HIDDEN_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new Se
 
 export const isHiddenArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
     HIDDEN_ARTIFACT_SUBTYPES.has(subtype);
+
+// Subtypes that are fully retired from **new generation**: no sidebar row, no
+// slot in new runs, no Settings model row — stronger than HIDDEN (which still
+// generates). The subtype stays in the type union and CORE_ARTIFACT_PIPELINE
+// so legacy persisted artifacts keep rendering/exporting, and their content is
+// consumed by newer views (the Implementation Plan adapter reads legacy
+// prompt_pack artifacts). Retired subtypes must never gate readiness, never
+// appear in pendingSlotsForSpine, and never surface a generation-config row.
+export const RETIRED_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArtifactSubtype>([
+    'prompt_pack',
+]);
+
+export const isRetiredArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
+    RETIRED_ARTIFACT_SUBTYPES.has(subtype);
 
 /**
  * Group the pipeline into dependency layers. Items in the same layer have no

@@ -14,6 +14,7 @@ import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
 import {
     CORE_ARTIFACT_PIPELINE,
+    isRetiredArtifactSubtype,
     buildDependencyLayers,
     getArtifactMeta,
     isHiddenArtifactSubtype,
@@ -520,7 +521,12 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
 }
 
 function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
-    return ALL_SLOT_KEYS.filter(k => !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
+    // Retired subtypes (e.g. prompt_pack, folded into the consolidated
+    // implementation_plan) never generate in new runs — they're excluded
+    // here so startAll/resume/regenerate can't schedule them.
+    return ALL_SLOT_KEYS.filter(k =>
+        (k === 'mockup' || !isRetiredArtifactSubtype(k))
+        && !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
 }
 
 // A slot is "hidden" when its subtype is hidden from the assets list. 'mockup'

@@ -10,7 +10,7 @@ import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
 import { useIsMobile } from '../lib/useIsMobile';
 import { artifactJobController } from '../lib/services/artifactJobController';
-import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype } from '../lib/coreArtifactPipeline';
+import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { ArtifactContentRenderer } from './renderers';
 import { StructuredPRDView } from './StructuredPRDView';
 import { MockupViewer } from './mockups/MockupViewer';
@@ -110,7 +110,12 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
     },
     { id: 'design', title: 'Design', icon: Palette, items: ['design_system'] },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
-    { id: 'development', title: 'Development', icon: Code2, items: ['prompt_pack', 'implementation_plan'] },
+    // Development consolidates the old Developer Prompts + Build Plan rows
+    // into one Implementation Plan artifact (milestones + prompt packs +
+    // quality gates). Legacy prompt_pack artifacts still exist in storage —
+    // the Implementation Plan view consumes them through
+    // implementationPlanAdapter rather than rendering a separate row.
+    { id: 'development', title: 'Development', icon: Code2, items: ['implementation_plan'] },
 ];
 
 function buildSlotMetas(): SlotMeta[] {
@@ -135,7 +140,7 @@ function buildSlotMetas(): SlotMeta[] {
         group.items
             .filter(key =>
                 key === 'prd' || key === 'mockup' || key === 'screens'
-                || !isHiddenArtifactSubtype(key))
+                || (!isHiddenArtifactSubtype(key) && !isRetiredArtifactSubtype(key)))
             .map(key => base[key]),
     );
 }
@@ -915,6 +920,16 @@ export function ArtifactWorkspace({
         const promptEdits = subtype === 'prompt_pack'
             ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
             : undefined;
+        // Legacy projects may hold a standalone prompt_pack artifact (retired
+        // subtype, no sidebar row). The Implementation Plan view consumes its
+        // content through the adapter so those prompts appear as prompt packs.
+        const legacyPromptPackContent = subtype === 'implementation_plan'
+            ? (() => {
+                const packArtifact = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === 'prompt_pack');
+                const packPreferred = packArtifact ? getPreferredVersion(projectId, packArtifact.id) : undefined;
+                return packPreferred?.content;
+            })()
+            : undefined;
         const handleUpdatePromptEdits = subtype === 'prompt_pack'
             ? (next: Record<number, string>) => {
                 updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next });
@@ -987,6 +1002,7 @@ export function ArtifactWorkspace({
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
                         onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
                         availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
+                        promptPackContent={legacyPromptPackContent}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
