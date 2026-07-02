@@ -341,6 +341,15 @@ function OverviewTab({ plan, onOpenMilestones }: { plan: ConsolidatedImplementat
                     </ul>
                 </div>
             )}
+
+            {/* Unrecognized legacy appendix prose — preserved so nothing is
+                lost when an old markdown plan renders through this view. */}
+            {plan.appendixNotes && (
+                <div className="bg-neutral-50 rounded-xl border border-neutral-200 p-4">
+                    <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Notes</p>
+                    <p className="text-sm text-neutral-700 whitespace-pre-wrap">{plan.appendixNotes}</p>
+                </div>
+            )}
         </div>
     );
 }

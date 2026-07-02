@@ -31,6 +31,7 @@ import type {
     ImplementationReadiness,
     ImplementationTraceabilityItem,
     QualityGateCategory,
+    RiskItem,
     StructuredImplementationPlan,
 } from '../../types';
 import {
@@ -194,11 +195,74 @@ function attachLegacyPacks(
 
 // --- Legacy markdown plan → milestones ---------------------------------------
 
+interface LegacyAppendix {
+    architecture: string[];
+    risks: RiskItem[];
+    definitionOfDone: string[];
+    criticalPath?: string;
+    teamSize?: string;
+    /** Appendix prose that didn't match a known section — kept, never dropped. */
+    notes?: string;
+}
+
+/**
+ * Parse the post-`---` appendix of a legacy markdown plan. The serializer
+ * (and hand-written legacy plans) put Architecture / Risks / Definition of
+ * Done sections and Critical Path / Team Size labels there; anything
+ * unrecognized is preserved as free-form notes so no content is lost when
+ * the plan renders through the consolidated view.
+ */
+function parseLegacyAppendix(appendix: string): LegacyAppendix {
+    const out: LegacyAppendix = { architecture: [], risks: [], definitionOfDone: [] };
+    if (!appendix.trim()) return out;
+
+    type Section = 'architecture' | 'risks' | 'dod' | 'other';
+    let section: Section = 'other';
+    const notes: string[] = [];
+
+    for (const raw of appendix.split('\n')) {
+        const line = raw.trim();
+        const heading = line.match(/^#{2,3}\s+(.+?)\s*$/);
+        if (heading) {
+            const name = heading[1].toLowerCase();
+            section = name.includes('architecture') ? 'architecture'
+                : name.includes('risk') ? 'risks'
+                    : name.includes('definition of done') ? 'dod'
+                        : 'other';
+            if (section === 'other') notes.push(raw);
+            continue;
+        }
+        const cp = line.match(/^\*\*Critical Path:\*\*\s*(.+)$/i);
+        if (cp) { out.criticalPath = cp[1].trim(); continue; }
+        const ts = line.match(/^\*\*Team Size:\*\*\s*(.+)$/i);
+        if (ts) { out.teamSize = ts[1].trim(); continue; }
+
+        const bullet = line.match(/^[-*]\s*(?:\[\s*[ xX]\s*\]\s*)?(.+)$/);
+        if (bullet && section !== 'other') {
+            const text = bullet[1].trim();
+            if (section === 'architecture') out.architecture.push(text);
+            else if (section === 'dod') out.definitionOfDone.push(text);
+            else {
+                // Risks serialize as "- **desc** — Mitigation: …".
+                const m = text.match(/^\*\*(.+?)\*\*\s*(?:—|-)?\s*(?:Mitigation:\s*(.+))?$/);
+                out.risks.push(m ? { description: m[1].trim(), mitigation: m[2]?.trim() } : { description: text });
+            }
+            continue;
+        }
+        if (line) notes.push(raw);
+    }
+
+    const joined = notes.join('\n').trim();
+    if (joined) out.notes = joined;
+    return out;
+}
+
 function milestonesFromLegacyMarkdown(planContent: string): {
     milestones: ImplementationPlanMilestone[];
-    globalDoD: string[];
-    architecture: string[];
     riskTexts: string[];
+    appendix: LegacyAppendix;
+    /** Pre-milestone prose — used as the build-strategy fallback. */
+    preamble: string;
 } {
     const parsed = parseImplementationPlan(planContent);
     const riskTexts: string[] = [];
@@ -227,7 +291,12 @@ function milestonesFromLegacyMarkdown(planContent: string): {
         return milestone;
     });
 
-    return { milestones, globalDoD: [], architecture: [], riskTexts };
+    return {
+        milestones,
+        riskTexts,
+        appendix: parseLegacyAppendix(parsed.appendix),
+        preamble: parsed.preamble.replace(/^#{1,3}\s+.+$/gm, '').trim(),
+    };
 }
 
 // --- Summary / readiness derivation ------------------------------------------
@@ -325,6 +394,22 @@ function dedupe(items: string[]): string[] {
 
 // --- Main entry ----------------------------------------------------------------
 
+/**
+ * Fill schema-optional nested fields with safe defaults. The Gemini response
+ * schema doesn't require `scope.include`/`scope.exclude` (or reject a missing
+ * `acceptanceCriteria` on hand-edited data), so partial model output like
+ * `scope: { include: [...] }` must not crash the renderer.
+ */
+function normalizePromptPack(pack: ImplementationPromptPack): ImplementationPromptPack {
+    return {
+        ...pack,
+        acceptanceCriteria: pack.acceptanceCriteria ?? [],
+        scope: pack.scope
+            ? { include: pack.scope.include ?? [], exclude: pack.scope.exclude ?? [] }
+            : undefined,
+    };
+}
+
 export function buildConsolidatedPlan(input: ConsolidatedPlanInput): ConsolidatedImplementationPlan | null {
     const planContent = input.planContent?.trim() || '';
     const promptPackContent = input.promptPackContent?.trim() || '';
@@ -335,19 +420,27 @@ export function buildConsolidatedPlan(input: ConsolidatedPlanInput): Consolidate
     let planSource: ConsolidatedImplementationPlan['sources']['plan'] = 'none';
     let milestones: ImplementationPlanMilestone[] = [];
     const riskTexts: string[] = [];
+    let legacyAppendix: LegacyAppendix | null = null;
+    let legacyPreamble = '';
 
     if (planContent) {
         structured = extractStructuredPlan(planContent);
         if (structured) {
             planSource = 'structured';
-            milestones = structured.milestones.map(m => ({ ...m }));
+            milestones = structured.milestones.map(m => ({
+                ...m,
+                promptPacks: m.promptPacks?.map(normalizePromptPack),
+            }));
             riskTexts.push(...(structured.risks ?? []).map(r => r.description));
         } else {
             const legacy = milestonesFromLegacyMarkdown(planContent);
             if (legacy.milestones.length > 0) {
                 planSource = 'legacy_markdown';
                 milestones = legacy.milestones;
+                legacyAppendix = legacy.appendix;
+                legacyPreamble = legacy.preamble;
                 riskTexts.push(...legacy.riskTexts);
+                riskTexts.push(...legacy.appendix.risks.map(r => r.description));
             }
         }
     }
@@ -376,17 +469,34 @@ export function buildConsolidatedPlan(input: ConsolidatedPlanInput): Consolidate
     if (planSource === 'none' && packSource === 'none') return null;
 
     // 3. Quality gates: native global gates, plus gates derived from the
-    //    plan-wide Definition of Done so legacy plans keep that content.
+    //    plan-wide Definition of Done (fenced or legacy-markdown appendix) so
+    //    legacy plans keep that content.
     const globalQualityGates: ImplementationQualityGate[] = [
         ...(structured?.globalQualityGates ?? []),
     ];
-    if (globalQualityGates.length === 0 && structured?.definitionOfDone?.length) {
-        structured.definitionOfDone.forEach((d, i) => {
+    const dodSource = structured?.definitionOfDone?.length
+        ? structured.definitionOfDone
+        : legacyAppendix?.definitionOfDone ?? [];
+    if (globalQualityGates.length === 0 && dodSource.length) {
+        dodSource.forEach((d, i) => {
             globalQualityGates.push(gateFromDoD(d, `gate-dod-${i + 1}`));
         });
     }
 
     const summary = deriveSummary(structured);
+    // Legacy markdown-only plans carry their summary/architecture content in
+    // the preamble + appendix — surface it instead of dropping it.
+    if (legacyAppendix) {
+        if (!summary.buildStrategy && legacyPreamble) summary.buildStrategy = legacyPreamble;
+        if ((!summary.criticalPath || summary.criticalPath.length === 0) && legacyAppendix.criticalPath) {
+            summary.criticalPath = [legacyAppendix.criticalPath];
+        }
+        if (!summary.teamAssumption && legacyAppendix.teamSize) summary.teamAssumption = legacyAppendix.teamSize;
+        if ((!summary.stackSummary || summary.stackSummary.length === 0) && legacyAppendix.architecture.length) {
+            summary.stackSummary = legacyAppendix.architecture.slice(0, 6);
+        }
+    }
+
     const readiness = deriveReadiness({
         planSource,
         packSource,
@@ -394,6 +504,11 @@ export function buildConsolidatedPlan(input: ConsolidatedPlanInput): Consolidate
         unassignedCount: unassignedPromptPacks.length,
         riskTexts,
     });
+
+    const risks: RiskItem[] = structured?.risks
+        ?? (legacyAppendix?.risks.length
+            ? legacyAppendix.risks
+            : riskTexts.map(description => ({ description })));
 
     return {
         title: input.title ?? 'Implementation Plan',
@@ -403,8 +518,9 @@ export function buildConsolidatedPlan(input: ConsolidatedPlanInput): Consolidate
         unassignedPromptPacks,
         globalQualityGates,
         traceability: deriveTraceability(milestones),
-        risks: structured?.risks ?? riskTexts.map(description => ({ description })),
-        architecture: structured?.architecture ?? [],
+        risks,
+        architecture: structured?.architecture ?? legacyAppendix?.architecture ?? [],
+        appendixNotes: legacyAppendix?.notes,
         sources: { plan: planSource, promptPacks: packSource },
     };
 }
@@ -487,6 +603,9 @@ export function consolidatedPlanToMarkdown(plan: ConsolidatedImplementationPlan)
         lines.push('## Risks', '');
         plan.risks.forEach(r => lines.push(`- ${r.description}${r.mitigation ? ` — Mitigation: ${r.mitigation}` : ''}`));
         lines.push('');
+    }
+    if (plan.appendixNotes) {
+        lines.push('## Notes', '', plan.appendixNotes, '');
     }
 
     return lines.join('\n').trim() + '\n';

@@ -220,6 +220,86 @@ Foundation then core.`;
         expect(plan!.readiness.missingInputs).toContain('Prompt packs');
     });
 
+    it('preserves the legacy markdown appendix (architecture, risks, DoD, critical path, notes)', () => {
+        const markdown = `# Implementation Plan
+
+Overall approach: ship a thin vertical slice first.
+
+### Milestone 1: Foundation (Week 1)
+**Goal:** Set up the project.
+**Key Deliverables:**
+- [ ] Initialize repository
+
+---
+
+## Architecture
+- Next.js frontend
+- Postgres database
+
+## Risks
+- **Vendor lock-in** — Mitigation: Abstract the storage layer
+
+## Definition of Done
+- [ ] All tests pass
+- [ ] Accessibility audit complete
+
+**Critical Path:** Foundation then launch
+**Team Size:** 2 devs
+
+Some extra hand-written appendix prose.`;
+        const plan = buildConsolidatedPlan({ planContent: markdown })!;
+        expect(plan.sources.plan).toBe('legacy_markdown');
+        // Preamble prose becomes the build strategy.
+        expect(plan.summary.buildStrategy).toContain('thin vertical slice');
+        // Appendix sections survive the consolidated view.
+        expect(plan.architecture).toEqual(['Next.js frontend', 'Postgres database']);
+        expect(plan.summary.stackSummary).toEqual(['Next.js frontend', 'Postgres database']);
+        expect(plan.summary.criticalPath).toEqual(['Foundation then launch']);
+        expect(plan.summary.teamAssumption).toBe('2 devs');
+        expect(plan.risks).toEqual([
+            { description: 'Vendor lock-in', mitigation: 'Abstract the storage layer' },
+        ]);
+        expect(plan.globalQualityGates.map(g => g.title)).toEqual([
+            'All tests pass',
+            'Accessibility audit complete',
+        ]);
+        expect(plan.appendixNotes).toContain('extra hand-written appendix prose');
+        // And it round-trips into the markdown export.
+        const md = consolidatedPlanToMarkdown(plan);
+        expect(md).toContain('Next.js frontend');
+        expect(md).toContain('extra hand-written appendix prose');
+    });
+
+    it('normalizes partial prompt-pack scope from native plans (schema-optional fields)', () => {
+        const partial: StructuredImplementationPlan = {
+            milestones: [
+                {
+                    id: 'm1',
+                    name: 'Setup',
+                    tasks: [],
+                    promptPacks: [
+                        {
+                            id: 'pp1',
+                            title: 'Partial scope pack',
+                            purpose: 'Test partial output.',
+                            prompt: '# Prompt',
+                            // scope.exclude / acceptanceCriteria omitted, as the
+                            // Gemini schema allows.
+                            scope: { include: ['Thing A'] } as never,
+                            acceptanceCriteria: undefined as never,
+                        },
+                    ],
+                },
+            ],
+        };
+        const plan = buildConsolidatedPlan({ planContent: fencePlan(partial) })!;
+        const pack = plan.milestones[0].promptPacks![0];
+        expect(pack.scope).toEqual({ include: ['Thing A'], exclude: [] });
+        expect(pack.acceptanceCriteria).toEqual([]);
+        // Copy helper must not throw on the normalized pack.
+        expect(promptPackToClipboardText(pack)).toContain('# Prompt');
+    });
+
     it('renders prompt packs alone when no plan exists', () => {
         const plan = buildConsolidatedPlan({ promptPackContent: LEGACY_PROMPT_PACK });
         expect(plan).not.toBeNull();

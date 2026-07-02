@@ -63,28 +63,30 @@ export function PromptPackCard({ pack, milestoneName, defaultCollapsed = false }
                         {pack.prompt}
                     </div>
 
-                    {(pack.scope?.include.length || pack.scope?.exclude.length) ? (
+                    {/* The adapter normalizes scope arrays, but stay defensive:
+                        partial model output may omit include/exclude. */}
+                    {(pack.scope?.include?.length || pack.scope?.exclude?.length) ? (
                         <div className="px-4 py-3 border-t border-neutral-100 grid grid-cols-1 sm:grid-cols-2 gap-3">
-                            {pack.scope.include.length > 0 && (
+                            {(pack.scope.include?.length ?? 0) > 0 && (
                                 <div>
                                     <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">In Scope</p>
                                     <ul className="space-y-0.5 text-xs text-neutral-700">
-                                        {pack.scope.include.map((s, i) => <li key={i}>• {s}</li>)}
+                                        {pack.scope.include!.map((s, i) => <li key={i}>• {s}</li>)}
                                     </ul>
                                 </div>
                             )}
-                            {pack.scope.exclude.length > 0 && (
+                            {(pack.scope.exclude?.length ?? 0) > 0 && (
                                 <div>
                                     <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">Out of Scope</p>
                                     <ul className="space-y-0.5 text-xs text-neutral-700">
-                                        {pack.scope.exclude.map((s, i) => <li key={i}>• {s}</li>)}
+                                        {pack.scope.exclude!.map((s, i) => <li key={i}>• {s}</li>)}
                                     </ul>
                                 </div>
                             )}
                         </div>
                     ) : null}
 
-                    {pack.acceptanceCriteria.length > 0 && (
+                    {(pack.acceptanceCriteria?.length ?? 0) > 0 && (
                         <div className="px-4 py-3 border-t border-neutral-100">
                             <p className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wider text-emerald-700 mb-1">
                                 <Target size={11} /> Acceptance Criteria

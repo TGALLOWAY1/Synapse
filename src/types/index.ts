@@ -823,6 +823,9 @@ export interface ConsolidatedImplementationPlan {
     traceability: ImplementationTraceabilityItem[];
     risks: RiskItem[];
     architecture: string[];
+    /** Unrecognized appendix prose from a legacy markdown plan — preserved
+     * verbatim so switching to the consolidated view never loses content. */
+    appendixNotes?: string;
     /** Where the data came from — drives legacy explainer copy in the UI. */
     sources: {
         plan: 'structured' | 'legacy_markdown' | 'none';
