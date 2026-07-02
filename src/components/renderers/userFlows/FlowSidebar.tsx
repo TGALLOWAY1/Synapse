@@ -189,7 +189,11 @@ export function FlowSidebar({
                 <button
                     type="button"
                     onClick={() => onToggleMobile(true)}
-                    aria-label="Browse flows"
+                    aria-label={
+                        selected
+                            ? `Browse flows — current: flow ${selectedIndex + 1} of ${flows.length}, ${selected.title}`
+                            : 'Browse flows'
+                    }
                     className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border border-neutral-300 rounded-lg text-left hover:bg-neutral-50 active:bg-neutral-100 transition"
                 >
                     <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold">
