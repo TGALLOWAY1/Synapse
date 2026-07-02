@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
 import { refreshProjectsFromServer } from '../store/projectServerSync';
-import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X } from 'lucide-react';
+import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X, FolderOpen } from 'lucide-react';
 import type { AuthProvider } from '../lib/recruiterApi';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
@@ -306,7 +306,7 @@ export function HomePage() {
                 : 'Generate PRD';
 
     return (
-        <div className="min-h-screen flex flex-col">
+        <div className="min-h-screen flex flex-col bg-neutral-50 text-neutral-900">
             {/* Top bar */}
             <div className="flex items-center justify-between px-6 py-4">
                 <div className="flex items-center gap-3">
@@ -314,13 +314,13 @@ export function HomePage() {
                 </div>
                 <div className="flex items-center gap-2">
                     {user && (
-                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-500/30 bg-emerald-500/10 text-emerald-200 text-sm">
+                        <div className="hidden md:flex items-center gap-2 px-3 py-1.5 rounded-xl border border-emerald-300 bg-emerald-50 text-emerald-700 text-sm">
                             Signed in as {user.name}{providerLabel(user.authProvider) ? ` via ${providerLabel(user.authProvider)}` : ''}
                         </div>
                     )}
                     <button
                         onClick={() => setIsSettingsOpen(true)}
-                        className="p-2.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
+                        className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300"
                         title="Settings"
                     >
                         <Settings size={18} />
@@ -329,7 +329,7 @@ export function HomePage() {
                         <button
                             onClick={handleSignOut}
                             disabled={isSigningOut}
-                            className="p-2.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10 disabled:opacity-60 disabled:cursor-wait"
+                            className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300 disabled:opacity-60 disabled:cursor-wait"
                             title="Sign out"
                         >
                             {isSigningOut ? <Loader2 size={18} className="animate-spin" /> : <LogOut size={18} />}
@@ -337,7 +337,7 @@ export function HomePage() {
                     )}
                     <button
                         onClick={() => setIsDrawerOpen(true)}
-                        className="p-2.5 text-neutral-400 hover:text-white hover:bg-white/10 rounded-xl transition-all border border-white/5 hover:border-white/10"
+                        className="p-2.5 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-xl transition-all border border-neutral-200 hover:border-neutral-300"
                         title="Projects"
                     >
                         <List size={18} />
@@ -348,10 +348,10 @@ export function HomePage() {
             {/* Pre-sign-in project import offer (explicit opt-in — never silent) */}
             {showImportBanner && (
                 <div className="px-6">
-                    <div className="mx-auto max-w-2xl flex items-start gap-3 rounded-xl border border-indigo-500/30 bg-indigo-500/10 px-4 py-3">
-                        <Download size={18} className="mt-0.5 shrink-0 text-indigo-300" />
+                    <div className="mx-auto max-w-2xl flex items-start gap-3 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3">
+                        <Download size={18} className="mt-0.5 shrink-0 text-indigo-500" />
                         <div className="flex-1 min-w-0">
-                            <p className="text-sm text-indigo-100">
+                            <p className="text-sm text-indigo-900">
                                 We found {legacyOffer.projectCount} project{legacyOffer.projectCount === 1 ? '' : 's'} saved
                                 on this browser that {legacyOffer.projectCount === 1 ? "isn't" : "aren't"} linked to your
                                 account yet. Recover {legacyOffer.projectCount === 1 ? 'it' : 'them'} into your account?
@@ -369,7 +369,7 @@ export function HomePage() {
                                 <button
                                     type="button"
                                     onClick={handleDismissImport}
-                                    className="px-3 py-1.5 rounded-lg text-sm text-neutral-300 hover:text-white hover:bg-white/10 transition"
+                                    className="px-3 py-1.5 rounded-lg text-sm text-neutral-600 hover:text-neutral-900 hover:bg-neutral-200/70 transition"
                                 >
                                     Not mine
                                 </button>
@@ -378,7 +378,7 @@ export function HomePage() {
                         <button
                             type="button"
                             onClick={handleDismissImport}
-                            className="p-1 text-neutral-400 hover:text-white rounded-lg transition"
+                            className="p-1 text-neutral-400 hover:text-neutral-700 rounded-lg transition"
                             title="Dismiss"
                             aria-label="Dismiss"
                         >
@@ -391,15 +391,25 @@ export function HomePage() {
             {/* Main content — vertically centered */}
             <div className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
                 <div className="w-full max-w-2xl">
-                    {/* Take the interactive tour */}
-                    <div className="flex justify-center mb-8">
+                    {/* Take the interactive tour + View demo project — inline pills */}
+                    <div className="flex flex-wrap justify-center items-center gap-2 mb-8">
                         <button
                             type="button"
                             onClick={() => navigate('/tour')}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 cursor-pointer transition"
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-300 bg-indigo-50 text-sm text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 cursor-pointer transition"
                         >
                             <Compass size={14} />
                             <span>Take the tour</span>
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleOpenDemo}
+                            disabled={isLoadingDemo}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-300 bg-indigo-50 text-sm text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 transition disabled:opacity-60 disabled:cursor-wait"
+                            title="Open the prepopulated demo project — no API key required"
+                        >
+                            {isLoadingDemo ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
+                            <span>{isLoadingDemo ? 'Loading demo…' : 'View demo project'}</span>
                         </button>
                     </div>
 
@@ -410,21 +420,11 @@ export function HomePage() {
 
                     {/* Example prompt pills */}
                     <div className="flex gap-2 overflow-x-auto pb-3 mb-6 scrollbar-hide">
-                        <button
-                            type="button"
-                            onClick={handleOpenDemo}
-                            disabled={isLoadingDemo}
-                            className="shrink-0 inline-flex items-center gap-1.5 px-4 py-2 rounded-full border border-indigo-500/40 bg-indigo-500/10 text-sm text-indigo-300 hover:border-indigo-400/60 hover:text-indigo-200 transition whitespace-nowrap disabled:opacity-60 disabled:cursor-wait"
-                            title="Open the prepopulated demo project — no API key required"
-                        >
-                            {isLoadingDemo && <Loader2 size={14} className="animate-spin" />}
-                            {isLoadingDemo ? 'Loading demo…' : 'View demo project'}
-                        </button>
                         {EXAMPLE_PROMPTS.map((example) => (
                             <button
                                 key={example.label}
                                 onClick={() => handleExampleClick(example)}
-                                className="shrink-0 px-4 py-2 rounded-full border border-neutral-600 bg-neutral-800/40 text-sm text-neutral-300 hover:border-neutral-500 hover:text-white transition whitespace-nowrap"
+                                className="shrink-0 px-4 py-2 rounded-full border border-neutral-300 bg-white text-sm text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 transition whitespace-nowrap"
                             >
                                 {example.label}
                             </button>
@@ -433,17 +433,17 @@ export function HomePage() {
 
                     {/* Prompt card */}
                     <form onSubmit={handleSubmit}>
-                        <div className="rounded-2xl border border-neutral-700 bg-neutral-800/50 overflow-hidden">
+                        <div className="rounded-2xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
                             {/* Project name */}
                             <div className="px-5 pt-4">
                                 <input
                                     type="text"
                                     value={projectName}
                                     onChange={(e) => setProjectName(e.target.value)}
-                                    className={`w-full bg-transparent text-sm text-neutral-300 focus:outline-none ${
+                                    className={`w-full bg-transparent text-sm text-neutral-900 focus:outline-none ${
                                         needsProjectName
-                                            ? 'placeholder-amber-400/80'
-                                            : 'placeholder-neutral-600'
+                                            ? 'placeholder-amber-500'
+                                            : 'placeholder-neutral-400'
                                     }`}
                                     placeholder={
                                         needsProjectName
@@ -458,7 +458,7 @@ export function HomePage() {
                             {/* Divider */}
                             <div
                                 className={`mx-5 my-2 border-t transition-colors ${
-                                    needsProjectName ? 'border-amber-500/40' : 'border-neutral-700/50'
+                                    needsProjectName ? 'border-amber-400/60' : 'border-neutral-200'
                                 }`}
                             />
 
@@ -468,7 +468,7 @@ export function HomePage() {
                                     ref={textareaRef}
                                     value={promptText}
                                     onChange={(e) => setPromptText(e.target.value)}
-                                    className="w-full bg-transparent text-neutral-100 placeholder-neutral-500 focus:outline-none resize-none min-h-[160px] text-[15px] leading-relaxed"
+                                    className="w-full bg-transparent text-neutral-900 placeholder-neutral-400 focus:outline-none resize-none min-h-[160px] text-[15px] leading-relaxed"
                                     placeholder="What product shall we design?"
                                     rows={6}
                                     aria-describedby="prompt-char-counter"
@@ -481,7 +481,7 @@ export function HomePage() {
                             {promptLength > 0 && (
                                 <div className="px-5 pb-1 flex items-center justify-between gap-3">
                                     <span
-                                        className={`text-xs ${isOverPromptLimit ? 'text-red-400' : 'text-amber-400/90'}`}
+                                        className={`text-xs ${isOverPromptLimit ? 'text-red-500' : 'text-amber-600'}`}
                                     >
                                         {isOverPromptLimit
                                             ? `Over the ${PROMPT_MAX_LENGTH.toLocaleString()}-character limit — shorten your prompt to continue.`
@@ -494,10 +494,10 @@ export function HomePage() {
                                         aria-live="polite"
                                         className={`text-xs tabular-nums shrink-0 ${
                                             isOverPromptLimit
-                                                ? 'text-red-400'
+                                                ? 'text-red-500'
                                                 : isApproachingLimit
-                                                    ? 'text-amber-400'
-                                                    : 'text-neutral-600'
+                                                    ? 'text-amber-500'
+                                                    : 'text-neutral-400'
                                         }`}
                                     >
                                         {isApproachingLimit
@@ -508,7 +508,7 @@ export function HomePage() {
                             )}
 
                             {/* Bottom toolbar */}
-                            <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-700/50">
+                            <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-200">
                                 <div className="flex items-center gap-2">
                                     {/* File upload */}
                                     <input
@@ -521,21 +521,21 @@ export function HomePage() {
                                     <button
                                         type="button"
                                         onClick={() => fileInputRef.current?.click()}
-                                        className="p-2 text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition"
+                                        className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-lg transition"
                                         title="Upload .md or .txt file"
                                     >
                                         <Plus size={18} />
                                     </button>
 
                                     {/* Platform toggle */}
-                                    <div className="flex items-center bg-neutral-700/40 rounded-lg p-0.5">
+                                    <div className="flex items-center bg-neutral-100 rounded-lg p-0.5">
                                         <button
                                             type="button"
                                             onClick={() => setPlatform('app')}
                                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition ${
                                                 platform === 'app'
-                                                    ? 'bg-neutral-600 text-white'
-                                                    : 'text-neutral-400 hover:text-neutral-200'
+                                                    ? 'bg-white text-neutral-900 shadow-sm'
+                                                    : 'text-neutral-500 hover:text-neutral-800'
                                             }`}
                                         >
                                             <Smartphone size={14} />
@@ -546,8 +546,8 @@ export function HomePage() {
                                             onClick={() => setPlatform('web')}
                                             className={`flex items-center gap-1.5 px-3 py-1.5 rounded-md text-sm transition ${
                                                 platform === 'web'
-                                                    ? 'bg-neutral-600 text-white'
-                                                    : 'text-neutral-400 hover:text-neutral-200'
+                                                    ? 'bg-white text-neutral-900 shadow-sm'
+                                                    : 'text-neutral-500 hover:text-neutral-800'
                                             }`}
                                         >
                                             <Monitor size={14} />
@@ -559,7 +559,7 @@ export function HomePage() {
                                 <div className="flex items-center gap-2">
                                     {/* Inline hint when prompt is ready but name is missing */}
                                     {needsProjectName && (
-                                        <span className="text-xs text-amber-400/90 hidden sm:inline">
+                                        <span className="text-xs text-amber-600 hidden sm:inline">
                                             Add a project name to continue
                                         </span>
                                     )}
@@ -569,7 +569,7 @@ export function HomePage() {
                                         type="button"
                                         onClick={handleEnhance}
                                         disabled={!promptText.trim() || isEnhancing}
-                                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-neutral-400 hover:text-white hover:bg-white/10 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
+                                        className="flex items-center gap-1.5 px-3 py-1.5 text-sm text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-lg transition disabled:opacity-30 disabled:cursor-not-allowed"
                                         title="Enhance prompt with AI"
                                     >
                                         {isEnhancing ? <Loader2 size={14} className="animate-spin" /> : <Sparkles size={14} />}
