@@ -172,6 +172,20 @@ that touches it with the screen highlighted in the journey diagram, and its
 mockup). Clicking a screen node in a User Flow jumps straight to that screen's
 page, so the working mental model is "I'm working on this screen."
 
+Screens are joined across artifacts by **stable ids**, so you can safely
+**edit a screen's name, purpose, intent, priority, and notes** without
+detaching its mockups, flow references, or uploaded images — edits are an
+overlay; the generated artifact is never rewritten and one click restores it.
+The Screens list shows **mockup coverage** ("Mockups: 3 of 12 screens
+covered"); uncovered screens get an **Add to mockups** action (generation
+stays explicit and cost-labeled — nothing is billed without confirmation), and
+a **Generate missing mockups** batch sits behind a confirm. Every screen page
+is **deep-linkable** (`?screen=…`), with working browser back/forward. A
+lightweight validation panel flags broken or ambiguous references (a flow step
+naming a missing screen, a mockup that lost its match, duplicate screen names)
+with one-click **relink / pin / ignore** repairs — warnings never block
+rendering.
+
 Each artifact is routed to the right model by complexity — Flash for simpler
 artifacts, Pro for complex reasoning — and you can override the model **per
 artifact** in Settings → **Artifact Generation Models** (the PRD itself routes

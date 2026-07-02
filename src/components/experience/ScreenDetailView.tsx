@@ -14,7 +14,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    AlertTriangle, ArrowLeft, Image as ImageIcon, Loader2, Pencil, RefreshCcw, RotateCcw, Workflow,
+    AlertTriangle, ArrowLeft, Image as ImageIcon, Link2, Loader2, Pencil, RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
     Feature, GenerationStatus, MockupPayload, MockupSettings, ScreenPriority,
@@ -74,13 +74,18 @@ interface Props {
      * already covered or no mockup artifact exists.
      */
     onAddToMockups?: () => void;
+    /** Orphaned mockup screens (matched to no canonical screen) offered for
+     * relinking to THIS screen from its Mockups tab. */
+    unmatchedMockups?: Array<{ id: string; name: string }>;
+    /** Persists a screenLinks repair binding the chosen mockup to this screen. */
+    onLinkMockup?: (mockupScreenId: string) => void;
 }
 
 export function ScreenDetailView({
     item, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mockupStatus, onRetryMockup,
-    features, onSaveScreenEdit, onAddToMockups,
+    features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -221,6 +226,8 @@ export function ScreenDetailView({
                     mockupStatus={mockupStatus}
                     onRetryMockup={onRetryMockup}
                     onAddToMockups={onAddToMockups}
+                    unmatchedMockups={unmatchedMockups}
+                    onLinkMockup={onLinkMockup}
                 />
             )}
         </div>
@@ -443,13 +450,17 @@ function FlowTab({
 
 function MockupsTab({
     item, mockupContext, mockupStatus, onRetryMockup, onAddToMockups,
+    unmatchedMockups, onLinkMockup,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
     mockupStatus?: GenerationStatus;
     onRetryMockup?: () => void;
     onAddToMockups?: () => void;
+    unmatchedMockups?: Array<{ id: string; name: string }>;
+    onLinkMockup?: (mockupScreenId: string) => void;
 }) {
+    const [linkTarget, setLinkTarget] = useState('');
     if (mockupContext && item.mockupScreen) {
         return (
             <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
@@ -514,6 +525,35 @@ function MockupsTab({
                 >
                     <ImageIcon size={14} /> Add to mockups
                 </button>
+            )}
+            {onLinkMockup && unmatchedMockups && unmatchedMockups.length > 0 && (
+                <div className="mt-5 pt-4 border-t border-neutral-200 max-w-sm mx-auto">
+                    <p className="text-[11px] text-neutral-500 mb-2">
+                        Or link an existing mockup that lost its screen match
+                        (e.g. after a regeneration renamed things):
+                    </p>
+                    <div className="flex items-center justify-center gap-2 flex-wrap">
+                        <select
+                            value={linkTarget}
+                            onChange={e => setLinkTarget(e.target.value)}
+                            aria-label="Orphaned mockup to link to this screen"
+                            className="text-xs border border-neutral-300 rounded-md px-2 py-1.5 max-w-[220px]"
+                        >
+                            <option value="">Choose mockup…</option>
+                            {unmatchedMockups.map(m => (
+                                <option key={m.id} value={m.id}>{m.name}</option>
+                            ))}
+                        </select>
+                        <button
+                            type="button"
+                            disabled={!linkTarget}
+                            onClick={() => linkTarget && onLinkMockup(linkTarget)}
+                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-md bg-neutral-100 hover:bg-neutral-200 text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                        >
+                            <Link2 size={12} /> Link mockup
+                        </button>
+                    </div>
+                </div>
             )}
         </div>
     );

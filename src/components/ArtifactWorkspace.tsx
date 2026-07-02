@@ -646,6 +646,18 @@ export function ArtifactWorkspace({
                                 ? () => handleAddScreenToMockups(detailItem.id)
                                 : undefined
                         }
+                        unmatchedMockups={
+                            mockupPayload && !detailItem.mockupScreen
+                                ? mockupPayload.screens
+                                    .filter(s => !screenIndex.items.some(i => i.mockupScreen?.id === s.id))
+                                    .map(s => ({ id: s.id, name: s.name }))
+                                : undefined
+                        }
+                        onLinkMockup={
+                            mockupArtifact && mockupPreferred && !detailItem.mockupScreen
+                                ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
+                                : undefined
+                        }
                     />
                 );
             }
