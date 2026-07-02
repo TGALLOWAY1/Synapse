@@ -47,7 +47,7 @@ export function SuccessCriteriaBlock({ flow }: Props) {
     if (!userOutcome && productAll.length === 0 && qaAll.length === 0) return null;
 
     return (
-        <section className="bg-white rounded-xl border border-neutral-200 p-5 mb-4">
+        <section className="bg-white rounded-xl border border-neutral-200 p-4 sm:p-5 mb-4">
             <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 flex items-center gap-1 mb-3">
                 <Sparkles size={11} /> Success criteria
             </p>

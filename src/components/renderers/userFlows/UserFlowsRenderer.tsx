@@ -113,7 +113,10 @@ export function UserFlowsRenderer({
     const drawerFeature = drawerRef ? featuresById?.get(drawerRef.id) : undefined;
 
     return (
-        <div className="md:flex md:gap-5 md:items-start">
+        // `not-prose` opts out of the surrounding ArtifactWorkspace `prose`
+        // typography, which would otherwise indent <dd> values, and add stray
+        // margins to the <dl>/<ul>/<h4>/<code> elements this card styles itself.
+        <div className="not-prose md:flex md:gap-5 md:items-start">
             <FlowSidebar
                 flows={flows}
                 selectedIndex={safeIndex}
