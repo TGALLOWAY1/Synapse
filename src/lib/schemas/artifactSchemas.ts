@@ -346,6 +346,53 @@ export const designSystemTokensSchema = {
     required: ["colors", "typography", "spacing", "radius", "components", "rules"],
 };
 
+// Consolidated Implementation Plan sub-schemas. Prompt packs and quality
+// gates are milestone-centered; the plan drives the Development section of
+// the assets workspace directly.
+const implementationQualityGateSchema = {
+    type: "OBJECT",
+    properties: {
+        id: { type: "STRING" },
+        title: { type: "STRING" },
+        description: { type: "STRING" },
+        category: {
+            type: "STRING",
+            enum: [
+                "design_fidelity",
+                "functional",
+                "data_integrity",
+                "integration",
+                "accessibility",
+                "performance",
+                "testing",
+                "regression",
+            ],
+        },
+        required: { type: "BOOLEAN" },
+    },
+    required: ["id", "title", "category", "required"],
+};
+
+const implementationPromptPackSchema = {
+    type: "OBJECT",
+    properties: {
+        id: { type: "STRING" },
+        title: { type: "STRING" },
+        purpose: { type: "STRING" },
+        prompt: { type: "STRING" },
+        scope: {
+            type: "OBJECT",
+            properties: {
+                include: { type: "ARRAY", items: { type: "STRING" } },
+                exclude: { type: "ARRAY", items: { type: "STRING" } },
+            },
+        },
+        acceptanceCriteria: { type: "ARRAY", items: { type: "STRING" } },
+        recommendedCommitMessage: { type: "STRING" },
+    },
+    required: ["id", "title", "purpose", "prompt", "acceptanceCriteria"],
+};
+
 export const implementationPlanSchema = {
     type: "OBJECT",
     properties: {
@@ -357,6 +404,16 @@ export const implementationPlanSchema = {
                 teamSize: { type: "STRING" },
             },
         },
+        summary: {
+            type: "OBJECT",
+            properties: {
+                buildStrategy: { type: "STRING" },
+                stackSummary: { type: "ARRAY", items: { type: "STRING" } },
+                criticalPath: { type: "ARRAY", items: { type: "STRING" } },
+                estimatedEffort: { type: "STRING" },
+                teamAssumption: { type: "STRING" },
+            },
+        },
         milestones: {
             type: "ARRAY",
             items: {
@@ -366,6 +423,28 @@ export const implementationPlanSchema = {
                     name: { type: "STRING" },
                     timeframe: { type: "STRING" },
                     goal: { type: "STRING" },
+                    objective: { type: "STRING" },
+                    priority: {
+                        type: "STRING",
+                        enum: ["critical", "high", "medium", "low"],
+                    },
+                    estimatedEffort: { type: "STRING" },
+                    dependencies: { type: "ARRAY", items: { type: "STRING" } },
+                    linkedArtifacts: {
+                        type: "OBJECT",
+                        properties: {
+                            screens: { type: "ARRAY", items: { type: "STRING" } },
+                            dataModels: { type: "ARRAY", items: { type: "STRING" } },
+                            components: { type: "ARRAY", items: { type: "STRING" } },
+                            userFlows: { type: "ARRAY", items: { type: "STRING" } },
+                            risks: { type: "ARRAY", items: { type: "STRING" } },
+                            apis: { type: "ARRAY", items: { type: "STRING" } },
+                        },
+                    },
+                    promptPacks: { type: "ARRAY", items: implementationPromptPackSchema },
+                    qualityGates: { type: "ARRAY", items: implementationQualityGateSchema },
+                    validationCommands: { type: "ARRAY", items: { type: "STRING" } },
+                    definitionOfDone: { type: "ARRAY", items: { type: "STRING" } },
                     tasks: {
                         type: "ARRAY",
                         items: {
@@ -395,6 +474,7 @@ export const implementationPlanSchema = {
                 required: ["id", "name", "tasks"],
             },
         },
+        globalQualityGates: { type: "ARRAY", items: implementationQualityGateSchema },
         architecture: { type: "ARRAY", items: { type: "STRING" } },
         risks: {
             type: "ARRAY",
