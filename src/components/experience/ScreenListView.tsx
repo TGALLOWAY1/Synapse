@@ -12,9 +12,15 @@ interface Props {
     index: ScreenExperienceIndex;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
+    /**
+     * Opens the confirmed "Generate missing mockups" flow. Absent (no mockup
+     * artifact yet / unparseable payload) the button is hidden. Nothing is
+     * generated without this explicit confirmation.
+     */
+    onGenerateMissingMockups?: () => void;
 }
 
-export function ScreenListView({ index, onSelectScreen }: Props) {
+export function ScreenListView({ index, onSelectScreen, onGenerateMissingMockups }: Props) {
     if (index.items.length === 0) {
         return (
             <div className="max-w-xl mx-auto bg-white rounded-xl border border-dashed border-neutral-300 p-10 text-center">
@@ -29,8 +35,31 @@ export function ScreenListView({ index, onSelectScreen }: Props) {
         );
     }
 
+    const coveredCount = index.items.filter(i => i.mockupScreen).length;
+    const missingCount = index.items.length - coveredCount;
+
     return (
         <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-8">
+            {/* Mockup coverage summary — makes partial coverage explicit
+                instead of leaving users to discover empty Mockups tabs. */}
+            <div className="flex items-center justify-between gap-2 flex-wrap rounded-lg border border-neutral-200 bg-white px-4 py-2.5">
+                <span className="inline-flex items-center gap-2 text-xs text-neutral-600">
+                    <ImageIcon size={13} className={coveredCount > 0 ? 'text-emerald-500' : 'text-neutral-300'} />
+                    <span>
+                        Mockups: <span className="font-semibold text-neutral-800">{coveredCount} of {index.items.length}</span> screens covered
+                    </span>
+                </span>
+                {onGenerateMissingMockups && missingCount > 0 && (
+                    <button
+                        type="button"
+                        onClick={onGenerateMissingMockups}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                    >
+                        <ImageIcon size={12} /> Generate missing mockups ({missingCount})
+                    </button>
+                )}
+            </div>
+
             {index.collisions.length > 0 && (
                 <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
                     <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />

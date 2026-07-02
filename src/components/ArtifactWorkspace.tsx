@@ -22,7 +22,13 @@ import { StalenessBadge } from './StalenessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignDirectionControl } from './DesignDirectionControl';
-import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
+import { v4 as uuidv4 } from 'uuid';
+import {
+    tryParsePayload, extractMockupSettings, mergeExtraScreens,
+    mockupScreenFromInventoryScreen, readExtraMockupScreens,
+} from '../lib/mockupParsing';
+import { hasOpenAIKey } from '../lib/openaiClient';
+import { useMockupImageStore } from '../store/mockupImageStore';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
 import {
     buildScreenIndex, readScreenEdits, type ScreenMetadataEdit,
@@ -34,8 +40,8 @@ import { ScreenListView } from './experience/ScreenListView';
 import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import type {
-    ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
-    ProjectTask,
+    ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
+    GenerationStatus, ProjectTask,
 } from '../types';
 
 // Stable empty reference for the tasks selector. Returning `[]` literal each
@@ -210,10 +216,14 @@ export function ArtifactWorkspace({
     const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
     const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
 
-    const mockupPayload = useMemo(
-        () => (mockupPreferred ? tryParsePayload(mockupPreferred) : null),
-        [mockupPreferred],
-    );
+    // Effective mockup payload: stored screens + the version's user-added
+    // extraScreens overlay (metadata — keeps the version id, so existing
+    // per-screen images stay keyed correctly).
+    const mockupPayload = useMemo(() => {
+        if (!mockupPreferred) return null;
+        const parsed = tryParsePayload(mockupPreferred);
+        return parsed ? mergeExtraScreens(parsed, mockupPreferred.metadata) : null;
+    }, [mockupPreferred]);
 
     // Read-side screen index: joins the parsed screen_inventory, user_flows,
     // and mockup contents by canonical screen id / slug. Pure + memoized —
@@ -235,6 +245,65 @@ export function ArtifactWorkspace({
         if (edit) next[screenId] = edit;
         else delete next[screenId];
         updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, { screenEdits: next });
+    };
+
+    // --- Mockup coverage actions --------------------------------------------
+    // Add inventory screens to the CURRENT mockup version's extraScreens
+    // overlay. No AI call happens here — image generation stays an explicit
+    // per-screen action (or the confirmed batch below), so adding coverage is
+    // free. Returns the appended MockupScreen specs.
+    const addScreensToMockups = (screenIds: string[]): MockupScreen[] => {
+        if (!mockupArtifact || !mockupPreferred) return [];
+        const existing = readExtraMockupScreens(mockupPreferred.metadata);
+        const appended: MockupScreen[] = [];
+        for (const id of screenIds) {
+            const item = screenIndex.byId.get(id);
+            if (!item || item.mockupScreen) continue; // already covered
+            if (existing.some(e => e.sourceScreenId === item.id)) continue;
+            const mockup = mockupScreenFromInventoryScreen(item.baseScreen, uuidv4(), item.id);
+            existing.push(mockup);
+            appended.push(mockup);
+        }
+        if (appended.length > 0) {
+            updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, {
+                extraScreens: existing,
+            });
+        }
+        return appended;
+    };
+
+    const handleAddScreenToMockups = (screenId: string) => {
+        addScreensToMockups([screenId]);
+    };
+
+    // Confirmed batch: add every uncovered screen, then (only with an OpenAI
+    // key) kick off low-quality draft generation per screen. Each generation
+    // is individually tracked and cancellable via the standard per-screen
+    // panel; failures leave that screen on its generate/upload placeholder.
+    const [missingMockupsConfirm, setMissingMockupsConfirm] = useState<{ count: number } | null>(null);
+    const handleGenerateMissingMockups = () => {
+        const missing = screenIndex.items.filter(i => !i.mockupScreen).map(i => i.id);
+        if (missing.length === 0 || !mockupArtifact || !mockupPreferred || !mockupPayload) {
+            setMissingMockupsConfirm(null);
+            return;
+        }
+        const appended = addScreensToMockups(missing);
+        setMissingMockupsConfirm(null);
+        if (!hasOpenAIKey()) return; // screens now show the upload sheet instead
+        const settings = extractMockupSettings(mockupPreferred);
+        const payloadForPrompt = { ...mockupPayload, screens: [...mockupPayload.screens, ...appended] };
+        const imageStore = useMockupImageStore.getState();
+        for (const mockup of appended) {
+            void imageStore.generate({
+                projectId,
+                artifactId: mockupArtifact.id,
+                versionId: mockupPreferred.id,
+                screen: mockup,
+                payload: payloadForPrompt,
+                settings,
+                quality: 'low',
+            });
+        }
     };
 
     // Per-screen upload-gallery context for the detail view's Overview tab —
@@ -505,6 +574,11 @@ export function ArtifactWorkspace({
                         onRetryMockup={() => handleRetrySlot('mockup')}
                         features={structuredPRD.features}
                         onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
+                        onAddToMockups={
+                            mockupDetailContext && !detailItem.mockupScreen
+                                ? () => handleAddScreenToMockups(detailItem.id)
+                                : undefined
+                        }
                     />
                 );
             }
@@ -572,7 +646,17 @@ export function ArtifactWorkspace({
                             </button>
                         </div>
                     )}
-                    <ScreenListView index={screenIndex} onSelectScreen={handleOpenScreen} />
+                    <ScreenListView
+                        index={screenIndex}
+                        onSelectScreen={handleOpenScreen}
+                        onGenerateMissingMockups={
+                            mockupDetailContext
+                                ? () => setMissingMockupsConfirm({
+                                    count: screenIndex.items.filter(i => !i.mockupScreen).length,
+                                })
+                                : undefined
+                        }
+                    />
                 </div>
             );
         }
@@ -642,7 +726,8 @@ export function ArtifactWorkspace({
             if (!mockup || !preferred) {
                 return <EmptyState message="No mockup yet" />;
             }
-            const payload = tryParsePayload(preferred);
+            const parsed = tryParsePayload(preferred);
+            const payload = parsed ? mergeExtraScreens(parsed, preferred.metadata) : null;
             if (!payload) {
                 return (
                     <div className="bg-white rounded-xl border border-neutral-200 p-5 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[600px]">
@@ -1005,6 +1090,63 @@ export function ArtifactWorkspace({
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
                             >
                                 <RefreshCcw size={13} /> Regenerate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {missingMockupsConfirm && (
+                <div
+                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
+                    onClick={() => setMissingMockupsConfirm(null)}
+                    role="presentation"
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="missing-mockups-title"
+                    >
+                        <div className="px-5 pt-5 pb-3">
+                            <h3 id="missing-mockups-title" className="text-base font-bold text-neutral-900">
+                                Generate missing mockups
+                            </h3>
+                            <p className="text-sm text-neutral-700 mt-1">
+                                Adds {missingMockupsConfirm.count} uncovered{' '}
+                                {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
+                                mockup set.
+                            </p>
+                            {hasOpenAIKey() ? (
+                                <p className="text-xs text-amber-700 mt-2">
+                                    A low-quality draft image will be generated per screen via OpenAI
+                                    gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
+                                    {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
+                                    own key (typically a few cents each). You can cancel any screen
+                                    while it&rsquo;s generating.
+                                </p>
+                            ) : (
+                                <p className="text-xs text-neutral-500 mt-2">
+                                    No OpenAI key is configured, so nothing will be generated — each
+                                    added screen shows a copyable prompt and an upload sheet instead.
+                                </p>
+                            )}
+                        </div>
+                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMissingMockupsConfirm(null)}
+                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleGenerateMissingMockups}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
+                            >
+                                <Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}
                             </button>
                         </div>
                     </div>

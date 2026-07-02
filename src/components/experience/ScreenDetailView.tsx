@@ -67,13 +67,20 @@ interface Props {
      * to the generated content). Absent → the detail view stays read-only.
      */
     onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
+    /**
+     * Adds this (uncovered) screen to the current mockup set — a free
+     * metadata-overlay write; image generation stays a separate explicit,
+     * cost-labeled action on the resulting panel. Absent when the screen is
+     * already covered or no mockup artifact exists.
+     */
+    onAddToMockups?: () => void;
 }
 
 export function ScreenDetailView({
     item, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mockupStatus, onRetryMockup,
-    features, onSaveScreenEdit,
+    features, onSaveScreenEdit, onAddToMockups,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -213,6 +220,7 @@ export function ScreenDetailView({
                     mockupContext={mockupContext}
                     mockupStatus={mockupStatus}
                     onRetryMockup={onRetryMockup}
+                    onAddToMockups={onAddToMockups}
                 />
             )}
         </div>
@@ -434,12 +442,13 @@ function FlowTab({
 // --- Mockups tab ------------------------------------------------------------
 
 function MockupsTab({
-    item, mockupContext, mockupStatus, onRetryMockup,
+    item, mockupContext, mockupStatus, onRetryMockup, onAddToMockups,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
     mockupStatus?: GenerationStatus;
     onRetryMockup?: () => void;
+    onAddToMockups?: () => void;
 }) {
     if (mockupContext && item.mockupScreen) {
         return (
@@ -493,8 +502,19 @@ function MockupsTab({
                 No mockup has been generated for this screen yet.
             </p>
             <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
-                Current mockup generation may only cover key screens.
+                Mockup generation covers the key screens by default. Add this screen to the
+                mockup set to generate an AI image or upload your own — adding it is free;
+                image generation stays a separate, clearly-priced action.
             </p>
+            {onAddToMockups && (
+                <button
+                    type="button"
+                    onClick={onAddToMockups}
+                    className="mt-4 inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition font-medium"
+                >
+                    <ImageIcon size={14} /> Add to mockups
+                </button>
+            )}
         </div>
     );
 }

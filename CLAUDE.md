@@ -998,6 +998,21 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `availableScreenSlugs` (threaded through `ArtifactContentRenderer` →
   `UserFlowsRenderer` → `FlowJourney.onNavigateToScreen`); otherwise the
   original scroll-to-step behavior is preserved.
+- **Mockup coverage is explicit and overlay-based.** The Screens list shows
+  "Mockups: X of N screens covered". Uncovered screens get an **Add to
+  mockups** action (Mockups tab) and the list header offers a confirmed
+  **Generate missing mockups** batch. Both write user-added `MockupScreen`s
+  into the *current* mockup ArtifactVersion's **`metadata.extraScreens`**
+  overlay (`readExtraMockupScreens`/`mergeExtraScreens`/
+  `mockupScreenFromInventoryScreen` in `mockupParsing.ts`) — **never a new
+  ArtifactVersion**, because per-screen images are keyed by
+  `versionId:screenId:quality`, so appending a version would orphan every
+  existing render. Adding coverage is free; **image generation is never
+  automatic** — it's the standard per-screen action, or the batch flow which
+  fires low-quality drafts only after an explicit cost-labeled confirm and
+  only when an OpenAI key exists (keyless → upload sheets). Every consumer of
+  a mockup payload in the workspace must read the *effective* payload
+  (`mergeExtraScreens(tryParsePayload(v), v.metadata)`).
 - **Status/fallbacks:** the Screens sidebar dot and generation/error states map
   to the **`screen_inventory` slot** (its retry re-runs that slot, since it no
   longer has its own row); the Mockups tab surfaces the `mockup` slot's
