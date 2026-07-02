@@ -449,11 +449,15 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     neutral style hint so legacy projects still get a working prompt. Do **not**
     re-duplicate design-system prose into a prompt builder — reuse the brief.
   - **Design System Presets (`src/lib/designSystemPresets.ts`).** A
-    visual-direction choice (`SaaS Minimal`, `AI Workspace`, `Editorial /
-    Learning`, `Developer Tool`, `Consumer Mobile`, `Custom / Generate for me`)
-    surfaced by `DesignSystemPresetChoice` on the Mark-as-Final edge in
-    `ProjectWorkspace` (only when a real project hasn't picked one yet). The
-    chosen id is stored on `Project.designSystemPreset`
+    visual-direction choice (`Modern SaaS`, `Enterprise Professional`,
+    `AI Workspace`, `Minimal Editorial`, `Developer / Technical`,
+    `Consumer Mobile`, `Creative Studio`, `Custom / Generate for me`). Preset
+    **ids are stable and persisted** (`saas_minimal`, `editorial_learning`,
+    `developer_tool`, … — never rename an id; labels are display-only). Each
+    concrete preset also carries setup-step metadata (`tone`,
+    `recommendedUseCases`, `visualTraits`, `previewTokens` — presentation-only,
+    never fed to generation; only `directive` steers the model). The chosen id
+    is stored on `Project.designSystemPreset`
     (`setProjectDesignSystemPreset`) and read at generation time by
     `artifactJobController.runCoreArtifactSlot` off the project (NOT threaded
     through every call site) and passed to `generateCoreArtifact`, which injects
@@ -463,6 +467,34 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     and the external copy-prompt, keeping the project visually consistent. The
     `DesignSystemRenderer` shows a banner explaining this coupling and that
     regenerating may shift downstream mockups/screen prompts.
+    - **Setup-stage selection (`src/components/setup/DesignSetupStep.tsx`) is
+      the primary picker.** New projects stamp `Project.needsDesignSetup: true`
+      in `createProject`; while that flag is set and no preset is chosen, the
+      workspace PRD stage renders `DesignSetupStep` **instead of** the PRD/
+      progress view — after the preflight clarification flow (if any) completes
+      and therefore exactly while PRD generation runs in the background (the
+      PRD run is untouched; the step is purely a view swap, so generation never
+      waits on the choice). Gating is the pure, unit-tested
+      `shouldShowDesignSetup` (`src/lib/designSetup.ts`): never for legacy
+      projects (no flag), the demo, blocked spines, or failed runs — full
+      (`generationError`) *and* partial (`generationMeta.failedSections`;
+      plus the transient `hasFailedSection` guard in `ProjectWorkspace`) —
+      because the error card / incomplete-PRD banner and their retry
+      affordances must stay reachable. The step shows static
+      `previewTokens`-driven preview cards (no AI/image calls), a rule-based
+      **Recommended** badge (`src/lib/designPresetRecommendation.ts` — keyword
+      scoring over idea + clarification answers, `saas_minimal` fallback), and
+      preselects the user's saved **default preset**
+      (`src/lib/designPresetPreference.ts`, localStorage
+      `SYNAPSE_DEFAULT_DESIGN_PRESET`, written only via the explicit "Use this
+      as my default" checkbox). Choosing calls `setProjectDesignSystemPreset`
+      (which also clears `needsDesignSetup` — from any picker); "Decide later"
+      calls `markDesignSetupComplete` and defers to the finalize gate.
+    - **The Mark-as-Final gate (`DesignSystemPresetChoice` in
+      `ProjectWorkspace`) is now the fallback**, still shown when a real
+      project reaches finalize with no preset (setup skipped, or a legacy
+      project) — so visual artifact generation still never starts without an
+      explicit preset decision.
     - **Post-finalization re-selection.** The preset is **no longer one-time**.
       Because the Mark-as-Final gate only fires once (and never for projects
       finalized before presets existed), the **Design System artifact** carries a
@@ -866,6 +898,10 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               Pass A streams structured JSON → onPartial paints draft
               ↓
               SpineVersion stored, currentStage='prd'
+              ↓ (new projects: needsDesignSetup)
+              DesignSetupStep — pick a visual direction while the PRD
+              generates in the background (see "Design System Presets")
+              ↓
   PRD stage:       SelectableSpine / StructuredPRDView — text selection →
                    branch creation → AI conversation → consolidateBranch()
                    merges into spine (local or doc-wide scope, see

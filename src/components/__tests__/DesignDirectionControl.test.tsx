@@ -15,7 +15,7 @@ describe('DesignDirectionControl', () => {
                 onRegenerate={() => {}}
             />,
         );
-        expect(screen.getByText('SaaS Minimal')).toBeTruthy();
+        expect(screen.getByText('Modern SaaS')).toBeTruthy();
     });
 
     it('falls back to an "AI decides" note when no preset is set', () => {

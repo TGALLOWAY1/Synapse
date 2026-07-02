@@ -21,6 +21,7 @@ export type ProjectSlice = {
     getHistoryEvents: ProjectState['getHistoryEvents'];
     setProjectStage: ProjectState['setProjectStage'];
     setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
+    markDesignSetupComplete: ProjectState['markDesignSetupComplete'];
     loadDemoProject: ProjectState['loadDemoProject'];
 };
 
@@ -35,6 +36,10 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             id: projectId,
             name,
             createdAt: now,
+            // New projects owe a setup-stage design selection (shown while the
+            // PRD generates). Legacy persisted projects lack the flag and keep
+            // the finalize-edge preset gate as their only prompt.
+            needsDesignSetup: true,
             ...(platform && { platform }),
         };
 
@@ -132,7 +137,22 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             return {
                 projects: {
                     ...state.projects,
-                    [projectId]: { ...project, designSystemPreset: presetId },
+                    // A chosen preset settles the setup step no matter which UI
+                    // it came from (setup step, finalize gate, design artifact).
+                    [projectId]: { ...project, designSystemPreset: presetId, needsDesignSetup: false },
+                },
+            };
+        });
+    },
+
+    markDesignSetupComplete: (projectId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: { ...project, needsDesignSetup: false },
                 },
             };
         });

@@ -77,6 +77,15 @@ Before generation, an **optional preflight clarification** step can ask you a
 **Generate Immediately**. Answers (and anything you skip) feed straight into
 the PRD prompt as authoritative intent.
 
+The moment your answers are in, **PRD generation starts in the background** —
+and while it runs, Synapse asks you to **choose a visual direction** for the
+project from a set of design presets, each with a static token-driven preview
+(colors, type, buttons, layout shapes). Synapse **recommends** one based on
+what you're building — a music app suggests *Creative Studio*, a CRM suggests
+*Enterprise Professional* — but any preset can be chosen, and you can save one
+as your **default for future projects** (defaults are preselected next time).
+You can also skip and decide later, at the latest when marking the PRD final.
+
 ### 2. AI builds the spec, section by section
 
 <img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" />
@@ -143,15 +152,17 @@ feedback event — with diffs where it matters.
 <img width="100%" alt="Mark the PRD as final to generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" />
 
 Mark your PRD as final and Synapse generates all the assets you need to build —
-in parallel, from that single source of truth. Just before generation, you pick
-a **Design System Preset** (SaaS Minimal, AI Workspace, Editorial / Learning,
-Developer Tool, Consumer Mobile, or *Custom / Generate for me*) that sets the
-project's visual direction. The choice is stored on the project and steers the
-**Design System** artifact — and through it, both the internal mockups and the
-prompts you copy for external image tools, so everything stays visually
-consistent. You can change the visual direction later from the **Design System**
-artifact and regenerate it; when its tokens change, Synapse flags the affected
-mockups and offers to regenerate them so they pick up the new direction.
+in parallel, from that single source of truth. The **Design System Preset**
+(Modern SaaS, Enterprise Professional, AI Workspace, Minimal Editorial,
+Developer / Technical, Consumer Mobile, Creative Studio, or *Custom / Generate
+for me*) you picked during project setup sets the project's visual direction;
+if you skipped that step, Synapse asks just before generation. The choice is
+stored on the project and steers the **Design System** artifact — and through
+it, both the internal mockups and the prompts you copy for external image
+tools, so everything stays visually consistent. You can change the visual
+direction later from the **Design System** artifact and regenerate it; when its
+tokens change, Synapse flags the affected mockups and offers to regenerate them
+so they pick up the new direction.
 
 - **Screen Inventory** and **User Flows**
 - **Design System**
