@@ -992,8 +992,18 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   generated content clears itself (saved as null); "Reset to generated"
   removes it. Edits are per-version — regenerating the inventory starts clean,
   same as promptEdits. Do NOT rewrite `ArtifactVersion.content` for edits.
-- **Navigation state is local to `ArtifactWorkspace`** (`selectedScreenId` —
-  the canonical id — + `screenTab`); no URL routes. Screen journey nodes in **User Flows** navigate
+- **Screen selection is URL-addressable:** `/p/:projectId?screen=<canonical
+  id>[&screenTab=flow|mockups]`. The query param is the **single source of
+  truth** for the open Screen Detail (via `useSearchParams`); the rendered
+  view is *derived* (`activeSelection = screen param ? 'screens' : selected`)
+  — never synced by a setState-in-effect. Deep links, refresh, and browser
+  back/forward all work; tab switches use `replace` so history is one entry
+  per screen; unknown/stale ids miss `byId` and fall back to the list;
+  unrelated query params (debug flags) are preserved. `ProjectWorkspace` has a
+  one-shot mount effect that switches a deep-linked project to the `workspace`
+  stage when the spine is final (otherwise the param is inert). Artifact-row
+  selection (`selected`) stays local component state — only the screen
+  dimension lives in the URL. Screen journey nodes in **User Flows** navigate
   to Screen Detail when the node is a `screen` kind AND its slug is in
   `availableScreenSlugs` (threaded through `ArtifactContentRenderer` →
   `UserFlowsRenderer` → `FlowJourney.onNavigateToScreen`); otherwise the

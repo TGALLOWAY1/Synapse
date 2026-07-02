@@ -1,4 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, ListChecks, History,
@@ -196,11 +197,44 @@ export function ArtifactWorkspace({
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
-    // Experience workspace (Screens) navigation state. `selectedScreenId`
-    // is the open Screen Detail (null = the Screens list view) keyed by the
-    // stable canonical screen id; `screenTab` is its active tab.
-    const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
-    const [screenTab, setScreenTab] = useState<ScreenDetailTab>('overview');
+    // Experience workspace (Screens) navigation state — URL-addressable:
+    // /p/:projectId?screen=<canonical id>[&screenTab=flow|mockups]. The URL
+    // is the single source of truth for which screen is open, so deep links,
+    // refresh, and browser back/forward all work without a state↔URL sync
+    // effect (which would also trip react-hooks/set-state-in-effect). An
+    // invalid/stale id simply misses `byId` and falls back to the list.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const selectedScreenId = searchParams.get('screen');
+    const rawScreenTab = searchParams.get('screenTab');
+    const screenTab: ScreenDetailTab =
+        rawScreenTab === 'flow' || rawScreenTab === 'mockups' ? rawScreenTab : 'overview';
+
+    // Update the screen params, preserving unrelated query params (debug
+    // flags etc). `replace` is used for tab switches so history stays one
+    // entry per screen, not per tab click.
+    const setScreenParams = (
+        screenId: string | null,
+        tab: ScreenDetailTab = 'overview',
+        opts?: { replace?: boolean },
+    ) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (screenId) {
+                next.set('screen', screenId);
+                if (tab !== 'overview') next.set('screenTab', tab);
+                else next.delete('screenTab');
+            } else {
+                next.delete('screen');
+                next.delete('screenTab');
+            }
+            return next;
+        }, { replace: opts?.replace });
+    };
+
+    // The rendered selection: an open screen param always means the Screens
+    // view (derived — never synced), so back/forward re-entering ?screen=…
+    // reopens the detail page even if another artifact row was selected.
+    const activeSelection: WorkspaceSelection = selectedScreenId ? 'screens' : selected;
 
     const job = getJob(projectId);
 
@@ -347,10 +381,11 @@ export function ArtifactWorkspace({
         });
     }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform]);
 
-    // Scroll the content pane back to the top on every page switch.
+    // Scroll the content pane back to the top on every page switch (including
+    // opening/closing a screen detail page).
     useEffect(() => {
         mainRef.current?.scrollTo({ top: 0 });
-    }, [selected]);
+    }, [activeSelection, selectedScreenId]);
 
     const slotStatusFor = (key: WorkspaceSelection): GenerationStatus => {
         if (key === 'prd') return 'done';
@@ -410,11 +445,11 @@ export function ArtifactWorkspace({
     };
 
     // Open a screen's detail view by its stable canonical id (Screens list,
-    // deep links).
+    // flow-node navigation). Pushes a history entry so browser Back returns
+    // to the previous view.
     const handleOpenScreen = (screenId: string) => {
         setSelected('screens');
-        setSelectedScreenId(screenId);
-        setScreenTab('overview');
+        setScreenParams(screenId);
         setMobileSidebarOpen(false);
     };
 
@@ -473,7 +508,7 @@ export function ArtifactWorkspace({
     };
 
     const renderMain = () => {
-        if (selected === 'prd') {
+        if (activeSelection === 'prd') {
             return (
                 <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
                     <StructuredPRDView
@@ -487,7 +522,7 @@ export function ArtifactWorkspace({
         }
 
         // --- Experience → Screens (read-side consolidation) -----------------
-        if (selected === 'screens') {
+        if (activeSelection === 'screens') {
             const screensStatus = slotStatusFor('screens'); // = screen_inventory slot
             const screensError = slotErrorFor('screens');
             if (screensStatus === 'queued' || screensStatus === 'generating') {
@@ -564,8 +599,8 @@ export function ArtifactWorkspace({
                     <ScreenDetailView
                         item={detailItem}
                         activeTab={screenTab}
-                        onTabChange={setScreenTab}
-                        onBack={() => setSelectedScreenId(null)}
+                        onTabChange={(tab) => setScreenParams(detailItem.id, tab, { replace: true })}
+                        onBack={() => setScreenParams(null)}
                         onNavigateToScreen={handleNavigateToScreen}
                         availableScreenSlugs={screenIndex.availableSlugs}
                         screenImageContext={invScreenImageContext}
@@ -661,26 +696,26 @@ export function ArtifactWorkspace({
             );
         }
 
-        const status = slotStatusFor(selected);
-        const error = slotErrorFor(selected);
+        const status = slotStatusFor(activeSelection);
+        const error = slotErrorFor(activeSelection);
 
         if (status === 'queued' || status === 'generating') {
-            const meta = selected === 'mockup' ? null : getArtifactMeta(selected);
-            const stages = selected === 'mockup' ? MOCKUP_GENERATION_STAGES : getArtifactStages(selected);
-            const displayName = selected === 'mockup' ? 'Mockup' : (meta?.title ?? selected);
+            const meta = activeSelection === 'mockup' ? null : getArtifactMeta(activeSelection);
+            const stages = activeSelection === 'mockup' ? MOCKUP_GENERATION_STAGES : getArtifactStages(activeSelection);
+            const displayName = activeSelection === 'mockup' ? 'Mockup' : (meta?.title ?? activeSelection);
             const title = status === 'queued'
                 ? `Queued: ${displayName}`
-                : selected === 'mockup'
+                : activeSelection === 'mockup'
                     ? 'Designing your product interface'
                     : `Generating ${displayName}`;
             return (
                 <div className="max-w-2xl mx-auto">
                     <GenerationProgress
                         stages={stages}
-                        variant={selected === 'mockup' ? 'creative' : 'systematic'}
+                        variant={activeSelection === 'mockup' ? 'creative' : 'systematic'}
                         title={title}
                         subtitle={status === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
-                        history={job?.slots[selected]?.progressLog ?? []}
+                        history={job?.slots[activeSelection]?.progressLog ?? []}
                     />
                 </div>
             );
@@ -700,7 +735,7 @@ export function ArtifactWorkspace({
                             )}
                             <button
                                 type="button"
-                                onClick={() => handleRetrySlot(selected)}
+                                onClick={() => handleRetrySlot(activeSelection)}
                                 className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                             >
                                 <RefreshCcw size={14} /> Retry
@@ -720,7 +755,7 @@ export function ArtifactWorkspace({
         }
 
         // status === 'done' or 'idle' — try to render the existing artifact.
-        if (selected === 'mockup') {
+        if (activeSelection === 'mockup') {
             const mockup = getArtifacts(projectId, 'mockup')[0];
             const preferred = mockup ? getPreferredVersion(projectId, mockup.id) : undefined;
             if (!mockup || !preferred) {
@@ -802,7 +837,7 @@ export function ArtifactWorkspace({
         }
 
         // Core artifact done state.
-        const subtype = selected;
+        const subtype = activeSelection;
         const artifact = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
         const preferred = artifact ? getPreferredVersion(projectId, artifact.id) : undefined;
         if (!artifact || !preferred) {
@@ -909,12 +944,13 @@ export function ArtifactWorkspace({
         );
     };
 
-    const selectedMeta = slotMetas.find(s => s.key === selected);
+    const selectedMeta = slotMetas.find(s => s.key === activeSelection);
     const handleSelect = (key: WorkspaceSelection) => {
         setSelected(key);
         // Any sidebar selection (including re-clicking "Screens") lands on the
-        // top of that view, closing an open Screen Detail.
-        setSelectedScreenId(null);
+        // top of that view, closing an open Screen Detail (clears the URL
+        // params, so Back can return to the screen).
+        if (selectedScreenId) setScreenParams(null);
         setMobileSidebarOpen(false);
     };
 
@@ -976,7 +1012,7 @@ export function ArtifactWorkspace({
                                 <ul>
                                     {groupSlots.map(slot => {
                                         const status = slotStatusFor(slot.key);
-                                        const isSel = selected === slot.key;
+                                        const isSel = activeSelection === slot.key;
                                         const Icon = slot.icon;
                                         return (
                                             <li key={slot.key}>
@@ -1027,9 +1063,9 @@ export function ArtifactWorkspace({
                     <span className="text-sm font-semibold text-neutral-800 truncate">
                         {selectedMeta?.title ?? 'Artifacts'}
                     </span>
-                    {selected !== 'prd' && (
+                    {activeSelection !== 'prd' && (
                         <span className="ml-auto shrink-0">
-                            <StatusDot status={slotStatusFor(selected)} />
+                            <StatusDot status={slotStatusFor(activeSelection)} />
                         </span>
                     )}
                 </div>
