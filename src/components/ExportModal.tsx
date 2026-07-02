@@ -6,6 +6,11 @@ import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenIn
 import { downloadFile } from '../lib/utils/downloadFile';
 import { copyToClipboard } from '../lib/utils/copyToClipboard';
 import { buildAgentHandoff } from '../lib/exportHandoff';
+import {
+    CORE_ARTIFACT_DISPLAY_ORDER,
+    getArtifactMeta,
+    isHiddenArtifactSubtype,
+} from '../lib/coreArtifactPipeline';
 import type { Artifact } from '../types';
 
 // Screen inventory is now persisted as JSON. For human-readable exports,
@@ -60,6 +65,21 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
     const mockupArtifacts = getArtifacts(projectId, 'mockup');
 
+    // Mirror the Assets tab: label each artifact with the same title shown in the
+    // workspace (the meta title keyed by subtype), not the persisted
+    // generation-time `artifact.title`, which can drift (e.g. "Prompt Pack" vs
+    // "Developer Prompts"). Fall back to the stored title for any non-core row.
+    const displayTitle = (artifact: Artifact): string =>
+        artifact.subtype ? getArtifactMeta(artifact.subtype).title : artifact.title;
+
+    // Order artifacts the way the Assets tab does (CORE_ARTIFACT_DISPLAY_ORDER)
+    // and drop hidden subtypes (e.g. UI Components) so the export list matches
+    // exactly what the user sees in the workspace.
+    const orderedCoreArtifacts: Artifact[] = CORE_ARTIFACT_DISPLAY_ORDER
+        .filter(meta => !isHiddenArtifactSubtype(meta.subtype))
+        .map(meta => coreArtifacts.find(a => a.subtype === meta.subtype))
+        .filter((a): a is Artifact => Boolean(a));
+
     const exportPRD = () => {
         if (!latestSpine) return;
         downloadFile(latestSpine.responseText, `${project?.name || 'project'}-prd.md`);
@@ -71,7 +91,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         if (!preferred) return;
         downloadFile(
             exportContentFor(artifact, preferred.content),
-            `${artifact.title.replace(/\s+/g, '-').toLowerCase()}.md`,
+            `${displayTitle(artifact).replace(/\s+/g, '-').toLowerCase()}.md`,
         );
     };
 
@@ -80,14 +100,14 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         const data = {
             project: project,
             structuredPRD: latestSpine.structuredPRD,
-            artifacts: coreArtifacts.map(a => {
+            artifacts: orderedCoreArtifacts.map(a => {
                 const versions = getArtifactVersions(projectId, a.id);
                 const preferred = versions.find(v => v.isPreferred);
                 return {
                     id: a.id,
                     type: a.type,
                     subtype: a.subtype,
-                    title: a.title,
+                    title: displayTitle(a),
                     content: preferred?.content || '',
                     versionNumber: preferred?.versionNumber,
                 };
@@ -109,9 +129,9 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         if (latestSpine) {
             sections.push('# Product Requirements Document\n', latestSpine.responseText, '\n---\n');
         }
-        for (const artifact of coreArtifacts) {
+        for (const artifact of orderedCoreArtifacts) {
             const content = artifactContent(artifact);
-            if (content) sections.push(`# ${artifact.title}\n`, content, '\n---\n');
+            if (content) sections.push(`# ${displayTitle(artifact)}\n`, content, '\n---\n');
         }
         for (const mockup of mockupArtifacts) {
             const versions = getArtifactVersions(projectId, mockup.id);
@@ -127,9 +147,9 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         buildAgentHandoff({
             projectName: project?.name || 'This product',
             prdMarkdown: latestSpine?.responseText,
-            artifacts: coreArtifacts.map(a => ({
+            artifacts: orderedCoreArtifacts.map(a => ({
                 subtype: a.subtype ?? '',
-                title: a.title,
+                title: displayTitle(a),
                 content: artifactContent(a),
             })),
         });
@@ -157,6 +177,9 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                 </div>
 
                 <div className="p-4 space-y-3 overflow-y-auto min-h-0">
+                    {/* --- EXPORT: whole-project bundles --- */}
+                    <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Export</span>
+
                     {/* Agent handoff — the build-companion preset */}
                     <div className="flex items-stretch gap-2">
                         <button
@@ -183,51 +206,6 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                             <Download size={16} className="text-violet-600" />
                         </button>
                     </div>
-
-                    {/* PRD */}
-                    <div className="flex items-stretch gap-2">
-                        <button
-                            onClick={exportPRD}
-                            disabled={!latestSpine}
-                            className="flex-1 flex items-center gap-3 p-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition text-left disabled:opacity-50"
-                        >
-                            <FileText size={18} className="text-indigo-500 shrink-0" />
-                            <div>
-                                <div className="text-sm font-medium text-neutral-800">Export PRD</div>
-                                <div className="text-xs text-neutral-500">Download PRD as Markdown</div>
-                            </div>
-                        </button>
-                        <button
-                            onClick={() => copyText('prd', latestSpine?.responseText ?? '', 'the PRD')}
-                            disabled={!latestSpine}
-                            aria-label="Copy PRD to clipboard"
-                            title="Copy to clipboard"
-                            className="shrink-0 flex items-center justify-center px-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition disabled:opacity-50"
-                        >
-                            {copiedKey === 'prd'
-                                ? <Check size={16} className="text-green-600" />
-                                : <Copy size={16} className="text-neutral-400" />}
-                        </button>
-                    </div>
-
-                    {/* Individual Artifacts */}
-                    {coreArtifacts.length > 0 && (
-                        <div>
-                            <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Artifacts</span>
-                            <div className="mt-1 space-y-1">
-                                {coreArtifacts.map(a => (
-                                    <button
-                                        key={a.id}
-                                        onClick={() => exportArtifact(a)}
-                                        className="w-full flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 rounded-md transition text-left text-sm text-neutral-700"
-                                    >
-                                        <Download size={14} className="text-neutral-400 shrink-0" />
-                                        {a.title}
-                                    </button>
-                                ))}
-                            </div>
-                        </div>
-                    )}
 
                     {/* Full Bundle */}
                     <div className="flex items-stretch gap-2">
@@ -269,6 +247,53 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                             <div className="text-xs text-neutral-500">PRD + artifacts as structured data</div>
                         </div>
                     </button>
+
+                    {/* --- DOWNLOAD: individual documents --- */}
+                    <div className="pt-1">
+                        <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Download</span>
+                    </div>
+
+                    {/* PRD */}
+                    <div className="flex items-stretch gap-2">
+                        <button
+                            onClick={exportPRD}
+                            disabled={!latestSpine}
+                            className="flex-1 flex items-center gap-3 p-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition text-left disabled:opacity-50"
+                        >
+                            <FileText size={18} className="text-indigo-500 shrink-0" />
+                            <div>
+                                <div className="text-sm font-medium text-neutral-800">PRD</div>
+                                <div className="text-xs text-neutral-500">Download PRD as Markdown</div>
+                            </div>
+                        </button>
+                        <button
+                            onClick={() => copyText('prd', latestSpine?.responseText ?? '', 'the PRD')}
+                            disabled={!latestSpine}
+                            aria-label="Copy PRD to clipboard"
+                            title="Copy to clipboard"
+                            className="shrink-0 flex items-center justify-center px-3 bg-neutral-50 hover:bg-neutral-100 rounded-lg transition disabled:opacity-50"
+                        >
+                            {copiedKey === 'prd'
+                                ? <Check size={16} className="text-green-600" />
+                                : <Copy size={16} className="text-neutral-400" />}
+                        </button>
+                    </div>
+
+                    {/* Individual Artifacts — same names and order as the Assets tab */}
+                    {orderedCoreArtifacts.length > 0 && (
+                        <div className="space-y-1">
+                            {orderedCoreArtifacts.map(a => (
+                                <button
+                                    key={a.id}
+                                    onClick={() => exportArtifact(a)}
+                                    className="w-full flex items-center gap-2 px-3 py-2 hover:bg-neutral-50 rounded-md transition text-left text-sm text-neutral-700"
+                                >
+                                    <Download size={14} className="text-neutral-400 shrink-0" />
+                                    {displayTitle(a)}
+                                </button>
+                            ))}
+                        </div>
+                    )}
                 </div>
             </div>
         </div>
