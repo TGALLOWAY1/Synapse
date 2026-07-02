@@ -284,6 +284,9 @@ export function extractTasksFromStructuredPlan(
 
     plan.milestones.forEach((milestone: ImplementationPlanMilestone, milestoneIndex) => {
         const milestoneNumericId = milestoneIndex + 1;
+        // Consolidated plans carry a per-milestone Definition of Done — the
+        // tighter criteria source; fall back to the plan-wide list.
+        const dodSource = milestone.definitionOfDone?.length ? milestone.definitionOfDone : planDoD;
         milestone.tasks.forEach(task => {
             const haystack = `${task.title} ${task.description ?? ''} ${milestone.goal ?? ''}`;
             const taskType = inferTaskType(haystack);
@@ -292,7 +295,7 @@ export function extractTasksFromStructuredPlan(
 
             const acceptanceCriteria = buildAcceptanceCriteria(
                 task.title,
-                planDoD.length ? planDoD.join('\n') : undefined,
+                dodSource.length ? dodSource.join('\n') : undefined,
                 milestone.tasks.map(t => t.title),
             );
 

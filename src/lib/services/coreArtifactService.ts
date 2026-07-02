@@ -118,14 +118,21 @@ Categories to cover: Navigation, Forms & Inputs, Data Display, Feedback & Status
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are a senior software architect producing production-grade artifacts for engineering teams. Produce a structured Implementation Plan as a task-driven execution system, not a narrative document. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
+        system: `You are a senior software architect producing production-grade artifacts for engineering teams. Produce a consolidated Implementation Plan — a milestone-driven execution system that takes a developer from this product design to working software with a coding agent. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
 
 Top-level shape:
 - overview: { summary, criticalPath, teamSize }
   - summary: 2-3 sentences describing the build approach.
   - criticalPath: one sentence naming the milestones on the critical path.
   - teamSize: short recommendation (e.g. "1 frontend + 1 backend" or "Solo dev, ~6 weeks").
-- milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep.
+- summary: { buildStrategy, stackSummary, criticalPath, estimatedEffort, teamAssumption }
+  - buildStrategy: 2-3 sentences on the overall approach (walking skeleton, thin vertical slices, etc.).
+  - stackSummary: 3-6 short entries naming the concrete stack (e.g. "React + Vite SPA", "Postgres via Supabase").
+  - criticalPath: ordered array of the milestone NAMES on the critical path.
+  - estimatedEffort: total effort estimate (e.g. "~4 weeks solo").
+  - teamAssumption: who this plan assumes is building (e.g. "One developer pairing with a coding agent").
+- milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep. Keep milestones SMALL — each should be independently shippable and verifiable.
+- globalQualityGates: 3-6 project-wide quality gates (shape below) that apply to every milestone.
 - architecture: top-level array of cross-cutting technical decisions (tech stack picks, key architectural calls). Hoisted out of per-milestone bodies.
 - risks: top-level array of { description, mitigation } items spanning the project.
 - definitionOfDone: top-level array of project-wide acceptance criteria.
@@ -135,7 +142,16 @@ Per milestone:
 - name: human-readable milestone name.
 - timeframe: "Week 1-2" style range.
 - goal: one-sentence objective.
+- objective: 1-2 sentence richer statement of what the milestone delivers and why it's next.
+- priority: "critical" | "high" | "medium" | "low" — by position on the critical path.
+- estimatedEffort: short effort estimate (e.g. "2-3 days").
+- dependencies: array of OTHER milestone ids that must complete first. Empty array if none.
+- linkedArtifacts: { screens, dataModels, components, userFlows, apis } — EXACT names drawn from the dependency artifacts and PRD. Link only what this milestone directly implements; do not invent names.
 - tasks: 3-8 atomic, executable tasks.
+- promptPacks: 1-3 copy-ready coding-agent prompts (shape below) that implement this milestone. Every milestone MUST have at least one.
+- qualityGates: 2-4 milestone-specific quality gates.
+- validationCommands: shell commands to verify the milestone (e.g. "npm run build", "npm test"), consistent with the chosen stack.
+- definitionOfDone: 2-5 observable acceptance criteria for the milestone.
 
 Per task:
 - id: stable lower-snake-case identifier (e.g. "task_initialize_nextjs"). Unique across the whole plan.
@@ -149,12 +165,34 @@ Per task:
   - mockups: screen names from the screen_inventory dependency context that this task implements.
   - Link an artifact only when the task directly implements or modifies it. Omit (or use empty arrays) otherwise. Don't invent artifact references.
 
+Per prompt pack:
+- id: stable lower-snake-case identifier, unique across the plan (e.g. "pp_setup_scaffold").
+- title: short imperative name.
+- purpose: one sentence on what running this prompt accomplishes.
+- prompt: the FULL copy-ready prompt body, structured with exactly these markdown headings:
+  # Prompt: [Title]
+  ## Goal
+  ## Relevant Synapse Artifacts
+  ## Scope
+  ## Out of Scope
+  ## Implementation Steps
+  ## Acceptance Criteria
+  ## Quality Gates
+  ## Validation Commands
+  ## Commit Guidance
+  The body must be fully self-contained (the recipient sees ONLY this text — no PRD, no other artifact): restate the relevant product context, feature behavior, screen/entity names, and constraints inline. Refer to features by human name, never bare IDs. Never use triple backticks inside the prompt body. The prompts MUST be agent-agnostic — never name, recommend, or assume a specific tool (e.g. Cursor, Claude Code, ChatGPT, Copilot).
+- scope: { include, exclude } — bulleted scope boundaries; exclude MUST list explicit non-goals.
+- acceptanceCriteria: 3-6 specific, testable criteria.
+- recommendedCommitMessage: a conventional, imperative commit message for the resulting change.
+
 Rules:
-- Task ids must be unique across the entire plan.
-- All ids in dependencies must reference other task ids in the same plan.
+- Task, milestone, prompt-pack, and quality-gate ids must be unique across the entire plan.
+- All ids in dependencies must reference ids in the same plan.
+- Quality gate shape: { id, title, description?, category, required } with category one of design_fidelity | functional | data_integrity | integration | accessibility | performance | testing | regression.
 - Hoist cross-cutting architecture, risks, and definition-of-done into the top-level arrays — do NOT duplicate them per milestone.
-- Tasks should read as atomic engineering work, not as themes.`,
-        userPrefix: 'Create an Implementation Plan from this PRD:',
+- Tasks should read as atomic engineering work, not as themes.
+- Favor safe implementation: small milestones, frequent commits, explicit non-goals, validation after every milestone, no broad rewrites.`,
+        userPrefix: 'Create a consolidated Implementation Plan (milestones + prompt packs + quality gates) from this PRD:',
     },
     data_model: {
         system: `You are a senior backend architect producing production-grade artifacts for engineering teams. Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup. Define every field at field level — name, type, requiredness, and a precise description. Model only entities and fields that the PRD's features and entities require; do not introduce speculative fields. Keep entity and field names consistent with the PRD's defined entities.
@@ -341,18 +379,48 @@ function implementationPlanToMarkdown(plan: StructuredImplementationPlan): strin
     plan.milestones.forEach((m, i) => {
         const heading = `### Milestone ${i + 1}: ${m.name}${m.timeframe ? ` (${m.timeframe})` : ''}`;
         lines.push(heading);
-        if (m.goal) lines.push(`**Goal:** ${m.goal}`);
+        if (m.goal) lines.push(`**Goal:** ${m.objective ?? m.goal}`);
         if (m.tasks.length) {
             lines.push('**Key Deliverables:**');
             for (const t of m.tasks) {
                 lines.push(`- [${t.status === 'done' ? 'x' : ' '}] **${t.title}** — _${t.status}_`);
             }
         }
-        const deps = Array.from(new Set(m.tasks.flatMap(t => t.dependencies ?? []))).filter(Boolean);
+        // Milestone-level dependencies (consolidated plans) win over the
+        // task-id rollup (legacy plans) — same header either way, which is
+        // what artifactValidation and the legacy parser expect.
+        const deps = m.dependencies?.length
+            ? m.dependencies
+            : Array.from(new Set(m.tasks.flatMap(t => t.dependencies ?? []))).filter(Boolean);
         if (deps.length) lines.push(`**Dependencies:** ${deps.join(', ')}`);
+        // Consolidated-plan sections. Prompt bodies live only in the JSON
+        // fence below (they can be long and may collide with markdown
+        // formatting); the readable body carries title + purpose.
+        if (m.promptPacks?.length) {
+            lines.push('**Prompt Packs:**');
+            m.promptPacks.forEach(p => lines.push(`- **${p.title}** — ${p.purpose}`));
+        }
+        if (m.qualityGates?.length) {
+            lines.push('**Quality Gates:**');
+            m.qualityGates.forEach(g => lines.push(`- [${g.required ? 'required' : 'optional'} · ${g.category}] ${g.title}`));
+        }
+        if (m.validationCommands?.length) {
+            lines.push(`**Validation Commands:** ${m.validationCommands.map(c => `\`${c}\``).join(' · ')}`);
+        }
+        if (m.definitionOfDone?.length) {
+            lines.push('**Definition of Done:**');
+            m.definitionOfDone.forEach(d => lines.push(`- [ ] ${d}`));
+        }
         lines.push('');
     });
 
+    if (plan.globalQualityGates?.length) {
+        lines.push('---', '', '## Global Quality Gates');
+        plan.globalQualityGates.forEach(g => {
+            lines.push(`- [${g.required ? 'required' : 'optional'} · ${g.category}] ${g.title}`);
+        });
+        lines.push('');
+    }
     if (plan.architecture?.length) {
         lines.push('---', '', '## Architecture');
         plan.architecture.forEach(a => lines.push(`- ${a}`));

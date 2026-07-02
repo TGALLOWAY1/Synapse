@@ -76,7 +76,13 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
         subtype: 'implementation_plan',
         title: 'Implementation Plan',
         description: 'Milestones, prompt packs, and quality gates',
-        dependsOn: [],
+        // True data deps: the consolidated plan links milestones to screen and
+        // entity names and writes prompt packs that reference them, so it
+        // needs those artifacts' output as prompt context. user_flows is
+        // deliberately NOT a dep — flow links are nice-to-have and adding the
+        // edge would make the active pipeline 3 layers deep (see the depth
+        // test in coreArtifactPipeline.test.ts).
+        dependsOn: ['screen_inventory', 'data_model'],
         displayOrder: 7,
     },
 ];
