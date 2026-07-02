@@ -2,8 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, Menu, X, ListChecks, History,
-    Layers, Database, Code2, AppWindow, Palette,
+    RefreshCcw, Menu, X, ListChecks, History, Lock,
+    Layers, Database, Code2, AppWindow,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -21,7 +21,7 @@ import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
 import { StalenessBadge } from './StalenessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
-import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
+import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
 import { v4 as uuidv4 } from 'uuid';
 import {
@@ -91,10 +91,12 @@ interface ArtifactGroup {
 
 // Sidebar grouping is purely visual — subtype IDs are unchanged. Order within
 // a group is the order rows render in. The "Project Foundation → Experience →
-// Design → Architecture → Development" sequence tells the product-build story;
-// keep it in sync with the README/tour if either changes.
+// Architecture → Development" sequence tells the product-build story; keep it in
+// sync with the README/tour if either changes. The Design System sits under
+// Project Foundation, directly below the PRD — it's the visual foundation every
+// downstream asset is generated against.
 const ARTIFACT_GROUPS: ArtifactGroup[] = [
-    { id: 'foundation', title: 'Project Foundation', icon: FileText, items: ['prd'] },
+    { id: 'foundation', title: 'Project Foundation', icon: FileText, items: ['prd', 'design_system'] },
     {
         id: 'experience',
         title: 'Experience',
@@ -108,7 +110,6 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
         // a hidden subtype — see HIDDEN_ARTIFACT_SUBTYPES / docs/backlog §6.
         items: ['user_flows', 'screens'],
     },
-    { id: 'design', title: 'Design', icon: Palette, items: ['design_system'] },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
     // Development consolidates the old Developer Prompts + Build Plan rows
     // into one Implementation Plan artifact (milestones + prompt packs +
@@ -153,6 +154,25 @@ function StatusDot({ status }: { status: GenerationStatus }) {
     if (status === 'error') return <AlertTriangle size={14} className="text-red-500 shrink-0" />;
     if (status === 'interrupted') return <AlertTriangle size={14} className="text-amber-500 shrink-0" />;
     return <Circle size={14} className="text-neutral-300 shrink-0" />;
+}
+
+// The PRD and the Design System itself are the foundation — every other asset is
+// generated *against* the design system, so once produced it's "locked" to that
+// visual direction (changing direction + regenerating the design system is what
+// updates it). These two are exempt from the lock affordance.
+const LOCK_EXEMPT_SELECTIONS = new Set<WorkspaceSelection>(['prd', 'design_system']);
+function isLockableAsset(key: WorkspaceSelection): boolean {
+    return !LOCK_EXEMPT_SELECTIONS.has(key);
+}
+
+// Small lock shown on a generated downstream asset, signalling it's anchored to
+// the current design system. Rendered only for `done` lockable assets.
+function AssetLock() {
+    return (
+        <span title="Locked to your design system" className="inline-flex shrink-0">
+            <Lock size={11} className="text-neutral-400" aria-label="Locked to your design system" />
+        </span>
+    );
 }
 
 export function ArtifactWorkspace({
@@ -1102,6 +1122,9 @@ export function ArtifactWorkspace({
                                                                 {slot.title}
                                                             </span>
                                                             <StatusDot status={status} />
+                                                            {status === 'done' && isLockableAsset(slot.key) && (
+                                                                <AssetLock />
+                                                            )}
                                                         </div>
                                                         <div className="text-[11px] text-neutral-500 leading-tight truncate">
                                                             {slot.description}
@@ -1134,8 +1157,11 @@ export function ArtifactWorkspace({
                         {selectedMeta?.title ?? 'Artifacts'}
                     </span>
                     {activeSelection !== 'prd' && (
-                        <span className="ml-auto shrink-0">
+                        <span className="ml-auto shrink-0 flex items-center gap-1.5">
                             <StatusDot status={slotStatusFor(activeSelection)} />
+                            {slotStatusFor(activeSelection) === 'done' && isLockableAsset(activeSelection) && (
+                                <AssetLock />
+                            )}
                         </span>
                     )}
                 </div>
@@ -1260,10 +1286,8 @@ export function ArtifactWorkspace({
             )}
 
             {showDirectionPicker && (
-                <DesignSystemPresetChoice
+                <ChangeDirectionModal
                     currentPresetId={designSystemPreset}
-                    title="Change your visual direction"
-                    description="Pick a new direction for this project's design system. Internal mockups and the prompts you copy for external image tools both follow it, so everything stays consistent."
                     onChoose={handleChooseDirection}
                     onClose={() => setShowDirectionPicker(false)}
                 />
@@ -1289,10 +1313,15 @@ export function ArtifactWorkspace({
                             <p className="text-sm text-neutral-700 mt-1">
                                 Creates Version {designRegenConfirm.nextVersion} using your chosen direction.
                             </p>
-                            <p className="text-xs text-neutral-500 mt-1">
-                                This may make your existing mockups out of date — you can regenerate them
-                                afterward. The current version remains in version history.
-                            </p>
+                            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                                <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-500" />
+                                <p className="text-xs text-amber-800">
+                                    This changes the visual foundation, so your downstream assets —
+                                    mockups and the screen-level prompts you copy for external image
+                                    tools — may become out of date. You can regenerate them afterward.
+                                    The current version stays in version history.
+                                </p>
+                            </div>
                         </div>
                         <div className="px-5 pb-4 flex items-center justify-end gap-2">
                             <button

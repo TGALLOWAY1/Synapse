@@ -501,12 +501,27 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       `DesignDirectionControl` (`src/components/DesignDirectionControl.tsx`,
       presentational) above its content in `ArtifactWorkspace`: it shows the
       current direction (or an "AI decides" fallback) and offers **Change
-      direction** (re-opens `DesignSystemPresetChoice`, now accepting
-      `currentPresetId`/`title`/`description` props so it doubles as a change
-      dialog) and **Regenerate**. Choosing a new direction persists it via
-      `setProjectDesignSystemPreset` then opens a regenerate-confirm that calls
-      `artifactJobController.retrySlot('design_system')` — which re-reads the
-      preset off the project, so the new direction actually reaches generation.
+      direction** and **Regenerate**. **Change direction opens
+      `ChangeDirectionModal` (`src/components/setup/ChangeDirectionModal.tsx`),
+      which deliberately mirrors the setup-stage `DesignSetupStep`** — same light
+      surface and large `DesignPresetGrid` preview cards (the card grid is
+      extracted into the shared `src/components/setup/DesignPresetGrid.tsx` so the
+      two screens are visually identical) — with the active preset marked
+      **Current** and a prominent amber warning that the change flows through to
+      downstream artifacts (mockups + copied screen prompts). Choosing a new
+      direction persists it via `setProjectDesignSystemPreset` then opens a
+      regenerate-confirm (itself carrying the downstream-impact warning) that
+      calls `artifactJobController.retrySlot('design_system')` — which re-reads
+      the preset off the project, so the new direction actually reaches
+      generation. (The old compact `DesignSystemPresetChoice` sheet now serves
+      only the Mark-as-Final fallback gate in `ProjectWorkspace`.)
+    - **Generated-asset lock affordance.** Every *downstream* asset in the
+      sidebar/mobile-header — anything except the PRD and the Design System
+      itself (`isLockableAsset` / `LOCK_EXEMPT_SELECTIONS` in `ArtifactWorkspace`)
+      — shows a small `Lock` icon once its slot status is `done`, signalling it's
+      anchored ("locked") to the current design system. It's a passive indicator
+      only; changing the visual direction + regenerating the design system is what
+      updates those assets.
     - **Mockup-drift prompt.** Regenerating the design system produces a new
       `tokensHash`, which `stalenessSlice` already uses to flip dependent mockups
       to `possibly_outdated` (the auto-flag). On top of that, the Mockups view in
@@ -922,12 +937,14 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 ### Post-finalization transition (Mark Final → Assets)
 
-The artifact sidebar is organized into five workflow-named sections —
-**Project Foundation** (PRD), **Experience** (User Flows, Screens — see "The
-Experience workspace" below), **Design** (Design System), **Architecture**
-(Data Model), and **Development** (Implementation Plan — see "Consolidated
-Implementation Plan" below) — driven by `ARTIFACT_GROUPS` in
-`ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
+The artifact sidebar is organized into four workflow-named sections —
+**Project Foundation** (PRD **and** Design System — the design system sits
+directly below the PRD as the shared visual foundation every downstream asset is
+generated against), **Experience** (User Flows, Screens — see "The Experience
+workspace" below), **Architecture** (Data Model), and **Development**
+(Implementation Plan — see "Consolidated Implementation Plan" below) — driven by
+`ARTIFACT_GROUPS` in `ArtifactWorkspace.tsx`. Grouping is purely visual;
+`CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
 per-artifact model overrides keep working. **`component_inventory` (UI Components)
@@ -973,7 +990,7 @@ switching stage. Its
 `ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
-`ARTIFACT_GROUPS` order (user_flows → screens → design_system → … →
+`ARTIFACT_GROUPS` order (design_system → user_flows → screens → … →
 implementation_plan) — and opens the mobile drawer (`useIsMobile`-gated, so it
 never reopens after the user closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
