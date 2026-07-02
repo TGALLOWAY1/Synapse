@@ -49,7 +49,7 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
 
             {/* Drawer */}
             <div
-                className={`fixed top-0 right-0 h-full w-80 bg-neutral-900 border-l border-neutral-700 z-50 transform transition-transform duration-300 ease-in-out ${
+                className={`fixed top-0 right-0 h-full w-80 bg-neutral-900 text-neutral-100 border-l border-neutral-700 z-50 transform transition-transform duration-300 ease-in-out ${
                     isOpen ? 'translate-x-0' : 'translate-x-full'
                 }`}
             >
