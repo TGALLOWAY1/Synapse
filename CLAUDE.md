@@ -547,12 +547,14 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     header (Prompt N · Title · Category · "Generated <date>"), only **Edit** +
     **Copy Prompt** actions (Reset surfaces inside edit mode when modified),
     the prompt body rendered exactly as before (mono `whitespace-pre-wrap`,
-    unchanged), and reorganized supporting cards below it — **User Intent**
-    (`**Reason:**`), **Expected Output** (trailing `**Expected Output:**`),
-    **Dependencies** (feature names parsed from the body's `## Features In
-    Scope`), **Key Implementation Areas** (Category + Target Tool) — each
-    rendered only when its data exists, plus a subtle "Safe to regenerate /
-    Creates Version X" callout. `generatedAt` (version `createdAt`) and
+    unchanged), and a single supporting card below it — **Expected Output**
+    (trailing `**Expected Output:**`), rendered only when present — plus a
+    subtle "Safe to regenerate / Creates Version X" callout. **The generated
+    prompts are agent-agnostic** — the `prompt_pack` generation prompt
+    (`coreArtifactService.ts`) must never name or recommend a specific coding
+    agent (Cursor, Claude Code, ChatGPT, Copilot), and the renderer no longer
+    parses/shows a Target Tool, Reason/User Intent, Dependencies, or Key
+    Implementation Areas block. `generatedAt` (version `createdAt`) and
     `versionNumber` thread through `ArtifactContentRenderer`.
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight

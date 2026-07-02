@@ -2,14 +2,12 @@ import { describe, it, expect } from 'vitest';
 import { render, screen, within } from '@testing-library/react';
 import { PromptPackRenderer } from '../PromptPackRenderer';
 
-// Two-prompt pack exercising the parser: title, target tool/reason, category,
-// a fenced prompt body, Features In Scope (→ Dependencies), and the trailing
-// Expected Output summary.
+// Two-prompt pack exercising the parser: title, category, a fenced prompt
+// body, and the trailing Expected Output summary. Prompts are agent-agnostic —
+// no target-tool / recommendation context is parsed or shown.
 const CONTENT = `Intro preamble line.
 
 ### 1. Geofence Configuration View
-**Target Tool:** Cursor
-**Reason:** Cursor applies multi-file code changes directly.
 **Category:** UI Implementation
 \`\`\`
 # Task
@@ -22,7 +20,6 @@ Implement the Geofence Configuration screen.
 **Expected Output:** A working geofence configuration screen.
 
 ### 2. Playback State Dashboard
-**Target Tool:** ChatGPT
 **Category:** State Management
 \`\`\`
 # Task
@@ -45,19 +42,16 @@ describe('PromptPackRenderer', () => {
         expect(within(nav).getByText('(2)')).toBeInTheDocument();
     });
 
-    it('surfaces supporting context: user intent, expected output, dependencies', () => {
+    it('surfaces only the Expected Output supporting context', () => {
         render(<PromptPackRenderer content={CONTENT} />);
-
-        expect(screen.getByText('User Intent')).toBeInTheDocument();
-        expect(screen.getByText(/Cursor applies multi-file code changes directly/)).toBeInTheDocument();
 
         expect(screen.getByText('Expected Output')).toBeInTheDocument();
         expect(screen.getByText(/A working geofence configuration screen/)).toBeInTheDocument();
 
-        // Dependencies come from "Features In Scope" feature names (id prefix stripped).
-        expect(screen.getByText('Dependencies')).toBeInTheDocument();
-        expect(screen.getByText('Geofence editor')).toBeInTheDocument();
-        expect(screen.getByText('Radius slider')).toBeInTheDocument();
+        // Agent-agnostic: no target-tool / intent / dependency context is shown.
+        expect(screen.queryByText('User Intent')).not.toBeInTheDocument();
+        expect(screen.queryByText('Dependencies')).not.toBeInTheDocument();
+        expect(screen.queryByText('Key Implementation Areas')).not.toBeInTheDocument();
     });
 
     it('only exposes Copy Prompt by default and Edit when editing is enabled', () => {
