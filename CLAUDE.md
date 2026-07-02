@@ -940,18 +940,32 @@ layer only**: the `screen_inventory`, `user_flows`, and `mockup` artifacts keep
 generating, persisting, and versioning exactly as before — no schema, prompt,
 pipeline, sync, or snapshot change. Do not add persisted state for this view.
 
+- **Stable screen ids** — every screen has a canonical `ScreenItem.id`,
+  stamped by `assignStableScreenIds` inside `normalizeScreenInventory`
+  (`src/lib/screenInventoryNormalize.ts`): existing content id → slug of the
+  name → deterministic `-2`/`-3` suffix on duplicates, in document order.
+  Because generation persists the normalized shape, **new inventories store
+  their ids**, while legacy artifacts derive the *same* ids on every read (no
+  regeneration/migration required — derivation is deterministic from stored
+  content and never from a user-facing rename). `MockupScreen.sourceScreenId`
+  (optional, back-compat) records the inventory screen a mockup screen was
+  derived from (`generateMockup` stamps it; `mockupParsing.coerceScreen`
+  round-trips it).
 - **Join layer** — `src/lib/screenExperience.ts` (pure; no store/IDB/React;
   unit-tested in `src/lib/__tests__/screenExperience.test.ts`).
   `buildScreenIndex(inventory, flows, mockupPayload)` joins the three parsed
-  artifact contents into a `ScreenExperienceIndex` keyed by
-  **`slugifyScreenName(name)`** — the same slug the per-screen image stores
-  use, and the only cross-artifact screen identity that exists (there is no
-  persisted screen id). Flow steps match by exact slug of the parsed
-  `[Screen Name]` step title (`stepScreenSlug`); mockup screens match by
-  slugified `MockupScreen.name`. Missing artifacts degrade gracefully; a
-  missing inventory returns the module-level `EMPTY_SCREEN_EXPERIENCE_INDEX`
-  (stable reference — Selector-stability rule). Slug collisions keep the first
-  screen and are surfaced via `index.collisions` (warning banner in the list).
+  artifact contents into a `ScreenExperienceIndex` with **`byId` (canonical,
+  rename-safe) and `bySlug` (name-based, first-wins)** lookups. Mockup screens
+  match by `sourceScreenId` first, then slugified `MockupScreen.name` (legacy
+  fallback). Flow steps are markdown and only know names, so they match by
+  exact slug of the parsed `[Screen Name]` step title (`stepScreenSlug`).
+  Screen selection/navigation uses the **id**; per-screen images stay keyed by
+  the slug of the *stored* (generated) name, so both survive display renames.
+  Missing artifacts degrade gracefully; a missing inventory returns the
+  module-level `EMPTY_SCREEN_EXPERIENCE_INDEX` (stable reference —
+  Selector-stability rule). Slug collisions keep **all** screens as items
+  (unique ids), resolve `bySlug` to the first, and are surfaced via
+  `index.collisions` (warning banner in the list).
 - **Views** — `src/components/experience/`: `ScreenListView` (sectioned list of
   all inventory screens with flow-ref/mockup coverage chips),
   `ScreenDetailView` + `ScreenDetailTabs` (per-screen **Overview / Flow /

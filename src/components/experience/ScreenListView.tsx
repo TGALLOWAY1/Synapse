@@ -10,7 +10,8 @@ import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 
 interface Props {
     index: ScreenExperienceIndex;
-    onSelectScreen: (slug: string) => void;
+    /** Opens the Screen Detail view — keyed by the stable canonical id. */
+    onSelectScreen: (screenId: string) => void;
 }
 
 export function ScreenListView({ index, onSelectScreen }: Props) {
@@ -58,8 +59,8 @@ export function ScreenListView({ index, onSelectScreen }: Props) {
                     </header>
                     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {section.items.map(item => (
-                            <li key={item.slug}>
-                                <ScreenRow item={item} onSelect={() => onSelectScreen(item.slug)} />
+                            <li key={item.id}>
+                                <ScreenRow item={item} onSelect={() => onSelectScreen(item.id)} />
                             </li>
                         ))}
                     </ul>

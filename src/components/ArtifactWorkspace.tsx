@@ -188,11 +188,10 @@ export function ArtifactWorkspace({
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
-    // Experience workspace (Screens) navigation state. `selectedScreenSlug`
-    // is the open Screen Detail (null = the Screens list view); `screenTab`
-    // is its active tab. Local component state only — no URL routing in the
-    // MVP, mirroring how `selected` itself works.
-    const [selectedScreenSlug, setSelectedScreenSlug] = useState<string | null>(null);
+    // Experience workspace (Screens) navigation state. `selectedScreenId`
+    // is the open Screen Detail (null = the Screens list view) keyed by the
+    // stable canonical screen id; `screenTab` is its active tab.
+    const [selectedScreenId, setSelectedScreenId] = useState<string | null>(null);
     const [screenTab, setScreenTab] = useState<ScreenDetailTab>('overview');
 
     const job = getJob(projectId);
@@ -326,14 +325,20 @@ export function ArtifactWorkspace({
         });
     };
 
-    // Open a screen's detail view — used by the Screens list, the Screens
-    // sidebar row (via handleSelect resetting to the list), and screen nodes
-    // in the User Flows journey diagram.
-    const handleNavigateToScreen = (slug: string) => {
+    // Open a screen's detail view by its stable canonical id (Screens list,
+    // deep links).
+    const handleOpenScreen = (screenId: string) => {
         setSelected('screens');
-        setSelectedScreenSlug(slug);
+        setSelectedScreenId(screenId);
         setScreenTab('overview');
         setMobileSidebarOpen(false);
+    };
+
+    // Slug-based entry point for User Flows journey nodes (flows are markdown
+    // and only know screen names) — resolved to the canonical id here.
+    const handleNavigateToScreen = (slug: string) => {
+        const item = screenIndex.bySlug.get(slug);
+        if (item) handleOpenScreen(item.id);
     };
 
     // Persist a newly-chosen visual direction, then surface the regenerate
@@ -467,8 +472,8 @@ export function ArtifactWorkspace({
                 );
             }
 
-            const detailItem = selectedScreenSlug
-                ? screenIndex.bySlug.get(selectedScreenSlug)
+            const detailItem = selectedScreenId
+                ? screenIndex.byId.get(selectedScreenId)
                 : undefined;
             if (detailItem) {
                 return (
@@ -476,7 +481,7 @@ export function ArtifactWorkspace({
                         item={detailItem}
                         activeTab={screenTab}
                         onTabChange={setScreenTab}
-                        onBack={() => setSelectedScreenSlug(null)}
+                        onBack={() => setSelectedScreenId(null)}
                         onNavigateToScreen={handleNavigateToScreen}
                         availableScreenSlugs={screenIndex.availableSlugs}
                         screenImageContext={invScreenImageContext}
@@ -551,7 +556,7 @@ export function ArtifactWorkspace({
                             </button>
                         </div>
                     )}
-                    <ScreenListView index={screenIndex} onSelectScreen={handleNavigateToScreen} />
+                    <ScreenListView index={screenIndex} onSelectScreen={handleOpenScreen} />
                 </div>
             );
         }
@@ -808,7 +813,7 @@ export function ArtifactWorkspace({
         setSelected(key);
         // Any sidebar selection (including re-clicking "Screens") lands on the
         // top of that view, closing an open Screen Detail.
-        setSelectedScreenSlug(null);
+        setSelectedScreenId(null);
         setMobileSidebarOpen(false);
     };
 

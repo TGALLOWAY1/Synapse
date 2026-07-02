@@ -46,6 +46,9 @@ const coerceScreen = (raw: unknown): MockupScreen | null => {
         coreUIElements: stringArray(s.coreUIElements),
         componentRefs: stringArray(s.componentRefs),
         notes: typeof s.notes === 'string' ? s.notes : undefined,
+        sourceScreenId: typeof s.sourceScreenId === 'string' && s.sourceScreenId.length > 0
+            ? s.sourceScreenId
+            : undefined,
     };
 };
 

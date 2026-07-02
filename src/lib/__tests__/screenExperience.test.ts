@@ -184,7 +184,7 @@ describe('buildScreenIndex', () => {
         expect(index.sections[0].title).toBe('Main');
     });
 
-    it('detects slug collisions and keeps the first screen', () => {
+    it('detects slug collisions, keeps both screens, and resolves slug lookups to the first', () => {
         const colliding: ScreenInventoryContent = {
             sections: [
                 {
@@ -197,7 +197,11 @@ describe('buildScreenIndex', () => {
             ],
         };
         const index = buildScreenIndex(colliding, [], null);
-        expect(index.items).toHaveLength(1);
+        // Both screens survive as distinct items with unique canonical ids.
+        expect(index.items).toHaveLength(2);
+        expect(index.byId.get('sign-in')?.screen.purpose).toBe('First.');
+        expect(index.byId.get('sign-in-2')?.screen.purpose).toBe('Second.');
+        // Name-based lookups stay first-wins.
         expect(index.bySlug.get('sign-in')?.screen.purpose).toBe('First.');
         expect(index.collisions).toEqual([
             { slug: 'sign-in', names: ['Sign-In', 'Sign In'] },
@@ -219,6 +223,70 @@ describe('buildScreenIndex', () => {
         const flows = parseFlows(FLOWS_MARKDOWN);
         const index = buildScreenIndex(colliding, flows, null);
         expect(index.bySlug.get('sign-in')?.relatedFlows).toHaveLength(2);
+    });
+});
+
+describe('stable screen ids', () => {
+    it('derives canonical ids (content id first, else slug) and exposes byId', () => {
+        const inv: ScreenInventoryContent = {
+            sections: [
+                {
+                    title: 'A',
+                    screens: [
+                        { id: 'model-id-1', name: 'Landing Page', priority: 'P0', purpose: 'X.' },
+                        { name: 'Dashboard', priority: 'P0', purpose: 'Y.' },
+                    ],
+                },
+            ],
+        };
+        const index = buildScreenIndex(inv, [], null);
+        expect(index.byId.get('model-id-1')?.slug).toBe('landing-page');
+        expect(index.byId.get('dashboard')?.screen.purpose).toBe('Y.');
+        expect(index.items.map(i => i.id)).toEqual(['model-id-1', 'dashboard']);
+    });
+
+    it('matches mockup screens by sourceScreenId ahead of name (rename-safe)', () => {
+        const inv: ScreenInventoryContent = {
+            sections: [
+                {
+                    title: 'A',
+                    screens: [
+                        { id: 'scr-dash', name: 'Dashboard', priority: 'P0', purpose: 'Main.' },
+                    ],
+                },
+            ],
+        };
+        const payload: MockupPayload = {
+            version: 'mockup_spec_v1',
+            title: 'T',
+            summary: 'S',
+            screens: [
+                // Name has drifted (would NOT slug-match "Dashboard"), but the
+                // stable id still resolves it.
+                { id: 'uuid-9', name: 'Dashboard (v2 layout)', purpose: 'Main.', sourceScreenId: 'scr-dash' },
+            ],
+        };
+        const index = buildScreenIndex(inv, [], payload);
+        expect(index.byId.get('scr-dash')?.mockupScreen?.id).toBe('uuid-9');
+    });
+
+    it('normalization stamps deterministic ids on legacy inventories (no regeneration needed)', () => {
+        const legacyJson = JSON.stringify({
+            sections: [
+                {
+                    title: 'A',
+                    screens: [
+                        { name: 'Home', priority: 'P0', purpose: 'X.' },
+                        { name: 'Home', priority: 'P1', purpose: 'Dup.' },
+                    ],
+                },
+            ],
+        });
+        const first = parseScreenInventory(legacyJson);
+        const second = parseScreenInventory(legacyJson);
+        // Deterministic across reads — same ids every time.
+        expect(first?.sections[0].screens.map(s => s.id)).toEqual(['home', 'home-2']);
+        expect(second?.sections[0].screens.map(s => s.id)).toEqual(['home', 'home-2']);
     });
 });
 

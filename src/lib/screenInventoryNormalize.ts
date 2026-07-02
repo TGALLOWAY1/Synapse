@@ -23,6 +23,7 @@ import type {
     ScreenState,
     ScreenType,
 } from '../types';
+import { slugifyScreenName } from './screenInventoryImageStore';
 
 const LEGACY_PRIORITY_MAP: Record<LegacyScreenPriority, ScreenPriority> = {
     core: 'P0',
@@ -52,7 +53,7 @@ export function normalizeScreenInventory(raw: unknown): ScreenInventoryContent |
             .map(normalizeSection)
             .filter((s): s is ScreenInventorySection => s !== null);
         if (sections.length === 0) return null;
-        return { sections };
+        return { sections: assignStableScreenIds(sections) };
     }
 
     if (Array.isArray(obj.groups)) {
@@ -66,10 +67,45 @@ export function normalizeScreenInventory(raw: unknown): ScreenInventoryContent |
             })
             .filter((s): s is ScreenInventorySection => s !== null);
         if (sections.length === 0) return null;
-        return { sections };
+        return { sections: assignStableScreenIds(sections) };
     }
 
     return null;
+}
+
+/**
+ * Stamp a stable, unique `id` onto every screen (the canonical screen
+ * identity for cross-artifact joins — see src/lib/screenExperience.ts).
+ * Derivation is deterministic from the stored content, so legacy artifacts
+ * with no ids resolve to the SAME ids on every read without regeneration,
+ * and newly generated artifacts persist them (generation re-serializes the
+ * normalized shape). Precedence per screen:
+ *   1. an existing non-empty `id` from the content (model-emitted or a
+ *      previously persisted derived id),
+ *   2. the slug of the screen name (the join key images already use),
+ *   3. the literal 'screen' fallback slugify provides.
+ * Duplicates (either duplicate content ids or same-name screens) get a
+ * deterministic `-2`, `-3`… suffix in document order. Never derived from a
+ * user-facing rename — display-name edits are an overlay and do not touch
+ * the stored content this reads.
+ */
+export function assignStableScreenIds(sections: ScreenInventorySection[]): ScreenInventorySection[] {
+    const used = new Set<string>();
+    for (const section of sections) {
+        for (const screen of section.screens) {
+            const fromContent = typeof screen.id === 'string' ? screen.id.trim() : '';
+            const base = fromContent || slugifyScreenName(screen.name);
+            let candidate = base;
+            let n = 2;
+            while (used.has(candidate)) {
+                candidate = `${base}-${n}`;
+                n += 1;
+            }
+            used.add(candidate);
+            screen.id = candidate;
+        }
+    }
+    return sections;
 }
 
 function normalizeSection(raw: unknown): ScreenInventorySection | null {

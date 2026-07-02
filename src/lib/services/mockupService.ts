@@ -219,6 +219,10 @@ export const generateMockup = (
             type: item.type,
             coreUIElements: uiElements?.slice(0, 12),
             componentRefs,
+            // Canonical inventory screen id (stamped by assignStableScreenIds
+            // in screenInventoryNormalize) — the rename-safe join key the
+            // Experience workspace prefers over name matching.
+            sourceScreenId: item.id,
         };
     });
 

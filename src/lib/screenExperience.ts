@@ -39,6 +39,13 @@ export interface ScreenFlowRef {
 
 /** A canonical screen plus everything the other artifacts say about it. */
 export interface ScreenExperienceItem {
+    /**
+     * Stable canonical screen id — the rename-safe join/selection key.
+     * Normally stamped by `assignStableScreenIds` during inventory
+     * normalization; derived here with the same precedence (content id →
+     * unique slug) as a safety net for inventories that skipped it.
+     */
+    id: string;
     slug: string;
     screen: ScreenItem;
     /** Title of the inventory section the screen belongs to. */
@@ -64,6 +71,10 @@ export interface ScreenSlugCollision {
 
 export interface ScreenExperienceIndex {
     items: ScreenExperienceItem[];
+    /** Canonical lookup — id is the stable, rename-safe key. */
+    byId: Map<string, ScreenExperienceItem>;
+    /** Name-based lookup for artifacts that only know names (flow steps,
+     * legacy mockups). First screen wins on slug collision. */
     bySlug: Map<string, ScreenExperienceItem>;
     sections: ScreenExperienceSection[];
     collisions: ScreenSlugCollision[];
@@ -76,6 +87,7 @@ export interface ScreenExperienceIndex {
 // for the same empty state — see the Selector-stability rule in CLAUDE.md.
 export const EMPTY_SCREEN_EXPERIENCE_INDEX: ScreenExperienceIndex = {
     items: [],
+    byId: new Map(),
     bySlug: new Map(),
     sections: [],
     collisions: [],
@@ -119,6 +131,7 @@ export function buildScreenIndex(
     }
 
     const items: ScreenExperienceItem[] = [];
+    const byId = new Map<string, ScreenExperienceItem>();
     const bySlug = new Map<string, ScreenExperienceItem>();
     const namesBySlug = new Map<string, string[]>();
     const sections: ScreenExperienceSection[] = [];
@@ -131,14 +144,27 @@ export function buildScreenIndex(
             const names = namesBySlug.get(slug) ?? [];
             names.push(screen.name);
             namesBySlug.set(slug, names);
-            if (bySlug.has(slug)) continue; // first occurrence wins
+            // Canonical id: normalization (assignStableScreenIds) stamps one;
+            // derive the same way here for inventories that bypassed it, and
+            // unique-ify defensively so byId never drops a screen.
+            const baseId = (typeof screen.id === 'string' && screen.id.trim()) || slug;
+            let id = baseId;
+            let n = 2;
+            while (byId.has(id)) {
+                id = `${baseId}-${n}`;
+                n += 1;
+            }
             const item: ScreenExperienceItem = {
+                id,
                 slug,
                 screen,
                 sectionTitle: section.title,
                 relatedFlows: [],
             };
-            bySlug.set(slug, item);
+            byId.set(id, item);
+            // Name-keyed lookup keeps first-wins semantics on collisions
+            // (later same-name screens still exist as items, keyed by id).
+            if (!bySlug.has(slug)) bySlug.set(slug, item);
             items.push(item);
             sectionItems.push(item);
         }
@@ -156,7 +182,7 @@ export function buildScreenIndex(
 
     // Join flow steps by exact slug of the parsed step title. Substring /
     // fuzzy matching is deliberately avoided: "Sign In" must not match
-    // "Sign In Confirmation".
+    // "Sign In Confirmation". (Flows are markdown and only know names.)
     flows.forEach((flow, flowIndex) => {
         for (const step of flow.steps) {
             const slug = stepScreenSlug(step);
@@ -167,13 +193,17 @@ export function buildScreenIndex(
         }
     });
 
-    // Join mockup screens by slugified mockup screen name. A mockup screen
-    // that matches no inventory screen is simply not surfaced here (it stays
-    // visible in the legacy mockup viewer).
+    // Join mockup screens: stable `sourceScreenId` wins (rename-safe, stamped
+    // by generateMockup on new payloads); legacy payloads fall back to
+    // slugified-name matching. A mockup screen that matches nothing is not
+    // surfaced here (it stays visible in the legacy mockup viewer).
     if (mockupPayload) {
         for (const mockupScreen of mockupPayload.screens) {
-            if (!mockupScreen.name) continue;
-            const item = bySlug.get(slugifyScreenName(mockupScreen.name));
+            const byStableId = mockupScreen.sourceScreenId
+                ? byId.get(mockupScreen.sourceScreenId)
+                : undefined;
+            const item = byStableId
+                ?? (mockupScreen.name ? bySlug.get(slugifyScreenName(mockupScreen.name)) : undefined);
             if (item && !item.mockupScreen) item.mockupScreen = mockupScreen;
         }
     }
@@ -185,6 +215,7 @@ export function buildScreenIndex(
 
     return {
         items,
+        byId,
         bySlug,
         sections,
         collisions,
