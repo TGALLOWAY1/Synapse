@@ -30,7 +30,7 @@ import { shouldShowDesignSetup } from '../lib/designSetup';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
-import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype } from '../lib/coreArtifactPipeline';
+import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
@@ -487,7 +487,9 @@ export function ProjectWorkspace() {
         // retry them, so a hidden slot erroring would otherwise leave the
         // finalize success modal stuck reporting "assets are being created".
         const coreReady = CORE_ARTIFACT_DISPLAY_ORDER
-            .filter(meta => !isHiddenArtifactSubtype(meta.subtype))
+            // Retired subtypes (prompt_pack) no longer generate at all, so
+            // they must not gate readiness either.
+            .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
             .every(meta =>
                 getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
             );
