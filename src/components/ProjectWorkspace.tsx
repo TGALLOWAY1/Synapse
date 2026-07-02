@@ -223,8 +223,11 @@ export function ProjectWorkspace() {
     // background, a fresh project picks its visual direction. Replaces the
     // PRD/progress view until the user chooses or skips; never shown for
     // legacy projects, the demo, blocked spines, or failed runs (see
-    // shouldShowDesignSetup).
-    const showDesignSetup = !showPreflight && !isOldVersion
+    // shouldShowDesignSetup). `hasFailedSection` additionally yields on a
+    // *transient* section failure (the live grid errors before the persisted
+    // failedSections meta lands on the spine) so the progress timeline's
+    // "Run again" affordance is never hidden behind the setup step.
+    const showDesignSetup = !showPreflight && !isOldVersion && !hasFailedSection
         && shouldShowDesignSetup(project, activeSpine);
 
     // Idea + clarification text feeding the rule-based preset recommendation.

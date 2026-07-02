@@ -476,8 +476,11 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       PRD run is untouched; the step is purely a view swap, so generation never
       waits on the choice). Gating is the pure, unit-tested
       `shouldShowDesignSetup` (`src/lib/designSetup.ts`): never for legacy
-      projects (no flag), the demo, blocked spines, or failed runs (the error
-      card + Try Again must stay reachable). The step shows static
+      projects (no flag), the demo, blocked spines, or failed runs — full
+      (`generationError`) *and* partial (`generationMeta.failedSections`;
+      plus the transient `hasFailedSection` guard in `ProjectWorkspace`) —
+      because the error card / incomplete-PRD banner and their retry
+      affordances must stay reachable. The step shows static
       `previewTokens`-driven preview cards (no AI/image calls), a rule-based
       **Recommended** badge (`src/lib/designPresetRecommendation.ts` — keyword
       scoring over idea + clarification answers, `saas_minimal` fallback), and

@@ -14,7 +14,9 @@ import { DEMO_PROJECT_ID } from '../data/demoProject';
  * the background, and until the user picks or skips even if the PRD finishes
  * first. It never shows for legacy projects (no flag → finalize-edge gate
  * keeps its original behavior), the demo, blocked spines, or a spine whose
- * generation failed (the error card + Try Again must stay reachable).
+ * generation failed — fully (generationError) or partially (persisted
+ * generationMeta.failedSections) — because the error card / incomplete-PRD
+ * banner and their Try Again / Run again affordances must stay reachable.
  */
 export function shouldShowDesignSetup(
     project: Project | undefined,
@@ -26,6 +28,13 @@ export function shouldShowDesignSetup(
     if (project.designSystemPreset) return false;
     if (spine.safetyReview?.status === 'blocked') return false;
     if (spine.generationError) return false;
+    // A partial-failure run settles WITHOUT a generationError: the pipeline
+    // returns a partial PRD and records the failed section ids instead. The
+    // PRD view owns the recovery UI for that state (the amber incomplete-PRD
+    // banner with per-section "Run again"), so the setup step must yield —
+    // otherwise it would claim the PRD is ready and hide recovery until the
+    // user makes an unrelated design choice.
+    if (spine.generationMeta?.failedSections?.length) return false;
     // Clarification questions come first; the design step takes over the
     // moment the preflight session completes (PRD generation kicks off then).
     const preflight = spine.preflightSession;

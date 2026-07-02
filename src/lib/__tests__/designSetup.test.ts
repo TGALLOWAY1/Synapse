@@ -93,6 +93,25 @@ describe('shouldShowDesignSetup', () => {
         expect(shouldShowDesignSetup(baseProject(), spine)).toBe(false);
     });
 
+    it('yields to the incomplete-PRD banner on a partial-failure run', () => {
+        // Some sections failed but the pipeline returned a partial PRD — no
+        // generationError is set; the failure lives in generationMeta. The PRD
+        // view owns the recovery UI (per-section "Run again"), so the setup
+        // step must not cover it.
+        const meta = { passes: [], totalMs: 100, revised: false, schemaVersion: 2 };
+        const spine = baseSpine({
+            structuredPRD: fakePrd,
+            generationMeta: { ...meta, failedSections: ['ux_design'] },
+        });
+        expect(shouldShowDesignSetup(baseProject(), spine)).toBe(false);
+        // An empty failed list is a clean run — the step shows normally.
+        const cleanSpine = baseSpine({
+            structuredPRD: fakePrd,
+            generationMeta: { ...meta, failedSections: [] },
+        });
+        expect(shouldShowDesignSetup(baseProject(), cleanSpine)).toBe(true);
+    });
+
     it('yields to the error card when generation failed', () => {
         const spine = baseSpine({
             generationError: { message: 'boom', category: 'network', timestamp: 1 },
