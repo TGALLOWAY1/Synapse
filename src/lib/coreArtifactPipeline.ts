@@ -80,6 +80,22 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
 export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
     CORE_ARTIFACT_PIPELINE.slice().sort((a, b) => a.displayOrder - b.displayOrder);
 
+// Subtypes that are still *generated* (they remain in CORE_ARTIFACT_PIPELINE and
+// MOCKUP_DEPENDENCIES so downstream consumers like mockups keep working) but are
+// **hidden from the assets list** — no hard dependents, not useful to surface
+// directly right now. This is the single source of truth for "hidden": it drives
+// the sidebar omission (ArtifactWorkspace.buildSlotMetas), the finalize readiness
+// gate (ProjectWorkspace.assetsReady), and the auto-resume decision
+// (artifactJobController.resumeIfNeeded). A hidden artifact must never gate
+// user-facing readiness or trigger an invisible retry loop, since the user has no
+// row to see its status or retry it. See docs/backlog/BACKLOG.md §6.
+export const HIDDEN_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArtifactSubtype>([
+    'component_inventory',
+]);
+
+export const isHiddenArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
+    HIDDEN_ARTIFACT_SUBTYPES.has(subtype);
+
 /**
  * Group the pipeline into dependency layers. Items in the same layer have no
  * dependency on each other and may be generated in parallel. Layers must run

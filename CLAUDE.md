@@ -875,12 +875,28 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 The artifact sidebar is organized into four workflow-named sections —
 **Project Foundation** (PRD), **UX & Design** (User Flows, Screen Inventory,
-Mockups, UI Components, Design System), **Architecture** (Data Model), and
+Mockups, Design System), **Architecture** (Data Model), and
 **Development** (Developer Prompts, Build Plan) — driven by `ARTIFACT_GROUPS` in
 `ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
-per-artifact model overrides keep working. `title`/`description` in
+per-artifact model overrides keep working. **`component_inventory` (UI Components)
+is a *hidden* artifact** — no hard dependents, not useful to surface directly
+right now, so it is hidden from the assets list but **still generates** (it stays
+in `CORE_ARTIFACT_PIPELINE` and `MOCKUP_DEPENDENCIES`; mockups softly consume it
+to tag per-screen `componentRefs`). **`HIDDEN_ARTIFACT_SUBTYPES` /
+`isHiddenArtifactSubtype` in `coreArtifactPipeline.ts` is the single source of
+truth for "hidden"** and drives three things: (1) `buildSlotMetas` drops it so it
+renders no sidebar/mobile-header/auto-open row (it may stay listed in
+`ARTIFACT_GROUPS.items`; the filter removes it); (2) `ProjectWorkspace.assetsReady`
+excludes hidden subtypes so a hidden slot erroring can't strand the finalize
+success modal on "assets are being created" (the user has no row to see/retry it);
+(3) `artifactJobController.resumeIfNeeded` only auto-wakes for *visible* pending
+slots so an errored hidden slot isn't retried invisibly on every remount — but
+`startAll` still includes hidden slots in its pending set, so they're best-effort
+generated alongside visible ones. A hidden artifact must never gate readiness or
+be the sole reason a run resumes. To re-expose one, remove it from
+`HIDDEN_ARTIFACT_SUBTYPES`. See `docs/backlog/BACKLOG.md` §6. `title`/`description` in
 `CORE_ARTIFACT_PIPELINE` are display-only labels that may be renamed freely; the
 sidebar's iteration order (and the mobile-header / auto-open order)
 all derive from `ARTIFACT_GROUPS`, not `displayOrder`. There is no

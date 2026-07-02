@@ -16,6 +16,7 @@ import {
     CORE_ARTIFACT_PIPELINE,
     buildDependencyLayers,
     getArtifactMeta,
+    isHiddenArtifactSubtype,
 } from '../coreArtifactPipeline';
 import { isAbortError } from '../concurrency';
 import { getStrongModel } from '../geminiClient';
@@ -522,6 +523,14 @@ function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
     return ALL_SLOT_KEYS.filter(k => !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
 }
 
+// A slot is "hidden" when its subtype is hidden from the assets list. 'mockup'
+// is always visible. Hidden slots still generate (startAll includes them), but
+// they must never be the *reason* auto-resume wakes a run — the user has no row
+// to see or retry them, so retrying an errored hidden slot on every remount is
+// invisible churn. resumeIfNeeded therefore gates on visible pending slots only.
+const isHiddenSlot = (slot: ArtifactSlotKey): boolean =>
+    slot !== 'mockup' && isHiddenArtifactSubtype(slot);
+
 export const artifactJobController = {
     isActive(projectId: string): boolean {
         const run = runs.get(projectId);
@@ -654,7 +663,13 @@ export const artifactJobController = {
      */
     resumeIfNeeded(args: StartArgs): void {
         if (this.isActive(args.projectId)) return;
-        const pending = pendingSlotsForSpine(args);
+        // Only auto-wake for *visible* pending slots. A hidden slot that errored
+        // stays pending forever (no version), and without this filter every
+        // workspace remount would spin up a run just to retry it — invisibly,
+        // with no user-facing status or retry affordance. When a visible slot is
+        // pending, startAll still includes the hidden slot in its own pending
+        // set, so hidden artifacts are best-effort regenerated alongside.
+        const pending = pendingSlotsForSpine(args).filter(k => !isHiddenSlot(k));
         if (pending.length === 0) return;
         this.startAll(args);
     },

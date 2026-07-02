@@ -1,8 +1,10 @@
 import { describe, it, expect } from 'vitest';
 import {
     CORE_ARTIFACT_PIPELINE,
+    HIDDEN_ARTIFACT_SUBTYPES,
     buildDependencyLayers,
     getArtifactMeta,
+    isHiddenArtifactSubtype,
 } from '../coreArtifactPipeline';
 
 describe('coreArtifactPipeline', () => {
@@ -40,6 +42,34 @@ describe('coreArtifactPipeline', () => {
     it('depth: <= 2 sequential layers so the worst-case waiter is one hop deep', () => {
         const layers = buildDependencyLayers();
         expect(layers.length).toBeLessThanOrEqual(2);
+    });
+
+    it('hidden artifacts are still in the pipeline so they keep generating', () => {
+        // The whole point of "hidden" is display-only: component_inventory is
+        // hidden from the assets list but MUST remain generated (mockups consume
+        // it). If a hidden subtype ever leaves the pipeline, mockup component
+        // tagging silently breaks — catch that here.
+        const subtypes = new Set(CORE_ARTIFACT_PIPELINE.map(m => m.subtype));
+        for (const hidden of HIDDEN_ARTIFACT_SUBTYPES) {
+            expect(subtypes.has(hidden)).toBe(true);
+        }
+    });
+
+    it('isHiddenArtifactSubtype hides component_inventory and nothing else visible', () => {
+        expect(isHiddenArtifactSubtype('component_inventory')).toBe(true);
+        expect(isHiddenArtifactSubtype('screen_inventory')).toBe(false);
+        expect(isHiddenArtifactSubtype('design_system')).toBe(false);
+    });
+
+    it('no hidden artifact is a hard dependency of a visible one', () => {
+        // A hidden artifact must not gate a visible one — otherwise hiding it
+        // would strand a visible artifact whose upstream never appears.
+        for (const meta of CORE_ARTIFACT_PIPELINE) {
+            if (isHiddenArtifactSubtype(meta.subtype)) continue;
+            for (const dep of meta.dependsOn) {
+                expect(isHiddenArtifactSubtype(dep)).toBe(false);
+            }
+        }
     });
 
     it('buildDependencyLayers throws on an unsatisfiable graph', () => {
