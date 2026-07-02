@@ -392,6 +392,16 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     merged deterministically (`prdSectionMerge.ts`, disjoint top-level fields)
     and markdown is rendered via `prdMarkdownRenderer.ts`. Do **not** re-add
     edges to sequence sections by document position — only by real data flow.
+    **PRD reading order ≠ generation (DAG) order.** The human/agent-facing
+    section order is a fixed logical flow (Product Overview → Target Users →
+    MVP Scope → Core Features → UX → Success Metrics → Risks → Technical
+    Architecture → Data Model → State Machines → NFRs → reference appendix)
+    defined in **two mirrored renderers that must stay in sync**:
+    `prdMarkdownRenderer.renderPremiumMarkdown` (export/`responseText`) and
+    `StructuredPRDView`/`PremiumSections` (in-app). Reordering is
+    presentation-only and safe — downstream artifacts/mockups consume the
+    `StructuredPRD` **object by field**, never this render order — but if you
+    change one renderer's section order, change the other to match.
     The legacy multi-pass scoring + revision passes were removed — old projects
     in localStorage retain their saved `qualityScores`, but no new generation
     writes them.

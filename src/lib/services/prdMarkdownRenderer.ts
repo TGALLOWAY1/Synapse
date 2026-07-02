@@ -304,12 +304,25 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         }
     }
 
+    // ── Section order is a logical reading flow (see StructuredPRDView, which
+    // mirrors it): Product Overview → Target Users → MVP Scope → Features →
+    // UX → Metrics → Risks → Technical Architecture → Data Model → State
+    // Machines → NFRs → reference appendix. This ordering is presentation-only;
+    // downstream artifacts consume the StructuredPRD object by field, not this
+    // markdown, so blocks may be reordered freely without affecting generation.
+
+    // ── Product Overview ────────────────────────────────────────────────
     // Vision (always present in legacy spec)
     lines.push('## Vision');
     lines.push(prd.vision);
     lines.push('');
 
-    // Product Thesis
+    // Core Problem
+    lines.push('## Core Problem');
+    lines.push(prd.coreProblem);
+    lines.push('');
+
+    // Product Thesis (the "why this / why now / differentiation" solution rationale)
     if (prd.productThesis) {
         lines.push('## Product Thesis');
         lines.push(`**Why this should exist:** ${prd.productThesis.whyExist}`);
@@ -328,7 +341,14 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // Target Users + JTBD
+    // Principles
+    if (prd.principles?.length) {
+        lines.push('## Product Principles');
+        renderPrinciples(prd.principles).forEach(l => lines.push(l));
+        lines.push('');
+    }
+
+    // ── Target Users ────────────────────────────────────────────────────
     if (prd.jtbd?.length) {
         lines.push('## Target Users & Jobs-to-be-Done');
         renderJtbdTable(prd.jtbd).forEach(l => lines.push(l));
@@ -339,31 +359,29 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // Core Problem
-    lines.push('## Core Problem');
-    lines.push(prd.coreProblem);
-    lines.push('');
-
-    // Principles
-    if (prd.principles?.length) {
-        lines.push('## Product Principles');
-        renderPrinciples(prd.principles).forEach(l => lines.push(l));
+    // ── MVP Scope (what ships first — placed before the full feature detail) ─
+    if (prd.mvpScope) {
+        lines.push('## MVP Scope');
+        if (prd.mvpScope.rationale) {
+            lines.push(`> [!DECISION] ${prd.mvpScope.rationale}`);
+            lines.push('');
+        }
+        lines.push('**MVP — ship first:**');
+        prd.mvpScope.mvp.forEach(i => lines.push(`- \`[MVP]\` ${i}`));
+        if (prd.mvpScope.v1?.length) {
+            lines.push('');
+            lines.push('**V1 — soon after launch:**');
+            prd.mvpScope.v1.forEach(i => lines.push(`- \`[V1]\` ${i}`));
+        }
+        if (prd.mvpScope.later?.length) {
+            lines.push('');
+            lines.push('**Later — defer:**');
+            prd.mvpScope.later.forEach(i => lines.push(`- \`[Later]\` ${i}`));
+        }
         lines.push('');
     }
 
-    // User Loops
-    if (prd.userLoops?.length) {
-        lines.push('## Core User Loops');
-        renderUserLoops(prd.userLoops).forEach(l => lines.push(l));
-        lines.push('');
-    }
-
-    // UX Architecture
-    if (prd.uxPages?.length) {
-        lines.push('## UX Architecture');
-        renderUxPages(prd.uxPages).forEach(l => lines.push(l));
-    }
-
+    // ── Core Features ───────────────────────────────────────────────────
     // Feature Systems
     if (prd.featureSystems?.length) {
         lines.push('## Feature Systems');
@@ -386,6 +404,53 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
     lines.push('## Detailed Features');
     prd.features.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
 
+    // ── User Experience ─────────────────────────────────────────────────
+    // UX Architecture
+    if (prd.uxPages?.length) {
+        lines.push('## UX Architecture');
+        renderUxPages(prd.uxPages).forEach(l => lines.push(l));
+    }
+
+    // User Loops
+    if (prd.userLoops?.length) {
+        lines.push('## Core User Loops');
+        renderUserLoops(prd.userLoops).forEach(l => lines.push(l));
+        lines.push('');
+    }
+
+    // ── Success Metrics ─────────────────────────────────────────────────
+    if (prd.successMetrics?.length) {
+        lines.push('## Success Metrics');
+        renderMetrics(prd.successMetrics).forEach(l => lines.push(l));
+        lines.push('');
+    }
+
+    // ── Risks ───────────────────────────────────────────────────────────
+    if (prd.risksDetailed?.length) {
+        lines.push('## Risks');
+        renderRisksDetailed(prd.risksDetailed).forEach(l => lines.push(l));
+        lines.push('');
+    } else if (prd.risks?.length) {
+        lines.push('## Risks');
+        prd.risks.forEach(r => lines.push(`- ${r}`));
+        lines.push('');
+    }
+
+    // ── Technical Architecture ──────────────────────────────────────────
+    lines.push('## Architecture');
+    lines.push(prd.architecture);
+    lines.push('');
+    if (prd.architectureFlows?.length) {
+        lines.push('### Example Flows');
+        renderArchFlows(prd.architectureFlows).forEach(l => lines.push(l));
+    }
+
+    // Roles
+    if (prd.roles?.length) {
+        lines.push('## Permissions & Roles');
+        renderRoles(prd.roles).forEach(l => lines.push(l));
+    }
+
     // Data Model
     if (prd.richDataModel?.entities?.length) {
         lines.push('## Data Model');
@@ -398,21 +463,6 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         prd.stateMachines.forEach(m => renderStateMachine(m).forEach(l => lines.push(l)));
     }
 
-    // Roles
-    if (prd.roles?.length) {
-        lines.push('## Permissions & Roles');
-        renderRoles(prd.roles).forEach(l => lines.push(l));
-    }
-
-    // Architecture
-    lines.push('## Architecture');
-    lines.push(prd.architecture);
-    lines.push('');
-    if (prd.architectureFlows?.length) {
-        lines.push('### Example Flows');
-        renderArchFlows(prd.architectureFlows).forEach(l => lines.push(l));
-    }
-
     // NFRs
     if (prd.nonFunctionalRequirements?.length) {
         lines.push('## Non-Functional Requirements');
@@ -420,46 +470,7 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // Risks
-    if (prd.risksDetailed?.length) {
-        lines.push('## Risks');
-        renderRisksDetailed(prd.risksDetailed).forEach(l => lines.push(l));
-        lines.push('');
-    } else if (prd.risks?.length) {
-        lines.push('## Risks');
-        prd.risks.forEach(r => lines.push(`- ${r}`));
-        lines.push('');
-    }
-
-    // MVP Scope
-    if (prd.mvpScope) {
-        lines.push('## MVP Scope');
-        if (prd.mvpScope.rationale) {
-            lines.push(`> [!DECISION] ${prd.mvpScope.rationale}`);
-            lines.push('');
-        }
-        lines.push('**MVP — ship first:**');
-        prd.mvpScope.mvp.forEach(i => lines.push(`- \`[MVP]\` ${i}`));
-        if (prd.mvpScope.v1?.length) {
-            lines.push('');
-            lines.push('**V1 — soon after launch:**');
-            prd.mvpScope.v1.forEach(i => lines.push(`- \`[V1]\` ${i}`));
-        }
-        if (prd.mvpScope.later?.length) {
-            lines.push('');
-            lines.push('**Later — defer:**');
-            prd.mvpScope.later.forEach(i => lines.push(`- \`[Later]\` ${i}`));
-        }
-        lines.push('');
-    }
-
-    // Success Metrics
-    if (prd.successMetrics?.length) {
-        lines.push('## Success Metrics');
-        renderMetrics(prd.successMetrics).forEach(l => lines.push(l));
-        lines.push('');
-    }
-
+    // ── Appendix / Reference Material ───────────────────────────────────
     // Constraints
     if (prd.constraints?.length) {
         lines.push('## Constraints');
@@ -487,7 +498,7 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // Assumptions — last so they're easy to find
+    // Assumptions & Open Questions — last so they're easy to find
     if (prd.assumptions?.length) {
         lines.push('## Assumptions');
         prd.assumptions.forEach(a => {
