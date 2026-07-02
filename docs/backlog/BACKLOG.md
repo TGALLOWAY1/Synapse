@@ -304,19 +304,28 @@ generated/stored/rendered.
 was **hidden from the assets list** because it has no hard dependents and isn't
 useful to surface directly right now.
 
-- **What changed.** `component_inventory` was removed from `ARTIFACT_GROUPS` in
-  `src/components/ArtifactWorkspace.tsx`, which drives the sidebar, mobile
-  header, auto-open order, and slot counts. Users no longer see or create it
-  directly.
+- **What changed.** `component_inventory` is now a **hidden artifact**, declared
+  in `HIDDEN_ARTIFACT_SUBTYPES` (`src/lib/coreArtifactPipeline.ts`) — the single
+  source of truth for "generated but not surfaced." That set drives: the sidebar
+  omission (`ArtifactWorkspace.buildSlotMetas` filters it out, so no row / mobile
+  header / auto-open / count), the finalize readiness gate
+  (`ProjectWorkspace.assetsReady` excludes hidden subtypes), and the auto-resume
+  decision (`artifactJobController.resumeIfNeeded` only wakes for visible pending
+  slots). Users no longer see or create it directly.
 - **What deliberately did *not* change.** It is **still generated** — it remains
-  in `CORE_ARTIFACT_PIPELINE` (`src/lib/coreArtifactPipeline.ts`) and in
-  `MOCKUP_DEPENDENCIES` (`src/lib/services/artifactJobController.ts`), because
-  **mockups softly consume it**: `generateMockup` uses it to tag which reusable
-  components appear on each screen (`componentRefs`), which feed the gpt-image
-  mockup prompts (`mockupImageService`). It degrades gracefully when absent, but
-  keeping it generating preserves richer mockup prompts. `assetsReady` and
-  staleness checks (which iterate `CORE_ARTIFACT_DISPLAY_ORDER`) still resolve
-  because generation is unchanged.
+  in `CORE_ARTIFACT_PIPELINE` and in `MOCKUP_DEPENDENCIES`
+  (`src/lib/services/artifactJobController.ts`), because **mockups softly consume
+  it**: `generateMockup` uses it to tag which reusable components appear on each
+  screen (`componentRefs`), which feed the gpt-image mockup prompts
+  (`mockupImageService`). It degrades gracefully when absent, but keeping it
+  generating preserves richer mockup prompts. `startAll` still includes it in its
+  pending set so it's best-effort regenerated alongside visible artifacts.
+- **Why the readiness/resume gates matter (Codex review, PR #189).** Because a
+  hidden artifact has no visible row, it must never *gate* user-facing state: if
+  `component_inventory` errored while visible assets finished, an un-excluded
+  `assetsReady` would leave the success modal stuck on "assets are being
+  created," and an un-filtered `resumeIfNeeded` would silently retry it on every
+  remount with no status/retry affordance. Both gates now exclude hidden slots.
 
 ### Revisit checklist
 
@@ -330,8 +339,10 @@ useful to surface directly right now.
   the schema (`componentInventorySchema`), the parser (`componentInventoryParse.ts`),
   model routing (`artifactModelSettings.ts`), the Design System renderer's
   "Downstream Usage Status" reference, and the README / tour mentions.
-- [ ] **If re-exposing:** restore the `'component_inventory'` entry in
-  `ARTIFACT_GROUPS` and re-add the README assets bullet + mermaid node.
+- [ ] **If re-exposing:** remove `'component_inventory'` from
+  `HIDDEN_ARTIFACT_SUBTYPES` (it already sits in `ARTIFACT_GROUPS`, so the row,
+  readiness gate, and auto-resume all come back automatically) and re-add the
+  README assets bullet + mermaid node.
 
 ---
 

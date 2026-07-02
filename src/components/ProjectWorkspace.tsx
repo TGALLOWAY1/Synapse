@@ -28,7 +28,7 @@ import { PreflightView } from './preflight/PreflightView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
-import { CORE_ARTIFACT_DISPLAY_ORDER } from '../lib/coreArtifactPipeline';
+import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
@@ -439,9 +439,15 @@ export function ProjectWorkspace() {
     // modal's "ready" vs "being created" copy. Cheap presence check; safe to
     // run each render.
     const assetsReady = !!activeSpine?.structuredPRD && (() => {
-        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER.every(meta =>
-            getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
-        );
+        // Hidden artifacts (generated for downstream use but not surfaced in the
+        // assets list) must not gate readiness — the user has no row to see or
+        // retry them, so a hidden slot erroring would otherwise leave the
+        // finalize success modal stuck reporting "assets are being created".
+        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER
+            .filter(meta => !isHiddenArtifactSubtype(meta.subtype))
+            .every(meta =>
+                getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
+            );
         const mockupReady = getArtifacts(projectId, 'mockup').some(a => a.currentVersionId);
         return coreReady && mockupReady;
     })();

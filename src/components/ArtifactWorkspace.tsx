@@ -9,7 +9,7 @@ import remarkGfm from 'remark-gfm';
 import { useProjectStore } from '../store/projectStore';
 import { useIsMobile } from '../lib/useIsMobile';
 import { artifactJobController } from '../lib/services/artifactJobController';
-import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta } from '../lib/coreArtifactPipeline';
+import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { ArtifactContentRenderer } from './renderers';
 import { StructuredPRDView } from './StructuredPRDView';
 import { MockupViewer } from './mockups/MockupViewer';
@@ -75,17 +75,11 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
         id: 'design',
         title: 'UX & Design',
         icon: Layers,
-        // NOTE: 'component_inventory' (UI Components) is intentionally hidden
-        // from the assets list — no artifact hard-depends on it and it isn't
-        // useful to surface directly right now. It is deliberately NOT removed
-        // from CORE_ARTIFACT_PIPELINE: mockups still consume it (see
-        // MOCKUP_DEPENDENCIES / generateMockup) to tag which components appear
-        // on each screen, so it keeps generating under the hood. Because the
-        // sidebar, mobile header, auto-open order, and slot counts all derive
-        // from ARTIFACT_GROUPS (via buildSlotMetas), dropping it here removes it
-        // from the UI without breaking mockup generation. Revisit before
-        // re-exposing — see docs/backlog/BACKLOG.md ("UI Components artifact").
-        items: ['user_flows', 'screen_inventory', 'mockup', 'design_system'],
+        // 'component_inventory' (UI Components) lives in this group but is hidden
+        // from the assets list at materialization time — see buildSlotMetas and
+        // HIDDEN_ARTIFACT_SUBTYPES. It still generates for mockups; it just
+        // never renders a sidebar row. Revisit — see docs/backlog/BACKLOG.md §6.
+        items: ['user_flows', 'screen_inventory', 'mockup', 'component_inventory', 'design_system'],
     },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
     { id: 'development', title: 'Development', icon: Code2, items: ['prompt_pack', 'implementation_plan'] },
@@ -105,8 +99,14 @@ function buildSlotMetas(): SlotMeta[] {
         };
     }
     // Materialize in the group order so the right rail / counts / mobile
-    // header iterate in the same order the sidebar shows.
-    return ARTIFACT_GROUPS.flatMap(group => group.items.map(key => base[key]));
+    // header iterate in the same order the sidebar shows. Hidden artifact
+    // subtypes (generated for downstream use but not surfaced) are dropped here
+    // so they render no row anywhere in the workspace.
+    return ARTIFACT_GROUPS.flatMap(group =>
+        group.items
+            .filter(key => key === 'prd' || key === 'mockup' || !isHiddenArtifactSubtype(key))
+            .map(key => base[key]),
+    );
 }
 
 function StatusDot({ status }: { status: GenerationStatus }) {
