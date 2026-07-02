@@ -3,7 +3,9 @@ import {
     EMPTY_SCREEN_EXPERIENCE_INDEX,
     buildScreenIndex,
     groupFlowRefsByFlow,
+    readDismissedScreenIssues,
     readScreenEdits,
+    readScreenLinks,
     stepScreenSlug,
 } from '../screenExperience';
 import { parseScreenInventory } from '../screenInventoryNormalize';
@@ -346,6 +348,100 @@ describe('readScreenEdits', () => {
     it('returns the stable empty map for missing/invalid metadata', () => {
         expect(readScreenEdits(undefined)).toBe(readScreenEdits({}));
         expect(readScreenEdits({ screenEdits: 'nope' })).toBe(readScreenEdits(undefined));
+    });
+});
+
+describe('reference validation issues', () => {
+    it('flags screen-looking flow steps that match no screen (grouped per name)', () => {
+        const flows = parseFlows(`### Flow: Broken
+**Goal:** Test.
+**Steps:**
+1. [Onboarding Setup Page] — User starts → System shows setup
+2. [Onboarding Setup Page] — User retries → System shows setup again
+3. [Dashboard] — User lands → System loads
+**Success Outcome:** Done.`);
+        const index = buildScreenIndex(INVENTORY, flows, null);
+        const flowIssues = index.issues.filter(i => i.kind === 'unmatched_flow_step');
+        // Two steps, one missing screen → ONE grouped issue.
+        expect(flowIssues).toHaveLength(1);
+        expect(flowIssues[0].key).toBe('flowstep:onboarding-setup-page');
+        expect(flowIssues[0].message).toContain('Onboarding Setup Page');
+    });
+
+    it('flags unmatched mockup screens as repairable issues', () => {
+        const payload: MockupPayload = {
+            version: 'mockup_spec_v1',
+            title: 'T',
+            summary: 'S',
+            screens: [{ id: 'uuid-x', name: 'Totally Renamed Screen', purpose: 'Drifted.' }],
+        };
+        const index = buildScreenIndex(INVENTORY, [], payload);
+        const issue = index.issues.find(i => i.kind === 'unmatched_mockup_screen');
+        expect(issue?.mockupScreenId).toBe('uuid-x');
+    });
+
+    it('flags name-only mockup matches as legacy (informational) issues', () => {
+        const index = buildScreenIndex(INVENTORY, [], MOCKUP_PAYLOAD);
+        const legacy = index.issues.filter(i => i.kind === 'legacy_name_match');
+        // uuid-1 (Landing Page) and uuid-2 (Dashboard) match by name only.
+        expect(legacy.map(i => i.mockupScreenId).sort()).toEqual(['uuid-1', 'uuid-2']);
+        // The current match is preserved and exposed for one-click pinning.
+        expect(legacy[0].screenId).toBeDefined();
+    });
+
+    it('does not flag sourceScreenId matches as legacy', () => {
+        const payload: MockupPayload = {
+            version: 'mockup_spec_v1',
+            title: 'T',
+            summary: 'S',
+            screens: [{ id: 'uuid-1', name: 'Landing Page', purpose: 'X.', sourceScreenId: 'landing-page' }],
+        };
+        const index = buildScreenIndex(INVENTORY, [], payload);
+        expect(index.issues.filter(i => i.kind === 'legacy_name_match')).toEqual([]);
+    });
+
+    it('emits a slug_collision issue alongside the collisions list', () => {
+        const colliding: ScreenInventoryContent = {
+            sections: [
+                {
+                    title: 'A',
+                    screens: [
+                        { name: 'Sign-In', priority: 'P0', purpose: 'First.' },
+                        { name: 'Sign In', priority: 'P1', purpose: 'Second.' },
+                    ],
+                },
+            ],
+        };
+        const index = buildScreenIndex(colliding, [], null);
+        const issue = index.issues.find(i => i.kind === 'slug_collision');
+        expect(issue?.key).toBe('collision:sign-in');
+        expect(issue?.message).toContain('Sign-In');
+    });
+});
+
+describe('screen links (relink repairs)', () => {
+    it('an explicit link outranks sourceScreenId and name matching', () => {
+        const payload: MockupPayload = {
+            version: 'mockup_spec_v1',
+            title: 'T',
+            summary: 'S',
+            screens: [
+                // Name matches "Dashboard", but the user linked it to Settings.
+                { id: 'uuid-7', name: 'Dashboard', purpose: 'X.' },
+            ],
+        };
+        const index = buildScreenIndex(INVENTORY, [], payload, {}, { 'uuid-7': 'settings' });
+        expect(index.byId.get('settings')?.mockupScreen?.id).toBe('uuid-7');
+        expect(index.byId.get('dashboard')?.mockupScreen).toBeUndefined();
+        // A linked match is neither legacy nor unmatched.
+        expect(index.issues.filter(i => i.mockupScreenId === 'uuid-7')).toEqual([]);
+    });
+
+    it('readScreenLinks / readDismissedScreenIssues tolerate junk and stay stable when empty', () => {
+        expect(readScreenLinks({ screenLinks: { a: 'scr-1', b: 42, c: '' } })).toEqual({ a: 'scr-1' });
+        expect(readScreenLinks(undefined)).toBe(readScreenLinks({ screenLinks: 'junk' }));
+        expect(readDismissedScreenIssues({ dismissedScreenIssues: ['k1', 7, ''] }).has('k1')).toBe(true);
+        expect(readDismissedScreenIssues(undefined)).toBe(readDismissedScreenIssues({}));
     });
 });
 

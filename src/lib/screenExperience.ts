@@ -27,6 +27,7 @@ import type {
     ParsedFlow,
     ParsedStep,
 } from '../components/renderers/userFlows/types';
+import { inferNodeKind } from '../components/renderers/userFlows/journeyNode';
 
 /**
  * User edit overlay for one screen, keyed by the canonical screen id and
@@ -136,6 +137,64 @@ export interface ScreenSlugCollision {
     names: string[];
 }
 
+// --- Reference validation ----------------------------------------------------
+
+export type ScreenReferenceIssueKind =
+    /** A flow step that *looks like* a screen (journey node kind `screen`)
+     * references a name no canonical screen matches. */
+    | 'unmatched_flow_step'
+    /** A mockup screen matched no canonical screen (renamed/regenerated
+     * inventory, or drifted mockup payload). Repairable via relink. */
+    | 'unmatched_mockup_screen'
+    /** Two screens collapse to one slug — name-based references are
+     * ambiguous between them. */
+    | 'slug_collision'
+    /** A mockup screen matched by name only (no stable id / explicit link) —
+     * works today, but a future rename would detach it. Informational. */
+    | 'legacy_name_match';
+
+export interface ScreenReferenceIssue {
+    /** Stable key for dismissal persistence. */
+    key: string;
+    kind: ScreenReferenceIssueKind;
+    message: string;
+    /** The mockup screen involved (set for mockup-related kinds) — relink target. */
+    mockupScreenId?: string;
+    /** The canonical screen involved, when one exists. */
+    screenId?: string;
+}
+
+/**
+ * Explicit mockup-screen → canonical-screen repairs, stored on the mockup
+ * ArtifactVersion as `metadata.screenLinks` (mockupScreenId → screenId).
+ * Highest-priority join key — survives both renames and name drift.
+ */
+export function readScreenLinks(metadata: Record<string, unknown> | undefined): Record<string, string> {
+    const raw = metadata?.screenLinks;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return EMPTY_SCREEN_LINKS;
+    const out: Record<string, string> = {};
+    for (const [k, v] of Object.entries(raw as Record<string, unknown>)) {
+        if (typeof v === 'string' && v) out[k] = v;
+    }
+    return Object.keys(out).length > 0 ? out : EMPTY_SCREEN_LINKS;
+}
+
+export const EMPTY_SCREEN_LINKS: Record<string, string> = {};
+
+/**
+ * Dismissed validation-issue keys, stored on the screen_inventory
+ * ArtifactVersion as `metadata.dismissedScreenIssues` (the Screens view's
+ * home artifact). Per-version, like every other overlay.
+ */
+export function readDismissedScreenIssues(metadata: Record<string, unknown> | undefined): ReadonlySet<string> {
+    const raw = metadata?.dismissedScreenIssues;
+    if (!Array.isArray(raw)) return EMPTY_DISMISSED_ISSUES;
+    const keys = raw.filter((k): k is string => typeof k === 'string' && k.length > 0);
+    return keys.length > 0 ? new Set(keys) : EMPTY_DISMISSED_ISSUES;
+}
+
+export const EMPTY_DISMISSED_ISSUES: ReadonlySet<string> = new Set();
+
 export interface ScreenExperienceIndex {
     items: ScreenExperienceItem[];
     /** Canonical lookup — id is the stable, rename-safe key. */
@@ -147,6 +206,9 @@ export interface ScreenExperienceIndex {
     collisions: ScreenSlugCollision[];
     /** Slugs with a canonical screen — used to gate flow-node navigation. */
     availableSlugs: ReadonlySet<string>;
+    /** Non-blocking reference-validation findings (see kinds above). Full,
+     * undismissed set — callers filter against readDismissedScreenIssues. */
+    issues: ScreenReferenceIssue[];
 }
 
 // Stable empty index. Returned for every "no inventory" case so consumers
@@ -159,6 +221,7 @@ export const EMPTY_SCREEN_EXPERIENCE_INDEX: ScreenExperienceIndex = {
     sections: [],
     collisions: [],
     availableSlugs: new Set(),
+    issues: [],
 };
 
 /** Strip surrounding markdown backticks (step titles are often `` `Name` ``). */
@@ -189,12 +252,15 @@ export function stepScreenSlug(step: Pick<ParsedStep, 'title'>): string | null {
  * colliding names are surfaced in `collisions` for the UI to warn about.
  * `edits` is the per-version user overlay (`readScreenEdits`) — it changes
  * only what views display; every join key stays derived from stored content.
+ * `screenLinks` (`readScreenLinks`) are explicit user repairs mapping a
+ * mockup screen id to a canonical screen id — the highest-priority match.
  */
 export function buildScreenIndex(
     inventory: ScreenInventoryContent | null,
     flows: readonly ParsedFlow[],
     mockupPayload: MockupPayload | null,
     edits: ScreenEditsMap = EMPTY_SCREEN_EDITS,
+    screenLinks: Record<string, string> = EMPTY_SCREEN_LINKS,
 ): ScreenExperienceIndex {
     if (!inventory || !inventory.sections || inventory.sections.length === 0) {
         return EMPTY_SCREEN_EXPERIENCE_INDEX;
@@ -254,37 +320,94 @@ export function buildScreenIndex(
 
     if (items.length === 0) return EMPTY_SCREEN_EXPERIENCE_INDEX;
 
+    const issues: ScreenReferenceIssue[] = [];
+
     // Join flow steps by exact slug of the parsed step title. Substring /
     // fuzzy matching is deliberately avoided: "Sign In" must not match
     // "Sign In Confirmation". (Flows are markdown and only know names.)
+    // Screen-looking steps that match nothing become validation issues —
+    // grouped per missing name so ten steps don't produce ten warnings.
+    const unmatchedFlowSlugs = new Map<string, string>(); // slug → display name
     flows.forEach((flow, flowIndex) => {
         for (const step of flow.steps) {
             const slug = stepScreenSlug(step);
             if (!slug) continue;
             const item = bySlug.get(slug);
-            if (!item) continue;
-            item.relatedFlows.push({ flow, flowIndex, step, stepIndex: step.index });
+            if (item) {
+                item.relatedFlows.push({ flow, flowIndex, step, stepIndex: step.index });
+            } else if (inferNodeKind(step) === 'screen' && step.title) {
+                unmatchedFlowSlugs.set(slug, step.title);
+            }
         }
     });
+    for (const [slug, name] of unmatchedFlowSlugs) {
+        issues.push({
+            key: `flowstep:${slug}`,
+            kind: 'unmatched_flow_step',
+            message: `Flow step "${name}" could not be matched to a screen.`,
+        });
+    }
 
-    // Join mockup screens: stable `sourceScreenId` wins (rename-safe, stamped
-    // by generateMockup on new payloads); legacy payloads fall back to
-    // slugified-name matching. A mockup screen that matches nothing is not
-    // surfaced here (it stays visible in the legacy mockup viewer).
+    // Join mockup screens in three priority passes so an explicit repair or
+    // stable id always beats a coincidental name match by another screen:
+    //   1. explicit user link (metadata.screenLinks — a persisted repair),
+    //   2. stable sourceScreenId (stamped on newly generated payloads),
+    //   3. slugified name (legacy fallback — flagged as such).
+    // A mockup screen that matches nothing becomes a repairable issue (it
+    // stays visible in the legacy mockup viewer either way).
     if (mockupPayload) {
+        const unmatched: MockupScreen[] = [];
+        const attach = (item: ScreenExperienceItem | undefined, mockupScreen: MockupScreen): boolean => {
+            if (!item || item.mockupScreen) return false;
+            item.mockupScreen = mockupScreen;
+            return true;
+        };
+        const pending: MockupScreen[] = [];
         for (const mockupScreen of mockupPayload.screens) {
-            const byStableId = mockupScreen.sourceScreenId
-                ? byId.get(mockupScreen.sourceScreenId)
-                : undefined;
-            const item = byStableId
-                ?? (mockupScreen.name ? bySlug.get(slugifyScreenName(mockupScreen.name)) : undefined);
-            if (item && !item.mockupScreen) item.mockupScreen = mockupScreen;
+            const linked = screenLinks[mockupScreen.id];
+            if (linked && attach(byId.get(linked), mockupScreen)) continue;
+            pending.push(mockupScreen);
+        }
+        const nameFallback: MockupScreen[] = [];
+        for (const mockupScreen of pending) {
+            if (mockupScreen.sourceScreenId && attach(byId.get(mockupScreen.sourceScreenId), mockupScreen)) continue;
+            nameFallback.push(mockupScreen);
+        }
+        for (const mockupScreen of nameFallback) {
+            const item = mockupScreen.name ? bySlug.get(slugifyScreenName(mockupScreen.name)) : undefined;
+            if (attach(item, mockupScreen)) {
+                issues.push({
+                    key: `legacy:${mockupScreen.id}`,
+                    kind: 'legacy_name_match',
+                    message: `Mockup "${mockupScreen.name}" is matched by name only — a rename would detach it. Relink to pin it to its screen.`,
+                    mockupScreenId: mockupScreen.id,
+                    screenId: item?.id,
+                });
+            } else {
+                unmatched.push(mockupScreen);
+            }
+        }
+        for (const mockupScreen of unmatched) {
+            issues.push({
+                key: `mockup:${mockupScreen.id}`,
+                kind: 'unmatched_mockup_screen',
+                message: `Mockup "${mockupScreen.name}" could not be matched to a screen.`,
+                mockupScreenId: mockupScreen.id,
+            });
         }
     }
 
     const collisions: ScreenSlugCollision[] = [];
     for (const [slug, names] of namesBySlug) {
-        if (names.length > 1) collisions.push({ slug, names });
+        if (names.length > 1) {
+            collisions.push({ slug, names });
+            issues.push({
+                key: `collision:${slug}`,
+                kind: 'slug_collision',
+                message: `"${names.join('" and "')}" share the same normalized name — name-based references are ambiguous between them.`,
+                screenId: bySlug.get(slug)?.id,
+            });
+        }
     }
 
     return {
@@ -294,6 +417,7 @@ export function buildScreenIndex(
         sections,
         collisions,
         availableSlugs: new Set(bySlug.keys()),
+        issues,
     };
 }
 

@@ -1023,6 +1023,20 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   only when an OpenAI key exists (keyless → upload sheets). Every consumer of
   a mockup payload in the workspace must read the *effective* payload
   (`mergeExtraScreens(tryParsePayload(v), v.metadata)`).
+- **Reference validation is advisory, never blocking.** `buildScreenIndex`
+  emits `index.issues` (`ScreenReferenceIssue`): `unmatched_flow_step`
+  (screen-kind journey steps matching no screen, grouped per name),
+  `unmatched_mockup_screen`, `slug_collision`, and `legacy_name_match`
+  (mockup matched by name only — works, but rename-fragile). The Screens list
+  renders them in the collapsed `ReferenceWarningsPanel`
+  (`src/components/experience/ReferenceWarningsPanel.tsx`) with two persisted
+  repairs: **Relink/Pin** writes `metadata.screenLinks`
+  (mockupScreenId → canonical screenId) on the **mockup** version — the
+  highest-priority mockup match, above `sourceScreenId` and name — and
+  **Ignore** appends the issue key to `metadata.dismissedScreenIssues` on the
+  **inventory** version. Matching runs in three passes (links →
+  sourceScreenId → name) so an explicit repair always beats a coincidental
+  name match. Rendering must never be gated on validation results.
 - **Status/fallbacks:** the Screens sidebar dot and generation/error states map
   to the **`screen_inventory` slot** (its retry re-runs that slot, since it no
   longer has its own row); the Mockups tab surfaces the `mockup` slot's

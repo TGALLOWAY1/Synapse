@@ -32,8 +32,10 @@ import { hasOpenAIKey } from '../lib/openaiClient';
 import { useMockupImageStore } from '../store/mockupImageStore';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
 import {
-    buildScreenIndex, readScreenEdits, type ScreenMetadataEdit,
+    buildScreenIndex, readScreenEdits, readScreenLinks, readDismissedScreenIssues,
+    type ScreenMetadataEdit,
 } from '../lib/screenExperience';
+import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 import { parseFlows } from './renderers/userFlows/parseFlow';
 import type { ParsedFlow } from './renderers/userFlows/types';
@@ -268,8 +270,38 @@ export function ArtifactWorkspace({
     const screenIndex = useMemo(() => {
         const inventory = invPreferred ? parseScreenInventory(invPreferred.content) : null;
         const flows = flowsPreferred ? parseFlows(flowsPreferred.content) : EMPTY_FLOWS;
-        return buildScreenIndex(inventory, flows, mockupPayload, readScreenEdits(invPreferred?.metadata));
-    }, [invPreferred, flowsPreferred, mockupPayload]);
+        return buildScreenIndex(
+            inventory,
+            flows,
+            mockupPayload,
+            readScreenEdits(invPreferred?.metadata),
+            readScreenLinks(mockupPreferred?.metadata),
+        );
+    }, [invPreferred, flowsPreferred, mockupPayload, mockupPreferred]);
+
+    // Validation issues minus the user's persisted dismissals.
+    const visibleScreenIssues = useMemo(() => {
+        const dismissed = readDismissedScreenIssues(invPreferred?.metadata);
+        return screenIndex.issues.filter(i => !dismissed.has(i.key));
+    }, [screenIndex, invPreferred]);
+
+    // Repair: pin/relink a mockup screen to a canonical screen (persisted on
+    // the mockup version — survives renames and name drift thereafter).
+    const handleRelinkMockupScreen = (mockupScreenId: string, screenId: string) => {
+        if (!mockupArtifact || !mockupPreferred) return;
+        const links = { ...readScreenLinks(mockupPreferred.metadata), [mockupScreenId]: screenId };
+        updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, { screenLinks: links });
+    };
+
+    // Repair: hide a warning (current behavior is kept — nothing else changes).
+    const handleDismissScreenIssue = (issueKey: string) => {
+        if (!invArtifact || !invPreferred) return;
+        const dismissed = new Set(readDismissedScreenIssues(invPreferred.metadata));
+        dismissed.add(issueKey);
+        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, {
+            dismissedScreenIssues: Array.from(dismissed),
+        });
+    };
 
     // Persist (or clear, with null) one screen's metadata edit overlay.
     const handleSaveScreenEdit = (screenId: string, edit: ScreenMetadataEdit | null) => {
@@ -679,6 +711,16 @@ export function ArtifactWorkspace({
                             >
                                 <RefreshCcw size={12} /> Regenerate Mockup
                             </button>
+                        </div>
+                    )}
+                    {visibleScreenIssues.length > 0 && (
+                        <div className="max-w-3xl xl:max-w-5xl mx-auto">
+                            <ReferenceWarningsPanel
+                                issues={visibleScreenIssues}
+                                screenOptions={screenIndex.items.map(i => ({ id: i.id, name: i.screen.name }))}
+                                onRelink={mockupArtifact && mockupPreferred ? handleRelinkMockupScreen : undefined}
+                                onDismiss={invArtifact && invPreferred ? handleDismissScreenIssue : undefined}
+                            />
                         </div>
                     )}
                     <ScreenListView

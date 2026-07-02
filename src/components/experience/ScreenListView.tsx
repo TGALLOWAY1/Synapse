@@ -4,7 +4,7 @@
 // what the other experience artifacts say about each screen (flow-step count,
 // mockup coverage) and click through to the Screen Detail view.
 
-import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Workflow } from 'lucide-react';
+import { AppWindow, ChevronRight, Image as ImageIcon, Workflow } from 'lucide-react';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 
@@ -60,18 +60,9 @@ export function ScreenListView({ index, onSelectScreen, onGenerateMissingMockups
                 )}
             </div>
 
-            {index.collisions.length > 0 && (
-                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <AlertTriangle size={14} className="mt-0.5 shrink-0 text-amber-600" />
-                    <p className="text-xs text-amber-800">
-                        Some screens share the same normalized name
-                        {' '}({index.collisions.map(c => c.names.join(' / ')).join('; ')}).
-                        Only the first of each is listed — consider renaming them in the
-                        Screen Inventory so every screen is distinct.
-                    </p>
-                </div>
-            )}
-
+            {/* Slug collisions and other reference problems surface in the
+                ReferenceWarningsPanel rendered above this list (with repair
+                and dismiss actions), not as a separate banner here. */}
             {index.sections.map((section, sectionIdx) => (
                 <section key={sectionIdx}>
                     <header className="mb-3">
