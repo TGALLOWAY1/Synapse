@@ -13,14 +13,17 @@
 // this component never queries artifacts from the store itself.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
-import { AlertTriangle, ArrowLeft, Image as ImageIcon, Loader2, RefreshCcw, Workflow } from 'lucide-react';
+import {
+    AlertTriangle, ArrowLeft, Image as ImageIcon, Loader2, Pencil, RefreshCcw, RotateCcw, Workflow,
+} from 'lucide-react';
 import type {
-    Feature, GenerationStatus, MockupPayload, MockupSettings,
+    Feature, GenerationStatus, MockupPayload, MockupSettings, ScreenPriority,
 } from '../../types';
 import {
     groupFlowRefsByFlow,
     type ScreenExperienceItem,
     type ScreenFlowGroup,
+    type ScreenMetadataEdit,
 } from '../../lib/screenExperience';
 import { ScreenCard } from '../renderers/ScreenInventoryRenderer';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
@@ -59,16 +62,22 @@ interface Props {
     onRetryMockup?: () => void;
     /** Canonical feature catalog for StepCard feature chips + the drawer. */
     features?: Feature[];
+    /**
+     * Persists a metadata edit overlay for this screen (null clears it back
+     * to the generated content). Absent → the detail view stays read-only.
+     */
+    onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
 }
 
 export function ScreenDetailView({
     item, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mockupStatus, onRetryMockup,
-    features,
+    features, onSaveScreenEdit,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
+    const [editing, setEditing] = useState(false);
 
     // Hydrate the per-screen upload gallery (Overview tab) exactly like the
     // standalone ScreenInventoryRenderer does.
@@ -82,6 +91,8 @@ export function ScreenDetailView({
         () => groupFlowRefsByFlow(item.relatedFlows),
         [item.relatedFlows],
     );
+
+    const renamed = item.isEdited && item.screen.name !== item.baseScreen.name;
 
     return (
         <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-4">
@@ -100,9 +111,19 @@ export function ScreenDetailView({
                         </h2>
                         <p className="text-[11px] uppercase tracking-wide text-neutral-400 mt-0.5">
                             {item.sectionTitle}
+                            {renamed && (
+                                <span className="normal-case tracking-normal text-neutral-400">
+                                    {' '}· generated as &ldquo;{item.baseScreen.name}&rdquo;
+                                </span>
+                            )}
                         </p>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
+                        {item.isEdited && (
+                            <span className="text-[10px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-200 px-1.5 py-0.5 rounded">
+                                Edited
+                            </span>
+                        )}
                         {screen.type && screen.type !== 'screen' && (
                             <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
                                 {screen.type}
@@ -123,7 +144,57 @@ export function ScreenDetailView({
             />
 
             {activeTab === 'overview' && (
-                <ScreenCard screen={screen} imageContext={screenImageContext} />
+                <div className="space-y-3">
+                    {onSaveScreenEdit && !editing && (
+                        <div className="flex items-center justify-end gap-2">
+                            {item.isEdited && (
+                                <button
+                                    type="button"
+                                    onClick={() => onSaveScreenEdit(item.id, null)}
+                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 rounded-md transition"
+                                    title="Discard your edits and show the generated content"
+                                >
+                                    <RotateCcw size={12} /> Reset to generated
+                                </button>
+                            )}
+                            <button
+                                type="button"
+                                onClick={() => setEditing(true)}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                            >
+                                <Pencil size={12} /> Edit details
+                            </button>
+                        </div>
+                    )}
+                    {onSaveScreenEdit && editing ? (
+                        <ScreenEditForm
+                            item={item}
+                            onSave={(edit) => {
+                                onSaveScreenEdit(item.id, edit);
+                                setEditing(false);
+                            }}
+                            onCancel={() => setEditing(false)}
+                        />
+                    ) : (
+                        <>
+                            <ScreenCard
+                                screen={screen}
+                                imageContext={screenImageContext}
+                                imageStorageName={item.baseScreen.name}
+                            />
+                            {item.edit?.notes && (
+                                <div className="bg-violet-50/60 rounded-lg border border-violet-200 p-3">
+                                    <div className="text-[10px] uppercase tracking-wide text-violet-600 mb-1">
+                                        Notes
+                                    </div>
+                                    <p className="text-xs text-neutral-700 whitespace-pre-wrap">
+                                        {item.edit.notes}
+                                    </p>
+                                </div>
+                            )}
+                        </>
+                    )}
+                </div>
             )}
 
             {activeTab === 'flow' && (
@@ -144,6 +215,102 @@ export function ScreenDetailView({
                     onRetryMockup={onRetryMockup}
                 />
             )}
+        </div>
+    );
+}
+
+// --- Overview edit form -------------------------------------------------------
+
+const EDIT_PRIORITIES: ScreenPriority[] = ['P0', 'P1', 'P2', 'P3'];
+
+/**
+ * Minimal, rename-safe metadata editor. Saves an overlay (see
+ * ScreenMetadataEdit) containing only the fields that differ from the stored
+ * generated screen — an overlay equal to the generated content saves as null,
+ * clearing the edit. The generated artifact content is never rewritten.
+ */
+function ScreenEditForm({
+    item, onSave, onCancel,
+}: {
+    item: ScreenExperienceItem;
+    onSave: (edit: ScreenMetadataEdit | null) => void;
+    onCancel: () => void;
+}) {
+    const { screen, baseScreen } = item;
+    const [name, setName] = useState(screen.name);
+    const [purpose, setPurpose] = useState(screen.purpose ?? '');
+    const [userIntent, setUserIntent] = useState(screen.userIntent ?? '');
+    const [priority, setPriority] = useState<ScreenPriority>(stylablePriority(screen.priority));
+    const [notes, setNotes] = useState(item.edit?.notes ?? '');
+
+    const handleSave = () => {
+        const edit: ScreenMetadataEdit = {};
+        const trimmedName = name.trim();
+        if (trimmedName && trimmedName !== baseScreen.name) edit.name = trimmedName;
+        if (purpose !== (baseScreen.purpose ?? '')) edit.purpose = purpose;
+        if (userIntent !== (baseScreen.userIntent ?? '')) edit.userIntent = userIntent;
+        if (priority !== stylablePriority(baseScreen.priority)) edit.priority = priority;
+        if (notes.trim()) edit.notes = notes;
+        onSave(Object.keys(edit).length > 0 ? edit : null);
+    };
+
+    const field = 'w-full text-sm border border-neutral-300 rounded-md px-2.5 py-1.5 focus:outline-none focus:ring-2 focus:ring-indigo-300';
+
+    return (
+        <div className="bg-white rounded-lg border border-indigo-200 p-4 space-y-3">
+            <p className="text-[11px] text-neutral-500">
+                Edits are saved as an overlay on this artifact version — the generated
+                content is kept, and mockups, flows, and uploaded images stay attached
+                even when you rename the screen.
+            </p>
+            <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Name</span>
+                <input className={field} value={name} onChange={e => setName(e.target.value)} />
+            </label>
+            <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Purpose</span>
+                <textarea className={field} rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} />
+            </label>
+            <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">User intent</span>
+                <textarea className={field} rows={2} value={userIntent} onChange={e => setUserIntent(e.target.value)} />
+            </label>
+            <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Priority</span>
+                <select
+                    className={field}
+                    value={priority}
+                    onChange={e => setPriority(e.target.value as ScreenPriority)}
+                >
+                    {EDIT_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
+                </select>
+            </label>
+            <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Notes (internal)</span>
+                <textarea
+                    className={field}
+                    rows={2}
+                    placeholder="Anything the team should know about this screen…"
+                    value={notes}
+                    onChange={e => setNotes(e.target.value)}
+                />
+            </label>
+            <div className="flex items-center justify-end gap-2 pt-1">
+                <button
+                    type="button"
+                    onClick={onCancel}
+                    className="px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 rounded-md transition"
+                >
+                    Cancel
+                </button>
+                <button
+                    type="button"
+                    onClick={handleSave}
+                    className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition font-medium"
+                >
+                    Save
+                </button>
+            </div>
         </div>
     );
 }

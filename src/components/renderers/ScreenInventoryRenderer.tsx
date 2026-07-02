@@ -114,12 +114,18 @@ function JourneyRow({ steps }: { steps: string[] }) {
 
 // Exported so the Experience workspace's Screen Detail "Overview" tab renders
 // the exact same per-screen block as the standalone Screen Inventory renderer.
+// `imageStorageName` (optional) is the stored generated name the upload
+// gallery keys images by — the Experience workspace passes it so display
+// renames never orphan uploads. Omitted (standalone renderer), the gallery
+// keys by `screen.name` exactly as before.
 export function ScreenCard({
     screen,
     imageContext,
+    imageStorageName,
 }: {
     screen: ScreenItem;
     imageContext?: ScreenImageGalleryContext;
+    imageStorageName?: string;
 }) {
     const ui = screen.coreUIElements && screen.coreUIElements.length > 0
         ? screen.coreUIElements
@@ -205,7 +211,9 @@ export function ScreenCard({
                 <LinkedFeatures refs={screen.featureRefs} />
             )}
 
-            {imageContext && <ScreenImageGallery screen={screen} context={imageContext} />}
+            {imageContext && (
+                <ScreenImageGallery screen={screen} context={imageContext} storageName={imageStorageName} />
+            )}
         </article>
     );
 }

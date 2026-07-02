@@ -20,12 +20,68 @@ import type {
     MockupScreen,
     ScreenInventoryContent,
     ScreenItem,
+    ScreenPriority,
 } from '../types';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import type {
     ParsedFlow,
     ParsedStep,
 } from '../components/renderers/userFlows/types';
+
+/**
+ * User edit overlay for one screen, keyed by the canonical screen id and
+ * stored on the screen_inventory ArtifactVersion as `metadata.screenEdits`
+ * (the same overlay pattern as prompt_pack's `metadata.promptEdits`). The
+ * generated content is never rewritten: renames change only the *displayed*
+ * name, while every join and image key derives from the stored generated
+ * name — which is what makes renames unable to orphan relationships.
+ */
+export interface ScreenMetadataEdit {
+    name?: string;
+    purpose?: string;
+    userIntent?: string;
+    priority?: ScreenPriority;
+    /** Free-form user notes shown on the screen's Overview tab. */
+    notes?: string;
+}
+
+export type ScreenEditsMap = Record<string, ScreenMetadataEdit>;
+
+const VALID_EDIT_PRIORITIES: ReadonlySet<string> = new Set(['P0', 'P1', 'P2', 'P3']);
+
+/** Safely extract the screenEdits overlay from ArtifactVersion metadata. */
+export function readScreenEdits(metadata: Record<string, unknown> | undefined): ScreenEditsMap {
+    const raw = metadata?.screenEdits;
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return EMPTY_SCREEN_EDITS;
+    const out: ScreenEditsMap = {};
+    for (const [id, value] of Object.entries(raw as Record<string, unknown>)) {
+        if (!value || typeof value !== 'object' || Array.isArray(value)) continue;
+        const v = value as Record<string, unknown>;
+        const edit: ScreenMetadataEdit = {};
+        if (typeof v.name === 'string' && v.name.trim()) edit.name = v.name.trim();
+        if (typeof v.purpose === 'string') edit.purpose = v.purpose;
+        if (typeof v.userIntent === 'string') edit.userIntent = v.userIntent;
+        if (typeof v.priority === 'string' && VALID_EDIT_PRIORITIES.has(v.priority)) {
+            edit.priority = v.priority as ScreenPriority;
+        }
+        if (typeof v.notes === 'string') edit.notes = v.notes;
+        if (Object.keys(edit).length > 0) out[id] = edit;
+    }
+    return Object.keys(out).length > 0 ? out : EMPTY_SCREEN_EDITS;
+}
+
+export const EMPTY_SCREEN_EDITS: ScreenEditsMap = {};
+
+/** Apply an edit overlay to a stored screen, producing the effective screen. */
+function applyScreenEdit(base: ScreenItem, edit: ScreenMetadataEdit | undefined): ScreenItem {
+    if (!edit) return base;
+    const effective: ScreenItem = { ...base };
+    if (edit.name) effective.name = edit.name;
+    if (edit.purpose !== undefined) effective.purpose = edit.purpose;
+    if (edit.userIntent !== undefined) effective.userIntent = edit.userIntent;
+    if (edit.priority) effective.priority = edit.priority;
+    return effective;
+}
 
 /** One flow step that references a screen (matched by slug of the step title). */
 export interface ScreenFlowRef {
@@ -46,8 +102,19 @@ export interface ScreenExperienceItem {
      * unique slug) as a safety net for inventories that skipped it.
      */
     id: string;
+    /** Slug of the STORED generated name — the image/flow join key. Stable
+     * across display renames. */
     slug: string;
+    /** Effective screen: stored content with the user's edit overlay applied.
+     * Views render this. */
     screen: ScreenItem;
+    /** The stored generated screen, untouched by edits. Joins and image keys
+     * derive from this — pass its name to image galleries as `storageName`. */
+    baseScreen: ScreenItem;
+    /** True when a user edit overlay applies to this screen. */
+    isEdited: boolean;
+    /** The applied edit overlay (when isEdited). */
+    edit?: ScreenMetadataEdit;
     /** Title of the inventory section the screen belongs to. */
     sectionTitle: string;
     relatedFlows: ScreenFlowRef[];
@@ -120,11 +187,14 @@ export function stepScreenSlug(step: Pick<ParsedStep, 'title'>): string | null {
  * → the stable empty index; no flows/mockup → items with empty relations).
  * On slug collision the first screen in inventory order wins `bySlug`; the
  * colliding names are surfaced in `collisions` for the UI to warn about.
+ * `edits` is the per-version user overlay (`readScreenEdits`) — it changes
+ * only what views display; every join key stays derived from stored content.
  */
 export function buildScreenIndex(
     inventory: ScreenInventoryContent | null,
     flows: readonly ParsedFlow[],
     mockupPayload: MockupPayload | null,
+    edits: ScreenEditsMap = EMPTY_SCREEN_EDITS,
 ): ScreenExperienceIndex {
     if (!inventory || !inventory.sections || inventory.sections.length === 0) {
         return EMPTY_SCREEN_EXPERIENCE_INDEX;
@@ -154,10 +224,14 @@ export function buildScreenIndex(
                 id = `${baseId}-${n}`;
                 n += 1;
             }
+            const edit = edits[id];
             const item: ScreenExperienceItem = {
                 id,
                 slug,
-                screen,
+                screen: applyScreenEdit(screen, edit),
+                baseScreen: screen,
+                isEdited: Boolean(edit),
+                edit,
                 sectionTitle: section.title,
                 relatedFlows: [],
             };

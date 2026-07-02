@@ -88,6 +88,11 @@ function ScreenRow({ item, onSelect }: { item: ScreenExperienceItem; onSelect: (
                     {screen.name}
                 </h4>
                 <div className="flex items-center gap-1.5 shrink-0">
+                    {item.isEdited && (
+                        <span className="text-[10px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-200 px-1.5 py-0.5 rounded">
+                            Edited
+                        </span>
+                    )}
                     {screen.type && screen.type !== 'screen' && (
                         <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
                             {screen.type}

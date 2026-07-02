@@ -3,6 +3,7 @@ import {
     EMPTY_SCREEN_EXPERIENCE_INDEX,
     buildScreenIndex,
     groupFlowRefsByFlow,
+    readScreenEdits,
     stepScreenSlug,
 } from '../screenExperience';
 import { parseScreenInventory } from '../screenInventoryNormalize';
@@ -287,6 +288,64 @@ describe('stable screen ids', () => {
         // Deterministic across reads — same ids every time.
         expect(first?.sections[0].screens.map(s => s.id)).toEqual(['home', 'home-2']);
         expect(second?.sections[0].screens.map(s => s.id)).toEqual(['home', 'home-2']);
+    });
+});
+
+describe('screen metadata edit overlay (rename safety)', () => {
+    it('applies edits for display while keeping joins on the stored content', () => {
+        const flows = parseFlows(FLOWS_MARKDOWN);
+        const edits = {
+            'sign-in': { name: 'Authentication', purpose: 'Edited purpose.', priority: 'P1' as const },
+        };
+        const index = buildScreenIndex(INVENTORY, flows, MOCKUP_PAYLOAD, edits);
+        const item = index.byId.get('sign-in');
+        // Display fields reflect the overlay…
+        expect(item?.screen.name).toBe('Authentication');
+        expect(item?.screen.purpose).toBe('Edited purpose.');
+        expect(item?.screen.priority).toBe('P1');
+        expect(item?.isEdited).toBe(true);
+        // …but the stored screen, slug, and joins are untouched by the rename.
+        expect(item?.baseScreen.name).toBe('Sign In');
+        expect(item?.slug).toBe('sign-in');
+        expect(item?.relatedFlows).toHaveLength(2);
+        // A rename must also not steal another screen's identity: the edited
+        // display name does NOT create a bySlug entry for "authentication".
+        expect(index.bySlug.get('authentication')).toBeUndefined();
+    });
+
+    it('renaming a screen keeps its mockup attached (id/base-name join)', () => {
+        const edits = { 'landing-page': { name: 'Welcome Splash' } };
+        const index = buildScreenIndex(INVENTORY, [], MOCKUP_PAYLOAD, edits);
+        const item = index.byId.get('landing-page');
+        expect(item?.screen.name).toBe('Welcome Splash');
+        expect(item?.mockupScreen?.id).toBe('uuid-1');
+    });
+
+    it('screens without an edit stay pristine (screen === baseScreen)', () => {
+        const index = buildScreenIndex(INVENTORY, [], null, { 'sign-in': { purpose: 'X' } });
+        const untouched = index.byId.get('dashboard');
+        expect(untouched?.isEdited).toBe(false);
+        expect(untouched?.screen).toBe(untouched?.baseScreen);
+    });
+});
+
+describe('readScreenEdits', () => {
+    it('extracts a valid overlay and drops malformed entries', () => {
+        const edits = readScreenEdits({
+            screenEdits: {
+                'scr-1': { name: '  Renamed  ', purpose: 'P', priority: 'P2', notes: 'n' },
+                'scr-2': { priority: 'not-a-priority', name: '   ' },
+                'scr-3': 'garbage',
+            },
+        });
+        expect(edits['scr-1']).toEqual({ name: 'Renamed', purpose: 'P', priority: 'P2', notes: 'n' });
+        expect(edits['scr-2']).toBeUndefined();
+        expect(edits['scr-3']).toBeUndefined();
+    });
+
+    it('returns the stable empty map for missing/invalid metadata', () => {
+        expect(readScreenEdits(undefined)).toBe(readScreenEdits({}));
+        expect(readScreenEdits({ screenEdits: 'nope' })).toBe(readScreenEdits(undefined));
     });
 });
 

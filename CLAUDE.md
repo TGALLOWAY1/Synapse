@@ -977,8 +977,23 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Shared priority-chip styles live in `src/components/renderers/screenPriority.ts`
   (own module — the react-refresh/only-export-components rule forbids constant
   exports from component files).
-- **Navigation state is local to `ArtifactWorkspace`** (`selectedScreenSlug` +
-  `screenTab`); no URL routes. Screen journey nodes in **User Flows** navigate
+- **Screen metadata edits are an overlay, never a content rewrite.** User
+  edits (name / purpose / userIntent / priority / notes) are stored per
+  canonical screen id in the screen_inventory **ArtifactVersion's
+  `metadata.screenEdits`** (`ScreenMetadataEdit` / `readScreenEdits` in
+  `screenExperience.ts`, persisted via the existing
+  `updateArtifactVersionMetadata` — the prompt_pack `promptEdits` pattern).
+  `buildScreenIndex` applies the overlay to produce the *effective*
+  `item.screen` while keeping `item.baseScreen` (stored content) as the source
+  of every join and image key — so **renames cannot orphan mockups, flow refs,
+  or uploaded images**. `ScreenImageGallery`/`ScreenCard` take a
+  `storageName`/`imageStorageName` (the base generated name) so upload buckets
+  keep their original slug after a display rename. An overlay equal to the
+  generated content clears itself (saved as null); "Reset to generated"
+  removes it. Edits are per-version — regenerating the inventory starts clean,
+  same as promptEdits. Do NOT rewrite `ArtifactVersion.content` for edits.
+- **Navigation state is local to `ArtifactWorkspace`** (`selectedScreenId` —
+  the canonical id — + `screenTab`); no URL routes. Screen journey nodes in **User Flows** navigate
   to Screen Detail when the node is a `screen` kind AND its slug is in
   `availableScreenSlugs` (threaded through `ArtifactContentRenderer` →
   `UserFlowsRenderer` → `FlowJourney.onNavigateToScreen`); otherwise the

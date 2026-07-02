@@ -24,7 +24,9 @@ import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignDirectionControl } from './DesignDirectionControl';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
-import { buildScreenIndex } from '../lib/screenExperience';
+import {
+    buildScreenIndex, readScreenEdits, type ScreenMetadataEdit,
+} from '../lib/screenExperience';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 import { parseFlows } from './renderers/userFlows/parseFlow';
 import type { ParsedFlow } from './renderers/userFlows/types';
@@ -214,13 +216,26 @@ export function ArtifactWorkspace({
     );
 
     // Read-side screen index: joins the parsed screen_inventory, user_flows,
-    // and mockup contents by slugified screen name. Pure + memoized — nothing
-    // is persisted, and missing artifacts degrade to a stable empty index.
+    // and mockup contents by canonical screen id / slug. Pure + memoized —
+    // nothing new is persisted here, and missing artifacts degrade to a
+    // stable empty index. `screenEdits` is the per-version user overlay
+    // (metadata.screenEdits — the promptEdits pattern); a save patches the
+    // version metadata, which swaps the invPreferred reference and recomputes.
     const screenIndex = useMemo(() => {
         const inventory = invPreferred ? parseScreenInventory(invPreferred.content) : null;
         const flows = flowsPreferred ? parseFlows(flowsPreferred.content) : EMPTY_FLOWS;
-        return buildScreenIndex(inventory, flows, mockupPayload);
+        return buildScreenIndex(inventory, flows, mockupPayload, readScreenEdits(invPreferred?.metadata));
     }, [invPreferred, flowsPreferred, mockupPayload]);
+
+    // Persist (or clear, with null) one screen's metadata edit overlay.
+    const handleSaveScreenEdit = (screenId: string, edit: ScreenMetadataEdit | null) => {
+        if (!invArtifact || !invPreferred) return;
+        const current = readScreenEdits(invPreferred.metadata);
+        const next: Record<string, ScreenMetadataEdit> = { ...current };
+        if (edit) next[screenId] = edit;
+        else delete next[screenId];
+        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, { screenEdits: next });
+    };
 
     // Per-screen upload-gallery context for the detail view's Overview tab —
     // mirrors the context the standalone screen_inventory branch builds below.
@@ -489,6 +504,7 @@ export function ArtifactWorkspace({
                         mockupStatus={slotStatusFor('mockup')}
                         onRetryMockup={() => handleRetrySlot('mockup')}
                         features={structuredPRD.features}
+                        onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
                     />
                 );
             }
