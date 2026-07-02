@@ -24,9 +24,16 @@ export interface ScreenImageGalleryContext {
 interface Props {
     screen: ScreenItem;
     context: ScreenImageGalleryContext;
+    /**
+     * Name used for image storage/lookup (slug derivation + upload bucket).
+     * Defaults to `screen.name`. The Experience workspace passes the screen's
+     * *stored generated* name here while `screen` carries the display-edited
+     * one, so renaming a screen never orphans its uploaded images.
+     */
+    storageName?: string;
 }
 
-export function ScreenImageGallery({ screen, context }: Props) {
+export function ScreenImageGallery({ screen, context, storageName }: Props) {
     const { projectId, artifactId, artifactVersionId, productTitle, productSummary, designTokens, platformHint } = context;
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [copied, setCopied] = useState(false);
@@ -38,7 +45,8 @@ export function ScreenImageGallery({ screen, context }: Props) {
     // changed snapshot under Object.is — that loops setState and trips
     // React error #185 (max update depth).
     const allImages = useScreenInventoryImageStore(s => s.images);
-    const screenSlug = slugifyScreenName(screen.name);
+    const storageScreenName = storageName ?? screen.name;
+    const screenSlug = slugifyScreenName(storageScreenName);
     const versions = useMemo(() => {
         return Object.values(allImages)
             .filter(r => r.artifactVersionId === artifactVersionId && r.screenSlug === screenSlug)
@@ -64,8 +72,8 @@ export function ScreenImageGallery({ screen, context }: Props) {
 
     const handleFile = (file: File | null | undefined) => {
         if (!file) return;
-        if (error) clearError(artifactVersionId, screen.name);
-        void upload({ projectId, artifactId, artifactVersionId, screenName: screen.name, file, prompt });
+        if (error) clearError(artifactVersionId, storageScreenName);
+        void upload({ projectId, artifactId, artifactVersionId, screenName: storageScreenName, file, prompt });
     };
 
     return (

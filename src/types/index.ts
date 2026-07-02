@@ -889,6 +889,11 @@ export type MockupScreen = {
     coreUIElements?: string[];   // semantic UI elements present on this screen
     componentRefs?: string[];    // component names from component_inventory used here
     notes?: string;              // optional assumptions / callouts
+    // Canonical id of the screen_inventory screen this mockup was derived
+    // from (stamped by assignStableScreenIds — see screenInventoryNormalize /
+    // screenExperience). Optional & backward-compatible: legacy payloads lack
+    // it and the Experience join falls back to slugified-name matching.
+    sourceScreenId?: string;
 };
 
 export type MockupPayload = {

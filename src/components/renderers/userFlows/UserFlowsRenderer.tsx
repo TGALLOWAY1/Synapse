@@ -27,6 +27,11 @@ interface Props {
     domainEntities?: DomainEntity[];
     featureSystems?: FeatureSystem[];
     implementationPlan?: ImplementationPlan;
+    /** Experience-workspace wiring: clicking a screen journey node whose slug
+     * exists in `availableScreenSlugs` opens that screen's detail view. Both
+     * optional — omitted, the journey keeps its scroll-only behavior. */
+    onNavigateToScreen?: (screenSlug: string) => void;
+    availableScreenSlugs?: ReadonlySet<string>;
 }
 
 const TTV_RE = /<\s*(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\b|\b(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\s+to\s+value\b/i;
@@ -43,6 +48,7 @@ function inferTimeToValue(sources: Array<string | undefined>): string | null {
 
 export function UserFlowsRenderer({
     content, features, uxPages, domainEntities, featureSystems, implementationPlan,
+    onNavigateToScreen, availableScreenSlugs,
 }: Props) {
     const flows = useMemo(() => parseFlows(content), [content]);
     const featuresById = useMemo(() => {
@@ -138,6 +144,8 @@ export function UserFlowsRenderer({
                     flowIndex={safeIndex}
                     steps={flow.steps}
                     issuesByStep={issuesByStep}
+                    onNavigateToScreen={onNavigateToScreen}
+                    availableScreenSlugs={availableScreenSlugs}
                 />
 
                 {flow.steps.length > 0 && (

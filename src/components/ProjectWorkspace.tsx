@@ -141,6 +141,26 @@ export function ProjectWorkspace() {
         }
     }, [projectId, projectExists, navigate]);
 
+    // Deep link: /p/:id?screen=<canonical id> targets a screen in the
+    // Experience workspace (ArtifactWorkspace reads the param). currentStage
+    // is persisted per project, so a shared/bookmarked screen URL would
+    // otherwise open on whatever stage the project was last left in. One-shot
+    // on mount — never fights later user navigation. If the workspace isn't
+    // available (spine not final / blocked), the param is simply inert.
+    useEffect(() => {
+        if (!projectId) return;
+        if (!new URLSearchParams(window.location.search).get('screen')) return;
+        const store = useProjectStore.getState();
+        const proj = store.getProject(projectId);
+        const spine = store.getLatestSpine(projectId);
+        if (!proj || proj.currentStage === 'workspace') return;
+        if (spine?.isFinal && spine.structuredPRD && spine.safetyReview?.status !== 'blocked') {
+            store.setProjectStage(projectId, 'workspace');
+        }
+        // Mount-only by design (store read via getState, not deps): reacting
+        // to later param changes would yank the stage from under the user.
+    }, [projectId]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);

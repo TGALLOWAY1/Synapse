@@ -883,11 +883,12 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 ### Post-finalization transition (Mark Final → Assets)
 
-The artifact sidebar is organized into four workflow-named sections —
-**Project Foundation** (PRD), **UX & Design** (User Flows, Screen Inventory,
-Mockups, Design System), **Architecture** (Data Model), and
-**Development** (Developer Prompts, Build Plan) — driven by `ARTIFACT_GROUPS` in
-`ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
+The artifact sidebar is organized into five workflow-named sections —
+**Project Foundation** (PRD), **Experience** (User Flows, Screens — see "The
+Experience workspace" below), **Design** (Design System), **Architecture**
+(Data Model), and **Development** (Developer Prompts, Build Plan) — driven by
+`ARTIFACT_GROUPS` in `ArtifactWorkspace.tsx`. Grouping is purely visual;
+`CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
 per-artifact model overrides keep working. **`component_inventory` (UI Components)
@@ -924,11 +925,126 @@ check of the 7 core artifacts + mockups) **without** switching stage. Its
 `ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
-`ARTIFACT_GROUPS` order (user_flows → screen_inventory → mockup → … →
+`ARTIFACT_GROUPS` order (user_flows → screens → design_system → … →
 implementation_plan) — and opens the mobile drawer (`useIsMobile`-gated, so it
 never reopens after the user closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
+
+### The Experience workspace (Screens) — read-side consolidation
+
+The old **Screen Inventory** and **Mockups** sidebar rows are consolidated into
+one screen-centric **Screens** view (`selected === 'screens'`, a
+`WorkspaceSelection` value, NOT an artifact slot). **This is a read-side view
+layer only**: the `screen_inventory`, `user_flows`, and `mockup` artifacts keep
+generating, persisting, and versioning exactly as before — no schema, prompt,
+pipeline, sync, or snapshot change. Do not add persisted state for this view.
+
+- **Stable screen ids** — every screen has a canonical `ScreenItem.id`,
+  stamped by `assignStableScreenIds` inside `normalizeScreenInventory`
+  (`src/lib/screenInventoryNormalize.ts`): existing content id → slug of the
+  name → deterministic `-2`/`-3` suffix on duplicates, in document order.
+  Because generation persists the normalized shape, **new inventories store
+  their ids**, while legacy artifacts derive the *same* ids on every read (no
+  regeneration/migration required — derivation is deterministic from stored
+  content and never from a user-facing rename). `MockupScreen.sourceScreenId`
+  (optional, back-compat) records the inventory screen a mockup screen was
+  derived from (`generateMockup` stamps it; `mockupParsing.coerceScreen`
+  round-trips it).
+- **Join layer** — `src/lib/screenExperience.ts` (pure; no store/IDB/React;
+  unit-tested in `src/lib/__tests__/screenExperience.test.ts`).
+  `buildScreenIndex(inventory, flows, mockupPayload)` joins the three parsed
+  artifact contents into a `ScreenExperienceIndex` with **`byId` (canonical,
+  rename-safe) and `bySlug` (name-based, first-wins)** lookups. Mockup screens
+  match by `sourceScreenId` first, then slugified `MockupScreen.name` (legacy
+  fallback). Flow steps are markdown and only know names, so they match by
+  exact slug of the parsed `[Screen Name]` step title (`stepScreenSlug`).
+  Screen selection/navigation uses the **id**; per-screen images stay keyed by
+  the slug of the *stored* (generated) name, so both survive display renames.
+  Missing artifacts degrade gracefully; a missing inventory returns the
+  module-level `EMPTY_SCREEN_EXPERIENCE_INDEX` (stable reference —
+  Selector-stability rule). Slug collisions keep **all** screens as items
+  (unique ids), resolve `bySlug` to the first, and are surfaced via
+  `index.collisions` (warning banner in the list).
+- **Views** — `src/components/experience/`: `ScreenListView` (sectioned list of
+  all inventory screens with flow-ref/mockup coverage chips),
+  `ScreenDetailView` + `ScreenDetailTabs` (per-screen **Overview / Flow /
+  Mockups** tabs). They reuse existing pieces rather than duplicating them:
+  Overview = the exported `ScreenCard` from `ScreenInventoryRenderer` (+ the
+  upload gallery); Flow = `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with
+  the current screen's steps highlighted (`highlightedStepIndices`); Mockups =
+  `MockupScreenImage` (which internally routes to the manual upload sheet).
+  Shared priority-chip styles live in `src/components/renderers/screenPriority.ts`
+  (own module — the react-refresh/only-export-components rule forbids constant
+  exports from component files).
+- **Screen metadata edits are an overlay, never a content rewrite.** User
+  edits (name / purpose / userIntent / priority / notes) are stored per
+  canonical screen id in the screen_inventory **ArtifactVersion's
+  `metadata.screenEdits`** (`ScreenMetadataEdit` / `readScreenEdits` in
+  `screenExperience.ts`, persisted via the existing
+  `updateArtifactVersionMetadata` — the prompt_pack `promptEdits` pattern).
+  `buildScreenIndex` applies the overlay to produce the *effective*
+  `item.screen` while keeping `item.baseScreen` (stored content) as the source
+  of every join and image key — so **renames cannot orphan mockups, flow refs,
+  or uploaded images**. `ScreenImageGallery`/`ScreenCard` take a
+  `storageName`/`imageStorageName` (the base generated name) so upload buckets
+  keep their original slug after a display rename. An overlay equal to the
+  generated content clears itself (saved as null); "Reset to generated"
+  removes it. Edits are per-version — regenerating the inventory starts clean,
+  same as promptEdits. Do NOT rewrite `ArtifactVersion.content` for edits.
+- **Screen selection is URL-addressable:** `/p/:projectId?screen=<canonical
+  id>[&screenTab=flow|mockups]`. The query param is the **single source of
+  truth** for the open Screen Detail (via `useSearchParams`); the rendered
+  view is *derived* (`activeSelection = screen param ? 'screens' : selected`)
+  — never synced by a setState-in-effect. Deep links, refresh, and browser
+  back/forward all work; tab switches use `replace` so history is one entry
+  per screen; unknown/stale ids miss `byId` and fall back to the list;
+  unrelated query params (debug flags) are preserved. `ProjectWorkspace` has a
+  one-shot mount effect that switches a deep-linked project to the `workspace`
+  stage when the spine is final (otherwise the param is inert). Artifact-row
+  selection (`selected`) stays local component state — only the screen
+  dimension lives in the URL. Screen journey nodes in **User Flows** navigate
+  to Screen Detail when the node is a `screen` kind AND its slug is in
+  `availableScreenSlugs` (threaded through `ArtifactContentRenderer` →
+  `UserFlowsRenderer` → `FlowJourney.onNavigateToScreen`); otherwise the
+  original scroll-to-step behavior is preserved.
+- **Mockup coverage is explicit and overlay-based.** The Screens list shows
+  "Mockups: X of N screens covered". Uncovered screens get an **Add to
+  mockups** action (Mockups tab) and the list header offers a confirmed
+  **Generate missing mockups** batch. Both write user-added `MockupScreen`s
+  into the *current* mockup ArtifactVersion's **`metadata.extraScreens`**
+  overlay (`readExtraMockupScreens`/`mergeExtraScreens`/
+  `mockupScreenFromInventoryScreen` in `mockupParsing.ts`) — **never a new
+  ArtifactVersion**, because per-screen images are keyed by
+  `versionId:screenId:quality`, so appending a version would orphan every
+  existing render. Adding coverage is free; **image generation is never
+  automatic** — it's the standard per-screen action, or the batch flow which
+  fires low-quality drafts only after an explicit cost-labeled confirm and
+  only when an OpenAI key exists (keyless → upload sheets). Every consumer of
+  a mockup payload in the workspace must read the *effective* payload
+  (`mergeExtraScreens(tryParsePayload(v), v.metadata)`).
+- **Reference validation is advisory, never blocking.** `buildScreenIndex`
+  emits `index.issues` (`ScreenReferenceIssue`): `unmatched_flow_step`
+  (screen-kind journey steps matching no screen, grouped per name),
+  `unmatched_mockup_screen`, `slug_collision`, and `legacy_name_match`
+  (mockup matched by name only — works, but rename-fragile). The Screens list
+  renders them in the collapsed `ReferenceWarningsPanel`
+  (`src/components/experience/ReferenceWarningsPanel.tsx`) with two persisted
+  repairs: **Relink/Pin** writes `metadata.screenLinks`
+  (mockupScreenId → canonical screenId) on the **mockup** version — the
+  highest-priority mockup match, above `sourceScreenId` and name — and
+  **Ignore** appends the issue key to `metadata.dismissedScreenIssues` on the
+  **inventory** version. Matching runs in three passes (links →
+  sourceScreenId → name) so an explicit repair always beats a coincidental
+  name match. Rendering must never be gated on validation results.
+- **Status/fallbacks:** the Screens sidebar dot and generation/error states map
+  to the **`screen_inventory` slot** (its retry re-runs that slot, since it no
+  longer has its own row); the Mockups tab surfaces the `mockup` slot's
+  generating/error states. A screen_inventory version whose content isn't
+  parseable structured JSON (legacy markdown) falls back to the standalone
+  `ScreenInventoryRenderer` path inside the Screens view. The legacy
+  `screen_inventory` and `mockup` renderMain branches remain intact and
+  internally reachable — do not delete them.
 
 ### Implementation tasks (plan → tracked checklist)
 

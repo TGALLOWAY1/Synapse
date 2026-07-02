@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
+import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, ListChecks, History,
-    Layers, Database, Code2,
+    Layers, Database, Code2, AppWindow, Palette,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,11 +23,28 @@ import { StalenessBadge } from './StalenessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignDirectionControl } from './DesignDirectionControl';
-import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
+import { v4 as uuidv4 } from 'uuid';
+import {
+    tryParsePayload, extractMockupSettings, mergeExtraScreens,
+    mockupScreenFromInventoryScreen, readExtraMockupScreens,
+} from '../lib/mockupParsing';
+import { hasOpenAIKey } from '../lib/openaiClient';
+import { useMockupImageStore } from '../store/mockupImageStore';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
+import {
+    buildScreenIndex, readScreenEdits, readScreenLinks, readDismissedScreenIssues,
+    type ScreenMetadataEdit,
+} from '../lib/screenExperience';
+import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
+import { parseScreenInventory } from '../lib/screenInventoryNormalize';
+import { parseFlows } from './renderers/userFlows/parseFlow';
+import type { ParsedFlow } from './renderers/userFlows/types';
+import { ScreenListView } from './experience/ScreenListView';
+import { ScreenDetailView } from './experience/ScreenDetailView';
+import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import type {
-    ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
-    ProjectTask,
+    ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
+    GenerationStatus, ProjectTask,
 } from '../types';
 
 // Stable empty reference for the tasks selector. Returning `[]` literal each
@@ -34,6 +52,9 @@ import type {
 // render and bail out with React #185 (Maximum update depth) for any project
 // without saved tasks — e.g. the demo project on first load.
 const EMPTY_TASKS: ProjectTask[] = [];
+
+// Stable empty flows list for the screen-experience join memo.
+const EMPTY_FLOWS: ParsedFlow[] = [];
 
 interface ArtifactWorkspaceProps {
     projectId: string;
@@ -49,7 +70,10 @@ interface ArtifactWorkspaceProps {
     onAutoOpenConsumed?: () => void;
 }
 
-type WorkspaceSelection = 'prd' | ArtifactSlotKey;
+// 'screens' is the Experience workspace's screen-centric view — a read-side
+// join over screen_inventory + user_flows + mockup (src/lib/screenExperience.ts),
+// not an artifact slot of its own.
+type WorkspaceSelection = 'prd' | ArtifactSlotKey | 'screens';
 
 interface SlotMeta {
     key: WorkspaceSelection;
@@ -66,21 +90,25 @@ interface ArtifactGroup {
 }
 
 // Sidebar grouping is purely visual — subtype IDs are unchanged. Order within
-// a group is the order rows render in. The "Project Foundation → UX & Design
-// → Architecture → Development" sequence tells the product-build story; keep
-// it in sync with the README/tour if either changes.
+// a group is the order rows render in. The "Project Foundation → Experience →
+// Design → Architecture → Development" sequence tells the product-build story;
+// keep it in sync with the README/tour if either changes.
 const ARTIFACT_GROUPS: ArtifactGroup[] = [
     { id: 'foundation', title: 'Project Foundation', icon: FileText, items: ['prd'] },
     {
-        id: 'design',
-        title: 'UX & Design',
+        id: 'experience',
+        title: 'Experience',
         icon: Layers,
-        // 'component_inventory' (UI Components) lives in this group but is hidden
-        // from the assets list at materialization time — see buildSlotMetas and
-        // HIDDEN_ARTIFACT_SUBTYPES. It still generates for mockups; it just
-        // never renders a sidebar row. Revisit — see docs/backlog/BACKLOG.md §6.
-        items: ['user_flows', 'screen_inventory', 'mockup', 'component_inventory', 'design_system'],
+        // 'screens' consolidates the old Screen Inventory + Mockups sidebar rows
+        // into one screen-centric view (list → per-screen Overview/Flow/Mockups
+        // tabs). The screen_inventory and mockup artifacts still generate and
+        // persist unchanged — renderMain's legacy branches remain internally
+        // reachable as fallbacks; they just no longer render sidebar rows.
+        // 'component_inventory' also still generates (mockups consume it) but is
+        // a hidden subtype — see HIDDEN_ARTIFACT_SUBTYPES / docs/backlog §6.
+        items: ['user_flows', 'screens'],
     },
+    { id: 'design', title: 'Design', icon: Palette, items: ['design_system'] },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
     { id: 'development', title: 'Development', icon: Code2, items: ['prompt_pack', 'implementation_plan'] },
 ];
@@ -89,6 +117,7 @@ function buildSlotMetas(): SlotMeta[] {
     const base: Record<WorkspaceSelection, SlotMeta> = {
         prd: { key: 'prd', title: 'PRD', description: 'Final product requirements document', icon: FileText },
         mockup: { key: 'mockup', title: 'Mockups', description: 'Interactive UI mockups', icon: Image },
+        screens: { key: 'screens', title: 'Screens', description: 'Screen-by-screen experience workspace', icon: AppWindow },
     } as Record<WorkspaceSelection, SlotMeta>;
     for (const meta of CORE_ARTIFACT_DISPLAY_ORDER) {
         base[meta.subtype as WorkspaceSelection] = {
@@ -104,7 +133,9 @@ function buildSlotMetas(): SlotMeta[] {
     // so they render no row anywhere in the workspace.
     return ARTIFACT_GROUPS.flatMap(group =>
         group.items
-            .filter(key => key === 'prd' || key === 'mockup' || !isHiddenArtifactSubtype(key))
+            .filter(key =>
+                key === 'prd' || key === 'mockup' || key === 'screens'
+                || !isHiddenArtifactSubtype(key))
             .map(key => base[key]),
     );
 }
@@ -168,8 +199,209 @@ export function ArtifactWorkspace({
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
+    // Experience workspace (Screens) navigation state — URL-addressable:
+    // /p/:projectId?screen=<canonical id>[&screenTab=flow|mockups]. The URL
+    // is the single source of truth for which screen is open, so deep links,
+    // refresh, and browser back/forward all work without a state↔URL sync
+    // effect (which would also trip react-hooks/set-state-in-effect). An
+    // invalid/stale id simply misses `byId` and falls back to the list.
+    const [searchParams, setSearchParams] = useSearchParams();
+    const selectedScreenId = searchParams.get('screen');
+    const rawScreenTab = searchParams.get('screenTab');
+    const screenTab: ScreenDetailTab =
+        rawScreenTab === 'flow' || rawScreenTab === 'mockups' ? rawScreenTab : 'overview';
+
+    // Update the screen params, preserving unrelated query params (debug
+    // flags etc). `replace` is used for tab switches so history stays one
+    // entry per screen, not per tab click.
+    const setScreenParams = (
+        screenId: string | null,
+        tab: ScreenDetailTab = 'overview',
+        opts?: { replace?: boolean },
+    ) => {
+        setSearchParams(prev => {
+            const next = new URLSearchParams(prev);
+            if (screenId) {
+                next.set('screen', screenId);
+                if (tab !== 'overview') next.set('screenTab', tab);
+                else next.delete('screenTab');
+            } else {
+                next.delete('screen');
+                next.delete('screenTab');
+            }
+            return next;
+        }, { replace: opts?.replace });
+    };
+
+    // The rendered selection: an open screen param always means the Screens
+    // view (derived — never synced), so back/forward re-entering ?screen=…
+    // reopens the detail page even if another artifact row was selected.
+    const activeSelection: WorkspaceSelection = selectedScreenId ? 'screens' : selected;
 
     const job = getJob(projectId);
+
+    // --- Experience (Screens) join layer ------------------------------------
+    // Preferred versions of the three experience artifacts. The version
+    // objects are stable references in the store until a new version lands,
+    // so they are safe useMemo dependencies.
+    const coreArtifacts = getArtifacts(projectId, 'core_artifact');
+    const invArtifact = coreArtifacts.find(a => a.subtype === 'screen_inventory');
+    const invPreferred = invArtifact ? getPreferredVersion(projectId, invArtifact.id) : undefined;
+    const flowsArtifact = coreArtifacts.find(a => a.subtype === 'user_flows');
+    const flowsPreferred = flowsArtifact ? getPreferredVersion(projectId, flowsArtifact.id) : undefined;
+    const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
+    const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
+
+    // Effective mockup payload: stored screens + the version's user-added
+    // extraScreens overlay (metadata — keeps the version id, so existing
+    // per-screen images stay keyed correctly).
+    const mockupPayload = useMemo(() => {
+        if (!mockupPreferred) return null;
+        const parsed = tryParsePayload(mockupPreferred);
+        return parsed ? mergeExtraScreens(parsed, mockupPreferred.metadata) : null;
+    }, [mockupPreferred]);
+
+    // Read-side screen index: joins the parsed screen_inventory, user_flows,
+    // and mockup contents by canonical screen id / slug. Pure + memoized —
+    // nothing new is persisted here, and missing artifacts degrade to a
+    // stable empty index. `screenEdits` is the per-version user overlay
+    // (metadata.screenEdits — the promptEdits pattern); a save patches the
+    // version metadata, which swaps the invPreferred reference and recomputes.
+    const screenIndex = useMemo(() => {
+        const inventory = invPreferred ? parseScreenInventory(invPreferred.content) : null;
+        const flows = flowsPreferred ? parseFlows(flowsPreferred.content) : EMPTY_FLOWS;
+        return buildScreenIndex(
+            inventory,
+            flows,
+            mockupPayload,
+            readScreenEdits(invPreferred?.metadata),
+            readScreenLinks(mockupPreferred?.metadata),
+        );
+    }, [invPreferred, flowsPreferred, mockupPayload, mockupPreferred]);
+
+    // Validation issues minus the user's persisted dismissals.
+    const visibleScreenIssues = useMemo(() => {
+        const dismissed = readDismissedScreenIssues(invPreferred?.metadata);
+        return screenIndex.issues.filter(i => !dismissed.has(i.key));
+    }, [screenIndex, invPreferred]);
+
+    // Repair: pin/relink a mockup screen to a canonical screen (persisted on
+    // the mockup version — survives renames and name drift thereafter).
+    const handleRelinkMockupScreen = (mockupScreenId: string, screenId: string) => {
+        if (!mockupArtifact || !mockupPreferred) return;
+        const links = { ...readScreenLinks(mockupPreferred.metadata), [mockupScreenId]: screenId };
+        updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, { screenLinks: links });
+    };
+
+    // Repair: hide a warning (current behavior is kept — nothing else changes).
+    const handleDismissScreenIssue = (issueKey: string) => {
+        if (!invArtifact || !invPreferred) return;
+        const dismissed = new Set(readDismissedScreenIssues(invPreferred.metadata));
+        dismissed.add(issueKey);
+        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, {
+            dismissedScreenIssues: Array.from(dismissed),
+        });
+    };
+
+    // Persist (or clear, with null) one screen's metadata edit overlay.
+    const handleSaveScreenEdit = (screenId: string, edit: ScreenMetadataEdit | null) => {
+        if (!invArtifact || !invPreferred) return;
+        const current = readScreenEdits(invPreferred.metadata);
+        const next: Record<string, ScreenMetadataEdit> = { ...current };
+        if (edit) next[screenId] = edit;
+        else delete next[screenId];
+        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, { screenEdits: next });
+    };
+
+    // --- Mockup coverage actions --------------------------------------------
+    // Add inventory screens to the CURRENT mockup version's extraScreens
+    // overlay. No AI call happens here — image generation stays an explicit
+    // per-screen action (or the confirmed batch below), so adding coverage is
+    // free. Returns the appended MockupScreen specs.
+    const addScreensToMockups = (screenIds: string[]): MockupScreen[] => {
+        if (!mockupArtifact || !mockupPreferred) return [];
+        const existing = readExtraMockupScreens(mockupPreferred.metadata);
+        const appended: MockupScreen[] = [];
+        for (const id of screenIds) {
+            const item = screenIndex.byId.get(id);
+            if (!item || item.mockupScreen) continue; // already covered
+            if (existing.some(e => e.sourceScreenId === item.id)) continue;
+            const mockup = mockupScreenFromInventoryScreen(item.baseScreen, uuidv4(), item.id);
+            existing.push(mockup);
+            appended.push(mockup);
+        }
+        if (appended.length > 0) {
+            updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, {
+                extraScreens: existing,
+            });
+        }
+        return appended;
+    };
+
+    const handleAddScreenToMockups = (screenId: string) => {
+        addScreensToMockups([screenId]);
+    };
+
+    // Confirmed batch: add every uncovered screen, then (only with an OpenAI
+    // key) kick off low-quality draft generation per screen. Each generation
+    // is individually tracked and cancellable via the standard per-screen
+    // panel; failures leave that screen on its generate/upload placeholder.
+    const [missingMockupsConfirm, setMissingMockupsConfirm] = useState<{ count: number } | null>(null);
+    const handleGenerateMissingMockups = () => {
+        const missing = screenIndex.items.filter(i => !i.mockupScreen).map(i => i.id);
+        if (missing.length === 0 || !mockupArtifact || !mockupPreferred || !mockupPayload) {
+            setMissingMockupsConfirm(null);
+            return;
+        }
+        const appended = addScreensToMockups(missing);
+        setMissingMockupsConfirm(null);
+        if (!hasOpenAIKey()) return; // screens now show the upload sheet instead
+        const settings = extractMockupSettings(mockupPreferred);
+        const payloadForPrompt = { ...mockupPayload, screens: [...mockupPayload.screens, ...appended] };
+        const imageStore = useMockupImageStore.getState();
+        for (const mockup of appended) {
+            void imageStore.generate({
+                projectId,
+                artifactId: mockupArtifact.id,
+                versionId: mockupPreferred.id,
+                screen: mockup,
+                payload: payloadForPrompt,
+                settings,
+                quality: 'low',
+            });
+        }
+    };
+
+    // Per-screen upload-gallery context for the detail view's Overview tab —
+    // mirrors the context the standalone screen_inventory branch builds below.
+    const invScreenImageContext = invArtifact && invPreferred
+        ? {
+            projectId,
+            artifactId: invArtifact.id,
+            artifactVersionId: invPreferred.id,
+            productTitle: structuredPRD.productName ?? getProject(projectId)?.name ?? 'this product',
+            productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
+            designTokens,
+            platformHint: (projectPlatform === 'app'
+                ? 'mobile'
+                : projectPlatform === 'web'
+                    ? 'desktop'
+                    : 'responsive') as 'mobile' | 'desktop' | 'responsive',
+        }
+        : undefined;
+
+    // Mockups-tab context for the detail view. Absent when the mockup
+    // artifact is missing or its payload is unparseable — the tab shows an
+    // empty state instead.
+    const mockupDetailContext = mockupArtifact && mockupPreferred && mockupPayload
+        ? {
+            projectId,
+            artifactId: mockupArtifact.id,
+            versionId: mockupPreferred.id,
+            payload: mockupPayload,
+            settings: extractMockupSettings(mockupPreferred),
+        }
+        : undefined;
 
     // Auto-resume any slots that didn't finish before the last unmount /
     // page reload. The job state is transient (stripped from persisted
@@ -181,19 +413,23 @@ export function ArtifactWorkspace({
         });
     }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform]);
 
-    // Scroll the content pane back to the top on every page switch.
+    // Scroll the content pane back to the top on every page switch (including
+    // opening/closing a screen detail page).
     useEffect(() => {
         mainRef.current?.scrollTo({ top: 0 });
-    }, [selected]);
+    }, [activeSelection, selectedScreenId]);
 
     const slotStatusFor = (key: WorkspaceSelection): GenerationStatus => {
         if (key === 'prd') return 'done';
-        const fromJob = job?.slots[key]?.status;
+        // 'screens' is a derived view over screen_inventory — surface that
+        // slot's status so the sidebar dot tracks the screens' source artifact.
+        const slotKey: ArtifactSlotKey = key === 'screens' ? 'screen_inventory' : key;
+        const fromJob = job?.slots[slotKey]?.status;
         if (fromJob && fromJob !== 'idle') return fromJob;
         // No active job state — derive from artifact presence so previously
         // completed artifacts still show as "Ready" after the job is cleared.
-        const type = key === 'mockup' ? 'mockup' : 'core_artifact';
-        const subtype: CoreArtifactSubtype | undefined = key === 'mockup' ? undefined : key;
+        const type = slotKey === 'mockup' ? 'mockup' : 'core_artifact';
+        const subtype: CoreArtifactSubtype | undefined = slotKey === 'mockup' ? undefined : slotKey;
         const artifacts = getArtifacts(projectId, type);
         const existing = subtype ? artifacts.find(a => a.subtype === subtype) : artifacts[0];
         if (existing && existing.currentVersionId) return 'done';
@@ -202,7 +438,8 @@ export function ArtifactWorkspace({
 
     const slotErrorFor = (key: WorkspaceSelection) => {
         if (key === 'prd') return undefined;
-        return job?.slots[key]?.error;
+        const slotKey: ArtifactSlotKey = key === 'screens' ? 'screen_inventory' : key;
+        return job?.slots[slotKey]?.error;
     };
 
     // Post-finalization auto-open. Runs once each time the parent arms
@@ -226,8 +463,10 @@ export function ArtifactWorkspace({
 
     // Drives the in-pane "Creating your build assets…" placeholder so an
     // idle slot doesn't read as empty while siblings are still in flight.
-    const isActive = slotMetas.some(s => {
-        const status = slotStatusFor(s.key);
+    // 'mockup' no longer renders a sidebar row (it lives inside the Screens
+    // view), so it's re-added here explicitly to keep the in-flight signal.
+    const isActive = ([...slotMetas.map(s => s.key), 'mockup'] as WorkspaceSelection[]).some(key => {
+        const status = slotStatusFor(key);
         return status === 'generating' || status === 'queued';
     });
 
@@ -235,6 +474,22 @@ export function ArtifactWorkspace({
         artifactJobController.retrySlot(slot, {
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
+    };
+
+    // Open a screen's detail view by its stable canonical id (Screens list,
+    // flow-node navigation). Pushes a history entry so browser Back returns
+    // to the previous view.
+    const handleOpenScreen = (screenId: string) => {
+        setSelected('screens');
+        setScreenParams(screenId);
+        setMobileSidebarOpen(false);
+    };
+
+    // Slug-based entry point for User Flows journey nodes (flows are markdown
+    // and only know screen names) — resolved to the canonical id here.
+    const handleNavigateToScreen = (slug: string) => {
+        const item = screenIndex.bySlug.get(slug);
+        if (item) handleOpenScreen(item.id);
     };
 
     // Persist a newly-chosen visual direction, then surface the regenerate
@@ -285,7 +540,7 @@ export function ArtifactWorkspace({
     };
 
     const renderMain = () => {
-        if (selected === 'prd') {
+        if (activeSelection === 'prd') {
             return (
                 <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
                     <StructuredPRDView
@@ -298,26 +553,223 @@ export function ArtifactWorkspace({
             );
         }
 
-        const status = slotStatusFor(selected);
-        const error = slotErrorFor(selected);
+        // --- Experience → Screens (read-side consolidation) -----------------
+        if (activeSelection === 'screens') {
+            const screensStatus = slotStatusFor('screens'); // = screen_inventory slot
+            const screensError = slotErrorFor('screens');
+            if (screensStatus === 'queued' || screensStatus === 'generating') {
+                return (
+                    <div className="max-w-2xl mx-auto">
+                        <GenerationProgress
+                            stages={getArtifactStages('screen_inventory')}
+                            variant="systematic"
+                            title={screensStatus === 'queued' ? 'Queued: Screens' : 'Generating Screen Inventory'}
+                            subtitle={screensStatus === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
+                            history={job?.slots.screen_inventory?.progressLog ?? []}
+                        />
+                    </div>
+                );
+            }
+            if (screensStatus === 'error' || screensStatus === 'interrupted') {
+                // The Screens view is fed by screen_inventory, so its retry
+                // re-runs that slot (there is no standalone sidebar row for it
+                // anymore).
+                return (
+                    <div className="max-w-2xl mx-auto bg-white border border-neutral-200 rounded-xl p-6 shadow-sm">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle size={20} className={screensStatus === 'error' ? 'text-red-500' : 'text-amber-500'} />
+                            <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-neutral-900">
+                                    {screensStatus === 'error' ? 'Screen Inventory generation failed' : 'Screen Inventory generation interrupted'}
+                                </h3>
+                                {screensError?.message && (
+                                    <p className="text-sm text-neutral-600 mt-1 break-words">{screensError.message}</p>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => handleRetrySlot('screen_inventory')}
+                                    className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                                >
+                                    <RefreshCcw size={14} /> Retry
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+            if (screensStatus === 'idle' && isActive) {
+                return <BuildAssetsLoading />;
+            }
+
+            // Legacy fallback: a screen_inventory version exists but isn't
+            // parseable structured JSON (old markdown artifacts). Render it
+            // through the standalone renderer so the content stays reachable
+            // instead of dead-ending on an empty Screens list.
+            if (screenIndex.items.length === 0 && invPreferred && invArtifact) {
+                return (
+                    <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
+                        <div className="flex items-center justify-start">
+                            {renderVersionControls(invArtifact.id, invPreferred)}
+                        </div>
+                        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
+                            <ArtifactContentRenderer
+                                subtype="screen_inventory"
+                                content={invPreferred.content}
+                                screenImageContext={invScreenImageContext}
+                                projectId={projectId}
+                            />
+                        </div>
+                    </div>
+                );
+            }
+
+            const detailItem = selectedScreenId
+                ? screenIndex.byId.get(selectedScreenId)
+                : undefined;
+            if (detailItem) {
+                return (
+                    <ScreenDetailView
+                        item={detailItem}
+                        activeTab={screenTab}
+                        onTabChange={(tab) => setScreenParams(detailItem.id, tab, { replace: true })}
+                        onBack={() => setScreenParams(null)}
+                        onNavigateToScreen={handleNavigateToScreen}
+                        availableScreenSlugs={screenIndex.availableSlugs}
+                        screenImageContext={invScreenImageContext}
+                        mockupContext={mockupDetailContext}
+                        mockupStatus={slotStatusFor('mockup')}
+                        onRetryMockup={() => handleRetrySlot('mockup')}
+                        features={structuredPRD.features}
+                        onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
+                        onAddToMockups={
+                            mockupDetailContext && !detailItem.mockupScreen
+                                ? () => handleAddScreenToMockups(detailItem.id)
+                                : undefined
+                        }
+                        unmatchedMockups={
+                            mockupPayload && !detailItem.mockupScreen
+                                ? mockupPayload.screens
+                                    .filter(s => !screenIndex.items.some(i => i.mockupScreen?.id === s.id))
+                                    .map(s => ({ id: s.id, name: s.name }))
+                                : undefined
+                        }
+                        onLinkMockup={
+                            mockupArtifact && mockupPreferred && !detailItem.mockupScreen
+                                ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
+                                : undefined
+                        }
+                    />
+                );
+            }
+
+            // Artifact-level controls for the two source artifacts that no
+            // longer have their own sidebar rows: Screen Inventory version
+            // history / staleness, and Mockup version history / regenerate
+            // (incl. the design-system drift prompt). Without these here the
+            // consolidation would orphan restore + regenerate flows.
+            const mockupDesignRef = mockupPreferred?.sourceRefs.find(
+                r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
+            );
+            const currentDesignForScreens = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
+            const screensDesignDrift = !!mockupDesignRef
+                && !!currentDesignForScreens?.tokensHash
+                && currentDesignForScreens.tokensHash !== mockupDesignRef.anchorInfo;
+
+            // Stale screen id (e.g. inventory regenerated) falls back to the list.
+            return (
+                <div className="space-y-4">
+                    {(invPreferred || mockupPreferred) && (
+                        <div className="max-w-3xl xl:max-w-5xl mx-auto flex items-center justify-between gap-2 flex-wrap">
+                            <div className="flex items-center gap-2 flex-wrap">
+                                {invArtifact && invPreferred && renderVersionControls(invArtifact.id, invPreferred)}
+                            </div>
+                            {mockupArtifact && mockupPreferred && (
+                                <div className="flex items-center gap-2 flex-wrap">
+                                    <button
+                                        type="button"
+                                        onClick={() => setVersionHistoryArtifactId(mockupArtifact.id)}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                                    >
+                                        <History size={12} /> Mockup history
+                                    </button>
+                                    <button
+                                        type="button"
+                                        onClick={() => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })}
+                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+                                    >
+                                        <RefreshCcw size={12} /> Regenerate Mockup
+                                    </button>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {screensDesignDrift && mockupPreferred && (
+                        <div className="max-w-3xl xl:max-w-5xl mx-auto flex items-start justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 p-3">
+                            <div className="flex items-start gap-2 min-w-0">
+                                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-amber-900">
+                                        Design system changed since these mockups were generated
+                                    </p>
+                                    <p className="text-xs text-amber-700 mt-0.5">
+                                        Regenerate the mockups to apply the new visual direction.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-md transition shrink-0"
+                            >
+                                <RefreshCcw size={12} /> Regenerate Mockup
+                            </button>
+                        </div>
+                    )}
+                    {visibleScreenIssues.length > 0 && (
+                        <div className="max-w-3xl xl:max-w-5xl mx-auto">
+                            <ReferenceWarningsPanel
+                                issues={visibleScreenIssues}
+                                screenOptions={screenIndex.items.map(i => ({ id: i.id, name: i.screen.name }))}
+                                onRelink={mockupArtifact && mockupPreferred ? handleRelinkMockupScreen : undefined}
+                                onDismiss={invArtifact && invPreferred ? handleDismissScreenIssue : undefined}
+                            />
+                        </div>
+                    )}
+                    <ScreenListView
+                        index={screenIndex}
+                        onSelectScreen={handleOpenScreen}
+                        onGenerateMissingMockups={
+                            mockupDetailContext
+                                ? () => setMissingMockupsConfirm({
+                                    count: screenIndex.items.filter(i => !i.mockupScreen).length,
+                                })
+                                : undefined
+                        }
+                    />
+                </div>
+            );
+        }
+
+        const status = slotStatusFor(activeSelection);
+        const error = slotErrorFor(activeSelection);
 
         if (status === 'queued' || status === 'generating') {
-            const meta = selected === 'mockup' ? null : getArtifactMeta(selected);
-            const stages = selected === 'mockup' ? MOCKUP_GENERATION_STAGES : getArtifactStages(selected);
-            const displayName = selected === 'mockup' ? 'Mockup' : (meta?.title ?? selected);
+            const meta = activeSelection === 'mockup' ? null : getArtifactMeta(activeSelection);
+            const stages = activeSelection === 'mockup' ? MOCKUP_GENERATION_STAGES : getArtifactStages(activeSelection);
+            const displayName = activeSelection === 'mockup' ? 'Mockup' : (meta?.title ?? activeSelection);
             const title = status === 'queued'
                 ? `Queued: ${displayName}`
-                : selected === 'mockup'
+                : activeSelection === 'mockup'
                     ? 'Designing your product interface'
                     : `Generating ${displayName}`;
             return (
                 <div className="max-w-2xl mx-auto">
                     <GenerationProgress
                         stages={stages}
-                        variant={selected === 'mockup' ? 'creative' : 'systematic'}
+                        variant={activeSelection === 'mockup' ? 'creative' : 'systematic'}
                         title={title}
                         subtitle={status === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
-                        history={job?.slots[selected]?.progressLog ?? []}
+                        history={job?.slots[activeSelection]?.progressLog ?? []}
                     />
                 </div>
             );
@@ -337,7 +789,7 @@ export function ArtifactWorkspace({
                             )}
                             <button
                                 type="button"
-                                onClick={() => handleRetrySlot(selected)}
+                                onClick={() => handleRetrySlot(activeSelection)}
                                 className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                             >
                                 <RefreshCcw size={14} /> Retry
@@ -357,13 +809,14 @@ export function ArtifactWorkspace({
         }
 
         // status === 'done' or 'idle' — try to render the existing artifact.
-        if (selected === 'mockup') {
+        if (activeSelection === 'mockup') {
             const mockup = getArtifacts(projectId, 'mockup')[0];
             const preferred = mockup ? getPreferredVersion(projectId, mockup.id) : undefined;
             if (!mockup || !preferred) {
                 return <EmptyState message="No mockup yet" />;
             }
-            const payload = tryParsePayload(preferred);
+            const parsed = tryParsePayload(preferred);
+            const payload = parsed ? mergeExtraScreens(parsed, preferred.metadata) : null;
             if (!payload) {
                 return (
                     <div className="bg-white rounded-xl border border-neutral-200 p-5 prose prose-sm prose-neutral max-w-none overflow-auto max-h-[600px]">
@@ -438,7 +891,7 @@ export function ArtifactWorkspace({
         }
 
         // Core artifact done state.
-        const subtype = selected;
+        const subtype = activeSelection;
         const artifact = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
         const preferred = artifact ? getPreferredVersion(projectId, artifact.id) : undefined;
         if (!artifact || !preferred) {
@@ -532,6 +985,8 @@ export function ArtifactWorkspace({
                         domainEntities={subtype === 'user_flows' ? structuredPRD.domainEntities : undefined}
                         featureSystems={subtype === 'user_flows' ? structuredPRD.featureSystems : undefined}
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
+                        onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
+                        availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
@@ -543,9 +998,13 @@ export function ArtifactWorkspace({
         );
     };
 
-    const selectedMeta = slotMetas.find(s => s.key === selected);
+    const selectedMeta = slotMetas.find(s => s.key === activeSelection);
     const handleSelect = (key: WorkspaceSelection) => {
         setSelected(key);
+        // Any sidebar selection (including re-clicking "Screens") lands on the
+        // top of that view, closing an open Screen Detail (clears the URL
+        // params, so Back can return to the screen).
+        if (selectedScreenId) setScreenParams(null);
         setMobileSidebarOpen(false);
     };
 
@@ -607,7 +1066,7 @@ export function ArtifactWorkspace({
                                 <ul>
                                     {groupSlots.map(slot => {
                                         const status = slotStatusFor(slot.key);
-                                        const isSel = selected === slot.key;
+                                        const isSel = activeSelection === slot.key;
                                         const Icon = slot.icon;
                                         return (
                                             <li key={slot.key}>
@@ -658,9 +1117,9 @@ export function ArtifactWorkspace({
                     <span className="text-sm font-semibold text-neutral-800 truncate">
                         {selectedMeta?.title ?? 'Artifacts'}
                     </span>
-                    {selected !== 'prd' && (
+                    {activeSelection !== 'prd' && (
                         <span className="ml-auto shrink-0">
-                            <StatusDot status={slotStatusFor(selected)} />
+                            <StatusDot status={slotStatusFor(activeSelection)} />
                         </span>
                     )}
                 </div>
@@ -721,6 +1180,63 @@ export function ArtifactWorkspace({
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
                             >
                                 <RefreshCcw size={13} /> Regenerate
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
+
+            {missingMockupsConfirm && (
+                <div
+                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
+                    onClick={() => setMissingMockupsConfirm(null)}
+                    role="presentation"
+                >
+                    <div
+                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
+                        onClick={(e) => e.stopPropagation()}
+                        role="dialog"
+                        aria-modal="true"
+                        aria-labelledby="missing-mockups-title"
+                    >
+                        <div className="px-5 pt-5 pb-3">
+                            <h3 id="missing-mockups-title" className="text-base font-bold text-neutral-900">
+                                Generate missing mockups
+                            </h3>
+                            <p className="text-sm text-neutral-700 mt-1">
+                                Adds {missingMockupsConfirm.count} uncovered{' '}
+                                {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
+                                mockup set.
+                            </p>
+                            {hasOpenAIKey() ? (
+                                <p className="text-xs text-amber-700 mt-2">
+                                    A low-quality draft image will be generated per screen via OpenAI
+                                    gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
+                                    {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
+                                    own key (typically a few cents each). You can cancel any screen
+                                    while it&rsquo;s generating.
+                                </p>
+                            ) : (
+                                <p className="text-xs text-neutral-500 mt-2">
+                                    No OpenAI key is configured, so nothing will be generated — each
+                                    added screen shows a copyable prompt and an upload sheet instead.
+                                </p>
+                            )}
+                        </div>
+                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
+                            <button
+                                type="button"
+                                onClick={() => setMissingMockupsConfirm(null)}
+                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
+                            >
+                                Cancel
+                            </button>
+                            <button
+                                type="button"
+                                onClick={handleGenerateMissingMockups}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
+                            >
+                                <Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}
                             </button>
                         </div>
                     </div>
