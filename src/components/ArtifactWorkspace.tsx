@@ -75,7 +75,17 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
         id: 'design',
         title: 'UX & Design',
         icon: Layers,
-        items: ['user_flows', 'screen_inventory', 'mockup', 'component_inventory', 'design_system'],
+        // NOTE: 'component_inventory' (UI Components) is intentionally hidden
+        // from the assets list — no artifact hard-depends on it and it isn't
+        // useful to surface directly right now. It is deliberately NOT removed
+        // from CORE_ARTIFACT_PIPELINE: mockups still consume it (see
+        // MOCKUP_DEPENDENCIES / generateMockup) to tag which components appear
+        // on each screen, so it keeps generating under the hood. Because the
+        // sidebar, mobile header, auto-open order, and slot counts all derive
+        // from ARTIFACT_GROUPS (via buildSlotMetas), dropping it here removes it
+        // from the UI without breaking mockup generation. Revisit before
+        // re-exposing — see docs/backlog/BACKLOG.md ("UI Components artifact").
+        items: ['user_flows', 'screen_inventory', 'mockup', 'design_system'],
     },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
     { id: 'development', title: 'Development', icon: Code2, items: ['prompt_pack', 'implementation_plan'] },

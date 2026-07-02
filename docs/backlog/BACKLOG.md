@@ -298,6 +298,43 @@ generated/stored/rendered.
 
 ---
 
+## 6. UI Components artifact (hidden from the assets list — revisit)
+
+**Decision (2026-07-02):** The **UI Components** artifact (`component_inventory`)
+was **hidden from the assets list** because it has no hard dependents and isn't
+useful to surface directly right now.
+
+- **What changed.** `component_inventory` was removed from `ARTIFACT_GROUPS` in
+  `src/components/ArtifactWorkspace.tsx`, which drives the sidebar, mobile
+  header, auto-open order, and slot counts. Users no longer see or create it
+  directly.
+- **What deliberately did *not* change.** It is **still generated** — it remains
+  in `CORE_ARTIFACT_PIPELINE` (`src/lib/coreArtifactPipeline.ts`) and in
+  `MOCKUP_DEPENDENCIES` (`src/lib/services/artifactJobController.ts`), because
+  **mockups softly consume it**: `generateMockup` uses it to tag which reusable
+  components appear on each screen (`componentRefs`), which feed the gpt-image
+  mockup prompts (`mockupImageService`). It degrades gracefully when absent, but
+  keeping it generating preserves richer mockup prompts. `assetsReady` and
+  staleness checks (which iterate `CORE_ARTIFACT_DISPLAY_ORDER`) still resolve
+  because generation is unchanged.
+
+### Revisit checklist
+
+- [ ] **Decide the artifact's future.** Options: (a) re-expose it if a hard
+  dependent or clear user value emerges; (b) fully remove it — drop it from
+  `CORE_ARTIFACT_PIPELINE` **and** `MOCKUP_DEPENDENCIES`/`generateMockup`,
+  accepting that mockup prompts lose per-screen component tagging; (c) keep the
+  current hidden-but-generated state.
+- [ ] **If fully removing:** also prune the renderer wiring
+  (`ComponentInventoryRenderer` + `src/components/renderers/componentInventory/`),
+  the schema (`componentInventorySchema`), the parser (`componentInventoryParse.ts`),
+  model routing (`artifactModelSettings.ts`), the Design System renderer's
+  "Downstream Usage Status" reference, and the README / tour mentions.
+- [ ] **If re-exposing:** restore the `'component_inventory'` entry in
+  `ARTIFACT_GROUPS` and re-add the README assets bullet + mermaid node.
+
+---
+
 ## Cross-cutting themes
 
 A few of the items above show up in multiple artifact sections — surfacing

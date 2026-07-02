@@ -873,12 +873,19 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 The artifact sidebar is organized into four workflow-named sections —
 **Project Foundation** (PRD), **UX & Design** (User Flows, Screen Inventory,
-Mockups, UI Components, Design System), **Architecture** (Data Model), and
+Mockups, Design System), **Architecture** (Data Model), and
 **Development** (Developer Prompts, Build Plan) — driven by `ARTIFACT_GROUPS` in
 `ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
-per-artifact model overrides keep working. `title`/`description` in
+per-artifact model overrides keep working. **`component_inventory` (UI Components)
+is intentionally *not* in `ARTIFACT_GROUPS`** — it is hidden from the assets list
+(no hard dependents, not useful to surface directly right now) but **still
+generates** because it stays in `CORE_ARTIFACT_PIPELINE` and `MOCKUP_DEPENDENCIES`:
+mockups softly consume it to tag per-screen `componentRefs`. Because `assetsReady`
+and staleness iterate `CORE_ARTIFACT_DISPLAY_ORDER` (which still includes it) and
+generation is unchanged, those gates still resolve. See
+`docs/backlog/BACKLOG.md` §6 before re-exposing or fully removing it. `title`/`description` in
 `CORE_ARTIFACT_PIPELINE` are display-only labels that may be renamed freely; the
 sidebar's iteration order (and the mobile-header / auto-open order)
 all derive from `ARTIFACT_GROUPS`, not `displayOrder`. There is no

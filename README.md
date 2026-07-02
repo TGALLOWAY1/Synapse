@@ -154,14 +154,12 @@ artifact and regenerate it; when its tokens change, Synapse flags the affected
 mockups and offers to regenerate them so they pick up the new direction.
 
 - **Screen Inventory** and **User Flows**
-- **UI Components** (a searchable, filterable component library with live
-  previews and per-component accessibility contracts) and **Design System**
+- **Design System**
 - **Data Model** schemas with entities, fields, and relationships
 - **Build Plan** and **Developer Prompts**
 
-Three of them (`screen_inventory`, `data_model`, `component_inventory`) use
-Gemini JSON mode with explicit schemas and render as card grids, entity tables,
-and categorized component cards rather than raw markdown. Every artifact tracks
+Two of them (`screen_inventory`, `data_model`) use Gemini JSON mode with explicit
+schemas and render as card grids and entity tables rather than raw markdown. Every artifact tracks
 **staleness** against the current spine, supports **natural-language
 refinement** ("add error states to each screen"), and surfaces **quality
 warnings** if the output looks truncated or malformed.
@@ -289,7 +287,7 @@ graph TD
 
     H --> J(Screen Inventory)
     H --> K(Data Model)
-    H --> L(UI Components)
+    H --> L(Design System)
     H --> M(Build Plan)
 ```
 
