@@ -5,6 +5,7 @@ import { AlertTriangle, Check, Copy, Pencil, RotateCcw, ShieldCheck } from 'luci
 import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
 import { useArtifactOutline } from '../../lib/useArtifactOutline';
 import { useIsMobile } from '../../lib/useIsMobile';
+import { parsePromptPack, type PromptCard } from '../../lib/services/promptPackParser';
 import type { Feature } from '../../types';
 
 // Render a `prompt_pack` artifact as a vertical document — one card per
@@ -31,82 +32,8 @@ interface Props {
     versionNumber?: number;
 }
 
-type PromptCard = {
-    index: number;
-    title: string;
-    category?: string;
-    promptBody: string;
-    expected?: string;
-};
-
-const PROMPT_HEADING = /^###\s+(\d+)\.?\s+(.+?)\s*$/;
-
-function parsePromptPack(markdown: string): { preamble: string; cards: PromptCard[] } {
-    const lines = markdown.split('\n');
-    const preambleLines: string[] = [];
-    const cards: PromptCard[] = [];
-    let active: { rawLines: string[]; index: number; title: string } | null = null;
-    let inMilestones = false;
-
-    for (const line of lines) {
-        const heading = line.match(PROMPT_HEADING);
-        if (heading) {
-            if (active) cards.push(buildCard(active));
-            active = { rawLines: [], index: Number(heading[1]), title: heading[2] };
-            inMilestones = true;
-            continue;
-        }
-        if (active) {
-            active.rawLines.push(line);
-        } else if (!inMilestones) {
-            preambleLines.push(line);
-        }
-    }
-    if (active) cards.push(buildCard(active));
-    return { preamble: preambleLines.join('\n').trim(), cards };
-}
-
-function buildCard(active: { rawLines: string[]; index: number; title: string }): PromptCard {
-    const card: PromptCard = {
-        index: active.index,
-        title: active.title,
-        promptBody: '',
-    };
-    let inFence = false;
-    const promptLines: string[] = [];
-    let collectExpected = false;
-    const expectedLines: string[] = [];
-
-    for (const line of active.rawLines) {
-        if (/^```/.test(line.trim())) {
-            inFence = !inFence;
-            continue;
-        }
-        if (inFence) {
-            promptLines.push(line);
-            continue;
-        }
-        const cat = line.match(/^\*\*Category:\*\*\s*(.+)$/i);
-        if (cat) {
-            card.category = cat[1].trim();
-            continue;
-        }
-        const exp = line.match(/^\*\*Expected Output:\*\*\s*(.*)$/i);
-        if (exp) {
-            collectExpected = true;
-            if (exp[1].trim()) expectedLines.push(exp[1].trim());
-            continue;
-        }
-        if (collectExpected) {
-            expectedLines.push(line);
-        }
-    }
-    card.promptBody = promptLines.join('\n').trim();
-    if (expectedLines.length > 0) {
-        card.expected = expectedLines.join('\n').trim();
-    }
-    return card;
-}
+// Prompt-card parsing now lives in `src/lib/services/promptPackParser.ts`
+// so the implementation-plan adapter can share the same rules.
 
 // Find feature IDs (e.g. f1, F-014) that appear OUTSIDE a "## Features In
 // Scope" section. Dangling IDs aren't usable when the prompt is copied
