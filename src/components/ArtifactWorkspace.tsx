@@ -920,6 +920,16 @@ export function ArtifactWorkspace({
         const promptEdits = subtype === 'prompt_pack'
             ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
             : undefined;
+        // Legacy projects may hold a standalone prompt_pack artifact (retired
+        // subtype, no sidebar row). The Implementation Plan view consumes its
+        // content through the adapter so those prompts appear as prompt packs.
+        const legacyPromptPackContent = subtype === 'implementation_plan'
+            ? (() => {
+                const packArtifact = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === 'prompt_pack');
+                const packPreferred = packArtifact ? getPreferredVersion(projectId, packArtifact.id) : undefined;
+                return packPreferred?.content;
+            })()
+            : undefined;
         const handleUpdatePromptEdits = subtype === 'prompt_pack'
             ? (next: Record<number, string>) => {
                 updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next });
@@ -992,6 +1002,7 @@ export function ArtifactWorkspace({
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
                         onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
                         availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
+                        promptPackContent={legacyPromptPackContent}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
