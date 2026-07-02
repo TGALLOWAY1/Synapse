@@ -164,6 +164,14 @@ schemas and render as card grids and entity tables rather than raw markdown. Eve
 refinement** ("add error states to each screen"), and surfaces **quality
 warnings** if the output looks truncated or malformed.
 
+The workspace presents the experience artifacts screen-first: an **Experience**
+section holds **User Flows** and **Screens** — a consolidated, screen-centric
+view where each screen from the Screen Inventory gets its own detail page with
+**Overview / Flow / Mockups** tabs (its inventory spec, every user-flow step
+that touches it with the screen highlighted in the journey diagram, and its
+mockup). Clicking a screen node in a User Flow jumps straight to that screen's
+page, so the working mental model is "I'm working on this screen."
+
 Each artifact is routed to the right model by complexity — Flash for simpler
 artifacts, Pro for complex reasoning — and you can override the model **per
 artifact** in Settings → **Artifact Generation Models** (the PRD itself routes

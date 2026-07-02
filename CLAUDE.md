@@ -883,11 +883,12 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 ### Post-finalization transition (Mark Final → Assets)
 
-The artifact sidebar is organized into four workflow-named sections —
-**Project Foundation** (PRD), **UX & Design** (User Flows, Screen Inventory,
-Mockups, Design System), **Architecture** (Data Model), and
-**Development** (Developer Prompts, Build Plan) — driven by `ARTIFACT_GROUPS` in
-`ArtifactWorkspace.tsx`. Grouping is purely visual; `CoreArtifactSubtype` ids
+The artifact sidebar is organized into five workflow-named sections —
+**Project Foundation** (PRD), **Experience** (User Flows, Screens — see "The
+Experience workspace" below), **Design** (Design System), **Architecture**
+(Data Model), and **Development** (Developer Prompts, Build Plan) — driven by
+`ARTIFACT_GROUPS` in `ArtifactWorkspace.tsx`. Grouping is purely visual;
+`CoreArtifactSubtype` ids
 (`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
 `'implementation_plan'`) are unchanged so persisted artifacts, generation, and
 per-artifact model overrides keep working. **`component_inventory` (UI Components)
@@ -924,11 +925,58 @@ check of the 7 core artifacts + mockups) **without** switching stage. Its
 `ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
-`ARTIFACT_GROUPS` order (user_flows → screen_inventory → mockup → … →
+`ARTIFACT_GROUPS` order (user_flows → screens → design_system → … →
 implementation_plan) — and opens the mobile drawer (`useIsMobile`-gated, so it
 never reopens after the user closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
+
+### The Experience workspace (Screens) — read-side consolidation
+
+The old **Screen Inventory** and **Mockups** sidebar rows are consolidated into
+one screen-centric **Screens** view (`selected === 'screens'`, a
+`WorkspaceSelection` value, NOT an artifact slot). **This is a read-side view
+layer only**: the `screen_inventory`, `user_flows`, and `mockup` artifacts keep
+generating, persisting, and versioning exactly as before — no schema, prompt,
+pipeline, sync, or snapshot change. Do not add persisted state for this view.
+
+- **Join layer** — `src/lib/screenExperience.ts` (pure; no store/IDB/React;
+  unit-tested in `src/lib/__tests__/screenExperience.test.ts`).
+  `buildScreenIndex(inventory, flows, mockupPayload)` joins the three parsed
+  artifact contents into a `ScreenExperienceIndex` keyed by
+  **`slugifyScreenName(name)`** — the same slug the per-screen image stores
+  use, and the only cross-artifact screen identity that exists (there is no
+  persisted screen id). Flow steps match by exact slug of the parsed
+  `[Screen Name]` step title (`stepScreenSlug`); mockup screens match by
+  slugified `MockupScreen.name`. Missing artifacts degrade gracefully; a
+  missing inventory returns the module-level `EMPTY_SCREEN_EXPERIENCE_INDEX`
+  (stable reference — Selector-stability rule). Slug collisions keep the first
+  screen and are surfaced via `index.collisions` (warning banner in the list).
+- **Views** — `src/components/experience/`: `ScreenListView` (sectioned list of
+  all inventory screens with flow-ref/mockup coverage chips),
+  `ScreenDetailView` + `ScreenDetailTabs` (per-screen **Overview / Flow /
+  Mockups** tabs). They reuse existing pieces rather than duplicating them:
+  Overview = the exported `ScreenCard` from `ScreenInventoryRenderer` (+ the
+  upload gallery); Flow = `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with
+  the current screen's steps highlighted (`highlightedStepIndices`); Mockups =
+  `MockupScreenImage` (which internally routes to the manual upload sheet).
+  Shared priority-chip styles live in `src/components/renderers/screenPriority.ts`
+  (own module — the react-refresh/only-export-components rule forbids constant
+  exports from component files).
+- **Navigation state is local to `ArtifactWorkspace`** (`selectedScreenSlug` +
+  `screenTab`); no URL routes. Screen journey nodes in **User Flows** navigate
+  to Screen Detail when the node is a `screen` kind AND its slug is in
+  `availableScreenSlugs` (threaded through `ArtifactContentRenderer` →
+  `UserFlowsRenderer` → `FlowJourney.onNavigateToScreen`); otherwise the
+  original scroll-to-step behavior is preserved.
+- **Status/fallbacks:** the Screens sidebar dot and generation/error states map
+  to the **`screen_inventory` slot** (its retry re-runs that slot, since it no
+  longer has its own row); the Mockups tab surfaces the `mockup` slot's
+  generating/error states. A screen_inventory version whose content isn't
+  parseable structured JSON (legacy markdown) falls back to the standalone
+  `ScreenInventoryRenderer` path inside the Screens view. The legacy
+  `screen_inventory` and `mockup` renderMain branches remain intact and
+  internally reachable — do not delete them.
 
 ### Implementation tasks (plan → tracked checklist)
 

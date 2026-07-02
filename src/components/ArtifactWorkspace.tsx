@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, ListChecks, History,
-    Layers, Database, Code2,
+    Layers, Database, Code2, AppWindow, Palette,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -24,6 +24,13 @@ import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { DesignDirectionControl } from './DesignDirectionControl';
 import { tryParsePayload, extractMockupSettings } from '../lib/mockupParsing';
 import { selectPreferredDesignTokens, selectPreferredDesignSystem } from '../lib/designTokens';
+import { buildScreenIndex } from '../lib/screenExperience';
+import { parseScreenInventory } from '../lib/screenInventoryNormalize';
+import { parseFlows } from './renderers/userFlows/parseFlow';
+import type { ParsedFlow } from './renderers/userFlows/types';
+import { ScreenListView } from './experience/ScreenListView';
+import { ScreenDetailView } from './experience/ScreenDetailView';
+import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, ProjectPlatform, StructuredPRD, GenerationStatus,
     ProjectTask,
@@ -34,6 +41,9 @@ import type {
 // render and bail out with React #185 (Maximum update depth) for any project
 // without saved tasks — e.g. the demo project on first load.
 const EMPTY_TASKS: ProjectTask[] = [];
+
+// Stable empty flows list for the screen-experience join memo.
+const EMPTY_FLOWS: ParsedFlow[] = [];
 
 interface ArtifactWorkspaceProps {
     projectId: string;
@@ -49,7 +59,10 @@ interface ArtifactWorkspaceProps {
     onAutoOpenConsumed?: () => void;
 }
 
-type WorkspaceSelection = 'prd' | ArtifactSlotKey;
+// 'screens' is the Experience workspace's screen-centric view — a read-side
+// join over screen_inventory + user_flows + mockup (src/lib/screenExperience.ts),
+// not an artifact slot of its own.
+type WorkspaceSelection = 'prd' | ArtifactSlotKey | 'screens';
 
 interface SlotMeta {
     key: WorkspaceSelection;
@@ -66,21 +79,25 @@ interface ArtifactGroup {
 }
 
 // Sidebar grouping is purely visual — subtype IDs are unchanged. Order within
-// a group is the order rows render in. The "Project Foundation → UX & Design
-// → Architecture → Development" sequence tells the product-build story; keep
-// it in sync with the README/tour if either changes.
+// a group is the order rows render in. The "Project Foundation → Experience →
+// Design → Architecture → Development" sequence tells the product-build story;
+// keep it in sync with the README/tour if either changes.
 const ARTIFACT_GROUPS: ArtifactGroup[] = [
     { id: 'foundation', title: 'Project Foundation', icon: FileText, items: ['prd'] },
     {
-        id: 'design',
-        title: 'UX & Design',
+        id: 'experience',
+        title: 'Experience',
         icon: Layers,
-        // 'component_inventory' (UI Components) lives in this group but is hidden
-        // from the assets list at materialization time — see buildSlotMetas and
-        // HIDDEN_ARTIFACT_SUBTYPES. It still generates for mockups; it just
-        // never renders a sidebar row. Revisit — see docs/backlog/BACKLOG.md §6.
-        items: ['user_flows', 'screen_inventory', 'mockup', 'component_inventory', 'design_system'],
+        // 'screens' consolidates the old Screen Inventory + Mockups sidebar rows
+        // into one screen-centric view (list → per-screen Overview/Flow/Mockups
+        // tabs). The screen_inventory and mockup artifacts still generate and
+        // persist unchanged — renderMain's legacy branches remain internally
+        // reachable as fallbacks; they just no longer render sidebar rows.
+        // 'component_inventory' also still generates (mockups consume it) but is
+        // a hidden subtype — see HIDDEN_ARTIFACT_SUBTYPES / docs/backlog §6.
+        items: ['user_flows', 'screens'],
     },
+    { id: 'design', title: 'Design', icon: Palette, items: ['design_system'] },
     { id: 'architecture', title: 'Architecture', icon: Database, items: ['data_model'] },
     { id: 'development', title: 'Development', icon: Code2, items: ['prompt_pack', 'implementation_plan'] },
 ];
@@ -89,6 +106,7 @@ function buildSlotMetas(): SlotMeta[] {
     const base: Record<WorkspaceSelection, SlotMeta> = {
         prd: { key: 'prd', title: 'PRD', description: 'Final product requirements document', icon: FileText },
         mockup: { key: 'mockup', title: 'Mockups', description: 'Interactive UI mockups', icon: Image },
+        screens: { key: 'screens', title: 'Screens', description: 'Screen-by-screen experience workspace', icon: AppWindow },
     } as Record<WorkspaceSelection, SlotMeta>;
     for (const meta of CORE_ARTIFACT_DISPLAY_ORDER) {
         base[meta.subtype as WorkspaceSelection] = {
@@ -104,7 +122,9 @@ function buildSlotMetas(): SlotMeta[] {
     // so they render no row anywhere in the workspace.
     return ARTIFACT_GROUPS.flatMap(group =>
         group.items
-            .filter(key => key === 'prd' || key === 'mockup' || !isHiddenArtifactSubtype(key))
+            .filter(key =>
+                key === 'prd' || key === 'mockup' || key === 'screens'
+                || !isHiddenArtifactSubtype(key))
             .map(key => base[key]),
     );
 }
@@ -168,8 +188,71 @@ export function ArtifactWorkspace({
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
+    // Experience workspace (Screens) navigation state. `selectedScreenSlug`
+    // is the open Screen Detail (null = the Screens list view); `screenTab`
+    // is its active tab. Local component state only — no URL routing in the
+    // MVP, mirroring how `selected` itself works.
+    const [selectedScreenSlug, setSelectedScreenSlug] = useState<string | null>(null);
+    const [screenTab, setScreenTab] = useState<ScreenDetailTab>('overview');
 
     const job = getJob(projectId);
+
+    // --- Experience (Screens) join layer ------------------------------------
+    // Preferred versions of the three experience artifacts. The version
+    // objects are stable references in the store until a new version lands,
+    // so they are safe useMemo dependencies.
+    const coreArtifacts = getArtifacts(projectId, 'core_artifact');
+    const invArtifact = coreArtifacts.find(a => a.subtype === 'screen_inventory');
+    const invPreferred = invArtifact ? getPreferredVersion(projectId, invArtifact.id) : undefined;
+    const flowsArtifact = coreArtifacts.find(a => a.subtype === 'user_flows');
+    const flowsPreferred = flowsArtifact ? getPreferredVersion(projectId, flowsArtifact.id) : undefined;
+    const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
+    const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
+
+    const mockupPayload = useMemo(
+        () => (mockupPreferred ? tryParsePayload(mockupPreferred) : null),
+        [mockupPreferred],
+    );
+
+    // Read-side screen index: joins the parsed screen_inventory, user_flows,
+    // and mockup contents by slugified screen name. Pure + memoized — nothing
+    // is persisted, and missing artifacts degrade to a stable empty index.
+    const screenIndex = useMemo(() => {
+        const inventory = invPreferred ? parseScreenInventory(invPreferred.content) : null;
+        const flows = flowsPreferred ? parseFlows(flowsPreferred.content) : EMPTY_FLOWS;
+        return buildScreenIndex(inventory, flows, mockupPayload);
+    }, [invPreferred, flowsPreferred, mockupPayload]);
+
+    // Per-screen upload-gallery context for the detail view's Overview tab —
+    // mirrors the context the standalone screen_inventory branch builds below.
+    const invScreenImageContext = invArtifact && invPreferred
+        ? {
+            projectId,
+            artifactId: invArtifact.id,
+            artifactVersionId: invPreferred.id,
+            productTitle: structuredPRD.productName ?? getProject(projectId)?.name ?? 'this product',
+            productSummary: structuredPRD.executiveSummary ?? structuredPRD.vision,
+            designTokens,
+            platformHint: (projectPlatform === 'app'
+                ? 'mobile'
+                : projectPlatform === 'web'
+                    ? 'desktop'
+                    : 'responsive') as 'mobile' | 'desktop' | 'responsive',
+        }
+        : undefined;
+
+    // Mockups-tab context for the detail view. Absent when the mockup
+    // artifact is missing or its payload is unparseable — the tab shows an
+    // empty state instead.
+    const mockupDetailContext = mockupArtifact && mockupPreferred && mockupPayload
+        ? {
+            projectId,
+            artifactId: mockupArtifact.id,
+            versionId: mockupPreferred.id,
+            payload: mockupPayload,
+            settings: extractMockupSettings(mockupPreferred),
+        }
+        : undefined;
 
     // Auto-resume any slots that didn't finish before the last unmount /
     // page reload. The job state is transient (stripped from persisted
@@ -188,12 +271,15 @@ export function ArtifactWorkspace({
 
     const slotStatusFor = (key: WorkspaceSelection): GenerationStatus => {
         if (key === 'prd') return 'done';
-        const fromJob = job?.slots[key]?.status;
+        // 'screens' is a derived view over screen_inventory — surface that
+        // slot's status so the sidebar dot tracks the screens' source artifact.
+        const slotKey: ArtifactSlotKey = key === 'screens' ? 'screen_inventory' : key;
+        const fromJob = job?.slots[slotKey]?.status;
         if (fromJob && fromJob !== 'idle') return fromJob;
         // No active job state — derive from artifact presence so previously
         // completed artifacts still show as "Ready" after the job is cleared.
-        const type = key === 'mockup' ? 'mockup' : 'core_artifact';
-        const subtype: CoreArtifactSubtype | undefined = key === 'mockup' ? undefined : key;
+        const type = slotKey === 'mockup' ? 'mockup' : 'core_artifact';
+        const subtype: CoreArtifactSubtype | undefined = slotKey === 'mockup' ? undefined : slotKey;
         const artifacts = getArtifacts(projectId, type);
         const existing = subtype ? artifacts.find(a => a.subtype === subtype) : artifacts[0];
         if (existing && existing.currentVersionId) return 'done';
@@ -202,7 +288,8 @@ export function ArtifactWorkspace({
 
     const slotErrorFor = (key: WorkspaceSelection) => {
         if (key === 'prd') return undefined;
-        return job?.slots[key]?.error;
+        const slotKey: ArtifactSlotKey = key === 'screens' ? 'screen_inventory' : key;
+        return job?.slots[slotKey]?.error;
     };
 
     // Post-finalization auto-open. Runs once each time the parent arms
@@ -226,8 +313,10 @@ export function ArtifactWorkspace({
 
     // Drives the in-pane "Creating your build assets…" placeholder so an
     // idle slot doesn't read as empty while siblings are still in flight.
-    const isActive = slotMetas.some(s => {
-        const status = slotStatusFor(s.key);
+    // 'mockup' no longer renders a sidebar row (it lives inside the Screens
+    // view), so it's re-added here explicitly to keep the in-flight signal.
+    const isActive = ([...slotMetas.map(s => s.key), 'mockup'] as WorkspaceSelection[]).some(key => {
+        const status = slotStatusFor(key);
         return status === 'generating' || status === 'queued';
     });
 
@@ -235,6 +324,16 @@ export function ArtifactWorkspace({
         artifactJobController.retrySlot(slot, {
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
+    };
+
+    // Open a screen's detail view — used by the Screens list, the Screens
+    // sidebar row (via handleSelect resetting to the list), and screen nodes
+    // in the User Flows journey diagram.
+    const handleNavigateToScreen = (slug: string) => {
+        setSelected('screens');
+        setSelectedScreenSlug(slug);
+        setScreenTab('overview');
+        setMobileSidebarOpen(false);
     };
 
     // Persist a newly-chosen visual direction, then surface the regenerate
@@ -296,6 +395,97 @@ export function ArtifactWorkspace({
                     />
                 </div>
             );
+        }
+
+        // --- Experience → Screens (read-side consolidation) -----------------
+        if (selected === 'screens') {
+            const screensStatus = slotStatusFor('screens'); // = screen_inventory slot
+            const screensError = slotErrorFor('screens');
+            if (screensStatus === 'queued' || screensStatus === 'generating') {
+                return (
+                    <div className="max-w-2xl mx-auto">
+                        <GenerationProgress
+                            stages={getArtifactStages('screen_inventory')}
+                            variant="systematic"
+                            title={screensStatus === 'queued' ? 'Queued: Screens' : 'Generating Screen Inventory'}
+                            subtitle={screensStatus === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
+                            history={job?.slots.screen_inventory?.progressLog ?? []}
+                        />
+                    </div>
+                );
+            }
+            if (screensStatus === 'error' || screensStatus === 'interrupted') {
+                // The Screens view is fed by screen_inventory, so its retry
+                // re-runs that slot (there is no standalone sidebar row for it
+                // anymore).
+                return (
+                    <div className="max-w-2xl mx-auto bg-white border border-neutral-200 rounded-xl p-6 shadow-sm">
+                        <div className="flex items-start gap-3">
+                            <AlertTriangle size={20} className={screensStatus === 'error' ? 'text-red-500' : 'text-amber-500'} />
+                            <div className="flex-1 min-w-0">
+                                <h3 className="font-semibold text-neutral-900">
+                                    {screensStatus === 'error' ? 'Screen Inventory generation failed' : 'Screen Inventory generation interrupted'}
+                                </h3>
+                                {screensError?.message && (
+                                    <p className="text-sm text-neutral-600 mt-1 break-words">{screensError.message}</p>
+                                )}
+                                <button
+                                    type="button"
+                                    onClick={() => handleRetrySlot('screen_inventory')}
+                                    className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
+                                >
+                                    <RefreshCcw size={14} /> Retry
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                );
+            }
+            if (screensStatus === 'idle' && isActive) {
+                return <BuildAssetsLoading />;
+            }
+
+            // Legacy fallback: a screen_inventory version exists but isn't
+            // parseable structured JSON (old markdown artifacts). Render it
+            // through the standalone renderer so the content stays reachable
+            // instead of dead-ending on an empty Screens list.
+            if (screenIndex.items.length === 0 && invPreferred) {
+                return (
+                    <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto">
+                        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
+                            <ArtifactContentRenderer
+                                subtype="screen_inventory"
+                                content={invPreferred.content}
+                                screenImageContext={invScreenImageContext}
+                                projectId={projectId}
+                            />
+                        </div>
+                    </div>
+                );
+            }
+
+            const detailItem = selectedScreenSlug
+                ? screenIndex.bySlug.get(selectedScreenSlug)
+                : undefined;
+            if (detailItem) {
+                return (
+                    <ScreenDetailView
+                        item={detailItem}
+                        activeTab={screenTab}
+                        onTabChange={setScreenTab}
+                        onBack={() => setSelectedScreenSlug(null)}
+                        onNavigateToScreen={handleNavigateToScreen}
+                        availableScreenSlugs={screenIndex.availableSlugs}
+                        screenImageContext={invScreenImageContext}
+                        mockupContext={mockupDetailContext}
+                        mockupStatus={slotStatusFor('mockup')}
+                        onRetryMockup={() => handleRetrySlot('mockup')}
+                        features={structuredPRD.features}
+                    />
+                );
+            }
+            // Stale slug (e.g. inventory regenerated) falls back to the list.
+            return <ScreenListView index={screenIndex} onSelectScreen={handleNavigateToScreen} />;
         }
 
         const status = slotStatusFor(selected);
@@ -532,6 +722,8 @@ export function ArtifactWorkspace({
                         domainEntities={subtype === 'user_flows' ? structuredPRD.domainEntities : undefined}
                         featureSystems={subtype === 'user_flows' ? structuredPRD.featureSystems : undefined}
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
+                        onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
+                        availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
@@ -546,6 +738,9 @@ export function ArtifactWorkspace({
     const selectedMeta = slotMetas.find(s => s.key === selected);
     const handleSelect = (key: WorkspaceSelection) => {
         setSelected(key);
+        // Any sidebar selection (including re-clicking "Screens") lands on the
+        // top of that view, closing an open Screen Detail.
+        setSelectedScreenSlug(null);
         setMobileSidebarOpen(false);
     };
 

@@ -36,6 +36,10 @@ interface DispatchProps {
     domainEntities?: DomainEntity[];
     featureSystems?: FeatureSystem[];
     implementationPlan?: ImplementationPlan;
+    /** Only consumed by `user_flows`: Experience-workspace wiring so screen
+     * journey nodes can open the matching Screen Detail view. */
+    onNavigateToScreen?: (screenSlug: string) => void;
+    availableScreenSlugs?: ReadonlySet<string>;
     /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
     promptEdits?: Record<number, string>;
     /** Only consumed by `prompt_pack`; persists the new edit overlay. */
@@ -82,6 +86,8 @@ export function ArtifactContentRenderer({
     domainEntities,
     featureSystems,
     implementationPlan,
+    onNavigateToScreen,
+    availableScreenSlugs,
     promptEdits,
     onUpdatePromptEdits,
     generatedAt,
@@ -108,6 +114,8 @@ export function ArtifactContentRenderer({
                 domainEntities={domainEntities}
                 featureSystems={featureSystems}
                 implementationPlan={implementationPlan}
+                onNavigateToScreen={onNavigateToScreen}
+                availableScreenSlugs={availableScreenSlugs}
             />
         );
     }

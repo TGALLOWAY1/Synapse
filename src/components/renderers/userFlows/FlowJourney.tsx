@@ -1,13 +1,25 @@
 import {
     AppWindow, Cog, GitBranch, Layers, MousePointerClick, Sparkles, Workflow,
 } from 'lucide-react';
-import type { ParsedStep, FlowJourneyNodeKind } from './types';
+import type { FlowJourneyNode, ParsedStep, FlowJourneyNodeKind } from './types';
 import { buildJourneyNodes, NODE_KIND_LABEL, nodeKindStyle } from './journeyNode';
+import { stepScreenSlug } from '../../../lib/screenExperience';
 
 interface Props {
     flowIndex: number;
     steps: ParsedStep[];
     issuesByStep: Map<number, number>;
+    /**
+     * Experience-workspace wiring (all optional — default behavior is
+     * unchanged). When a clicked node is a `screen` node whose slugified
+     * title exists in `availableScreenSlugs`, `onNavigateToScreen` fires
+     * instead of the scroll-to-step default. Other nodes keep scrolling.
+     */
+    onNavigateToScreen?: (screenSlug: string) => void;
+    availableScreenSlugs?: ReadonlySet<string>;
+    /** Step indices to visually emphasize (the current screen in a Screen
+     * Detail "Flow" tab). */
+    highlightedStepIndices?: ReadonlySet<number>;
 }
 
 const KIND_ICON: Record<FlowJourneyNodeKind, typeof AppWindow> = {
@@ -53,12 +65,25 @@ function Legend() {
     );
 }
 
-export function FlowJourney({ flowIndex, steps, issuesByStep }: Props) {
+export function FlowJourney({
+    flowIndex, steps, issuesByStep,
+    onNavigateToScreen, availableScreenSlugs, highlightedStepIndices,
+}: Props) {
     if (steps.length === 0) return null;
     const nodes = buildJourneyNodes(steps);
 
-    const handleClick = (stepIndex: number) => {
-        const el = document.getElementById(`flow-${flowIndex}-step-${stepIndex}`);
+    const handleClick = (node: FlowJourneyNode) => {
+        // Screen nodes with a matching canonical screen navigate to that
+        // screen's detail view; everything else keeps the scroll behavior.
+        if (onNavigateToScreen && availableScreenSlugs && node.kind === 'screen') {
+            const step = steps.find(s => s.index === node.stepIndex);
+            const slug = step ? stepScreenSlug(step) : null;
+            if (slug && availableScreenSlugs.has(slug)) {
+                onNavigateToScreen(slug);
+                return;
+            }
+        }
+        const el = document.getElementById(`flow-${flowIndex}-step-${node.stepIndex}`);
         if (el) el.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
@@ -80,6 +105,7 @@ export function FlowJourney({ flowIndex, steps, issuesByStep }: Props) {
                         const style = nodeKindStyle(node.kind);
                         const altCount = issuesByStep.get(node.stepIndex) ?? 0;
                         const isLast = i === nodes.length - 1;
+                        const highlighted = highlightedStepIndices?.has(node.stepIndex) ?? false;
                         return (
                             <li
                                 key={node.stepIndex}
@@ -87,8 +113,11 @@ export function FlowJourney({ flowIndex, steps, issuesByStep }: Props) {
                             >
                                 <button
                                     type="button"
-                                    onClick={() => handleClick(node.stepIndex)}
-                                    className={`group relative w-40 text-left rounded-xl border ${style.border} ${style.bg} hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition px-3 py-2.5 flex flex-col`}
+                                    onClick={() => handleClick(node)}
+                                    aria-current={highlighted ? 'true' : undefined}
+                                    className={`group relative w-40 text-left rounded-xl border ${style.border} ${style.bg} hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition px-3 py-2.5 flex flex-col ${
+                                        highlighted ? 'ring-2 ring-offset-1 ring-indigo-500' : ''
+                                    }`}
                                 >
                                     <div className="flex items-center justify-between gap-1 mb-1">
                                         <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/80 text-[10px] font-bold text-neutral-700 border border-neutral-200">
