@@ -1,6 +1,7 @@
 import { CheckCircle2, Sparkles, TestTube2 } from 'lucide-react';
 import type { ParsedFlow } from './types';
 import { inlineMd } from './markdown';
+import { CollapsibleSection } from './CollapsibleSection';
 
 interface Props {
     flow: ParsedFlow;
@@ -34,7 +35,8 @@ function extractFromSteps(flow: ParsedFlow): { qa: string[]; criteria: string[] 
 
 export function SuccessCriteriaBlock({ flow }: Props) {
     const lines = flow.successOutcome ? splitToLines(flow.successOutcome) : [];
-    const userOutcome = lines[0] ?? flow.successOutcome;
+    // Line 0 is the headline user outcome (shown in the Flow Summary card);
+    // the remaining lines carry measurable criteria / QA checks.
     const remaining = lines.slice(1);
 
     const productCriteria: string[] = remaining.filter(l => MEASURABLE_RE.test(l));
@@ -44,25 +46,18 @@ export function SuccessCriteriaBlock({ flow }: Props) {
     const productAll = Array.from(new Set([...productCriteria, ...fromSteps.criteria]));
     const qaAll = Array.from(new Set([...engineeringChecks, ...fromSteps.qa]));
 
-    if (!userOutcome && productAll.length === 0 && qaAll.length === 0) return null;
+    // The headline success outcome is already shown in the Flow Summary card.
+    // Only surface this (collapsed) detail block when there's measurable
+    // product criteria or engineering/QA checks to add beyond that headline.
+    if (productAll.length === 0 && qaAll.length === 0) return null;
 
     return (
-        <section className="bg-white rounded-xl border border-neutral-200 p-4 sm:p-5 mb-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-emerald-700 flex items-center gap-1 mb-3">
-                <Sparkles size={11} /> Success criteria
-            </p>
+        <CollapsibleSection
+            title="Success criteria & checks"
+            icon={<Sparkles size={12} className="text-emerald-600" />}
+            count={productAll.length + qaAll.length}
+        >
             <div className="space-y-3 text-sm">
-                {userOutcome && (
-                    <div>
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
-                            User outcome
-                        </p>
-                        <div className="flex items-start gap-2 text-neutral-800">
-                            <CheckCircle2 size={14} className="shrink-0 mt-0.5 text-emerald-600" />
-                            <div className="min-w-0">{inlineMd(userOutcome)}</div>
-                        </div>
-                    </div>
-                )}
                 {productAll.length > 0 && (
                     <div>
                         <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-1">
@@ -94,6 +89,6 @@ export function SuccessCriteriaBlock({ flow }: Props) {
                     </div>
                 )}
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }

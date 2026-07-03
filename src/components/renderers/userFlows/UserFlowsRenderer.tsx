@@ -15,6 +15,7 @@ import { IssuesPanel } from './IssuesPanel';
 import { FeatureDetailDrawer } from './FeatureDetailDrawer';
 import { RelatedArtifactsPanel } from './RelatedArtifactsPanel';
 import { AssumptionsPanel } from './AssumptionsPanel';
+import { computeRelatedArtifacts } from './relatedArtifacts';
 
 interface Props {
     content: string;
@@ -118,6 +119,12 @@ export function UserFlowsRenderer({
 
     const drawerFeature = drawerRef ? featuresById?.get(drawerRef.id) : undefined;
 
+    // Heuristic join computed once, shared by the header relationship summary
+    // and the Related Artifacts panel so their counts never disagree.
+    const related = computeRelatedArtifacts(flow, {
+        uxPages, domainEntities, implementationPlan, featureSystems,
+    });
+
     return (
         // `not-prose` opts out of the surrounding ArtifactWorkspace `prose`
         // typography, which would otherwise indent <dd> values, and add stray
@@ -138,6 +145,7 @@ export function UserFlowsRenderer({
                     timeToValue={ttvByFlow[safeIndex]}
                     featuresById={featuresById}
                     onSelectFeature={onSelectFeature}
+                    related={related}
                 />
 
                 <FlowJourney
@@ -175,13 +183,9 @@ export function UserFlowsRenderer({
                 <SuccessCriteriaBlock flow={flow} />
 
                 <RelatedArtifactsPanel
-                    flow={flow}
+                    related={related}
                     featuresById={featuresById}
                     onSelectFeature={onSelectFeature}
-                    uxPages={uxPages}
-                    domainEntities={domainEntities}
-                    featureSystems={featureSystems}
-                    implementationPlan={implementationPlan}
                 />
 
                 <IssuesPanel

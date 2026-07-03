@@ -1,5 +1,7 @@
+import { useState } from 'react';
 import {
-    AppWindow, Cog, GitBranch, Layers, MousePointerClick, Sparkles, Workflow,
+    AppWindow, ChevronRight, Cog, GitBranch, Layers, MousePointerClick,
+    Sparkles, Workflow,
 } from 'lucide-react';
 import type { FlowJourneyNode, ParsedStep, FlowJourneyNodeKind } from './types';
 import { buildJourneyNodes, NODE_KIND_LABEL, nodeKindStyle } from './journeyNode';
@@ -55,12 +57,6 @@ function Legend() {
                     </span>
                 );
             })}
-            <span className="inline-flex items-center gap-1 ml-1">
-                <span className="inline-block w-6 border-t-2 border-neutral-400" /> Primary path
-            </span>
-            <span className="inline-flex items-center gap-1">
-                <span className="inline-block w-6 border-t-2 border-dashed border-amber-500" /> Alternate path
-            </span>
         </div>
     );
 }
@@ -69,6 +65,7 @@ export function FlowJourney({
     flowIndex, steps, issuesByStep,
     onNavigateToScreen, availableScreenSlugs, highlightedStepIndices,
 }: Props) {
+    const [legendOpen, setLegendOpen] = useState(false);
     if (steps.length === 0) return null;
     const nodes = buildJourneyNodes(steps);
 
@@ -98,48 +95,47 @@ export function FlowJourney({
                 </span>
             </div>
 
-            <div className="overflow-x-auto -mx-1 px-1 pb-1">
-                <ol className="flex items-stretch gap-3 min-w-max">
-                    {nodes.map((node, i) => {
-                        const Icon = KIND_ICON[node.kind];
-                        const style = nodeKindStyle(node.kind);
-                        const altCount = issuesByStep.get(node.stepIndex) ?? 0;
-                        const isLast = i === nodes.length - 1;
-                        const highlighted = highlightedStepIndices?.has(node.stepIndex) ?? false;
-                        return (
-                            <li
-                                key={node.stepIndex}
-                                className="flex items-stretch gap-3"
+            {/* Vertical timeline — readable at any width, no horizontal scroll,
+                and each row lines up 1:1 with the Step-by-Step cards below. */}
+            <ol className="relative">
+                {nodes.map((node, i) => {
+                    const Icon = KIND_ICON[node.kind];
+                    const style = nodeKindStyle(node.kind);
+                    const altCount = issuesByStep.get(node.stepIndex) ?? 0;
+                    const isLast = i === nodes.length - 1;
+                    const highlighted = highlightedStepIndices?.has(node.stepIndex) ?? false;
+                    return (
+                        <li key={node.stepIndex} className="relative flex gap-3">
+                            {/* Rail: number marker + connector line */}
+                            <div className="relative flex flex-col items-center">
+                                <span className="z-10 inline-flex items-center justify-center w-7 h-7 rounded-full bg-white border border-neutral-300 text-[11px] font-bold text-neutral-700">
+                                    {node.stepIndex + 1}
+                                </span>
+                                {!isLast && (
+                                    <span
+                                        aria-hidden="true"
+                                        className="w-px flex-1 bg-neutral-200 my-0.5"
+                                    />
+                                )}
+                            </div>
+
+                            {/* Node card */}
+                            <button
+                                type="button"
+                                onClick={() => handleClick(node)}
+                                aria-current={highlighted ? 'true' : undefined}
+                                className={`group flex-1 min-w-0 text-left rounded-lg border ${style.border} ${style.bg} hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition px-3 py-2 mb-2 flex items-start gap-2.5 ${
+                                    highlighted ? 'ring-2 ring-offset-1 ring-indigo-500' : ''
+                                }`}
                             >
-                                <button
-                                    type="button"
-                                    onClick={() => handleClick(node)}
-                                    aria-current={highlighted ? 'true' : undefined}
-                                    className={`group relative w-40 text-left rounded-xl border ${style.border} ${style.bg} hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition px-3 py-2.5 flex flex-col ${
-                                        highlighted ? 'ring-2 ring-offset-1 ring-indigo-500' : ''
-                                    }`}
-                                >
-                                    <div className="flex items-center justify-between gap-1 mb-1">
-                                        <span className="inline-flex items-center justify-center w-5 h-5 rounded-full bg-white/80 text-[10px] font-bold text-neutral-700 border border-neutral-200">
-                                            {node.stepIndex + 1}
-                                        </span>
-                                        <span className={`inline-flex items-center justify-center w-5 h-5 rounded ${style.badgeBg} ${style.badgeText}`}>
-                                            <Icon size={11} />
-                                        </span>
-                                    </div>
-                                    <p
-                                        className={`text-[12px] font-medium leading-snug ${style.text}`}
-                                        title={node.label}
-                                        style={{
-                                            display: '-webkit-box',
-                                            WebkitLineClamp: 2,
-                                            WebkitBoxOrient: 'vertical',
-                                            overflow: 'hidden',
-                                        }}
-                                    >
+                                <span className={`shrink-0 mt-0.5 inline-flex items-center justify-center w-5 h-5 rounded ${style.badgeBg} ${style.badgeText}`}>
+                                    <Icon size={12} />
+                                </span>
+                                <span className="min-w-0 flex-1">
+                                    <span className={`block text-[13px] font-medium leading-snug ${style.text}`} title={node.label}>
                                         {node.label}
-                                    </p>
-                                    <div className="mt-1.5 flex items-center justify-between gap-1">
+                                    </span>
+                                    <span className="mt-1 flex items-center gap-1.5 flex-wrap">
                                         <NodeBadge kind={node.kind} />
                                         {altCount > 0 && (
                                             <span
@@ -149,25 +145,40 @@ export function FlowJourney({
                                                 {altCount} alt
                                             </span>
                                         )}
-                                    </div>
-                                </button>
-                                {!isLast && (
-                                    <div
-                                        aria-hidden="true"
-                                        className="flex items-center"
-                                    >
-                                        <span className="block h-px w-6 bg-neutral-300" />
-                                        <span className="block w-0 h-0 border-y-4 border-y-transparent border-l-[6px] border-l-neutral-300" />
-                                    </div>
-                                )}
-                            </li>
-                        );
-                    })}
-                </ol>
-            </div>
+                                    </span>
+                                </span>
+                                <ChevronRight
+                                    size={14}
+                                    className="shrink-0 mt-1 text-neutral-300 group-hover:text-indigo-400 transition-colors"
+                                    aria-hidden="true"
+                                />
+                            </button>
+                        </li>
+                    );
+                })}
+            </ol>
 
-            <div className="mt-3 pt-3 border-t border-neutral-100">
-                <Legend />
+            {/* Compact, collapsible legend — the per-row kind badges already
+                label each node, so the color key is opt-in. */}
+            <div className="mt-1 pt-2 border-t border-neutral-100">
+                <button
+                    type="button"
+                    onClick={() => setLegendOpen(o => !o)}
+                    aria-expanded={legendOpen}
+                    className="inline-flex items-center gap-1 text-[10px] font-medium text-neutral-400 hover:text-neutral-600 transition-colors"
+                >
+                    <ChevronRight
+                        size={11}
+                        className={`transition-transform ${legendOpen ? 'rotate-90' : ''}`}
+                        aria-hidden="true"
+                    />
+                    Legend
+                </button>
+                {legendOpen && (
+                    <div className="mt-2">
+                        <Legend />
+                    </div>
+                )}
             </div>
         </section>
     );

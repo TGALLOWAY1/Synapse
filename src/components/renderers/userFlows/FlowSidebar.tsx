@@ -1,5 +1,7 @@
-import { useEffect } from 'react';
-import { Clock, GitBranch, Menu, Sparkles, X } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import {
+    Clock, GitBranch, Menu, PanelLeftClose, PanelLeftOpen, Sparkles, X,
+} from 'lucide-react';
 import type { FlowCategory, FlowIssueKind, FlowRiskLevel, ParsedFlow } from './types';
 import { CATEGORY_ORDER } from './categorize';
 
@@ -57,6 +59,11 @@ export function FlowSidebar({
 }: Props) {
     const grouped = groupFlows(flows);
     const selected = flows[selectedIndex];
+    // Desktop rail collapses to a narrow numbered strip so the flow list is
+    // one click away without permanently dominating horizontal space. A
+    // single-flow artifact never needs a switcher, so the rail hides entirely.
+    const [railExpanded, setRailExpanded] = useState(false);
+    const multiFlow = flows.length > 1;
 
     useEffect(() => {
         if (!isMobileOpen) return;
@@ -168,23 +175,75 @@ export function FlowSidebar({
         </div>
     );
 
+    // Narrow collapsed rail: numbered buttons only, name on hover/tooltip.
+    const renderCollapsedRail = () => (
+        <ul className="space-y-1.5" aria-label="Flows">
+            {flows.map((flow, i) => {
+                const active = i === selectedIndex;
+                const showRisk = flow.risk !== 'low' || flow.issues.length > 0;
+                const risk = RISK_DOT[flow.risk];
+                return (
+                    <li key={i} className="relative flex justify-center">
+                        <button
+                            type="button"
+                            onClick={() => onSelect(i)}
+                            aria-current={active ? 'true' : undefined}
+                            title={`Flow ${i + 1}: ${flow.title}`}
+                            className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold transition ${
+                                active
+                                    ? 'bg-indigo-600 text-white shadow-sm'
+                                    : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
+                            }`}
+                        >
+                            {i + 1}
+                        </button>
+                        {showRisk && (
+                            <span
+                                className={`absolute top-0 right-1 w-2 h-2 rounded-full ring-2 ring-white ${risk.color}`}
+                                title={risk.label}
+                                aria-label={risk.label}
+                            />
+                        )}
+                    </li>
+                );
+            })}
+        </ul>
+    );
+
     return (
         <>
-            {/* Desktop rail */}
-            <aside
-                className="hidden md:block w-72 shrink-0 self-start sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto pr-2 border-r border-neutral-200"
-                aria-label="Flow navigation"
-            >
-                <div className="px-2 mb-3 flex items-center justify-between">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-700">
-                        User Flows
-                    </p>
-                    <span className="text-[10px] text-neutral-400 font-mono">{flows.length}</span>
-                </div>
-                {renderList(onSelect)}
-            </aside>
+            {/* Desktop rail — collapsible; hidden entirely for single-flow artifacts */}
+            {multiFlow && (
+                <aside
+                    className={`hidden md:block shrink-0 self-start sticky top-0 max-h-[calc(100vh-6rem)] overflow-y-auto border-r border-neutral-200 transition-[width] duration-200 ${
+                        railExpanded ? 'w-64 pr-2' : 'w-14 pr-1'
+                    }`}
+                    aria-label="Flow navigation"
+                >
+                    <div className={`mb-3 flex items-center ${railExpanded ? 'px-2 justify-between' : 'justify-center'}`}>
+                        {railExpanded && (
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-700">
+                                User Flows
+                            </p>
+                        )}
+                        <button
+                            type="button"
+                            onClick={() => setRailExpanded(e => !e)}
+                            aria-expanded={railExpanded}
+                            aria-label={railExpanded ? 'Collapse flow list' : 'Expand flow list'}
+                            title={railExpanded ? 'Collapse flow list' : 'Expand flow list'}
+                            className="p-1.5 rounded hover:bg-neutral-100 text-neutral-500"
+                        >
+                            {railExpanded ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
+                        </button>
+                    </div>
+                    {railExpanded ? renderList(onSelect) : renderCollapsedRail()}
+                </aside>
+            )}
 
-            {/* Mobile trigger — full-width current-flow selector that opens the drawer */}
+            {/* Mobile trigger — full-width current-flow selector that opens the
+                drawer. Single-flow artifacts have nothing to switch between. */}
+            {multiFlow && (
             <div className="md:hidden mb-3">
                 <button
                     type="button"
@@ -212,6 +271,7 @@ export function FlowSidebar({
                     <Menu size={16} className="shrink-0 text-neutral-400" />
                 </button>
             </div>
+            )}
 
             {/* Mobile drawer overlay + panel */}
             {isMobileOpen && (

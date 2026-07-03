@@ -2,6 +2,7 @@ import { HelpCircle, Lightbulb } from 'lucide-react';
 import type { Feature } from '../../../types';
 import type { FeatureRef, ParsedFlow } from './types';
 import { inlineWithFeatures } from './inlineWithFeatures';
+import { CollapsibleSection } from './CollapsibleSection';
 
 interface Props {
     flow: ParsedFlow;
@@ -41,10 +42,11 @@ export function AssumptionsPanel({ flow, featuresById, onSelectFeature }: Props)
         inlineWithFeatures(text, { featuresById, onSelectFeature });
 
     return (
-        <section className="mb-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2 inline-flex items-center gap-1">
-                <Lightbulb size={11} /> Assumptions & open questions
-            </p>
+        <CollapsibleSection
+            title="Assumptions & open questions"
+            icon={<Lightbulb size={12} />}
+            count={assumptions.length + openQuestions.length}
+        >
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
                 {assumptions.length > 0 && (
                     <section className="rounded-xl border border-neutral-200 bg-white p-3.5">
@@ -79,6 +81,6 @@ export function AssumptionsPanel({ flow, featuresById, onSelectFeature }: Props)
                     </section>
                 )}
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }
