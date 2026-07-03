@@ -77,6 +77,39 @@ describe('buildSectionPrompt', () => {
     });
 });
 
+describe('lean decision-level prompts (detail deferred to artifacts)', () => {
+    it('ux_loops asks for a lean screen list, not per-screen UI specs', () => {
+        const { user } = buildSectionPrompt('ux_loops', { idea: 'Test app', upstream: {} });
+        expect(user).toContain('key content');
+        expect(user).not.toContain('emptyState');
+        expect(user).not.toContain('loadingState');
+        expect(user).not.toContain('errorState');
+        expect(user).not.toContain('interactions (array)');
+    });
+
+    it('architecture grounds on domainEntities instead of the retired richDataModel', () => {
+        const { user } = buildSectionPrompt('architecture', {
+            idea: 'Test app',
+            upstream: { domainEntities: [{ name: 'UniqueEntity99', description: 'x' }] },
+        });
+        expect(user).toContain('UniqueEntity99');
+        expect(user).not.toContain('richDataModel');
+    });
+
+    it('features omits UI-acceptance and analytics-event asks', () => {
+        const { user } = buildSectionPrompt('features', { idea: 'Test app', upstream: {} });
+        expect(user).not.toContain('uiAcceptanceCriteria');
+        expect(user).not.toContain('analyticsEvents');
+        expect(user).toContain('failureModes');
+    });
+
+    it('metrics_scope asks for decision-level metrics without instrumentation fields', () => {
+        const { user } = buildSectionPrompt('metrics_scope', { idea: 'Test app', upstream: {} });
+        expect(user).toContain('{ name, target? }');
+        expect(user).not.toContain('instrumentation?');
+    });
+});
+
 describe('SECTION_TITLES', () => {
     it('covers every active and retired section id', () => {
         for (const section of [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS]) {

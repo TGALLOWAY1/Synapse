@@ -29,6 +29,30 @@ const featureItemSchema = {
     required: ["id", "name", "description", "userValue", "complexity", "priority", "acceptanceCriteria"],
 };
 
+// Lean feature shape for NEW generation (features slice): drops the
+// uiAcceptanceCriteria / analyticsEvents properties — UI acceptance detail
+// belongs to the Screen Inventory artifact and analytics/tracking detail to
+// downstream artifacts. Legacy PRDs keep the full shape via featureItemSchema.
+const leanFeatureItemSchema = {
+    type: "OBJECT",
+    properties: {
+        id: { type: "STRING" },
+        name: { type: "STRING" },
+        description: { type: "STRING" },
+        userValue: { type: "STRING" },
+        complexity: { type: "STRING", enum: ["low", "medium", "high"] },
+        priority: { type: "STRING", enum: ["must", "should", "could"] },
+        acceptanceCriteria: { type: "ARRAY", items: { type: "STRING" } },
+        dependencies: { type: "ARRAY", items: { type: "STRING" } },
+        system: { type: "STRING" },
+        successCriteria: { type: "ARRAY", items: { type: "STRING" } },
+        edgeCases: { type: "ARRAY", items: { type: "STRING" } },
+        failureModes: { type: "ARRAY", items: { type: "STRING" } },
+        tier: { type: "STRING", enum: ["mvp", "v1", "later"] },
+    },
+    required: ["id", "name", "description", "userValue", "complexity", "priority", "acceptanceCriteria"],
+};
+
 const productThesisSchema = {
     type: "OBJECT",
     properties: {
@@ -89,7 +113,29 @@ const uxPageItemSchema = {
         errorState: { type: "STRING" },
         responsiveNotes: { type: "STRING" },
     },
-    required: ["id", "name", "purpose", "components", "interactions"],
+    // `components`/`interactions` are no longer required: new PRDs are lean
+    // (screen list only — the Screen Inventory artifact owns UI detail), and
+    // the consistency-review pass validates against structuredPRDSchema, so a
+    // stricter list would force the model to fabricate UI specs for lean PRDs.
+    required: ["id", "name", "purpose"],
+};
+
+// Lean uxPages shape for NEW generation (ux_loops slice): the PRD carries a
+// decision-level screen list (name/purpose/key content) only. Detailed
+// component/interaction/state specs belong to the Screen Inventory artifact.
+// Gemini JSON mode cannot emit properties absent from the schema, so omitting
+// them here is what actually enforces the slimming. Legacy PRDs keep the full
+// shape via uxPageItemSchema above.
+const leanUxPageItemSchema = {
+    type: "OBJECT",
+    properties: {
+        id: { type: "STRING" },
+        name: { type: "STRING" },
+        purpose: { type: "STRING" },
+        primaryUser: { type: "STRING" },
+        components: { type: "ARRAY", items: { type: "STRING" } },
+    },
+    required: ["id", "name", "purpose"],
 };
 
 const featureSystemItemSchema = {
@@ -214,6 +260,17 @@ const successMetricSchema = {
         name: { type: "STRING" },
         target: { type: "STRING" },
         instrumentation: { type: "STRING" },
+    },
+    required: ["name"],
+};
+
+// Lean metric shape for NEW generation (metrics_scope slice): decision-level
+// name + target only — instrumentation/tracking detail belongs downstream.
+const leanSuccessMetricSchema = {
+    type: "OBJECT",
+    properties: {
+        name: { type: "STRING" },
+        target: { type: "STRING" },
     },
     required: ["name"],
 };
@@ -349,7 +406,7 @@ export const groundingSliceSchema = {
 export const featuresSliceSchema = {
     type: "OBJECT",
     properties: {
-        features: { type: "ARRAY", items: featureItemSchema },
+        features: { type: "ARRAY", items: leanFeatureItemSchema },
         featureSystems: { type: "ARRAY", items: featureSystemItemSchema },
     },
     required: ["features"],
@@ -368,7 +425,7 @@ export const uxSliceSchema = {
     type: "OBJECT",
     properties: {
         userLoops: { type: "ARRAY", items: userLoopItemSchema },
-        uxPages: { type: "ARRAY", items: uxPageItemSchema },
+        uxPages: { type: "ARRAY", items: leanUxPageItemSchema },
         roles: { type: "ARRAY", items: rolePermissionSchema },
     },
     required: ["userLoops"],
@@ -399,7 +456,7 @@ export const metricsScopeSliceSchema = {
     type: "OBJECT",
     properties: {
         mvpScope: mvpScopeSchema,
-        successMetrics: { type: "ARRAY", items: successMetricSchema },
+        successMetrics: { type: "ARRAY", items: leanSuccessMetricSchema },
     },
     required: ["successMetrics"],
 };

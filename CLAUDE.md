@@ -395,7 +395,19 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
     sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
     Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
-    rendering — the renderer blocks and optional `StructuredPRD` fields stay. `runDag()` runs every section whose
+    rendering — the renderer blocks and optional `StructuredPRD` fields stay.
+    The remaining sections are prompted (and, where it matters,
+    **schema-enforced** via lean slice schemas in `prdSchemas.ts` —
+    `leanUxPageItemSchema`/`leanFeatureItemSchema`/`leanSuccessMetricSchema`,
+    since Gemini JSON mode can't emit properties absent from the schema) to
+    stay at decision level: `uxPages` is a lean screen list (name/purpose/key
+    content — no per-screen interaction/empty/loading/error specs), features
+    drop `uiAcceptanceCriteria`/`analyticsEvents`, success metrics drop
+    `instrumentation`, and the architecture narrative is a short decision
+    story grounded on `domainEntities`. `RUBRIC_DEFINITION` (`prdPrompts.ts`)
+    encodes this split — decisions live in the PRD, detail lives in the
+    artifacts — so don't re-add "full schemas / state machines / per-page
+    component specs" demands to prompts or rubric. `runDag()` runs every section whose
     deps are satisfied concurrently, under separate per-tier concurrency caps
     (`maxFastConcurrency` / `maxStrongConcurrency`); low-risk sections use the
     fast (Flash) model, high-risk the strong (Pro) model. `validateGraph()` runs

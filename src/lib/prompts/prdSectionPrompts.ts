@@ -137,10 +137,10 @@ Product basics: ${basics}
 ${hasThesis ? `Product thesis: ${thesis}` : ''}
 
 Return JSON with:
-- features: array of 8–14 features, each: { id (f1, f2…), name, description, userValue, complexity (low/medium/high), priority (must/should/could), acceptanceCriteria (≥2 success-path checks), system?, successCriteria?, edgeCases?, failureModes?, uiAcceptanceCriteria?, analyticsEvents?, tier? (mvp/v1/later), dependencies? }
+- features: array of 8–14 features, each: { id (f1, f2…), name, description, userValue, complexity (low/medium/high), priority (must/should/could), acceptanceCriteria (≥2 success-path checks), system?, successCriteria?, edgeCases?, failureModes?, tier? (mvp/v1/later), dependencies? }
 - featureSystems: array of 2–4 system groups, each: { id (s1…), name, purpose, featureIds, endToEndBehavior, dependencies?, edgeCases?, mvpVsLater? }
 
-For every must- and should-priority feature, populate successCriteria, edgeCases, failureModes, and uiAcceptanceCriteria — treat these as expected, not optional.`,
+For every must- and should-priority feature, populate successCriteria, edgeCases, and failureModes — treat these as expected, not optional. Stay at the product-requirement level: do NOT specify UI acceptance details or analytics/tracking events — the dedicated Screen Inventory and downstream artifacts own that detail.`,
         };
     },
 
@@ -185,29 +185,29 @@ ${thesis !== UNAVAILABLE ? `Product thesis: ${thesis}` : ''}
 
 Return JSON with:
 - userLoops: array of 2–4 retention loops, each: { name, trigger, action, systemResponse, reward, retentionMechanic }
-- uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (array), interactions (array), emptyState?, loadingState?, errorState?, responsiveNotes? }. Specify emptyState, loadingState, and errorState for every screen.
+- uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (3–6 short items — the key content and primary actions the user sees on this screen) }. Stay at the decision level: do NOT write component-by-component UI specs, interaction lists, or empty/loading/error state definitions — the dedicated Screen Inventory artifact owns that detail.
 - roles: array of user roles, each: { role, allowed (array), restricted?, dataVisibility?, notes? }`,
         };
     },
 
     architecture: (ctx) => {
         const features = pick(ctx.upstream, 'features', 'featureSystems');
-        const dataModel = pick(ctx.upstream, 'richDataModel');
+        const grounding = pick(ctx.upstream, 'domainEntities');
         const hasFeatures = features !== UNAVAILABLE;
         const note = !hasFeatures ? missingNote('features') : '';
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the architecture slice: architecture (narrative), architectureFlows, nonFunctionalRequirements, constraints. Every technology and architectural decision must include reasoning grounded in scalability, maintainability, ecosystem maturity, or performance — never stylistic descriptors. Prefer widely adopted, stable technologies unless the product requires otherwise.
+You are generating the architecture slice: architecture (narrative), architectureFlows, nonFunctionalRequirements, constraints. Every technology and architectural decision must include reasoning grounded in scalability, maintainability, ecosystem maturity, or performance — never stylistic descriptors. Prefer widely adopted, stable technologies unless the product requires otherwise. State decisions, not designs — detailed schemas, entity models, and step-by-step request specifications belong to the dedicated Data Model and Implementation Plan artifacts.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
 ${hasFeatures ? `Features: ${features}` : ''}
-${dataModel !== UNAVAILABLE ? `Data model: ${dataModel}` : ''}
+${grounding !== UNAVAILABLE ? `Domain entities: ${grounding}` : ''}
 
 Return JSON with:
-- architecture: string — 2–4 paragraph technical architecture narrative covering tech stack, key components, integration points
-- architectureFlows: array of { name, steps (array of strings) } — 3–5 key system flows (auth, data write, notification, etc.). Express each flow's steps as an ordered, numbered sequence.
+- architecture: string — 2–3 paragraph decision narrative: the chosen stack and why, the major components and their responsibilities, key integration points, and significant build-vs-buy decisions
+- architectureFlows: array of { name, steps (array of strings) } — the 2–3 highest-risk system flows only (e.g. auth, the core data write), each an ordered numbered sequence of at most 7 decision-level steps
 - nonFunctionalRequirements: array of strings — testable requirements spanning performance, accessibility, security, privacy, reliability, scalability, observability, and cost
 - constraints: array of strings — budget, timeline, technical, regulatory, or integration constraints`,
         };
@@ -249,7 +249,7 @@ ${features !== UNAVAILABLE ? `Features: ${features}` : ''}
 
 Return JSON with:
 - mvpScope: { mvp (array of feature names/descriptions), v1 (array), later (array), rationale? } — the MVP must be opinionated, coherent, and shippable; defer aggressively rather than listing every feature.
-- successMetrics: array of { name, target?, instrumentation? } — 5–8 measurable product success criteria spanning activation, engagement, conversion, quality, and operational metrics`,
+- successMetrics: array of { name, target? } — 5–8 measurable product success criteria spanning activation, engagement, conversion, quality, and operational metrics. State the decision-level target; do NOT specify instrumentation, event names, or tracking implementation — analytics detail belongs to downstream artifacts.`,
         };
     },
 
