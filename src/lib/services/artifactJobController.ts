@@ -9,6 +9,7 @@ import type {
 import { MOCKUP_SPEC_V1 } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
 import { generateCoreArtifact, selectArtifactModel } from './coreArtifactService';
+import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
@@ -167,11 +168,26 @@ async function runCoreArtifactSlot(
         // Read the chosen design-system preset off the project here (rather than
         // threading it through every startAll/regenerate/resume call site) so
         // ALL generation paths consistently honor it. Only design_system uses it.
-        const designSystemPreset = store.getProject(projectId)?.designSystemPreset;
+        const project = store.getProject(projectId);
+        const designSystemPreset = project?.designSystemPreset;
+        // Build the Canonical PRD Spine — the primary source of truth — freshly
+        // from THIS run's structuredPRD (rather than trusting a persisted copy,
+        // which could lag an edit). Deterministic and cheap. The persisted
+        // spine on the SpineVersion is a diagnostic/diffing convenience only.
+        const spineVersion = (store.spineVersions[projectId] || []).find(s => s.id === spineVersionId);
+        const canonicalSpine = buildCanonicalPrdSpine(structuredPRD, {
+            projectName: project?.productName || project?.name,
+            platform: project?.platform,
+            designSystemPreset,
+            safetyReview: spineVersion?.safetyReview,
+            sourceSpineVersionId: spineVersionId,
+            sourcePrdVersion: spineVersion?.prdVersion,
+        });
         const result = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
             generatedArtifacts,
             signal,
             designSystemPreset,
+            canonicalSpine,
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
         content = result.content;
