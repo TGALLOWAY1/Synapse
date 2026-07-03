@@ -420,7 +420,12 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     **PRD reading order ≠ generation (DAG) order.** The human/agent-facing
     section order is a fixed logical flow (Product Overview → Target Users →
     MVP Scope → Core Features → UX → Success Metrics → Risks → Technical
-    Architecture → Data Model → State Machines → NFRs → reference appendix)
+    Architecture → Data Model → State Machines → NFRs → reference appendix →
+    **"Where the Detail Lives"**, a static deterministic handoff appendix
+    pointing to the downstream artifacts, rendered unconditionally by both
+    renderers — legacy spines' persisted `responseText` picks it up on the
+    next re-render (edit / section retry / regenerate), while the in-app
+    Structured view shows it immediately for every PRD)
     defined in **two mirrored renderers that must stay in sync**:
     `prdMarkdownRenderer.renderPremiumMarkdown` (export/`responseText`) and
     `StructuredPRDView`/`PremiumSections` (in-app). Reordering is

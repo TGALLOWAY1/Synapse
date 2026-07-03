@@ -307,9 +307,10 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
     // ── Section order is a logical reading flow (see StructuredPRDView, which
     // mirrors it): Product Overview → Target Users → MVP Scope → Features →
     // UX → Metrics → Risks → Technical Architecture → Data Model → State
-    // Machines → NFRs → reference appendix. This ordering is presentation-only;
-    // downstream artifacts consume the StructuredPRD object by field, not this
-    // markdown, so blocks may be reordered freely without affecting generation.
+    // Machines → NFRs → reference appendix → Where the Detail Lives (static
+    // handoff appendix). This ordering is presentation-only; downstream
+    // artifacts consume the StructuredPRD object by field, not this markdown,
+    // so blocks may be reordered freely without affecting generation.
 
     // ── Product Overview ────────────────────────────────────────────────
     // Vision (always present in legacy spec)
@@ -506,6 +507,18 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
             lines.push('');
         });
     }
+
+    // Static handoff appendix — always rendered (legacy PRDs included).
+    // Wording must stay bullet-for-bullet identical to HandoffAppendixSection
+    // in src/components/prd/PremiumSections.tsx (mirrored-renderer rule).
+    lines.push('## Where the Detail Lives');
+    lines.push('This PRD stays at the product-decision level. The deep specification is generated as dedicated downstream artifacts:');
+    lines.push('- **Data Model** — entities, fields, relationships, and state machines');
+    lines.push('- **Screens (Screen Inventory)** — per-screen components, states, and interactions');
+    lines.push('- **User Flows** — step-by-step journeys and decision points');
+    lines.push('- **Design System** — visual tokens and component conventions');
+    lines.push('- **Implementation Plan** — phased milestones, tasks, and quality gates');
+    lines.push('');
 
     return lines.join('\n').trimEnd() + '\n';
 };

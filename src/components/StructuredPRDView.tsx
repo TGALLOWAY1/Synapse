@@ -35,6 +35,7 @@ import {
     MvpScopeSection,
     MetricsSection,
     AssumptionsSection,
+    HandoffAppendixSection,
 } from './prd/PremiumSections';
 
 interface StructuredPRDViewProps {
@@ -559,7 +560,8 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                 {/* Section order is a logical reading flow (mirrors
                     prdMarkdownRenderer): Product Overview → Target Users → MVP
                     Scope → Features → UX → Metrics → Risks → Technical
-                    Architecture → Data Model → State Machines → reference. */}
+                    Architecture → Data Model → State Machines → reference →
+                    Where the Detail Lives (static handoff appendix). */}
 
                 {/* Product Overview: Vision → Problem → Thesis → Principles */}
                 {renderTextSection('Vision', 'vision', structuredPRD.vision)}
@@ -675,6 +677,8 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                 {structuredPRD.assumptions && structuredPRD.assumptions.length > 0 && (
                     <AssumptionsSection assumptions={structuredPRD.assumptions} />
                 )}
+
+                <HandoffAppendixSection />
             </div>
 
             {selection && (

@@ -102,7 +102,10 @@ touching the rest of the document.
 
 You get back a structured PRD with vision, target users, core problems,
 features (with priority, acceptance criteria, and dependencies), architecture,
-metrics, risks, and non-functional requirements.
+metrics, risks, and non-functional requirements. The PRD deliberately stays at
+the product-decision level — deep specification (data model, screens, flows,
+implementation plan) is generated as the dedicated downstream assets, and the
+PRD ends with a "Where the Detail Lives" appendix pointing to them.
 
 That concurrency is **measured, not just claimed**. An **Orchestration
 Metrics** dashboard (`/metrics`, linked from Settings and the workspace menu)
