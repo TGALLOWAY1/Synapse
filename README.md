@@ -1,283 +1,476 @@
-# Synapse
+<div align="center">
 
-**Synapse is an AI-native product definition environment.** It turns a
-plain-language idea into a structured PRD, then carries that PRD forward into
-UI mockups, downstream engineering artifacts, and annotated visual feedback —
-all from a single client-side workspace.
+<img width="100%" alt="Synapse — start with a single idea" src="public/screenshots/tour-idea.png" />
 
-<img width="100%" alt="Synapse tour — start with a single idea" src="public/screenshots/tour-idea.png" />
+# ⚡ Synapse
 
-## Check out the demo and tour 
+### From plain-language to product blueprint.
 
-- **Public URL:** 'https://synapse-prd.vercel.app'
-- **No authentication** — the route is not behind the auth gate.
+**Synapse is an AI-native product-definition web app that turns one sentence into a structured PRD — then into UI mockups, engineering artifacts, and annotated visual feedback, all from a single workspace.**
 
-## What it does
+<br />
 
-A single prompt flows from a plain-language idea to a finalized blueprint and
-every downstream asset:
+![License](https://img.shields.io/badge/license-TBD-lightgrey?style=flat-square)
+[![Node](https://img.shields.io/badge/node-%3E%3D20-339933?style=flat-square&logo=node.js&logoColor=white)](https://nodejs.org)
+[![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
+[![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
+[![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
+[![Tests](https://img.shields.io/badge/tests-838%20passing-success?style=flat-square&logo=vitest&logoColor=white)](#-why-this-project-is-technically-interesting)
+[![Deploy](https://img.shields.io/badge/deploy-Vercel-000000?style=flat-square&logo=vercel&logoColor=white)](https://vercel.com)
 
-Each stage is backed by Google Gemini, structured JSON schemas where they
-matter, a code-level safety gate, and a versioned store so nothing you
-generate is lost. Mockups are generated using OpenAI's GPT Image 2 model. 
+[![CI](https://img.shields.io/github/actions/workflow/status/tgalloway1/synapse/mockup-harness.yml?style=flat-square&label=CI&logo=githubactions&logoColor=white)](https://github.com/tgalloway1/synapse/actions)
+[![Last commit](https://img.shields.io/github/last-commit/tgalloway1/synapse?style=flat-square)](https://github.com/tgalloway1/synapse/commits)
+[![Stars](https://img.shields.io/github/stars/tgalloway1/synapse?style=flat-square&logo=github)](https://github.com/tgalloway1/synapse/stargazers)
+[![Release](https://img.shields.io/github/v/release/tgalloway1/synapse?style=flat-square&include_prereleases&label=release)](https://github.com/tgalloway1/synapse/releases)
 
-## Feature tour
+<br />
 
-### 1. Start with a single idea
+**[▶️ Live Interactive Tour](#-demo)** · **[🔬 Why It's Interesting](#-why-this-project-is-technically-interesting)** · **[🏗️ Architecture](#%EF%B8%8F-architecture)** · **[🗺️ Roadmap](#%EF%B8%8F-roadmap)** · **[❓ FAQ](#-faq)**
 
-Synapse transforms a plain-language concept into a structured product
-blueprint. Type one sentence — *"Build an app that helps musicians finish
-songs."* — and you're off.
-
-Before generation, an **optional preflight clarification** step can ask you a
-**Quick** (5) or **Deep** (10) set of questions to sharpen intent, or you can
-**Generate Immediately**. Answers (and anything you skip) feed straight into
-the PRD prompt as authoritative intent.
-
-The moment your answers are in, **PRD generation starts in the background** —
-and while it runs, Synapse asks you to **choose a visual direction** for the
-project from a set of design presets, each with a static token-driven preview
-(colors, type, buttons, layout shapes). Synapse **recommends** one based on
-what you're building — a music app suggests *Creative Studio*, a CRM suggests
-*Enterprise Professional* — but any preset can be chosen, and you can save one
-as your **default for future projects** (defaults are preselected next time).
-You can also skip and decide later, at the latest when marking the PRD final.
-
-### 2. AI builds the spec, section by section
-
-<img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" />
-
-The PRD is generated as structured JSON by a **dependency-graph pipeline**:
-the sections run concurrently the moment their inputs are ready — they are
-never sequenced just because they appear later in the document. A live
-**progress timeline** shows exactly what's happening: sections are grouped into
-dependency *waves*, with independent sections rendered as "running
-concurrently" groups, and each step shows whether it's waiting on dependencies,
-queued for a free slot, or running — alongside the actual Gemini model in use
-and elapsed/estimated timing. A failed section can be re-run on its own without
-touching the rest of the document.
-
-You get back a structured PRD with vision, target users, core problems,
-features (with priority, acceptance criteria, and dependencies), architecture,
-metrics, risks, and non-functional requirements. The PRD deliberately stays at
-the product-decision level — deep specification (data model, screens, flows,
-implementation plan) is generated as the dedicated downstream assets, and the
-PRD ends with a "Where the Detail Lives" appendix pointing to them.
-
-That concurrency is **measured, not just claimed**. An **Orchestration
-Metrics** dashboard (`/metrics`, linked from Settings and the workspace menu)
-records each PRD generation and artifact-bundle run and shows real telemetry:
-sequential estimate vs. actual runtime, **parallel speedup** and time saved,
-max/average concurrency, critical path, per-section token usage, and estimated
-AI cost — with a per-run Gantt timeline that visualizes which agents ran in
-parallel. Cost figures are clearly labeled estimates; there's no synthetic
-data, so a fresh account shows an empty state until the first real run.
-
-### 3. Refine specific parts of the document
-
-Highlight any passage and improve it without rewriting everything. A
-contextual action dialog offers **Clarify / Expand / Specify / Alternative /
-Replace**, spawning a threaded branch scoped to just that passage.
-
-- **Branch-based refinement** — iterate on a single span in a focused thread.
-- **Consolidation engine** — merge a branch's decisions back into a new
-  unified PRD iteration (local or document-wide scope).
-- **Touch-first** — the same highlight → action pipeline works with mouse,
-  pen, and mobile long-press; the dialog is a floating popover on desktop and
-  a safe-area bottom sheet on mobile. On phones, an explicit **Select text to
-  edit** mode lets you adjust the native selection to a full phrase before
-  tapping **Edit selection** — so the action sheet never fights the iOS
-  selection toolbar.
-
-<img width="100%" alt="Refine a passage — Clarify / Expand / Specify / Alternative / Replace dialog and threaded branch" src="public/screenshots/tour-refine.png" />
-
-### 4. Nothing gets lost — every change is versioned
-
-<img width="100%" alt="Version timeline with side-by-side diff comparison" src="public/screenshots/tour-versions.png" />
-
-Every regeneration, consolidation, **and inline edit** becomes a new **spine
-version** you can revisit, compare, or build on — edits never overwrite the
-previous version in place. Open **Version History** to see each version's change
-source (edit, regenerate, section retry, branch merge, restore), **compare** any
-version against the current one with a section-aware diff, and **restore** an
-earlier version (which appends a new version — history is never deleted, and any
-downstream artifacts that fall out of date are flagged). Artifacts carry their
-own version history and restore too, and show which PRD version they were
-generated from. The History stage is a chronological audit log of every spine
-regeneration, edit, restore, branch consolidation, artifact derivation, and
-feedback event — with diffs where it matters.
-
-### 5. One finalized PRD powers the entire workspace
-
-<img width="100%" alt="Mark the PRD as final to generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" />
-
-Mark your PRD as final and Synapse generates all the assets you need to build —
-in parallel, from that single source of truth. The **Design System Preset**
-(Modern SaaS, Enterprise Professional, AI Workspace, Minimal Editorial,
-Developer / Technical, Consumer Mobile, Creative Studio, or *Custom / Generate
-for me*) you picked during project setup sets the project's visual direction;
-if you skipped that step, Synapse asks just before generation. The choice is
-stored on the project and steers the **Design System** artifact — and through
-it, both the internal mockups and the prompts you copy for external image
-tools, so everything stays visually consistent. You can change the visual
-direction later from the **Design System** artifact and regenerate it; when its
-tokens change, Synapse flags the affected mockups and offers to regenerate them
-so they pick up the new direction.
-
-- **Screen Inventory** and **User Flows**
-- **Design System**
-- **Data Model** schemas with entities, fields, and relationships
-- **Implementation Plan** — a consolidated build guide: small milestones, each
-  with linked screens/entities, implementation tasks, **copy-ready prompt
-  packs** for your coding agent, **quality gates**, validation commands, and a
-  definition of done, plus a traceability view connecting milestones →
-  screens → data models → prompt packs → gates. (Projects generated before the
-  consolidation had separate *Build Plan* and *Developer Prompts* artifacts;
-  they're merged into this view automatically — nothing is lost or migrated.)
-
-Two of them (`screen_inventory`, `data_model`) use Gemini JSON mode with explicit
-schemas and render as card grids and entity tables rather than raw markdown. Every artifact tracks
-**staleness** against the current spine, supports **natural-language
-refinement** ("add error states to each screen"), and surfaces **quality
-warnings** if the output looks truncated or malformed.
-
-The workspace presents the experience artifacts screen-first: an **Experience**
-section holds **User Flows** and **Screens** — a consolidated, screen-centric
-view where each screen from the Screen Inventory gets its own detail page with
-**Overview / Flow / Mockups** tabs (its inventory spec, every user-flow step
-that touches it with the screen highlighted in the journey diagram, and its
-mockup). Clicking a screen node in a User Flow jumps straight to that screen's
-page, so the working mental model is "I'm working on this screen."
-
-Screens are joined across artifacts by **stable ids**, so you can safely
-**edit a screen's name, purpose, intent, priority, and notes** without
-detaching its mockups, flow references, or uploaded images — edits are an
-overlay; the generated artifact is never rewritten and one click restores it.
-The Screens list shows **mockup coverage** ("Mockups: 3 of 12 screens
-covered"); uncovered screens get an **Add to mockups** action (generation
-stays explicit and cost-labeled — nothing is billed without confirmation), and
-a **Generate missing mockups** batch sits behind a confirm. Every screen page
-is **deep-linkable** (`?screen=…`), with working browser back/forward. A
-lightweight validation panel flags broken or ambiguous references (a flow step
-naming a missing screen, a mockup that lost its match, duplicate screen names)
-with one-click **relink / pin / ignore** repairs — warnings never block
-rendering.
-
-Each artifact is routed to the right model by complexity — Flash for simpler
-artifacts, Pro for complex reasoning — and you can override the model **per
-artifact** in Settings → **Artifact Generation Models** (the PRD itself routes
-per-section). Sensible defaults mean you never have to touch it.
-
-#### Multi-fidelity UI mockups
-
-<img width="100%" alt="UI Mockups are one of the assets generated from the finalized PRD" src="public/screenshots/tour-assets.png" />
-
-Generate UI mockups directly from the finalized PRD with configurable platform
-(mobile / desktop), fidelity (wireframe / mid-fi / high-fi), and scope (single
-screen / multi-screen / key workflow). Every run is saved as a new version so
-you can diff iterations side-by-side. Per-screen images come from one of two
-sources (chosen in Settings → **Artifact Generation Models → Mockups**): OpenAI
-`gpt-image-2`, or **your own uploads** — the latter shows a generated prompt for
-each screen (goal, layout, visual style, expected format) to guide what you
-create and upload. If GPT Image is selected without an OpenAI key, Synapse falls
-back to the upload sheet rather than failing silently.
-
-The Screen Inventory page also offers a **Copy image prompt** action per screen
-for generating a mockup in any external tool. That copied prompt embeds the
-**same** Design System Brief the internal mockups use (palette, typography,
-spacing, radius, component conventions, accessibility) alongside the screen's
-specifics, so externally generated mockups match your project's visual
-language instead of drifting.
-
-#### Integrated feedback loop
-
-<img width="100%" alt="Feedback extracted from mockups feeds back into the PRD assets" src="public/screenshots/tour-assets.png" />
-
-Extract structured feedback items from generated mockups. Feedback surfaces as
-actionable cards on the PRD stage — applying one spawns a localized branch to
-address the critique without regenerating the whole document.
-
-#### Track implementation progress
-
-The Implementation Plan converts into a tracked task checklist — no LLM call,
-derived deterministically from the plan. Review and edit the extracted tasks,
-**save them to the project**, and a progress checklist appears on the
-Implementation Plan: a `done / total` progress bar, a per-task status toggle
-(to do → in progress → done), and expandable acceptance criteria. Export the
-tasks to **Markdown** or **GitHub issues**; created GitHub issues are linked
-back to each task so you can jump straight to them. Progress persists across
-refreshes, so Synapse answers "how far along am I?" — not just "what should I
-build?".
-
-#### Hand off to a coding agent
-
-Export isn't just a download. The **Export** dialog includes a one-click
-**"Copy for coding agent"** preset — an instruction preamble plus the PRD and
-the build-relevant artifacts (implementation plan, prompt pack, data model,
-design system), ready to paste straight into Claude Code, Cursor, or another
-agent. Copy-to-clipboard is available for the PRD and the full bundle too, and
-you can still download Markdown, a combined bundle, or structured JSON.
-
-### 6. Everything stays connected
-
-When the product changes, Synapse helps keep the rest of the project aligned.
-Artifacts carry source references back to the spine, so staleness is detected
-automatically when the PRD moves underneath them — and the History timeline
-records the ripple of every change across the workspace.
-
-<img width="100%" alt="Connections graph — the PRD wired to every artifact with up-to-date status" src="public/screenshots/tour-connections.png" />
+</div>
 
 ---
 
-## Safety gate
-
-Every PRD generation path runs through one code-level chokepoint that
-classifies the project **before** any section is written (`allowed` /
-`allowed_with_restrictions` / `disallowed`). A disallowed idea never runs the
-pipeline; it renders a Safety Review and is excluded from all downstream
-artifact, mockup, and workspace generation. Classification **fails closed** —
-if safety can't be determined, the request is treated as disallowed (genuine
-API-key/billing/permission errors still surface on the normal error path).
+> ### 🎯 What problem does this solve?
+>
+> Turning a product idea into a real spec is slow, lossy, and manual: someone writes a PRD, someone else re-derives screens and a data model from it, and every downstream artifact drifts the moment the spec changes. **Synapse collapses that gap.** One plain-language prompt becomes a structured, schema-validated PRD generated by a concurrent multi-agent pipeline — then *that same source of truth* fans out into UI mockups, a screen inventory, a data model, a component library, an implementation plan, and a coding-agent hand-off. Every change is versioned, every artifact tracks staleness against the spec, and a code-level safety gate runs before a single word is written.
 
 ---
 
-## Data flow
+## ✨ Key Features
+
+| | Feature | What it does | Why it matters |
+|---|---|---|---|
+| 🧠 | **Concurrent PRD pipeline** | A 10-section PRD is generated as a **dependency graph (DAG)** — sections run the moment their inputs are ready, not in document order. | Real parallelism cuts wall-clock time; the structure is graph-derived, not hardcoded. |
+| 🛡️ | **Code-level safety gate** | Every generation path is classified `allowed` / `restricted` / `disallowed` **before** any section runs — and **fails closed**. | A guardrail in code, not just a prompt — a blocked idea can never drive downstream artifacts. |
+| 🎨 | **One PRD → every asset** | Mark a PRD final and Synapse generates every downstream build artifact — screen inventory, data model, user flows, design system, and a consolidated implementation plan — plus multi-fidelity mockups and annotated SVGs, in parallel. | A single source of truth replaces hand-copying the spec into a stack of documents. |
+| 🖌️ | **Design-system presets** | Pick a visual direction (Modern SaaS, Enterprise, Creative Studio, …) — recommended from your idea — that steers the design system, mockups, and external image prompts. | Every generated asset stays visually consistent instead of drifting. |
+| ✍️ | **Highlight-to-refine** | Select any passage → Clarify / Expand / Specify / Alternative / Replace → a threaded branch merges back in. | Surgical edits on one span instead of regenerating the whole document. |
+| 🕓 | **Everything is versioned** | Every regenerate, edit, branch-merge, and restore appends a new version with a section-aware diff. | Non-destructive history — nothing is ever overwritten or lost. |
+| 📊 | **Orchestration metrics** | A `/metrics` dashboard records real telemetry: speedup, concurrency, critical path, token usage, cost estimates. | The concurrency is **measured, not claimed** — with per-run Gantt charts. |
+| 🔌 | **Staleness tracking** | Artifacts carry source references to the spine and flag themselves when the PRD moves underneath them. | The whole workspace stays coherent as the product evolves. |
+| ☁️ | **Cross-device web app** | A Vercel-hosted web app: signed-in users' projects sync to a per-account server collection and follow them across machines. | Access your work from any browser — nothing is trapped on one device. |
+| 📱 | **Mobile-ready by design** | Responsive layouts, safe-area insets, touch-aware selection, swipe navigation, and reduced-motion support throughout. | The full workflow — including highlight-to-refine — works on a phone, not just desktop. |
+| 🤝 | **Coding-agent hand-off** | One-click "Copy for coding agent" bundles PRD + build artifacts for Claude Code / Cursor. | Closes the loop from idea straight to implementation. |
+
+---
+
+## 🔬 Why This Project Is Technically Interesting
+
+> Written for engineers, AI engineers, and hiring managers. This section explains the *engineering problems solved*, not the marketing surface.
+
+| Engineering Capability | Why It's Interesting | Technologies Used |
+|---|---|---|
+| **Multi-agent orchestration over a DAG** | PRD sections declare *true data dependencies only*; a Kahn's-algorithm validator rejects cycles/unknown refs, then a scheduler runs every ready node concurrently. It's a dependency-resolving executor, not a sequential prompt chain. | TypeScript, custom DAG runner (`runDag`), topological waves |
+| **Parallel + streaming inference** (performance) | Independent sections fan out across two concurrency pools with tiered model routing (fast vs. strong), while SSE streaming paints drafts as tokens arrive — wrapped in two-layer retry that reconnects a dropped mobile stream from byte zero. | Fetch + ReadableStream, SSE, per-tier concurrency caps, Gemini Flash + Pro |
+| **Code-level safety gate (fail-closed)** | A single chokepoint classifies intent before generation; if classification can't be determined it's treated as *disallowed*, and genuine config errors are distinguished from safety failures. | Gemini JSON-mode classifier, typed `SafetyClassificationResult` |
+| **Resumable / self-healing workflows** | A page reload kills any in-flight pipeline; on rehydrate, spines still marked `running` are converted into a settled, retryable error state instead of an eternal spinner. Single failed sections re-run in isolation. | Zustand `persist`, interrupted-generation reconciler |
+| **Observability & cost telemetry** | Token usage is captured from `usageMetadata` and threaded into a metrics layer that computes speedup, max/avg concurrency (interval sweep), and critical path (memoized DFS) — rendered as per-run Gantt charts, no synthetic data. | Pure metric math, `/metrics` dashboard |
+| **Non-destructive versioning + staleness** | Every edit *appends* a version with change-source attribution; restores append a clone rather than mutating history. Structural diffs are computed on the fly, and artifacts flag themselves stale when the PRD moves. | jsdiff, immutable version slices, source-ref tracking |
+| **Schema-constrained generation** | Structured artifacts (screen inventory, data model, component inventory) use Gemini JSON mode with explicit schemas, round-trip through markdown, and degrade gracefully when older saved data lacks newer fields. | JSON-mode schemas, markdown round-trip parsers |
+| **Type-safe end-to-end** | `tsc -b` is the authoritative gate (stricter than `--noEmit`); test files compile with the app, so a typing slip in a test fails the deploy exactly like app code. | TypeScript 5.9 project references |
+
+<details>
+<summary><strong>⚡ Engineering Highlights — the 30-second recruiter skim</strong></summary>
+
+<br />
+
+- 🧩 **Custom DAG executor** runs a 10-agent PRD pipeline concurrently — with cycle detection and tiered model routing.
+- 📡 **Streaming inference** with two-layer retry that survives mid-stream mobile-network drops.
+- 🛡️ **Fail-closed safety gate** in code, not prompt — blocks unsafe generation before it starts.
+- 📊 **Real observability**: token usage, speedup, concurrency, and critical path rendered as per-run Gantt charts — no synthetic data.
+- 🕓 **Non-destructive versioning** with section-aware diffs and self-healing interrupted-run recovery.
+- 📱 **Mobile-ready web app** with touch-aware refine gestures, deployed on Vercel with cross-device sync.
+- ✅ **~58K lines of TypeScript, 838 tests, 131 components** — `tsc -b` enforced on every deploy.
+
+</details>
+
+> **🔭 Not yet surfaced in the product UI (portfolio-worthy):** the [mockup evaluation harness](docs/mockup-evaluation-harness.md) (`npm run mockup:harness`) is a genuine **LLM-output eval framework** with retry/scoring runs and a GitHub Actions workflow — currently only documented, not shown in-app. Worth promoting as a first-class "AI evals" capability. The **token-usage capture** exists for PRD sections but artifact services don't yet forward it (documented TODO) — wiring it through would complete cost observability.
+
+---
+
+## 🎬 Demo
+
+> **[🌐 Live app: synapse-prd.vercel.app](https://synapse-prd.vercel.app)** — and take the interactive tour at **[`/tour`](https://synapse-prd.vercel.app/tour)** (aliased `/about`) with **no sign-up and no API key**. The tour rebuilds the entire workflow as native, clickable UI on local demo data: it never calls an LLM, never touches the backend, and exposes no user data — a portfolio-safe, deep-linkable demo.
+
+### The end-to-end workflow, in six beats
+
+<table>
+<tr>
+<td width="50%" valign="top">
+
+**1 · Start with an idea** 💡
+Type one sentence. Optionally answer a **Quick (5)** or **Deep (10)** clarification set to sharpen intent before generation.
+
+</td>
+<td width="50%" valign="top">
+
+**2 · AI builds the spec** 🧠
+A live timeline shows 10 sections generating in **dependency waves** — concurrent groups, per-section model, and elapsed/estimated timing.
+
+</td>
+</tr>
+<tr>
+<td colspan="2"><img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" /></td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**3 · Refine surgically** ✍️
+Highlight any passage → **Clarify / Expand / Specify / Alternative / Replace** → a threaded branch merges back in.
+
+</td>
+<td width="50%" valign="top">
+
+**4 · Nothing gets lost** 🕓
+Every change appends a new **version** with a section-aware diff, change-source badge, and one-click restore.
+
+</td>
+</tr>
+<tr>
+<td><img width="100%" alt="Refine a passage" src="public/screenshots/tour-refine.png" /></td>
+<td><img width="100%" alt="Version timeline with diff" src="public/screenshots/tour-versions.png" /></td>
+</tr>
+<tr>
+<td width="50%" valign="top">
+
+**5 · One PRD → every asset** 🎨
+Mark final → screen inventory, data model, flows, design system, implementation plan + multi-fidelity mockups (generated *or* your own uploads) + annotated SVGs generate **in parallel** from one source of truth.
+
+</td>
+<td width="50%" valign="top">
+
+**6 · Everything stays connected** 🔌
+Artifacts carry source refs back to the spine; staleness is detected automatically as the PRD evolves.
+
+</td>
+</tr>
+<tr>
+<td><img width="100%" alt="Generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" /></td>
+<td><img width="100%" alt="Connections graph" src="public/screenshots/tour-connections.png" /></td>
+</tr>
+</table>
+
+---
+
+## 🏗️ Architecture
+
+Synapse is a **Vercel-hosted React web app** (a mobile-friendly SPA) that calls Google Gemini directly from the browser for low-latency streaming, backed by **Vercel serverless functions** for durable cross-device sync, encrypted secrets, auth, and OpenAI-proxied image generation.
 
 ```mermaid
-graph TD
-    A[Initial Prompt] -->|Optional preflight Q&A| P[Clarified Intent]
-    P -->|Safety gate| S{Allowed?}
-    A -->|Safety gate| S
-    S -->|disallowed| R[Safety Review]
-    S -->|allowed| B(Structured PRD Spine)
-    B --> C{PRD Canvas}
-    C -->|Highlight & ask| D[Threaded Branch]
-    D -->|Consolidation| B
+graph TB
+    subgraph Client["🖥️ Browser (React 19 SPA)"]
+        UI["Workspace UI<br/>HomePage · ProjectWorkspace · Tour · 131 components"]
+        STORE["Zustand Store<br/>10 slices · persist middleware"]
+        LS["localStorage<br/>(live PRD/artifact cache)"]
+        IDB["IndexedDB<br/>(mockup PNGs)"]
+        LLM["LLM Layer (in-browser)<br/>DAG pipeline · safety gate · streaming · retry"]
+        VAULT["geminiKeyVault<br/>(in-memory key, never persisted)"]
+        UI --> STORE --> LS
+        STORE --> IDB
+        UI --> LLM
+        LLM --> VAULT
+    end
 
-    B -->|Mark final| E{Pipeline Stages}
-    E -->|Mockups| F[UI Mockup Versions]
-    F -->|Extract feedback| D
+    subgraph Edge["☁️ Vercel Serverless (api/ · 11 functions)"]
+        PROJ["projects.js<br/>(cross-device sync)"]
+        KEYS["provider-keys.js<br/>(encrypted vault CRUD)"]
+        IMG["image/generate.js<br/>(OpenAI proxy)"]
+        AUTH["auth/* · session.js<br/>(OAuth + sessions)"]
+        SNAP["snapshots.js<br/>(owner-only archive)"]
+        REQ["requireUser<br/>(verified session → userId)"]
+        AUTH --> REQ
+        PROJ --> REQ
+        KEYS --> REQ
+    end
 
-    E -->|Artifacts| H[7 Core Artifacts]
-    E -->|Markup| I[Annotated SVGs]
+    subgraph Data["🗄️ Data & Storage"]
+        MONGO[("MongoDB<br/>projects · users · provider_keys · recruiter")]
+        BLOB[("Vercel Blob<br/>snapshot bundles + images")]
+    end
 
-    H --> J(Screen Inventory)
-    H --> K(Data Model)
-    H --> L(Design System)
-    H --> M(Implementation Plan)
+    subgraph External["🌐 External APIs"]
+        GEM["Google Gemini<br/>(PRD · artifacts · safety)"]
+        OAI["OpenAI<br/>(gpt-image-2 mockups)"]
+        OAUTH["GitHub / LinkedIn OAuth"]
+    end
+
+    LLM -.->|"streaming HTTPS"| GEM
+    VAULT -.->|"GET ?material=gemini"| KEYS
+    STORE -.->|"debounced push/pull"| PROJ
+    IMG -.->|"server-side, key never exposed"| OAI
+    AUTH -.-> OAUTH
+    PROJ --> MONGO
+    KEYS --> MONGO
+    AUTH --> MONGO
+    SNAP --> BLOB
+
+    classDef client fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
+    classDef edge fill:#ede9fe,stroke:#8b5cf6,color:#4c1d95;
+    classDef data fill:#dcfce7,stroke:#22c55e,color:#14532d;
+    classDef ext fill:#fef3c7,stroke:#f59e0b,color:#78350f;
+    class UI,STORE,LS,IDB,LLM,VAULT client;
+    class PROJ,KEYS,IMG,AUTH,SNAP,REQ edge;
+    class MONGO,BLOB data;
+    class GEM,OAI,OAUTH ext;
 ```
 
-## Tech stack
+<details>
+<summary><strong>Layer-by-layer breakdown</strong></summary>
 
-- **Frontend:** React 19, TypeScript, Vite 7, Tailwind CSS 3
-- **Backend:** Vercel serverless API routes + MongoDB (for recruiter auth analytics) + Vercel Blob (for owner-only project snapshots)
-- **State:** Zustand 5 with debounced `localStorage` persistence; mockup PNGs in IndexedDB
-- **LLM:** Google Gemini (default `gemini-3.5-flash`) via direct browser calls with streaming + connection/stream-level retry; OpenAI `gpt-image-2` for mockup image previews
-- **Markdown:** `react-markdown` + `remark-gfm` + `rehype-raw`
-- **Routing:** React Router v7 (workspace, recruiter portal, admin, the interactive product tour at `/tour` + `/about`, `/privacy`)
-- **Icons & animation:** `lucide-react`, `framer-motion`, `@formkit/auto-animate`
+<br />
 
-The product workspace remains browser-first, while recruiter authentication
-and tracking run through API routes backed by MongoDB.
+| Layer | Responsibility | Key modules |
+|---|---|---|
+| **Frontend** | React 19 SPA — workspace, renderers, interactive tour | `src/components/` (131 components), `src/App.tsx` |
+| **State** | Zustand store (10 slices) + debounced localStorage; mockup PNGs in IndexedDB | `src/store/slices/` |
+| **LLM orchestration** | In-browser DAG pipeline, safety gate, streaming transport, retry | `src/lib/services/`, `src/lib/geminiClient.ts` |
+| **API (serverless)** | 11 Vercel functions — project sync, vault, image proxy, auth, snapshots | `api/*.js`, shared helpers in `api/_lib/` |
+| **Auth** | Session cookies (HMAC), OAuth (GitHub/LinkedIn), email/password, identity linking | `api/_lib/session.js`, `api/auth/`, `requireUser.js` |
+| **Database** | MongoDB via official Node driver with cached pool — `projects`, `users`, `provider_keys`, recruiter collections | `api/_lib/db.js`, `projectsStore.js`, `users.js` |
+| **Storage** | Vercel Blob for owner-only full-project snapshots (state + images) | `api/snapshots.js` |
+| **External APIs** | Google Gemini (text/JSON, client-side), OpenAI `gpt-image-2` (server-proxied), GitHub/LinkedIn OAuth | `geminiClient.ts`, `api/image/generate.js` |
+
+> ⚠️ **Note on "background workers":** Synapse uses **serverless functions** (stateless, request-scoped) rather than a long-running worker/queue tier. Parallelism is achieved via the in-browser concurrent DAG executor, not a job queue.
+
+</details>
 
 ---
+
+## 🔁 End-to-End Workflow
+
+What happens after you press **one button** — "Generate PRD":
+
+```mermaid
+sequenceDiagram
+    autonumber
+    actor U as User
+    participant FE as Frontend (React)
+    participant LLM as LLM Layer (browser)
+    participant DAG as DAG Executor
+    participant GEM as Google Gemini
+    participant ST as Zustand + localStorage
+    participant API as api/projects.js
+    participant DB as MongoDB
+
+    U->>FE: Enter idea → (optional) preflight Q&A → Generate
+    FE->>LLM: generateStructuredPRD(idea, context)
+    LLM->>GEM: classifyProjectSafety()
+    GEM-->>LLM: allowed / restricted / disallowed
+    alt disallowed
+        LLM-->>FE: SafetyBlockedError → render Safety Review
+    else allowed
+        LLM->>DAG: runDag(10 sections, deps)
+        Note over DAG,GEM: Ready sections fan out concurrently<br/>(fast vs strong model per tier)
+        par Wave 1 (independent)
+            DAG->>GEM: section A (stream)
+            DAG->>GEM: section B (stream)
+        and Wave 2 (deps satisfied)
+            DAG->>GEM: section C (stream)
+        end
+        GEM-->>DAG: section slices + token usage
+        DAG-->>LLM: merged StructuredPRD + metrics
+        LLM-->>ST: updateSpineStructuredPRD()
+        ST-->>FE: live timeline + rendered PRD
+        ST->>API: PUT /api/projects (debounced, signed-in)
+        API->>DB: upsert (userId-scoped)
+        DB-->>API: ok
+    end
+```
+
+The same pattern drives artifact generation (the bundle controller fans the core artifacts out concurrently) and is recorded as a `WorkflowRun` for the `/metrics` dashboard.
+
+<!-- ====================================================================
+## 🚀 Performance  (commented out — populate from real /metrics runs)
+
+The `/metrics` dashboard already measures real per-run performance — these tables are the **template to populate** from representative runs (no synthetic data is shipped by design).
+
+| Run | Sequential estimate | Actual (parallel) | Speedup | Max concurrency |
+|---|---|---|---|---|
+| PRD generation (10 sections) | _TODO_ | _TODO_ | _TODO ×_ | _TODO_ |
+| Artifact bundle (core artifacts) | _TODO_ | _TODO_ | _TODO ×_ | _TODO_ |
+
+| Dimension | Sequential | Parallel (Synapse) |
+|---|---|---|
+| Wall-clock latency | _TODO_ | _TODO_ |
+| Token usage (total) | _TODO_ | _TODO_ |
+| Est. cost (USD) | _TODO_ | _TODO_ |
+
+How to generate: run a few PRD + artifact bundles, open /metrics, and read the sequential-estimate / actual / speedup / concurrency / token / cost figures directly off each WorkflowRun.
+==================================================================== -->
+
+<!-- ====================================================================
+## 🖼️ Screenshots  (commented out)
+
+| | |
+|---|---|
+| **💡 Idea entry** | **🧠 Spec generation (live waves)** |
+| ![Idea](public/screenshots/tour-idea.png) | ![Spec](public/screenshots/tour-spec.png) |
+| **✍️ Refine a passage** | **🕓 Version history & diff** |
+| ![Refine](public/screenshots/tour-refine.png) | ![Versions](public/screenshots/tour-versions.png) |
+| **🎨 Generated assets** | **🔌 Connections graph** |
+| ![Assets](public/screenshots/tour-assets.png) | ![Connections](public/screenshots/tour-connections.png) |
+
+Screenshot gaps to fill: mobile layout, dark mode, the /metrics dashboard, and a generated artifact. Regenerate via npm run capture:screenshots.
+==================================================================== -->
+
+<!-- ====================================================================
+## 🧭 Design Decisions  (commented out)
+
+### Why a Vercel-hosted SPA (and why Gemini is called from the browser)?
+PRD generation streams and can run for tens of seconds — longer than a Vercel Hobby serverless function's maxDuration. Calling Gemini directly from the browser keeps streaming responsive, with localStorage as a client cache and server sync for durability. The trade-off — a client-held key — is mitigated by the encrypted server vault (keys fetched into memory, never persisted) and a server proxy for OpenAI image generation where the key must stay secret.
+
+### Why React 19 + Vite + Zustand (not Next.js / Redux)?
+The product is a single rich workspace, not a content site — SSR/routing-heavy frameworks add cost without benefit. Vite gives fast HMR and a clean static build. Zustand's slice composition fits the store with persist middleware; selector-stability discipline avoids useSyncExternalStore update storms.
+
+### Why a custom DAG executor instead of LangGraph / a workflow engine?
+The orchestration runs in the browser alongside the UI and needs to emit fine-grained lifecycle events into a live timeline. A small, typed, dependency-resolving executor with explicit per-tier concurrency caps is lighter than a Python-side graph engine, has zero server round-trips, and keeps the whole pipeline type-checked end-to-end.
+
+### Why MongoDB (not Postgres)?
+A project is a nine-collection bundle serialized as one document keyed by a client UUID — a document model maps cleanly onto that transport unit. Access control is RLS-equivalent in the data layer (userId pinned into every filter), so relational guarantees aren't load-bearing here.
+
+### Why Vercel serverless (not a container / worker tier)?
+The backend's job is bursty and request-scoped — sync upserts, vault reads, OAuth, an image proxy — none of which needs a long-running process. Serverless keeps ops near-zero and scales to zero.
+==================================================================== -->
+
+---
+
+## 🗺️ Roadmap
+
+**✅ Current**
+- [x] Concurrent DAG PRD pipeline with live timeline
+- [x] Code-level fail-closed safety gate
+- [x] Full build-artifact bundle + multi-fidelity mockups + markup SVGs
+- [x] Append-only versioning with section-aware diffs & restore
+- [x] Orchestration metrics dashboard (`/metrics`)
+- [x] Encrypted provider-key vault + OAuth + identity linking
+- [x] Cross-device project sync
+
+**🔜 Next release**
+- [ ] Wire `@vitest/coverage-v8` + publish a real coverage badge
+- [ ] Forward token usage from artifact services (complete cost observability)
+- [ ] Per-project server-newer reconciliation (currently local-always-wins)
+- [ ] Migrate server-side data (snapshots / provider keys) on account merge
+- [ ] Cross-device sync for mockup images (currently device-local)
+
+**🔮 Future**
+- [ ] Additional LLM providers (Anthropic / Azure OpenAI) via the routing layer
+- [ ] Dockerfile + compose for one-command self-hosting
+- [ ] Real-time collaborative editing on a shared spine
+
+**🔬 Research**
+- [ ] Promote the mockup eval harness into an in-app **AI evals** surface
+- [ ] Automated PRD quality scoring against the rubric
+- [ ] Cost-aware adaptive model routing per section difficulty
+
+---
+
+## 🤝 Contributing
+
+Contributions are welcome — see **[`CONTRIBUTING.md`](CONTRIBUTING.md)** for the full guide.
+
+| | |
+|---|---|
+| **Branch strategy** | Feature branches off `main`; never push directly to `main`. |
+| **Commits** | Clear, descriptive, present-tense messages. |
+| **Required gate** | `npm run build` **and** `npm run lint` must pass (Vercel runs the build). |
+| **Testing** | Add/extend Vitest tests under `src/**/__tests__/`; keep test TS as strict as app TS. |
+| **Docs rule** | A change to a user-visible feature updates `README.md` **and** `CLAUDE.md` in the same commit. |
+
+```bash
+# 1. Branch
+git checkout -b feat/my-change
+# 2. Develop + verify
+npm run build && npm run lint && npm test
+# 3. Push & open a PR
+git push -u origin feat/my-change
+```
+
+---
+
+## ❓ FAQ
+
+<details>
+<summary><strong>Do I need to install anything to try Synapse?</strong></summary>
+
+No — the interactive `/tour` (aliased `/about`) runs in any browser on local demo data with no sign-up and no API key. To generate real PRDs you add a Google Gemini key in Settings; it's stored client-side and sent directly to Gemini.
+</details>
+
+<details>
+<summary><strong>Where do my API keys and projects live?</strong></summary>
+
+Keys are stored client-side (namespaced per user) for the direct-to-Gemini path, or AES-256-GCM encrypted in the server vault for signed-in users — never returned to the client as material. Projects are cached in the browser for responsiveness and, when signed in, synced to a `userId`-scoped MongoDB collection so they follow you across devices.
+</details>
+
+<details>
+<summary><strong>Is the "multi-agent" concurrency real or just a label?</strong></summary>
+
+Real. Sections run through a dependency-graph executor with cycle detection and per-tier concurrency caps, and the `/metrics` dashboard records actual speedup, max/avg concurrency, and critical path per run — no synthetic data.
+</details>
+
+<details>
+<summary><strong>Why Gemini in the browser — isn't that a security risk?</strong></summary>
+
+Streaming PRD generation exceeds serverless time limits, so Gemini is called client-side. The key stays in memory (vault) or per-user browser storage, and any provider whose key *must* be secret (OpenAI images) is proxied server-side where the key never reaches the client.
+</details>
+
+<details>
+<summary><strong>Does it work on mobile?</strong></summary>
+
+Yes — responsive layouts, safe-area insets, touch-aware text selection, swipe navigation, and reduced-motion support are built in. The highlight-to-refine gesture has a dedicated mobile flow so it doesn't fight the native selection toolbar.
+</details>
+
+<details>
+<summary><strong>What happens if generation is interrupted (refresh / network drop)?</strong></summary>
+
+Streaming retries reconnect mid-stream; on reload, any pipeline still marked `running` is converted into a settled, retryable error state (not an eternal spinner), and individual failed sections can be re-run without touching the rest of the document.
+</details>
+
+---
+
+## 📚 Documentation
+
+| Doc | What's inside |
+|---|---|
+| [`CLAUDE.md`](CLAUDE.md) | Architecture, state slices, LLM pipeline, cross-cutting patterns (kept in sync with code) |
+| [`docs/architecture.md`](docs/architecture.md) | Runtime stack, state layer, LLM services, UI composition |
+| [`docs/artifact-flow.md`](docs/artifact-flow.md) | File-by-file trace of one end-to-end pipeline run |
+| [`docs/ORCHESTRATION_AND_METRICS.md`](docs/ORCHESTRATION_AND_METRICS.md) | Concurrent workflows, the `/metrics` dashboard, each metric explained |
+| [`docs/AUTH_AND_PROVIDER_KEYS.md`](docs/AUTH_AND_PROVIDER_KEYS.md) | Per-user projects, encrypted vault, server-side model routing |
+| [`docs/auth.md`](docs/auth.md) · [`docs/linkedin-auth.md`](docs/linkedin-auth.md) | Multi-provider auth, user schema, OAuth setup |
+| [`docs/SERVER_PROJECT_STORAGE.md`](docs/SERVER_PROJECT_STORAGE.md) | Cross-device sync design |
+| [`docs/VERSIONING_AUDIT.md`](docs/VERSIONING_AUDIT.md) | Versioning & revert design (Phase 1) |
+| [`docs/deployment.md`](docs/deployment.md) | Commands, Vercel setup, self-hosting |
+| [`docs/mockup-evaluation-harness.md`](docs/mockup-evaluation-harness.md) | LLM-output eval framework |
+| [`.env.example`](.env.example) | Backend environment variables (workspace needs none) |
+
+<!-- ====================================================================
+## 🙏 Acknowledgements  (commented out)
+
+Built with the open-source ecosystem:
+
+Core — React 19 · TypeScript · Vite · Tailwind CSS · Zustand
+UI/UX — framer-motion · lucide-react · react-markdown + remark-gfm · @formkit/auto-animate
+Data/diff — jsdiff · date-fns · MongoDB Node driver
+Platform — Vercel (hosting · serverless · Blob) · Vitest · Playwright
+AI — Google Gemini (PRD, artifacts, safety) · OpenAI (image generation)
+==================================================================== -->
+
+<!-- ====================================================================
+## 📄 License  (commented out)
+
+TODO: no LICENSE file is present yet. Add one (MIT is the conventional choice for a portfolio project) and the License badge above will resolve.
+==================================================================== -->
+
+<div align="center">
+
+<br />
+
+**[⬆ back to top](#-synapse)**
+
+<br />
+
+*Built to turn one sentence into a buildable product blueprint.*
+⭐ **Star the repo if the concurrent-pipeline + versioned-artifact architecture is useful to you.**
+
+</div>
