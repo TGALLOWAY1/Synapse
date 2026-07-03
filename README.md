@@ -145,83 +145,11 @@ Artifacts carry source refs back to the spine; staleness is detected automatical
 
 Synapse is a **Vercel-hosted React web app** (a mobile-friendly SPA) that calls Google Gemini directly from the browser for low-latency streaming, backed by **Vercel serverless functions** for durable cross-device sync, encrypted secrets, auth, and OpenAI-proxied image generation.
 
-```mermaid
-graph TB
-    subgraph Client["🖥️ Browser (React 19 SPA)"]
-        UI["Workspace UI<br/>HomePage · ProjectWorkspace · Tour · 131 components"]
-        STORE["Zustand Store<br/>10 slices · persist middleware"]
-        LS["localStorage<br/>(live PRD/artifact cache)"]
-        IDB["IndexedDB<br/>(mockup PNGs)"]
-        LLM["LLM Layer (in-browser)<br/>DAG pipeline · safety gate · streaming · retry"]
-        VAULT["geminiKeyVault<br/>(in-memory key, never persisted)"]
-        UI --> STORE --> LS
-        STORE --> IDB
-        UI --> LLM
-        LLM --> VAULT
-    end
 
-    subgraph Edge["☁️ Vercel Serverless (api/ · 11 functions)"]
-        PROJ["projects.js<br/>(cross-device sync)"]
-        KEYS["provider-keys.js<br/>(encrypted vault CRUD)"]
-        IMG["image/generate.js<br/>(OpenAI proxy)"]
-        AUTH["auth/* · session.js<br/>(OAuth + sessions)"]
-        SNAP["snapshots.js<br/>(owner-only archive)"]
-        REQ["requireUser<br/>(verified session → userId)"]
-        AUTH --> REQ
-        PROJ --> REQ
-        KEYS --> REQ
-    end
+<img width="1448" height="1086" alt="image" src="https://github.com/user-attachments/assets/8cdad13a-e586-48a2-a35f-5bd5cf1f444b" />
 
-    subgraph Data["🗄️ Data & Storage"]
-        MONGO[("MongoDB<br/>projects · users · provider_keys · recruiter")]
-        BLOB[("Vercel Blob<br/>snapshot bundles + images")]
-    end
-
-    subgraph External["🌐 External APIs"]
-        GEM["Google Gemini<br/>(PRD · artifacts · safety)"]
-        OAI["OpenAI<br/>(gpt-image-2 mockups)"]
-        OAUTH["GitHub / LinkedIn OAuth"]
-    end
-
-    LLM -.->|"streaming HTTPS"| GEM
-    VAULT -.->|"GET ?material=gemini"| KEYS
-    STORE -.->|"debounced push/pull"| PROJ
-    IMG -.->|"server-side, key never exposed"| OAI
-    AUTH -.-> OAUTH
-    PROJ --> MONGO
-    KEYS --> MONGO
-    AUTH --> MONGO
-    SNAP --> BLOB
-
-    classDef client fill:#dbeafe,stroke:#3b82f6,color:#1e3a8a;
-    classDef edge fill:#ede9fe,stroke:#8b5cf6,color:#4c1d95;
-    classDef data fill:#dcfce7,stroke:#22c55e,color:#14532d;
-    classDef ext fill:#fef3c7,stroke:#f59e0b,color:#78350f;
-    class UI,STORE,LS,IDB,LLM,VAULT client;
-    class PROJ,KEYS,IMG,AUTH,SNAP,REQ edge;
-    class MONGO,BLOB data;
-    class GEM,OAI,OAUTH ext;
-```
-
-<details>
-<summary><strong>Layer-by-layer breakdown</strong></summary>
-
-<br />
-
-| Layer | Responsibility | Key modules |
-|---|---|---|
-| **Frontend** | React 19 SPA — workspace, renderers, interactive tour | `src/components/` (131 components), `src/App.tsx` |
-| **State** | Zustand store (10 slices) + debounced localStorage; mockup PNGs in IndexedDB | `src/store/slices/` |
-| **LLM orchestration** | In-browser DAG pipeline, safety gate, streaming transport, retry | `src/lib/services/`, `src/lib/geminiClient.ts` |
-| **API (serverless)** | 11 Vercel functions — project sync, vault, image proxy, auth, snapshots | `api/*.js`, shared helpers in `api/_lib/` |
-| **Auth** | Session cookies (HMAC), OAuth (GitHub/LinkedIn), email/password, identity linking | `api/_lib/session.js`, `api/auth/`, `requireUser.js` |
-| **Database** | MongoDB via official Node driver with cached pool — `projects`, `users`, `provider_keys`, recruiter collections | `api/_lib/db.js`, `projectsStore.js`, `users.js` |
-| **Storage** | Vercel Blob for owner-only full-project snapshots (state + images) | `api/snapshots.js` |
-| **External APIs** | Google Gemini (text/JSON, client-side), OpenAI `gpt-image-2` (server-proxied), GitHub/LinkedIn OAuth | `geminiClient.ts`, `api/image/generate.js` |
 
 > ⚠️ **Note on "background workers":** Synapse uses **serverless functions** (stateless, request-scoped) rather than a long-running worker/queue tier. Parallelism is achieved via the in-browser concurrent DAG executor, not a job queue.
-
-</details>
 
 ---
 
