@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildSectionPrompt, SECTION_TITLES } from '../prompts/prdSectionPrompts';
-import { DEFAULT_PRD_SECTIONS } from '../services/progressivePrdGeneration';
+import { DEFAULT_PRD_SECTIONS, RETIRED_PRD_SECTIONS } from '../services/progressivePrdGeneration';
 import type { SectionId } from '../schemas/prdSchemas';
 
 describe('buildSectionPrompt', () => {
-    it('returns non-empty system and user strings for all 10 sections', () => {
-        for (const section of DEFAULT_PRD_SECTIONS) {
+    it('returns non-empty system and user strings for all pipeline sections', () => {
+        for (const section of [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS]) {
             const { system, user } = buildSectionPrompt(section.id as SectionId, {
                 idea: 'A task management app for remote teams',
                 upstream: {},
@@ -78,14 +78,17 @@ describe('buildSectionPrompt', () => {
 });
 
 describe('SECTION_TITLES', () => {
-    it('has an entry for all 10 sections', () => {
-        expect(Object.keys(SECTION_TITLES).length).toBe(DEFAULT_PRD_SECTIONS.length);
-    });
-
-    it('every DEFAULT_PRD_SECTIONS entry has a non-empty title', () => {
-        for (const section of DEFAULT_PRD_SECTIONS) {
+    it('covers every active and retired section id', () => {
+        for (const section of [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS]) {
             const title = SECTION_TITLES[section.id as SectionId];
             expect(title).toBeTruthy();
+        }
+    });
+
+    it('retired sections are not in the default generation graph', () => {
+        const activeIds = new Set(DEFAULT_PRD_SECTIONS.map((s) => s.id));
+        for (const retired of RETIRED_PRD_SECTIONS) {
+            expect(activeIds.has(retired.id)).toBe(false);
         }
     });
 });

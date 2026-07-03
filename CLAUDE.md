@@ -379,10 +379,23 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
   `llmProvider.ts` barrel keeps legacy call sites stable.
   - `prdService.ts` → `progressivePrdPipeline.ts` → `progressivePrdGeneration.ts`
     — PRD generation runs as a **dependency-graph (DAG) pipeline**, not in
-    document order. `DEFAULT_PRD_SECTIONS` (10 schema-aligned sections in
+    document order. `DEFAULT_PRD_SECTIONS` (8 schema-aligned sections in
     `progressivePrdGeneration.ts`) each declare `dependencies` that are **true
     data dependencies only** — a section lists another solely when it consumes
-    that section's output as prompt context. `runDag()` runs every section whose
+    that section's output as prompt context. **The PRD is the product decision
+    document, not a container for downstream artifacts:** the former
+    `data_model` and `implementation_plan` PRD sections are **retired** from the
+    default graph (`RETIRED_PRD_SECTIONS` / `RETIRED_SECTION_IDS`) — the
+    dedicated data_model / implementation_plan *artifacts* own that detail, and
+    the PRD-embedded copies duplicated them (two entity lists was a standing
+    inconsistency source; `implementationPlan` was never rendered). Their
+    `SectionId`, prompt builder, slice schema, and title all survive solely so
+    single-section retry of legacy `generationMeta.failedSections` keeps
+    working (`prdSectionRetry.ts` looks sections up across
+    `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
+    sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
+    Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
+    rendering — the renderer blocks and optional `StructuredPRD` fields stay. `runDag()` runs every section whose
     deps are satisfied concurrently, under separate per-tier concurrency caps
     (`maxFastConcurrency` / `maxStrongConcurrency`); low-risk sections use the
     fast (Flash) model, high-risk the strong (Pro) model. `validateGraph()` runs
@@ -1283,7 +1296,7 @@ component). It is driven directly by the live `prdSectionStatus` store slice
 (not by parsing the `prdProgress` message log):
 
 - **`buildGenerationSteps.ts`** — pure adapter. `computeWaves()` groups the
-  10 pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
+  pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
   (topological levels): a single-section wave is a sequential row, a
   multi-section wave is a "Running concurrently" group whose children are the
   parallel sections (labeled `2A`, `2B`, …). This is purely graph-derived, so

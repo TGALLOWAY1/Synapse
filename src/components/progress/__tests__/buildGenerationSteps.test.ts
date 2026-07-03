@@ -29,13 +29,12 @@ describe('formatModelName', () => {
 });
 
 describe('computeWaves (default DAG)', () => {
-    it('groups the 10 sections into dependency waves', () => {
+    it('groups the 8 sections into dependency waves', () => {
         const waves = computeWaves();
-        expect(waves.map((w) => w.length)).toEqual([1, 3, 4, 1, 1]);
+        expect(waves.map((w) => w.length)).toEqual([1, 3, 4]);
         expect(waves[0][0].id).toBe('product_basics');
         expect(waves[1].map((s) => s.id)).toEqual(['product_thesis', 'grounding', 'features']);
-        expect(waves[2].map((s) => s.id)).toEqual(['data_model', 'ux_loops', 'quality_risks', 'metrics_scope']);
-        expect(waves[4].map((s) => s.id)).toEqual(['implementation_plan']);
+        expect(waves[2].map((s) => s.id)).toEqual(['ux_loops', 'architecture', 'quality_risks', 'metrics_scope']);
     });
 });
 
@@ -56,7 +55,7 @@ describe('computeWaves (arbitrary graph — future-proofing)', () => {
 describe('buildGenerationSteps', () => {
     it('builds sequential rows and concurrent groups with labels', () => {
         const steps = buildGenerationSteps({}, MODELS);
-        expect(steps).toHaveLength(5);
+        expect(steps).toHaveLength(3);
         expect(steps[0].sectionId).toBe('product_basics');
         expect(steps[0].label).toBe('1');
         expect(steps[0].executionMode).toBe('sequential');
@@ -134,9 +133,9 @@ describe('summarizeSteps', () => {
         };
         const steps = buildGenerationSteps(status, MODELS);
         const summary = summarizeSteps(steps);
-        expect(summary.total).toBe(10);
+        expect(summary.total).toBe(8);
         expect(summary.completed).toBe(2);
-        expect(summary.percent).toBe(20);
+        expect(summary.percent).toBe(25);
         expect(summary.status).toBe('in_progress');
     });
 
@@ -148,8 +147,8 @@ describe('summarizeSteps', () => {
         expect(summarizeSteps(steps).status).toBe('failed');
     });
 
-    it('flattenLeaves returns all 10 leaf sections', () => {
+    it('flattenLeaves returns all 8 leaf sections', () => {
         const steps = buildGenerationSteps({}, MODELS);
-        expect(flattenLeaves(steps)).toHaveLength(10);
+        expect(flattenLeaves(steps)).toHaveLength(8);
     });
 });

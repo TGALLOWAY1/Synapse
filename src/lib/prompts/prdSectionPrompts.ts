@@ -144,6 +144,9 @@ For every must- and should-priority feature, populate successCriteria, edgeCases
         };
     },
 
+    // Retired from default generation (see RETIRED_PRD_SECTIONS) — the
+    // data_model artifact owns this detail now. Retained so single-section
+    // retry of legacy PRDs' failedSections keeps working.
     data_model: (ctx) => {
         const features = pick(ctx.upstream, 'features', 'featureSystems');
         const grounding = pick(ctx.upstream, 'domainEntities', 'primaryActions');
@@ -250,6 +253,9 @@ Return JSON with:
         };
     },
 
+    // Retired from default generation (see RETIRED_PRD_SECTIONS) — the
+    // implementation_plan artifact owns this detail now. Retained so
+    // single-section retry of legacy PRDs' failedSections keeps working.
     implementation_plan: (ctx) => {
         const features = pick(ctx.upstream, 'features', 'featureSystems');
         const dataModel = pick(ctx.upstream, 'richDataModel');
@@ -288,6 +294,9 @@ export const buildSectionPrompt = (
     return builder(ctx);
 };
 
+// Keyed by the FULL SectionId union — retired sections (data_model,
+// implementation_plan) keep their entries so legacy failed-section banners
+// and retries still resolve a title.
 export const SECTION_TITLES: Record<SectionId, string> = {
     product_basics: 'Product Basics',
     product_thesis: 'Product Thesis',

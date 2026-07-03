@@ -91,7 +91,7 @@ You can also skip and decide later, at the latest when marking the PRD final.
 <img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" />
 
 The PRD is generated as structured JSON by a **dependency-graph pipeline**:
-the ten sections run concurrently the moment their inputs are ready — they are
+the sections run concurrently the moment their inputs are ready — they are
 never sequenced just because they appear later in the document. A live
 **progress timeline** shows exactly what's happening: sections are grouped into
 dependency *waves*, with independent sections rendered as "running
