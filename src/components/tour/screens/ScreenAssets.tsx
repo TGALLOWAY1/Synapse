@@ -4,16 +4,18 @@ import { Check, ChevronRight, FileText, Sparkles, Zap } from 'lucide-react';
 import { ScreenShell } from '../components/ScreenShell';
 import { StatusIcon, type StepStatus } from '../components/GenerationStep';
 import { ArtifactDrawer } from '../components/ArtifactDrawer';
-import { TOUR_ASSETS, type TourAsset } from '../tourData';
+import { TOUR_ASSETS, TOUR_ASSET_GROUPS, type TourAsset } from '../tourData';
 import type { ScreenProps } from '../tourTypes';
 
 const ASSET_GEN_MS = 650;
 const allDone = () => TOUR_ASSETS.map(() => 'done' as StepStatus);
 
 /**
- * Screen 5 (hero) — "Mark as Final" finalizes the PRD and the seven workspace
- * assets generate one at a time. Each finished asset is clickable and opens a
- * lightweight preview drawer. This is the key onboarding moment.
+ * Screen 5 (hero) — "Mark as Final" finalizes the PRD and the downstream
+ * workspace assets generate one at a time, grouped exactly as the real Assets
+ * page groups them (Project Foundation → Experience → Architecture →
+ * Development). Each finished asset is clickable and opens a lightweight preview
+ * drawer. This is the key onboarding moment.
  */
 export default function ScreenAssets({ reducedMotion }: ScreenProps) {
     // The screen remounts fresh each time it becomes active, so the hero moment
@@ -92,40 +94,62 @@ export default function ScreenAssets({ reducedMotion }: ScreenProps) {
                     </motion.span>
                 </div>
 
-                {/* Assets grid */}
-                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
-                    {TOUR_ASSETS.map((asset, i) => {
-                        const status = statuses[i];
-                        const isDone = status === 'done';
+                {/* Assets — grouped exactly like the workspace Assets page
+                    sidebar (Project Foundation → Experience → Architecture →
+                    Development). The generation status array is keyed by the
+                    flat TOUR_ASSETS order, so each button looks up its own
+                    index. */}
+                <div className="space-y-4">
+                    {TOUR_ASSET_GROUPS.map((group) => {
+                        const groupAssets = TOUR_ASSETS.map((asset, i) => ({ asset, i })).filter(
+                            ({ asset }) => asset.group === group.id,
+                        );
+                        if (groupAssets.length === 0) return null;
                         return (
-                            <button
-                                key={asset.id}
-                                type="button"
-                                disabled={!isDone}
-                                onClick={() => setOpenAsset(asset)}
-                                aria-label={isDone ? `Preview ${asset.name}` : `${asset.name} (not generated yet)`}
-                                className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
-                                    isDone
-                                        ? 'border-neutral-700 bg-neutral-800/50 hover:border-indigo-500/50 hover:bg-neutral-800'
-                                        : 'border-neutral-800 bg-neutral-800/20'
-                                }`}
-                            >
-                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${asset.accent}`}>
-                                    <asset.icon size={18} aria-hidden="true" />
-                                </span>
-                                <span className="min-w-0 flex-1">
-                                    <span className="block truncate text-sm font-medium text-neutral-100">{asset.name}</span>
-                                    <span className="block truncate text-xs text-neutral-500">{asset.tagline}</span>
-                                </span>
-                                {status === 'queued' ? (
-                                    <span className="text-[11px] text-neutral-600">Queued</span>
-                                ) : (
-                                    <span className="flex items-center gap-1">
-                                        <StatusIcon status={status} reducedMotion={reducedMotion} size="sm" />
-                                        {isDone && <ChevronRight size={15} className="text-neutral-500" />}
+                            <div key={group.id}>
+                                <div className="mb-2 flex items-center gap-2">
+                                    <group.icon size={13} className="text-neutral-500" aria-hidden="true" />
+                                    <span className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                        {group.title}
                                     </span>
-                                )}
-                            </button>
+                                </div>
+                                <div className="grid grid-cols-1 gap-2.5 sm:grid-cols-2">
+                                    {groupAssets.map(({ asset, i }) => {
+                                        const status = statuses[i];
+                                        const isDone = status === 'done';
+                                        return (
+                                            <button
+                                                key={asset.id}
+                                                type="button"
+                                                disabled={!isDone}
+                                                onClick={() => setOpenAsset(asset)}
+                                                aria-label={isDone ? `Preview ${asset.name}` : `${asset.name} (not generated yet)`}
+                                                className={`flex items-center gap-3 rounded-xl border p-3 text-left transition ${
+                                                    isDone
+                                                        ? 'border-neutral-700 bg-neutral-800/50 hover:border-indigo-500/50 hover:bg-neutral-800'
+                                                        : 'border-neutral-800 bg-neutral-800/20'
+                                                }`}
+                                            >
+                                                <span className={`flex h-9 w-9 shrink-0 items-center justify-center rounded-lg ${asset.accent}`}>
+                                                    <asset.icon size={18} aria-hidden="true" />
+                                                </span>
+                                                <span className="min-w-0 flex-1">
+                                                    <span className="block truncate text-sm font-medium text-neutral-100">{asset.name}</span>
+                                                    <span className="block truncate text-xs text-neutral-500">{asset.tagline}</span>
+                                                </span>
+                                                {status === 'queued' ? (
+                                                    <span className="text-[11px] text-neutral-600">Queued</span>
+                                                ) : (
+                                                    <span className="flex items-center gap-1">
+                                                        <StatusIcon status={status} reducedMotion={reducedMotion} size="sm" />
+                                                        {isDone && <ChevronRight size={15} className="text-neutral-500" />}
+                                                    </span>
+                                                )}
+                                            </button>
+                                        );
+                                    })}
+                                </div>
+                            </div>
                         );
                     })}
                 </div>

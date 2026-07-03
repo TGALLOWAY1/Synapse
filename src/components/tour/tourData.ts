@@ -1,10 +1,12 @@
 import {
     Workflow,
-    Smartphone,
+    AppWindow,
     Database,
-    Boxes,
     Terminal,
     Palette,
+    FileText,
+    Layers,
+    Code2,
     type LucideIcon,
 } from 'lucide-react';
 
@@ -182,8 +184,31 @@ export const VERSIONS: VersionEntry[] = [
 
 export type AssetPreviewKind = 'flow' | 'screens' | 'table' | 'grid' | 'roadmap' | 'palette' | 'prompt';
 
+/**
+ * Sidebar groups shown on the workspace Assets page. These mirror
+ * `ARTIFACT_GROUPS` in `ArtifactWorkspace.tsx` (minus the PRD row, which is the
+ * hub these assets are generated *from*, not a generated asset itself). Keep the
+ * ids, titles, order, and icons in sync if the workspace grouping changes.
+ */
+export type AssetGroupId = 'foundation' | 'experience' | 'architecture' | 'development';
+
+export interface AssetGroup {
+    id: AssetGroupId;
+    title: string;
+    icon: LucideIcon;
+}
+
+export const TOUR_ASSET_GROUPS: AssetGroup[] = [
+    { id: 'foundation', title: 'Project Foundation', icon: FileText },
+    { id: 'experience', title: 'Experience', icon: Layers },
+    { id: 'architecture', title: 'Architecture', icon: Database },
+    { id: 'development', title: 'Development', icon: Code2 },
+];
+
 export interface TourAsset {
     id: string;
+    /** Which Assets-page sidebar group this artifact lives under. */
+    group: AssetGroupId;
     name: string;
     tagline: string;
     icon: LucideIcon;
@@ -194,9 +219,30 @@ export interface TourAsset {
     preview: string[];
 }
 
+/**
+ * The assets Synapse generates from a finalized PRD, in the same order and
+ * grouping the workspace Assets page shows them. This list is deliberately
+ * limited to artifacts that are actually surfaced to the user — the hidden
+ * `component_inventory` (mockups consume it but it has no sidebar row) and the
+ * retired standalone `prompt_pack` (folded into the Implementation Plan) are
+ * intentionally omitted so the tour matches the real product. Mockups aren't a
+ * standalone row either: they live inside the consolidated **Screens** view
+ * under Experience, alongside **User Flows**.
+ */
 export const TOUR_ASSETS: TourAsset[] = [
     {
+        id: 'design_system',
+        group: 'foundation',
+        name: 'Design System',
+        tagline: 'Colors, typography & components',
+        icon: Palette,
+        accent: 'text-pink-300 bg-pink-500/10',
+        previewKind: 'palette',
+        preview: ['Indigo / primary', 'Neutral / surface', 'Emerald / success', 'Display / heading', 'Body / text'],
+    },
+    {
         id: 'user_flows',
+        group: 'experience',
         name: 'User Flows',
         tagline: 'Flow diagrams & journeys',
         icon: Workflow,
@@ -205,16 +251,21 @@ export const TOUR_ASSETS: TourAsset[] = [
         preview: ['Open app', 'Start a song idea', 'Record / import', 'Arrange sections', 'Export & release'],
     },
     {
-        id: 'ui_mockups',
-        name: 'UI Mockups',
-        tagline: 'Screens & wireframes',
-        icon: Smartphone,
+        // The consolidated, screen-centric Experience view: each screen gets an
+        // Overview / Flow / Mockups tab. This is where UI mockups live in the
+        // real product — there's no standalone "UI Mockups" sidebar row.
+        id: 'screens',
+        group: 'experience',
+        name: 'Screens',
+        tagline: 'Screen-by-screen: overview, flow & mockups',
+        icon: AppWindow,
         accent: 'text-indigo-300 bg-indigo-500/10',
         previewKind: 'screens',
         preview: ['Home', 'Song editor', 'Arrangement view', 'Collaboration', 'Library'],
     },
     {
         id: 'data_model',
+        group: 'architecture',
         name: 'Data Model',
         tagline: 'Entities & relationships',
         icon: Database,
@@ -223,19 +274,11 @@ export const TOUR_ASSETS: TourAsset[] = [
         preview: ['User', 'Song', 'Track', 'Section', 'Collaborator'],
     },
     {
-        id: 'component_library',
-        name: 'Component Library',
-        tagline: 'Reusable UI components',
-        icon: Boxes,
-        accent: 'text-orange-300 bg-orange-500/10',
-        previewKind: 'grid',
-        preview: ['Button', 'Waveform', 'TrackRow', 'Transport bar', 'Mixer fader'],
-    },
-    {
         // Consolidated Development artifact: milestones now carry their own
         // prompt packs and quality gates (the old standalone Prompt Pack card
         // folded into this one).
         id: 'implementation_plan',
+        group: 'development',
         name: 'Implementation Plan',
         tagline: 'Milestones, prompt packs & quality gates',
         icon: Terminal,
@@ -247,15 +290,6 @@ export const TOUR_ASSETS: TourAsset[] = [
             'M3 — Collaboration · 1 prompt pack',
             'M4 — Export & launch · quality gates',
         ],
-    },
-    {
-        id: 'design_system',
-        name: 'Design System',
-        tagline: 'Colors, typography & components',
-        icon: Palette,
-        accent: 'text-pink-300 bg-pink-500/10',
-        previewKind: 'palette',
-        preview: ['Indigo / primary', 'Neutral / surface', 'Emerald / success', 'Display / heading', 'Body / text'],
     },
 ];
 
@@ -284,7 +318,7 @@ export interface ActivityEntry {
     when: string;
     title: string;
     detail: string;
-    /** e.g. "7 artifacts updated"; empty for the initial version. */
+    /** e.g. "5 artifacts updated"; empty for the initial version. */
     impact: string;
 }
 
@@ -295,7 +329,7 @@ export const RECENT_ACTIVITY: ActivityEntry[] = [
         when: '2h ago',
         title: 'Consolidated Strategy',
         detail: 'Added pricing strategy and refined user personas',
-        impact: '7 artifacts updated',
+        impact: '5 artifacts updated',
     },
     {
         id: 'a3',
@@ -303,7 +337,7 @@ export const RECENT_ACTIVITY: ActivityEntry[] = [
         when: 'Yesterday',
         title: 'New Monetization Strategy',
         detail: 'Updated subscription tiers and pricing approach',
-        impact: '5 artifacts updated',
+        impact: '3 artifacts updated',
     },
     {
         id: 'a2',
@@ -311,7 +345,7 @@ export const RECENT_ACTIVITY: ActivityEntry[] = [
         when: 'May 14',
         title: 'Expanded User Personas',
         detail: 'Added detailed user segments and workflows',
-        impact: '6 artifacts updated',
+        impact: '4 artifacts updated',
     },
     {
         id: 'a1',

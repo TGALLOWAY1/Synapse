@@ -45,7 +45,7 @@ function PrdHubCard() {
 
 /**
  * Screen 6 — the connected workspace. A project rail, the finalized PRD wired
- * to its seven generated artifacts (tap any node to trace dependencies), and a
+ * to its generated artifacts (tap any node to trace dependencies), and a
  * tappable recent-activity timeline. Teaches that Synapse keeps the whole
  * project consistent.
  */
@@ -97,7 +97,7 @@ export default function ScreenConnections({ reducedMotion }: ScreenProps) {
                         <div className="mb-4 flex items-center justify-between">
                             <h3 className="text-sm font-semibold text-white">Generated Artifacts</h3>
                             <span className="inline-flex items-center gap-1 text-xs text-emerald-400">
-                                <Check size={13} /> 7 of 7 up to date
+                                <Check size={13} /> {TOUR_ASSETS.length} of {TOUR_ASSETS.length} up to date
                             </span>
                         </div>
                         <NodeGraph
