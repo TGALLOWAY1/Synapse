@@ -379,10 +379,35 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
   `llmProvider.ts` barrel keeps legacy call sites stable.
   - `prdService.ts` → `progressivePrdPipeline.ts` → `progressivePrdGeneration.ts`
     — PRD generation runs as a **dependency-graph (DAG) pipeline**, not in
-    document order. `DEFAULT_PRD_SECTIONS` (10 schema-aligned sections in
+    document order. `DEFAULT_PRD_SECTIONS` (8 schema-aligned sections in
     `progressivePrdGeneration.ts`) each declare `dependencies` that are **true
     data dependencies only** — a section lists another solely when it consumes
-    that section's output as prompt context. `runDag()` runs every section whose
+    that section's output as prompt context. **The PRD is the product decision
+    document, not a container for downstream artifacts:** the former
+    `data_model` and `implementation_plan` PRD sections are **retired** from the
+    default graph (`RETIRED_PRD_SECTIONS` / `RETIRED_SECTION_IDS`) — the
+    dedicated data_model / implementation_plan *artifacts* own that detail, and
+    the PRD-embedded copies duplicated them (two entity lists was a standing
+    inconsistency source; `implementationPlan` was never rendered). Their
+    `SectionId`, prompt builder, slice schema, and title all survive solely so
+    single-section retry of legacy `generationMeta.failedSections` keeps
+    working (`prdSectionRetry.ts` looks sections up across
+    `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
+    sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
+    Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
+    rendering — the renderer blocks and optional `StructuredPRD` fields stay.
+    The remaining sections are prompted (and, where it matters,
+    **schema-enforced** via lean slice schemas in `prdSchemas.ts` —
+    `leanUxPageItemSchema`/`leanFeatureItemSchema`/`leanSuccessMetricSchema`,
+    since Gemini JSON mode can't emit properties absent from the schema) to
+    stay at decision level: `uxPages` is a lean screen list (name/purpose/key
+    content — no per-screen interaction/empty/loading/error specs), features
+    drop `uiAcceptanceCriteria`/`analyticsEvents`, success metrics drop
+    `instrumentation`, and the architecture narrative is a short decision
+    story grounded on `domainEntities`. `RUBRIC_DEFINITION` (`prdPrompts.ts`)
+    encodes this split — decisions live in the PRD, detail lives in the
+    artifacts — so don't re-add "full schemas / state machines / per-page
+    component specs" demands to prompts or rubric. `runDag()` runs every section whose
     deps are satisfied concurrently, under separate per-tier concurrency caps
     (`maxFastConcurrency` / `maxStrongConcurrency`); low-risk sections use the
     fast (Flash) model, high-risk the strong (Pro) model. `validateGraph()` runs
@@ -395,7 +420,12 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     **PRD reading order ≠ generation (DAG) order.** The human/agent-facing
     section order is a fixed logical flow (Product Overview → Target Users →
     MVP Scope → Core Features → UX → Success Metrics → Risks → Technical
-    Architecture → Data Model → State Machines → NFRs → reference appendix)
+    Architecture → Data Model → State Machines → NFRs → reference appendix →
+    **"Where the Detail Lives"**, a static deterministic handoff appendix
+    pointing to the downstream artifacts, rendered unconditionally by both
+    renderers — legacy spines' persisted `responseText` picks it up on the
+    next re-render (edit / section retry / regenerate), while the in-app
+    Structured view shows it immediately for every PRD)
     defined in **two mirrored renderers that must stay in sync**:
     `prdMarkdownRenderer.renderPremiumMarkdown` (export/`responseText`) and
     `StructuredPRDView`/`PremiumSections` (in-app). Reordering is
@@ -1286,7 +1316,7 @@ component). It is driven directly by the live `prdSectionStatus` store slice
 (not by parsing the `prdProgress` message log):
 
 - **`buildGenerationSteps.ts`** — pure adapter. `computeWaves()` groups the
-  10 pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
+  pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
   (topological levels): a single-section wave is a sequential row, a
   multi-section wave is a "Running concurrently" group whose children are the
   parallel sections (labeled `2A`, `2B`, …). This is purely graph-derived, so

@@ -11,6 +11,7 @@ import { buildSectionPrompt } from '../prompts/prdSectionPrompts';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
 import {
     DEFAULT_PRD_SECTIONS,
+    RETIRED_PRD_SECTIONS,
     selectModelTier,
     parseSectionJson,
 } from './progressivePrdGeneration';
@@ -46,7 +47,9 @@ export const regeneratePrdSection = async (
 ): Promise<RetrySectionResult> => {
     const { platform, signal, onSectionStatus } = options;
 
-    const template = DEFAULT_PRD_SECTIONS.find((s) => s.id === sectionId);
+    // RETIRED_PRD_SECTIONS keeps retry working for legacy spines whose
+    // failedSections reference a section no longer in the default graph.
+    const template = [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS].find((s) => s.id === sectionId);
     if (!template) {
         throw new Error(`Unknown PRD section: ${sectionId}`);
     }

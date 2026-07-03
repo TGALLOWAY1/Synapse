@@ -48,7 +48,7 @@ You can also skip and decide later, at the latest when marking the PRD final.
 <img width="100%" alt="PRD generation progress timeline — sections generated wave by wave" src="public/screenshots/tour-spec.png" />
 
 The PRD is generated as structured JSON by a **dependency-graph pipeline**:
-the ten sections run concurrently the moment their inputs are ready — they are
+the sections run concurrently the moment their inputs are ready — they are
 never sequenced just because they appear later in the document. A live
 **progress timeline** shows exactly what's happening: sections are grouped into
 dependency *waves*, with independent sections rendered as "running
@@ -59,7 +59,10 @@ touching the rest of the document.
 
 You get back a structured PRD with vision, target users, core problems,
 features (with priority, acceptance criteria, and dependencies), architecture,
-metrics, risks, and non-functional requirements.
+metrics, risks, and non-functional requirements. The PRD deliberately stays at
+the product-decision level — deep specification (data model, screens, flows,
+implementation plan) is generated as the dedicated downstream assets, and the
+PRD ends with a "Where the Detail Lives" appendix pointing to them.
 
 That concurrency is **measured, not just claimed**. An **Orchestration
 Metrics** dashboard (`/metrics`, linked from Settings and the workspace menu)

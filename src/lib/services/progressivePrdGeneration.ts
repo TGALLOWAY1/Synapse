@@ -94,9 +94,17 @@ export type ProgressiveEvent =
     | { type: 'session_completed' };
 
 // ─── Section topology ────────────────────────────────────────────────────────
-// 10 schema-aligned sections. Each emits a typed slice of StructuredPRD that
+// 8 schema-aligned sections. Each emits a typed slice of StructuredPRD that
 // is merged client-side into the final document. Fast (Flash) sections run
 // independently; strong (Pro) sections depend on earlier results.
+//
+// The PRD is the product DECISION document — detailed specification belongs to
+// the dedicated downstream artifacts. The former `data_model` and
+// `implementation_plan` sections are retired from the default graph (see
+// RETIRED_PRD_SECTIONS below): the data_model and implementation_plan
+// artifacts own that detail, the PRD-embedded copies duplicated them (two
+// entity lists — domainEntities vs richDataModel.entities — was a standing
+// internal-inconsistency source), and implementationPlan was never rendered.
 
 // Dependencies are TRUE data dependencies only — a section lists another only
 // when it actually consumes that section's output as prompt context. Sections
@@ -115,16 +123,31 @@ export const DEFAULT_PRD_SECTIONS: PrdSectionTemplate[] = [
     // features depends on product_basics only — it runs in parallel with the
     // slow product_thesis call instead of waiting behind it.
     { id: 'features',             title: SECTION_TITLES.features,             order: 4,  risk: 'high', estimatedSeconds: 35, dependencies: ['product_basics'] },
-    { id: 'data_model',           title: SECTION_TITLES.data_model,           order: 5,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'grounding'] },
     // ux_loops only truly needs the feature set; thesis is incidental context.
     { id: 'ux_loops',             title: SECTION_TITLES.ux_loops,             order: 6,  risk: 'high', estimatedSeconds: 25, dependencies: ['features'] },
-    { id: 'architecture',         title: SECTION_TITLES.architecture,         order: 7,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'data_model'] },
+    // architecture grounds its entity reasoning in the grounding section's
+    // domainEntities (the retired data_model section previously played this role).
+    { id: 'architecture',         title: SECTION_TITLES.architecture,         order: 7,  risk: 'high', estimatedSeconds: 25, dependencies: ['features', 'grounding'] },
     // quality_risks is derivable from the feature set; it no longer waits on the
     // long architecture chain.
     { id: 'quality_risks',        title: SECTION_TITLES.quality_risks,        order: 8,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
     { id: 'metrics_scope',        title: SECTION_TITLES.metrics_scope,        order: 9,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
-    { id: 'implementation_plan',  title: SECTION_TITLES.implementation_plan,  order: 10, risk: 'high', estimatedSeconds: 30, dependencies: ['features', 'data_model', 'architecture'] },
 ];
+
+// Sections retired from the DEFAULT generation graph. Kept ONLY so the
+// single-section retry path (prdSectionRetry.ts) can re-run them for legacy
+// PRDs whose generationMeta.failedSections still reference them — their
+// SectionId, prompt builder, slice schema, and title all survive. Never feed
+// these to runDag, and never re-add them to DEFAULT_PRD_SECTIONS: the
+// dedicated data_model / implementation_plan artifacts own that detail now.
+export const RETIRED_PRD_SECTIONS: PrdSectionTemplate[] = [
+    { id: 'data_model',          title: SECTION_TITLES.data_model,          order: 98, risk: 'high', estimatedSeconds: 25 },
+    { id: 'implementation_plan', title: SECTION_TITLES.implementation_plan, order: 99, risk: 'high', estimatedSeconds: 30 },
+];
+
+export const RETIRED_SECTION_IDS: ReadonlySet<string> = new Set(
+    RETIRED_PRD_SECTIONS.map(s => s.id),
+);
 
 /** Lookup of estimated wall-clock seconds per section, derived from DEFAULT_PRD_SECTIONS. */
 export const SECTION_ESTIMATES_S: Record<string, number> = Object.fromEntries(
