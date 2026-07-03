@@ -6,9 +6,6 @@ UI mockups, downstream engineering artifacts, and annotated visual feedback —
 all from a single client-side workspace.
 
 <img width="100%" alt="Synapse tour — start with a single idea" src="public/screenshots/tour-idea.png" />
-
-> **Take the interactive tour.** 
-
 ---
 
 ## Check out the demo and tour 
@@ -219,14 +216,6 @@ design system), ready to paste straight into Claude Code, Cursor, or another
 agent. Copy-to-clipboard is available for the PRD and the full bundle too, and
 you can still download Markdown, a combined bundle, or structured JSON.
 
-#### Markup image artifacts
-
-Five annotation types — screenshot annotations, critique boards, wireframe
-callouts, flow annotations, and design feedback boards — are generated from
-PRD context as `MarkupImageSpec` JSON and rendered as resolution-independent
-SVG with highlights, arrows, numbered markers, and text blocks. Exportable as
-SVG.
-
 ### 6. Everything stays connected
 
 When the product changes, Synapse helps keep the rest of the project aligned.
@@ -247,21 +236,6 @@ pipeline; it renders a Safety Review and is excluded from all downstream
 artifact, mockup, and workspace generation. Classification **fails closed** —
 if safety can't be determined, the request is treated as disallowed (genuine
 API-key/billing/permission errors still surface on the normal error path).
-
-## Cloud snapshots (owner-only)
-
-Save the entire current project — spine versions, branches, artifacts,
-feedback, history, **and** the AI-generated mockup images — to Vercel Blob
-behind a single owner token. Reload from any browser or device, or delete a
-snapshot when you're done.
-
-- Demo viewers never see this panel: it gates on owner-token presence.
-- Images bundle along with the project, so a restored snapshot looks identical
-  to the moment it was saved (no re-generation, no missing PNGs).
-- Token is stored in your browser's `localStorage`; the server side validates
-  with constant-time comparison against `SYNAPSE_OWNER_TOKEN`.
-
-Open via the workspace overflow menu &rarr; **Cloud Snapshots**.
 
 ---
 
@@ -305,115 +279,3 @@ The product workspace remains browser-first, while recruiter authentication
 and tracking run through API routes backed by MongoDB.
 
 ---
-
-## Getting started
-
-You'll need a Gemini API key. Get one at
-[Google AI Studio](https://aistudio.google.com/apikey).
-
-```bash
-npm install
-npm run dev
-```
-
-Open `http://localhost:5173`, click the Settings gear, and paste your key.
-Workspace state (projects, spines, artifacts) persists to `localStorage` as the
-live cache; **for signed-in users projects also sync to the server** (a MongoDB
-`projects` collection scoped to your account) so they follow you across web and
-mobile and survive a browser-data clear. AI-generated mockup PNGs persist to
-**IndexedDB** (typically gigabytes of headroom, so high-quality images don't
-blow the localStorage 5-10 MB cap) as the local cache, and for signed-in users
-**now also sync across devices** via Vercel Blob (image bytes go to Blob, only
-small references travel with the project) so mockups appear on your other
-devices too — hydrated lazily on view.
-
-Prefer to look before you build? Visit `http://localhost:5173/tour` for the
-interactive product tour — it runs entirely on demo data with no API key.
-
-### Owner-only cloud snapshots (optional)
-
-To enable the **Cloud Snapshots** panel for archiving / restoring whole
-projects (state + images) across devices, set two Vercel environment
-variables:
-
-| Variable | Where it comes from |
-| --- | --- |
-| `SYNAPSE_OWNER_TOKEN` | Any random string &geq; 24 chars. The server compares with `crypto.timingSafeEqual`; the client stores it in `localStorage`. |
-| `BLOB_READ_WRITE_TOKEN` | Created automatically when you provision Vercel Blob for the project. No manual setup needed. Also powers per-user **cross-device mockup image sync** (independent of snapshots). |
-
-The owner-token gate is single-tenant: there is no signup, no per-user
-isolation, no demo access. It exists so the project owner can persist real work
-without exposing an unauthenticated write endpoint to the public demo. Snapshot
-bundles are subject to Vercel's serverless body limit (~4.5 MB on Hobby), so
-very large projects with many high-quality images may need to be split or saved
-at lower image quality.
-
-### Build for production
-
-```bash
-npm run build
-```
-
-The build emits a fully static SPA to `dist/` — no server is required to serve
-the tour.
-
-### Deploying the tour (static hosting)
-
-Because Synapse is a client-side SPA, every host must fall back to
-`index.html` for unknown paths, or a direct load / refresh of `/tour` (or
-`/about`, `/p/:id`, `/privacy`) returns a 404. The repo ships the config for
-the common hosts:
-
-| Host | Config (already in repo) | Notes |
-| --- | --- | --- |
-| **Vercel** (recommended) | `vercel.json` → `rewrites` | The full app, including the recruiter-portal `api/` functions, deploys as-is. The negative-lookahead rewrite (`/((?!api/).*)`) keeps API routes server-side while sending everything else to `index.html`. |
-| **Netlify** | `public/_redirects` → `/*  /index.html  200` | Copied verbatim into `dist/` on build. Serves the static tour; the `api/` serverless functions are Vercel-specific. |
-| **GitHub Pages** | — | Static-only (no `api/`). Pages has no rewrite engine, so use the SPA fallback trick — copy `dist/index.html` to `dist/404.html` after build. If serving from a project subpath (`/<repo>/`), also set Vite's `base` accordingly. |
-
-**Recommendation:** deploy to **Vercel** — it's the configured target, supports
-the SPA rewrite and the backend functions, and serves `/tour` directly. For a
-**tour-only** portfolio link, Netlify or GitHub Pages also work since the tour
-needs no backend.
-
----
-
-## Documentation
-
-- [`CONTRIBUTING.md`](CONTRIBUTING.md) — local setup (workspace and recruiter
-  portal), commands, testing, and PR expectations
-- [`.env.example`](.env.example) — backend environment variables (the PRD
-  workspace needs none)
-- [`CLAUDE.md`](CLAUDE.md) — architecture, state slices, the LLM pipeline, and
-  cross-cutting patterns (kept in sync with the code)
-- [`docs/architecture.md`](docs/architecture.md) — runtime stack, state layer,
-  LLM services, UI composition
-- [`docs/artifact-flow.md`](docs/artifact-flow.md) — file-by-file trace of one
-  end-to-end pipeline run
-- [`docs/deployment.md`](docs/deployment.md) — commands, Vercel setup,
-  self-hosting
-- [`docs/auth.md`](docs/auth.md) — multi-provider auth (email/password,
-  GitHub, LinkedIn), user record schema, env vars, error codes
-- [`docs/AUTH_AND_PROVIDER_KEYS.md`](docs/AUTH_AND_PROVIDER_KEYS.md) — per-user
-  projects, the encrypted BYO provider-key vault, server-side model routing,
-  and the demo/recruiter mode
-- [`docs/ORCHESTRATION_AND_METRICS.md`](docs/ORCHESTRATION_AND_METRICS.md) —
-  how the concurrent multi-agent workflows run, the `/metrics` dashboard, and
-  what each metric means (sequential estimate vs. actual runtime, speedup,
-  concurrency, critical path, cost estimates)
-- [`docs/linkedin-auth.md`](docs/linkedin-auth.md) — LinkedIn OAuth setup,
-  recruiter capture fields, and compliance note
-- [`docs/archive/`](docs/archive/) — historical design notes and audits
-  retained for context
-
-## Project status
-
-Portfolio project. Demo visitors (and the public `/tour`) run the workspace
-fully in-browser &mdash; spine + artifact state in `localStorage`, mockup PNGs in
-IndexedDB, no telemetry. **Signed-in users get cross-device project sync**:
-projects persist to a per-account server collection and reconcile onto any device
-on sign-in, with localStorage kept as the offline cache. **AI-generated mockup
-images sync across devices too** — bytes live in Vercel Blob, only small refs
-travel with the project, and they hydrate lazily on view (user-uploaded mockup
-images and Screen Inventory uploads are not synced yet — see `tasks/TODO.md`).
-The owner can additionally opt-in to Vercel-Blob-backed Cloud Snapshots (gated by
-`SYNAPSE_OWNER_TOKEN`).
