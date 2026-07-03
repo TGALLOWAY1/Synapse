@@ -139,3 +139,28 @@ see CLAUDE.md "Cross-device mockup image sync"). Follow-ups:
 - [ ] Consider switching to signed/expiring read URLs if mockups ever carry
       sensitive content (current decision: public + unguessable content-addressed
       path, for direct browser downloads).
+
+## Lean PRD follow-ups (data_model / implementation_plan sections retired)
+
+Deferred from the lean-PRD change (PRD = decision document; detail lives in
+the dedicated artifacts).
+
+- [ ] **Renderer-parity test** for the two mirrored PRD renderers
+      (`prdMarkdownRenderer.renderPremiumMarkdown` vs
+      `StructuredPRDView`/`PremiumSections`): CLAUDE.md mandates their section
+      order stays in sync, but nothing asserts it. Consider extracting a shared
+      SECTION_ORDER constant both consume, then asserting against it.
+- [ ] **User Flows "Related Artifacts" phase chips**: new PRDs no longer carry
+      `structuredPRD.implementationPlan`, so `RelatedArtifactsPanel` loses its
+      implementation-phase cross-links (graceful — optional prop). If the chips
+      are worth keeping, source them from the implementation_plan *artifact*'s
+      structured JSON instead of the retired PRD field.
+- [ ] **Artifact prompt hints**: data_model / screen_inventory artifact
+      generation lost the PRD-embedded schema/page-spec hints from the markdown
+      body (intended — single source of truth per concern). If artifact quality
+      regresses, thread `domainEntities`/lean `uxPages` into those artifacts'
+      structured `prdSummary` context in `coreArtifactService.ts` rather than
+      re-fattening the PRD.
+- [ ] **Dead `PRD_GENERATION_STAGES` labels** in `src/components/generationStages.ts`
+      still mention "Defining data model…" but have no consumers — remove the
+      dead exports in a cleanup pass.
