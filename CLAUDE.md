@@ -515,13 +515,16 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       the preset off the project, so the new direction actually reaches
       generation. (The old compact `DesignSystemPresetChoice` sheet now serves
       only the Mark-as-Final fallback gate in `ProjectWorkspace`.)
-    - **Generated-asset lock affordance.** Every *downstream* asset in the
-      sidebar/mobile-header — anything except the PRD and the Design System
-      itself (`isLockableAsset` / `LOCK_EXEMPT_SELECTIONS` in `ArtifactWorkspace`)
-      — shows a small `Lock` icon once its slot status is `done`, signalling it's
-      anchored ("locked") to the current design system. It's a passive indicator
-      only; changing the visual direction + regenerating the design system is what
-      updates those assets.
+    - **Design-system lock affordance.** The **Design System row only**
+      (`isLockedAsset` in `ArtifactWorkspace`) shows a small `Lock` icon in the
+      sidebar/mobile-header once its slot status is `done`, signalling the
+      project's visual direction is locked in — one committed aesthetic every
+      downstream asset is generated against. It's a passive nudge, not a hard
+      lock: the user can still change direction via `ChangeDirectionModal`
+      (which carries the downstream-regression warning), but the lock
+      encourages staying with one aesthetic to avoid costly regeneration of
+      screens/mockups. Do **not** re-add per-asset lock icons to downstream
+      rows.
     - **Mockup-drift prompt.** Regenerating the design system produces a new
       `tokensHash`, which `stalenessSlice` already uses to flip dependent mockups
       to `possibly_outdated` (the auto-flag). On top of that, the Mockups view in

@@ -156,21 +156,22 @@ function StatusDot({ status }: { status: GenerationStatus }) {
     return <Circle size={14} className="text-neutral-300 shrink-0" />;
 }
 
-// The PRD and the Design System itself are the foundation — every other asset is
-// generated *against* the design system, so once produced it's "locked" to that
-// visual direction (changing direction + regenerating the design system is what
-// updates it). These two are exempt from the lock affordance.
-const LOCK_EXEMPT_SELECTIONS = new Set<WorkspaceSelection>(['prd', 'design_system']);
-function isLockableAsset(key: WorkspaceSelection): boolean {
-    return !LOCK_EXEMPT_SELECTIONS.has(key);
+// The lock lives on the Design System row only. Every downstream asset is
+// generated *against* the design system, so the lock signals "your visual
+// direction is locked in" — one aesthetic, committed — rather than tagging
+// each asset. Changing direction later is still possible (ChangeDirectionModal,
+// with its downstream-regression warning), but the lock nudges against it.
+function isLockedAsset(key: WorkspaceSelection): boolean {
+    return key === 'design_system';
 }
 
-// Small lock shown on a generated downstream asset, signalling it's anchored to
-// the current design system. Rendered only for `done` lockable assets.
+// Small lock shown on the generated Design System, signalling the project's
+// visual direction is locked in. Rendered only once its slot is `done`.
 function AssetLock() {
+    const label = 'Visual direction locked in — changing it can require regenerating downstream screens';
     return (
-        <span title="Locked to your design system" className="inline-flex shrink-0">
-            <Lock size={11} className="text-neutral-400" aria-label="Locked to your design system" />
+        <span title={label} className="inline-flex shrink-0">
+            <Lock size={11} className="text-neutral-400" aria-label={label} />
         </span>
     );
 }
@@ -1122,7 +1123,7 @@ export function ArtifactWorkspace({
                                                                 {slot.title}
                                                             </span>
                                                             <StatusDot status={status} />
-                                                            {status === 'done' && isLockableAsset(slot.key) && (
+                                                            {status === 'done' && isLockedAsset(slot.key) && (
                                                                 <AssetLock />
                                                             )}
                                                         </div>
@@ -1159,7 +1160,7 @@ export function ArtifactWorkspace({
                     {activeSelection !== 'prd' && (
                         <span className="ml-auto shrink-0 flex items-center gap-1.5">
                             <StatusDot status={slotStatusFor(activeSelection)} />
-                            {slotStatusFor(activeSelection) === 'done' && isLockableAsset(activeSelection) && (
+                            {slotStatusFor(activeSelection) === 'done' && isLockedAsset(activeSelection) && (
                                 <AssetLock />
                             )}
                         </span>
