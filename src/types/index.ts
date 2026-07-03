@@ -14,6 +14,22 @@ export type Project = {
     // the user-chosen `name`.
     productName?: string;
     productCategory?: string;
+    // Only set on the cached demo project: the snapshot id this device's demo
+    // was hydrated from. Used by `loadDemoProject` to detect when the owner
+    // has pinned a newer demo snapshot and re-fetch instead of serving stale
+    // local cache. Optional so legacy persisted projects keep working.
+    demoSourceSnapshotId?: string;
+    // The user-chosen design-system direction (a `DESIGN_SYSTEM_PRESETS` id,
+    // e.g. 'saas_minimal' or 'custom'), picked once before artifact generation.
+    // Steers design_system generation and, through it, the visual language of
+    // mockups and the Screen Inventory copy-prompt. Optional — legacy projects
+    // and the demo have none and behave exactly as before.
+    designSystemPreset?: string;
+    // True while the setup-stage design selection step (DesignSetupStep) is
+    // still owed for this project. Stamped by `createProject`, cleared when a
+    // preset is chosen (any path) or the user explicitly skips. Optional —
+    // legacy projects and the demo have none and never see the setup step.
+    needsDesignSetup?: boolean;
 };
 
 export type BranchMessage = {
@@ -268,6 +284,21 @@ export type GenerationPassRecord = {
     ok: boolean;
 };
 
+// Outcome of the automatic final consistency-review pass. Records — for
+// debugging/diagnostics, never the UI — whether the review ran, whether its
+// output was accepted over the deterministically-merged PRD, and (on
+// rejection) why the merged PRD was kept instead. Optional/back-compat:
+// legacy generation meta lacks it.
+export type ConsistencyReviewMeta = {
+    /** The review model call was attempted (false = skipped, e.g. partial run). */
+    ran: boolean;
+    /** The reviewed PRD passed every guard and was used as the generated PRD. */
+    applied: boolean;
+    status: 'applied' | 'rejected' | 'skipped' | 'error';
+    /** Present only when status is 'rejected' or 'error'. */
+    rejectionReason?: string;
+};
+
 export type GenerationMeta = {
     passes: GenerationPassRecord[];
     totalMs: number;
@@ -278,6 +309,10 @@ export type GenerationMeta = {
     // workspace surfaces an incomplete-PRD banner with per-section retry, and
     // a successful single-section retry removes its id from this list.
     failedSections?: string[];
+    // Result of the automatic consistency-review pass (default-on). See
+    // ConsistencyReviewMeta. Absent on legacy meta / when the pass was skipped
+    // for a partial run.
+    consistencyReview?: ConsistencyReviewMeta;
 };
 
 // --- Workflow orchestration metrics domain types ---
@@ -676,17 +711,93 @@ export interface ImplementationPlanTask {
     linkedArtifacts?: LinkedArtifacts;
 }
 
+// A ready-to-copy coding-agent prompt attached to a milestone. Legacy
+// `prompt_pack` artifacts are adapted into this shape at render time
+// (see lib/services/implementationPlanAdapter.ts).
+export interface ImplementationPromptPack {
+    id: string;
+    title: string;
+    /** What running this prompt accomplishes, in one sentence. */
+    purpose: string;
+    /** The full coding-agent-ready prompt body. */
+    prompt: string;
+    scope?: {
+        include: string[];
+        exclude: string[];
+    };
+    acceptanceCriteria: string[];
+    recommendedCommitMessage?: string;
+    /** Legacy prompt_pack category label (e.g. "UI Implementation"). */
+    category?: string;
+}
+
+export type QualityGateCategory =
+    | 'design_fidelity'
+    | 'functional'
+    | 'data_integrity'
+    | 'integration'
+    | 'accessibility'
+    | 'performance'
+    | 'testing'
+    | 'regression';
+
+export interface ImplementationQualityGate {
+    id: string;
+    title: string;
+    description?: string;
+    category: QualityGateCategory;
+    required: boolean;
+}
+
+/** Milestone-level references to other Synapse artifacts, by display name. */
+export interface MilestoneLinkedArtifacts {
+    screens?: string[];
+    dataModels?: string[];
+    components?: string[];
+    userFlows?: string[];
+    risks?: string[];
+    apis?: string[];
+}
+
 export interface ImplementationPlanMilestone {
     id: string;
     name: string;
     timeframe?: string;
     goal?: string;
     tasks: ImplementationPlanTask[];
+    // --- Consolidated-plan fields (all optional; legacy plans lack them) ---
+    /** Richer objective statement; falls back to `goal` when absent. */
+    objective?: string;
+    phase?: string;
+    priority?: 'critical' | 'high' | 'medium' | 'low';
+    estimatedEffort?: string;
+    /** Ids of other milestones that must complete first. */
+    dependencies?: string[];
+    linkedArtifacts?: MilestoneLinkedArtifacts;
+    promptPacks?: ImplementationPromptPack[];
+    qualityGates?: ImplementationQualityGate[];
+    validationCommands?: string[];
+    definitionOfDone?: string[];
 }
 
 export interface RiskItem {
     description: string;
     mitigation?: string;
+}
+
+export interface ImplementationPlanSummary {
+    buildStrategy?: string;
+    stackSummary?: string[];
+    criticalPath?: string[];
+    estimatedEffort?: string;
+    teamAssumption?: string;
+}
+
+export interface ImplementationReadiness {
+    status: 'ready' | 'needs_review' | 'blocked';
+    warnings: string[];
+    missingInputs: string[];
+    recommendedNextStep?: string;
 }
 
 export interface StructuredImplementationPlan {
@@ -699,6 +810,46 @@ export interface StructuredImplementationPlan {
     architecture?: string[];
     risks?: RiskItem[];
     definitionOfDone?: string[];
+    // --- Consolidated-plan fields (all optional; legacy plans lack them) ---
+    summary?: ImplementationPlanSummary;
+    globalQualityGates?: ImplementationQualityGate[];
+}
+
+// --- Consolidated Implementation Plan (render-time view model) ---
+//
+// Built by `implementationPlanAdapter.ts` from a native structured plan
+// and/or a legacy prompt_pack artifact. Never persisted — derived on read so
+// legacy projects need no migration.
+
+export interface ImplementationTraceabilityItem {
+    milestoneId: string;
+    milestoneTitle: string;
+    screens: string[];
+    dataModels: string[];
+    components: string[];
+    promptPackIds: string[];
+    qualityGateIds: string[];
+}
+
+export interface ConsolidatedImplementationPlan {
+    title: string;
+    summary: ImplementationPlanSummary;
+    readiness: ImplementationReadiness;
+    milestones: ImplementationPlanMilestone[];
+    /** Prompt packs that couldn't be attached to any milestone. */
+    unassignedPromptPacks: ImplementationPromptPack[];
+    globalQualityGates: ImplementationQualityGate[];
+    traceability: ImplementationTraceabilityItem[];
+    risks: RiskItem[];
+    architecture: string[];
+    /** Unrecognized appendix prose from a legacy markdown plan — preserved
+     * verbatim so switching to the consolidated view never loses content. */
+    appendixNotes?: string;
+    /** Where the data came from — drives legacy explainer copy in the UI. */
+    sources: {
+        plan: 'structured' | 'legacy_markdown' | 'none';
+        promptPacks: 'native' | 'legacy_prompt_pack' | 'none';
+    };
 }
 
 // --- Artifact System ---
@@ -878,6 +1029,11 @@ export type MockupScreen = {
     coreUIElements?: string[];   // semantic UI elements present on this screen
     componentRefs?: string[];    // component names from component_inventory used here
     notes?: string;              // optional assumptions / callouts
+    // Canonical id of the screen_inventory screen this mockup was derived
+    // from (stamped by assignStableScreenIds — see screenInventoryNormalize /
+    // screenExperience). Optional & backward-compatible: legacy payloads lack
+    // it and the Experience join falls back to slugified-name matching.
+    sourceScreenId?: string;
 };
 
 export type MockupPayload = {

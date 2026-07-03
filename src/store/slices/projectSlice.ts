@@ -4,7 +4,11 @@ import type { Project, HistoryEvent, PipelineStage, ProjectPlatform } from '../.
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
 import { DEMO_PROJECT_ID } from '../../data/demoProject';
-import { loadDemoSnapshotPublic, restoreSnapshotAs } from '../../lib/snapshotClient';
+import {
+    loadDemoSnapshotPointer,
+    loadDemoSnapshotPublic,
+    restoreSnapshotAs,
+} from '../../lib/snapshotClient';
 import { projectsDebug } from '../../lib/projectsDebug';
 import { resolveProjectStorageName } from '../userScope';
 
@@ -16,6 +20,8 @@ export type ProjectSlice = {
     getProject: ProjectState['getProject'];
     getHistoryEvents: ProjectState['getHistoryEvents'];
     setProjectStage: ProjectState['setProjectStage'];
+    setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
+    markDesignSetupComplete: ProjectState['markDesignSetupComplete'];
     loadDemoProject: ProjectState['loadDemoProject'];
 };
 
@@ -30,6 +36,10 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             id: projectId,
             name,
             createdAt: now,
+            // New projects owe a setup-stage design selection (shown while the
+            // PRD generates). Legacy persisted projects lack the flag and keep
+            // the finalize-edge preset gate as their only prompt.
+            needsDesignSetup: true,
             ...(platform && { platform }),
         };
 
@@ -120,15 +130,61 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         void trackActivity(stage === 'mockups' ? 'viewed_mockups' : 'clicked_section', { section: stage, projectId });
     },
 
-    // Hydrates the store with the demo project. The demo is now a normal
-    // cloud snapshot that the owner has pinned via SnapshotsPanel — we fetch
-    // it from the public `/api/snapshots?demo=1` endpoint and splice it in
-    // at the stable DEMO_PROJECT_ID. Idempotent: if the demo is already
-    // present, returns without a network call so a user's in-progress
-    // changes to the demo copy aren't clobbered on re-click.
+    setProjectDesignSystemPreset: (projectId: string, presetId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    // A chosen preset settles the setup step no matter which UI
+                    // it came from (setup step, finalize gate, design artifact).
+                    [projectId]: { ...project, designSystemPreset: presetId, needsDesignSetup: false },
+                },
+            };
+        });
+    },
+
+    markDesignSetupComplete: (projectId: string) => {
+        set((state) => {
+            const project = state.projects[projectId];
+            if (!project) return state;
+            return {
+                projects: {
+                    ...state.projects,
+                    [projectId]: { ...project, needsDesignSetup: false },
+                },
+            };
+        });
+    },
+
+    // Hydrates the store with the demo project. The demo is a cloud snapshot
+    // the owner has pinned via SnapshotsPanel — we fetch it from the public
+    // `/api/snapshots?demo=1` endpoint and splice it in at the stable
+    // DEMO_PROJECT_ID.
+    //
+    // Freshness: a previously cached demo is reused ONLY when its source
+    // snapshot id still matches the live pointer. Otherwise (owner pinned a
+    // newer snapshot) we re-fetch and overwrite the cache. This is why the
+    // desktop used to show a stale demo while mobile — with no cache — showed
+    // the latest one. The pointer probe is a tiny, public JSON fetch and runs
+    // before any heavy bundle/image download. If the pointer fetch itself
+    // fails (offline / proxy error), we fall back to the cached copy so the
+    // demo still opens.
     loadDemoProject: async () => {
         const existing = get().projects[DEMO_PROJECT_ID];
-        if (existing) {
+
+        const pointer = await loadDemoSnapshotPointer().catch((err) => {
+            console.error('[loadDemoProject] failed to read demo pointer', err);
+            return null;
+        });
+
+        if (existing && pointer && existing.demoSourceSnapshotId === pointer.snapshotId) {
+            return { projectId: DEMO_PROJECT_ID, available: true };
+        }
+        if (existing && !pointer) {
+            // Pointer probe failed — keep the cached demo rather than wiping
+            // it. Better stale than empty.
             return { projectId: DEMO_PROJECT_ID, available: true };
         }
 
@@ -137,10 +193,39 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             return null;
         });
         if (!payload) {
-            return { projectId: DEMO_PROJECT_ID, available: false };
+            // Fetch failed and nothing is cached — surface unavailable. If a
+            // cache exists, keep serving it.
+            return { projectId: DEMO_PROJECT_ID, available: !!existing };
         }
 
         await restoreSnapshotAs(payload, DEMO_PROJECT_ID);
+
+        // Stamp the source snapshot id so the next click can short-circuit
+        // when the pointer is unchanged. Pull from the freshly-restored
+        // payload's manifest, falling back to the pointer if the manifest
+        // didn't carry an id (defensive — older bundles always did).
+        //
+        // EXCEPT when the load dropped images (`imagesComplete === false`:
+        // some per-image fetches kept failing — flaky network / rate limit).
+        // We still restore what we have (fresh-partial beats stale cache) but
+        // leave the stamp off so the next demo open re-fetches and self-heals
+        // to the full image set instead of pinning the partial copy forever.
+        const sourceId = payload.imagesComplete === false
+            ? null
+            : payload.manifest?.id ?? pointer?.snapshotId ?? null;
+        if (sourceId) {
+            set((state) => {
+                const restored = state.projects[DEMO_PROJECT_ID];
+                if (!restored) return {};
+                return {
+                    projects: {
+                        ...state.projects,
+                        [DEMO_PROJECT_ID]: { ...restored, demoSourceSnapshotId: sourceId },
+                    },
+                };
+            });
+        }
+
         return { projectId: DEMO_PROJECT_ID, available: true };
     },
 });

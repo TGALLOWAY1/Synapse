@@ -15,7 +15,7 @@
 [![TypeScript](https://img.shields.io/badge/TypeScript-5.9-3178C6?style=flat-square&logo=typescript&logoColor=white)](https://www.typescriptlang.org)
 [![React](https://img.shields.io/badge/React-19-61DAFB?style=flat-square&logo=react&logoColor=black)](https://react.dev)
 [![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
-[![Tests](https://img.shields.io/badge/tests-614%20passing-success?style=flat-square&logo=vitest&logoColor=white)](#-why-this-project-is-technically-interesting)
+[![Tests](https://img.shields.io/badge/tests-838%20passing-success?style=flat-square&logo=vitest&logoColor=white)](#-why-this-project-is-technically-interesting)
 [![Deploy](https://img.shields.io/badge/deploy-Vercel-000000?style=flat-square&logo=vercel&logoColor=white)](https://vercel.com)
 
 [![CI](https://img.shields.io/github/actions/workflow/status/tgalloway1/synapse/mockup-harness.yml?style=flat-square&label=CI&logo=githubactions&logoColor=white)](https://github.com/tgalloway1/synapse/actions)
@@ -43,7 +43,8 @@
 |---|---|---|---|
 | 🧠 | **Concurrent PRD pipeline** | A 10-section PRD is generated as a **dependency graph (DAG)** — sections run the moment their inputs are ready, not in document order. | Real parallelism cuts wall-clock time; the structure is graph-derived, not hardcoded. |
 | 🛡️ | **Code-level safety gate** | Every generation path is classified `allowed` / `restricted` / `disallowed` **before** any section runs — and **fails closed**. | A guardrail in code, not just a prompt — a blocked idea can never drive downstream artifacts. |
-| 🎨 | **One PRD → every asset** | Mark a PRD final and Synapse generates 7 core artifacts + multi-fidelity mockups + annotated SVGs in parallel. | A single source of truth replaces hand-copying the spec into seven documents. |
+| 🎨 | **One PRD → every asset** | Mark a PRD final and Synapse generates every downstream build artifact — screen inventory, data model, user flows, design system, and a consolidated implementation plan — plus multi-fidelity mockups and annotated SVGs, in parallel. | A single source of truth replaces hand-copying the spec into a stack of documents. |
+| 🖌️ | **Design-system presets** | Pick a visual direction (Modern SaaS, Enterprise, Creative Studio, …) — recommended from your idea — that steers the design system, mockups, and external image prompts. | Every generated asset stays visually consistent instead of drifting. |
 | ✍️ | **Highlight-to-refine** | Select any passage → Clarify / Expand / Specify / Alternative / Replace → a threaded branch merges back in. | Surgical edits on one span instead of regenerating the whole document. |
 | 🕓 | **Everything is versioned** | Every regenerate, edit, branch-merge, and restore appends a new version with a section-aware diff. | Non-destructive history — nothing is ever overwritten or lost. |
 | 📊 | **Orchestration metrics** | A `/metrics` dashboard records real telemetry: speedup, concurrency, critical path, token usage, cost estimates. | The concurrency is **measured, not claimed** — with per-run Gantt charts. |
@@ -66,7 +67,7 @@
 | **Resumable / self-healing workflows** | A page reload kills any in-flight pipeline; on rehydrate, spines still marked `running` are converted into a settled, retryable error state instead of an eternal spinner. Single failed sections re-run in isolation. | Zustand `persist`, interrupted-generation reconciler |
 | **Observability & cost telemetry** | Token usage is captured from `usageMetadata` and threaded into a metrics layer that computes speedup, max/avg concurrency (interval sweep), and critical path (memoized DFS) — rendered as per-run Gantt charts, no synthetic data. | Pure metric math, `/metrics` dashboard |
 | **Non-destructive versioning + staleness** | Every edit *appends* a version with change-source attribution; restores append a clone rather than mutating history. Structural diffs are computed on the fly, and artifacts flag themselves stale when the PRD moves. | jsdiff, immutable version slices, source-ref tracking |
-| **Schema-constrained generation** | Three artifacts use Gemini JSON mode with explicit schemas, round-trip through markdown, and degrade gracefully when older saved data lacks newer fields. | JSON-mode schemas, markdown round-trip parsers |
+| **Schema-constrained generation** | Structured artifacts (screen inventory, data model, component inventory) use Gemini JSON mode with explicit schemas, round-trip through markdown, and degrade gracefully when older saved data lacks newer fields. | JSON-mode schemas, markdown round-trip parsers |
 | **Type-safe end-to-end** | `tsc -b` is the authoritative gate (stricter than `--noEmit`); test files compile with the app, so a typing slip in a test fails the deploy exactly like app code. | TypeScript 5.9 project references |
 
 <details>
@@ -80,7 +81,7 @@
 - 📊 **Real observability**: token usage, speedup, concurrency, and critical path rendered as per-run Gantt charts — no synthetic data.
 - 🕓 **Non-destructive versioning** with section-aware diffs and self-healing interrupted-run recovery.
 - 📱 **Mobile-ready web app** with touch-aware refine gestures, deployed on Vercel with cross-device sync.
-- ✅ **~47K lines of TypeScript, 614 tests, 108 components** — `tsc -b` enforced on every deploy.
+- ✅ **~58K lines of TypeScript, 838 tests, 131 components** — `tsc -b` enforced on every deploy.
 
 </details>
 
@@ -90,7 +91,7 @@
 
 ## 🎬 Demo
 
-> **Take the interactive tour — no sign-up, no API key.** Synapse ships a fully interactive product tour at **`/tour`** (aliased `/about`) that rebuilds the entire workflow as native, clickable UI on local demo data. It never calls an LLM, never touches the backend, and exposes no user data — a portfolio-safe, deep-linkable demo.
+> **[🌐 Live app: synapse-prd.vercel.app](https://synapse-prd.vercel.app)** — and take the interactive tour at **[`/tour`](https://synapse-prd.vercel.app/tour)** (aliased `/about`) with **no sign-up and no API key**. The tour rebuilds the entire workflow as native, clickable UI on local demo data: it never calls an LLM, never touches the backend, and exposes no user data — a portfolio-safe, deep-linkable demo.
 
 ### The end-to-end workflow, in six beats
 
@@ -134,7 +135,7 @@ Every change appends a new **version** with a section-aware diff, change-source 
 <td width="50%" valign="top">
 
 **5 · One PRD → every asset** 🎨
-Mark final → 7 artifacts + multi-fidelity mockups + annotated SVGs generate **in parallel** from one source of truth.
+Mark final → screen inventory, data model, flows, design system, implementation plan + multi-fidelity mockups (generated *or* your own uploads) + annotated SVGs generate **in parallel** from one source of truth.
 
 </td>
 <td width="50%" valign="top">
@@ -159,7 +160,7 @@ Synapse is a **Vercel-hosted React web app** (a mobile-friendly SPA) that calls 
 ```mermaid
 graph TB
     subgraph Client["🖥️ Browser (React 19 SPA)"]
-        UI["Workspace UI<br/>HomePage · ProjectWorkspace · Tour · 108 components"]
+        UI["Workspace UI<br/>HomePage · ProjectWorkspace · Tour · 131 components"]
         STORE["Zustand Store<br/>10 slices · persist middleware"]
         LS["localStorage<br/>(live PRD/artifact cache)"]
         IDB["IndexedDB<br/>(mockup PNGs)"]
@@ -221,7 +222,7 @@ graph TB
 
 | Layer | Responsibility | Key modules |
 |---|---|---|
-| **Frontend** | React 19 SPA — workspace, renderers, interactive tour | `src/components/` (108 components), `src/App.tsx` |
+| **Frontend** | React 19 SPA — workspace, renderers, interactive tour | `src/components/` (131 components), `src/App.tsx` |
 | **State** | Zustand store (10 slices) + debounced localStorage; mockup PNGs in IndexedDB | `src/store/slices/` |
 | **LLM orchestration** | In-browser DAG pipeline, safety gate, streaming transport, retry | `src/lib/services/`, `src/lib/geminiClient.ts` |
 | **API (serverless)** | 11 Vercel functions — project sync, vault, image proxy, auth, snapshots | `api/*.js`, shared helpers in `api/_lib/` |
@@ -277,7 +278,7 @@ sequenceDiagram
     end
 ```
 
-The same pattern drives artifact generation (the bundle controller fans the 7 core artifacts out concurrently) and is recorded as a `WorkflowRun` for the `/metrics` dashboard.
+The same pattern drives artifact generation (the bundle controller fans the core artifacts out concurrently) and is recorded as a `WorkflowRun` for the `/metrics` dashboard.
 
 <!-- ====================================================================
 ## 🚀 Performance  (commented out — populate from real /metrics runs)
@@ -287,7 +288,7 @@ The `/metrics` dashboard already measures real per-run performance — these tab
 | Run | Sequential estimate | Actual (parallel) | Speedup | Max concurrency |
 |---|---|---|---|---|
 | PRD generation (10 sections) | _TODO_ | _TODO_ | _TODO ×_ | _TODO_ |
-| Artifact bundle (7 artifacts) | _TODO_ | _TODO_ | _TODO ×_ | _TODO_ |
+| Artifact bundle (core artifacts) | _TODO_ | _TODO_ | _TODO ×_ | _TODO_ |
 
 | Dimension | Sequential | Parallel (Synapse) |
 |---|---|---|
@@ -339,7 +340,7 @@ The backend's job is bursty and request-scoped — sync upserts, vault reads, OA
 **✅ Current**
 - [x] Concurrent DAG PRD pipeline with live timeline
 - [x] Code-level fail-closed safety gate
-- [x] 7 core artifacts + multi-fidelity mockups + markup SVGs
+- [x] Full build-artifact bundle + multi-fidelity mockups + markup SVGs
 - [x] Append-only versioning with section-aware diffs & restore
 - [x] Orchestration metrics dashboard (`/metrics`)
 - [x] Encrypted provider-key vault + OAuth + identity linking

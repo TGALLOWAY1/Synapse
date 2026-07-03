@@ -143,6 +143,95 @@ otherwise have nothing in common — keep that distinction in mind:
    The old Atlas Data API REST gateway was retired by MongoDB (2025-09-30); the
    shim preserves the prior call/return shapes so call sites are unchanged.
 
+### Snapshots & the demo project (`src/lib/snapshotClient.ts`, `api/snapshots.js`)
+
+Owner-only project snapshots bundle a project's Zustand slice **plus its
+IndexedDB-backed mockup images** (base64 PNGs from `src/lib/mockupImageStore.ts`,
+keyed `versionId:screenId:quality` where `versionId` is the **artifact version
+id**) **and its user-uploaded Screen Inventory images** (from
+`src/lib/screenInventoryImageStore.ts`, a separate IDB store, keyed
+`artifactVersionId:screenSlug:versionNumber`) and push them to Vercel Blob
+behind a `SYNAPSE_OWNER_TOKEN` gate. The bundle also carries the project's
+**implementation tasks** (`tasks` slice) and **orchestration metrics**
+(`workflowRuns` slice) — every *persisted* store slice for the project, so a
+restored snapshot is a faithful copy. Both image kinds split out of the JSON
+envelope and ship one request each (reusing the **same** per-image blob channel
+— each blob is keyed by a hash of the image key, and the two key shapes never
+collide) so neither upload nor download crosses Vercel's ~4.5 MB cap. The wire
+format carries mockup images in `payload.images` and screen-inventory images in
+`payload.screenImages`. One snapshot can be pinned as **the demo** (`_demo.json`
+pointer + public `?demo=1` read); `loadDemoProject` restores it under the stable
+`DEMO_PROJECT_ID`. Snapshot fields (`tasks`/`workflowRuns`/`screenImages`) are
+all **optional on the wire** — pre-existing snapshots lack them and restore
+defaults each to `[]`. When adding a new persisted slice or IDB image store,
+add it to `collectProjectBundle`/`collectScreenImages`, the restore writers, and
+`namespaceSnapshotForRestore`, or it silently won't travel in snapshots.
+
+- **Demo cache freshness — never short-circuit on a `DEMO_PROJECT_ID` cache hit
+  alone.** Each restored demo project stores its source snapshot id in the
+  optional `Project.demoSourceSnapshotId` (so it travels with the per-user
+  project namespace). On every `loadDemoProject` call, the client first probes
+  the lightweight public `GET /api/snapshots?demo=1&pointer=1`
+  (`loadDemoSnapshotPointer`) and only reuses the cached demo when the stamped
+  id matches the live pointer. When the owner pins a newer snapshot the
+  pointer differs → the full bundle is re-fetched and `restoreSnapshotAs`
+  overwrites the cache. If the pointer probe itself fails (offline / proxy
+  error) the cache is preferred over an empty state. **Do not** re-add an
+  early `if (existing) return` — that's exactly what made the desktop serve a
+  stale demo while mobile (with no cache) silently saw the latest.
+- **Demo image hydration is retried and failure-tolerant — never all-or-nothing.**
+  A cache-less demo load is a burst of `2 + imageCount + screenImageCount`
+  requests (pointer + bundle + one fetch per mockup/screen image). Per-image
+  fetches in `snapshotClient` retry transient failures with backoff
+  (`fetchImageWithRetry`); on the public demo path (`loadDemoSnapshotPublic`)
+  an image that still fails is **dropped** (`imagesComplete: false` on the
+  returned payload, a client-only field) instead of rejecting the whole
+  snapshot. `loadDemoProject` restores an incomplete payload (fresh-partial
+  beats stale cache) but skips stamping `demoSourceSnapshotId`, so the next
+  open re-fetches and self-heals. This is the fix for "mobile shows the demo
+  without its screen-inventory images": one failed image fetch used to reject
+  the entire fresh snapshot and silently fall back to the stale cached demo.
+  Owner-token `loadSnapshot` keeps strict all-or-nothing semantics (a restore
+  over real data must not be partial). Server side, the public demo GET
+  channel has its own rate-limit scope (`snapshots-demo`, 300/min in
+  `api/snapshots.js`) so an image-rich demo can't 429 its own hydration burst;
+  owner routes stay at 60/min.
+- **Restoring under a *different* project id MUST namespace the artifact version
+  ids** (`namespaceSnapshotForRestore` → `rewriteIds`), not just the project id.
+  Both mockup images AND screen-inventory images are keyed in IndexedDB by the
+  artifact version id with **no projectId in the key**, so a demo restored from a
+  real project's snapshot would otherwise share version ids — and
+  `restoreSnapshotAs`'s `deleteImagesForVersion()` /
+  `deleteScreenImagesForArtifactVersion()` would wipe and re-tag the **source
+  project's** images. Version ids are namespaced as `${targetProjectId}:${versionId}`
+  (deterministic → idempotent re-restores) and each image's composite `key` is
+  rebuilt from the remapped fields (`buildImageKey` for mockups,
+  `buildScreenImageKey` for screen-inventory). `rewriteIds` runs over the whole
+  bundle, so `tasks`/`workflowRuns` (which carry `projectId`) are remapped too.
+  Never restore a snapshot under a foreign project id without this remap.
+- **`collectProjectImages` must not filter images by the stored `record.projectId`.**
+  A version id uniquely identifies its owning project, so collect by version id
+  only; filtering on a (possibly drifted) `projectId` tag is what silently
+  dropped mockup images from snapshots.
+- **`collectScreenImages` (like `collectProjectImages`) must not filter by the
+  stored `record.projectId`** — collect by artifact version id only, for the same
+  drift reason.
+- Note: user-uploaded Screen Inventory images
+  (`src/lib/screenInventoryImageStore.ts`, a separate IndexedDB store) **are now
+  captured in snapshots** (and therefore the demo) via `payload.screenImages`.
+  They are **still a gap on the `/api/projects` cross-device sync path**, which
+  only carries **mockup** images (via a separate Blob ref layer — see
+  "Cross-device mockup image sync" below). The snapshot feature and the
+  project-sync image layer are **independent**: different Blob prefixes
+  (`snapshots/<id>/…` vs `users/<userId>/mockup-images/…`), different ref models,
+  different auth gates (owner token vs per-user session). Do not entangle them.
+  The project-sync ref layer is built generic (`kind`/`meta`) so screen-inventory
+  images can be wired into it later. **Note:** the `user_uploaded` **mockup image
+  source mode** (the OpenAI-key-free path that lets the user upload their own
+  mockup) persists to `screenInventoryImageStore`, **not** `mockupImageStore` — so
+  those uploads now travel in snapshots but still ride the cross-device-sync gap.
+  Only the `gpt_image` (AI-generated) mockups sync across devices today.
+
 ### Server-side project storage (`api/projects.js`, `api/_lib/projectsStore.js`, `src/store/projectServerSync.ts`)
 
 PRD projects sync to a MongoDB `projects` collection so a signed-in user sees the
@@ -197,6 +286,83 @@ device-scoped and never syncs) and full design.
   (`userScope.ts`); after a legacy import, `HomePage` triggers a server
   reconcile so the newly-claimed projects upload to the account.
 
+### Cross-device mockup image sync (`api/_lib/imageRefsStore.js`, `src/store/projectImageSync.ts`)
+
+AI-generated **mockup** images follow a signed-in user's projects across devices.
+The `/api/projects` bundle stays **text-only**; image BYTES go to **Vercel Blob**
+and only small **reference** records live in Mongo. This is the per-user sync
+path and is **independent of the owner-only snapshot feature** (`api/snapshots.js`)
+— different Blob prefix, ref model, and auth gate; don't entangle them.
+
+- **Local-first, unchanged render path.** IndexedDB (`src/lib/mockupImageStore.ts`)
+  remains the source of truth / render cache; generation still writes there.
+  `MockupScreenImage` renders from the Zustand cache exactly as before.
+- **Content-addressing.** Images are addressed by `sha256(dataUrl)`
+  (`src/lib/imageBlobHash.ts`) and stored at the per-user, deterministic path
+  `users/<userId>/mockup-images/<hash>.<ext>` (`addRandomSuffix:false`,
+  `allowOverwrite:true`). Identical renders dedup to one blob; the hash → blob is
+  1:1, which makes refcount GC exact. **Blob access is `public`** (unguessable
+  uuid userId + sha256 path) — a deliberate decision: the architecture requires
+  the browser to download bytes **directly** from the Blob URL (no function
+  proxy), and a `private` blob would need a per-download function call to mint a
+  signed URL. Mockups are low-sensitivity, so public + unguessable is the
+  chosen trade-off. If image sensitivity ever rises, switch to signed URLs.
+- **Client-direct upload.** Bytes go browser → Blob via `@vercel/blob/client`
+  `upload()` (`src/lib/imageRefsClient.ts`), so they never traverse a serverless
+  body (dodging Vercel's ~4.5 MB cap). The function only mints a signed token.
+- **Ref store** (`api/_lib/imageRefsStore.js`, collection `project_images`). One
+  doc per `(userId, projectId, key)`. A ref carries `{ key, hash, blobUrl,
+  byteSize, kind, versionId?, screenId?, quality?, meta }` where `meta` is the
+  dataUrl-less image record (so the client can reconstruct it on pull) — generic
+  over `kind` (`mockup` | `screen_inventory`) so a second image type can reuse
+  it. **RLS-equivalent** exactly like `projectsStore.js`: every function pins
+  `{ userId }` (from `requireUser`, never the body). Indexes
+  (`ensureImageRefIndexes`): `{userId,projectId,key}` unique, `{userId,projectId}`,
+  `{userId,hash}`.
+- **Endpoints — folded into `api/projects.js` via `?action=` (NO new function;
+  the repo is at 11/12).** `image-upload-token` (POST, `handleUpload` token
+  issuer — `onBeforeGenerateToken` restricts the pathname to the caller's
+  `users/<userId>/…` prefix + allowed image types; `onUploadCompleted` persists a
+  backup ref). `image-refs` (GET, list a project's refs). `image-ref-put` (POST,
+  authoritative ref persist after upload — rejects a `blobUrl` outside the
+  caller's prefix). `image-ref-delete` (POST, refcount-GCs orphan blobs).
+  **`image-upload-token` runs BEFORE the global `requireUser`**: the
+  upload-completed callback is a signed server-to-server request with no session
+  cookie — `handleUpload` verifies its signature, and the userId comes from the
+  `tokenPayload` stamped (from the verified session) at token-gen time. Never
+  move it behind `requireUser`.
+- **Dual ref-persist (both idempotent).** The client's `image-ref-put` is the
+  **authoritative** path (works everywhere, incl. localhost where Vercel can't
+  reach `onUploadCompleted`). `onUploadCompleted` is a best-effort backup for the
+  tab-closed-early case and persists a minimal ref (routing parsed from the key).
+- **Push** (`pushProjectImages`, fired after each text save AND from
+  `mockupImageStore.generate` via `notifyMockupImageGenerated` — generation
+  writes IDB directly and would otherwise never trigger a push). Diffs local
+  image keys against a per-user uploaded-marker set
+  (`synapse-mockup-images-uploaded::u:<userId>`, `src/lib/imageUploadMarker.ts`,
+  mirrors `projectMigration.ts`) + the server refs, uploads the missing ones,
+  persists refs, marks them. **Image sync NEVER blocks text sync** and every
+  failure is non-fatal (the image is left unmarked and retried next push); a
+  failed image never reverts local data.
+- **Pull = refs only, hydrate lazily.** Reconcile pulls refs into an in-memory
+  registry (`src/lib/imageRefRegistry.ts`, keyed by versionId). `loadForVersion`
+  in the mockup image store, on an IndexedDB cache **miss** where a ref exists,
+  fetches the Blob URL directly (concurrency-limited, mirrors snapshot
+  `hydrateImages`), writes it into IndexedDB, then renders. **No bulk download on
+  sign-in.**
+- **GC.** Project **hard-delete** (`api/projects.js`) calls
+  `deleteRefsForProject` then `del()`s the returned **orphaned** blob URLs —
+  refcount-aware: a blob is deleted only once NO remaining ref for that user
+  points at its hash (`findOrphanedHashes`; pure mirror in
+  `src/lib/imageSyncDiff.ts`). Soft-delete keeps refs (recoverable). GC failures
+  are logged, never fatal. **Known gap (sweep TODO):** per-image overwrite /
+  version regen can orphan a blob until project hard-delete (a new render = new
+  hash = new blob; the old ref/blob isn't eagerly collected). `image-ref-delete`
+  exists for a future fine-grained sweep.
+- **CSP.** `vercel.json` `connect-src` must include `https://*.vercel-storage.com`
+  for the browser's upload/download fetches — without it the feature breaks in
+  prod.
+
 ### LLM layer (`src/lib/`)
 
 - **`geminiClient.ts`** — low-level Gemini transport. Two modes:
@@ -213,10 +379,35 @@ device-scoped and never syncs) and full design.
   `llmProvider.ts` barrel keeps legacy call sites stable.
   - `prdService.ts` → `progressivePrdPipeline.ts` → `progressivePrdGeneration.ts`
     — PRD generation runs as a **dependency-graph (DAG) pipeline**, not in
-    document order. `DEFAULT_PRD_SECTIONS` (10 schema-aligned sections in
+    document order. `DEFAULT_PRD_SECTIONS` (8 schema-aligned sections in
     `progressivePrdGeneration.ts`) each declare `dependencies` that are **true
     data dependencies only** — a section lists another solely when it consumes
-    that section's output as prompt context. `runDag()` runs every section whose
+    that section's output as prompt context. **The PRD is the product decision
+    document, not a container for downstream artifacts:** the former
+    `data_model` and `implementation_plan` PRD sections are **retired** from the
+    default graph (`RETIRED_PRD_SECTIONS` / `RETIRED_SECTION_IDS`) — the
+    dedicated data_model / implementation_plan *artifacts* own that detail, and
+    the PRD-embedded copies duplicated them (two entity lists was a standing
+    inconsistency source; `implementationPlan` was never rendered). Their
+    `SectionId`, prompt builder, slice schema, and title all survive solely so
+    single-section retry of legacy `generationMeta.failedSections` keeps
+    working (`prdSectionRetry.ts` looks sections up across
+    `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
+    sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
+    Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
+    rendering — the renderer blocks and optional `StructuredPRD` fields stay.
+    The remaining sections are prompted (and, where it matters,
+    **schema-enforced** via lean slice schemas in `prdSchemas.ts` —
+    `leanUxPageItemSchema`/`leanFeatureItemSchema`/`leanSuccessMetricSchema`,
+    since Gemini JSON mode can't emit properties absent from the schema) to
+    stay at decision level: `uxPages` is a lean screen list (name/purpose/key
+    content — no per-screen interaction/empty/loading/error specs), features
+    drop `uiAcceptanceCriteria`/`analyticsEvents`, success metrics drop
+    `instrumentation`, and the architecture narrative is a short decision
+    story grounded on `domainEntities`. `RUBRIC_DEFINITION` (`prdPrompts.ts`)
+    encodes this split — decisions live in the PRD, detail lives in the
+    artifacts — so don't re-add "full schemas / state machines / per-page
+    component specs" demands to prompts or rubric. `runDag()` runs every section whose
     deps are satisfied concurrently, under separate per-tier concurrency caps
     (`maxFastConcurrency` / `maxStrongConcurrency`); low-risk sections use the
     fast (Flash) model, high-risk the strong (Pro) model. `validateGraph()` runs
@@ -226,25 +417,212 @@ device-scoped and never syncs) and full design.
     merged deterministically (`prdSectionMerge.ts`, disjoint top-level fields)
     and markdown is rendered via `prdMarkdownRenderer.ts`. Do **not** re-add
     edges to sequence sections by document position — only by real data flow.
+    **PRD reading order ≠ generation (DAG) order.** The human/agent-facing
+    section order is a fixed logical flow (Product Overview → Target Users →
+    MVP Scope → Core Features → UX → Success Metrics → Risks → Technical
+    Architecture → Data Model → State Machines → NFRs → reference appendix →
+    **"Where the Detail Lives"**, a static deterministic handoff appendix
+    pointing to the downstream artifacts, rendered unconditionally by both
+    renderers — legacy spines' persisted `responseText` picks it up on the
+    next re-render (edit / section retry / regenerate), while the in-app
+    Structured view shows it immediately for every PRD)
+    defined in **two mirrored renderers that must stay in sync**:
+    `prdMarkdownRenderer.renderPremiumMarkdown` (export/`responseText`) and
+    `StructuredPRDView`/`PremiumSections` (in-app). Reordering is
+    presentation-only and safe — downstream artifacts/mockups consume the
+    `StructuredPRD` **object by field**, never this render order — but if you
+    change one renderer's section order, change the other to match.
     The legacy multi-pass scoring + revision passes were removed — old projects
     in localStorage retain their saved `qualityScores`, but no new generation
     writes them.
-    - **Optional final consistency review** (`prdConsistencyReview.ts`): off by
-      default (one extra fast-model call). When enabled (localStorage
-      `synapse-prd-consistency-review === 'true'`, threaded through as
-      `enableConsistencyReview`), it reconciles terminology / names /
-      contradictions across the merged PRD. It **merges over the original**
-      (omitted fields preserved) and a **detail-loss guard** discards any
-      revision that would shrink/empty a key content array; on apply it sets
-      `generationMeta.revised` and adds a `consistency_review` pass record.
+    - **User project name → `productName`.** The name the user types when
+      creating a project is threaded into generation as an optional
+      `projectName` (call site `runPrdGeneration`/`ProjectWorkspace.handleRegenerate`
+      → `generateStructuredPRD` → pipeline → `generateProgressivePrd` →
+      `SectionPromptContext.projectName`). The `product_basics` builder
+      (`prdSectionPrompts.ts`) makes it the **authoritative** `productName` so the
+      PRD (and every downstream artifact/mockup, which read `productName`) use the
+      name the user chose instead of one the model invents. A generic-placeholder
+      guard (`isMeaningfulProjectName` / `GENERIC_PROJECT_NAMES`: "untitled",
+      "test", "my app", …) drops names with no product intent so the model is
+      still free to coin one. `runPrdGeneration` reads the name from the store by
+      `projectId`; pass it explicitly from any new direct `generateStructuredPRD`
+      call site.
+    - **Automatic final consistency review** (`prdConsistencyReview.ts`): runs
+      **by default and silently** as the last step of normal PRD generation
+      (one extra fast-model call, after DAG merge, before markdown is rendered
+      for display/storage). It reconciles terminology / names / feature ids /
+      duplicates / cross-section contradictions across the merged PRD. The user
+      is **never** asked to approve ordinary repairs. The reviewed PRD replaces
+      the merged one **only** when it clears conservative acceptance guards; a
+      failed/unsafe review is discarded and the merged PRD is kept, so a review
+      failure never blocks a usable PRD:
+      - **merge-over-original** (omitted fields preserved — safety-restriction
+        `constraints` survive even if the model omits them),
+      - **detail-loss guard** (discards any revision shrinking/emptying a key
+        content array below 70%),
+      - **required-field guard** (vision/coreProblem/architecture must stay
+        non-empty; targetUsers/features/risks must stay non-empty),
+      - **feature-id stability** (every original `Feature.id` must survive —
+        downstream artifacts/tasks reference them),
+      - **product-identity guard** (a present `productName` may be canonicalized
+        but never blanked).
+      On apply it sets `generationMeta.revised` and adds a `consistency_review`
+      pass record. The outcome (`ran`/`applied`/`status`/`rejectionReason`) is
+      recorded in `generationMeta.consistencyReview` (`ConsistencyReviewMeta`)
+      for diagnostics — never surfaced in the UI. It is **skipped** for a
+      partial run (a section failed → PRD already surfaced as incomplete). The
+      localStorage `synapse-prd-consistency-review` key is now only a
+      **developer/debug opt-out** (`'false'` → skip via `enableConsistencyReview:
+      false`); default and any other value leave the review on. `runPrdGeneration`
+      resolves that override; `ProjectWorkspace.handleRegenerate` leaves it
+      default-on. Do **not** re-add a user-facing "repair PRD?" prompt.
     - **Observability** (`prdGenerationLog.ts`): structured, debug-gated logs
       (`synapse-prd-debug` / `?prddebug`) for queued/started/completed/failed,
       retry, run summary, model, est-vs-actual, and `surface` (mobile/web).
   - `mockupService.ts` + `mockupImageService.ts` — mockup HTML and image
     generation.
+  - **Shared design-system brief (single source of visual truth for image
+    prompts).** `buildDesignSystemBrief(tokens)` (`designTokens/promptSnippet.ts`,
+    replaced the old `tokensToImagePromptBrief`) is the ONE concise-but-complete
+    Design System Brief embedded into every prompt that drives a mockup/screen
+    image. Both the internal gpt-image-2 path (`mockupImageService.buildScreenImagePrompt`)
+    and the user-copied external prompt on the Screen Inventory page
+    (`screenInventoryImageService.buildExternalMockupPrompt`, formerly
+    `buildScreenInventoryImagePrompt`) call it, so an externally generated mockup
+    follows the same visual language as the internal one instead of drifting to a
+    generic "neutral palette" look. The brief covers palette, typography,
+    spacing/density, radius, elevation, button/card/form/modal conventions,
+    navigation, responsive behavior, and accessibility — token data verbatim,
+    the rest as derived conventions. `buildExternalMockupPrompt` takes optional
+    `designTokens` (threaded from `ArtifactWorkspace` via `selectPreferredDesignTokens`
+    into `ScreenImageGalleryContext`); with no design system it falls back to the
+    neutral style hint so legacy projects still get a working prompt. Do **not**
+    re-duplicate design-system prose into a prompt builder — reuse the brief.
+  - **Design System Presets (`src/lib/designSystemPresets.ts`).** A
+    visual-direction choice (`Modern SaaS`, `Enterprise Professional`,
+    `AI Workspace`, `Minimal Editorial`, `Developer / Technical`,
+    `Consumer Mobile`, `Creative Studio`, `Custom / Generate for me`). Preset
+    **ids are stable and persisted** (`saas_minimal`, `editorial_learning`,
+    `developer_tool`, … — never rename an id; labels are display-only). Each
+    concrete preset also carries setup-step metadata (`tone`,
+    `recommendedUseCases`, `visualTraits`, `previewTokens` — presentation-only,
+    never fed to generation; only `directive` steers the model). The chosen id
+    is stored on `Project.designSystemPreset`
+    (`setProjectDesignSystemPreset`) and read at generation time by
+    `artifactJobController.runCoreArtifactSlot` off the project (NOT threaded
+    through every call site) and passed to `generateCoreArtifact`, which injects
+    `getDesignSystemPresetDirective(id)` into the **design_system** prompt only.
+    `custom`/unknown/missing → empty directive → original PRD-only behavior. The
+    preset steers design_system generation and therefore both internal mockups
+    and the external copy-prompt, keeping the project visually consistent. The
+    `DesignSystemRenderer` shows a banner explaining this coupling and that
+    regenerating may shift downstream mockups/screen prompts.
+    - **Setup-stage selection (`src/components/setup/DesignSetupStep.tsx`) is
+      the primary picker.** New projects stamp `Project.needsDesignSetup: true`
+      in `createProject`; while that flag is set and no preset is chosen, the
+      workspace PRD stage renders `DesignSetupStep` **instead of** the PRD/
+      progress view — after the preflight clarification flow (if any) completes
+      and therefore exactly while PRD generation runs in the background (the
+      PRD run is untouched; the step is purely a view swap, so generation never
+      waits on the choice). Gating is the pure, unit-tested
+      `shouldShowDesignSetup` (`src/lib/designSetup.ts`): never for legacy
+      projects (no flag), the demo, blocked spines, or failed runs — full
+      (`generationError`) *and* partial (`generationMeta.failedSections`;
+      plus the transient `hasFailedSection` guard in `ProjectWorkspace`) —
+      because the error card / incomplete-PRD banner and their retry
+      affordances must stay reachable. The step shows static
+      `previewTokens`-driven preview cards (no AI/image calls), a rule-based
+      **Recommended** badge (`src/lib/designPresetRecommendation.ts` — keyword
+      scoring over idea + clarification answers, `saas_minimal` fallback), and
+      preselects the user's saved **default preset**
+      (`src/lib/designPresetPreference.ts`, localStorage
+      `SYNAPSE_DEFAULT_DESIGN_PRESET`, written only via the explicit "Use this
+      as my default" checkbox). Choosing calls `setProjectDesignSystemPreset`
+      (which also clears `needsDesignSetup` — from any picker); "Decide later"
+      calls `markDesignSetupComplete` and defers to the finalize gate.
+    - **The Mark-as-Final gate (`DesignSystemPresetChoice` in
+      `ProjectWorkspace`) is now the fallback**, still shown when a real
+      project reaches finalize with no preset (setup skipped, or a legacy
+      project) — so visual artifact generation still never starts without an
+      explicit preset decision.
+    - **Post-finalization re-selection.** The preset is **no longer one-time**.
+      Because the Mark-as-Final gate only fires once (and never for projects
+      finalized before presets existed), the **Design System artifact** carries a
+      `DesignDirectionControl` (`src/components/DesignDirectionControl.tsx`,
+      presentational) above its content in `ArtifactWorkspace`: it shows the
+      current direction (or an "AI decides" fallback) and offers **Change
+      direction** and **Regenerate**. **Change direction opens
+      `ChangeDirectionModal` (`src/components/setup/ChangeDirectionModal.tsx`),
+      which deliberately mirrors the setup-stage `DesignSetupStep`** — same light
+      surface and large `DesignPresetGrid` preview cards (the card grid is
+      extracted into the shared `src/components/setup/DesignPresetGrid.tsx` so the
+      two screens are visually identical) — with the active preset marked
+      **Current** and a prominent amber warning that the change flows through to
+      downstream artifacts (mockups + copied screen prompts). Choosing a new
+      direction persists it via `setProjectDesignSystemPreset` then opens a
+      regenerate-confirm (itself carrying the downstream-impact warning) that
+      calls `artifactJobController.retrySlot('design_system')` — which re-reads
+      the preset off the project, so the new direction actually reaches
+      generation. (The old compact `DesignSystemPresetChoice` sheet now serves
+      only the Mark-as-Final fallback gate in `ProjectWorkspace`.)
+    - **Design-system lock affordance.** The **Design System row only**
+      (`isLockedAsset` in `ArtifactWorkspace`) shows a small `Lock` icon in the
+      sidebar/mobile-header once its slot status is `done`, signalling the
+      project's visual direction is locked in — one committed aesthetic every
+      downstream asset is generated against. It's a passive nudge, not a hard
+      lock: the user can still change direction via `ChangeDirectionModal`
+      (which carries the downstream-regression warning), but the lock
+      encourages staying with one aesthetic to avoid costly regeneration of
+      screens/mockups. Do **not** re-add per-asset lock icons to downstream
+      rows.
+    - **Mockup-drift prompt.** Regenerating the design system produces a new
+      `tokensHash`, which `stalenessSlice` already uses to flip dependent mockups
+      to `possibly_outdated` (the auto-flag). On top of that, the Mockups view in
+      `ArtifactWorkspace` renders an amber **"Design system changed … Regenerate
+      the mockups"** banner when the mockup's recorded design_system
+      `anchorInfo` (tokensHash) differs from the project's current preferred
+      design system (`selectPreferredDesignSystem`), wired to the existing mockup
+      regenerate-confirm. Mockup *images* are keyed by the new mockup version id,
+      so the user must regenerate to pull the new visual direction through.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
-    implementation_plan, prompt_pack, design_system). Three of these
+    implementation_plan, prompt_pack, design_system). **`prompt_pack` is
+    RETIRED from new generation** (see "Consolidated Implementation Plan"
+    below): it stays in the subtype union, pipeline, and complexity map so
+    legacy persisted artifacts keep working, but new runs never generate it.
+    **Per-artifact model
+    routing (`src/lib/artifactModelSettings.ts`):** the routing brain lives in
+    `artifactModelSettings.ts` (not coreArtifactService) so the Settings UI and
+    the generation pipeline share one source of truth. Each subtype is tagged in
+    `CORE_ARTIFACT_COMPLEXITY` (`low`/`high`); `getArtifactModel(subtype)`
+    resolves **(1)** an explicit per-artifact override (Settings → "Artifact
+    Generation Models", persisted as the `GEMINI_ARTIFACT_MODELS` JSON map),
+    else **(2)** the complexity recommendation — `high` (screen_inventory,
+    user_flows, data_model, implementation_plan) → Expert/Pro (`getStrongModel`),
+    `low` (component_inventory, design_system, prompt_pack) → Fast/Flash
+    (`getFastModel`), else **(3)** the tier fallback to the single Default model
+    (`getModel`) → `DEFAULT_GEMINI_MODEL`. `coreArtifactService.selectArtifactModel`
+    delegates to `getArtifactModel` and re-exports `CORE_ARTIFACT_COMPLEXITY` for
+    back-compat. Existing projects have no override key, so behaviour is
+    unchanged until the user picks a model (no migration). The resolved model is
+    threaded into every generate **and** refine call, and `artifactJobController`
+    records that same per-subtype model in workflow metrics. Keep
+    `CORE_ARTIFACT_COMPLEXITY` in sync when adding a `CoreArtifactSubtype`.
+    **Mockups are image artifacts, not text:** `artifactModelSettings` also owns
+    the mockup **image source mode** (`getMockupImageMode`/`setMockupImageMode`,
+    `SYNAPSE_MOCKUP_IMAGE_MODE`: `gpt_image` | `user_uploaded`, default
+    `gpt_image`). `resolveMockupRender(mode, hasOpenAiKey)` decides per screen:
+    `user_uploaded` (or `gpt_image` with **no** OpenAI key — a non-silent forced
+    fallback) → the manual prompt+upload sheet (`MockupScreenUpload`, reusing the
+    IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
+    otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
+    `MockupImageStatusChip` summarizes per-version status (AI-generated /
+    uploaded / awaiting). The Settings section is `settings/ArtifactModelsSection.tsx`
+    (PRD shown as expandable "Multi", text artifacts with Complex/Simple badges,
+    Mockups with an "Image Source" select); the model list is the shared
+    `src/lib/modelCatalog.ts`.
+    Three of these
     (screen/data/component inventory) use Gemini JSON mode with schemas in
     `schemas/artifactSchemas.ts`, then convert to markdown via
     `structuredArtifactToMarkdown()` for storage; renderers in
@@ -260,6 +638,38 @@ device-scoped and never syncs) and full design.
     every card still shows a preview and a dedicated a11y block.
     `componentInventoryParse.ts` round-trips all these fields through
     markdown.
+    **Artifact in-page navigation** is a shared, collapsible **Artifact
+    Outline** — `src/components/ArtifactOutlineNav.tsx` (presentational/
+    controlled) + `src/lib/useArtifactOutline.ts` (scroll-spy via
+    IntersectionObserver, smooth-scroll, and hash `history.pushState` so
+    back/forward steps through sections). It mirrors the Mockups "Pages"
+    navigator: a numbered list/card, subtle purple active highlight + a
+    "Current section/entity" badge, `collapseOnSelect` on mobile (passed
+    `isMobile`) with a floating re-open button. Used by the **Design System**
+    (sections), **Data Model** (entities), and **Developer Prompts**
+    (`prompt_pack`, prompts) renderers, which anchor each section with a
+    `scroll-mt-*` id matching an outline item. This **replaced the old
+    wrapping "pill" nav** (`SectionTabs`) on the first two pages and the old
+    permanent left rail on Developer Prompts — do not reintroduce pills or a
+    side rail there; `SectionTabs` survives only in the Implementation Plan
+    renderer's legacy-markdown fallback path. When a document-style artifact
+    needs in-page nav, reuse
+    `ArtifactOutlineNav`/`useArtifactOutline` rather than introducing another
+    navigation style.
+    The `prompt_pack` (**Developer Prompts**) renderer
+    (`PromptPackRenderer.tsx`) survives only for legacy persisted artifacts
+    (the subtype is retired — no sidebar row, no new generation): a vertical
+    document driven by the shared outline (one card per `### N. Title`), with
+    Edit + Copy Prompt actions and a per-prompt `promptEdits` metadata
+    overlay. Its markdown parser lives in
+    `src/lib/services/promptPackParser.ts`, shared with the implementation-
+    plan adapter (which is how legacy Developer Prompts surface inside the
+    consolidated view). **Generated prompts are agent-agnostic** — neither
+    the legacy prompt_pack prompt nor the implementation_plan prompt-pack
+    instructions (`coreArtifactService.ts`) may name or recommend a specific
+    coding agent (Cursor, Claude Code, ChatGPT, Copilot). `generatedAt`
+    (version `createdAt`) and `versionNumber` thread through
+    `ArtifactContentRenderer`.
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and
@@ -560,6 +970,10 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               Pass A streams structured JSON → onPartial paints draft
               ↓
               SpineVersion stored, currentStage='prd'
+              ↓ (new projects: needsDesignSetup)
+              DesignSetupStep — pick a visual direction while the PRD
+              generates in the background (see "Design System Presets")
+              ↓
   PRD stage:       SelectableSpine / StructuredPRDView — text selection →
                    branch creation → AI conversation → consolidateBranch()
                    merges into spine (local or doc-wide scope, see
@@ -577,21 +991,236 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
 
 ### Post-finalization transition (Mark Final → Assets)
 
+The artifact sidebar is organized into four workflow-named sections —
+**Project Foundation** (PRD **and** Design System — the design system sits
+directly below the PRD as the shared visual foundation every downstream asset is
+generated against), **Experience** (User Flows, Screens — see "The Experience
+workspace" below), **Architecture** (Data Model), and **Development**
+(Implementation Plan — see "Consolidated Implementation Plan" below) — driven by
+`ARTIFACT_GROUPS` in `ArtifactWorkspace.tsx`. Grouping is purely visual;
+`CoreArtifactSubtype` ids
+(`'data_model'`, `'component_inventory'`, `'design_system'`, `'prompt_pack'`,
+`'implementation_plan'`) are unchanged so persisted artifacts, generation, and
+per-artifact model overrides keep working. **`component_inventory` (UI Components)
+is a *hidden* artifact** — no hard dependents, not useful to surface directly
+right now, so it is hidden from the assets list but **still generates** (it stays
+in `CORE_ARTIFACT_PIPELINE` and `MOCKUP_DEPENDENCIES`; mockups softly consume it
+to tag per-screen `componentRefs`). **`HIDDEN_ARTIFACT_SUBTYPES` /
+`isHiddenArtifactSubtype` in `coreArtifactPipeline.ts` is the single source of
+truth for "hidden"** and drives three things: (1) `buildSlotMetas` drops it so it
+renders no sidebar/mobile-header/auto-open row (it may stay listed in
+`ARTIFACT_GROUPS.items`; the filter removes it); (2) `ProjectWorkspace.assetsReady`
+excludes hidden subtypes so a hidden slot erroring can't strand the finalize
+success modal on "assets are being created" (the user has no row to see/retry it);
+(3) `artifactJobController.resumeIfNeeded` only auto-wakes for *visible* pending
+slots so an errored hidden slot isn't retried invisibly on every remount — but
+`startAll` still includes hidden slots in its pending set, so they're best-effort
+generated alongside visible ones. A hidden artifact must never gate readiness or
+be the sole reason a run resumes. To re-expose one, remove it from
+`HIDDEN_ARTIFACT_SUBTYPES`. See `docs/backlog/BACKLOG.md` §6.
+**`prompt_pack` (Developer Prompts) is a *retired* artifact**
+(`RETIRED_ARTIFACT_SUBTYPES` / `isRetiredArtifactSubtype`, same module) —
+stronger than hidden: retired subtypes are excluded from new generation runs
+(`pendingSlotsForSpine`), from `assetsReady`, from `buildSlotMetas`, and from
+the Settings model list, while the pipeline meta / renderer / export path stay
+for legacy persisted artifacts. A retired subtype must never be a dependency
+of an active one (its dep would starve in the layer filter — regression test
+in `coreArtifactPipeline.test.ts`). `title`/`description` in
+`CORE_ARTIFACT_PIPELINE` are display-only labels that may be renamed freely; the
+sidebar's iteration order (and the mobile-header / auto-open order)
+all derive from `ARTIFACT_GROUPS`, not `displayOrder`. There is no
+separate generation-status panel on the right — per-slot status lives
+inline on each sidebar row (the `StatusDot` next to the title) and in
+the mobile header beside the selected artifact name.
+
 Marking a spine final must not dump the user back on something that looks like
 the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)
 starts artifact generation and shows `FinalizationSuccessModal` ("PRD
 Finalized" — *being created* vs *ready*, keyed off an `assetsReady` presence
-check of the 7 core artifacts + mockups) **without** switching stage. Its
+check of the non-hidden, non-retired core artifacts + mockups) **without**
+switching stage. Its
 **Open Assets** action (`handleOpenAssets`) switches `currentStage` to
 `workspace` and arms a one-shot `finalizeAutoOpen` flag passed to
 `ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
-`CORE_ARTIFACT_DISPLAY_ORDER` (data_model → … → prompt_pack, then mockups) — and
-opens the mobile drawer (`useIsMobile`-gated, so it never reopens after the user
-closes it; desktop keeps the persistent side rail). While the overall run is in
+`ARTIFACT_GROUPS` order (design_system → user_flows → screens → … →
+implementation_plan) — and opens the mobile drawer (`useIsMobile`-gated, so it
+never reopens after the user closes it; desktop keeps the persistent side rail). While the overall run is in
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
+
+### Consolidated Implementation Plan (Development section)
+
+The old **Developer Prompts** (`prompt_pack`) and **Build Plan**
+(`implementation_plan`) rows are consolidated into one **Implementation Plan**
+artifact (subtype id still `implementation_plan` — no new subtype, so
+persisted artifacts, version history, snapshots, sync, model routing, and
+Convert-to-Tasks all keep working). See
+`docs/IMPLEMENTATION_PLAN_CONSOLIDATION.md` for the audit + design.
+
+- **Data shape.** `StructuredImplementationPlan` (in `src/types`) gained
+  all-optional consolidated fields: plan `summary`
+  (`ImplementationPlanSummary`), `globalQualityGates`, and per-milestone
+  `objective`/`priority`/`estimatedEffort`/`dependencies`/`linkedArtifacts`/
+  `promptPacks` (`ImplementationPromptPack`)/`qualityGates`
+  (`ImplementationQualityGate`)/`validationCommands`/`definitionOfDone`.
+  Storage format is unchanged: markdown + trailing ```` ```json synapse-plan ````
+  fence; the readable markdown keeps the legacy
+  Milestone/Goal/Deliverables/Dependencies headings (artifactValidation and
+  the legacy parser depend on them) and full prompt bodies live only in the
+  fence JSON.
+- **Adapter, not migration.** `src/lib/services/implementationPlanAdapter.ts`
+  (`buildConsolidatedPlan`, pure, unit-tested) builds the render-time
+  `ConsolidatedImplementationPlan` view model from any combination of: native
+  consolidated plan, legacy structured plan, legacy markdown-only plan,
+  and/or a legacy `prompt_pack` artifact. Legacy prompts become prompt packs
+  attached to milestones by conservative token matching (≥2 shared meaningful
+  tokens; unmatched → a labeled **Unassigned Prompt Packs** group); legacy
+  plan-wide Definition of Done → categorized global quality gates; legacy
+  Architecture → summary stack; Risks → readiness warnings. `readiness` and
+  `traceability` are always **derived, never persisted/generated**. The
+  legacy prompt-card parser is shared via
+  `src/lib/services/promptPackParser.ts` (extracted from
+  `PromptPackRenderer`).
+- **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
+  `renderers/implementationPlan/ConsolidatedPlanView.tsx` (tabs: Overview /
+  Milestones / Prompt Packs / Quality Gates / Traceability + copy actions:
+  per-prompt, per-milestone, all packs, whole plan as markdown via the
+  adapter's helpers). Fence-less, milestone-less content falls back to the
+  old timeline / plain markdown. `ArtifactWorkspace` threads the legacy
+  standalone prompt_pack artifact's preferred content in as
+  `promptPackContent` (via `ArtifactContentRenderer`).
+- **Generation.** The `implementation_plan` prompt + Gemini schema
+  (`artifactSchemas.ts`) emit the consolidated shape with **milestone-centered
+  prompt packs** (self-contained, agent-agnostic, fixed heading structure:
+  Goal / Relevant Synapse Artifacts / Scope / Out of Scope / Implementation
+  Steps / Acceptance Criteria / Quality Gates / Validation Commands / Commit
+  Guidance; no triple backticks inside bodies — they'd collide with the
+  markdown fences). It has true data deps on `screen_inventory` +
+  `data_model` (NOT `user_flows` — that edge would make the active pipeline 3
+  layers deep; the pipeline-shape tests assert ≥3-wide layer 1 and ≤2 layers
+  over the **active** pipeline). New runs never generate `prompt_pack` (see
+  the retired-subtype rules above).
+- The demo project is a **cloud snapshot** and carries the legacy
+  two-artifact shape until the owner re-pins a regenerated snapshot; the
+  adapter is what keeps it rendering consolidated in the meantime. Do not add
+  persisted state for the consolidated view.
+
+### The Experience workspace (Screens) — read-side consolidation
+
+The old **Screen Inventory** and **Mockups** sidebar rows are consolidated into
+one screen-centric **Screens** view (`selected === 'screens'`, a
+`WorkspaceSelection` value, NOT an artifact slot). **This is a read-side view
+layer only**: the `screen_inventory`, `user_flows`, and `mockup` artifacts keep
+generating, persisting, and versioning exactly as before — no schema, prompt,
+pipeline, sync, or snapshot change. Do not add persisted state for this view.
+
+- **Stable screen ids** — every screen has a canonical `ScreenItem.id`,
+  stamped by `assignStableScreenIds` inside `normalizeScreenInventory`
+  (`src/lib/screenInventoryNormalize.ts`): existing content id → slug of the
+  name → deterministic `-2`/`-3` suffix on duplicates, in document order.
+  Because generation persists the normalized shape, **new inventories store
+  their ids**, while legacy artifacts derive the *same* ids on every read (no
+  regeneration/migration required — derivation is deterministic from stored
+  content and never from a user-facing rename). `MockupScreen.sourceScreenId`
+  (optional, back-compat) records the inventory screen a mockup screen was
+  derived from (`generateMockup` stamps it; `mockupParsing.coerceScreen`
+  round-trips it).
+- **Join layer** — `src/lib/screenExperience.ts` (pure; no store/IDB/React;
+  unit-tested in `src/lib/__tests__/screenExperience.test.ts`).
+  `buildScreenIndex(inventory, flows, mockupPayload)` joins the three parsed
+  artifact contents into a `ScreenExperienceIndex` with **`byId` (canonical,
+  rename-safe) and `bySlug` (name-based, first-wins)** lookups. Mockup screens
+  match by `sourceScreenId` first, then slugified `MockupScreen.name` (legacy
+  fallback). Flow steps are markdown and only know names, so they match by
+  exact slug of the parsed `[Screen Name]` step title (`stepScreenSlug`).
+  Screen selection/navigation uses the **id**; per-screen images stay keyed by
+  the slug of the *stored* (generated) name, so both survive display renames.
+  Missing artifacts degrade gracefully; a missing inventory returns the
+  module-level `EMPTY_SCREEN_EXPERIENCE_INDEX` (stable reference —
+  Selector-stability rule). Slug collisions keep **all** screens as items
+  (unique ids), resolve `bySlug` to the first, and are surfaced via
+  `index.collisions` (warning banner in the list).
+- **Views** — `src/components/experience/`: `ScreenListView` (sectioned list of
+  all inventory screens with flow-ref/mockup coverage chips),
+  `ScreenDetailView` + `ScreenDetailTabs` (per-screen **Overview / Flow /
+  Mockups** tabs). They reuse existing pieces rather than duplicating them:
+  Overview = the exported `ScreenCard` from `ScreenInventoryRenderer` (+ the
+  upload gallery); Flow = `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with
+  the current screen's steps highlighted (`highlightedStepIndices`); Mockups =
+  `MockupScreenImage` (which internally routes to the manual upload sheet).
+  Shared priority-chip styles live in `src/components/renderers/screenPriority.ts`
+  (own module — the react-refresh/only-export-components rule forbids constant
+  exports from component files).
+- **Screen metadata edits are an overlay, never a content rewrite.** User
+  edits (name / purpose / userIntent / priority / notes) are stored per
+  canonical screen id in the screen_inventory **ArtifactVersion's
+  `metadata.screenEdits`** (`ScreenMetadataEdit` / `readScreenEdits` in
+  `screenExperience.ts`, persisted via the existing
+  `updateArtifactVersionMetadata` — the prompt_pack `promptEdits` pattern).
+  `buildScreenIndex` applies the overlay to produce the *effective*
+  `item.screen` while keeping `item.baseScreen` (stored content) as the source
+  of every join and image key — so **renames cannot orphan mockups, flow refs,
+  or uploaded images**. `ScreenImageGallery`/`ScreenCard` take a
+  `storageName`/`imageStorageName` (the base generated name) so upload buckets
+  keep their original slug after a display rename. An overlay equal to the
+  generated content clears itself (saved as null); "Reset to generated"
+  removes it. Edits are per-version — regenerating the inventory starts clean,
+  same as promptEdits. Do NOT rewrite `ArtifactVersion.content` for edits.
+- **Screen selection is URL-addressable:** `/p/:projectId?screen=<canonical
+  id>[&screenTab=flow|mockups]`. The query param is the **single source of
+  truth** for the open Screen Detail (via `useSearchParams`); the rendered
+  view is *derived* (`activeSelection = screen param ? 'screens' : selected`)
+  — never synced by a setState-in-effect. Deep links, refresh, and browser
+  back/forward all work; tab switches use `replace` so history is one entry
+  per screen; unknown/stale ids miss `byId` and fall back to the list;
+  unrelated query params (debug flags) are preserved. `ProjectWorkspace` has a
+  one-shot mount effect that switches a deep-linked project to the `workspace`
+  stage when the spine is final (otherwise the param is inert). Artifact-row
+  selection (`selected`) stays local component state — only the screen
+  dimension lives in the URL. Screen journey nodes in **User Flows** navigate
+  to Screen Detail when the node is a `screen` kind AND its slug is in
+  `availableScreenSlugs` (threaded through `ArtifactContentRenderer` →
+  `UserFlowsRenderer` → `FlowJourney.onNavigateToScreen`); otherwise the
+  original scroll-to-step behavior is preserved.
+- **Mockup coverage is explicit and overlay-based.** The Screens list shows
+  "Mockups: X of N screens covered". Uncovered screens get an **Add to
+  mockups** action (Mockups tab) and the list header offers a confirmed
+  **Generate missing mockups** batch. Both write user-added `MockupScreen`s
+  into the *current* mockup ArtifactVersion's **`metadata.extraScreens`**
+  overlay (`readExtraMockupScreens`/`mergeExtraScreens`/
+  `mockupScreenFromInventoryScreen` in `mockupParsing.ts`) — **never a new
+  ArtifactVersion**, because per-screen images are keyed by
+  `versionId:screenId:quality`, so appending a version would orphan every
+  existing render. Adding coverage is free; **image generation is never
+  automatic** — it's the standard per-screen action, or the batch flow which
+  fires low-quality drafts only after an explicit cost-labeled confirm and
+  only when an OpenAI key exists (keyless → upload sheets). Every consumer of
+  a mockup payload in the workspace must read the *effective* payload
+  (`mergeExtraScreens(tryParsePayload(v), v.metadata)`).
+- **Reference validation is advisory, never blocking.** `buildScreenIndex`
+  emits `index.issues` (`ScreenReferenceIssue`): `unmatched_flow_step`
+  (screen-kind journey steps matching no screen, grouped per name),
+  `unmatched_mockup_screen`, `slug_collision`, and `legacy_name_match`
+  (mockup matched by name only — works, but rename-fragile). The Screens list
+  renders them in the collapsed `ReferenceWarningsPanel`
+  (`src/components/experience/ReferenceWarningsPanel.tsx`) with two persisted
+  repairs: **Relink/Pin** writes `metadata.screenLinks`
+  (mockupScreenId → canonical screenId) on the **mockup** version — the
+  highest-priority mockup match, above `sourceScreenId` and name — and
+  **Ignore** appends the issue key to `metadata.dismissedScreenIssues` on the
+  **inventory** version. Matching runs in three passes (links →
+  sourceScreenId → name) so an explicit repair always beats a coincidental
+  name match. Rendering must never be gated on validation results.
+- **Status/fallbacks:** the Screens sidebar dot and generation/error states map
+  to the **`screen_inventory` slot** (its retry re-runs that slot, since it no
+  longer has its own row); the Mockups tab surfaces the `mockup` slot's
+  generating/error states. A screen_inventory version whose content isn't
+  parseable structured JSON (legacy markdown) falls back to the standalone
+  `ScreenInventoryRenderer` path inside the Screens view. The legacy
+  `screen_inventory` and `mockup` renderMain branches remain intact and
+  internally reachable — do not delete them.
 
 ### Implementation tasks (plan → tracked checklist)
 
@@ -708,7 +1337,7 @@ component). It is driven directly by the live `prdSectionStatus` store slice
 (not by parsing the `prdProgress` message log):
 
 - **`buildGenerationSteps.ts`** — pure adapter. `computeWaves()` groups the
-  10 pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
+  pipeline sections (`DEFAULT_PRD_SECTIONS`) into **dependency waves**
   (topological levels): a single-section wave is a sequential row, a
   multi-section wave is a "Running concurrently" group whose children are the
   parallel sections (labeled `2A`, `2B`, …). This is purely graph-derived, so

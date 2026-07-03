@@ -16,16 +16,25 @@ import type { PreflightContext } from './llmProvider';
 import { detectSurface } from './services/prdGenerationLog';
 
 /**
- * Read the opt-in consistency-review flag from localStorage. Default OFF —
- * enabling adds a final reconciliation model call. Wrapped in try/catch for
- * non-browser contexts.
+ * Resolve the consistency-review override from localStorage.
+ *
+ * The final consistency-review pass now runs by DEFAULT and silently as part of
+ * normal PRD generation (see prdConsistencyReview.ts / progressivePrdPipeline).
+ * The `synapse-prd-consistency-review` key is retained only as a
+ * developer/debug override: `'false'` skips the pass (saving one model call),
+ * anything else (including absent) leaves the default-on behavior. Returns
+ * `undefined` when there is no override, so the pipeline default applies.
+ * Wrapped in try/catch for non-browser contexts.
  */
-const consistencyReviewEnabled = (): boolean => {
+const consistencyReviewOverride = (): boolean | undefined => {
     try {
-        return typeof localStorage !== 'undefined'
-            && localStorage.getItem('synapse-prd-consistency-review') === 'true';
+        if (typeof localStorage === 'undefined') return undefined;
+        const value = localStorage.getItem('synapse-prd-consistency-review');
+        if (value === 'false') return false;
+        if (value === 'true') return true;
+        return undefined;
     } catch {
-        return false;
+        return undefined;
     }
 };
 
@@ -53,6 +62,9 @@ export async function runPrdGeneration({
     preflight,
 }: RunPrdGenerationParams): Promise<void> {
     const store = useProjectStore.getState();
+    // The name the user gave the project is forwarded into generation so the
+    // PRD's productName reflects it (see prdSectionPrompts.product_basics).
+    const projectName = store.getProject(projectId)?.name;
     // Fresh run starts with a clean event log. Marking the spine 'running'
     // lets rehydration detect an interrupted run if the page is closed
     // mid-generation (see markInterruptedGenerations).
@@ -80,7 +92,8 @@ export async function runPrdGeneration({
             sourcePrompt,
             {
                 preflight,
-                enableConsistencyReview: consistencyReviewEnabled(),
+                projectName,
+                enableConsistencyReview: consistencyReviewOverride(),
                 surface: detectSurface(),
                 onWorkflowRun: (run) => {
                     // The pipeline doesn't know the project — stamp identity here

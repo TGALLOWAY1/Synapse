@@ -18,54 +18,71 @@ export interface CoreArtifactMeta {
 // prompt, so most artifacts can be generated independently from it. Spurious
 // deps serialize the pipeline — buildDependencyLayers turns them into wait
 // gates — which kneecaps parallelism with little quality benefit.
+// `subtype` is the stable internal id and must not change — generation,
+// routing, persisted artifacts, and per-artifact model overrides all key off
+// it. `title`/`description` are display-only labels (shown in the artifact
+// sidebar, settings model picker, and progress messages) and may be renamed
+// freely. The grouping that drives the sidebar's visual sections lives in
+// ArtifactWorkspace's ARTIFACT_GROUPS, which keys off subtype.
 export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
-    {
-        subtype: 'screen_inventory',
-        title: 'Screen Inventory',
-        description: 'Structured list of screens and views implied by the PRD',
-        dependsOn: [],
-        displayOrder: 3,
-    },
     {
         subtype: 'user_flows',
         title: 'User Flows',
-        description: 'Primary user journeys and key flow sequences',
+        description: 'Primary user journeys and key flows',
         dependsOn: ['screen_inventory'],
+        displayOrder: 1,
+    },
+    {
+        subtype: 'screen_inventory',
+        title: 'Screen Inventory',
+        description: 'Structured list of screens and views',
+        dependsOn: [],
         displayOrder: 2,
     },
     {
         subtype: 'component_inventory',
-        title: 'Component Inventory',
-        description: 'Reusable components implied by the product design',
+        title: 'UI Components',
+        description: 'Reusable components and patterns',
         dependsOn: ['screen_inventory'],
+        displayOrder: 3,
+    },
+    {
+        subtype: 'design_system',
+        title: 'Design System',
+        description: 'Foundational UI system and styles',
+        dependsOn: [],
         displayOrder: 4,
     },
     {
         subtype: 'data_model',
-        title: 'Data Model Draft',
-        description: 'Primary entities, relationships, and data needs',
-        dependsOn: [],
-        displayOrder: 1,
-    },
-    {
-        subtype: 'implementation_plan',
-        title: 'Implementation Plan',
-        description: 'High-level build sequence and milestone-oriented dev plan',
-        dependsOn: [],
-        displayOrder: 6,
-    },
-    {
-        subtype: 'design_system',
-        title: 'Design System Starter',
-        description: 'Foundational UI system draft with patterns and components',
+        title: 'Data Model',
+        description: 'Entities, relationships, and data schema',
         dependsOn: [],
         displayOrder: 5,
     },
     {
+        // RETIRED (see RETIRED_ARTIFACT_SUBTYPES): standalone Developer
+        // Prompts no longer generate — the implementation_plan artifact now
+        // carries milestone-centered prompt packs. The meta stays so legacy
+        // persisted prompt_pack artifacts keep their title, renderer, and
+        // export path, and getArtifactMeta never throws for them.
         subtype: 'prompt_pack',
-        title: 'Prompt Pack',
-        description: 'Downstream prompts for design, coding, critique, and testing',
+        title: 'Developer Prompts',
+        description: 'AI prompts for downstream tasks',
         dependsOn: ['implementation_plan', 'design_system', 'data_model'],
+        displayOrder: 6,
+    },
+    {
+        subtype: 'implementation_plan',
+        title: 'Implementation Plan',
+        description: 'Milestones, prompt packs, and quality gates',
+        // True data deps: the consolidated plan links milestones to screen and
+        // entity names and writes prompt packs that reference them, so it
+        // needs those artifacts' output as prompt context. user_flows is
+        // deliberately NOT a dep — flow links are nice-to-have and adding the
+        // edge would make the active pipeline 3 layers deep (see the depth
+        // test in coreArtifactPipeline.test.ts).
+        dependsOn: ['screen_inventory', 'data_model'],
         displayOrder: 7,
     },
 ];
@@ -73,6 +90,36 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
 /** Artifacts sorted for UI display. Iteration order does NOT respect dependencies. */
 export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
     CORE_ARTIFACT_PIPELINE.slice().sort((a, b) => a.displayOrder - b.displayOrder);
+
+// Subtypes that are still *generated* (they remain in CORE_ARTIFACT_PIPELINE and
+// MOCKUP_DEPENDENCIES so downstream consumers like mockups keep working) but are
+// **hidden from the assets list** — no hard dependents, not useful to surface
+// directly right now. This is the single source of truth for "hidden": it drives
+// the sidebar omission (ArtifactWorkspace.buildSlotMetas), the finalize readiness
+// gate (ProjectWorkspace.assetsReady), and the auto-resume decision
+// (artifactJobController.resumeIfNeeded). A hidden artifact must never gate
+// user-facing readiness or trigger an invisible retry loop, since the user has no
+// row to see its status or retry it. See docs/backlog/BACKLOG.md §6.
+export const HIDDEN_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArtifactSubtype>([
+    'component_inventory',
+]);
+
+export const isHiddenArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
+    HIDDEN_ARTIFACT_SUBTYPES.has(subtype);
+
+// Subtypes that are fully retired from **new generation**: no sidebar row, no
+// slot in new runs, no Settings model row — stronger than HIDDEN (which still
+// generates). The subtype stays in the type union and CORE_ARTIFACT_PIPELINE
+// so legacy persisted artifacts keep rendering/exporting, and their content is
+// consumed by newer views (the Implementation Plan adapter reads legacy
+// prompt_pack artifacts). Retired subtypes must never gate readiness, never
+// appear in pendingSlotsForSpine, and never surface a generation-config row.
+export const RETIRED_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArtifactSubtype>([
+    'prompt_pack',
+]);
+
+export const isRetiredArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
+    RETIRED_ARTIFACT_SUBTYPES.has(subtype);
 
 /**
  * Group the pipeline into dependency layers. Items in the same layer have no

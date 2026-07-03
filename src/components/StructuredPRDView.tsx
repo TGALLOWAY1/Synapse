@@ -35,6 +35,7 @@ import {
     MvpScopeSection,
     MetricsSection,
     AssumptionsSection,
+    HandoffAppendixSection,
 } from './prd/PremiumSections';
 
 interface StructuredPRDViewProps {
@@ -556,31 +557,36 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     the entire document. Hidden if the PRD has no actionable signal. */}
                 <ImplementationSummarySection prd={structuredPRD} />
 
+                {/* Section order is a logical reading flow (mirrors
+                    prdMarkdownRenderer): Product Overview → Target Users → MVP
+                    Scope → Features → UX → Metrics → Risks → Technical
+                    Architecture → Data Model → State Machines → reference →
+                    Where the Detail Lives (static handoff appendix). */}
+
+                {/* Product Overview: Vision → Problem → Thesis → Principles */}
                 {renderTextSection('Vision', 'vision', structuredPRD.vision)}
+
+                {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
 
                 {structuredPRD.productThesis && (
                     <ProductThesisSection thesis={structuredPRD.productThesis} />
                 )}
 
-                {/* JTBD if available, else legacy targetUsers list */}
-                {structuredPRD.jtbd && structuredPRD.jtbd.length > 0
-                    ? <JtbdSection jtbd={structuredPRD.jtbd} />
-                    : renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
-
-                {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
-
                 {structuredPRD.principles && structuredPRD.principles.length > 0 && (
                     <PrinciplesSection principles={structuredPRD.principles} />
                 )}
 
-                {structuredPRD.userLoops && structuredPRD.userLoops.length > 0 && (
-                    <UserLoopsSection loops={structuredPRD.userLoops} />
-                )}
+                {/* Target Users — JTBD if available, else legacy targetUsers list */}
+                {structuredPRD.jtbd && structuredPRD.jtbd.length > 0
+                    ? <JtbdSection jtbd={structuredPRD.jtbd} />
+                    : renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
 
-                {structuredPRD.uxPages && structuredPRD.uxPages.length > 0 && (
-                    <UxArchitectureSection pages={structuredPRD.uxPages} />
-                )}
+                {/* MVP Scope — what ships first, before the full feature detail */}
+                {structuredPRD.mvpScope && (structuredPRD.mvpScope.mvp.length || structuredPRD.mvpScope.v1.length || structuredPRD.mvpScope.later.length) ? (
+                    <MvpScopeSection scope={structuredPRD.mvpScope} />
+                ) : null}
 
+                {/* Core Features */}
                 {structuredPRD.featureSystems && structuredPRD.featureSystems.length > 0 && (
                     <FeatureSystemsSection systems={structuredPRD.featureSystems} />
                 )}
@@ -626,6 +632,36 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     </div>
                 </div>
 
+                {/* User Experience: UX Architecture → Core User Loops */}
+                {structuredPRD.uxPages && structuredPRD.uxPages.length > 0 && (
+                    <UxArchitectureSection pages={structuredPRD.uxPages} />
+                )}
+
+                {structuredPRD.userLoops && structuredPRD.userLoops.length > 0 && (
+                    <UserLoopsSection loops={structuredPRD.userLoops} />
+                )}
+
+                {/* Success Metrics */}
+                {structuredPRD.successMetrics && structuredPRD.successMetrics.length > 0 && (
+                    <MetricsSection metrics={structuredPRD.successMetrics} />
+                )}
+
+                {/* Risks: prefer detailed, fall back to legacy bullet list */}
+                {structuredPRD.risksDetailed && structuredPRD.risksDetailed.length > 0
+                    ? <RisksDetailedSection risks={structuredPRD.risksDetailed} />
+                    : renderListSection('Risks', 'risks', structuredPRD.risks)}
+
+                {/* Technical Architecture → Roles → Data Model → State Machines */}
+                {renderTextSection('Architecture', 'architecture', structuredPRD.architecture)}
+
+                {structuredPRD.architectureFlows && structuredPRD.architectureFlows.length > 0 && (
+                    <ArchFlowsSection flows={structuredPRD.architectureFlows} />
+                )}
+
+                {structuredPRD.roles && structuredPRD.roles.length > 0 && (
+                    <RolesSection roles={structuredPRD.roles} />
+                )}
+
                 {structuredPRD.richDataModel && structuredPRD.richDataModel.entities.length > 0 && (
                     <DataModelSection model={structuredPRD.richDataModel} />
                 )}
@@ -634,35 +670,15 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     <StateMachinesSection machines={structuredPRD.stateMachines} />
                 )}
 
-                {structuredPRD.roles && structuredPRD.roles.length > 0 && (
-                    <RolesSection roles={structuredPRD.roles} />
-                )}
-
-                {renderTextSection('Architecture', 'architecture', structuredPRD.architecture)}
-
-                {structuredPRD.architectureFlows && structuredPRD.architectureFlows.length > 0 && (
-                    <ArchFlowsSection flows={structuredPRD.architectureFlows} />
-                )}
-
-                {/* Risks: prefer detailed, fall back to legacy bullet list */}
-                {structuredPRD.risksDetailed && structuredPRD.risksDetailed.length > 0
-                    ? <RisksDetailedSection risks={structuredPRD.risksDetailed} />
-                    : renderListSection('Risks', 'risks', structuredPRD.risks)}
-
-                {structuredPRD.mvpScope && (structuredPRD.mvpScope.mvp.length || structuredPRD.mvpScope.v1.length || structuredPRD.mvpScope.later.length) ? (
-                    <MvpScopeSection scope={structuredPRD.mvpScope} />
-                ) : null}
-
-                {structuredPRD.successMetrics && structuredPRD.successMetrics.length > 0 && (
-                    <MetricsSection metrics={structuredPRD.successMetrics} />
-                )}
-
+                {/* Appendix / Reference Material */}
                 {renderDomainEntities()}
                 {renderPrimaryActions()}
 
                 {structuredPRD.assumptions && structuredPRD.assumptions.length > 0 && (
                     <AssumptionsSection assumptions={structuredPRD.assumptions} />
                 )}
+
+                <HandoffAppendixSection />
             </div>
 
             {selection && (

@@ -15,6 +15,7 @@ import { requireOwner } from './_lib/ownerAuth.js';
 //   GET    /api/snapshots?id=...&image=<key>  -> load one image (owner)
 //   DELETE /api/snapshots?id=...              -> remove one snapshot (owner)
 //   GET    /api/snapshots?demo=1              -> load the demo snapshot (PUBLIC)
+//   GET    /api/snapshots?demo=1&pointer=1    -> read the demo pointer (PUBLIC)
 //   GET    /api/snapshots?demo=1&image=<key>  -> load one demo image (PUBLIC)
 //   PUT    /api/snapshots?demo=1&id=          -> mark a snapshot as the demo (owner)
 //   PUT    /api/snapshots?demo=1              -> clear the demo pointer (owner)
@@ -155,6 +156,7 @@ async function handlePost(req, res) {
 
   const project = body?.project;
   const rawImages = Array.isArray(body?.images) ? body.images : [];
+  const rawScreenImages = Array.isArray(body?.screenImages) ? body.screenImages : [];
   if (!project || typeof project !== 'object') {
     return json(res, 400, { error: 'missing_project' });
   }
@@ -162,9 +164,15 @@ async function handlePost(req, res) {
   // Drop any dataUrl that snuck through — image blobs are uploaded
   // individually via `?id=...&image=1`. Storing dataUrl inline would just
   // bring back the size problem this split was meant to solve.
-  const imageRefs = rawImages
-    .map(imageMetadata)
-    .filter((m) => m && typeof m.key === 'string' && m.key.length > 0 && m.key.length <= IMAGE_KEY_MAX);
+  const toRefs = (arr) =>
+    arr
+      .map(imageMetadata)
+      .filter((m) => m && typeof m.key === 'string' && m.key.length > 0 && m.key.length <= IMAGE_KEY_MAX);
+  const imageRefs = toRefs(rawImages);
+  // Screen Inventory images live in a separate client IDB store and travel as
+  // their own array, but they reuse the exact same per-image blob channel
+  // (keyed by a hash of the image key, which never collides with a mockup key).
+  const screenImageRefs = toRefs(rawScreenImages);
 
   const id = crypto.randomUUID();
   const manifest = {
@@ -174,6 +182,7 @@ async function handlePost(req, res) {
     createdAt: nowIso(),
     schemaVersion: CURRENT_SCHEMA_VERSION,
     imageCount: imageRefs.length,
+    screenImageCount: screenImageRefs.length,
   };
 
   const data = {
@@ -184,6 +193,7 @@ async function handlePost(req, res) {
     // separate blob under snapshots/<id>/images/<hash>.json so that no
     // single request crosses the 4.5 MB serverless body cap.
     images: imageRefs,
+    screenImages: screenImageRefs,
   };
   const dataJson = JSON.stringify(data);
   const manifestJson = JSON.stringify({ ...manifest, sizeBytes: dataJson.length });
@@ -328,6 +338,19 @@ async function handleGetDemoImage(key, res) {
   return await handleGetImage(pointer.snapshotId, key, res);
 }
 
+// Public, lightweight: return JUST the current demo pointer so clients can
+// invalidate a cached demo project without paying the cost of downloading the
+// full bundle + per-image blobs. Returns 200 with `{ snapshotId: null }` when
+// no demo has been pinned so callers can distinguish "no demo" from a network
+// failure without parsing 404s.
+async function handleGetDemoPointer(res) {
+  const pointer = await readDemoPointer();
+  return json(res, 200, {
+    snapshotId: pointer?.snapshotId ?? null,
+    updatedAt: pointer?.updatedAt ?? null,
+  });
+}
+
 async function handlePutDemo(id, res) {
   // PUT /api/snapshots?demo=1&id=<id>  -> set pointer
   // PUT /api/snapshots?demo=1          -> clear pointer
@@ -387,22 +410,24 @@ export default async function handler(req, res) {
   if (!['GET', 'POST', 'PUT', 'DELETE'].includes(req.method)) {
     return methodNotAllowed(res, ['GET', 'POST', 'PUT', 'DELETE']);
   }
-  if (
-    enforceRateLimit(req, res, {
-      scope: 'snapshots',
-      limit: 60,
-      windowMs: 60_000,
-      errorBody: { error: 'rate_limited' },
-    })
-  ) {
-    return;
-  }
 
   // `?demo=1` is the public-demo channel. GET is anonymous (so any visitor
   // can load the demo), but PUT (set/clear pointer) is owner-only. Every
   // other route stays owner-gated as before.
   const isDemoChannel = req.query?.demo === '1' || req.query?.demo === 'true';
   const isPublicDemoRead = isDemoChannel && req.method === 'GET';
+
+  // The public demo read gets its own, larger budget: one cache-less demo
+  // load is a legitimate burst of `2 + imageCount + screenImageCount`
+  // requests (pointer + bundle + one fetch per image), so an image-rich demo
+  // would trip a 60/min cap on exactly the devices with no cache (mobile) and
+  // silently fall back to a stale copy. Owner-token routes keep the tight cap.
+  const rateOptions = isPublicDemoRead
+    ? { scope: 'snapshots-demo', limit: 300, windowMs: 60_000 }
+    : { scope: 'snapshots', limit: 60, windowMs: 60_000 };
+  if (enforceRateLimit(req, res, { ...rateOptions, errorBody: { error: 'rate_limited' } })) {
+    return;
+  }
   if (!isPublicDemoRead && requireOwner(req, res)) return;
 
   // @vercel/blob reads BLOB_READ_WRITE_TOKEN from the env. Just creating a
@@ -431,9 +456,14 @@ export default async function handler(req, res) {
     ? imageQuery
     : null;
 
+  // `pointer=1` is the lightweight demo-pointer probe — see
+  // `handleGetDemoPointer`. Only meaningful on the demo channel.
+  const isPointerProbe = req.query?.pointer === '1' || req.query?.pointer === 'true';
+
   try {
     if (isDemoChannel) {
       if (req.method === 'GET') {
+        if (isPointerProbe) return await handleGetDemoPointer(res);
         if (imageReadKey !== null) return await handleGetDemoImage(imageReadKey, res);
         return await handleGetDemo(res);
       }

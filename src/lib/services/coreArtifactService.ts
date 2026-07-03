@@ -1,6 +1,8 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
+import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
+import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
@@ -10,6 +12,7 @@ import {
     hashDesignTokens,
     designSystemTokensToMarkdown,
 } from '../designTokens';
+import { getDesignSystemPresetDirective } from '../designSystemPresets';
 
 export interface CoreArtifactGenerationResult {
     /** Canonical markdown body, stored in `ArtifactVersion.content`. */
@@ -22,6 +25,22 @@ export interface CoreArtifactGenerationResult {
      */
     metadata?: Record<string, unknown>;
 }
+
+// Per-artifact model routing now lives in `artifactModelSettings.ts` so the
+// Settings UI and the generation pipeline share one source of truth. Re-export
+// the complexity map and type for back-compat with existing importers.
+export { CORE_ARTIFACT_COMPLEXITY };
+export type { ArtifactComplexity };
+
+/**
+ * Resolve the Gemini model id a given core artifact should generate with.
+ * Honors an explicit per-artifact override (Settings → "Artifact Generation
+ * Models") and otherwise falls back to the complexity recommendation. Exported
+ * so the artifact orchestrator can record the *actual* model in workflow
+ * metrics.
+ */
+export const selectArtifactModel = (subtype: CoreArtifactSubtype): string =>
+    getArtifactModel(subtype);
 
 const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
@@ -99,14 +118,21 @@ Categories to cover: Navigation, Forms & Inputs, Data Display, Feedback & Status
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are a senior software architect producing production-grade artifacts for engineering teams. Produce a structured Implementation Plan as a task-driven execution system, not a narrative document. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
+        system: `You are a senior software architect producing production-grade artifacts for engineering teams. Produce a consolidated Implementation Plan — a milestone-driven execution system that takes a developer from this product design to working software with a coding agent. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
 
 Top-level shape:
 - overview: { summary, criticalPath, teamSize }
   - summary: 2-3 sentences describing the build approach.
   - criticalPath: one sentence naming the milestones on the critical path.
   - teamSize: short recommendation (e.g. "1 frontend + 1 backend" or "Solo dev, ~6 weeks").
-- milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep.
+- summary: { buildStrategy, stackSummary, criticalPath, estimatedEffort, teamAssumption }
+  - buildStrategy: 2-3 sentences on the overall approach (walking skeleton, thin vertical slices, etc.).
+  - stackSummary: 3-6 short entries naming the concrete stack (e.g. "React + Vite SPA", "Postgres via Supabase").
+  - criticalPath: ordered array of the milestone NAMES on the critical path.
+  - estimatedEffort: total effort estimate (e.g. "~4 weeks solo").
+  - teamAssumption: who this plan assumes is building (e.g. "One developer pairing with a coding agent").
+- milestones: 4-6 entries. First is infrastructure/setup. Last covers testing and launch prep. Keep milestones SMALL — each should be independently shippable and verifiable.
+- globalQualityGates: 3-6 project-wide quality gates (shape below) that apply to every milestone.
 - architecture: top-level array of cross-cutting technical decisions (tech stack picks, key architectural calls). Hoisted out of per-milestone bodies.
 - risks: top-level array of { description, mitigation } items spanning the project.
 - definitionOfDone: top-level array of project-wide acceptance criteria.
@@ -116,7 +142,16 @@ Per milestone:
 - name: human-readable milestone name.
 - timeframe: "Week 1-2" style range.
 - goal: one-sentence objective.
+- objective: 1-2 sentence richer statement of what the milestone delivers and why it's next.
+- priority: "critical" | "high" | "medium" | "low" — by position on the critical path.
+- estimatedEffort: short effort estimate (e.g. "2-3 days").
+- dependencies: array of OTHER milestone ids that must complete first. Empty array if none.
+- linkedArtifacts: { screens, dataModels, components, userFlows, apis } — EXACT names drawn from the dependency artifacts and PRD. Link only what this milestone directly implements; do not invent names.
 - tasks: 3-8 atomic, executable tasks.
+- promptPacks: 1-3 copy-ready coding-agent prompts (shape below) that implement this milestone. Every milestone MUST have at least one.
+- qualityGates: 2-4 milestone-specific quality gates.
+- validationCommands: shell commands to verify the milestone (e.g. "npm run build", "npm test"), consistent with the chosen stack.
+- definitionOfDone: 2-5 observable acceptance criteria for the milestone.
 
 Per task:
 - id: stable lower-snake-case identifier (e.g. "task_initialize_nextjs"). Unique across the whole plan.
@@ -130,12 +165,34 @@ Per task:
   - mockups: screen names from the screen_inventory dependency context that this task implements.
   - Link an artifact only when the task directly implements or modifies it. Omit (or use empty arrays) otherwise. Don't invent artifact references.
 
+Per prompt pack:
+- id: stable lower-snake-case identifier, unique across the plan (e.g. "pp_setup_scaffold").
+- title: short imperative name.
+- purpose: one sentence on what running this prompt accomplishes.
+- prompt: the FULL copy-ready prompt body, structured with exactly these markdown headings:
+  # Prompt: [Title]
+  ## Goal
+  ## Relevant Synapse Artifacts
+  ## Scope
+  ## Out of Scope
+  ## Implementation Steps
+  ## Acceptance Criteria
+  ## Quality Gates
+  ## Validation Commands
+  ## Commit Guidance
+  The body must be fully self-contained (the recipient sees ONLY this text — no PRD, no other artifact): restate the relevant product context, feature behavior, screen/entity names, and constraints inline. Refer to features by human name, never bare IDs. Never use triple backticks inside the prompt body. The prompts MUST be agent-agnostic — never name, recommend, or assume a specific tool (e.g. Cursor, Claude Code, ChatGPT, Copilot).
+- scope: { include, exclude } — bulleted scope boundaries; exclude MUST list explicit non-goals.
+- acceptanceCriteria: 3-6 specific, testable criteria.
+- recommendedCommitMessage: a conventional, imperative commit message for the resulting change.
+
 Rules:
-- Task ids must be unique across the entire plan.
-- All ids in dependencies must reference other task ids in the same plan.
+- Task, milestone, prompt-pack, and quality-gate ids must be unique across the entire plan.
+- All ids in dependencies must reference ids in the same plan.
+- Quality gate shape: { id, title, description?, category, required } with category one of design_fidelity | functional | data_integrity | integration | accessibility | performance | testing | regression.
 - Hoist cross-cutting architecture, risks, and definition-of-done into the top-level arrays — do NOT duplicate them per milestone.
-- Tasks should read as atomic engineering work, not as themes.`,
-        userPrefix: 'Create an Implementation Plan from this PRD:',
+- Tasks should read as atomic engineering work, not as themes.
+- Favor safe implementation: small milestones, frequent commits, explicit non-goals, validation after every milestone, no broad rewrites.`,
+        userPrefix: 'Create a consolidated Implementation Plan (milestones + prompt packs + quality gates) from this PRD:',
     },
     data_model: {
         system: `You are a senior backend architect producing production-grade artifacts for engineering teams. Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup. Define every field at field level — name, type, requiredness, and a precise description. Model only entities and fields that the PRD's features and entities require; do not introduce speculative fields. Keep entity and field names consistent with the PRD's defined entities.
@@ -173,13 +230,11 @@ Use stable names for entities and fields: reuse the PRD's exact entity and field
         userPrefix: 'Create a Data Model from this PRD:',
     },
     prompt_pack: {
-        system: `You are a senior prompt engineer producing production-grade artifacts for engineering teams. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into Cursor, Claude Code, ChatGPT, or Copilot WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language.
+        system: `You are a senior prompt engineer producing production-grade artifacts for engineering teams. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into any coding agent or AI assistant WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language. The prompts MUST be agent-agnostic — never name, recommend, or assume a specific tool (e.g. Cursor, Claude Code, ChatGPT, Copilot). Do not tailor a prompt to any one agent's features.
 
 For each prompt, use this exact format:
 
 ### [N]. [Prompt Title]
-**Target Tool:** Cursor | Claude Code | ChatGPT | Copilot | Generic
-**Reason:** One short user-facing sentence (≤25 words) explaining why this target tool fits THIS prompt — e.g. "Cursor — best fit for applying multi-file code changes directly in the repo with diff preview." Keep it concrete; do not say "best AI tool". Select the tool by fit: Cursor for multi-file repo edits; Claude Code for repo-aware agentic tasks; ChatGPT or Generic for standalone reasoning, content, and critique; Copilot for inline code completion.
 **Category:** UI Implementation | UX Critique | Testing | API Design | Content | Accessibility
 **Prompt:**
 \`\`\`
@@ -324,18 +379,48 @@ function implementationPlanToMarkdown(plan: StructuredImplementationPlan): strin
     plan.milestones.forEach((m, i) => {
         const heading = `### Milestone ${i + 1}: ${m.name}${m.timeframe ? ` (${m.timeframe})` : ''}`;
         lines.push(heading);
-        if (m.goal) lines.push(`**Goal:** ${m.goal}`);
+        if (m.goal) lines.push(`**Goal:** ${m.objective ?? m.goal}`);
         if (m.tasks.length) {
             lines.push('**Key Deliverables:**');
             for (const t of m.tasks) {
                 lines.push(`- [${t.status === 'done' ? 'x' : ' '}] **${t.title}** — _${t.status}_`);
             }
         }
-        const deps = Array.from(new Set(m.tasks.flatMap(t => t.dependencies ?? []))).filter(Boolean);
+        // Milestone-level dependencies (consolidated plans) win over the
+        // task-id rollup (legacy plans) — same header either way, which is
+        // what artifactValidation and the legacy parser expect.
+        const deps = m.dependencies?.length
+            ? m.dependencies
+            : Array.from(new Set(m.tasks.flatMap(t => t.dependencies ?? []))).filter(Boolean);
         if (deps.length) lines.push(`**Dependencies:** ${deps.join(', ')}`);
+        // Consolidated-plan sections. Prompt bodies live only in the JSON
+        // fence below (they can be long and may collide with markdown
+        // formatting); the readable body carries title + purpose.
+        if (m.promptPacks?.length) {
+            lines.push('**Prompt Packs:**');
+            m.promptPacks.forEach(p => lines.push(`- **${p.title}** — ${p.purpose}`));
+        }
+        if (m.qualityGates?.length) {
+            lines.push('**Quality Gates:**');
+            m.qualityGates.forEach(g => lines.push(`- [${g.required ? 'required' : 'optional'} · ${g.category}] ${g.title}`));
+        }
+        if (m.validationCommands?.length) {
+            lines.push(`**Validation Commands:** ${m.validationCommands.map(c => `\`${c}\``).join(' · ')}`);
+        }
+        if (m.definitionOfDone?.length) {
+            lines.push('**Definition of Done:**');
+            m.definitionOfDone.forEach(d => lines.push(`- [ ] ${d}`));
+        }
         lines.push('');
     });
 
+    if (plan.globalQualityGates?.length) {
+        lines.push('---', '', '## Global Quality Gates');
+        plan.globalQualityGates.forEach(g => {
+            lines.push(`- [${g.required ? 'required' : 'optional'} · ${g.category}] ${g.title}`);
+        });
+        lines.push('');
+    }
     if (plan.architecture?.length) {
         lines.push('---', '', '## Architecture');
         plan.architecture.forEach(a => lines.push(`- ${a}`));
@@ -376,10 +461,19 @@ export const generateCoreArtifact = async (
         generatedArtifacts?: Partial<Record<CoreArtifactSubtype, string>>;
         signal?: AbortSignal;
         onProgress?: (message: string) => void;
+        /**
+         * The project's chosen design-system preset id (see
+         * DESIGN_SYSTEM_PRESETS). Consumed only by the `design_system` subtype;
+         * other subtypes ignore it. Absent/unknown/'custom' → no steering.
+         */
+        designSystemPreset?: string;
     },
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
     const onProgress = options?.onProgress;
+    // Route by complexity: high-reasoning artifacts → Expert (Pro), the rest →
+    // Fast (Flash). Mirrors the PRD pipeline's per-section tiering.
+    const model = selectArtifactModel(subtype);
 
     const featureList = structuredPRD.features.map(f => {
         let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
@@ -416,6 +510,16 @@ Architecture: ${structuredPRD.architecture}${
         ? `\n\n---\n\nMockup Context (reference for screens, components, and layout):\n${options.mockupContext.slice(0, 3000)}`
         : '';
 
+    // Design-system preset steering. Only the design_system subtype consumes
+    // it; an absent/unknown/'custom' preset yields '' (no steering → original
+    // PRD-only behavior). The model still adapts the direction to the domain.
+    const presetDirective = subtype === 'design_system'
+        ? getDesignSystemPresetDirective(options?.designSystemPreset)
+        : '';
+    const presetSection = presetDirective
+        ? `\n\n---\n\nSELECTED DESIGN DIRECTION (the user explicitly chose this preset — honor it while still fitting the product's domain and audience):\n${presetDirective}\n\nEnsure your token choices (palette, typography, radius, spacing, component recipes) clearly reflect this direction, and include one \`rules\` entry that names the resulting design direction and briefly explains why it fits this product.`
+        : '';
+
     // Use JSON mode for supported artifact types
     const jsonSchemas: Partial<Record<CoreArtifactSubtype, object>> = {
         screen_inventory: screenInventorySchema,
@@ -425,7 +529,7 @@ Architecture: ${structuredPRD.architecture}${
         implementation_plan: implementationPlanSchema,
     };
 
-    const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+    const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}${presetSection}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
 
     // Cap progress messages at ~3/s; emit every 250 chars OR 350ms to keep the
     // UI feeling alive without thrashing the store.
@@ -469,7 +573,7 @@ Architecture: ${structuredPRD.architecture}${
                 onError: () => {},
             },
             options?.signal,
-            { responseMimeType: 'application/json', responseSchema: schema },
+            { responseMimeType: 'application/json', responseSchema: schema, model },
         );
         onProgress?.('Validating output…');
 
@@ -515,6 +619,7 @@ Architecture: ${structuredPRD.architecture}${
             onError: () => {},
         },
         options?.signal,
+        { model },
     );
     onProgress?.('Validating output…');
     return { content: normalizeArtifactMarkdown(result) };
@@ -530,6 +635,8 @@ export const refineCoreArtifact = async (
 ): Promise<string> => {
     options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
 
+    // Refine on the same complexity tier the artifact was generated with.
+    const model = selectArtifactModel(subtype);
     const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
 
     if (subtype === 'screen_inventory') {
@@ -549,7 +656,7 @@ Rules:
         const result = await callGemini(
             system,
             `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-            { responseMimeType: 'application/json', responseSchema: screenInventorySchema },
+            { responseMimeType: 'application/json', responseSchema: screenInventorySchema, model },
             options?.signal,
         );
 
@@ -574,7 +681,7 @@ Rules:
     return callGemini(
         system,
         `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-        undefined,
+        { model },
         options?.signal,
     );
 };

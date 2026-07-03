@@ -8,14 +8,16 @@ import type {
 } from '../../types';
 import { MOCKUP_SPEC_V1 } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
-import { generateCoreArtifact } from './coreArtifactService';
+import { generateCoreArtifact, selectArtifactModel } from './coreArtifactService';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
 import {
     CORE_ARTIFACT_PIPELINE,
+    isRetiredArtifactSubtype,
     buildDependencyLayers,
     getArtifactMeta,
+    isHiddenArtifactSubtype,
 } from '../coreArtifactPipeline';
 import { isAbortError } from '../concurrency';
 import { getStrongModel } from '../geminiClient';
@@ -162,9 +164,14 @@ async function runCoreArtifactSlot(
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
         });
+        // Read the chosen design-system preset off the project here (rather than
+        // threading it through every startAll/regenerate/resume call site) so
+        // ALL generation paths consistently honor it. Only design_system uses it.
+        const designSystemPreset = store.getProject(projectId)?.designSystemPreset;
         const result = await generateCoreArtifact(subtype, prdContent, structuredPRD, {
             generatedArtifacts,
             signal,
+            designSystemPreset,
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
         content = result.content;
@@ -418,7 +425,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             nodeId: meta.subtype,
                             nodeName: meta.title,
                             agentName: 'Artifact Agent',
-                            model: getStrongModel(),
+                            model: selectArtifactModel(meta.subtype),
                             provider: 'gemini',
                             status: 'complete',
                             dependencyIds: meta.dependsOn,
@@ -431,7 +438,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             nodeId: meta.subtype,
                             nodeName: meta.title,
                             agentName: 'Artifact Agent',
-                            model: getStrongModel(),
+                            model: selectArtifactModel(meta.subtype),
                             provider: 'gemini',
                             status: 'error',
                             dependencyIds: meta.dependsOn,
@@ -514,8 +521,21 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
 }
 
 function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
-    return ALL_SLOT_KEYS.filter(k => !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
+    // Retired subtypes (e.g. prompt_pack, folded into the consolidated
+    // implementation_plan) never generate in new runs — they're excluded
+    // here so startAll/resume/regenerate can't schedule them.
+    return ALL_SLOT_KEYS.filter(k =>
+        (k === 'mockup' || !isRetiredArtifactSubtype(k))
+        && !isSlotDoneForSpine(args.projectId, k, args.spineVersionId));
 }
+
+// A slot is "hidden" when its subtype is hidden from the assets list. 'mockup'
+// is always visible. Hidden slots still generate (startAll includes them), but
+// they must never be the *reason* auto-resume wakes a run — the user has no row
+// to see or retry them, so retrying an errored hidden slot on every remount is
+// invisible churn. resumeIfNeeded therefore gates on visible pending slots only.
+const isHiddenSlot = (slot: ArtifactSlotKey): boolean =>
+    slot !== 'mockup' && isHiddenArtifactSubtype(slot);
 
 export const artifactJobController = {
     isActive(projectId: string): boolean {
@@ -649,7 +669,13 @@ export const artifactJobController = {
      */
     resumeIfNeeded(args: StartArgs): void {
         if (this.isActive(args.projectId)) return;
-        const pending = pendingSlotsForSpine(args);
+        // Only auto-wake for *visible* pending slots. A hidden slot that errored
+        // stays pending forever (no version), and without this filter every
+        // workspace remount would spin up a run just to retry it — invisibly,
+        // with no user-facing status or retry affordance. When a visible slot is
+        // pending, startAll still includes the hidden slot in its own pending
+        // set, so hidden artifacts are best-effort regenerated alongside.
+        const pending = pendingSlotsForSpine(args).filter(k => !isHiddenSlot(k));
         if (pending.length === 0) return;
         this.startAll(args);
     },

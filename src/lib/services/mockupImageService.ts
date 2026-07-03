@@ -3,7 +3,7 @@
 // store can stay thin.
 
 import type { DesignTokens, MockupPayload, MockupScreen, MockupSettings, MockupPlatform } from '../../types';
-import { tokensToImagePromptBrief } from '../designTokens';
+import { buildDesignSystemBrief } from '../designTokens';
 
 const FIDELITY_STYLE_HINTS: Record<string, string> = {
     low: 'low-fidelity wireframe, neutral grey palette, simple rectangular placeholders and labels, sketch-style linework, no imagery',
@@ -53,7 +53,7 @@ export const buildScreenImagePrompt = (
     const userStyle = settings.style?.trim();
     const styleSuffix = userStyle ? ` Visual direction: ${userStyle}.` : '';
     const tokenBrief = designTokens
-        ? ` ${tokensToImagePromptBrief(designTokens)}`
+        ? ` ${buildDesignSystemBrief(designTokens)}`
         : '';
 
     const intentLine = screen.userIntent

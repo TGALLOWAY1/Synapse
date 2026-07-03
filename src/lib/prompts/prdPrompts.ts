@@ -43,15 +43,19 @@ export const PROMPT_CONTRACT = `OPERATING CONTRACT — these principles are bind
 
 // Quality bar appended to the strategy system instruction. Phrased as
 // targets the model should aim for in its first (and only) output.
+// The PRD is the product DECISION document: it must make every product
+// decision crisp and unambiguous, and must NOT contain the detailed
+// specifications (schemas, state machines, per-screen UI specs, tracking
+// plans) that the dedicated downstream artifacts own.
 export const RUBRIC_DEFINITION = `QUALITY BAR — this is a hard requirement, not guidance. Your output is judged on these dimensions and must reach 5/5 on each:
 
 - specificity: 1=generic template; 3=some product-specific detail; 5=deeply tailored, opinionated, no filler.
-- uxUsefulness: 1=no page-level detail; 3=basic page list; 5=clear screen architecture with empty/loading/error states and interactions per page.
-- engineeringUsefulness: 1=feature list only; 3=some tech notes; 5=concrete data model, state machines, roles, request flows, NFRs.
+- uxUsefulness: 1=no screen-level signal; 3=basic page list; 5=every screen's name, purpose, and key content are unambiguous enough for the dedicated Screen Inventory and Design System artifacts to specify the full UI without guessing. Per-screen component architecture, interaction specs, and state matrices do NOT belong in the PRD.
+- engineeringUsefulness: 1=feature list only; 3=some tech notes; 5=architecture direction, roles, NFRs, and constraints decided crisply enough for the dedicated Data Model and Implementation Plan artifacts to be derived with no rework. Database schemas, state machines, and request-flow specifications do NOT belong in the PRD.
 - strategicClarity: 1=vague vision; 3=some differentiation; 5=strong product thesis, intentional non-goals, explicit tradeoffs.
 - formatting: handled deterministically by the client renderer — focus on populating the structured fields richly.
-- acceptanceCriteria: 1=basic checkboxes; 3=some details; 5=success, edge, failure, and UI behavior all enumerated per major feature.
-- downstreamReadiness: 1=weak source artifact; 3=usable with edits; 5=strong enough to drive mockups, screen inventory, data model, implementation plan with no rework.`;
+- acceptanceCriteria: 1=basic checkboxes; 3=some details; 5=success, edge, and failure behavior enumerated per major feature.
+- downstreamReadiness: 1=weak source artifact; 3=usable with edits; 5=every product decision is stated and unambiguous, so the dedicated downstream artifacts (screen inventory, user flows, data model, design system, implementation plan) can be generated with no rework — decisions live in the PRD, detail lives in those artifacts.`;
 
 // NOTE: currently unused at runtime. The live PRD path is the progressive
 // section pipeline (prdSectionPrompts.ts); this single-pass instruction is

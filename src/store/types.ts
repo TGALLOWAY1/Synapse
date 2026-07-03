@@ -54,6 +54,16 @@ export interface ProjectState {
     // Pipeline stage
     setProjectStage: (projectId: string, stage: PipelineStage) => void;
 
+    // Stores the chosen design-system preset id (see DESIGN_SYSTEM_PRESETS).
+    // Also clears `needsDesignSetup` — a chosen preset settles the setup step
+    // regardless of which UI it was picked from.
+    setProjectDesignSystemPreset: (projectId: string, presetId: string) => void;
+
+    // Dismisses the setup-stage design selection step without choosing a
+    // preset ("decide later") — the Mark-as-Final gate still asks before
+    // assets generate.
+    markDesignSetupComplete: (projectId: string) => void;
+
     // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
     // a demo snapshot was available. When `available` is false, the home
     // page surfaces a friendly "no demo set" message.

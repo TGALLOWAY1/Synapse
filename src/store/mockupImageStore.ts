@@ -26,6 +26,35 @@ import {
     listImagesForVersion as idbListImages,
     putImage as idbPutImage,
 } from '../lib/mockupImageStore';
+import { getRefsForVersion } from '../lib/imageRefRegistry';
+import { fetchBlobAsDataUrl } from '../lib/imageRefsClient';
+import { mockupRecordFromRef, type ImageRef } from '../lib/imageRef';
+import { notifyMockupImageGenerated } from './projectImageSync';
+
+// Pull blob bytes for refs the local IndexedDB doesn't have yet (cross-device
+// case). Concurrency-limited so a version with many screens doesn't open a fetch
+// per screen at once. A failed fetch is skipped (render shows empty, retried on
+// next mount) — never throws out of the loader.
+const hydrateMissingRefs = async (refs: ImageRef[]): Promise<MockupImageRecord[]> => {
+    const CONCURRENCY = 4;
+    const out: MockupImageRecord[] = [];
+    let cursor = 0;
+    const workers = Array.from({ length: Math.min(CONCURRENCY, refs.length) }, async () => {
+        while (true) {
+            const idx = cursor++;
+            if (idx >= refs.length) return;
+            const ref = refs[idx];
+            try {
+                const dataUrl = await fetchBlobAsDataUrl(ref.blobUrl);
+                out.push(mockupRecordFromRef(ref, dataUrl));
+            } catch {
+                // skip — best-effort hydration
+            }
+        }
+    });
+    await Promise.all(workers);
+    return out;
+};
 
 interface InFlight {
     quality: MockupImageQuality;
@@ -82,10 +111,27 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
 
     loadForVersion: async (versionId) => {
         const records = await idbListImages(versionId);
-        if (records.length === 0) return;
+        const haveKeys = new Set(records.map((r) => r.key));
+        if (records.length > 0) {
+            set((state) => {
+                const next = { ...state.images };
+                for (const r of records) next[r.key] = r;
+                return { images: next };
+            });
+        }
+
+        // Cross-device hydration: for any server ref this device is missing,
+        // fetch the blob, write it into IndexedDB (the local source of truth),
+        // and surface it in the reactive cache. Lazy — only on view, never a
+        // bulk download on sign-in.
+        const missing = getRefsForVersion(versionId).filter((r) => !haveKeys.has(r.key));
+        if (missing.length === 0) return;
+        const hydrated = await hydrateMissingRefs(missing);
+        if (hydrated.length === 0) return;
+        for (const record of hydrated) await idbPutImage(record);
         set((state) => {
             const next = { ...state.images };
-            for (const r of records) next[r.key] = r;
+            for (const r of hydrated) next[r.key] = r;
             return { images: next };
         });
     },
@@ -148,6 +194,10 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
                     inFlight: nextInFlight,
                 };
             });
+            // Sync the freshly generated render to Blob (best-effort; no-op when
+            // signed out). Image generation writes IndexedDB directly and never
+            // touches the project store, so the bundle-push path wouldn't see it.
+            notifyMockupImageGenerated(projectId, versionId);
         } catch (err) {
             const aborted = (err as { name?: string })?.name === 'AbortError' || abort.signal.aborted;
             const message = aborted

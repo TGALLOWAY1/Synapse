@@ -6,8 +6,10 @@ import rehypeRaw from 'rehype-raw';
 import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
-import { hashDesignTokens } from '../../lib/designTokens';
-import { SectionTabs, type SectionTabItem } from '../SectionTabs';
+import { getDesignSystemPresetLabel } from '../../lib/designSystemPresets';
+import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
+import { useArtifactOutline } from '../../lib/useArtifactOutline';
+import { useIsMobile } from '../../lib/useIsMobile';
 
 // Render a `design_system` artifact. The renderer prefers a structured
 // token contract on `metadata.tokens` (new generations) and falls back
@@ -15,13 +17,12 @@ import { SectionTabs, type SectionTabItem } from '../SectionTabs';
 // (older projects in localStorage).
 //
 // New token-aware sections (when metadata.tokens is present):
-//   1. Token Summary (counts + tokensHash badge)
-//   2. Color Tokens (grouped by namespace)
-//   3. Typography Tokens (live previews)
-//   4. Spacing + Radius (proportional bars)
-//   5. Component Tokens (recipe cards)
-//   6. Usage Rules (verbatim from tokens.rules)
-//   7. Downstream Usage Status (mockup / HTML mockup / component_inventory)
+//   1. Color Tokens (grouped by namespace)
+//   2. Typography Tokens (live previews)
+//   3. Spacing + Radius (proportional bars)
+//   4. Component Tokens (recipe cards)
+//   5. Usage Rules (verbatim from tokens.rules)
+//   6. Downstream Usage Status (mockup / HTML mockup / component_inventory)
 //
 // Legacy markdown rendering preserved unchanged for back-compat.
 
@@ -55,24 +56,40 @@ function useTokensFromMetadata(metadata: Record<string, unknown> | undefined): D
 
 // ─── Tokenized renderer ───────────────────────────────────────────────────
 
+function plural(n: number, singular: string, pluralForm = `${singular}s`): string {
+    return `${n} ${n === 1 ? singular : pluralForm}`;
+}
+
 function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; projectId?: string }) {
-    const tabs: SectionTabItem[] = [
-        { id: 'ds-summary', label: 'Summary' },
-        { id: 'ds-colors', label: 'Colors' },
-        { id: 'ds-typography', label: 'Typography' },
-        { id: 'ds-spacing', label: 'Spacing & Radius' },
-        { id: 'ds-components', label: 'Components' },
-        { id: 'ds-rules', label: 'Rules' },
-        { id: 'ds-downstream', label: 'Downstream' },
-    ];
+    const isMobile = useIsMobile();
+
+    const items: ArtifactOutlineItem[] = useMemo(() => {
+        const spacingCount = Object.keys(tokens.spacing).length + Object.keys(tokens.radius).length;
+        return [
+            { id: 'ds-colors', label: 'Colors', countLabel: plural(Object.keys(tokens.colors).length, 'token') },
+            { id: 'ds-typography', label: 'Typography', countLabel: plural(Object.keys(tokens.typography).length, 'role') },
+            { id: 'ds-spacing', label: 'Spacing & Radius', countLabel: plural(spacingCount, 'token') },
+            { id: 'ds-components', label: 'Components', countLabel: plural(Object.keys(tokens.components).length, 'component') },
+            { id: 'ds-rules', label: 'Rules', countLabel: plural(tokens.rules.length, 'rule') },
+            { id: 'ds-downstream', label: 'Downstream Effects' },
+        ];
+    }, [tokens]);
+
+    const ids = useMemo(() => items.map(i => i.id), [items]);
+    const { activeId, scrollTo } = useArtifactOutline(ids);
 
     return (
         <div className="space-y-6">
-            <SectionTabs items={tabs} />
+            <ArtifactOutlineNav
+                title="Sections"
+                items={items}
+                activeId={activeId}
+                activeLabel="Current section"
+                collapseOnSelect={isMobile}
+                onSelect={scrollTo}
+            />
 
-            <Section id="ds-summary" title="Token Summary">
-                <TokenSummary tokens={tokens} />
-            </Section>
+            <DesignDirectionNote projectId={projectId} />
 
             <Section id="ds-colors" title="Color Tokens">
                 <ColorTokens tokens={tokens} />
@@ -101,6 +118,28 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
     );
 }
 
+// Explains the design system's role as the project's single visual source of
+// truth: internal mockups and the prompts users copy for external image tools
+// both follow it, and regenerating it can shift those downstream assets. Shows
+// the chosen preset direction when one was set.
+function DesignDirectionNote({ projectId }: { projectId?: string }) {
+    const presetId = useProjectStore(s => (projectId ? s.projects[projectId]?.designSystemPreset : undefined));
+    const presetLabel = getDesignSystemPresetLabel(presetId);
+    return (
+        <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-xs text-indigo-900">
+            <p>
+                <span className="font-semibold">This design system is your project's visual source of truth.</span>{' '}
+                Internal mockups and the prompts you copy for external image tools both follow it, so they
+                stay consistent.
+                {presetLabel ? <> Direction: <span className="font-medium">{presetLabel}</span>.</> : null}
+            </p>
+            <p className="mt-1 text-indigo-700/90">
+                Regenerating the design system may change your mockups and screen-level prompts.
+            </p>
+        </div>
+    );
+}
+
 function Section({ id, title, children }: { id: string; title: string; children: React.ReactNode }) {
     return (
         <section id={id} className="scroll-mt-24">
@@ -109,39 +148,6 @@ function Section({ id, title, children }: { id: string; title: string; children:
             </h3>
             {children}
         </section>
-    );
-}
-
-function TokenSummary({ tokens }: { tokens: DesignTokens }) {
-    const hash = useMemo(() => hashDesignTokens(tokens), [tokens]);
-    const counts = [
-        { label: 'Colors', value: Object.keys(tokens.colors).length },
-        { label: 'Typography roles', value: Object.keys(tokens.typography).length },
-        { label: 'Spacing slots', value: Object.keys(tokens.spacing).length },
-        { label: 'Radius slots', value: Object.keys(tokens.radius).length },
-        { label: 'Components', value: Object.keys(tokens.components).length },
-        { label: 'Rules', value: tokens.rules.length },
-    ];
-    return (
-        <div className="space-y-3">
-            <div className="flex flex-wrap gap-2">
-                {counts.map(c => (
-                    <span
-                        key={c.label}
-                        className="text-[11px] uppercase tracking-wider px-2.5 py-1 rounded-md border border-neutral-200 bg-neutral-50 text-neutral-600 font-medium"
-                    >
-                        {c.value} {c.label}
-                    </span>
-                ))}
-            </div>
-            <div className="flex items-center gap-2 text-xs text-neutral-500">
-                <span>Token hash:</span>
-                <code className="font-mono text-[11px] px-1.5 py-0.5 rounded bg-neutral-100 border border-neutral-200 text-neutral-700">
-                    {hash}
-                </code>
-                <span className="text-neutral-400">— used to detect downstream staleness when tokens change.</span>
-            </div>
-        </div>
     );
 }
 
@@ -810,14 +816,27 @@ function FallbackMarkdown({ body }: { body: string }) {
 }
 
 function LegacyMarkdownDesignSystem({ content }: { content: string }) {
+    const isMobile = useIsMobile();
     const sections = useMemo(() => splitByH3(content), [content]);
-    const tabs: SectionTabItem[] = sections
-        .filter(s => s.title)
-        .map(s => ({ id: `ds-${slug(s.title)}`, label: s.title }));
+    const items: ArtifactOutlineItem[] = useMemo(
+        () => sections.filter(s => s.title).map(s => ({ id: `ds-${slug(s.title)}`, label: s.title })),
+        [sections],
+    );
+    const ids = useMemo(() => items.map(i => i.id), [items]);
+    const { activeId, scrollTo } = useArtifactOutline(ids);
 
     return (
         <div className="space-y-6">
-            <SectionTabs items={tabs} />
+            {items.length > 1 && (
+                <ArtifactOutlineNav
+                    title="Sections"
+                    items={items}
+                    activeId={activeId}
+                    activeLabel="Current section"
+                    collapseOnSelect={isMobile}
+                    onSelect={scrollTo}
+                />
+            )}
             {sections.map((section, i) => {
                 const title = section.title.toLowerCase();
                 let body: React.ReactNode;

@@ -25,9 +25,12 @@ import { StructuredPRDView } from './StructuredPRDView';
 import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
+import { DesignSetupStep } from './setup/DesignSetupStep';
+import { shouldShowDesignSetup } from '../lib/designSetup';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
-import { CORE_ARTIFACT_DISPLAY_ORDER } from '../lib/coreArtifactPipeline';
+import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
+import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
@@ -45,7 +48,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -74,6 +77,9 @@ export function ProjectWorkspace() {
     // and selects the first non-PRD artifact on arrival from finalize.
     const [showFinalizeSuccess, setShowFinalizeSuccess] = useState(false);
     const [finalizeAutoOpen, setFinalizeAutoOpen] = useState(false);
+    // Gate shown on the finalize edge when the project hasn't picked a
+    // design-system direction yet. Choosing one stores it, then finalizes.
+    const [showPresetChoice, setShowPresetChoice] = useState(false);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -137,6 +143,26 @@ export function ProjectWorkspace() {
         }
     }, [projectId, projectExists, navigate]);
 
+    // Deep link: /p/:id?screen=<canonical id> targets a screen in the
+    // Experience workspace (ArtifactWorkspace reads the param). currentStage
+    // is persisted per project, so a shared/bookmarked screen URL would
+    // otherwise open on whatever stage the project was last left in. One-shot
+    // on mount — never fights later user navigation. If the workspace isn't
+    // available (spine not final / blocked), the param is simply inert.
+    useEffect(() => {
+        if (!projectId) return;
+        if (!new URLSearchParams(window.location.search).get('screen')) return;
+        const store = useProjectStore.getState();
+        const proj = store.getProject(projectId);
+        const spine = store.getLatestSpine(projectId);
+        if (!proj || proj.currentStage === 'workspace') return;
+        if (spine?.isFinal && spine.structuredPRD && spine.safetyReview?.status !== 'blocked') {
+            store.setProjectStage(projectId, 'workspace');
+        }
+        // Mount-only by design (store read via getState, not deps): reacting
+        // to later param changes would yank the stage from under the user.
+    }, [projectId]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -191,6 +217,27 @@ export function ProjectWorkspace() {
         && !activeSpine.preflightSession.completed
         && !activeSpine.structuredPRD
         && activeSpine.safetyReview?.status !== 'blocked';
+
+    // Setup-stage design selection: right after clarification (or immediately,
+    // on the Generate Immediately path), while PRD generation runs in the
+    // background, a fresh project picks its visual direction. Replaces the
+    // PRD/progress view until the user chooses or skips; never shown for
+    // legacy projects, the demo, blocked spines, or failed runs (see
+    // shouldShowDesignSetup). `hasFailedSection` additionally yields on a
+    // *transient* section failure (the live grid errors before the persisted
+    // failedSections meta lands on the spine) so the progress timeline's
+    // "Run again" affordance is never hidden behind the setup step.
+    const showDesignSetup = !showPreflight && !isOldVersion && !hasFailedSection
+        && shouldShowDesignSetup(project, activeSpine);
+
+    // Idea + clarification text feeding the rule-based preset recommendation.
+    const designRecommendationText = showDesignSetup
+        ? [
+            activeSpine?.promptText,
+            activeSpine?.preflightSession?.summary,
+            ...(activeSpine?.preflightSession?.questions.map((q) => q.answer ?? '') ?? []),
+        ].filter(Boolean).join('\n')
+        : '';
 
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
@@ -274,6 +321,7 @@ export function ProjectWorkspace() {
             await generateStructuredPRD(
                 sourcePrompt,
                 {
+                    projectName: project?.name,
                     onProgress: (message) => appendPrdProgress(projectId, message),
                     onSectionStatus: (sectionId, update) => setSectionStatus(projectId, sectionId, update),
                     onWorkflowRun: (run) => {
@@ -434,9 +482,17 @@ export function ProjectWorkspace() {
     // modal's "ready" vs "being created" copy. Cheap presence check; safe to
     // run each render.
     const assetsReady = !!activeSpine?.structuredPRD && (() => {
-        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER.every(meta =>
-            getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
-        );
+        // Hidden artifacts (generated for downstream use but not surfaced in the
+        // assets list) must not gate readiness — the user has no row to see or
+        // retry them, so a hidden slot erroring would otherwise leave the
+        // finalize success modal stuck reporting "assets are being created".
+        const coreReady = CORE_ARTIFACT_DISPLAY_ORDER
+            // Retired subtypes (prompt_pack) no longer generate at all, so
+            // they must not gate readiness either.
+            .filter(meta => !isHiddenArtifactSubtype(meta.subtype) && !isRetiredArtifactSubtype(meta.subtype))
+            .every(meta =>
+                getArtifacts(projectId, 'core_artifact').some(a => a.subtype === meta.subtype && a.currentVersionId),
+            );
         const mockupReady = getArtifacts(projectId, 'mockup').some(a => a.currentVersionId);
         return coreReady && mockupReady;
     })();
@@ -459,8 +515,28 @@ export function ProjectWorkspace() {
         // Blocked spines can never advance to the workspace / artifact stage.
         if (activeSpine.safetyReview?.status === 'blocked') return;
         const next = !activeSpine.isFinal;
-        markSpineFinal(projectId, activeSpine.id, next);
-        if (!next) return;
+        if (!next) {
+            // Un-finalizing — just flip the flag, no generation involved.
+            markSpineFinal(projectId, activeSpine.id, false);
+            return;
+        }
+
+        // Finalizing. If this real project will generate assets but hasn't
+        // picked a design-system direction yet, ask first — the choice steers
+        // the design system (and therefore mockups + copied prompts). The demo
+        // never generates and skips straight through.
+        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID && !project?.designSystemPreset) {
+            setShowPresetChoice(true);
+            return;
+        }
+        finalizeAndGenerate();
+    };
+
+    // Performs the actual finalize + asset kickoff. Split out so it can run
+    // either directly (preset already chosen / demo) or after the preset gate.
+    const finalizeAndGenerate = () => {
+        if (!projectId || !activeSpine) return;
+        markSpineFinal(projectId, activeSpine.id, true);
 
         // Kick off artifact generation immediately so assets are underway
         // while the success modal is visible. We deliberately do NOT switch
@@ -476,6 +552,15 @@ export function ProjectWorkspace() {
             });
         }
         setShowFinalizeSuccess(true);
+    };
+
+    const handleChooseDesignSystemPreset = (presetId: string) => {
+        if (!projectId) return;
+        // Persist the choice synchronously so the generation pipeline reads it
+        // off the project when design_system runs.
+        setProjectDesignSystemPreset(projectId, presetId);
+        setShowPresetChoice(false);
+        finalizeAndGenerate();
     };
 
     // "Open Assets" from the success modal: navigate to the Assets stage and
@@ -652,6 +737,12 @@ export function ProjectWorkspace() {
                 </div>
             </div>
 
+            {showPresetChoice && (
+                <DesignSystemPresetChoice
+                    onChoose={handleChooseDesignSystemPreset}
+                    onClose={() => setShowPresetChoice(false)}
+                />
+            )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
                     assetsReady={assetsReady}
@@ -779,7 +870,14 @@ export function ProjectWorkspace() {
                                 platform={project?.platform}
                             />
                         )}
-                        {pipelineStage === 'prd' && !showPreflight && (
+                        {pipelineStage === 'prd' && showDesignSetup && activeSpine && (
+                            <DesignSetupStep
+                                projectId={projectId}
+                                recommendationText={designRecommendationText}
+                                prdGenerating={isPRDActivelyGenerating}
+                            />
+                        )}
+                        {pipelineStage === 'prd' && !showPreflight && !showDesignSetup && (
                             <>
                                 {/* Feedback items from mockups/artifacts */}
                                 <FeedbackItemsList

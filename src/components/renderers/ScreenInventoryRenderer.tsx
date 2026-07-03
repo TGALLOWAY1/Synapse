@@ -1,22 +1,16 @@
 import { useEffect, type ReactNode } from 'react';
 import { AlertTriangle, ChevronRight, ArrowRight } from 'lucide-react';
-import type { ExitPath, ScreenItem, ScreenPriority, ScreenState } from '../../types';
+import type { ExitPath, ScreenItem, ScreenState } from '../../types';
 import { ScreenImageGallery, type ScreenImageGalleryContext } from './ScreenImageGallery';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
 import { parseScreenInventory } from '../../lib/screenInventoryNormalize';
+import { PRIORITY_STYLES, stylablePriority } from './screenPriority';
 
 interface Props {
     content: string;
     /** When supplied, each screen card gets a copy-prompt + image-upload gallery. */
     imageContext?: ScreenImageGalleryContext;
 }
-
-const PRIORITY_STYLES: Record<ScreenPriority, string> = {
-    P0: 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200',
-    P1: 'bg-sky-100 text-sky-700 ring-1 ring-sky-200',
-    P2: 'bg-neutral-100 text-neutral-600 ring-1 ring-neutral-200',
-    P3: 'bg-neutral-50 text-neutral-400 ring-1 ring-neutral-100',
-};
 
 export function ScreenInventoryRenderer({ content, imageContext }: Props) {
     const inventory = parseScreenInventory(content);
@@ -118,19 +112,25 @@ function JourneyRow({ steps }: { steps: string[] }) {
     );
 }
 
-function ScreenCard({
+// Exported so the Experience workspace's Screen Detail "Overview" tab renders
+// the exact same per-screen block as the standalone Screen Inventory renderer.
+// `imageStorageName` (optional) is the stored generated name the upload
+// gallery keys images by — the Experience workspace passes it so display
+// renames never orphan uploads. Omitted (standalone renderer), the gallery
+// keys by `screen.name` exactly as before.
+export function ScreenCard({
     screen,
     imageContext,
+    imageStorageName,
 }: {
     screen: ScreenItem;
     imageContext?: ScreenImageGalleryContext;
+    imageStorageName?: string;
 }) {
     const ui = screen.coreUIElements && screen.coreUIElements.length > 0
         ? screen.coreUIElements
         : screen.components ?? [];
-    const priority = (screen.priority in PRIORITY_STYLES
-        ? screen.priority
-        : 'P1') as ScreenPriority;
+    const priority = stylablePriority(screen.priority);
 
     const hasNavigation = (screen.entryPoints?.length ?? 0) > 0
         || (screen.exitPaths?.length ?? 0) > 0;
@@ -211,7 +211,9 @@ function ScreenCard({
                 <LinkedFeatures refs={screen.featureRefs} />
             )}
 
-            {imageContext && <ScreenImageGallery screen={screen} context={imageContext} />}
+            {imageContext && (
+                <ScreenImageGallery screen={screen} context={imageContext} storageName={imageStorageName} />
+            )}
         </article>
     );
 }

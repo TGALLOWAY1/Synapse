@@ -17,6 +17,9 @@ logs
 !.env.example
 .vercel
 
+# Screenshot capture output (demo artifact shots — not committed)
+screenshots-demo/
+
 # Editor & OS
 .vscode/*
 !.vscode/extensions.json

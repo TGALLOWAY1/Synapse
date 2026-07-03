@@ -2,8 +2,14 @@ import { getCachedGeminiKey } from './geminiKeyVault';
 import { getLocalCredential, GEMINI_API_KEY } from './localCredentials';
 
 export interface JsonModeConfig {
-    responseMimeType: string;
-    responseSchema: object;
+    /**
+     * JSON-mode response controls. Optional so this config can also carry a
+     * plain-text per-call `model` override with no schema (the artifact tier
+     * routing passes `{ model }` alone). When omitted, no JSON `generationConfig`
+     * is sent and the call behaves as a normal text generation.
+     */
+    responseMimeType?: string;
+    responseSchema?: object;
     temperature?: number;
     topP?: number;
     topK?: number;
@@ -257,14 +263,18 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     };
 
     if (jsonMode) {
-        body.generationConfig = {
-            responseMimeType: jsonMode.responseMimeType,
-            responseSchema: jsonMode.responseSchema,
+        const generationConfig: Record<string, unknown> = {
+            ...(jsonMode.responseMimeType ? { responseMimeType: jsonMode.responseMimeType } : {}),
+            ...(jsonMode.responseSchema ? { responseSchema: jsonMode.responseSchema } : {}),
             ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
             ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
             ...(typeof jsonMode.maxOutputTokens === 'number' ? { maxOutputTokens: jsonMode.maxOutputTokens } : {}),
         };
+        // A model-only override (no schema/params) carries no generationConfig.
+        if (Object.keys(generationConfig).length > 0) {
+            body.generationConfig = generationConfig;
+        }
     }
 
     const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
@@ -339,14 +349,18 @@ export const callGeminiStream = async (
     };
 
     if (jsonMode) {
-        body.generationConfig = {
-            responseMimeType: jsonMode.responseMimeType,
-            responseSchema: jsonMode.responseSchema,
+        const generationConfig: Record<string, unknown> = {
+            ...(jsonMode.responseMimeType ? { responseMimeType: jsonMode.responseMimeType } : {}),
+            ...(jsonMode.responseSchema ? { responseSchema: jsonMode.responseSchema } : {}),
             ...(typeof jsonMode.temperature === 'number' ? { temperature: jsonMode.temperature } : {}),
             ...(typeof jsonMode.topP === 'number' ? { topP: jsonMode.topP } : {}),
             ...(typeof jsonMode.topK === 'number' ? { topK: jsonMode.topK } : {}),
             ...(typeof jsonMode.maxOutputTokens === 'number' ? { maxOutputTokens: jsonMode.maxOutputTokens } : {}),
         };
+        // A model-only override (no schema/params) carries no generationConfig.
+        if (Object.keys(generationConfig).length > 0) {
+            body.generationConfig = generationConfig;
+        }
     }
     const bodyJson = JSON.stringify(body);
 

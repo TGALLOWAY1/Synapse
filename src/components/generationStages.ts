@@ -80,7 +80,8 @@ export function getArtifactStages(subtype: string): ProgressStage[] {
             return [
                 { label: 'Scoping build phases...', minDuration: 2500 },
                 { label: 'Sequencing milestones...', minDuration: 3000 },
-                { label: 'Drafting implementation roadmap...', minDuration: 3500 },
+                { label: 'Writing milestone prompt packs...', minDuration: 3500 },
+                { label: 'Attaching quality gates...', minDuration: 3500 },
             ];
         case 'data_model':
             return [

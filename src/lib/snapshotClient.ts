@@ -22,9 +22,16 @@
 import type {
     Project, SpineVersion, HistoryEvent, Branch,
     Artifact, ArtifactVersion, FeedbackItem, MockupImageRecord,
+    ScreenInventoryImageRecord, ProjectTask, WorkflowRun,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
-import { listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
+import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
+import {
+    buildScreenImageKey,
+    listScreenImagesForArtifactVersion,
+    putScreenImage,
+    deleteScreenImagesForArtifactVersion,
+} from './screenInventoryImageStore';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -36,6 +43,12 @@ export type SnapshotProjectBundle = {
     artifacts: Artifact[];
     artifactVersions: ArtifactVersion[];
     feedbackItems: FeedbackItem[];
+    // Persisted store slices that were previously omitted from snapshots, so a
+    // restored project carries its implementation tasks and orchestration
+    // metrics too. Optional on the wire — snapshots saved before this layer
+    // existed won't have them, and restore defaults to [].
+    tasks?: ProjectTask[];
+    workflowRuns?: WorkflowRun[];
 };
 
 export type SnapshotManifest = {
@@ -45,6 +58,9 @@ export type SnapshotManifest = {
     createdAt: string;
     schemaVersion: number;
     imageCount: number;
+    // Count of user-uploaded Screen Inventory images bundled alongside the
+    // mockup images. Optional for back-compat with pre-existing manifests.
+    screenImageCount?: number;
     sizeBytes?: number;
 };
 
@@ -53,6 +69,15 @@ export type SnapshotPayload = {
     manifest: SnapshotManifest;
     project: SnapshotProjectBundle;
     images: MockupImageRecord[];
+    // User-uploaded Screen Inventory images. Lives in a separate IndexedDB
+    // store from mockup images (`screenInventoryImageStore`), so it travels as
+    // its own array. Optional on the wire — older snapshots won't have it.
+    screenImages?: ScreenInventoryImageRecord[];
+    // Client-side only (never on the wire): false when the demo load had to
+    // drop one or more images whose per-image fetch kept failing (flaky mobile
+    // network / rate limit). `loadDemoProject` uses it to skip stamping
+    // `demoSourceSnapshotId`, so the next demo open re-fetches and self-heals.
+    imagesComplete?: boolean;
 };
 
 export type SnapshotListItem = SnapshotManifest & { isDemo?: boolean };
@@ -124,6 +149,8 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
         artifacts: state.artifacts[projectId] ?? [],
         artifactVersions: state.artifactVersions[projectId] ?? [],
         feedbackItems: state.feedbackItems[projectId] ?? [],
+        tasks: state.tasks[projectId] ?? [],
+        workflowRuns: state.workflowRuns[projectId] ?? [],
     };
 };
 
@@ -131,13 +158,35 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
 // versions. The store keys artifactVersions by projectId, so the bundle's
 // version list already represents this project exhaustively. The IDB index
 // is keyed by versionId, so we walk that for each version.
+//
+// We deliberately do NOT filter on `record.projectId`. Artifact version ids
+// are unique per project (and the demo restore namespaces them — see
+// `namespaceSnapshotForRestore`), so a version id unambiguously identifies the
+// owning project. Filtering on the stored `projectId` used to silently drop
+// images whose tag had drifted (e.g. records left tagged with the demo project
+// id by the old restore path), which is exactly how snapshots ended up
+// "losing" mockup images.
 const collectProjectImages = async (bundle: SnapshotProjectBundle): Promise<MockupImageRecord[]> => {
     const out: MockupImageRecord[] = [];
     for (const v of bundle.artifactVersions) {
         const records = await listImagesForVersion(v.id);
-        for (const r of records) {
-            if (r.projectId === bundle.project.id) out.push(r);
-        }
+        out.push(...records);
+    }
+    return out;
+};
+
+// Gather every user-uploaded Screen Inventory image tied to one of this
+// project's artifact versions. Same rationale as `collectProjectImages`: the
+// IDB store is indexed by `artifactVersionId`, and a version id unambiguously
+// identifies its owning project, so we walk by version id and never filter on
+// the (drift-prone) stored `projectId`.
+const collectScreenImages = async (
+    bundle: SnapshotProjectBundle,
+): Promise<ScreenInventoryImageRecord[]> => {
+    const out: ScreenInventoryImageRecord[] = [];
+    for (const v of bundle.artifactVersions) {
+        const records = await listScreenImagesForArtifactVersion(v.id);
+        out.push(...records);
     }
     return out;
 };
@@ -145,9 +194,11 @@ const collectProjectImages = async (bundle: SnapshotProjectBundle): Promise<Mock
 // Strip the (large) base64 payload off an image record so the bundle POST
 // only carries the routing metadata. The dataUrl is uploaded in its own
 // request immediately after.
-const imageMetadata = (img: MockupImageRecord): Omit<MockupImageRecord, 'dataUrl'> => {
+const imageMetadata = <T extends { dataUrl: string }>(img: T): Omit<T, 'dataUrl'> => {
     // We intentionally destructure-then-discard so a future field added to
-    // MockupImageRecord automatically makes it into the metadata blob.
+    // an image record automatically makes it into the metadata blob. Generic
+    // over the record shape so it serves both mockup and screen-inventory
+    // images.
     const { dataUrl: _dataUrl, ...meta } = img;
     void _dataUrl;
     return meta;
@@ -160,12 +211,13 @@ export const saveSnapshot = async (
 ): Promise<SnapshotManifest> => {
     const bundle = collectProjectBundle(projectId);
     const images = await collectProjectImages(bundle);
+    const screenImages = await collectScreenImages(bundle);
 
     onProgress?.({ phase: 'bundle', completed: 0, total: 0 });
 
     // Step 1 — POST the project bundle plus image metadata only. This is
     // bounded (typically a few hundred KB) regardless of how many or how
-    // large the mockup images are.
+    // large the mockup / screen images are.
     const bundleResp = await fetch(API_BASE, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json', ...authHeaders() },
@@ -173,6 +225,7 @@ export const saveSnapshot = async (
             title,
             project: bundle,
             images: images.map(imageMetadata),
+            screenImages: screenImages.map(imageMetadata),
         }),
     });
     if (!bundleResp.ok) throw await errorFromResponse(bundleResp, 'save_failed');
@@ -180,17 +233,21 @@ export const saveSnapshot = async (
 
     // Step 2 — upload each image as a separate request. We go sequentially
     // so a slow/flaky uplink doesn't try to push all images at once and so
-    // browsers don't hold every base64 payload in flight concurrently.
-    onProgress?.({ phase: 'images', completed: 0, total: images.length });
-    for (let i = 0; i < images.length; i++) {
-        const img = images[i];
+    // browsers don't hold every base64 payload in flight concurrently. Mockup
+    // and screen-inventory images share the same per-image endpoint (the
+    // server keys each blob by a hash of the image key, and the two key shapes
+    // never collide), so we upload them in one combined pass.
+    const allImages: Array<{ key: string; dataUrl: string }> = [...images, ...screenImages];
+    onProgress?.({ phase: 'images', completed: 0, total: allImages.length });
+    for (let i = 0; i < allImages.length; i++) {
+        const img = allImages[i];
         const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}&image=1`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json', ...authHeaders() },
             body: JSON.stringify({ image: img }),
         });
         if (!resp.ok) throw await errorFromResponse(resp, 'save_image_failed');
-        onProgress?.({ phase: 'images', completed: i + 1, total: images.length });
+        onProgress?.({ phase: 'images', completed: i + 1, total: allImages.length });
     }
 
     return manifest;
@@ -220,7 +277,7 @@ export const setDemoSnapshot = async (snapshotId: string | null): Promise<string
 // True if the bundle still has every image dataUrl inline — i.e. a legacy
 // v1 snapshot. v2 bundles return image metadata only and need a follow-up
 // fetch per image to hydrate the dataUrls.
-const isFullyInlined = (images: unknown[]): images is MockupImageRecord[] => {
+const isFullyInlined = (images: unknown[]): boolean => {
     if (!Array.isArray(images)) return false;
     if (images.length === 0) return true;
     return images.every((img) =>
@@ -230,62 +287,170 @@ const isFullyInlined = (images: unknown[]): images is MockupImageRecord[] => {
     );
 };
 
-// Pull each image blob into a full MockupImageRecord. Runs the fetches
-// with a small concurrency limit so a project with dozens of screens
-// doesn't try to open a fetch for every one simultaneously.
-const hydrateImages = async (
+// Backoff between per-image fetch attempts. A transient 429 (the demo load is
+// a burst of N+2 requests against one rate-limit scope) or a mobile-network
+// blip on one image must not cost the whole snapshot.
+const IMAGE_RETRY_DELAYS_MS = [500, 1500];
+
+const sleep = (ms: number): Promise<void> => new Promise((resolve) => setTimeout(resolve, ms));
+
+// Fetch one image record, retrying transient failures (non-2xx responses and
+// thrown network errors). A malformed body is permanent — retrying won't fix
+// it — so it fails immediately.
+const fetchImageWithRetry = async <T extends { key: string; dataUrl: string }>(
     fetchOne: (key: string) => Promise<Response>,
-    refs: Array<Omit<MockupImageRecord, 'dataUrl'>>,
-): Promise<MockupImageRecord[]> => {
+    key: string,
+): Promise<T> => {
+    let lastError: Error = new Error(`load_image_failed: ${key}`);
+    for (let attempt = 0; attempt <= IMAGE_RETRY_DELAYS_MS.length; attempt++) {
+        if (attempt > 0) await sleep(IMAGE_RETRY_DELAYS_MS[attempt - 1]);
+        try {
+            const resp = await fetchOne(key);
+            if (!resp.ok) {
+                lastError = await errorFromResponse(resp, 'load_image_failed');
+                continue;
+            }
+            const body = await resp.json() as { image?: T };
+            if (!body?.image || typeof body.image.dataUrl !== 'string') {
+                throw new Error(`load_image_failed: malformed image record for ${key}`);
+            }
+            return body.image;
+        } catch (err) {
+            if (err instanceof Error && err.message.startsWith('load_image_failed: malformed')) {
+                throw err;
+            }
+            lastError = err instanceof Error ? err : new Error(String(err));
+        }
+    }
+    throw lastError;
+};
+
+type HydrateResult<T> = { images: T[]; failedKeys: string[] };
+
+// Pull each image blob into a full record. Runs the fetches with a small
+// concurrency limit so a project with dozens of screens doesn't try to open a
+// fetch for every one simultaneously. With `tolerateFailures`, an image whose
+// fetch permanently fails is dropped (reported in `failedKeys`) instead of
+// rejecting the whole hydration — the public demo path uses this so one bad
+// image on a flaky mobile connection can't discard the entire fresh snapshot.
+const hydrateImages = async <T extends { key: string; dataUrl: string }>(
+    fetchOne: (key: string) => Promise<Response>,
+    refs: Array<Omit<T, 'dataUrl'>>,
+    options?: { tolerateFailures?: boolean },
+): Promise<HydrateResult<T>> => {
     const CONCURRENCY = 4;
-    const out: MockupImageRecord[] = new Array(refs.length);
+    const out: Array<T | undefined> = new Array(refs.length);
+    const failedKeys: string[] = [];
     let cursor = 0;
     const workers = Array.from({ length: Math.min(CONCURRENCY, refs.length) }, async () => {
         while (true) {
             const idx = cursor++;
             if (idx >= refs.length) return;
             const ref = refs[idx];
-            const resp = await fetchOne(ref.key);
-            if (!resp.ok) throw await errorFromResponse(resp, 'load_image_failed');
-            const body = await resp.json() as { image?: MockupImageRecord };
-            if (!body?.image || typeof body.image.dataUrl !== 'string') {
-                throw new Error(`load_image_failed: malformed image record for ${ref.key}`);
+            try {
+                out[idx] = await fetchImageWithRetry<T>(fetchOne, ref.key);
+            } catch (err) {
+                if (!options?.tolerateFailures) throw err;
+                console.warn(`[snapshots] dropping image ${ref.key} after retries`, err);
+                failedKeys.push(ref.key);
             }
-            out[idx] = body.image;
         }
     });
     await Promise.all(workers);
-    return out;
+    return { images: out.filter((img): img is T => img !== undefined), failedKeys };
+};
+
+// Hydrate the optional `screenImages` array of a payload using the same
+// per-image fetch the mockup images use. Returns the payload's array unchanged
+// when it carries no screen images (legacy snapshots) or they are already
+// inlined.
+const hydrateScreenImages = async (
+    payload: SnapshotPayload,
+    fetchOne: (key: string) => Promise<Response>,
+    options?: { tolerateFailures?: boolean },
+): Promise<{ images: ScreenInventoryImageRecord[] | undefined; failedKeys: string[] }> => {
+    const screenImages = payload.screenImages;
+    if (!Array.isArray(screenImages) || screenImages.length === 0) {
+        return { images: screenImages, failedKeys: [] };
+    }
+    if (isFullyInlined(screenImages)) return { images: screenImages, failedKeys: [] };
+    return await hydrateImages<ScreenInventoryImageRecord>(
+        fetchOne,
+        screenImages as unknown as Array<Omit<ScreenInventoryImageRecord, 'dataUrl'>>,
+        options,
+    );
+};
+
+// Public, lightweight: read just the demo pointer so callers can decide
+// whether their cached demo project is still current without paying the
+// full bundle+image download. Returns null when no demo has been pinned
+// or the probe fails — the caller is expected to fall back to its cache.
+export type DemoPointer = { snapshotId: string; updatedAt: string | null };
+
+export const loadDemoSnapshotPointer = async (): Promise<DemoPointer | null> => {
+    const resp = await fetch(`${API_BASE}?demo=1&pointer=1`);
+    if (!resp.ok) return null;
+    const body = await resp.json().catch(() => null) as
+        | { snapshotId?: unknown; updatedAt?: unknown }
+        | null;
+    if (!body || typeof body.snapshotId !== 'string' || body.snapshotId.length === 0) {
+        return null;
+    }
+    return {
+        snapshotId: body.snapshotId,
+        updatedAt: typeof body.updatedAt === 'string' ? body.updatedAt : null,
+    };
 };
 
 // Public: fetch the snapshot the owner has marked as the demo. No auth.
 // Returns null when no demo has been set (server returns 404 in that case).
+//
+// Image hydration is failure-tolerant here: an image that keeps failing after
+// retries is dropped and `imagesComplete` is set false, so a single flaky
+// fetch on a mobile connection serves a fresh (mostly complete) demo instead
+// of silently falling back to a stale cached one.
 export const loadDemoSnapshotPublic = async (): Promise<SnapshotPayload | null> => {
     const resp = await fetch(`${API_BASE}?demo=1`);
     if (resp.status === 404) return null;
     if (!resp.ok) throw await errorFromResponse(resp, 'load_demo_failed');
     const payload = await resp.json() as SnapshotPayload;
-    if (isFullyInlined(payload.images)) return payload;
-    const hydrated = await hydrateImages(
-        (key) => fetch(`${API_BASE}?demo=1&image=${encodeURIComponent(key)}`),
-        payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
-    );
-    return { ...payload, images: hydrated };
+    const fetchOne = (key: string) => fetch(`${API_BASE}?demo=1&image=${encodeURIComponent(key)}`);
+    const tolerate = { tolerateFailures: true };
+    const mockups = isFullyInlined(payload.images)
+        ? { images: payload.images, failedKeys: [] as string[] }
+        : await hydrateImages<MockupImageRecord>(
+            fetchOne,
+            payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+            tolerate,
+        );
+    const screens = await hydrateScreenImages(payload, fetchOne, tolerate);
+    return {
+        ...payload,
+        images: mockups.images,
+        screenImages: screens.images,
+        imagesComplete: mockups.failedKeys.length === 0 && screens.failedKeys.length === 0,
+    };
 };
 
+// Owner-only load. Hydration retries transient failures but stays strict —
+// an owner restore should fail loudly rather than restore an incomplete
+// snapshot over real data.
 export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
     const resp = await fetch(`${API_BASE}?id=${encodeURIComponent(id)}`, { headers: authHeaders() });
     if (!resp.ok) throw await errorFromResponse(resp, 'load_failed');
     const payload = await resp.json() as SnapshotPayload;
-    if (isFullyInlined(payload.images)) return payload;
-    const hydrated = await hydrateImages(
-        (key) => fetch(
-            `${API_BASE}?id=${encodeURIComponent(id)}&image=${encodeURIComponent(key)}`,
-            { headers: authHeaders() },
-        ),
-        payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+    const fetchOne = (key: string) => fetch(
+        `${API_BASE}?id=${encodeURIComponent(id)}&image=${encodeURIComponent(key)}`,
+        { headers: authHeaders() },
     );
-    return { ...payload, images: hydrated };
+    const mockups = isFullyInlined(payload.images)
+        ? { images: payload.images }
+        : await hydrateImages<MockupImageRecord>(
+            fetchOne,
+            payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
+        );
+    const screens = await hydrateScreenImages(payload, fetchOne);
+    return { ...payload, images: mockups.images, screenImages: screens.images };
 };
 
 export const deleteSnapshot = async (id: string): Promise<void> => {
@@ -296,16 +461,9 @@ export const deleteSnapshot = async (id: string): Promise<void> => {
     if (!resp.ok) throw await errorFromResponse(resp, 'delete_failed');
 };
 
-// Restore a snapshot into the live store. Replaces any existing project with
-// the same id (we use the snapshot's project id directly so external
-// references — e.g. screen URLs — keep working). Images are repopulated in
-// IndexedDB for the project's mockup versions.
-export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string> => {
-    const { project: bundle, images } = snapshot;
-    const projectId = bundle.project.id;
-
-    // Repopulate IDB images first, before we expose the project in the store,
-    // so renderers don't briefly see "missing image" placeholders.
+// Repopulate the IndexedDB mockup-image store for a set of records, clearing
+// each touched version first so a restore is a clean replace, not a merge.
+const restoreMockupImagesToIdb = async (images: MockupImageRecord[]): Promise<void> => {
     const versionIds = new Set(images.map((r) => r.versionId));
     for (const vid of versionIds) {
         await deleteImagesForVersion(vid);
@@ -313,6 +471,35 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
     for (const record of images) {
         await putImage(record);
     }
+};
+
+// Same as above for the separate Screen Inventory image store, keyed by
+// `artifactVersionId`. No-op when the snapshot predates screen-image capture.
+const restoreScreenImagesToIdb = async (
+    screenImages: ScreenInventoryImageRecord[] | undefined,
+): Promise<void> => {
+    if (!screenImages || screenImages.length === 0) return;
+    const versionIds = new Set(screenImages.map((r) => r.artifactVersionId));
+    for (const vid of versionIds) {
+        await deleteScreenImagesForArtifactVersion(vid);
+    }
+    for (const record of screenImages) {
+        await putScreenImage(record);
+    }
+};
+
+// Restore a snapshot into the live store. Replaces any existing project with
+// the same id (we use the snapshot's project id directly so external
+// references — e.g. screen URLs — keep working). Images are repopulated in
+// IndexedDB for the project's mockup and screen-inventory versions.
+export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string> => {
+    const { project: bundle, images } = snapshot;
+    const projectId = bundle.project.id;
+
+    // Repopulate IDB images first, before we expose the project in the store,
+    // so renderers don't briefly see "missing image" placeholders.
+    await restoreMockupImagesToIdb(images);
+    await restoreScreenImagesToIdb(snapshot.screenImages);
 
     // Splice the bundle back into the Zustand store. We mutate the store
     // imperatively because there's no public action for "replace one project
@@ -325,30 +512,93 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
         artifacts: { ...state.artifacts, [projectId]: bundle.artifacts },
         artifactVersions: { ...state.artifactVersions, [projectId]: bundle.artifactVersions },
         feedbackItems: { ...state.feedbackItems, [projectId]: bundle.feedbackItems },
+        tasks: { ...state.tasks, [projectId]: bundle.tasks ?? [] },
+        workflowRuns: { ...state.workflowRuns, [projectId]: bundle.workflowRuns ?? [] },
     }));
 
     return projectId;
 };
 
-// Deep-clone a bundle while rewriting every string occurrence of `fromId` to
-// `toId`. We use this when restoring a snapshot as the demo project so the
-// project URL is stable across visitors (always /p/<DEMO_PROJECT_ID>) and
-// independent of whichever real project id was saved.
-const rewriteProjectId = <T,>(value: T, fromId: string, toId: string): T => {
+// Deep-clone a value while replacing every string that EXACTLY equals a key in
+// `idMap` with its mapped value. Exact-string matching (never substring) keeps
+// this safe to run over PRD prose / markdown — only standalone id fields are
+// rewritten, never an id that happens to appear inside a longer string.
+const rewriteIds = <T,>(value: T, idMap: Map<string, string>): T => {
     if (Array.isArray(value)) {
-        return value.map((v) => rewriteProjectId(v, fromId, toId)) as unknown as T;
+        return value.map((v) => rewriteIds(v, idMap)) as unknown as T;
     }
     if (value && typeof value === 'object') {
         const out: Record<string, unknown> = {};
         for (const [k, v] of Object.entries(value as Record<string, unknown>)) {
-            out[k] = rewriteProjectId(v, fromId, toId);
+            out[k] = rewriteIds(v, idMap);
         }
         return out as T;
     }
-    if (typeof value === 'string' && value === fromId) {
-        return toId as unknown as T;
+    if (typeof value === 'string' && idMap.has(value)) {
+        return idMap.get(value) as unknown as T;
     }
     return value;
+};
+
+// Produce a copy of a snapshot whose ids are namespaced under `targetProjectId`
+// so the restored project shares NO ids — and therefore no IndexedDB image
+// keys — with any real project already on this device.
+//
+// This is the crux of the "setting a project as demo wiped its mockup images"
+// bug. Mockup images are keyed in IndexedDB by `versionId` (the artifact
+// version id). The demo restore reuses the source project's bundle, so without
+// remapping, the demo and its source project reference the *same* artifact
+// version ids — and `restoreSnapshotAs` would `deleteImagesForVersion()` and
+// overwrite the source project's own images. Remapping every artifact version
+// id (and rebuilding each image's composite key) isolates the demo completely.
+//
+// Pure: no IndexedDB / store access, so it is unit-testable in isolation.
+export const namespaceSnapshotForRestore = (
+    snapshot: SnapshotPayload,
+    targetProjectId: string,
+): {
+    bundle: SnapshotProjectBundle;
+    images: MockupImageRecord[];
+    screenImages: ScreenInventoryImageRecord[];
+} => {
+    const sourceId = snapshot.project.project.id;
+    const screenImagesIn = snapshot.screenImages ?? [];
+
+    const idMap = new Map<string, string>();
+    if (sourceId !== targetProjectId) {
+        idMap.set(sourceId, targetProjectId);
+        // Namespace every artifact version id deterministically so repeated
+        // restores are idempotent and never collide with a real project's
+        // bare-UUID version ids.
+        for (const v of snapshot.project.artifactVersions) {
+            if (v.id) idMap.set(v.id, `${targetProjectId}:${v.id}`);
+        }
+    }
+
+    if (idMap.size === 0) {
+        return { bundle: snapshot.project, images: snapshot.images, screenImages: screenImagesIn };
+    }
+
+    const bundle = rewriteIds(snapshot.project, idMap);
+    const images = snapshot.images.map((record) => {
+        const next = rewriteIds(record, idMap);
+        // The composite `key` embeds the versionId, so rebuild it from the
+        // remapped fields rather than relying on exact-string replacement.
+        return { ...next, key: buildImageKey(next.versionId, next.screenId, next.quality) };
+    });
+    // Screen Inventory images are keyed in IDB by `artifactVersionId`, so they
+    // need the same remap as mockup images — otherwise a demo restored from a
+    // real project would share version ids and `restoreSnapshotAs`'s
+    // delete-then-put would wipe the source project's screen images.
+    const screenImages = screenImagesIn.map((record) => {
+        const next = rewriteIds(record, idMap);
+        return {
+            ...next,
+            key: buildScreenImageKey(next.artifactVersionId, next.screenSlug, next.versionNumber),
+        };
+    });
+
+    return { bundle, images, screenImages };
 };
 
 // Restore a snapshot into the store under a fixed `targetProjectId` instead
@@ -359,22 +609,10 @@ export const restoreSnapshotAs = async (
     snapshot: SnapshotPayload,
     targetProjectId: string,
 ): Promise<string> => {
-    const sourceId = snapshot.project.project.id;
-    const remapped: SnapshotProjectBundle = sourceId === targetProjectId
-        ? snapshot.project
-        : rewriteProjectId(snapshot.project, sourceId, targetProjectId);
+    const { bundle: remapped, images, screenImages } = namespaceSnapshotForRestore(snapshot, targetProjectId);
 
-    const versionIds = new Set(snapshot.images.map((r) => r.versionId));
-    for (const vid of versionIds) {
-        await deleteImagesForVersion(vid);
-    }
-    for (const record of snapshot.images) {
-        // Image records also embed projectId, so remap before persisting.
-        const remappedRecord = sourceId === targetProjectId
-            ? record
-            : rewriteProjectId(record, sourceId, targetProjectId);
-        await putImage(remappedRecord);
-    }
+    await restoreMockupImagesToIdb(images);
+    await restoreScreenImagesToIdb(screenImages);
 
     useProjectStore.setState((state) => ({
         projects: { ...state.projects, [targetProjectId]: remapped.project },
@@ -384,6 +622,8 @@ export const restoreSnapshotAs = async (
         artifacts: { ...state.artifacts, [targetProjectId]: remapped.artifacts },
         artifactVersions: { ...state.artifactVersions, [targetProjectId]: remapped.artifactVersions },
         feedbackItems: { ...state.feedbackItems, [targetProjectId]: remapped.feedbackItems ?? [] },
+        tasks: { ...state.tasks, [targetProjectId]: remapped.tasks ?? [] },
+        workflowRuns: { ...state.workflowRuns, [targetProjectId]: remapped.workflowRuns ?? [] },
     }));
 
     return targetProjectId;

@@ -36,10 +36,21 @@ interface DispatchProps {
     domainEntities?: DomainEntity[];
     featureSystems?: FeatureSystem[];
     implementationPlan?: ImplementationPlan;
+    /** Only consumed by `user_flows`: Experience-workspace wiring so screen
+     * journey nodes can open the matching Screen Detail view. */
+    onNavigateToScreen?: (screenSlug: string) => void;
+    availableScreenSlugs?: ReadonlySet<string>;
+    /** Only consumed by `implementation_plan`: content of the project's legacy
+     * standalone prompt_pack artifact, adapted into the consolidated view. */
+    promptPackContent?: string;
     /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
     promptEdits?: Record<number, string>;
     /** Only consumed by `prompt_pack`; persists the new edit overlay. */
     onUpdatePromptEdits?: (next: Record<number, string>) => void;
+    /** Only consumed by `prompt_pack`; creation timestamp of the artifact version. */
+    generatedAt?: number;
+    /** Only consumed by `prompt_pack`; current artifact version number. */
+    versionNumber?: number;
 }
 
 /**
@@ -78,8 +89,13 @@ export function ArtifactContentRenderer({
     domainEntities,
     featureSystems,
     implementationPlan,
+    onNavigateToScreen,
+    availableScreenSlugs,
+    promptPackContent,
     promptEdits,
     onUpdatePromptEdits,
+    generatedAt,
+    versionNumber,
 }: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
@@ -102,11 +118,13 @@ export function ArtifactContentRenderer({
                 domainEntities={domainEntities}
                 featureSystems={featureSystems}
                 implementationPlan={implementationPlan}
+                onNavigateToScreen={onNavigateToScreen}
+                availableScreenSlugs={availableScreenSlugs}
             />
         );
     }
     if (subtype === 'implementation_plan') {
-        return <ImplementationPlanRenderer content={content} />;
+        return <ImplementationPlanRenderer content={content} promptPackContent={promptPackContent} />;
     }
     if (subtype === 'prompt_pack') {
         return (
@@ -115,6 +133,8 @@ export function ArtifactContentRenderer({
                 features={features}
                 edits={promptEdits}
                 onUpdateEdits={onUpdatePromptEdits}
+                generatedAt={generatedAt}
+                versionNumber={versionNumber}
             />
         );
     }
