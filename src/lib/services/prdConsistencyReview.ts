@@ -1,4 +1,4 @@
-// Optional final consistency-review pass for the parallel PRD pipeline.
+// Automatic final consistency-review pass for the parallel PRD pipeline.
 //
 // Because sections are generated concurrently (and some without seeing each
 // other's output), the merged document can carry small inconsistencies:
@@ -7,13 +7,18 @@
 // fully-merged PRD and asks the model to reconcile those issues WITHOUT
 // removing substantive detail.
 //
-// It is OFF by default in the pipeline (it adds a model call). Two safety
-// properties make it safe to enable:
+// It runs by DEFAULT in the pipeline and silently — the user is never asked to
+// approve ordinary repairs. Several conservative acceptance guards make the
+// reviewed PRD safe to substitute for the merged one, and a failed/unsafe
+// review is discarded (the merged PRD is kept):
 //   1. It MERGES the revision over the original, so any field the model omits
 //      is preserved (never dropped).
 //   2. A detail-loss guard discards the entire revision if it would shrink or
 //      empty any key content array — a defensive backstop against a model that
 //      "summarizes" instead of reconciling.
+//   3. Required top-level fields must survive, feature IDs must stay stable
+//      (downstream artifacts reference them), and product identity must be
+//      preserved — any violation discards the revision.
 
 import { callGemini, getFastModel } from '../geminiClient';
 import type { StructuredPRD } from '../../types';
@@ -43,6 +48,18 @@ export interface ReviewOptions {
     signal?: AbortSignal;
 }
 
+/**
+ * Why a review revision was discarded (merged PRD kept). Recorded in
+ * generation metadata for diagnostics; never surfaced to the user.
+ */
+export type ReviewRejectionReason =
+    | 'no-prd'                // model response carried no `prd` object
+    | 'unparseable'           // model response was not valid JSON
+    | 'detail-loss'           // a key content array materially shrank
+    | 'missing-required'      // a required top-level field was emptied/dropped
+    | 'feature-ids-changed'   // one or more original feature IDs disappeared
+    | 'product-identity-lost'; // productName was present originally, now empty
+
 export interface ReviewResult {
     /** The PRD to use downstream (revised when `applied`, else the original). */
     prd: StructuredPRD;
@@ -50,6 +67,8 @@ export interface ReviewResult {
     applied: boolean;
     /** Short human-readable note about what changed (model-provided, optional). */
     changeLog?: string;
+    /** Present only when `applied` is false: why the revision was discarded. */
+    rejectionReason?: ReviewRejectionReason;
 }
 
 const SYSTEM = `You are a meticulous product editor performing a final consistency pass on a Product Requirements Document. The PRD was assembled from independently-generated sections, so it may contain inconsistencies.
@@ -108,6 +127,52 @@ const losesDetail = (original: StructuredPRD, revised: StructuredPRD): boolean =
     return false;
 };
 
+/**
+ * Required top-level fields the reviewed PRD must still carry. Emptying any of
+ * these (string blanked, array emptied) makes the PRD unusable, so the revision
+ * is discarded. Only enforced when the original actually had the field.
+ */
+const dropsRequiredField = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const strings: Array<keyof StructuredPRD> = ['vision', 'coreProblem', 'architecture'];
+    for (const key of strings) {
+        const before = original[key];
+        if (typeof before === 'string' && before.trim().length > 0) {
+            const after = revised[key];
+            if (typeof after !== 'string' || after.trim().length === 0) return true;
+        }
+    }
+    const arrays: Array<keyof StructuredPRD> = ['targetUsers', 'features', 'risks'];
+    for (const key of arrays) {
+        if (len(original[key]) > 0 && len(revised[key]) === 0) return true;
+    }
+    return false;
+};
+
+/**
+ * Feature IDs must stay stable: downstream artifacts, tasks, and cross-feature
+ * dependency references key off `Feature.id`. A revision that renames or drops
+ * any original id (even while keeping the count high enough to pass the
+ * detail-loss guard) would silently break those references, so it is discarded.
+ */
+const changesFeatureIds = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const originalIds = (original.features ?? []).map(f => f.id).filter(Boolean);
+    if (originalIds.length === 0) return false;
+    const revisedIds = new Set((revised.features ?? []).map(f => f.id).filter(Boolean));
+    return originalIds.some(id => !revisedIds.has(id));
+};
+
+/**
+ * Product identity guard: if the merged PRD named the product, the reviewed one
+ * must still name it. The review may canonicalize the name (that is its job),
+ * but it must never blank it out.
+ */
+const losesProductIdentity = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const before = original.productName;
+    if (typeof before !== 'string' || before.trim().length === 0) return false;
+    const after = revised.productName;
+    return typeof after !== 'string' || after.trim().length === 0;
+};
+
 const parse = (raw: string): { prd?: Partial<StructuredPRD>; changeLog?: string } | null => {
     const tryParse = (s: string) => {
         try {
@@ -132,15 +197,29 @@ export const reviewPrdConsistency = async (
     const raw = await transport({ prompt: buildPrompt(prd), model: getFastModel() });
 
     const parsed = parse(raw);
-    if (!parsed?.prd) {
-        return { prd, applied: false };
+    if (parsed === null) {
+        return { prd, applied: false, rejectionReason: 'unparseable' };
+    }
+    if (!parsed.prd) {
+        return { prd, applied: false, rejectionReason: 'no-prd' };
     }
 
     // Merge over the original so any omitted field is preserved.
     const revised: StructuredPRD = { ...prd, ...parsed.prd };
 
+    // Conservative acceptance guards — any violation discards the whole
+    // revision and keeps the deterministically-merged PRD.
     if (losesDetail(prd, revised)) {
-        return { prd, applied: false, changeLog: 'discarded: detail-loss guard tripped' };
+        return { prd, applied: false, rejectionReason: 'detail-loss' };
+    }
+    if (dropsRequiredField(prd, revised)) {
+        return { prd, applied: false, rejectionReason: 'missing-required' };
+    }
+    if (changesFeatureIds(prd, revised)) {
+        return { prd, applied: false, rejectionReason: 'feature-ids-changed' };
+    }
+    if (losesProductIdentity(prd, revised)) {
+        return { prd, applied: false, rejectionReason: 'product-identity-lost' };
     }
 
     return { prd: revised, applied: true, changeLog: parsed.changeLog };

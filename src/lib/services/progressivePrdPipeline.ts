@@ -10,7 +10,7 @@ import { renderPremiumMarkdown } from './prdMarkdownRenderer';
 import { reviewPrdConsistency } from './prdConsistencyReview';
 import { logPrd, type PrdLogSurface } from './prdGenerationLog';
 import type { PrdPipelineOptions, PrdPipelineResult } from './prdPipeline';
-import type { StructuredPRD, GenerationPassRecord, WorkflowRun } from '../../types';
+import type { StructuredPRD, GenerationPassRecord, WorkflowRun, ConsistencyReviewMeta } from '../../types';
 import type { SectionId } from '../schemas/prdSchemas';
 import type { ProjectPlatform } from '../../types';
 import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
@@ -36,9 +36,13 @@ export interface ProgressivePrdPipelineOptions extends PrdPipelineOptions {
      */
     onSectionStatus?: (sectionId: SectionId, update: SectionStatusUpdate) => void;
     /**
-     * When true, run a final cross-section consistency-review pass after the
-     * DAG completes. Default false — the deterministic merge is the fast path;
-     * the review adds one extra model call. See prdConsistencyReview.ts.
+     * Controls the final cross-section consistency-review pass that runs after
+     * the DAG completes and reconciles terminology/name/reference drift left by
+     * parallel generation. **Default ON** — the review runs automatically and
+     * silently as part of normal generation (its output is only used when it
+     * passes conservative acceptance guards; otherwise the merged PRD is kept).
+     * Pass `false` only as a developer/debug override to skip the extra model
+     * call. See prdConsistencyReview.ts.
      */
     enableConsistencyReview?: boolean;
     /** Rendering surface, attached to structured logs for observability. */
@@ -240,14 +244,20 @@ export const runProgressivePrdPipeline = async (
     const allJobs = Object.values(jobs);
     const failedSections = allJobs.filter(j => j.status === 'error');
 
-    // Optional final consistency-review pass. Reconciles terminology, names,
-    // duplicates, and contradictions introduced by parallel generation. Skipped
-    // by default (extra model call) and never runs when every section failed
-    // (handled below) or on a heavily-degraded partial. Guarded against detail
-    // loss inside reviewPrdConsistency — a lossy revision is discarded.
+    // Automatic final consistency-review pass. Reconciles terminology, names,
+    // feature ids, duplicates, and cross-section contradictions introduced by
+    // parallel generation. Runs by DEFAULT and silently — the user is never
+    // asked to approve ordinary repairs. Pass `enableConsistencyReview: false`
+    // only as a developer/debug override. It is skipped when a section failed
+    // (the PRD is already surfaced as incomplete) or when every section failed
+    // (handled below). Its output is used only when it clears the conservative
+    // acceptance guards inside reviewPrdConsistency; otherwise the
+    // deterministically-merged PRD is kept and the reason is recorded in meta.
+    const runConsistencyReview = enableConsistencyReview !== false;
     let reviewed = false;
     let consistencyMs: number | undefined;
-    if (enableConsistencyReview && failedSections.length === 0) {
+    let consistencyReviewMeta: ConsistencyReviewMeta = { ran: false, applied: false, status: 'skipped' };
+    if (runConsistencyReview && failedSections.length === 0) {
         onProgress?.('Reviewing for consistency…');
         const reviewStart = performance.now();
         const reviewStartEpoch = nowEpoch();
@@ -256,6 +266,12 @@ export const runProgressivePrdPipeline = async (
             const reviewMs = performance.now() - reviewStart;
             consistencyMs = reviewMs;
             reviewed = review.applied;
+            consistencyReviewMeta = {
+                ran: true,
+                applied: review.applied,
+                status: review.applied ? 'applied' : 'rejected',
+                rejectionReason: review.applied ? undefined : review.rejectionReason,
+            };
             if (review.applied) structuredPRD = review.prd;
             // Record the consistency pass as a final, all-sections-dependent
             // node so the Gantt shows it sequentially after the parallel wave.
@@ -274,12 +290,15 @@ export const runProgressivePrdPipeline = async (
             logPrd({
                 event: 'consistency_review',
                 actualSeconds: reviewMs / 1000,
-                detail: review.applied ? (review.changeLog || 'applied') : 'discarded (no-op or detail-loss guard)',
+                detail: review.applied
+                    ? (review.changeLog || 'applied')
+                    : `discarded (${review.rejectionReason ?? 'no-op'})`,
                 surface,
             });
         } catch (e) {
             // A review failure must never fail the whole generation — keep the
             // deterministically-merged PRD.
+            consistencyReviewMeta = { ran: true, applied: false, status: 'error', rejectionReason: 'error' };
             console.warn('[prd] consistency review failed; keeping merged PRD.', e);
         }
     }
@@ -345,6 +364,7 @@ export const runProgressivePrdPipeline = async (
             revised: reviewed,
             schemaVersion: PRD_SCHEMA_VERSION,
             failedSections: failedSections.map(j => j.id),
+            consistencyReview: consistencyReviewMeta,
         },
         model: `${fastModel} / ${strongModel}`,
     };

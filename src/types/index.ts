@@ -284,6 +284,21 @@ export type GenerationPassRecord = {
     ok: boolean;
 };
 
+// Outcome of the automatic final consistency-review pass. Records — for
+// debugging/diagnostics, never the UI — whether the review ran, whether its
+// output was accepted over the deterministically-merged PRD, and (on
+// rejection) why the merged PRD was kept instead. Optional/back-compat:
+// legacy generation meta lacks it.
+export type ConsistencyReviewMeta = {
+    /** The review model call was attempted (false = skipped, e.g. partial run). */
+    ran: boolean;
+    /** The reviewed PRD passed every guard and was used as the generated PRD. */
+    applied: boolean;
+    status: 'applied' | 'rejected' | 'skipped' | 'error';
+    /** Present only when status is 'rejected' or 'error'. */
+    rejectionReason?: string;
+};
+
 export type GenerationMeta = {
     passes: GenerationPassRecord[];
     totalMs: number;
@@ -294,6 +309,10 @@ export type GenerationMeta = {
     // workspace surfaces an incomplete-PRD banner with per-section retry, and
     // a successful single-section retry removes its id from this list.
     failedSections?: string[];
+    // Result of the automatic consistency-review pass (default-on). See
+    // ConsistencyReviewMeta. Absent on legacy meta / when the pass was skipped
+    // for a partial run.
+    consistencyReview?: ConsistencyReviewMeta;
 };
 
 // --- Workflow orchestration metrics domain types ---

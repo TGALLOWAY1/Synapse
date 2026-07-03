@@ -23,5 +23,9 @@ describe('runProgressivePrdPipeline partial failure', () => {
         expect(result.generationMeta.failedSections).toEqual(['product_thesis']);
         // The run still settles with a merged (partial) PRD.
         expect(result.structuredPRD).toBeTruthy();
+        // A partial run skips the consistency review (the PRD is already
+        // surfaced as incomplete) — no review runs, so the merged PRD stands.
+        expect(result.generationMeta.consistencyReview?.status).toBe('skipped');
+        expect(result.generationMeta.revised).toBe(false);
     });
 });

@@ -10,9 +10,9 @@ dashboard) is implemented; the items below are deferred follow-ups.
       an "advanced" control with sane defaults.
 - [ ] Auto-tune concurrency caps based on observed 429/rate-limit responses
       (back off the per-tier cap on `RESOURCE_EXHAUSTED`, recover on success).
-- [ ] Consider overlapping the optional consistency-review pass with
-      independent downstream work where it's safe (today it's strictly after the
-      DAG).
+- [ ] Consider overlapping the automatic consistency-review pass (now default-on)
+      with independent downstream work where it's safe (today it's strictly after
+      the DAG).
 - [ ] Expose the artifact dependency layers' concurrency utilization the same
       way the PRD waves are shown.
 
