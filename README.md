@@ -19,19 +19,13 @@ all from a single client-side workspace.
 The interactive product tour is a **public, standalone demo** you can link to
 directly from a portfolio or résumé:
 
-- **Public URL:** `https://<your-deployment>/tour` (alias: `/about`)
+- **Public URL:** 'https://synapse-prd.vercel.app'
 - **No authentication** — the route is not behind the auth gate.
 - **Demo data only** — every screen renders local fixtures
   (`src/components/tour/tourData.ts`). It never calls Gemini, never touches the
   `api/` backend or the project store, and never reads or exposes an API key or
   any user data.
-- **Deep-linkable** — open or refresh `/tour` directly; the SPA rewrite (see
-  [Deploying the tour](#deploying-the-tour-static-hosting)) serves
-  `index.html`, so there is no 404.
-- **Mobile-first** — responsive layout with swipe navigation and reduced-motion
-  support.
 
-### Paste-into-your-portfolio markdown
 
 ```markdown
 ### Synapse — AI-native product definition environment
@@ -39,15 +33,11 @@ directly from a portfolio or résumé:
 From a plain-language idea to a structured PRD, UI mockups, and downstream
 engineering artifacts — all in one client-side workspace.
 
-▶️ **[Try the interactive demo](https://<your-deployment>/tour)** ·
-📂 **[Source on GitHub](https://github.com/<you>/synapse)**
+▶️ **[Try the interactive demo](https://synapse-prd.vercel.app)** ·
 
 *The demo runs entirely on local sample data — no sign-up, no API key, no
 backend calls.*
 ```
-
-> Replace `<your-deployment>` with your live host (e.g. your Vercel URL) and
-> `<you>` with your GitHub username before publishing.
 
 ---
 
