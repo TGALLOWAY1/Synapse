@@ -6,7 +6,6 @@ UI mockups, downstream engineering artifacts, and annotated visual feedback —
 all from a single client-side workspace.
 
 <img width="100%" alt="Synapse tour — start with a single idea" src="public/screenshots/tour-idea.png" />
----
 
 ## Check out the demo and tour 
 
