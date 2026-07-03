@@ -7,52 +7,23 @@ all from a single client-side workspace.
 
 <img width="100%" alt="Synapse tour — start with a single idea" src="public/screenshots/tour-idea.png" />
 
-> **Take the interactive tour.** Synapse ships a fully interactive product
-> tour at **`/tour`** (aliased at `/about`) that rebuilds the whole workflow
-> as native, clickable UI — no sign-up, no API key. The walkthrough below
-> follows the same six beats as that tour.
+> **Take the interactive tour.** 
 
 ---
 
-## Live demo (portfolio-safe)
-
-The interactive product tour is a **public, standalone demo** you can link to
-directly from a portfolio or résumé:
+## Check out the demo and tour 
 
 - **Public URL:** 'https://synapse-prd.vercel.app'
 - **No authentication** — the route is not behind the auth gate.
-- **Demo data only** — every screen renders local fixtures
-  (`src/components/tour/tourData.ts`). It never calls Gemini, never touches the
-  `api/` backend or the project store, and never reads or exposes an API key or
-  any user data.
-
-
-```markdown
-### Synapse — AI-native product definition environment
-
-From a plain-language idea to a structured PRD, UI mockups, and downstream
-engineering artifacts — all in one client-side workspace.
-
-▶️ **[Try the interactive demo](https://synapse-prd.vercel.app)** ·
-
-*The demo runs entirely on local sample data — no sign-up, no API key, no
-backend calls.*
-```
-
----
 
 ## What it does
 
 A single prompt flows from a plain-language idea to a finalized blueprint and
 every downstream asset:
 
-```
-idea → (optional clarification) → PRD canvas → refine & version → mark final → assets
-```
-
 Each stage is backed by Google Gemini, structured JSON schemas where they
 matter, a code-level safety gate, and a versioned store so nothing you
-generate is lost.
+generate is lost. Mockups are generated using OpenAI's GPT Image 2 model. 
 
 ## Feature tour
 
