@@ -17,12 +17,6 @@
 [![Vite](https://img.shields.io/badge/Vite-7-646CFF?style=flat-square&logo=vite&logoColor=white)](https://vitejs.dev)
 [![Tests](https://img.shields.io/badge/tests-838%20passing-success?style=flat-square&logo=vitest&logoColor=white)](#-why-this-project-is-technically-interesting)
 [![Deploy](https://img.shields.io/badge/deploy-Vercel-000000?style=flat-square&logo=vercel&logoColor=white)](https://vercel.com)
-
-[![CI](https://img.shields.io/github/actions/workflow/status/tgalloway1/synapse/mockup-harness.yml?style=flat-square&label=CI&logo=githubactions&logoColor=white)](https://github.com/tgalloway1/synapse/actions)
-[![Last commit](https://img.shields.io/github/last-commit/tgalloway1/synapse?style=flat-square)](https://github.com/tgalloway1/synapse/commits)
-[![Stars](https://img.shields.io/github/stars/tgalloway1/synapse?style=flat-square&logo=github)](https://github.com/tgalloway1/synapse/stargazers)
-[![Release](https://img.shields.io/github/v/release/tgalloway1/synapse?style=flat-square&include_prereleases&label=release)](https://github.com/tgalloway1/synapse/releases)
-
 <br />
 
 **[▶️ Live Interactive Tour](#-demo)** · **[🔬 Why It's Interesting](#-why-this-project-is-technically-interesting)** · **[🏗️ Architecture](#%EF%B8%8F-architecture)** · **[🗺️ Roadmap](#%EF%B8%8F-roadmap)** · **[❓ FAQ](#-faq)**
@@ -57,8 +51,6 @@
 
 ## 🔬 Why This Project Is Technically Interesting
 
-> Written for engineers, AI engineers, and hiring managers. This section explains the *engineering problems solved*, not the marketing surface.
-
 | Engineering Capability | Why It's Interesting | Technologies Used |
 |---|---|---|
 | **Multi-agent orchestration over a DAG** | PRD sections declare *true data dependencies only*; a Kahn's-algorithm validator rejects cycles/unknown refs, then a scheduler runs every ready node concurrently. It's a dependency-resolving executor, not a sequential prompt chain. | TypeScript, custom DAG runner (`runDag`), topological waves |
@@ -77,22 +69,17 @@
 
 - 🧩 **Custom DAG executor** runs a 10-agent PRD pipeline concurrently — with cycle detection and tiered model routing.
 - 📡 **Streaming inference** with two-layer retry that survives mid-stream mobile-network drops.
-- 🛡️ **Fail-closed safety gate** in code, not prompt — blocks unsafe generation before it starts.
 - 📊 **Real observability**: token usage, speedup, concurrency, and critical path rendered as per-run Gantt charts — no synthetic data.
 - 🕓 **Non-destructive versioning** with section-aware diffs and self-healing interrupted-run recovery.
 - 📱 **Mobile-ready web app** with touch-aware refine gestures, deployed on Vercel with cross-device sync.
-- ✅ **~58K lines of TypeScript, 838 tests, 131 components** — `tsc -b` enforced on every deploy.
-
 </details>
-
-> **🔭 Not yet surfaced in the product UI (portfolio-worthy):** the [mockup evaluation harness](docs/mockup-evaluation-harness.md) (`npm run mockup:harness`) is a genuine **LLM-output eval framework** with retry/scoring runs and a GitHub Actions workflow — currently only documented, not shown in-app. Worth promoting as a first-class "AI evals" capability. The **token-usage capture** exists for PRD sections but artifact services don't yet forward it (documented TODO) — wiring it through would complete cost observability.
-
 ---
 
 ## 🎬 Demo
 
-> **[🌐 Live app: synapse-prd.vercel.app](https://synapse-prd.vercel.app)** — and take the interactive tour at **[`/tour`](https://synapse-prd.vercel.app/tour)** (aliased `/about`) with **no sign-up and no API key**. The tour rebuilds the entire workflow as native, clickable UI on local demo data: it never calls an LLM, never touches the backend, and exposes no user data — a portfolio-safe, deep-linkable demo.
+> **[🌐 Live app: synapse-prd.vercel.app](https://synapse-prd.vercel.app)** — and take the interactive tour with **no sign-up and no API key**. The tour rebuilds the entire workflow as native, clickable UI on local demo data: it never calls an LLM, never touches the backend, and exposes no user data.
 
+<!--
 ### The end-to-end workflow, in six beats
 
 <table>
@@ -150,6 +137,7 @@ Artifacts carry source refs back to the spine; staleness is detected automatical
 <td><img width="100%" alt="Connections graph" src="public/screenshots/tour-connections.png" /></td>
 </tr>
 </table>
+-->
 
 ---
 
@@ -241,42 +229,8 @@ graph TB
 
 What happens after you press **one button** — "Generate PRD":
 
-```mermaid
-sequenceDiagram
-    autonumber
-    actor U as User
-    participant FE as Frontend (React)
-    participant LLM as LLM Layer (browser)
-    participant DAG as DAG Executor
-    participant GEM as Google Gemini
-    participant ST as Zustand + localStorage
-    participant API as api/projects.js
-    participant DB as MongoDB
+<img width="1672" height="941" alt="image" src="https://github.com/user-attachments/assets/374e85ad-c02a-49c8-83c9-6796b6296546" />
 
-    U->>FE: Enter idea → (optional) preflight Q&A → Generate
-    FE->>LLM: generateStructuredPRD(idea, context)
-    LLM->>GEM: classifyProjectSafety()
-    GEM-->>LLM: allowed / restricted / disallowed
-    alt disallowed
-        LLM-->>FE: SafetyBlockedError → render Safety Review
-    else allowed
-        LLM->>DAG: runDag(10 sections, deps)
-        Note over DAG,GEM: Ready sections fan out concurrently<br/>(fast vs strong model per tier)
-        par Wave 1 (independent)
-            DAG->>GEM: section A (stream)
-            DAG->>GEM: section B (stream)
-        and Wave 2 (deps satisfied)
-            DAG->>GEM: section C (stream)
-        end
-        GEM-->>DAG: section slices + token usage
-        DAG-->>LLM: merged StructuredPRD + metrics
-        LLM-->>ST: updateSpineStructuredPRD()
-        ST-->>FE: live timeline + rendered PRD
-        ST->>API: PUT /api/projects (debounced, signed-in)
-        API->>DB: upsert (userId-scoped)
-        DB-->>API: ok
-    end
-```
 
 The same pattern drives artifact generation (the bundle controller fans the core artifacts out concurrently) and is recorded as a `WorkflowRun` for the `/metrics` dashboard.
 
@@ -337,54 +291,12 @@ The backend's job is bursty and request-scoped — sync upserts, vault reads, OA
 
 ## 🗺️ Roadmap
 
-**✅ Current**
-- [x] Concurrent DAG PRD pipeline with live timeline
-- [x] Code-level fail-closed safety gate
-- [x] Full build-artifact bundle + multi-fidelity mockups + markup SVGs
-- [x] Append-only versioning with section-aware diffs & restore
-- [x] Orchestration metrics dashboard (`/metrics`)
-- [x] Encrypted provider-key vault + OAuth + identity linking
-- [x] Cross-device project sync
-
-**🔜 Next release**
-- [ ] Wire `@vitest/coverage-v8` + publish a real coverage badge
-- [ ] Forward token usage from artifact services (complete cost observability)
-- [ ] Per-project server-newer reconciliation (currently local-always-wins)
-- [ ] Migrate server-side data (snapshots / provider keys) on account merge
-- [ ] Cross-device sync for mockup images (currently device-local)
 
 **🔮 Future**
 - [ ] Additional LLM providers (Anthropic / Azure OpenAI) via the routing layer
-- [ ] Dockerfile + compose for one-command self-hosting
 - [ ] Real-time collaborative editing on a shared spine
-
-**🔬 Research**
-- [ ] Promote the mockup eval harness into an in-app **AI evals** surface
-- [ ] Automated PRD quality scoring against the rubric
-- [ ] Cost-aware adaptive model routing per section difficulty
-
----
-
-## 🤝 Contributing
-
-Contributions are welcome — see **[`CONTRIBUTING.md`](CONTRIBUTING.md)** for the full guide.
-
-| | |
-|---|---|
-| **Branch strategy** | Feature branches off `main`; never push directly to `main`. |
-| **Commits** | Clear, descriptive, present-tense messages. |
-| **Required gate** | `npm run build` **and** `npm run lint` must pass (Vercel runs the build). |
-| **Testing** | Add/extend Vitest tests under `src/**/__tests__/`; keep test TS as strict as app TS. |
-| **Docs rule** | A change to a user-visible feature updates `README.md` **and** `CLAUDE.md` in the same commit. |
-
-```bash
-# 1. Branch
-git checkout -b feat/my-change
-# 2. Develop + verify
-npm run build && npm run lint && npm test
-# 3. Push & open a PR
-git push -u origin feat/my-change
-```
+- [ ] Improved versioning functionality
+- [ ] Enhanced build plan features
 
 ---
 
@@ -409,12 +321,6 @@ Real. Sections run through a dependency-graph executor with cycle detection and 
 </details>
 
 <details>
-<summary><strong>Why Gemini in the browser — isn't that a security risk?</strong></summary>
-
-Streaming PRD generation exceeds serverless time limits, so Gemini is called client-side. The key stays in memory (vault) or per-user browser storage, and any provider whose key *must* be secret (OpenAI images) is proxied server-side where the key never reaches the client.
-</details>
-
-<details>
 <summary><strong>Does it work on mobile?</strong></summary>
 
 Yes — responsive layouts, safe-area insets, touch-aware text selection, swipe navigation, and reduced-motion support are built in. The highlight-to-refine gesture has a dedicated mobile flow so it doesn't fight the native selection toolbar.
@@ -427,41 +333,6 @@ Streaming retries reconnect mid-stream; on reload, any pipeline still marked `ru
 </details>
 
 ---
-
-## 📚 Documentation
-
-| Doc | What's inside |
-|---|---|
-| [`CLAUDE.md`](CLAUDE.md) | Architecture, state slices, LLM pipeline, cross-cutting patterns (kept in sync with code) |
-| [`docs/architecture.md`](docs/architecture.md) | Runtime stack, state layer, LLM services, UI composition |
-| [`docs/artifact-flow.md`](docs/artifact-flow.md) | File-by-file trace of one end-to-end pipeline run |
-| [`docs/ORCHESTRATION_AND_METRICS.md`](docs/ORCHESTRATION_AND_METRICS.md) | Concurrent workflows, the `/metrics` dashboard, each metric explained |
-| [`docs/AUTH_AND_PROVIDER_KEYS.md`](docs/AUTH_AND_PROVIDER_KEYS.md) | Per-user projects, encrypted vault, server-side model routing |
-| [`docs/auth.md`](docs/auth.md) · [`docs/linkedin-auth.md`](docs/linkedin-auth.md) | Multi-provider auth, user schema, OAuth setup |
-| [`docs/SERVER_PROJECT_STORAGE.md`](docs/SERVER_PROJECT_STORAGE.md) | Cross-device sync design |
-| [`docs/VERSIONING_AUDIT.md`](docs/VERSIONING_AUDIT.md) | Versioning & revert design (Phase 1) |
-| [`docs/deployment.md`](docs/deployment.md) | Commands, Vercel setup, self-hosting |
-| [`docs/mockup-evaluation-harness.md`](docs/mockup-evaluation-harness.md) | LLM-output eval framework |
-| [`.env.example`](.env.example) | Backend environment variables (workspace needs none) |
-
-<!-- ====================================================================
-## 🙏 Acknowledgements  (commented out)
-
-Built with the open-source ecosystem:
-
-Core — React 19 · TypeScript · Vite · Tailwind CSS · Zustand
-UI/UX — framer-motion · lucide-react · react-markdown + remark-gfm · @formkit/auto-animate
-Data/diff — jsdiff · date-fns · MongoDB Node driver
-Platform — Vercel (hosting · serverless · Blob) · Vitest · Playwright
-AI — Google Gemini (PRD, artifacts, safety) · OpenAI (image generation)
-==================================================================== -->
-
-<!-- ====================================================================
-## 📄 License  (commented out)
-
-TODO: no LICENSE file is present yet. Add one (MIT is the conventional choice for a portfolio project) and the License badge above will resolve.
-==================================================================== -->
-
 <div align="center">
 
 <br />
@@ -469,8 +340,6 @@ TODO: no LICENSE file is present yet. Add one (MIT is the conventional choice fo
 **[⬆ back to top](#-synapse)**
 
 <br />
-
-*Built to turn one sentence into a buildable product blueprint.*
 ⭐ **Star the repo if the concurrent-pipeline + versioned-artifact architecture is useful to you.**
 
 </div>
