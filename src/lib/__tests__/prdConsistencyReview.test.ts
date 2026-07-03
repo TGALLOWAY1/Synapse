@@ -68,5 +68,54 @@ describe('reviewPrdConsistency', () => {
     const result = await reviewPrdConsistency(original, { transport });
     expect(result.applied).toBe(false);
     expect(result.prd).toEqual(original);
+    expect(result.rejectionReason).toBe('unparseable');
+  });
+
+  it('rejects a revision that empties a required field', async () => {
+    const original = basePrd();
+    // Model blanks out the vision — the PRD would be unusable.
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, vision: '' }, changeLog: 'tightened' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('missing-required');
+    expect(result.prd.vision).toBe('A vision');
+  });
+
+  it('rejects a revision that renames/drops a feature id', async () => {
+    const original = basePrd();
+    // Same feature count (passes detail-loss) but the ids are all different.
+    const renamed = original.features.map((f, i) => ({ ...f, id: `renamed-${i}` }));
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: renamed }, changeLog: 'renamed ids' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('feature-ids-changed');
+    expect(result.prd.features.map(f => f.id)).toEqual(original.features.map(f => f.id));
+  });
+
+  it('rejects a revision that blanks the product name', async () => {
+    const original = basePrd();
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, productName: '' }, changeLog: 'dropped name' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('product-identity-lost');
+    expect(result.prd.productName).toBe('MyApp');
+  });
+
+  it('preserves safety-restriction constraints the model omits (merge)', async () => {
+    const original: StructuredPRD = { ...basePrd(), constraints: ['No collection of medical data'] };
+    // Model returns a revision that omits constraints entirely.
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, constraints: undefined }, changeLog: 'reconciled' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(true);
+    // The restriction survives via merge-over-original.
+    expect(result.prd.constraints).toEqual(['No collection of medical data']);
   });
 });
