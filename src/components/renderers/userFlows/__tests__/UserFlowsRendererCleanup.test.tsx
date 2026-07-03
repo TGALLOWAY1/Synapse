@@ -37,7 +37,13 @@ const FEATURES: Feature[] = [
 ];
 
 const UX_PAGES: UXPage[] = [
-    { id: 'p1', name: 'Save Recipe to Library', purpose: 'Persist a parsed recipe' },
+    {
+        id: 'p1',
+        name: 'Save Recipe to Library',
+        purpose: 'Persist a parsed recipe',
+        components: ['Save button'],
+        interactions: ['Click save'],
+    },
 ];
 
 const ENTITIES: DomainEntity[] = [
