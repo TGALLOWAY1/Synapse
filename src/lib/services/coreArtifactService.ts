@@ -1,10 +1,11 @@
-import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan } from '../../types';
+import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan, CanonicalPrdSpine } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
+import { buildCanonicalPrdSpine, buildCanonicalSpinePromptSection } from '../canonicalPrdSpine';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
 import {
@@ -467,6 +468,14 @@ export const generateCoreArtifact = async (
          * other subtypes ignore it. Absent/unknown/'custom' → no steering.
          */
         designSystemPreset?: string;
+        /**
+         * The Canonical PRD Spine — the primary, authoritative source of truth
+         * for artifact generation. When present (and non-empty), the prompt
+         * leads with it and demotes full PRD markdown to a secondary fallback.
+         * When absent, one is rebuilt deterministically from `structuredPRD`;
+         * an empty spine (no features) falls back to the legacy summary prompt.
+         */
+        canonicalSpine?: CanonicalPrdSpine;
     },
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
@@ -475,34 +484,6 @@ export const generateCoreArtifact = async (
     // Fast (Flash). Mirrors the PRD pipeline's per-section tiering.
     const model = selectArtifactModel(subtype);
 
-    const featureList = structuredPRD.features.map(f => {
-        let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
-        if (f.acceptanceCriteria && f.acceptanceCriteria.length > 0) {
-            line += `\n  Acceptance Criteria: ${f.acceptanceCriteria.join('; ')}`;
-        }
-        if (f.dependencies && f.dependencies.length > 0) {
-            line += `\n  Dependencies: ${f.dependencies.join(', ')}`;
-        }
-        return line;
-    }).join('\n');
-
-const prdSummary = `Vision: ${structuredPRD.vision}
-Core Problem: ${structuredPRD.coreProblem}
-Target Users: ${structuredPRD.targetUsers.join(', ')}
-
-Features:
-${featureList}
-
-Architecture: ${structuredPRD.architecture}${
-    structuredPRD.nonFunctionalRequirements?.length
-        ? `\n\nNon-Functional Requirements:\n${structuredPRD.nonFunctionalRequirements.map(r => `- ${r}`).join('\n')}`
-        : ''
-}${
-    structuredPRD.constraints?.length
-        ? `\n\nConstraints:\n${structuredPRD.constraints.map(c => `- ${c}`).join('\n')}`
-        : ''
-}`;
-    const featureGlossary = buildFeatureGlossary(structuredPRD);
     const dependencyContext = buildDependencyContext(subtype, options?.generatedArtifacts ?? {});
     const guardrails = buildNarrativeGuardrails(structuredPRD);
 
@@ -529,7 +510,61 @@ Architecture: ${structuredPRD.architecture}${
         implementation_plan: implementationPlanSchema,
     };
 
-    const userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}${presetSection}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+    // Canonical PRD Spine — the primary, authoritative source of truth. Rebuild
+    // deterministically when the caller didn't pass one (e.g. legacy projects
+    // with no saved spine). A spine with no features yields a null section; we
+    // then fall back to the legacy feature-glossary + inline-summary prompt.
+    const canonicalSpine = options?.canonicalSpine
+        ?? buildCanonicalPrdSpine(structuredPRD, { designSystemPreset: options?.designSystemPreset });
+    const spineSection = buildCanonicalSpinePromptSection(canonicalSpine);
+    const spineContextUsed = spineSection !== null;
+
+    // Prompt hierarchy: persona/system → guardrails → Canonical PRD Spine
+    // (authoritative) → dependency artifacts → full PRD markdown (secondary
+    // fallback only). The spine subsumes the old feature glossary + inline PRD
+    // summary, so those are dropped when the spine is used to avoid feeding
+    // several differently-worded views of the same product facts.
+    let userPrompt: string;
+    if (spineSection) {
+        userPrompt = `${config.userPrefix}\n\n${guardrails}\n\n${spineSection}\n\nDependency Artifacts:\n${dependencyContext}${presetSection}\n\n---\n\nFull PRD (SECONDARY reference only — defer to the Canonical PRD Spine above on any conflict; use this solely for detail the spine omits):\n${prdContent}${mockupSection}`;
+    } else {
+        // Legacy fallback: no reliable spine (e.g. a PRD with no features).
+        const featureList = structuredPRD.features.map(f => {
+            let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
+            if (f.acceptanceCriteria && f.acceptanceCriteria.length > 0) {
+                line += `\n  Acceptance Criteria: ${f.acceptanceCriteria.join('; ')}`;
+            }
+            if (f.dependencies && f.dependencies.length > 0) {
+                line += `\n  Dependencies: ${f.dependencies.join(', ')}`;
+            }
+            return line;
+        }).join('\n');
+        const prdSummary = `Vision: ${structuredPRD.vision}
+Core Problem: ${structuredPRD.coreProblem}
+Target Users: ${structuredPRD.targetUsers.join(', ')}
+
+Features:
+${featureList}
+
+Architecture: ${structuredPRD.architecture}${
+            structuredPRD.nonFunctionalRequirements?.length
+                ? `\n\nNon-Functional Requirements:\n${structuredPRD.nonFunctionalRequirements.map(r => `- ${r}`).join('\n')}`
+                : ''
+        }${
+            structuredPRD.constraints?.length
+                ? `\n\nConstraints:\n${structuredPRD.constraints.map(c => `- ${c}`).join('\n')}`
+                : ''
+        }`;
+        const featureGlossary = buildFeatureGlossary(structuredPRD);
+        userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}${presetSection}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+    }
+
+    // Diagnostics stamped onto every artifact version — records whether the
+    // canonical spine drove generation or the legacy summary path was used.
+    const spineMeta: Record<string, unknown> = {
+        spineContextUsed,
+        spineSchemaVersion: canonicalSpine.meta.schemaVersion,
+    };
 
     // Cap progress messages at ~3/s; emit every 250 chars OR 350ms to keep the
     // UI feeling alive without thrashing the store.
@@ -586,7 +621,7 @@ Architecture: ${structuredPRD.architecture}${
             // markdown for storage to avoid cross-cutting changes.
             if (subtype === 'screen_inventory') {
                 const normalized = normalizeScreenInventory(parsed) ?? parsed;
-                return { content: JSON.stringify(normalized, null, 2) };
+                return { content: JSON.stringify(normalized, null, 2), metadata: spineMeta };
             }
             const content = normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
             // For design_system specifically, the parsed JSON IS the token
@@ -597,15 +632,15 @@ Architecture: ${structuredPRD.architecture}${
                 const tokens = normalizeDesignTokens(parsed);
                 return {
                     content,
-                    metadata: { tokens, tokensHash: hashDesignTokens(tokens) },
+                    metadata: { ...spineMeta, tokens, tokensHash: hashDesignTokens(tokens) },
                 };
             }
-            return { content };
+            return { content, metadata: spineMeta };
         } catch {
             // JSON-mode failure: fall back to the raw text body. For
             // design_system this means we won't have structured tokens —
             // legacy markdown rendering still works in the UI.
-            return { content: normalizeArtifactMarkdown(result) };
+            return { content: normalizeArtifactMarkdown(result), metadata: spineMeta };
         }
     }
 
@@ -622,7 +657,7 @@ Architecture: ${structuredPRD.architecture}${
         { model },
     );
     onProgress?.('Validating output…');
-    return { content: normalizeArtifactMarkdown(result) };
+    return { content: normalizeArtifactMarkdown(result), metadata: spineMeta };
 };
 
 export const refineCoreArtifact = async (

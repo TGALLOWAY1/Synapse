@@ -585,6 +585,35 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       design system (`selectPreferredDesignSystem`), wired to the existing mockup
       regenerate-confirm. Mockup *images* are keyed by the new mockup version id,
       so the user must regenerate to pull the new visual direction through.
+  - **Canonical PRD Spine (`src/lib/canonicalPrdSpine.ts`) — the primary,
+    authoritative context for artifact generation.** `buildCanonicalPrdSpine(prd,
+    options)` is a **pure, deterministic** builder (NEVER an LLM call) that
+    distills the finalized `StructuredPRD` into a compact structured contract
+    (`CanonicalPrdSpine` in `src/types`): product identity, users/JTBD, a
+    canonical feature glossary (**PRD `Feature.id`s preserved verbatim**),
+    conservative **screen seeds** (deterministic `scr-<slug>` ids) and **entity
+    seeds** (deterministic `ent-<slug>` ids — isolated in `slugId`, an interim
+    stable-id source), constraints (privacy/security auto-extracted), safety
+    restrictions (reconstructed from the persisted `SpineSafetyReview` via
+    `buildRestrictionDirective`), architecture direction, and design direction
+    (from the selected preset). Seeds are **seeds, not full artifacts** — derived
+    only from existing structured fields (`uxPages`/`userLoops`;
+    `domainEntities`/`richDataModel`), never invented. `validateCanonicalPrdSpine`
+    records non-invasive warnings in `spine.meta.validation` (never a silently
+    empty/misleading spine). The spine is **attached to `SpineVersion.canonicalSpine`**
+    on final settle (`updateSpineStructuredPRD`, only when `generationMeta` is
+    present — a diagnostic/diffing copy; artifact generation always **rebuilds it
+    lazily** from `structuredPRD` so old projects and post-edit PRDs stay
+    consistent). In `generateCoreArtifact` the prompt hierarchy is **persona →
+    guardrails → Canonical PRD Spine (authoritative) → dependency artifacts →
+    full PRD markdown (SECONDARY fallback only)**; the spine subsumes and
+    **replaces** the old standalone feature glossary + inline PRD summary (they
+    are dropped when a spine is present). A spine with **no features** yields a
+    null prompt section → the legacy summary prompt. Each artifact version stamps
+    `metadata.spineContextUsed` / `spineSchemaVersion`. Do **not** re-add the
+    duplicate glossary/summary blocks alongside the spine, and do **not** feed
+    long markdown into the spine (it must stay compact/structured). See
+    `docs/CANONICAL_PRD_SPINE.md`.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
     implementation_plan, prompt_pack, design_system). **`prompt_pack` is

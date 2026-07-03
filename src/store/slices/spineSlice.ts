@@ -6,6 +6,7 @@ import type {
     PreflightSession,
 } from '../../types';
 import type { ProjectState, SpineGenerationMetaInput } from '../types';
+import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -272,7 +273,27 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 if (meta?.prdVersion !== undefined) next.prdVersion = meta.prdVersion;
                 // generationMeta only arrives with the final onResult — partial
                 // (onPartial) updates leave the run marked as still running.
-                if (meta?.generationMeta !== undefined) next.generationPhase = 'complete';
+                if (meta?.generationMeta !== undefined) {
+                    next.generationPhase = 'complete';
+                    // Attach the canonical PRD spine on final settle only. It is
+                    // rebuilt deterministically at artifact-generation time too,
+                    // so this persisted copy is a diagnostic/diffing convenience
+                    // and never the sole source of truth. Best-effort — a build
+                    // failure must never block a usable PRD.
+                    try {
+                        const project = state.projects[projectId];
+                        next.canonicalSpine = buildCanonicalPrdSpine(structuredPRD, {
+                            projectName: project?.productName || project?.name,
+                            platform: project?.platform,
+                            designSystemPreset: project?.designSystemPreset,
+                            safetyReview: next.safetyReview,
+                            sourceSpineVersionId: next.id,
+                            sourcePrdVersion: meta.prdVersion ?? meta.generationMeta.schemaVersion,
+                        });
+                    } catch {
+                        // Leave canonicalSpine unset; lazy rebuild covers it.
+                    }
+                }
                 return next;
             });
             return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };

@@ -426,6 +426,168 @@ export type SpineSafetyReview = {
     reviewedAt: number;
 };
 
+// --- Canonical PRD Spine ---------------------------------------------------
+//
+// A compact, structured, deterministic contract derived from the finalized
+// StructuredPRD (after the silent consistency review). It is the *primary*
+// source of truth for downstream artifact generation — a single, stable
+// product contract that replaces the several overlapping PRD summaries that
+// used to be concatenated into artifact prompts (feature glossary + inline
+// PRD summary). Full PRD markdown is retained only as a secondary fallback.
+//
+// The spine is built by `buildCanonicalPrdSpine` (deterministic code, never an
+// LLM call) and attached to `SpineVersion.canonicalSpine`. It is intentionally
+// compact — no embedded markdown — so it can be rendered into a prompt as
+// structured JSON without bloating context. Every field is conservative:
+// screen/entity seeds are *seeds*, not full downstream artifacts. All arrays
+// are optional-empty and the whole object is optional on SpineVersion so
+// legacy projects (which have no saved spine) keep working — artifact
+// generation rebuilds a spine lazily from the stored StructuredPRD.
+
+/** Schema version for the canonical spine shape — bump on breaking changes. */
+export const CANONICAL_SPINE_SCHEMA_VERSION = 1 as const;
+
+export type SpineProductIdentity = {
+    /** Authoritative product name (user-chosen name wins over model-invented). */
+    productName?: string;
+    /** One-sentence product description. */
+    description?: string;
+    /** Platform / delivery context, e.g. "Mobile app", "Web app". */
+    platform?: string;
+    /** The single primary product goal. */
+    primaryGoal?: string;
+};
+
+export type SpineUserSegment = {
+    /** Segment / persona name. */
+    segment: string;
+    /** Primary jobs-to-be-done for this segment. */
+    jobsToBeDone?: string[];
+    /** Key pains or needs. */
+    pains?: string[];
+};
+
+/**
+ * Canonical feature entry. `id` is the PRD `Feature.id` verbatim — feature ids
+ * stay canonical across the PRD and every downstream artifact.
+ */
+export type SpineFeature = {
+    id: string;
+    name: string;
+    description: string;
+    /** Acceptance criteria or success expectations, when available. */
+    acceptanceCriteria?: string[];
+    /** MoSCoW priority marker, when available. */
+    priority?: 'must' | 'should' | 'could';
+    /** MVP / post-MVP release tier, when available. */
+    tier?: 'mvp' | 'v1' | 'later';
+};
+
+/**
+ * A likely canonical screen implied by the PRD. `id` is a deterministic
+ * slug-based id (`scr-<slug>` with numeric dedup suffixes) — interim stable id
+ * until a real screen inventory exists. Seeds are conservative, not a full
+ * screen inventory.
+ */
+export type SpineScreenSeed = {
+    id: string;
+    name: string;
+    purpose?: string;
+    /** Canonical `Feature.id`s this screen relates to, when derivable. */
+    relatedFeatureIds?: string[];
+    /** Primary user intent for the screen, in the user's own words. */
+    userIntent?: string;
+    /** Known screen states, when available. */
+    states?: string[];
+};
+
+/**
+ * A likely canonical domain entity implied by the PRD. `id` is a deterministic
+ * slug-based id (`ent-<slug>` with numeric dedup suffixes). Seeds are
+ * conservative, not a full data model.
+ */
+export type SpineEntitySeed = {
+    id: string;
+    name: string;
+    description?: string;
+    /** Canonical `Feature.id`s this entity relates to, when derivable. */
+    relatedFeatureIds?: string[];
+    /** Obvious relationships, when available. */
+    relationships?: string[];
+};
+
+export type SpineConstraints = {
+    technical?: string[];
+    product?: string[];
+    nonFunctional?: string[];
+    /** Privacy / security / compliance constraints (extracted from the above). */
+    privacySecurityCompliance?: string[];
+    /** Explicit out-of-scope items. */
+    outOfScope?: string[];
+};
+
+/**
+ * Safety restrictions that must propagate downstream. Sourced from the spine's
+ * persisted `SpineSafetyReview`. `blocked` spines never reach artifact
+ * generation, so in practice this carries `generated` / `restricted`.
+ */
+export type SpineSafetyRestrictions = {
+    classification: SafetyClassification;
+    status: SpineSafetyReview['status'];
+    /** Binding restriction directives for `allowed_with_restrictions` runs. */
+    restrictionDirectives?: string[];
+    /** Content/implementation boundaries (detected concerns) to honor. */
+    boundaries?: string[];
+};
+
+export type SpineArchitectureDirection = {
+    /** High-level architecture guidance (short decision narrative). */
+    summary?: string;
+    integrationAssumptions?: string[];
+    dataStorageAssumptions?: string[];
+    aiToolingAssumptions?: string[];
+    /** Implementation constraints artifacts should respect. */
+    implementationConstraints?: string[];
+};
+
+export type SpineDesignDirection = {
+    /** Selected `DESIGN_SYSTEM_PRESETS` id. */
+    presetId?: string;
+    presetLabel?: string;
+    tone?: string;
+    visualDirection?: string;
+    accessibilityExpectations?: string[];
+    platformNotes?: string[];
+};
+
+export type CanonicalSpineValidation = {
+    valid: boolean;
+    warnings: string[];
+};
+
+export type CanonicalSpineMeta = {
+    schemaVersion: typeof CANONICAL_SPINE_SCHEMA_VERSION;
+    generatedAt: number;
+    /** Spine version the contract was built from (for diffing/staleness). */
+    sourceSpineVersionId?: string;
+    /** `StructuredPRD` schema version at build time, when known. */
+    sourcePrdVersion?: number;
+    validation: CanonicalSpineValidation;
+};
+
+export type CanonicalPrdSpine = {
+    identity: SpineProductIdentity;
+    users: SpineUserSegment[];
+    features: SpineFeature[];
+    screenSeeds: SpineScreenSeed[];
+    entitySeeds: SpineEntitySeed[];
+    constraints: SpineConstraints;
+    safety?: SpineSafetyRestrictions;
+    architecture: SpineArchitectureDirection;
+    design?: SpineDesignDirection;
+    meta: CanonicalSpineMeta;
+};
+
 // --- Preflight clarification (optional pre-PRD interview) ---
 // When the user opts into Quick (5) or Deep (10) clarification, Synapse
 // generates idea-specific questions, collects answers one at a time, shows a
@@ -502,6 +664,12 @@ export type SpineVersion = {
     // Change attribution for this version (user edit vs AI regen vs revert, …).
     // Optional & backward-compatible: legacy spines have none.
     provenance?: VersionProvenance;
+    // Compact structured contract derived deterministically from the finalized
+    // structuredPRD (after the consistency review). The primary source of truth
+    // for downstream artifact generation. Attached on final settle; optional &
+    // backward-compatible — legacy spines lack it and artifact generation
+    // rebuilds one lazily from `structuredPRD`.
+    canonicalSpine?: CanonicalPrdSpine;
 };
 
 // --- Structured Artifact Content Types ---
