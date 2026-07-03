@@ -188,6 +188,7 @@ export function FlowSidebar({
                             type="button"
                             onClick={() => onSelect(i)}
                             aria-current={active ? 'true' : undefined}
+                            aria-label={`Flow ${i + 1}: ${flow.title}`}
                             title={`Flow ${i + 1}: ${flow.title}`}
                             className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold transition ${
                                 active
