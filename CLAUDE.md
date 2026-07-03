@@ -448,14 +448,35 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       still free to coin one. `runPrdGeneration` reads the name from the store by
       `projectId`; pass it explicitly from any new direct `generateStructuredPRD`
       call site.
-    - **Optional final consistency review** (`prdConsistencyReview.ts`): off by
-      default (one extra fast-model call). When enabled (localStorage
-      `synapse-prd-consistency-review === 'true'`, threaded through as
-      `enableConsistencyReview`), it reconciles terminology / names /
-      contradictions across the merged PRD. It **merges over the original**
-      (omitted fields preserved) and a **detail-loss guard** discards any
-      revision that would shrink/empty a key content array; on apply it sets
-      `generationMeta.revised` and adds a `consistency_review` pass record.
+    - **Automatic final consistency review** (`prdConsistencyReview.ts`): runs
+      **by default and silently** as the last step of normal PRD generation
+      (one extra fast-model call, after DAG merge, before markdown is rendered
+      for display/storage). It reconciles terminology / names / feature ids /
+      duplicates / cross-section contradictions across the merged PRD. The user
+      is **never** asked to approve ordinary repairs. The reviewed PRD replaces
+      the merged one **only** when it clears conservative acceptance guards; a
+      failed/unsafe review is discarded and the merged PRD is kept, so a review
+      failure never blocks a usable PRD:
+      - **merge-over-original** (omitted fields preserved — safety-restriction
+        `constraints` survive even if the model omits them),
+      - **detail-loss guard** (discards any revision shrinking/emptying a key
+        content array below 70%),
+      - **required-field guard** (vision/coreProblem/architecture must stay
+        non-empty; targetUsers/features/risks must stay non-empty),
+      - **feature-id stability** (every original `Feature.id` must survive —
+        downstream artifacts/tasks reference them),
+      - **product-identity guard** (a present `productName` may be canonicalized
+        but never blanked).
+      On apply it sets `generationMeta.revised` and adds a `consistency_review`
+      pass record. The outcome (`ran`/`applied`/`status`/`rejectionReason`) is
+      recorded in `generationMeta.consistencyReview` (`ConsistencyReviewMeta`)
+      for diagnostics — never surfaced in the UI. It is **skipped** for a
+      partial run (a section failed → PRD already surfaced as incomplete). The
+      localStorage `synapse-prd-consistency-review` key is now only a
+      **developer/debug opt-out** (`'false'` → skip via `enableConsistencyReview:
+      false`); default and any other value leave the review on. `runPrdGeneration`
+      resolves that override; `ProjectWorkspace.handleRegenerate` leaves it
+      default-on. Do **not** re-add a user-facing "repair PRD?" prompt.
     - **Observability** (`prdGenerationLog.ts`): structured, debug-gated logs
       (`synapse-prd-debug` / `?prddebug`) for queued/started/completed/failed,
       retry, run summary, model, est-vs-actual, and `surface` (mobile/web).
