@@ -95,29 +95,30 @@ export function StepCard({
                 </dl>
             )}
 
+            {/* Quiet inline "Uses:" reference instead of a row of large colored
+                chips — the same features are shown prominently elsewhere
+                (flow header summary + Related Artifacts). Each name stays
+                clickable to open the feature drawer. */}
             {step.featureRefs.length > 0 && (
-                <div className="mt-3 flex flex-wrap gap-1">
-                    {step.featureRefs.map(ref => {
+                <p className="mt-3 text-[11px] text-neutral-500 leading-relaxed">
+                    <span className="font-medium text-neutral-400 uppercase tracking-wider mr-1">Uses</span>
+                    {step.featureRefs.map((ref, i) => {
                         const feature = featuresById?.get(ref.id);
-                        const idLabel = feature?.id ?? ref.id.toUpperCase();
-                        const name = feature?.name;
+                        const label = feature?.name ?? feature?.id ?? ref.id.toUpperCase();
                         return (
-                            <button
-                                key={ref.id}
-                                type="button"
-                                onClick={() => onSelectFeature(ref)}
-                                className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded bg-fuchsia-50 hover:bg-fuchsia-100 border border-fuchsia-200 text-fuchsia-700 text-[11px] font-semibold transition-colors"
-                            >
-                                <span className="font-mono uppercase">{idLabel}</span>
-                                {name && (
-                                    <span className="font-medium normal-case text-fuchsia-800">
-                                        {name}
-                                    </span>
-                                )}
-                            </button>
+                            <span key={ref.id}>
+                                {i > 0 && <span className="text-neutral-300">, </span>}
+                                <button
+                                    type="button"
+                                    onClick={() => onSelectFeature(ref)}
+                                    className="text-neutral-600 hover:text-fuchsia-700 hover:underline transition-colors"
+                                >
+                                    {label}
+                                </button>
+                            </span>
                         );
                     })}
-                </div>
+                </p>
             )}
 
             {step.decisions.length > 0 && (

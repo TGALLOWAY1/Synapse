@@ -3,6 +3,7 @@ import type { Feature } from '../../../types';
 import type { FeatureRef, FlowIssue, FlowIssueKind, ParsedStep } from './types';
 import { ISSUE_KIND_META } from './issueMeta';
 import { inlineWithFeatures } from './inlineWithFeatures';
+import { CollapsibleSection } from './CollapsibleSection';
 
 interface Props {
     flowIndex: number;
@@ -75,10 +76,11 @@ export function IssuesPanel({
         inlineWithFeatures(text, { featuresById, onSelectFeature });
 
     return (
-        <section className="mb-4">
-            <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2 inline-flex items-center gap-1">
-                <AlertTriangle size={11} /> Alternate paths & edge cases
-            </p>
+        <CollapsibleSection
+            title="Alternate paths & edge cases"
+            icon={<AlertTriangle size={12} className="text-amber-500" />}
+            count={all.length}
+        >
             <div className="space-y-3">
                 {KIND_ORDER.map(kind => {
                     const list = grouped[kind];
@@ -124,6 +126,6 @@ export function IssuesPanel({
                     );
                 })}
             </div>
-        </section>
+        </CollapsibleSection>
     );
 }
