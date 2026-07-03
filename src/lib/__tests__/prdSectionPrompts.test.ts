@@ -108,6 +108,19 @@ describe('lean decision-level prompts (detail deferred to artifacts)', () => {
         expect(user).toContain('{ name, target? }');
         expect(user).not.toContain('instrumentation?');
     });
+
+    it('retired-section retry prompts omit the lean rubric that would contradict their asks', () => {
+        // The rubric says schemas/state machines "do NOT belong in the PRD" —
+        // a legacy data_model/implementation_plan retry must not receive it.
+        for (const retired of RETIRED_PRD_SECTIONS) {
+            const { system } = buildSectionPrompt(retired.id as SectionId, { idea: 'Test app', upstream: {} });
+            expect(system).not.toContain('QUALITY BAR');
+            expect(system).not.toContain('do NOT belong in the PRD');
+        }
+        // Active sections keep the rubric.
+        const { system } = buildSectionPrompt('ux_loops', { idea: 'Test app', upstream: {} });
+        expect(system).toContain('QUALITY BAR');
+    });
 });
 
 describe('SECTION_TITLES', () => {

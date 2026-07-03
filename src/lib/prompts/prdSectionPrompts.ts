@@ -45,6 +45,17 @@ ${PROMPT_CONTRACT}
 
 ${RUBRIC_DEFINITION}`;
 
+// Preamble for RETIRED sections (legacy single-section retry only). Omits
+// RUBRIC_DEFINITION: its lean-PRD rules ("database schemas, state machines …
+// do NOT belong in the PRD") would directly contradict these sections' own
+// asks (richDataModel / stateMachines / implementationPlan) and could thin or
+// empty the regenerated slice. A legacy retry must reproduce full detail.
+const RETIRED_SECTION_PREAMBLE = `${SAFETY_OVERRIDE}
+
+You are a senior product strategist and tech lead regenerating one section of an existing full-detail structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product. Produce the complete level of detail this section's schema asks for.
+
+${PROMPT_CONTRACT}`;
+
 const UNAVAILABLE = '<unavailable — infer conservatively and flag uncertainties as assumptions>';
 
 // Serialize a subset of the upstream PRD as compact JSON. Returns the
@@ -153,7 +164,7 @@ For every must- and should-priority feature, populate successCriteria, edgeCases
         const hasFeatures = features !== UNAVAILABLE;
         const note = !hasFeatures ? missingNote('features') : '';
         return {
-            system: `${SHARED_PREAMBLE}
+            system: `${RETIRED_SECTION_PREAMBLE}
 
 You are generating the data_model slice: richDataModel, stateMachines.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
@@ -265,7 +276,7 @@ Return JSON with:
         const note = (!hasFeatures ? missingNote('features') : '') +
             (!hasArch ? missingNote('architecture') : '');
         return {
-            system: `${SHARED_PREAMBLE}
+            system: `${RETIRED_SECTION_PREAMBLE}
 
 You are generating the implementation_plan slice: a phased development roadmap. Phases and their goals must be concrete and actionable, not abstract; each phase must state the reasoning or dependency that determines its ordering.
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
