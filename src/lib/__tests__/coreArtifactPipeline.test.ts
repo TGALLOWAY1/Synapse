@@ -4,6 +4,7 @@ import {
     HIDDEN_ARTIFACT_SUBTYPES,
     RETIRED_ARTIFACT_SUBTYPES,
     buildDependencyLayers,
+    expandWithHiddenDependencyClosure,
     getArtifactMeta,
     isHiddenArtifactSubtype,
     isRetiredArtifactSubtype,
@@ -125,5 +126,46 @@ describe('coreArtifactPipeline', () => {
                 },
             ]),
         ).toThrow();
+    });
+});
+
+describe('expandWithHiddenDependencyClosure', () => {
+    const allDone = () => true;
+    const noneDone = () => false;
+
+    it('pulls component_inventory into a batch that regenerates screen_inventory and the mockup', () => {
+        // The dependency-graph batch after screen_inventory drift: the mockup
+        // consumes component_inventory (hidden), which itself consumes the
+        // screen_inventory being regenerated — it must ride along or the new
+        // mockup is built from a component inventory of the OLD screens.
+        const expanded = expandWithHiddenDependencyClosure(
+            ['screen_inventory', 'user_flows', 'implementation_plan', 'mockup'],
+            allDone,
+        );
+        expect(expanded).toContain('component_inventory');
+    });
+
+    it('leaves a fresh hidden dependency alone when its own inputs are untouched', () => {
+        // Design-tokens drift batch: mockup consumes component_inventory, but
+        // screen_inventory is not being regenerated and the hidden slot is
+        // done — regenerating it would be a wasted API call.
+        const expanded = expandWithHiddenDependencyClosure(['design_system', 'mockup'], allDone);
+        expect(expanded).not.toContain('component_inventory');
+    });
+
+    it('heals a missing/errored hidden dependency when a consumer is in the batch', () => {
+        const expanded = expandWithHiddenDependencyClosure(['mockup'], noneDone);
+        expect(expanded).toContain('component_inventory');
+    });
+
+    it('never adds a hidden subtype nothing in the batch consumes', () => {
+        const expanded = expandWithHiddenDependencyClosure(['data_model'], noneDone);
+        expect(expanded).toEqual(['data_model']);
+    });
+
+    it('preserves the caller order and appends additions', () => {
+        const expanded = expandWithHiddenDependencyClosure(['screen_inventory', 'mockup'], allDone);
+        expect(expanded.slice(0, 2)).toEqual(['screen_inventory', 'mockup']);
+        expect(expanded[2]).toBe('component_inventory');
     });
 });

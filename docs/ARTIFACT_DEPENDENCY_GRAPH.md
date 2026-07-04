@@ -89,7 +89,15 @@ caution flag, never a hard status.
 - **Update all impacted** → `artifactJobController.regenerateSlots(slots,
   args)` — a thin wrapper over the existing `executeJob`, which already runs
   core slots layer-by-layer and the mockup last. No second pipeline. No-op
-  while a run is active (buttons are disabled off live job state).
+  while a run is active (buttons are disabled off live job state). Because
+  graph batches only name *visible* nodes, `regenerateSlots` expands the set
+  with the hidden dependency closure
+  (`expandWithHiddenDependencyClosure` in `coreArtifactPipeline.ts`): a
+  hidden subtype rides along when a requested slot consumes it and either
+  its own inputs are also being regenerated or it isn't done for the spine —
+  so a `[screen_inventory, …, mockup]` batch also refreshes
+  `component_inventory` instead of feeding the new mockup a component
+  inventory built from the old screens.
 - **Open artifact** → the hosting workspace view (`screen_inventory` and
   `mockup` route into the Screens experience view).
 

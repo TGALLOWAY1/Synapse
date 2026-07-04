@@ -16,6 +16,7 @@ import { validateCrossArtifactConsistency } from '../artifactOrchestration';
 import {
     CORE_ARTIFACT_PIPELINE,
     MOCKUP_DEPENDENCIES,
+    expandWithHiddenDependencyClosure,
     isRetiredArtifactSubtype,
     buildDependencyLayers,
     getArtifactMeta,
@@ -631,8 +632,17 @@ export const artifactJobController = {
             .find(s => s.id === args.spineVersionId);
         if (spine?.safetyReview?.status === 'blocked') return;
 
-        const filtered = slots.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
-        if (filtered.length === 0) return;
+        const visible = slots.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
+        if (visible.length === 0) return;
+        // Graph-driven batches only name visible nodes; pull in any hidden
+        // subtype whose consumer is in the batch and whose inputs are being
+        // regenerated (or which isn't done for this spine), so e.g. the
+        // mockup never rebuilds against a component_inventory generated from
+        // the old screen_inventory. See expandWithHiddenDependencyClosure.
+        const filtered = expandWithHiddenDependencyClosure(
+            visible,
+            subtype => isSlotDoneForSpine(args.projectId, subtype, args.spineVersionId),
+        );
 
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted) return;

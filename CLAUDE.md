@@ -1286,7 +1286,14 @@ stale and why, and the safe update order. See
   the existing `executeJob` (dependency-layer order, mockup last — no second
   pipeline). It no-ops while a run is active; the UI disables update buttons
   off live job state. `computeUpdateOrder`/`computeRecommendedUpdates` supply
-  the topological order.
+  the topological order. **Hidden closure rule:** graph batches only name
+  visible nodes, so `regenerateSlots` expands them via
+  `expandWithHiddenDependencyClosure` (`coreArtifactPipeline.ts`) — a hidden
+  subtype is pulled in when a requested slot consumes it and its inputs are
+  also being regenerated (or it isn't done for the spine). Never pass a
+  graph-derived batch to `executeJob` without this expansion, or the mockup
+  can rebuild against a `component_inventory` generated from the old
+  screen inventory.
 - **Workspace wiring rules.** The selection is excluded from the finalize
   auto-open candidates and renders no `StatusDot` (`slotStatusFor` returns a
   constant `'done'` for it). "Open artifact" routes `screen_inventory`/
