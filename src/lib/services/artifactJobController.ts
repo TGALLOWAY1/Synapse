@@ -15,6 +15,8 @@ import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
 import {
     CORE_ARTIFACT_PIPELINE,
+    MOCKUP_DEPENDENCIES,
+    expandWithHiddenDependencyClosure,
     isRetiredArtifactSubtype,
     buildDependencyLayers,
     getArtifactMeta,
@@ -218,24 +220,37 @@ async function runCoreArtifactSlot(
     const parentVersionId = versions.length > 0 ? versions[versions.length - 1].id : null;
     const dependencyTrace = meta.dependsOn.join(', ');
 
+    // Record which upstream artifact versions were available as prompt context
+    // (mirrors what runMockupSlot already does), so the dependency graph can
+    // detect upstream drift precisely — not just via the spine ref. Legacy
+    // versions lack these refs; staleness falls back to a timestamp heuristic.
+    const sourceRefs: SourceRef[] = [
+        { id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' },
+    ];
+    for (const dep of meta.dependsOn) {
+        const ref = readPreferredArtifactRef(projectId, dep, spineVersionId);
+        if (ref) {
+            sourceRefs.push({
+                id: uuidv4(),
+                sourceArtifactId: ref.artifactId,
+                sourceArtifactVersionId: ref.versionId,
+                sourceType: 'core_artifact',
+            });
+        }
+    }
+
     writeStore.createArtifactVersion(
         projectId,
         artifactId,
         content,
         { subtype, dependencyTrace, validationWarnings: warnings, ...extraMetadata },
-        [{ id: uuidv4(), sourceArtifactId: projectId, sourceArtifactVersionId: spineVersionId, sourceType: 'spine' }],
+        sourceRefs,
         `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}`,
         parentVersionId,
     );
 
     writeStore.setSlotStatus(projectId, subtype, { status: 'done', finishedAt: Date.now() });
 }
-
-const MOCKUP_DEPENDENCIES: CoreArtifactSubtype[] = [
-    'screen_inventory',
-    'component_inventory',
-    'design_system',
-];
 
 const readPreferredArtifactForSpine = (
     projectId: string,
@@ -595,6 +610,48 @@ export const artifactJobController = {
 
         const controller = new AbortController();
         const promise = executeJob(args, controller, pending).finally(() => {
+            const current = runs.get(args.projectId);
+            if (current && current.controller === controller) {
+                runs.delete(args.projectId);
+            }
+        });
+        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise });
+    },
+
+    /**
+     * Force-regenerate an explicit set of slots in dependency order (the
+     * Dependency Graph's "update" actions). Unlike startAll, already-done
+     * slots ARE regenerated. Reuses executeJob, so core slots run layer by
+     * layer (an artifact never regenerates before an upstream input that is
+     * also in the set) and the mockup runs after the core pipeline settles.
+     * No-op while another run is active for the project — callers disable
+     * their update buttons off the live job state.
+     */
+    regenerateSlots(slots: ArtifactSlotKey[], args: StartArgs): void {
+        const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
+            .find(s => s.id === args.spineVersionId);
+        if (spine?.safetyReview?.status === 'blocked') return;
+
+        const visible = slots.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
+        if (visible.length === 0) return;
+        // Graph-driven batches only name visible nodes; pull in any hidden
+        // subtype whose consumer is in the batch and whose inputs are being
+        // regenerated (or which isn't done for this spine), so e.g. the
+        // mockup never rebuilds against a component_inventory generated from
+        // the old screen_inventory. See expandWithHiddenDependencyClosure.
+        const filtered = expandWithHiddenDependencyClosure(
+            visible,
+            subtype => isSlotDoneForSpine(args.projectId, subtype, args.spineVersionId),
+        );
+
+        const existing = runs.get(args.projectId);
+        if (existing && !existing.controller.signal.aborted) return;
+        if (existing) runs.delete(args.projectId);
+
+        useProjectStore.getState().initJob(args.projectId, args.spineVersionId, filtered);
+
+        const controller = new AbortController();
+        const promise = executeJob(args, controller, filtered).finally(() => {
             const current = runs.get(args.projectId);
             if (current && current.controller === controller) {
                 runs.delete(args.projectId);

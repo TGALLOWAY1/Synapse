@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, ListChecks, History, Lock,
-    Layers, Database, Code2, AppWindow,
+    Layers, Database, Code2, AppWindow, Waypoints,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -42,6 +42,8 @@ import type { ParsedFlow } from './renderers/userFlows/types';
 import { ScreenListView } from './experience/ScreenListView';
 import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
+import { DependencyGraphView } from './dependency/DependencyGraphView';
+import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -72,8 +74,10 @@ interface ArtifactWorkspaceProps {
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
 // join over screen_inventory + user_flows + mockup (src/lib/screenExperience.ts),
-// not an artifact slot of its own.
-type WorkspaceSelection = 'prd' | ArtifactSlotKey | 'screens';
+// not an artifact slot of its own. 'dependency_graph' is likewise a derived
+// view (src/lib/artifactDependencyGraph.ts) — the project-integrity map over
+// all artifact slots, never a slot itself.
+type WorkspaceSelection = 'prd' | ArtifactSlotKey | 'screens' | 'dependency_graph';
 
 interface SlotMeta {
     key: WorkspaceSelection;
@@ -117,6 +121,9 @@ const ARTIFACT_GROUPS: ArtifactGroup[] = [
     // the Implementation Plan view consumes them through
     // implementationPlanAdapter rather than rendering a separate row.
     { id: 'development', title: 'Development', icon: Code2, items: ['implementation_plan'] },
+    // The Dependency Graph is a read-side integrity view over every artifact
+    // slot (staleness, impact, safe update order) — not an artifact itself.
+    { id: 'map', title: 'Project Map', icon: Waypoints, items: ['dependency_graph'] },
 ];
 
 function buildSlotMetas(): SlotMeta[] {
@@ -124,6 +131,12 @@ function buildSlotMetas(): SlotMeta[] {
         prd: { key: 'prd', title: 'PRD', description: 'Final product requirements document', icon: FileText },
         mockup: { key: 'mockup', title: 'Mockups', description: 'Interactive UI mockups', icon: Image },
         screens: { key: 'screens', title: 'Screens', description: 'Screen-by-screen experience workspace', icon: AppWindow },
+        dependency_graph: {
+            key: 'dependency_graph',
+            title: 'Dependency Graph',
+            description: 'How artifacts connect and what needs updating',
+            icon: Waypoints,
+        },
     } as Record<WorkspaceSelection, SlotMeta>;
     for (const meta of CORE_ARTIFACT_DISPLAY_ORDER) {
         base[meta.subtype as WorkspaceSelection] = {
@@ -140,7 +153,7 @@ function buildSlotMetas(): SlotMeta[] {
     return ARTIFACT_GROUPS.flatMap(group =>
         group.items
             .filter(key =>
-                key === 'prd' || key === 'mockup' || key === 'screens'
+                key === 'prd' || key === 'mockup' || key === 'screens' || key === 'dependency_graph'
                 || (!isHiddenArtifactSubtype(key) && !isRetiredArtifactSubtype(key)))
             .map(key => base[key]),
     );
@@ -446,7 +459,9 @@ export function ArtifactWorkspace({
     }, [activeSelection, selectedScreenId]);
 
     const slotStatusFor = (key: WorkspaceSelection): GenerationStatus => {
-        if (key === 'prd') return 'done';
+        // 'dependency_graph' is a derived view over all slots, not a slot —
+        // it is always available (its row renders no status dot).
+        if (key === 'prd' || key === 'dependency_graph') return 'done';
         // 'screens' is a derived view over screen_inventory — surface that
         // slot's status so the sidebar dot tracks the screens' source artifact.
         const slotKey: ArtifactSlotKey = key === 'screens' ? 'screen_inventory' : key;
@@ -463,7 +478,7 @@ export function ArtifactWorkspace({
     };
 
     const slotErrorFor = (key: WorkspaceSelection) => {
-        if (key === 'prd') return undefined;
+        if (key === 'prd' || key === 'dependency_graph') return undefined;
         const slotKey: ArtifactSlotKey = key === 'screens' ? 'screen_inventory' : key;
         return job?.slots[slotKey]?.error;
     };
@@ -476,7 +491,9 @@ export function ArtifactWorkspace({
     // user who closes the drawer is never re-interrupted.
     useEffect(() => {
         if (!autoOpenIntent) return;
-        const candidates = slotMetas.map(s => s.key).filter(k => k !== 'prd');
+        // Exclude the always-'done' derived views so a fresh finalize never
+        // auto-lands on the Dependency Graph instead of a real artifact.
+        const candidates = slotMetas.map(s => s.key).filter(k => k !== 'prd' && k !== 'dependency_graph');
         const firstWith = (s: GenerationStatus) => candidates.find(k => slotStatusFor(k) === s);
         const pick = firstWith('done') ?? firstWith('generating') ?? firstWith('queued') ?? candidates[0];
         if (pick) setSelected(pick);
@@ -516,6 +533,21 @@ export function ArtifactWorkspace({
     const handleNavigateToScreen = (slug: string) => {
         const item = screenIndex.bySlug.get(slug);
         if (item) handleOpenScreen(item.id);
+    };
+
+    // Dependency Graph "Open artifact" → the workspace view that hosts that
+    // node. screen_inventory and mockup have no rows of their own anymore —
+    // both live inside the Screens experience view.
+    const handleOpenGraphNode = (nodeId: DependencyNodeId) => {
+        if (nodeId === 'screen_inventory' || nodeId === 'mockup') {
+            setSelected('screens');
+        } else if (nodeId === 'prd' || slotMetas.some(s => s.key === nodeId)) {
+            setSelected(nodeId as WorkspaceSelection);
+        } else {
+            return; // hidden/retired subtype — no view to open
+        }
+        if (selectedScreenId) setScreenParams(null);
+        setMobileSidebarOpen(false);
     };
 
     // Persist a newly-chosen visual direction, then surface the regenerate
@@ -576,6 +608,20 @@ export function ArtifactWorkspace({
                         readOnly
                     />
                 </div>
+            );
+        }
+
+        // --- Project Map → Dependency Graph (derived integrity view) --------
+        if (activeSelection === 'dependency_graph') {
+            return (
+                <DependencyGraphView
+                    projectId={projectId}
+                    spineVersionId={spineVersionId}
+                    prdContent={prdContent}
+                    structuredPRD={structuredPRD}
+                    projectPlatform={projectPlatform}
+                    onOpenNode={handleOpenGraphNode}
+                />
             );
         }
 
@@ -1122,7 +1168,7 @@ export function ArtifactWorkspace({
                                                             <span className={`text-sm font-medium truncate ${isSel ? 'text-indigo-900' : 'text-neutral-800'}`}>
                                                                 {slot.title}
                                                             </span>
-                                                            <StatusDot status={status} />
+                                                            {slot.key !== 'dependency_graph' && <StatusDot status={status} />}
                                                             {status === 'done' && isLockedAsset(slot.key) && (
                                                                 <AssetLock />
                                                             )}
@@ -1157,7 +1203,7 @@ export function ArtifactWorkspace({
                     <span className="text-sm font-semibold text-neutral-800 truncate">
                         {selectedMeta?.title ?? 'Artifacts'}
                     </span>
-                    {activeSelection !== 'prd' && (
+                    {activeSelection !== 'prd' && activeSelection !== 'dependency_graph' && (
                         <span className="ml-auto shrink-0 flex items-center gap-1.5">
                             <StatusDot status={slotStatusFor(activeSelection)} />
                             {slotStatusFor(activeSelection) === 'done' && isLockedAsset(activeSelection) && (

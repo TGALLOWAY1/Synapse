@@ -1,4 +1,4 @@
-import type { CoreArtifactSubtype } from '../types';
+import type { ArtifactSlotKey, CoreArtifactSubtype } from '../types';
 
 export interface CoreArtifactMeta {
     subtype: CoreArtifactSubtype;
@@ -91,6 +91,17 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
 export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
     CORE_ARTIFACT_PIPELINE.slice().sort((a, b) => a.displayOrder - b.displayOrder);
 
+// Upstream core artifacts the mockup spec builder consumes (screen list,
+// component tags, design tokens). Lives here — next to the pipeline it
+// extends — so the artifact dependency graph and the job controller share
+// one definition. The design_system ref additionally carries the tokensHash
+// via SourceRef.anchorInfo (see artifactJobController.runMockupSlot).
+export const MOCKUP_DEPENDENCIES: CoreArtifactSubtype[] = [
+    'screen_inventory',
+    'component_inventory',
+    'design_system',
+];
+
 // Subtypes that are still *generated* (they remain in CORE_ARTIFACT_PIPELINE and
 // MOCKUP_DEPENDENCIES so downstream consumers like mockups keep working) but are
 // **hidden from the assets list** — no hard dependents, not useful to surface
@@ -120,6 +131,53 @@ export const RETIRED_ARTIFACT_SUBTYPES: ReadonlySet<CoreArtifactSubtype> = new S
 
 export const isRetiredArtifactSubtype = (subtype: CoreArtifactSubtype): boolean =>
     RETIRED_ARTIFACT_SUBTYPES.has(subtype);
+
+/**
+ * Expand an explicit regeneration batch with the hidden-subtype dependency
+ * closure. Hidden subtypes (e.g. component_inventory) still generate and feed
+ * visible dependents — the mockup consumes component_inventory via
+ * MOCKUP_DEPENDENCIES — but the dependency graph collapses them out of the UI,
+ * so a graph-driven batch never names them. Without this expansion, a batch
+ * like [screen_inventory, …, mockup] would rebuild the mockup against a
+ * component inventory generated from the OLD screen inventory (or none at
+ * all), and resumeIfNeeded deliberately never wakes a hidden-only pending
+ * slot afterwards.
+ *
+ * A hidden subtype is added when some requested slot consumes it (directly)
+ * AND either (a) one of its own inputs is also being regenerated — it will be
+ * stale the moment the batch runs — or (b) it is not currently done for this
+ * spine (missing/errored), per the `isSlotDone` callback. Runs to a fixed
+ * point so hidden-on-hidden chains close too. Pure: the controller supplies
+ * the store-backed `isSlotDone`.
+ */
+export function expandWithHiddenDependencyClosure(
+    slots: ArtifactSlotKey[],
+    isSlotDone: (subtype: CoreArtifactSubtype) => boolean,
+): ArtifactSlotKey[] {
+    const requested = new Set<ArtifactSlotKey>(slots);
+    let changed = true;
+    while (changed) {
+        changed = false;
+        for (const meta of CORE_ARTIFACT_PIPELINE) {
+            if (!isHiddenArtifactSubtype(meta.subtype) || requested.has(meta.subtype)) continue;
+            const consumers: ArtifactSlotKey[] = [
+                ...CORE_ARTIFACT_PIPELINE
+                    .filter(m => !isRetiredArtifactSubtype(m.subtype) && m.dependsOn.includes(meta.subtype))
+                    .map(m => m.subtype),
+                ...(MOCKUP_DEPENDENCIES.includes(meta.subtype) ? (['mockup'] as ArtifactSlotKey[]) : []),
+            ];
+            if (!consumers.some(c => requested.has(c))) continue;
+            const inputRequested = meta.dependsOn.some(d => requested.has(d));
+            if (inputRequested || !isSlotDone(meta.subtype)) {
+                requested.add(meta.subtype);
+                changed = true;
+            }
+        }
+    }
+    // Preserve caller order, appending the hidden additions at the end —
+    // execution order is derived from buildDependencyLayers, not this array.
+    return [...slots, ...[...requested].filter(s => !slots.includes(s))];
+}
 
 /**
  * Group the pipeline into dependency layers. Items in the same layer have no

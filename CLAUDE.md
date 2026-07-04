@@ -1251,6 +1251,54 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `screen_inventory` and `mockup` renderMain branches remain intact and
   internally reachable — do not delete them.
 
+### Artifact Dependency Graph (Project Map) — read-side integrity view
+
+**Project Map → Dependency Graph** (`'dependency_graph'`, a
+`WorkspaceSelection` like `'screens'`, NOT an artifact slot — no persisted
+state) visualizes how artifacts derive from the PRD and each other, which are
+stale and why, and the safe update order. See
+`docs/ARTIFACT_DEPENDENCY_GRAPH.md`.
+
+- **The map is derived, never hand-drawn.** `src/lib/artifactDependencyGraph.ts`
+  (pure; no store/React/LLM imports; unit-tested) builds the graph from
+  `CORE_ARTIFACT_PIPELINE` + `MOCKUP_DEPENDENCIES` (the latter now lives in
+  `coreArtifactPipeline.ts`, shared with `artifactJobController`). Hidden
+  subtypes collapse transitively; retired subtypes are excluded. To change the
+  graph, change the pipeline constants — do **not** add edges in the graph
+  module.
+- **Provenance refs.** `runCoreArtifactSlot` records a `core_artifact`
+  `SourceRef` for each `dependsOn` input actually available at generation time
+  (mirrors what `runMockupSlot` always did). Legacy versions lack these refs —
+  the evaluator falls back to a timestamp heuristic (advisory
+  `update_recommended`, never hard `needs_update`). `sourceRefs` already
+  travel in `ArtifactVersion` through persistence/sync/snapshots, so no
+  schema change was involved.
+- **Staleness is deterministic** (`evaluateDependencyGraph`): spine-ref drift
+  and recorded dependency-ref drift → `needs_update`; the mockup
+  design-tokensHash rule mirrors `stalenessSlice` (hash comparison beats
+  version-id comparison — a token-identical regen keeps mockups current);
+  missing/error/generating come from artifact presence + live job slots.
+  Upstream trouble propagates downstream as `impactedBy` (blue "Impacted"
+  pill). Keep this evaluator and `stalenessSlice` consistent if either rule
+  set changes.
+- **Actions reuse existing flows.** Single update → `retrySlot`; batch →
+  `artifactJobController.regenerateSlots(slots, args)`, a thin wrapper over
+  the existing `executeJob` (dependency-layer order, mockup last — no second
+  pipeline). It no-ops while a run is active; the UI disables update buttons
+  off live job state. `computeUpdateOrder`/`computeRecommendedUpdates` supply
+  the topological order. **Hidden closure rule:** graph batches only name
+  visible nodes, so `regenerateSlots` expands them via
+  `expandWithHiddenDependencyClosure` (`coreArtifactPipeline.ts`) — a hidden
+  subtype is pulled in when a requested slot consumes it and its inputs are
+  also being regenerated (or it isn't done for the spine). Never pass a
+  graph-derived batch to `executeJob` without this expansion, or the mockup
+  can rebuild against a `component_inventory` generated from the old
+  screen inventory.
+- **Workspace wiring rules.** The selection is excluded from the finalize
+  auto-open candidates and renders no `StatusDot` (`slotStatusFor` returns a
+  constant `'done'` for it). "Open artifact" routes `screen_inventory`/
+  `mockup` into the Screens view since neither has its own sidebar row.
+
 ### Implementation tasks (plan → tracked checklist)
 
 The Implementation Plan artifact converts into trackable build tasks.
