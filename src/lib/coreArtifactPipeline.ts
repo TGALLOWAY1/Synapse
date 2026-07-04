@@ -91,6 +91,17 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
 export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
     CORE_ARTIFACT_PIPELINE.slice().sort((a, b) => a.displayOrder - b.displayOrder);
 
+// Upstream core artifacts the mockup spec builder consumes (screen list,
+// component tags, design tokens). Lives here — next to the pipeline it
+// extends — so the artifact dependency graph and the job controller share
+// one definition. The design_system ref additionally carries the tokensHash
+// via SourceRef.anchorInfo (see artifactJobController.runMockupSlot).
+export const MOCKUP_DEPENDENCIES: CoreArtifactSubtype[] = [
+    'screen_inventory',
+    'component_inventory',
+    'design_system',
+];
+
 // Subtypes that are still *generated* (they remain in CORE_ARTIFACT_PIPELINE and
 // MOCKUP_DEPENDENCIES so downstream consumers like mockups keep working) but are
 // **hidden from the assets list** — no hard dependents, not useful to surface
