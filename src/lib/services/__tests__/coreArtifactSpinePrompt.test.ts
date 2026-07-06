@@ -50,12 +50,12 @@ describe('generateCoreArtifact — canonical spine prompt', () => {
         const prompt = lastUserPrompt();
         expect(prompt).toMatch(/Canonical PRD Spine \(AUTHORITATIVE/);
         expect(prompt).toMatch(/"id": "f1"/);
-        // Full PRD present but explicitly marked secondary.
-        expect(prompt).toMatch(/Full PRD \(SECONDARY reference only/);
+        // Full PRD present but demoted to the clearly-labeled secondary appendix.
+        expect(prompt).toContain('## APPENDIX — FULL PRD MARKDOWN (SECONDARY REFERENCE ONLY)');
         expect(prompt).toContain('Full rendered PRD markdown body.');
-        // The spine section must appear before the full PRD.
-        expect(prompt.indexOf('Canonical PRD Spine')).toBeLessThan(prompt.indexOf('Full PRD (SECONDARY'));
-        // The redundant standalone glossary/summary headers are gone.
+        // The authoritative spine section must appear before the PRD appendix.
+        expect(prompt.indexOf('CANONICAL PRD SPINE')).toBeLessThan(prompt.indexOf('APPENDIX — FULL PRD MARKDOWN'));
+        // The redundant standalone glossary/summary headers are gone (spine path).
         expect(prompt).not.toContain('Canonical Feature Glossary:');
         expect(prompt).not.toContain('Vision: Match music to mood');
     });
