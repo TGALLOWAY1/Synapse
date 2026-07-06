@@ -6,7 +6,8 @@ import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSett
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
-import { assertDependenciesSufficient } from '../artifactDependencyGate';
+import { assertDependenciesSufficient, findMissingRequiredDependencies } from '../artifactDependencyGate';
+import { buildArtifactPrompt } from './artifactPromptBuilder';
 import { buildCanonicalPrdSpine, buildCanonicalSpinePromptSection } from '../canonicalPrdSpine';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
@@ -538,16 +539,10 @@ export const generateCoreArtifact = async (
     const spineSection = buildCanonicalSpinePromptSection(canonicalSpine);
     const spineContextUsed = spineSection !== null;
 
-    // Prompt hierarchy: persona/system → guardrails → Canonical PRD Spine
-    // (authoritative) → dependency artifacts → full PRD markdown (secondary
-    // fallback only). The spine subsumes the old feature glossary + inline PRD
-    // summary, so those are dropped when the spine is used to avoid feeding
-    // several differently-worded views of the same product facts.
-    let userPrompt: string;
-    if (spineSection) {
-        userPrompt = `${config.userPrefix}\n\n${guardrails}\n\n${spineSection}\n\nDependency Artifacts:\n${dependencyContext}${presetSection}\n\n---\n\nFull PRD (SECONDARY reference only — defer to the Canonical PRD Spine above on any conflict; use this solely for detail the spine omits):\n${prdContent}${mockupSection}`;
-    } else {
-        // Legacy fallback: no reliable spine (e.g. a PRD with no features).
+    // Legacy structured fallback (feature glossary + inline PRD summary), used
+    // only when there is no reliable spine (e.g. a PRD with no features). Built
+    // lazily so the spine path pays nothing for it.
+    const buildLegacyStructured = (): string => {
         const featureList = structuredPRD.features.map(f => {
             let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
             if (f.acceptanceCriteria && f.acceptanceCriteria.length > 0) {
@@ -575,8 +570,44 @@ Architecture: ${structuredPRD.architecture}${
                 : ''
         }`;
         const featureGlossary = buildFeatureGlossary(structuredPRD);
-        userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}${presetSection}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+        return `Canonical Feature Glossary:\n${featureGlossary}\n\n${prdSummary}`;
+    };
+
+    // Known conflicts / staleness to surface to the model. Missing REQUIRED
+    // dependencies (only reachable here when degraded generation was
+    // acknowledged) and spine validation warnings are the machine-derivable
+    // ones; stale prose feature names are detected inside the prompt builder.
+    const missingRequired = findMissingRequiredDependencies(subtype, generatedArtifacts);
+    const notices: string[] = [];
+    if (missingRequired.length > 0) {
+        notices.push(
+            `Required upstream ${missingRequired.length > 1 ? 'dependencies are' : 'dependency is'} missing (${missingRequired.join(', ')}); ` +
+            'generate against the Canonical PRD Spine and note any gaps rather than inventing detail.',
+        );
     }
+    for (const w of canonicalSpine.meta.validation.warnings) {
+        notices.push(`Canonical PRD Spine warning: ${w}`);
+    }
+
+    // Assemble the prompt with an explicit, machine-checkable source hierarchy:
+    // task → authoritative canonical spine → authoritative structured dependency
+    // summaries → selected options → known conflicts/staleness → SECONDARY full
+    // PRD markdown appendix. Prose in the appendix must never override the
+    // structured sources. See artifactPromptBuilder.ts.
+    const built = buildArtifactPrompt({
+        userPrefix: config.userPrefix,
+        guardrails,
+        canonicalSpine,
+        spineSection,
+        legacyStructured: spineSection ? undefined : buildLegacyStructured(),
+        dependencyContext,
+        dependencyKeys: Object.keys(generatedArtifacts),
+        presetSection,
+        prdMarkdown: prdContent,
+        mockupSection,
+        notices,
+    });
+    const userPrompt = built.prompt;
 
     // Diagnostics stamped onto every artifact version — records whether the
     // canonical spine drove generation or the legacy summary path was used.
@@ -608,13 +639,21 @@ Architecture: ${structuredPRD.architecture}${
         ],
         promptPieces: [
             { label: 'Artifact template (userPrefix)', present: true },
+            { label: 'Source hierarchy header', present: true },
             { label: 'Narrative guardrails', present: true },
-            { label: 'Canonical PRD Spine', present: spineContextUsed },
-            { label: 'Legacy feature glossary + summary', present: !spineContextUsed },
-            { label: 'Dependency artifacts', present: dependencyKeys.length > 0, detail: dependencyKeys.join(', ') || undefined },
-            { label: 'Design-system preset directive', present: Boolean(presetDirective) },
+            { label: 'Canonical PRD Spine (authoritative)', present: spineContextUsed },
+            { label: 'Legacy structured PRD summary (fallback)', present: !spineContextUsed },
+            { label: 'Structured dependency summaries (authoritative)', present: dependencyKeys.length > 0, detail: dependencyKeys.join(', ') || undefined },
+            { label: 'Selected options / preset directive', present: Boolean(presetDirective) },
+            {
+                label: 'Known conflicts & staleness block',
+                present: built.hasConflictBlock,
+                detail: built.staleNameConflicts.length
+                    ? `${built.staleNameConflicts.length} stale feature name(s)`
+                    : undefined,
+            },
             { label: 'Mockup context', present: Boolean(options?.mockupContext) },
-            { label: 'Full PRD (secondary)', present: true },
+            { label: 'Full PRD markdown appendix (secondary)', present: true },
         ],
     };
 

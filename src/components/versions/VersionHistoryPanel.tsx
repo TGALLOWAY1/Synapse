@@ -13,6 +13,9 @@ export type VersionEntry = {
     createdAt: number;
     changeSource?: VersionChangeSource;
     editSummary?: string;
+    // Optional one-line summary of the automatic consistency-review pass that
+    // produced/vetted this PRD version (transparency/debugging). PRD only.
+    consistencyReview?: string;
 };
 
 interface VersionHistoryPanelProps {
@@ -119,6 +122,11 @@ export function VersionHistoryPanel({
                                     <div className="text-xs text-neutral-400 mt-1">{formatTime(entry.createdAt)}</div>
                                     {entry.editSummary && (
                                         <div className="text-xs text-neutral-600 mt-1 break-words">{entry.editSummary}</div>
+                                    )}
+                                    {entry.consistencyReview && (
+                                        <div className="text-[11px] text-teal-700 mt-1 break-words">
+                                            <span className="font-medium">Consistency review:</span> {entry.consistencyReview}
+                                        </div>
                                     )}
                                     {!entry.isCurrent && (
                                         <div className="flex items-center gap-2 mt-2">

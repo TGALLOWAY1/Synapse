@@ -118,4 +118,241 @@ describe('reviewPrdConsistency', () => {
     // The restriction survives via merge-over-original.
     expect(result.prd.constraints).toEqual(['No collection of medical data']);
   });
+
+  // --- Phase 3 semantic preservation guards ----------------------------------
+
+  it('rejects a revision that keeps the feature id but drops acceptance criteria', async () => {
+    const original = basePrd();
+    original.features[0].acceptanceCriteria = ['must A', 'must B', 'must C'];
+    // Same id, same count of features, but one acceptance criterion removed.
+    const revised = original.features.map((f, i) =>
+      i === 0 ? { ...f, acceptanceCriteria: ['must A', 'must B'] } : f,
+    );
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: revised }, changeLog: 'trimmed criteria' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('feature-acceptance-criteria-lost');
+    expect(result.prd.features[0].acceptanceCriteria).toHaveLength(3);
+  });
+
+  it('rejects a revision that removes a feature dependency reference', async () => {
+    const original = basePrd();
+    original.features[1].dependencies = ['f1', 'f3'];
+    // Same feature, but one dependency id dropped.
+    const revised = original.features.map((f, i) =>
+      i === 1 ? { ...f, dependencies: ['f1'] } : f,
+    );
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: revised }, changeLog: 'removed dep' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('feature-dependencies-lost');
+    expect(result.prd.features[1].dependencies).toEqual(['f1', 'f3']);
+  });
+
+  it('rejects a revision that removes/weakens a safety restriction', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      constraints: ['No collection of medical data', 'No third-party data sharing'],
+    };
+    // Count is preserved (passes detail-loss) but one restriction was reworded
+    // into a weaker form — the safety guard must still reject it.
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: { ...original, constraints: ['Avoid excessive medical data', 'No third-party data sharing'] },
+        changeLog: 'reworded constraints',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('safety-restriction-lost');
+    expect(result.prd.constraints).toEqual([
+      'No collection of medical data',
+      'No third-party data sharing',
+    ]);
+  });
+
+  it('rejects a revision that drops an entity field', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          {
+            name: 'Patient',
+            description: 'A patient record',
+            fields: [
+              { name: 'id', type: 'string' },
+              { name: 'name', type: 'string' },
+              { name: 'dob', type: 'date' },
+            ],
+            relationships: ['has many Appointment'],
+          },
+        ],
+      },
+    };
+    // Same entity, but a field removed.
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          richDataModel: {
+            entities: [
+              {
+                name: 'Patient',
+                description: 'A patient record',
+                fields: [
+                  { name: 'id', type: 'string' },
+                  { name: 'name', type: 'string' },
+                ],
+                relationships: ['has many Appointment'],
+              },
+            ],
+          },
+        },
+        changeLog: 'dropped field',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-lost');
+    expect(result.prd.richDataModel?.entities[0].fields).toHaveLength(3);
+  });
+
+  it('rejects a revision that drops an entity relationship', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          {
+            name: 'Order',
+            description: 'A purchase order',
+            fields: [{ name: 'id', type: 'string' }],
+            relationships: ['belongs to Customer', 'has many LineItem'],
+          },
+        ],
+      },
+    };
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          richDataModel: {
+            entities: [
+              {
+                name: 'Order',
+                description: 'A purchase order',
+                fields: [{ name: 'id', type: 'string' }],
+                relationships: ['belongs to Customer'],
+              },
+            ],
+          },
+        },
+        changeLog: 'dropped relationship',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-lost');
+  });
+
+  it('rejects a revision that drops one entity out of several (identity, not count)', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          { name: 'Patient', description: 'p', fields: [{ name: 'id', type: 'string' }] },
+          { name: 'Appointment', description: 'a', fields: [{ name: 'id', type: 'string' }] },
+          { name: 'Provider', description: 'v', fields: [{ name: 'id', type: 'string' }] },
+        ],
+      },
+    };
+    // Drops 1 of 3 entities → 2/3 = 67%... use 4 entities so it stays above the
+    // 70% detail-loss floor and only the identity check can catch it.
+    original.richDataModel!.entities.push({ name: 'Invoice', description: 'i', fields: [{ name: 'id', type: 'string' }] });
+    const survivors = original.richDataModel!.entities.filter(e => e.name !== 'Provider'); // 3 of 4 = 75%
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: { ...original, richDataModel: { entities: survivors } },
+        changeLog: 'dropped an entity',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-lost');
+    expect(result.prd.richDataModel?.entities).toHaveLength(4);
+  });
+
+  it('rejects a revision that swaps an entity field while preserving the count', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          {
+            name: 'Patient',
+            description: 'p',
+            fields: [
+              { name: 'id', type: 'string' },
+              { name: 'dob', type: 'date' },
+            ],
+          },
+        ],
+      },
+    };
+    // Same field count (2), but "dob" replaced by an unrelated "nickname".
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          richDataModel: {
+            entities: [
+              {
+                name: 'Patient',
+                description: 'p',
+                fields: [
+                  { name: 'id', type: 'string' },
+                  { name: 'nickname', type: 'string' },
+                ],
+              },
+            ],
+          },
+        },
+        changeLog: 'swapped a field',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-lost');
+  });
+
+  it('records a structured diff on an accepted revision', async () => {
+    const original = basePrd();
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: { ...original, productName: 'MyApp (canonical)' },
+        changeLog: 'Normalized product name across sections.',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(true);
+    expect(result.diff).toBeDefined();
+    expect(result.diff?.outcome).toBe('accepted');
+    expect(result.diff?.guardsTriggered).toEqual([]);
+    expect(result.diff?.sectionsChanged).toContain('productName');
+    expect(result.diff?.productNameChange).toEqual({ before: 'MyApp', after: 'MyApp (canonical)' });
+  });
+
+  it('records the triggered guard in the diff on a rejected revision', async () => {
+    const original = basePrd();
+    const renamed = original.features.map((f, i) => ({ ...f, id: `renamed-${i}` }));
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: renamed }, changeLog: 'renamed ids' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.diff?.outcome).toBe('rejected');
+    expect(result.diff?.guardsTriggered).toContain('feature-ids-changed');
+  });
 });
