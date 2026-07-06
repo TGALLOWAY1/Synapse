@@ -13,8 +13,12 @@ interface Props {
 }
 
 // Deterministic canvas geometry — no DOM measurement (mirrors DependencyGraphView).
+// CARD_H must fit the full node stack (title + category pill + 2-line
+// description + footer, incl. px-3 py-2.5 padding). Because the footer is pinned
+// with mt-auto, an under-sized height squeezes and clips the description — keep
+// this tall enough for the tallest content, or the description gets cut off.
 const CARD_W = 224;
-const CARD_H = 118;
+const CARD_H = 140;
 const GAP_X = 40;
 const ROW_GAP = 92;
 
@@ -245,7 +249,7 @@ export function EntityGraph(props: Props) {
                                     onOpenEntity(node.id);
                                 }}
                                 style={{ left: pos.x, top: pos.y, width: CARD_W, height: CARD_H }}
-                                className={`absolute flex flex-col text-left rounded-xl border border-l-4 bg-white px-3 py-2.5 shadow-sm transition ${CATEGORY_STYLES[node.category].accent} ${
+                                className={`absolute flex flex-col overflow-hidden text-left rounded-xl border border-l-4 bg-white px-3 py-2.5 shadow-sm transition ${CATEGORY_STYLES[node.category].accent} ${
                                     highlighted
                                         ? 'border-indigo-500 ring-2 ring-indigo-200'
                                         : 'border-neutral-200 hover:border-indigo-300 hover:shadow'
