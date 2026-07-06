@@ -6,6 +6,7 @@ import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSett
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
+import { assertDependenciesSufficient } from '../artifactDependencyGate';
 import { buildCanonicalPrdSpine, buildCanonicalSpinePromptSection } from '../canonicalPrdSpine';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
@@ -477,6 +478,13 @@ export const generateCoreArtifact = async (
          * an empty spine (no features) falls back to the legacy summary prompt.
          */
         canonicalSpine?: CanonicalPrdSpine;
+        /**
+         * Explicit acknowledgement that generation may proceed with one or more
+         * REQUIRED upstream dependencies missing (degraded output). Without it,
+         * a missing required dependency throws DependencyInsufficiencyError
+         * before any model call.
+         */
+        allowMissingDependencies?: boolean;
         /** Developer-only LLM trace identity (session grouping + project). */
         traceContext?: { sessionId?: string; projectId?: string; projectName?: string };
     },
@@ -487,7 +495,15 @@ export const generateCoreArtifact = async (
     // Fast (Flash). Mirrors the PRD pipeline's per-section tiering.
     const model = selectArtifactModel(subtype);
 
-    const dependencyContext = buildDependencyContext(subtype, options?.generatedArtifacts ?? {});
+    const generatedArtifacts = options?.generatedArtifacts ?? {};
+    // Dependency sufficiency gate: block before any model call when a required
+    // upstream artifact is missing/empty (unless degraded generation is
+    // explicitly acknowledged), rather than silently generating from a soft
+    // "Not generated yet." placeholder.
+    assertDependenciesSufficient(subtype, generatedArtifacts, {
+        allowMissing: options?.allowMissingDependencies,
+    });
+    const dependencyContext = buildDependencyContext(subtype, generatedArtifacts);
     const guardrails = buildNarrativeGuardrails(structuredPRD);
 
     const mockupSection = options?.mockupContext

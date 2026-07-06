@@ -820,6 +820,28 @@ cleared (post-reload). UI: an amber `ShieldAlert` `StatusDot` + an in-view
 "Needs review" banner listing the issues with a Regenerate action. Keep the
 blocker list conservative — advisory warnings must stay non-blocking.
 
+### Dependency sufficiency gate (`src/lib/artifactDependencyGate.ts`)
+
+An artifact must not silently generate from missing/errored **required** upstream
+dependencies (which previously produced degraded output behind a soft "Not
+generated yet." placeholder). `REQUIRED_DEPENDENCIES` (`coreArtifactPipeline.ts`,
+a conservative subset of each subtype's `dependsOn`: `user_flows` ←
+`screen_inventory`; `implementation_plan` ← `screen_inventory` + `data_model`)
+declares which deps block. `generateCoreArtifact` calls
+`assertDependenciesSufficient(subtype, generatedArtifacts, { allowMissing })`
+**before any model call** — a missing required dep throws
+`DependencyInsufficiencyError` (surfaced as a slot error) unless
+`allowMissingDependencies` acknowledges degraded generation. The happy path never
+false-blocks because `buildDependencyLayers` runs required deps in an earlier
+layer. `runCoreArtifactSlot` stamps `metadata.dependencyStatus`
+(`complete`/`degraded`) + `missingRequiredDependencies`. `buildDependencyContext`
+labels required deps `(REQUIRED)` and, when one is absent, emits an explicit
+**MISSING** notice instead of "Not generated yet.". Screen-inventory dependency
+context is summarized via `summarizeScreenInventoryDependency`, which emits the
+**full screen roster (every id/name) first, never truncated**, then truncates the
+verbose prose — so downstream artifacts never lose a screen reference to a long
+prose cut.
+
 ### Preflight clarification (`src/lib/services/preflightService.ts`, `src/components/preflight/`)
 
 An **optional** pre-PRD step. After entering an idea on `HomePage`, a

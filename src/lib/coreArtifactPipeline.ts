@@ -91,6 +91,25 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
 export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
     CORE_ARTIFACT_PIPELINE.slice().sort((a, b) => a.displayOrder - b.displayOrder);
 
+// A subset of each artifact's `dependsOn` that is genuinely REQUIRED: the
+// dependent cannot be meaningfully generated without the dependency's output.
+// Missing required dependencies (not generated, errored, or empty) block
+// generation unless the user acknowledges degraded generation. Every other
+// declared dependency is treated as optional context. Keep this conservative —
+// over-marking a dep as required needlessly blocks generation.
+export const REQUIRED_DEPENDENCIES: Partial<Record<CoreArtifactSubtype, CoreArtifactSubtype[]>> = {
+    // Flows reference specific screens by name — without the inventory they'd be
+    // invented.
+    user_flows: ['screen_inventory'],
+    // The consolidated plan links milestones/prompt packs to concrete screens
+    // and entities; both are required for a trustworthy, traceable plan.
+    implementation_plan: ['screen_inventory', 'data_model'],
+};
+
+export function getRequiredDependencies(subtype: CoreArtifactSubtype): CoreArtifactSubtype[] {
+    return REQUIRED_DEPENDENCIES[subtype] ?? [];
+}
+
 // Upstream core artifacts the mockup spec builder consumes (screen list,
 // component tags, design tokens). Lives here — next to the pipeline it
 // extends — so the artifact dependency graph and the job controller share

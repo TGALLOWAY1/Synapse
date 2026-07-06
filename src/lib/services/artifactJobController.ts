@@ -23,6 +23,7 @@ import {
     getArtifactMeta,
     isHiddenArtifactSubtype,
 } from '../coreArtifactPipeline';
+import { findMissingRequiredDependencies } from '../artifactDependencyGate';
 import { isAbortError } from '../concurrency';
 import { evaluateSpineGenerationGate } from '../artifactGenerationGate';
 import { getStrongModel } from '../geminiClient';
@@ -272,6 +273,11 @@ async function runCoreArtifactSlot(
     // (partial) PRD so the UI can flag it as generated from degraded input.
     const incompletePrdSections = spineVersionForStamp(projectId, spineVersionId);
 
+    // Record dependency completeness. Generation only reaches here when all
+    // required deps were present (or degraded generation was acknowledged), so
+    // a non-empty `missing` list means the artifact was knowingly degraded.
+    const missingRequiredDeps = findMissingRequiredDependencies(subtype, generatedArtifacts);
+
     writeStore.createArtifactVersion(
         projectId,
         artifactId,
@@ -280,6 +286,8 @@ async function runCoreArtifactSlot(
             subtype,
             dependencyTrace,
             validationWarnings: warnings,
+            dependencyStatus: missingRequiredDeps.length ? 'degraded' : 'complete',
+            ...(missingRequiredDeps.length ? { missingRequiredDependencies: missingRequiredDeps } : {}),
             ...(blockers.length ? { validationBlockers: blockers } : {}),
             ...(incompletePrdSections.length
                 ? { generatedFromIncompletePrd: true, incompletePrdSections }

@@ -1,6 +1,8 @@
 import type { CoreArtifactSubtype, StructuredPRD } from '../types';
-import { getArtifactMeta } from './coreArtifactPipeline';
+import { getArtifactMeta, getRequiredDependencies } from './coreArtifactPipeline';
 import { parseScreenInventory, screenInventoryToMarkdown } from './screenInventoryNormalize';
+
+const DEPENDENCY_PROSE_BUDGET = 1400;
 
 const GENERIC_PHRASES = [
     'user-friendly interface',
@@ -23,28 +25,56 @@ export function buildDependencyContext(
     const dependencies = getArtifactMeta(subtype).dependsOn;
     if (dependencies.length === 0) return 'No dependency artifacts available yet.';
 
+    const requiredDeps = new Set(getRequiredDependencies(subtype));
+
     const slices = dependencies
         .map(dep => {
+            const isRequired = requiredDeps.has(dep);
+            const label = isRequired ? `### ${dep} (REQUIRED)` : `### ${dep}`;
             const depContent = generatedArtifacts[dep];
-            if (!depContent) return `### ${dep}\nNot generated yet.`;
-            // Screen inventory is now persisted as JSON. Render to a
-            // human-readable markdown summary before slicing so downstream
-            // LLMs (user_flows, component_inventory, implementation_plan)
-            // keep receiving the same kind of input they did pre-upgrade.
+            if (!depContent || !depContent.trim()) {
+                // Never present a required dependency's absence as a soft
+                // "Not generated yet." — make it explicit so the model (and any
+                // reviewer) knows the output is degraded.
+                return isRequired
+                    ? `${label}\n**MISSING — this required dependency was unavailable at generation time. Output may be incomplete or invented; treat with caution.**`
+                    : `${label}\nNot generated yet.`;
+            }
+            // Screen inventory is persisted as JSON. Render a human-readable
+            // summary that lists ALL screen ids/names first (never truncated),
+            // then the truncated per-screen prose — so downstream artifacts
+            // always see the complete screen roster even when detail is cut.
             const text = dep === 'screen_inventory'
-                ? renderScreenInventoryDependency(depContent)
-                : depContent;
-            return `### ${dep}\n${text.slice(0, 1400)}`;
+                ? summarizeScreenInventoryDependency(depContent, DEPENDENCY_PROSE_BUDGET)
+                : depContent.slice(0, DEPENDENCY_PROSE_BUDGET);
+            return `${label}\n${text}`;
         })
         .join('\n\n');
 
     return slices;
 }
 
-function renderScreenInventoryDependency(content: string): string {
+// Build a dependency summary of a screen inventory that guarantees every screen
+// id/name survives truncation. The compact roster (one line per screen) is
+// emitted in full first; the verbose per-screen markdown is then appended up to
+// `proseBudget` chars. A downstream artifact (user_flows, implementation_plan)
+// therefore never loses a screen reference just because the prose was long.
+export function summarizeScreenInventoryDependency(content: string, proseBudget: number): string {
     const parsed = parseScreenInventory(content);
-    if (!parsed) return content;
-    return screenInventoryToMarkdown(parsed);
+    if (!parsed) return content.slice(0, proseBudget);
+
+    const screens = parsed.sections.flatMap(s => s.screens);
+    const roster = screens
+        .map(s => `- ${s.id ?? ''}${s.id ? ': ' : ''}${s.name}`)
+        .join('\n');
+    const rosterBlock = `Screens (${screens.length}):\n${roster}`;
+
+    const prose = screenInventoryToMarkdown(parsed);
+    const truncatedProse = prose.length > proseBudget
+        ? `${prose.slice(0, proseBudget)}\n…(detail truncated; full screen roster listed above)`
+        : prose;
+
+    return `${rosterBlock}\n\n${truncatedProse}`;
 }
 
 export function buildNarrativeGuardrails(prd: StructuredPRD): string {
