@@ -1,5 +1,11 @@
 import { describe, it, expect } from 'vitest';
-import { detectArtifactBlockers, readValidationBlockers } from '../artifactBlockingValidation';
+import {
+    detectArtifactBlockers,
+    readValidationBlockers,
+    classifyBlockers,
+    isTraceabilityBlocker,
+    TRACEABILITY_BLOCKER_MESSAGE,
+} from '../artifactBlockingValidation';
 import type { StructuredPRD } from '../../types';
 
 // Minimal PRD with one feature so traceability checks have something to match.
@@ -50,6 +56,28 @@ describe('detectArtifactBlockers', () => {
         const content = '# User Flows\n\n## Some flow\nStep 1.\nError handled.\n';
         const blockers = detectArtifactBlockers('user_flows', content, prd);
         expect(blockers.some(b => /traceability/i.test(b))).toBe(true);
+    });
+});
+
+describe('classifyBlockers', () => {
+    it('recognizes the traceability blocker', () => {
+        expect(isTraceabilityBlocker(TRACEABILITY_BLOCKER_MESSAGE)).toBe(true);
+        expect(isTraceabilityBlocker('some other blocker')).toBe(false);
+    });
+
+    it('isolates a traceability-only blocker set (repair-eligible)', () => {
+        const { traceabilityBlockers, otherBlockers } = classifyBlockers([TRACEABILITY_BLOCKER_MESSAGE]);
+        expect(traceabilityBlockers).toEqual([TRACEABILITY_BLOCKER_MESSAGE]);
+        expect(otherBlockers).toEqual([]);
+    });
+
+    it('keeps other structural blockers separate (repair-ineligible)', () => {
+        const { traceabilityBlockers, otherBlockers } = classifyBlockers([
+            TRACEABILITY_BLOCKER_MESSAGE,
+            'Data model parsed but contains no entities.',
+        ]);
+        expect(traceabilityBlockers).toEqual([TRACEABILITY_BLOCKER_MESSAGE]);
+        expect(otherBlockers).toEqual(['Data model parsed but contains no entities.']);
     });
 });
 

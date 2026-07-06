@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, Menu, X, ListChecks, History, Lock, ShieldAlert,
+    RefreshCcw, Menu, X, ListChecks, History, Lock, ShieldAlert, ShieldCheck,
     Layers, Database, Code2, AppWindow, Waypoints,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -1060,11 +1060,26 @@ export function ArtifactWorkspace({
             }
             : undefined;
         const blockingIssues = readValidationBlockers(preferred.metadata);
+        // Small advisory note when a clean artifact was auto-enriched with PRD
+        // traceability (repair succeeded → no blocking banner, just a note).
+        const traceabilityRepaired =
+            blockingIssues.length === 0 &&
+            preferred.metadata?.repairType === 'traceability_enrichment' &&
+            preferred.metadata?.repairSucceeded === true;
         return (
             <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
                 <div className="flex items-center justify-start">
                     {renderVersionControls(artifact.id, preferred)}
                 </div>
+                {traceabilityRepaired && (
+                    <div className="flex items-start gap-2 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2">
+                        <ShieldCheck size={14} className="mt-0.5 shrink-0 text-emerald-600" />
+                        <p className="text-xs text-neutral-600">
+                            Synapse automatically mapped this artifact back to the PRD's features.
+                            See the <span className="font-medium">PRD Feature Traceability</span> section below.
+                        </p>
+                    </div>
+                )}
                 {blockingIssues.length > 0 && (
                     <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
                         <ShieldAlert size={18} className="mt-0.5 shrink-0 text-amber-600" />

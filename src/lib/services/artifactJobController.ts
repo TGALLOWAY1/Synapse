@@ -13,7 +13,14 @@ import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
-import { detectArtifactBlockers, readValidationBlockers } from '../artifactBlockingValidation';
+import {
+    detectArtifactBlockers,
+    readValidationBlockers,
+    classifyBlockers,
+    isTraceabilityBlocker,
+    TRACEABILITY_UNRESOLVED_MESSAGE,
+} from '../artifactBlockingValidation';
+import { repairTraceability } from '../artifactTraceabilityRepair';
 import {
     CORE_ARTIFACT_PIPELINE,
     MOCKUP_DEPENDENCIES,
@@ -234,14 +241,68 @@ async function runCoreArtifactSlot(
     // user-facing defects mean the artifact must not read as a trustworthy
     // completed output. The content is still saved (for review), but the slot
     // is flagged needs_review rather than done.
-    const blockers = detectArtifactBlockers(subtype, content, structuredPRD);
+    const initialBlockers = detectArtifactBlockers(subtype, content, structuredPRD);
+
+    // Automatic traceability repair. A missing-traceability blocker is often a
+    // false positive — the artifact is genuinely derived from the product's
+    // features but never spells out a feature id/name verbatim. When the ONLY
+    // blocker is traceability (the artifact is otherwise structurally valid), we
+    // attempt a deterministic enrichment pass BEFORE surfacing any blocker: map
+    // canonical PRD features to the content and, on a confident match, append an
+    // explicit traceability section, then re-validate. Repair only ever appends
+    // (never rewrites substantive content), so the artifact's meaning is
+    // preserved. Repair provenance is stamped into version metadata regardless
+    // of outcome.
+    let effectiveContent = content;
+    let blockers = initialBlockers;
+    let repairMetadata: Record<string, unknown> = {};
+    const { traceabilityBlockers, otherBlockers } = classifyBlockers(initialBlockers);
+    if (traceabilityBlockers.length > 0 && otherBlockers.length === 0) {
+        const repair = repairTraceability(subtype, content, structuredPRD);
+        const postRepairBlockers = repair.repaired
+            ? detectArtifactBlockers(subtype, repair.content, structuredPRD)
+            : initialBlockers;
+        const repairSucceeded = repair.repaired && postRepairBlockers.length === 0;
+        if (repairSucceeded) {
+            effectiveContent = repair.content;
+            blockers = postRepairBlockers; // now []
+        } else {
+            // Repair ineligible/failed: keep the blocker but reword it so the UI
+            // says "could not verify mapping", not "references none of the PRD".
+            blockers = [
+                ...otherBlockers,
+                ...postRepairBlockers.map(b =>
+                    isTraceabilityBlocker(b) ? TRACEABILITY_UNRESOLVED_MESSAGE : b,
+                ),
+            ];
+        }
+        repairMetadata = {
+            repairAttempted: true,
+            repairType: 'traceability_enrichment',
+            repairSucceeded,
+            originalValidationBlockers: initialBlockers,
+            postRepairValidationBlockers: postRepairBlockers,
+            ...(repair.warnings.length ? { repairWarnings: repair.warnings } : {}),
+            ...(repair.mappedFeatures.length
+                ? {
+                      traceabilityMappedFeatures: repair.mappedFeatures.map(m => ({
+                          id: m.featureId,
+                          name: m.featureName,
+                          reason: m.reason,
+                      })),
+                  }
+                : {}),
+        };
+    }
+
     // Only expose this artifact as dependency context to later layers in this
-    // run when it passed blocking validation. A needs_review artifact must not
-    // silently feed a dependent — a required dependent then correctly blocks
-    // (DependencyInsufficiencyError) instead of being saved as done from
-    // untrustworthy input; an optional dependent degrades as if it were missing.
+    // run when it passed blocking validation (post-repair). A needs_review
+    // artifact must not silently feed a dependent — a required dependent then
+    // correctly blocks (DependencyInsufficiencyError) instead of being saved as
+    // done from untrustworthy input; an optional dependent degrades as if it
+    // were missing.
     if (blockers.length === 0) {
-        generatedArtifacts[subtype] = content;
+        generatedArtifacts[subtype] = effectiveContent;
     }
 
     const writeStore = useProjectStore.getState();
@@ -286,10 +347,11 @@ async function runCoreArtifactSlot(
     // a non-empty `missing` list means the artifact was knowingly degraded.
     const missingRequiredDeps = findMissingRequiredDependencies(subtype, generatedArtifacts);
 
+    const repairApplied = repairMetadata.repairSucceeded === true;
     writeStore.createArtifactVersion(
         projectId,
         artifactId,
-        content,
+        effectiveContent,
         {
             subtype,
             dependencyTrace,
@@ -300,10 +362,12 @@ async function runCoreArtifactSlot(
             ...(incompletePrdSections.length
                 ? { generatedFromIncompletePrd: true, incompletePrdSections }
                 : {}),
+            ...repairMetadata,
             ...extraMetadata,
         },
         sourceRefs,
-        `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}`,
+        `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}` +
+            (repairApplied ? ' · auto-enriched PRD traceability' : ''),
         parentVersionId,
     );
 

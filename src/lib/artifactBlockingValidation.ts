@@ -27,6 +27,42 @@ const TRACEABILITY_CRITICAL: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArti
     'implementation_plan',
 ]);
 
+// The exact blocker string emitted for a missing-traceability defect. Exported
+// so the job controller can (a) recognize a traceability-only blocker set as
+// eligible for automatic repair and (b) swap in clearer wording after a repair
+// fails. Keep this in sync with the message pushed below.
+export const TRACEABILITY_BLOCKER_MESSAGE =
+    'Artifact references none of the PRD features — no traceability to the PRD.';
+
+// User-facing wording shown when automatic traceability repair was attempted
+// and could not confidently map the artifact to any PRD feature. Deliberately
+// less alarming than the raw blocker — the content may still be useful.
+export const TRACEABILITY_UNRESOLVED_MESSAGE =
+    'Synapse could not verify how this artifact maps back to the PRD (automatic ' +
+    'traceability repair found no confident feature match). The content is preserved for review.';
+
+/** True when the blocker is the missing-traceability defect (repair-eligible). */
+export function isTraceabilityBlocker(blocker: string): boolean {
+    return blocker === TRACEABILITY_BLOCKER_MESSAGE;
+}
+
+/**
+ * Split a blocker list into traceability-only vs. everything else. A blocker set
+ * is eligible for automatic traceability repair only when the traceability
+ * blocker is the SOLE issue (the artifact is otherwise structurally valid).
+ */
+export function classifyBlockers(blockers: string[]): {
+    traceabilityBlockers: string[];
+    otherBlockers: string[];
+} {
+    const traceabilityBlockers: string[] = [];
+    const otherBlockers: string[] = [];
+    for (const b of blockers) {
+        (isTraceabilityBlocker(b) ? traceabilityBlockers : otherBlockers).push(b);
+    }
+    return { traceabilityBlockers, otherBlockers };
+}
+
 export function detectArtifactBlockers(
     subtype: CoreArtifactSubtype,
     content: string,
@@ -52,7 +88,7 @@ export function detectArtifactBlockers(
             f => lc.includes(f.id.toLowerCase()) || lc.includes(f.name.toLowerCase()),
         );
         if (!referenced) {
-            blockers.push('Artifact references none of the PRD features — no traceability to the PRD.');
+            blockers.push(TRACEABILITY_BLOCKER_MESSAGE);
         }
     }
 
