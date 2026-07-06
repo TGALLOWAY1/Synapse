@@ -287,6 +287,7 @@ export function DataModelRenderer({ content }: Props) {
                     items={outlineItems}
                     activeId={activeId}
                     activeLabel="Current entity"
+                    defaultExpanded={false}
                     collapseOnSelect={isMobile}
                     onSelect={scrollTo}
                 />
