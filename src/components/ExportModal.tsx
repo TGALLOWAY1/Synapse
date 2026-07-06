@@ -1,7 +1,10 @@
 import { useEffect, useState } from 'react';
 import { Download, X, FileText, Package, Copy, Check, Bot } from 'lucide-react';
 import { useProjectStore } from '../store/projectStore';
+import { useProjectSyncStore } from '../store/projectSyncStore';
 import { useToastStore } from '../store/toastStore';
+import { downloadProjectRecoveryBundle } from '../lib/projectRecovery';
+import { AlertTriangle } from 'lucide-react';
 import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenInventoryNormalize';
 import { downloadFile } from '../lib/utils/downloadFile';
 import { copyToClipboard } from '../lib/utils/copyToClipboard';
@@ -32,9 +35,14 @@ interface ExportModalProps {
 export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const { getProject, getLatestSpine, getArtifacts, getArtifactVersions } = useProjectStore();
     const { addToast } = useToastStore();
+    const syncInfo = useProjectSyncStore((s) => s.projects[projectId]);
     const [exporting, setExporting] = useState(false);
     // Which card most recently showed a "Copied" confirmation.
     const [copiedKey, setCopiedKey] = useState<string | null>(null);
+    const [recoverySaved, setRecoverySaved] = useState(false);
+    // Surface a durability warning right where the user is about to rely on the
+    // export: their latest changes may not have reached the cloud.
+    const cloudAtRisk = syncInfo?.state === 'error' || syncInfo?.state === 'conflict';
 
     const flashCopied = (key: string) => {
         setCopiedKey(key);
@@ -177,6 +185,35 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                 </div>
 
                 <div className="p-4 space-y-3 overflow-y-auto min-h-0">
+                    {cloudAtRisk && (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-medium">
+                                        {syncInfo?.state === 'conflict'
+                                            ? 'This project has an unresolved cloud conflict'
+                                            : 'Recent changes may not have reached the cloud'}
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-amber-800">
+                                        Your work is safe on this device. Download a recovery bundle so
+                                        you have a complete copy regardless of cloud sync.
+                                    </p>
+                                    <button
+                                        onClick={() => {
+                                            const ok = downloadProjectRecoveryBundle(projectId, 'export-cloud-at-risk');
+                                            setRecoverySaved(ok);
+                                        }}
+                                        className="mt-2 inline-flex items-center gap-1 rounded-md bg-amber-600 px-2.5 py-1 text-xs font-medium text-white hover:bg-amber-700"
+                                    >
+                                        {recoverySaved ? <Check size={12} /> : <Download size={12} />}
+                                        {recoverySaved ? 'Recovery bundle saved' : 'Download recovery bundle'}
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
                     {/* --- EXPORT: whole-project bundles --- */}
                     <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Export</span>
 

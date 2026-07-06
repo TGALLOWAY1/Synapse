@@ -515,4 +515,23 @@ if (typeof window !== 'undefined') {
     refreshProjectsFromServer();
   });
   window.addEventListener('offline', () => useProjectSyncStore.getState().setOnline(false));
+
+  // Warn on close/navigation ONLY when cloud durability is genuinely stuck — a
+  // standing conflict or a failed cloud save that won't clear on its own. Normal
+  // 'dirty' (about to push) and 'saving' states are not blocked, to avoid
+  // nagging. Local data is never lost either way (localStorage persists); this
+  // guards against a user walking away believing work reached the cloud.
+  window.addEventListener('beforeunload', (event) => {
+    if (activeUserId === null) return;
+    const projects = useProjectSyncStore.getState().projects;
+    const stuck = Object.values(projects).some(
+      (p) => p.state === 'conflict' || p.state === 'error',
+    );
+    if (stuck) {
+      event.preventDefault();
+      // Legacy browsers require returnValue to be set to trigger the prompt.
+      event.returnValue = '';
+      return '';
+    }
+  });
 }
