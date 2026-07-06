@@ -85,6 +85,7 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
                 items={items}
                 activeId={activeId}
                 activeLabel="Current section"
+                defaultExpanded={false}
                 collapseOnSelect={isMobile}
                 onSelect={scrollTo}
             />
@@ -833,6 +834,7 @@ function LegacyMarkdownDesignSystem({ content }: { content: string }) {
                     items={items}
                     activeId={activeId}
                     activeLabel="Current section"
+                    defaultExpanded={false}
                     collapseOnSelect={isMobile}
                     onSelect={scrollTo}
                 />
