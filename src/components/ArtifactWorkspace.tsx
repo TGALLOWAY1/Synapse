@@ -1170,6 +1170,12 @@ export function ArtifactWorkspace({
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
                         versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
+                        prdVersionLabel={
+                            subtype === 'data_model'
+                                ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
+                                : undefined
+                        }
+                        staleness={subtype === 'data_model' ? getArtifactStaleness(projectId, artifact.id) : undefined}
                     />
                     </MockupErrorBoundary>
                 </div>

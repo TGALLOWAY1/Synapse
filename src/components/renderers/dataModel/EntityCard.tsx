@@ -1,0 +1,238 @@
+import { useMemo, type ReactNode } from 'react';
+import {
+    Braces, Check, ChevronDown, Database, GitBranch, KeyRound, ListTree, ShieldAlert, SlidersHorizontal,
+} from 'lucide-react';
+import type { ParsedEntity, ParsedFieldGroup } from '../../../lib/services/dataModelMarkdown';
+import type { DataModelNode } from '../../../lib/dataModelGraph';
+import {
+    classifyFieldType, entityAnchorId, indexedFieldNames, parseRelationshipCallout,
+} from '../../../lib/dataModelGraph';
+import { CategoryBadge, EntityAttributeBadges, FieldTypeChip, InspectorRow } from './badges';
+
+interface Props {
+    entity: ParsedEntity;
+    node: DataModelNode;
+    expanded: boolean;
+    onToggle: () => void;
+    /** Resolve a relationship target name to a known node id (for linking). */
+    resolveTargetId: (targetName: string) => string | undefined;
+    onNavigateToEntity: (nodeId: string) => void;
+}
+
+function CountChip({ icon: Icon, count, label, tone = 'neutral' }: {
+    icon: typeof Database; count: number; label: string; tone?: 'neutral' | 'rose';
+}) {
+    if (count <= 0) return null;
+    const toneCls = tone === 'rose'
+        ? 'bg-rose-50 text-rose-600 ring-rose-200'
+        : 'bg-neutral-100 text-neutral-600 ring-neutral-200';
+    return (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${toneCls}`}>
+            <Icon size={10} className="shrink-0" />
+            <span className="tabular-nums">{count}</span>
+            <span className="hidden sm:inline">{label}</span>
+        </span>
+    );
+}
+
+function FieldTable({ group, indexed }: { group: ParsedFieldGroup; indexed: Set<string> }) {
+    return (
+        <div className="space-y-1.5">
+            <h5 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">{group.name}</h5>
+            <div className="overflow-x-auto -mx-1">
+                <table className="w-full text-xs table-fixed">
+                    <colgroup>
+                        <col className="w-[34%]" />
+                        <col className="w-[22%]" />
+                        <col className="w-[10%]" />
+                        <col className="w-[34%]" />
+                    </colgroup>
+                    <thead>
+                        <tr className="text-neutral-400 uppercase tracking-wider text-[10px]">
+                            <th className="text-left px-2 py-1.5 font-medium">Field</th>
+                            <th className="text-left px-2 py-1.5 font-medium">Type</th>
+                            <th className="text-center px-2 py-1.5 font-medium">Req</th>
+                            <th className="text-left px-2 py-1.5 font-medium">Description</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {group.fields.map((f, fi) => {
+                            const kind = classifyFieldType(f.type, f.name);
+                            const isIndexed = indexed.has(f.name);
+                            return (
+                                <tr key={fi} className="border-t border-neutral-100 align-top">
+                                    <td className="px-2 py-1.5">
+                                        <span className="inline-flex items-center gap-1 font-mono text-[11px] text-neutral-800 break-all">
+                                            {f.name}
+                                            {isIndexed && (
+                                                <KeyRound size={10} className="shrink-0 text-slate-400" aria-label="Indexed" />
+                                            )}
+                                        </span>
+                                    </td>
+                                    <td className="px-2 py-1.5">
+                                        <span className="inline-flex items-center gap-1">
+                                            <FieldTypeChip kind={kind} label={f.type} />
+                                            {kind === 'json' && (
+                                                <Braces size={11} className="text-fuchsia-400" aria-label="Structured / object" />
+                                            )}
+                                        </span>
+                                    </td>
+                                    <td className="px-2 py-1.5 text-center">
+                                        {f.required
+                                            ? <Check size={13} className="inline text-emerald-500" aria-label="Required" />
+                                            : <span className="text-neutral-300" aria-label="Optional">—</span>}
+                                    </td>
+                                    <td className="px-2 py-1.5 text-neutral-600 leading-relaxed">{f.description}</td>
+                                </tr>
+                            );
+                        })}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * A compact, collapsible entity card. Collapsed: name, one-line description,
+ * key badges, and counts. Expanded: overview, grouped field tables, and
+ * inspector-style rows for relationships / constraints / privacy / indexes,
+ * plus the example record.
+ */
+export function EntityCard({ entity, node, expanded, onToggle, resolveTargetId, onNavigateToEntity }: Props) {
+    const indexed = useMemo(() => indexedFieldNames(entity), [entity]);
+
+    const relationships = entity.callouts.filter(c => c.kind === 'RELATIONSHIP');
+    const constraints = entity.callouts.filter(c => c.kind === 'CONSTRAINT');
+    const privacy = entity.callouts.filter(c => c.kind === 'PRIVACY');
+    const indexes = entity.callouts.filter(c => c.kind === 'INDEX');
+
+    return (
+        <section id={entityAnchorId(entity.name)} className="scroll-mt-24 rounded-xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+            {/* Header — always visible, toggles expansion */}
+            <button
+                type="button"
+                onClick={onToggle}
+                aria-expanded={expanded}
+                className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-neutral-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset"
+            >
+                <div className="mt-0.5 p-1.5 rounded-lg bg-neutral-100 text-neutral-500 shrink-0">
+                    <Database size={15} />
+                </div>
+                <div className="min-w-0 flex-1">
+                    <div className="flex items-center gap-2 flex-wrap">
+                        <h4 className="text-sm font-semibold text-neutral-900">{entity.name}</h4>
+                        <CategoryBadge category={node.category} size="xs" />
+                    </div>
+                    {entity.description && (
+                        <p className={`text-xs text-neutral-500 mt-0.5 ${expanded ? '' : 'line-clamp-1'}`}>
+                            {entity.description}
+                        </p>
+                    )}
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                        <EntityAttributeBadges node={node} />
+                    </div>
+                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                        <CountChip icon={ListTree} count={node.fieldCount} label="fields" />
+                        <CountChip icon={GitBranch} count={node.relationshipCount} label="relationships" />
+                        <CountChip icon={SlidersHorizontal} count={node.constraintCount} label="constraints" />
+                        <CountChip icon={ShieldAlert} count={node.privacyCount} label="privacy" tone="rose" />
+                        <CountChip icon={KeyRound} count={node.indexCount} label="indexes" />
+                    </div>
+                </div>
+                <ChevronDown
+                    size={18}
+                    className={`shrink-0 mt-1 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                    aria-hidden="true"
+                />
+            </button>
+
+            {expanded && (
+                <div className="px-4 pb-4 pt-1 space-y-4 border-t border-neutral-100">
+                    {entity.purpose && (
+                        <div className="rounded-lg bg-indigo-50/50 border border-indigo-100 px-3 py-2">
+                            <p className="text-xs text-neutral-700">
+                                <span className="font-semibold text-indigo-900">Purpose: </span>
+                                {entity.purpose}
+                            </p>
+                        </div>
+                    )}
+
+                    {entity.groupsAutoDetected && (
+                        <p className="text-[11px] text-neutral-400 italic">
+                            Fields grouped automatically — refine the artifact for explicit grouping.
+                        </p>
+                    )}
+
+                    {entity.fieldGroups.map((group, gi) => (
+                        <FieldTable key={gi} group={group} indexed={indexed} />
+                    ))}
+
+                    {relationships.length > 0 && (
+                        <InspectorSection title="Relationships">
+                            {relationships.map((c, i) => {
+                                const rel = parseRelationshipCallout(c.text);
+                                if (!rel) return null;
+                                const targetId = resolveTargetId(rel.target);
+                                const label = rel.cardinality ? `${rel.verb} · ${rel.cardinality}` : rel.verb;
+                                return (
+                                    <InspectorRow
+                                        key={i}
+                                        category="relationship"
+                                        label={label}
+                                        description={rel.description}
+                                        linkLabel={rel.target}
+                                        onLink={targetId ? () => onNavigateToEntity(targetId) : undefined}
+                                    />
+                                );
+                            })}
+                        </InspectorSection>
+                    )}
+
+                    {constraints.length > 0 && (
+                        <InspectorSection title="Constraints">
+                            {constraints.map((c, i) => (
+                                <InspectorRow key={i} category="constraint" label="" description={c.text} />
+                            ))}
+                        </InspectorSection>
+                    )}
+
+                    {privacy.length > 0 && (
+                        <InspectorSection title="Privacy">
+                            {privacy.map((c, i) => (
+                                <InspectorRow key={i} category="privacy" label="" description={c.text} />
+                            ))}
+                        </InspectorSection>
+                    )}
+
+                    {indexes.length > 0 && (
+                        <InspectorSection title="Indexes">
+                            {indexes.map((c, i) => (
+                                <InspectorRow key={i} category="index" label="" description={c.text} />
+                            ))}
+                        </InspectorSection>
+                    )}
+
+                    {entity.exampleRecord && (
+                        <div className="space-y-1">
+                            <h5 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Example record</h5>
+                            <p className="text-[11px] text-neutral-400 italic">Illustrative — not real data.</p>
+                            <pre className="font-mono text-[11px] bg-neutral-900 text-neutral-100 rounded-lg p-3 overflow-x-auto whitespace-pre">
+                                {entity.exampleRecord}
+                            </pre>
+                        </div>
+                    )}
+                </div>
+            )}
+        </section>
+    );
+}
+
+function InspectorSection({ title, children }: { title: string; children: ReactNode }) {
+    return (
+        <div className="space-y-0.5">
+            <h5 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 px-2.5">{title}</h5>
+            <div className="divide-y divide-neutral-50">{children}</div>
+        </div>
+    );
+}
