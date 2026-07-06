@@ -102,15 +102,30 @@ const getApiKey = () => {
  */
 export const DEFAULT_GEMINI_MODEL = 'gemini-3.5-flash';
 
-const getModel = () => {
-    return localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL;
-};
+/**
+ * Per-tier defaults. These MUST match the tier defaults advertised in the
+ * Settings model pickers (`SettingsModal`/`ArtifactModelsSection`) — the Fast
+ * tier defaults to Flash, the Expert (strong) tier defaults to Pro. If the
+ * runtime and the UI disagree here, the app silently generates complex PRD
+ * sections / high-complexity artifacts on Flash while Settings claims Pro.
+ */
+export const DEFAULT_FAST_MODEL = DEFAULT_GEMINI_MODEL;
+export const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
 
+/** The single "Default model" override, when the user has set one. */
+const getStoredDefaultModel = () => localStorage.getItem('GEMINI_MODEL') || '';
+
+const getModel = () => getStoredDefaultModel() || DEFAULT_GEMINI_MODEL;
+
+// Resolution order per tier: explicit tier override → the single Default model
+// override (so "set both to the same model" still works) → the tier default.
+// The final fallback is the crux: the strong tier defaults to Pro (matching the
+// UI), NOT to the Flash global default.
 export const getFastModel = (): string =>
-    localStorage.getItem('GEMINI_FAST_MODEL') || getModel();
+    localStorage.getItem('GEMINI_FAST_MODEL') || getStoredDefaultModel() || DEFAULT_FAST_MODEL;
 
 export const getStrongModel = (): string =>
-    localStorage.getItem('GEMINI_STRONG_MODEL') || getModel();
+    localStorage.getItem('GEMINI_STRONG_MODEL') || getStoredDefaultModel() || DEFAULT_STRONG_MODEL;
 
 /**
  * Optional Google Cloud project ID. When present, we forward it as the

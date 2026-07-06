@@ -3,7 +3,7 @@ import {
     CORE_ARTIFACT_COMPLEXITY,
     selectArtifactModel,
 } from '../coreArtifactService';
-import { DEFAULT_GEMINI_MODEL } from '../../geminiClient';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_STRONG_MODEL } from '../../geminiClient';
 import type { CoreArtifactSubtype } from '../../../types';
 
 const ALL_SUBTYPES: CoreArtifactSubtype[] = [
@@ -58,10 +58,12 @@ describe('core artifact complexity routing', () => {
         }
     });
 
-    it('falls back to the single Intelligence Level model when tier models are unset', () => {
-        // No GEMINI_FAST_MODEL / GEMINI_STRONG_MODEL and no GEMINI_MODEL → default.
+    it('falls back to the per-tier defaults when tier models are unset', () => {
+        // No GEMINI_FAST_MODEL / GEMINI_STRONG_MODEL and no GEMINI_MODEL → each
+        // tier's default. Low → Flash default; high → the Pro (strong) default,
+        // which must NOT collapse to Flash (that was the "Pro never used" bug).
         expect(selectArtifactModel('design_system')).toBe(DEFAULT_GEMINI_MODEL);
-        expect(selectArtifactModel('implementation_plan')).toBe(DEFAULT_GEMINI_MODEL);
+        expect(selectArtifactModel('implementation_plan')).toBe(DEFAULT_STRONG_MODEL);
 
         // With only the single model set, both tiers resolve to it.
         localStorage.setItem('GEMINI_MODEL', 'gemini-single-test');

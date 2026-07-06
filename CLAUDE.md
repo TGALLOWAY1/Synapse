@@ -768,8 +768,15 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     else **(2)** the complexity recommendation — `high` (screen_inventory,
     user_flows, data_model, implementation_plan) → Expert/Pro (`getStrongModel`),
     `low` (component_inventory, design_system, prompt_pack) → Fast/Flash
-    (`getFastModel`), else **(3)** the tier fallback to the single Default model
-    (`getModel`) → `DEFAULT_GEMINI_MODEL`. `coreArtifactService.selectArtifactModel`
+    (`getFastModel`), else **(3)** the tier fallback in `getFastModel`/
+    `getStrongModel`: an explicit tier model → the single Default model
+    (`GEMINI_MODEL`) → the **tier's own default** (`DEFAULT_FAST_MODEL` = Flash,
+    `DEFAULT_STRONG_MODEL` = Pro, both in `geminiClient.ts`). The strong tier
+    defaults to **Pro**, matching the Settings pickers — it must never collapse
+    to the Flash global default (the old `getStrongModel → getModel →
+    DEFAULT_GEMINI_MODEL` chain did, so complex PRD sections / high-complexity
+    artifacts silently ran on Flash even though Settings advertised Pro).
+    `coreArtifactService.selectArtifactModel`
     delegates to `getArtifactModel` and re-exports `CORE_ARTIFACT_COMPLEXITY` for
     back-compat. Existing projects have no override key, so behaviour is
     unchanged until the user picks a model (no migration). The resolved model is
