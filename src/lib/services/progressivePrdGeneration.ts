@@ -4,6 +4,14 @@ import { type SectionId, SECTION_SCHEMAS } from '../schemas/prdSchemas';
 import { buildSectionPrompt, SECTION_TITLES, type SectionPromptContext } from '../prompts/prdSectionPrompts';
 import { repairTruncatedJson } from '../jsonRepair';
 import type { ProjectPlatform } from '../../types';
+import type { LlmTraceMeta } from '../trace/traceTypes';
+
+/** Identity threaded into per-section LLM traces (developer-only). */
+export interface TraceContext {
+    sessionId?: string;
+    projectId?: string;
+    projectName?: string;
+}
 
 export type PrdSectionStatus =
     | 'pending'
@@ -76,6 +84,8 @@ export type ModelProvider = {
         signal?: AbortSignal;
         /** Optional sink for token usage — forwarded to the transport. */
         onUsage?: (usage: NodeTokenUsage) => void;
+        /** Optional developer-only trace enrichment forwarded to the transport. */
+        traceMeta?: LlmTraceMeta;
     }) => Promise<string>;
 };
 
@@ -213,7 +223,7 @@ export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => 
 };
 
 export const makeJsonProvider = (): ModelProvider => ({
-    async generateText({ prompt, model, schema, signal, onUsage }) {
+    async generateText({ prompt, model, schema, signal, onUsage, traceMeta }) {
         return callGemini('', prompt, {
             responseMimeType: 'application/json',
             responseSchema: schema,
@@ -222,6 +232,7 @@ export const makeJsonProvider = (): ModelProvider => ({
             temperature: 0.4,
             topP: 0.9,
             onUsage,
+            traceMeta,
         }, signal);
     },
 });
@@ -406,6 +417,8 @@ export async function generateProgressivePrd(params: {
     onSectionResult?: (sectionId: SectionId, value: Partial<StructuredPRD> | null) => void;
     sections?: PrdSectionTemplate[];
     signal?: AbortSignal;
+    /** Developer-only trace identity, stamped onto each section's LLM trace. */
+    traceContext?: TraceContext;
 }) {
     const sections = params.sections ?? DEFAULT_PRD_SECTIONS;
     const provider = params.provider ?? makeJsonProvider();
@@ -436,6 +449,30 @@ export async function generateProgressivePrd(params: {
         };
         const { system, user } = buildSectionPrompt(section.id, ctx);
 
+        const depIds = section.dependencies ?? [];
+        const traceMeta: LlmTraceMeta = {
+            sessionId: params.traceContext?.sessionId,
+            sessionLabel: params.traceContext?.projectName
+                ? `PRD · ${params.traceContext.projectName}`
+                : 'PRD Generation',
+            stage: 'PRD',
+            purpose: `Generate ${section.title}`,
+            artifact: section.id,
+            projectId: params.traceContext?.projectId,
+            projectName: params.traceContext?.projectName,
+            inputs: [
+                'Product idea',
+                ...(params.projectName ? ['Project name'] : []),
+                ...(depIds.length ? [`Upstream sections: ${depIds.join(', ')}`] : ['No upstream sections']),
+            ],
+            promptPieces: [
+                { label: 'Section system instruction', present: true },
+                { label: 'Section user prompt', present: true },
+                { label: 'Upstream section context', present: depIds.length > 0, detail: depIds.join(', ') || undefined },
+                { label: 'Safety override', present: true },
+            ],
+        };
+
         let usage: NodeTokenUsage | undefined;
         try {
             const raw = await provider.generateText({
@@ -444,6 +481,7 @@ export async function generateProgressivePrd(params: {
                 schema,
                 signal: params.signal,
                 onUsage: (u) => { usage = u; },
+                traceMeta,
             });
 
             // Parse with truncation repair fallback (shared helper).
@@ -481,6 +519,7 @@ export async function generateProgressivePrd(params: {
                     prompt: `Refine this PRD section. Increase specificity, remove all ambiguity and hedging, and replace any vague or informal phrasing with formal, professional, implementation-ready language. Preserve the structure and schema exactly — same fields, same shape — and return only the JSON object.\n\n${result.content}`,
                     schema,
                     signal: params.signal,
+                    traceMeta: { ...traceMeta, purpose: `Refine ${section.title}` },
                 });
                 const post = applyAiUpdate(jobs[section.id], refined);
                 jobs[section.id] = { ...post, confidence: Math.max(0.75, result.confidence) };

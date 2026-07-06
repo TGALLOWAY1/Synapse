@@ -98,6 +98,12 @@ export const generatePreflightQuestions = async (
             temperature: 0.5,
             topP: 0.95,
             maxOutputTokens: 2048,
+            traceMeta: {
+                stage: 'Preflight',
+                purpose: 'Generate clarification questions',
+                artifact: 'preflight_questions',
+                inputs: ['Product idea'],
+            },
         });
         const parsed = parseJson(raw) as { questions?: unknown[] } | null;
         const rawQuestions = Array.isArray(parsed?.questions) ? parsed!.questions : [];
@@ -168,6 +174,12 @@ export const generatePreflightSummary = async (
             temperature: 0.3,
             topP: 0.9,
             maxOutputTokens: 1536,
+            traceMeta: {
+                stage: 'Preflight',
+                purpose: 'Summarize clarification answers',
+                artifact: 'preflight_summary',
+                inputs: ['Product idea', 'Clarification answers'],
+            },
         });
         const parsed = parseJson(raw) as Record<string, unknown> | null;
         if (!parsed || typeof parsed.summary !== 'string' || !parsed.summary.trim()) {

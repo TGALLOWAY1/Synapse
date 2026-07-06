@@ -21,6 +21,7 @@
 //      preserved — any violation discards the revision.
 
 import { callGemini, getFastModel } from '../geminiClient';
+import type { LlmTraceMeta } from '../trace/traceTypes';
 import type { StructuredPRD } from '../../types';
 import { repairTruncatedJson } from '../jsonRepair';
 import { structuredPRDSchema } from '../schemas/prdSchemas';
@@ -40,12 +41,15 @@ const reviewResponseSchema = {
 export type ConsistencyReviewTransport = (input: {
     prompt: string;
     model: string;
+    traceMeta?: LlmTraceMeta;
 }) => Promise<string>;
 
 export interface ReviewOptions {
     /** Injectable transport for tests; defaults to a fast-model JSON call. */
     transport?: ConsistencyReviewTransport;
     signal?: AbortSignal;
+    /** Developer-only trace enrichment forwarded to the transport. */
+    traceMeta?: LlmTraceMeta;
 }
 
 /**
@@ -89,7 +93,7 @@ HARD RULES:
 const buildPrompt = (prd: StructuredPRD): string =>
     `${SYSTEM}\n\nHere is the PRD JSON to review:\n\n${JSON.stringify(prd)}`;
 
-const defaultTransport: ConsistencyReviewTransport = ({ prompt, model }) =>
+const defaultTransport: ConsistencyReviewTransport = ({ prompt, model, traceMeta }) =>
     callGemini('', prompt, {
         responseMimeType: 'application/json',
         responseSchema: reviewResponseSchema,
@@ -97,6 +101,7 @@ const defaultTransport: ConsistencyReviewTransport = ({ prompt, model }) =>
         maxOutputTokens: 8192,
         temperature: 0.2,
         topP: 0.9,
+        traceMeta,
     });
 
 const len = (v: unknown): number => (Array.isArray(v) ? v.length : 0);
@@ -194,7 +199,7 @@ export const reviewPrdConsistency = async (
     options: ReviewOptions = {},
 ): Promise<ReviewResult> => {
     const transport = options.transport ?? defaultTransport;
-    const raw = await transport({ prompt: buildPrompt(prd), model: getFastModel() });
+    const raw = await transport({ prompt: buildPrompt(prd), model: getFastModel(), traceMeta: options.traceMeta });
 
     const parsed = parse(raw);
     if (parsed === null) {

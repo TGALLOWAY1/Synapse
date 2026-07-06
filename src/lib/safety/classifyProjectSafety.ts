@@ -133,6 +133,12 @@ export async function classifyProjectSafety(
             temperature: 0.1,
             topP: 0.9,
             maxOutputTokens: 1024,
+            traceMeta: {
+                stage: 'Safety',
+                purpose: 'Classify project safety',
+                artifact: 'safety_classification',
+                inputs: ['Product idea'],
+            },
         });
     } catch (e) {
         // Config errors aren't safety verdicts — surface them normally.

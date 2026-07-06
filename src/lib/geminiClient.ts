@@ -1,5 +1,7 @@
 import { getCachedGeminiKey } from './geminiKeyVault';
 import { getLocalCredential, GEMINI_API_KEY } from './localCredentials';
+import { beginTrace } from './trace/traceRecorder';
+import type { LlmTraceMeta } from './trace/traceTypes';
 
 export interface JsonModeConfig {
     /**
@@ -36,6 +38,13 @@ export interface JsonModeConfig {
      * call still resolves to the response text, so no existing caller breaks.
      */
     onUsage?: (usage: GeminiTokenUsage) => void;
+    /**
+     * Optional developer-only trace enrichment (LLM Trace Viewer). Purely
+     * observational — attaches human labels (purpose/stage/artifact/inputs) to
+     * the trace captured at the geminiClient chokepoint. No effect on the
+     * request or response; ignored entirely unless trace capture is enabled.
+     */
+    traceMeta?: LlmTraceMeta;
 }
 
 /** Token counts extracted from a Gemini response's `usageMetadata`. */
@@ -277,6 +286,16 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
         }
     }
 
+    const trace = beginTrace({
+        model,
+        mode: jsonMode?.responseMimeType === 'application/json' ? 'json' : 'text',
+        systemInstruction,
+        promptText,
+        requestUrl: url,
+        requestBody: body,
+        meta: jsonMode?.traceMeta,
+    });
+
     const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
     let data: {
         candidates?: Array<{ finishReason?: string; content?: { parts?: Array<{ text?: string }> } }>;
@@ -297,7 +316,12 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
 
         data = await response.json();
     } catch (e) {
-        if (watchdog.timedOut()) throw new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
+        if (watchdog.timedOut()) {
+            const timeout = new GeminiTimeoutError(GEMINI_TIMEOUT_MS);
+            trace.finishError(timeout);
+            throw timeout;
+        }
+        trace.finishError(e);
         throw e;
     } finally {
         watchdog.dispose();
@@ -308,22 +332,50 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
     const candidate = data?.candidates?.[0];
     const finishReason = candidate?.finishReason;
     if (finishReason === 'SAFETY') {
-        throw new Error('Gemini refused to generate content due to safety filters. Try adjusting your prompt or PRD content.');
+        const safetyErr = new Error('Gemini refused to generate content due to safety filters. Try adjusting your prompt or PRD content.');
+        trace.finishError(safetyErr, { finishReason });
+        throw safetyErr;
     }
     const text: string | undefined = candidate?.content?.parts?.[0]?.text;
     if (!text) {
         const reason = finishReason ? ` (finishReason: ${finishReason})` : '';
-        throw new Error(`Gemini returned an empty response${reason}. Please try again.`);
+        const emptyErr = new Error(`Gemini returned an empty response${reason}. Please try again.`);
+        trace.finishError(emptyErr, { finishReason });
+        throw emptyErr;
     }
     // Surface token usage to any observer (Metrics dashboard). Gemini returns
     // these on the top-level `usageMetadata`; absent on some error/partial
     // responses, in which case we simply skip the callback.
-    if (jsonMode?.onUsage && data?.usageMetadata) {
+    let usage: GeminiTokenUsage | undefined;
+    if (data?.usageMetadata) {
         const u = data.usageMetadata;
-        jsonMode.onUsage({
+        usage = {
             inputTokens: u.promptTokenCount ?? 0,
             outputTokens: u.candidatesTokenCount ?? 0,
             totalTokens: u.totalTokenCount ?? (u.promptTokenCount ?? 0) + (u.candidatesTokenCount ?? 0),
+        };
+        jsonMode?.onUsage?.(usage);
+    }
+    // Record the trace (developer-only; no-op when capture is disabled). For
+    // JSON-mode calls, attempt a parse so the viewer's Parsed Result tab and
+    // validation status are populated at the chokepoint.
+    if (trace.id) {
+        let parsedJson: unknown;
+        let jsonParsed: boolean | undefined;
+        if (jsonMode?.responseMimeType === 'application/json') {
+            try {
+                parsedJson = JSON.parse(text);
+                jsonParsed = true;
+            } catch {
+                jsonParsed = false;
+            }
+        }
+        trace.finishSuccess({
+            rawResponse: text,
+            parsedJson,
+            usage,
+            finishReason,
+            validation: { jsonParsed, finishReason },
         });
     }
     const durationMs = performance.now() - startTime;
@@ -364,11 +416,21 @@ export const callGeminiStream = async (
     }
     const bodyJson = JSON.stringify(body);
 
+    const trace = beginTrace({
+        model,
+        mode: 'stream',
+        systemInstruction,
+        promptText,
+        requestUrl: url,
+        requestBody: body,
+        meta: jsonMode?.traceMeta,
+    });
+
     // Run a single stream attempt: connect, read SSE chunks, return the full
     // accumulated text along with the latest finishReason reported by the
     // server. Errors propagate to the outer retry loop so a mid-stream
     // network drop can be retried from byte zero with a fresh fetch.
-    const streamOnce = async (): Promise<{ fullText: string; finishReason?: string }> => {
+    const streamOnce = async (): Promise<{ fullText: string; finishReason?: string; usage?: GeminiTokenUsage }> => {
         // Watchdog is per-attempt: each retry gets a fresh inactivity window,
         // and every received chunk resets it — only true silence times out.
         const watchdog = createWatchdog(GEMINI_TIMEOUT_MS, signal);
@@ -393,6 +455,7 @@ export const callGeminiStream = async (
             let fullText = '';
             let buffer = '';
             let finishReason: string | undefined;
+            let usage: GeminiTokenUsage | undefined;
 
             while (true) {
                 const { done, value } = await reader.read();
@@ -419,13 +482,24 @@ export const callGeminiStream = async (
                         if (candidate?.finishReason) {
                             finishReason = candidate.finishReason;
                         }
+                        // Gemini reports token usage on the final SSE chunk. The
+                        // non-streaming path parses this too; capturing it here
+                        // closes the artifact-generation token-metrics gap.
+                        const u = chunk.usageMetadata;
+                        if (u) {
+                            usage = {
+                                inputTokens: u.promptTokenCount ?? 0,
+                                outputTokens: u.candidatesTokenCount ?? 0,
+                                totalTokens: u.totalTokenCount ?? (u.promptTokenCount ?? 0) + (u.candidatesTokenCount ?? 0),
+                            };
+                        }
                     } catch {
                         // Skip malformed JSON chunks
                     }
                 }
             }
 
-            return { fullText, finishReason };
+            return { fullText, finishReason, usage };
         } catch (e) {
             if (watchdog.timedOut()) {
                 reader?.cancel().catch(() => undefined);
@@ -448,15 +522,37 @@ export const callGeminiStream = async (
     let lastError: unknown;
     for (let attempt = 0; attempt <= MAX_FETCH_RETRIES; attempt++) {
         try {
-            const { fullText, finishReason } = await streamOnce();
+            const { fullText, finishReason, usage } = await streamOnce();
             const durationMs = performance.now() - startTime;
             console.log(`[GEN] callGeminiStream: ${durationMs.toFixed(0)}ms (${fullText.length} chars, finishReason=${finishReason ?? 'unknown'}, attempts=${attempt + 1})`);
+            if (usage) jsonMode?.onUsage?.(usage);
+            if (trace.id) {
+                let parsedJson: unknown;
+                let jsonParsed: boolean | undefined;
+                if (jsonMode?.responseMimeType === 'application/json') {
+                    try {
+                        parsedJson = JSON.parse(fullText);
+                        jsonParsed = true;
+                    } catch {
+                        jsonParsed = false;
+                    }
+                }
+                trace.finishSuccess({
+                    rawResponse: fullText,
+                    parsedJson,
+                    usage,
+                    finishReason,
+                    retryCount: attempt,
+                    validation: { jsonParsed, finishReason },
+                });
+            }
             callbacks.onFinish?.({ finishReason });
             callbacks.onComplete(fullText);
             return fullText;
         } catch (e) {
             lastError = e;
             if (!isRetryableNetworkError(e) || attempt === MAX_FETCH_RETRIES) {
+                trace.finishError(e, { retryCount: attempt });
                 if (e instanceof Error) callbacks.onError(e);
                 throw e;
             }
