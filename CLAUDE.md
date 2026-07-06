@@ -253,30 +253,74 @@ device-scoped and never syncs) and full design.
   `{userId,deletedAt}` indexes via the new `createIndexes` db action.
   `api/projects.js` is the session-gated, rate-limited CRUD endpoint (list,
   fetch-one, PUT upsert — covers PRD/artifact saves, bulk import, soft-delete/
-  restore, archive toggles, hard-delete). No public/shared access exists.
+  restore, archive toggles, hard-delete). No public/shared access exists. Each
+  doc carries a monotonic `revision` counter (`$inc` per upsert); `upsertProject`
+  returns the new revision and accepts an optional **`expectedRevision`**
+  (threaded from `?expectedRevision`) — an **optimistic-concurrency guard**: when
+  the caller's expected revision no longer matches the stored one (another device
+  saved in the interim), it does NOT write and returns `{ conflict, currentRevision }`,
+  which the handler maps to **HTTP 409**. A first-time save (no expectedRevision)
+  is unaffected.
 - **Client serialization.** A **ProjectBundle** (`src/lib/projectBundle.ts`,
   pure) is the transport unit: `extractProjectBundle` gathers a project's nine
   store slices; `mergeBundlesIntoSource` merges server bundles back **additively
-  — local always wins on id collision** (a pull only ADDs projects this device
-  lacks; it never clobbers local in-progress work — per-project server-newer
-  reconciliation is deferred, see `tasks/TODO.md`). `src/lib/projectsClient.ts`
-  is the `/api/projects` transport (`credentials: 'include'`; throws on non-2xx
-  so a failure never silently drops projects).
+  — local always wins on id collision** (an additive pull only ADDs projects this
+  device lacks). `overwriteBundlesIntoSource` is the deliberate exception —
+  REPLACES a project's local slices with the server copy, used only for a safe
+  server-newer refresh (local clean) or an explicit "use cloud" conflict
+  resolution. `src/lib/projectsClient.ts` is the `/api/projects` transport
+  (`credentials: 'include'`; throws on non-2xx so a failure never silently drops
+  projects; `saveProject` sends `expectedRevision` and throws a typed
+  `RevisionConflictError` on 409).
+- **Durable sync metadata** (`src/lib/projectSyncMeta.ts`). A per-user
+  localStorage map (`synapse-project-sync-meta::u:<userId>`, mirrors
+  `projectMigration.ts`) recording, **separately from user-authored project
+  content**, each project's `lastSeenServerRevision`/`lastSeenServerUpdatedAt`
+  (the conflict-detection baseline), `lastCloudSavedAt`, `lastCloudSaveError`,
+  `hasUnsyncedChanges` (durable dirty flag — survives reload so an offline edit
+  isn't forgotten), and `conflict`. `isServerNewer(server, meta)` compares
+  revision-first, `updatedAt` fallback, false when there's no baseline. All
+  fields optional → legacy/anonymous data is unaffected.
 - **Sync orchestrator** (`src/store/projectServerSync.ts`). `startProjectSync`/
   `stopProjectSync` are driven from `authStore.setUser`. On sign-in it
-  **reconciles** (pull server projects this device is missing → apply; upload
-  local-only projects → migrate) then subscribes to the store to **push**
-  changed projects (debounced, per-project) and remote-delete locally-deleted
-  ones. **A failed save never drops local data** — it stays in localStorage and
-  surfaces a per-project `error` sync state. `suspendPush` silences the echo
-  while applying pulled bundles. The read-only demo project
-  (`DEMO_PROJECT_ID`) is never synced.
+  **reconciles**: for a project missing locally → additive pull; for a project on
+  **both** sides → compare the server summary against the durable baseline
+  (`isServerNewer`) — **server-newer + local clean** overwrites local with the
+  newer copy and re-baselines (safe refresh), **server-newer + local dirty** flags
+  a **`conflict`** and touches neither side; local-only projects still migrate
+  (push). It then subscribes to the store to **push** changed projects (debounced,
+  per-project) and remote-delete locally-deleted ones. Every push is a
+  **conditional write** — it sends the last-seen `expectedRevision`, so a stale
+  push (server advanced on another device) is rejected (409 →
+  `RevisionConflictError`) and becomes a `conflict` instead of clobbering the
+  newer copy; a conflicted project is not auto-pushed. **A failed save never drops
+  local data** — it stays in localStorage and surfaces a per-project `error` sync
+  state (+ durable `lastCloudSaveError`). Conflict resolution is **explicit, never
+  silent**: `resolveConflictUseCloud` (adopt cloud, discard local — offer a
+  recovery download first) and `resolveConflictKeepLocal` (overwrite cloud from
+  local, re-baselined so the conditional push wins). `suspendPush` silences the
+  echo while applying pulled/overwritten bundles. The read-only demo project
+  (`DEMO_PROJECT_ID`) is never synced. A `beforeunload` guard warns only when
+  cloud state is genuinely stuck (`conflict`/`error`), never for normal pending
+  pushes.
 - **Sync UI state** (`src/store/projectSyncStore.ts`,
   `src/components/sync/ProjectSyncStatus.tsx`). Overall `phase`
-  (idle/loading/ready/error) + `online` + per-project saving/saved/error/dirty,
-  surfaced in `ProjectDrawer` (a `SyncStatusBanner` with a retry on failure, a
-  per-row `ProjectSyncDot`, and a loading guard so the drawer never flashes a
-  false "no projects" state while the session or initial pull is resolving).
+  (idle/loading/ready/error) + `online` + per-project
+  saving/saved/error/dirty/**conflict** (with `lastCloudSavedAt`/
+  `lastCloudSaveError`/`conflict` details; `patchProjectSync` merges partial
+  updates). Surfaced as: a `SyncStatusBanner` (retry on failure, conflict count)
+  and per-row `ProjectSyncDot` in `ProjectDrawer`; a compact `ProjectCloudStatus`
+  pill in the workspace header distinguishing saved-on-device / synced-to-cloud
+  ("synced Nm ago") / cloud-sync-pending / cloud-save-failed / conflict; and a
+  `ProjectConflictBanner` above the workspace body ("Cloud version changed on
+  another device" → keep local / use cloud / download local copy). `ExportModal`
+  shows an at-risk banner + recovery download when the project's cloud state is
+  failed/conflict.
+- **Recovery bundle** (`src/lib/projectRecovery.ts`). A network-free JSON
+  download of one project's LOCAL state (the `ProjectBundle` in a self-describing
+  envelope) for at-risk cloud durability — failed save, expired session, network
+  outage, server body-limit rejection, or an unresolved conflict. Reachable from
+  the conflict banner and the export modal.
 - **Migration markers** (`src/lib/projectMigration.ts`). A per-user localStorage
   set (`synapse-projects-server-migrated::u:<userId>`) of project ids already
   pushed. The server upsert is idempotent on the stable UUID, so duplicates are
