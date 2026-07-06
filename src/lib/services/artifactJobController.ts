@@ -13,6 +13,7 @@ import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
+import { detectArtifactBlockers, readValidationBlockers } from '../artifactBlockingValidation';
 import {
     CORE_ARTIFACT_PIPELINE,
     MOCKUP_DEPENDENCIES,
@@ -21,8 +22,11 @@ import {
     buildDependencyLayers,
     getArtifactMeta,
     isHiddenArtifactSubtype,
+    planSlotRetry,
 } from '../coreArtifactPipeline';
+import { findMissingRequiredDependencies } from '../artifactDependencyGate';
 import { isAbortError } from '../concurrency';
+import { evaluateSpineGenerationGate } from '../artifactGenerationGate';
 import { getStrongModel } from '../geminiClient';
 import { buildWorkflowRun, type NodeObservation } from '../metrics/buildWorkflowRun';
 import { buildAutoMockupSettings } from '../mockupDefaults';
@@ -39,6 +43,13 @@ export interface StartArgs {
     prdContent: string;
     structuredPRD: StructuredPRD;
     projectPlatform?: ProjectPlatform;
+    /**
+     * Explicit, one-shot acknowledgement that the user accepts generating
+     * downstream artifacts from an *incomplete* (partial) PRD. See
+     * evaluateSpineGenerationGate — without it, an incomplete non-final spine
+     * never auto-generates.
+     */
+    acknowledgeIncomplete?: boolean;
 }
 
 const ALL_SLOT_KEYS: ArtifactSlotKey[] = [
@@ -107,6 +118,15 @@ interface RunState {
 }
 
 const runs = new Map<string, RunState>();
+
+// PRD section ids that failed to generate for this spine (empty when the PRD
+// is complete). Used to stamp downstream artifact versions with degraded-input
+// provenance.
+function spineVersionForStamp(projectId: string, spineVersionId: string): string[] {
+    const spine = (useProjectStore.getState().spineVersions[projectId] || [])
+        .find(s => s.id === spineVersionId);
+    return spine?.generationMeta?.failedSections ?? [];
+}
 
 function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersionId: string): boolean {
     const store = useProjectStore.getState();
@@ -206,11 +226,23 @@ async function runCoreArtifactSlot(
 
     if (signal.aborted) throw new DOMException('aborted', 'AbortError');
 
-    generatedArtifacts[subtype] = content;
     const meta = getArtifactMeta(subtype);
     const validation = validateArtifactContent(subtype, content);
     const consistencyWarnings = validateCrossArtifactConsistency(subtype, content, structuredPRD);
     const warnings = [...validation.warnings, ...consistencyWarnings];
+    // Blocking (vs advisory) validation: a narrow set of high-confidence,
+    // user-facing defects mean the artifact must not read as a trustworthy
+    // completed output. The content is still saved (for review), but the slot
+    // is flagged needs_review rather than done.
+    const blockers = detectArtifactBlockers(subtype, content, structuredPRD);
+    // Only expose this artifact as dependency context to later layers in this
+    // run when it passed blocking validation. A needs_review artifact must not
+    // silently feed a dependent — a required dependent then correctly blocks
+    // (DependencyInsufficiencyError) instead of being saved as done from
+    // untrustworthy input; an optional dependent degrades as if it were missing.
+    if (blockers.length === 0) {
+        generatedArtifacts[subtype] = content;
+    }
 
     const writeStore = useProjectStore.getState();
     writeStore.appendSlotProgress(projectId, subtype, 'Saving artifact…');
@@ -245,17 +277,40 @@ async function runCoreArtifactSlot(
         }
     }
 
+    // Provenance: stamp when this artifact was generated from an incomplete
+    // (partial) PRD so the UI can flag it as generated from degraded input.
+    const incompletePrdSections = spineVersionForStamp(projectId, spineVersionId);
+
+    // Record dependency completeness. Generation only reaches here when all
+    // required deps were present (or degraded generation was acknowledged), so
+    // a non-empty `missing` list means the artifact was knowingly degraded.
+    const missingRequiredDeps = findMissingRequiredDependencies(subtype, generatedArtifacts);
+
     writeStore.createArtifactVersion(
         projectId,
         artifactId,
         content,
-        { subtype, dependencyTrace, validationWarnings: warnings, ...extraMetadata },
+        {
+            subtype,
+            dependencyTrace,
+            validationWarnings: warnings,
+            dependencyStatus: missingRequiredDeps.length ? 'degraded' : 'complete',
+            ...(missingRequiredDeps.length ? { missingRequiredDependencies: missingRequiredDeps } : {}),
+            ...(blockers.length ? { validationBlockers: blockers } : {}),
+            ...(incompletePrdSections.length
+                ? { generatedFromIncompletePrd: true, incompletePrdSections }
+                : {}),
+            ...extraMetadata,
+        },
         sourceRefs,
         `Generate ${meta.title} from PRD${dependencyTrace ? ` (after: ${dependencyTrace})` : ''}`,
         parentVersionId,
     );
 
-    writeStore.setSlotStatus(projectId, subtype, { status: 'done', finishedAt: Date.now() });
+    writeStore.setSlotStatus(projectId, subtype, {
+        status: blockers.length ? 'needs_review' : 'done',
+        finishedAt: Date.now(),
+    });
 }
 
 const readPreferredArtifactForSpine = (
@@ -377,6 +432,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         });
     }
 
+    const incompletePrdSections = spineVersionForStamp(projectId, spineVersionId);
     const newVersion = writeStore.createArtifactVersion(
         projectId,
         artifactId,
@@ -388,6 +444,9 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
             autoGenerated: true,
             warnings,
             ...(designSystemPreferred ? { designSystemTokensHash: designSystemPreferred.tokensHash } : {}),
+            ...(incompletePrdSections.length
+                ? { generatedFromIncompletePrd: true, incompletePrdSections }
+                : {}),
         },
         sourceRefs,
         `Auto-generate ${settings.fidelity} ${settings.platform} mockup (${settings.scope.replace('_', ' ')})`,
@@ -446,7 +505,11 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
         const existing = useProjectStore.getState().getArtifacts(projectId, 'core_artifact').find(a => a.subtype === meta.subtype);
         if (!existing) continue;
         const preferred = useProjectStore.getState().getPreferredVersion(projectId, existing.id);
-        if (preferred && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)) {
+        // Skip needs_review (blocking-validation) versions — an untrustworthy
+        // artifact must not seed dependency context for a later layer.
+        if (preferred
+            && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)
+            && readValidationBlockers(preferred.metadata).length === 0) {
             generatedArtifacts[meta.subtype] = preferred.content;
         }
     }
@@ -577,6 +640,21 @@ function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
 const isHiddenSlot = (slot: ArtifactSlotKey): boolean =>
     slot !== 'mockup' && isHiddenArtifactSubtype(slot);
 
+// A dependency slot is "healthy" (safe to build a dependent against) when it is
+// done for this spine AND its preferred version carries no blocking-validation
+// issues. Missing/errored deps aren't done → unhealthy; needs_review deps are
+// present but not trustworthy → unhealthy. Retry uses this to regenerate an
+// unhealthy dependency before the slot that consumes it.
+function isDependencyHealthy(projectId: string, subtype: CoreArtifactSubtype, spineVersionId: string): boolean {
+    if (!isSlotDoneForSpine(projectId, subtype, spineVersionId)) return false;
+    const store = useProjectStore.getState();
+    const artifact = store.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
+    if (!artifact) return false;
+    const preferred = store.getPreferredVersion(projectId, artifact.id);
+    if (!preferred) return false;
+    return !(Array.isArray(preferred.metadata?.validationBlockers) && preferred.metadata.validationBlockers.length > 0);
+}
+
 export const artifactJobController = {
     isActive(projectId: string): boolean {
         const run = runs.get(projectId);
@@ -589,11 +667,12 @@ export const artifactJobController = {
      * completion only queues slots still missing.
      */
     startAll(args: StartArgs): void {
-        // Downstream protection: a spine blocked by safety review can never
+        // Downstream protection: a spine blocked by safety review — or an
+        // incomplete (partial) PRD the user hasn't acknowledged — can never
         // drive artifact generation, even if startAll is reached directly.
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
-        if (spine?.safetyReview?.status === 'blocked') return;
+        if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
 
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted && existing.spineVersionId === args.spineVersionId) {
@@ -639,7 +718,7 @@ export const artifactJobController = {
     regenerateSlots(slots: ArtifactSlotKey[], args: StartArgs): void {
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
-        if (spine?.safetyReview?.status === 'blocked') return;
+        if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
 
         const visible = slots.filter(k => k === 'mockup' || !isRetiredArtifactSubtype(k));
         if (visible.length === 0) return;
@@ -697,6 +776,26 @@ export const artifactJobController = {
             });
             return;
         }
+
+        // Dependency closure: never regenerate this slot against missing,
+        // errored, stale, or needs_review upstream dependencies. When a
+        // dependency (including a hidden one like component_inventory that the
+        // mockup consumes) is unhealthy, regenerate the closure — the unhealthy
+        // upstreams first, then this slot — via the same graph-driven path the
+        // Dependency Graph's batch update uses, rather than saving a downstream
+        // result built from invalid dependency state. Only routes when no run is
+        // active (regenerateSlots is a no-op otherwise).
+        if (!this.isActive(args.projectId)) {
+            const plan = planSlotRetry(
+                slot,
+                subtype => isDependencyHealthy(args.projectId, subtype, args.spineVersionId),
+            );
+            if (plan.unhealthyDeps.length > 0) {
+                this.regenerateSlots(plan.slots, args);
+                return;
+            }
+        }
+
         const existingRun = runs.get(args.projectId);
         const reuseExisting = existingRun && !existingRun.controller.signal.aborted;
         const controller = reuseExisting ? existingRun!.controller : new AbortController();
@@ -712,7 +811,10 @@ export const artifactJobController = {
             const existing = store.getArtifacts(args.projectId, 'core_artifact').find(a => a.subtype === meta.subtype);
             if (!existing) continue;
             const preferred = store.getPreferredVersion(args.projectId, existing.id);
-            if (preferred && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)) {
+            // Skip needs_review versions — they must not seed dependency context.
+            if (preferred
+                && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)
+                && readValidationBlockers(preferred.metadata).length === 0) {
                 generatedArtifacts[meta.subtype] = preferred.content;
             }
         }

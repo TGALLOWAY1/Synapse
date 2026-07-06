@@ -704,7 +704,19 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
     otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
     `MockupImageStatusChip` summarizes per-version status (AI-generated /
-    uploaded / awaiting). The Settings section is `settings/ArtifactModelsSection.tsx`,
+    uploaded / awaiting). **Two-phase completion:** a mockup has a SPEC phase
+    (the ArtifactVersion, marked done by the job controller as soon as the spec
+    lands) and an independent IMAGE phase (one render per screen, async, can
+    partially fail). `computeMockupImageCompletion` (`src/lib/mockupImageCompletion.ts`,
+    pure) derives the visual status (`none`/`generating`/`partial`/`complete` +
+    `failedScreenIds`) from per-screen image results so the UI never presents a
+    mockup as fully complete when images failed: `MockupImageStatusChip` shows a
+    red "Images incomplete · N failed" state, and `MockupViewer`'s header swaps
+    the flat "AI Generated" badge for the live status and renders a
+    "Retry failed images" banner (per-screen retry already exists in
+    `MockupScreenImage`). Image failures are tracked in the session-scoped
+    `mockupImageStore` `errors`/`inFlight` maps (transient — a reload re-attempts
+    on view). The Settings section is `settings/ArtifactModelsSection.tsx`,
     now the single place PRD **and** artifact models are configured: the PRD row
     (badge "Per-section") expands to reveal the authoritative Fast (Flash) /
     Expert (Pro) model pickers **plus** a read-only per-section preview showing
@@ -808,6 +820,48 @@ request…").
   drive workspace/screens/architecture/implementation artifacts. Domain types
   (`SafetyClassification`, `SafetyClassificationResult`, `SpineSafetyReview`)
   live in `src/types`; the safety module re-exports them.
+
+### Artifact validation: blocking vs advisory (`src/lib/artifactBlockingValidation.ts`)
+
+Most artifact validation is **advisory** — `validateArtifactContent` /
+`validateCrossArtifactConsistency` produce warnings stamped into
+`ArtifactVersion.metadata.validationWarnings` but never change status. A narrow,
+high-confidence set of defects is **blocking**: `detectArtifactBlockers(subtype,
+content, prd)` (pure) flags (1) a `data_model` with no API surface, (2)
+`user_flows` with no error paths, (3) an implementation-critical artifact
+(`data_model`/`user_flows`/`implementation_plan`) that references **none** of the
+PRD features (no traceability), and (4) a JSON-mode artifact
+(screen/data/component inventory) that parses but is structurally empty. When
+blockers exist, `runCoreArtifactSlot` still **saves the version** (content
+preserved for review) but stamps `metadata.validationBlockers` and sets the slot
+status to the new `GenerationStatus` value **`needs_review`** instead of `done`.
+The state is durable: `ArtifactWorkspace.slotStatusFor` re-derives `needs_review`
+from `readValidationBlockers(preferred.metadata)` after the transient job slot is
+cleared (post-reload). UI: an amber `ShieldAlert` `StatusDot` + an in-view
+"Needs review" banner listing the issues with a Regenerate action. Keep the
+blocker list conservative — advisory warnings must stay non-blocking.
+
+### Dependency sufficiency gate (`src/lib/artifactDependencyGate.ts`)
+
+An artifact must not silently generate from missing/errored **required** upstream
+dependencies (which previously produced degraded output behind a soft "Not
+generated yet." placeholder). `REQUIRED_DEPENDENCIES` (`coreArtifactPipeline.ts`,
+a conservative subset of each subtype's `dependsOn`: `user_flows` ←
+`screen_inventory`; `implementation_plan` ← `screen_inventory` + `data_model`)
+declares which deps block. `generateCoreArtifact` calls
+`assertDependenciesSufficient(subtype, generatedArtifacts, { allowMissing })`
+**before any model call** — a missing required dep throws
+`DependencyInsufficiencyError` (surfaced as a slot error) unless
+`allowMissingDependencies` acknowledges degraded generation. The happy path never
+false-blocks because `buildDependencyLayers` runs required deps in an earlier
+layer. `runCoreArtifactSlot` stamps `metadata.dependencyStatus`
+(`complete`/`degraded`) + `missingRequiredDependencies`. `buildDependencyContext`
+labels required deps `(REQUIRED)` and, when one is absent, emits an explicit
+**MISSING** notice instead of "Not generated yet.". Screen-inventory dependency
+context is summarized via `summarizeScreenInventoryDependency`, which emits the
+**full screen roster (every id/name) first, never truncated**, then truncates the
+verbose prose — so downstream artifacts never lose a screen reference to a long
+prose cut.
 
 ### Preflight clarification (`src/lib/services/preflightService.ts`, `src/components/preflight/`)
 
@@ -1373,6 +1427,16 @@ stale and why, and the safe update order. See
   graph-derived batch to `executeJob` without this expansion, or the mockup
   can rebuild against a `component_inventory` generated from the old
   screen inventory.
+- **Retry respects the dependency closure.** `retrySlot` no longer regenerates a
+  slot against missing/errored/stale/needs_review upstreams. It calls the pure
+  `planSlotRetry(slot, isHealthy)` (`coreArtifactPipeline.ts`), which walks the
+  slot's dependency closure (including hidden deps like `component_inventory`)
+  and, when a dependency is unhealthy (`isDependencyHealthy`: not done for the
+  spine, or its preferred version carries `validationBlockers`), routes to
+  `regenerateSlots([…unhealthy deps, slot])` so the upstreams regenerate first —
+  reusing the same graph-driven `executeJob` path — instead of saving a
+  downstream result built from invalid dependency state. Routes only when no run
+  is active; an all-healthy plan falls through to the plain single-slot retry.
 - **Workspace wiring rules.** The selection is excluded from the finalize
   auto-open candidates and renders no `StatusDot` (`slotStatusFor` returns a
   constant `'done'` for it). "Open artifact" routes `screen_inventory`/
@@ -1543,6 +1607,21 @@ renders an amber "This PRD is incomplete" banner above the PRD with a
 per-section "Run again" button wired to the same `handleRetrySection` flow —
 this survives refresh, unlike the timeline. A successful single-section retry
 removes its id from the list (see `handleRetrySection`).
+
+**Incomplete-PRD generation gate** (`src/lib/artifactGenerationGate.ts`, pure).
+A partial PRD (`generationMeta.failedSections` non-empty) must not silently
+drive downstream artifact generation. `evaluateSpineGenerationGate(spine, opts)`
+is the code-level guardrail (defense-in-depth alongside the UI, mirroring the
+safety-blocked check): it returns `allowed:false` for a safety-blocked spine, a
+spine with no `structuredPRD`, or an incomplete spine that is neither
+acknowledged (`acknowledgeIncomplete`) nor already `isFinal` (the durable record
+of acknowledgement, so resume/retry after reload still work). `startAll` /
+`regenerateSlots` early-return when the gate disallows. On the finalize edge,
+`ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
+an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
+"Generate anyway" proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
+version generated while `failedSections` is non-empty is stamped
+`metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 
 ### Other-flow progress UI (`src/components/GenerationProgress.tsx`)
 

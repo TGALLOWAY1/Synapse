@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -80,6 +80,13 @@ export function ProjectWorkspace() {
     // Gate shown on the finalize edge when the project hasn't picked a
     // design-system direction yet. Choosing one stores it, then finalizes.
     const [showPresetChoice, setShowPresetChoice] = useState(false);
+    // Gate shown when finalizing a PRD that has failed (incomplete) sections —
+    // requires explicit acknowledgement before generating downstream artifacts
+    // from partial source material.
+    const [showIncompletePrdConfirm, setShowIncompletePrdConfirm] = useState(false);
+    // Carries the incomplete-PRD acknowledgement across the design-preset gate
+    // (which can interpose between acknowledgement and finalize).
+    const pendingIncompleteAck = useRef(false);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -521,20 +528,38 @@ export function ProjectWorkspace() {
             return;
         }
 
-        // Finalizing. If this real project will generate assets but hasn't
-        // picked a design-system direction yet, ask first — the choice steers
-        // the design system (and therefore mockups + copied prompts). The demo
-        // never generates and skips straight through.
+        // Incomplete PRD: some required sections failed. Do not silently
+        // finalize + generate downstream artifacts from partial source
+        // material — require an explicit acknowledgement first. Uses the raw
+        // persisted list (not the SECTION_TITLES-filtered display list) so it
+        // matches the code-level gate in artifactJobController.startAll.
+        if ((activeSpine.generationMeta?.failedSections?.length ?? 0) > 0) {
+            setShowIncompletePrdConfirm(true);
+            return;
+        }
+
+        startFinalizeFlow(false);
+    };
+
+    // Continues the finalize flow after the incomplete-PRD gate. If this real
+    // project will generate assets but hasn't picked a design-system direction
+    // yet, ask first — the choice steers the design system (and therefore
+    // mockups + copied prompts). The demo never generates and skips through.
+    // `ackIncomplete` records whether the user acknowledged generating from a
+    // partial PRD; it's carried across the preset gate.
+    const startFinalizeFlow = (ackIncomplete: boolean) => {
+        if (!projectId || !activeSpine) return;
         if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID && !project?.designSystemPreset) {
+            pendingIncompleteAck.current = ackIncomplete;
             setShowPresetChoice(true);
             return;
         }
-        finalizeAndGenerate();
+        finalizeAndGenerate(ackIncomplete);
     };
 
     // Performs the actual finalize + asset kickoff. Split out so it can run
     // either directly (preset already chosen / demo) or after the preset gate.
-    const finalizeAndGenerate = () => {
+    const finalizeAndGenerate = (ackIncomplete: boolean) => {
         if (!projectId || !activeSpine) return;
         markSpineFinal(projectId, activeSpine.id, true);
 
@@ -549,6 +574,7 @@ export function ProjectWorkspace() {
                 prdContent: activeSpine.responseText,
                 structuredPRD: activeSpine.structuredPRD,
                 projectPlatform: project?.platform,
+                acknowledgeIncomplete: ackIncomplete,
             });
         }
         setShowFinalizeSuccess(true);
@@ -560,7 +586,8 @@ export function ProjectWorkspace() {
         // off the project when design_system runs.
         setProjectDesignSystemPreset(projectId, presetId);
         setShowPresetChoice(false);
-        finalizeAndGenerate();
+        finalizeAndGenerate(pendingIncompleteAck.current);
+        pendingIncompleteAck.current = false;
     };
 
     // "Open Assets" from the success modal: navigate to the Assets stage and
@@ -737,6 +764,43 @@ export function ProjectWorkspace() {
                 </div>
             </div>
 
+            {showIncompletePrdConfirm && (
+                <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
+                        <div className="flex items-start gap-3 p-5 border-b border-neutral-100">
+                            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
+                            <div>
+                                <h3 className="font-semibold text-neutral-900">Generate assets from an incomplete PRD?</h3>
+                                <p className="text-sm text-neutral-600 mt-1">
+                                    {persistedFailedSections.length} PRD section{persistedFailedSections.length > 1 ? 's' : ''} failed
+                                    to generate. Downstream artifacts (screens, data model, mockups, and more) will be built
+                                    from partial source material and may be inconsistent or incomplete. They'll be tagged as
+                                    generated from an incomplete PRD.
+                                </p>
+                                <p className="text-sm text-neutral-600 mt-2">
+                                    We recommend retrying the failed sections first.
+                                </p>
+                            </div>
+                        </div>
+                        <div className="flex items-center justify-end gap-2 p-4">
+                            <button
+                                type="button"
+                                onClick={() => setShowIncompletePrdConfirm(false)}
+                                className="px-3 py-1.5 text-sm rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                            >
+                                Retry sections first
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => { setShowIncompletePrdConfirm(false); startFinalizeFlow(true); }}
+                                className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition"
+                            >
+                                Generate anyway
+                            </button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {showPresetChoice && (
                 <DesignSystemPresetChoice
                     onChoose={handleChooseDesignSystemPreset}

@@ -91,6 +91,25 @@ export const CORE_ARTIFACT_PIPELINE: CoreArtifactMeta[] = [
 export const CORE_ARTIFACT_DISPLAY_ORDER: CoreArtifactMeta[] =
     CORE_ARTIFACT_PIPELINE.slice().sort((a, b) => a.displayOrder - b.displayOrder);
 
+// A subset of each artifact's `dependsOn` that is genuinely REQUIRED: the
+// dependent cannot be meaningfully generated without the dependency's output.
+// Missing required dependencies (not generated, errored, or empty) block
+// generation unless the user acknowledges degraded generation. Every other
+// declared dependency is treated as optional context. Keep this conservative —
+// over-marking a dep as required needlessly blocks generation.
+export const REQUIRED_DEPENDENCIES: Partial<Record<CoreArtifactSubtype, CoreArtifactSubtype[]>> = {
+    // Flows reference specific screens by name — without the inventory they'd be
+    // invented.
+    user_flows: ['screen_inventory'],
+    // The consolidated plan links milestones/prompt packs to concrete screens
+    // and entities; both are required for a trustworthy, traceable plan.
+    implementation_plan: ['screen_inventory', 'data_model'],
+};
+
+export function getRequiredDependencies(subtype: CoreArtifactSubtype): CoreArtifactSubtype[] {
+    return REQUIRED_DEPENDENCIES[subtype] ?? [];
+}
+
 // Upstream core artifacts the mockup spec builder consumes (screen list,
 // component tags, design tokens). Lives here — next to the pipeline it
 // extends — so the artifact dependency graph and the job controller share
@@ -177,6 +196,47 @@ export function expandWithHiddenDependencyClosure(
     // Preserve caller order, appending the hidden additions at the end —
     // execution order is derived from buildDependencyLayers, not this array.
     return [...slots, ...[...requested].filter(s => !slots.includes(s))];
+}
+
+/** The direct dependencies a slot consumes (core deps, or MOCKUP_DEPENDENCIES for the mockup). */
+export function slotDependencies(slot: ArtifactSlotKey): CoreArtifactSubtype[] {
+    if (slot === 'mockup') return [...MOCKUP_DEPENDENCIES];
+    return getArtifactMeta(slot).dependsOn;
+}
+
+export interface RetryPlan {
+    /** Slots to (re)generate in dependency order — unhealthy upstreams first, then the target. */
+    slots: ArtifactSlotKey[];
+    /** Upstream dependencies found unhealthy (drove the closure). Empty → a plain single-slot retry. */
+    unhealthyDeps: CoreArtifactSubtype[];
+}
+
+/**
+ * Plan a single-slot retry so it never regenerates against missing/errored/
+ * stale/needs-review upstream dependencies. Walks the slot's dependency
+ * closure (including hidden deps like component_inventory that the mockup
+ * consumes) and, for any dependency the caller reports as unhealthy, pulls it
+ * (and transitively its own unhealthy inputs) into the batch so it regenerates
+ * BEFORE the target slot. When every dependency is healthy, returns just the
+ * target slot (a plain retry). Pure: the caller supplies `isHealthy`.
+ */
+export function planSlotRetry(
+    slot: ArtifactSlotKey,
+    isHealthy: (subtype: CoreArtifactSubtype) => boolean,
+): RetryPlan {
+    const unhealthy = new Set<CoreArtifactSubtype>();
+    const visit = (deps: CoreArtifactSubtype[]) => {
+        for (const dep of deps) {
+            if (isRetiredArtifactSubtype(dep) || unhealthy.has(dep)) continue;
+            if (!isHealthy(dep)) {
+                unhealthy.add(dep);
+                // The dep will be regenerated, so its own inputs must be sound too.
+                visit(getArtifactMeta(dep).dependsOn);
+            }
+        }
+    };
+    visit(slotDependencies(slot));
+    return { slots: [...unhealthy, slot], unhealthyDeps: [...unhealthy] };
 }
 
 /**

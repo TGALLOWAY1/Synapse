@@ -1,10 +1,11 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp, MessageSquareText } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp, MessageSquareText, AlertTriangle, Loader2, RefreshCcw, Clock, Images } from 'lucide-react';
 import type { MockupImageRecord, MockupPayload, MockupScreen, MockupSettings, StalenessState } from '../../types';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
 import { buildScreenScopeKey } from '../../lib/mockupImageStore';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
+import { computeMockupImageCompletion, type ScreenImageState } from '../../lib/mockupImageCompletion';
 import { StalenessBadge } from '../StalenessBadge';
 import { MockupScreenImage } from './MockupScreenImage';
 import { MockupPromptDialog } from './MockupPromptDialog';
@@ -174,6 +175,46 @@ export function MockupViewer({
 
     const screens = payload.screens;
 
+    // --- Two-phase completion: the spec exists (this version), but the visual
+    // (image) delivery can be partial or have failures. Compute it so the
+    // header reflects real image status instead of a flat "AI Generated". ---
+    const aiImages = useMockupImageStore((s) => s.images);
+    const imgErrors = useMockupImageStore((s) => s.errors);
+    const imgInFlight = useMockupImageStore((s) => s.inFlight);
+    const generateImage = useMockupImageStore((s) => s.generate);
+    const clearImageError = useMockupImageStore((s) => s.clearError);
+    const uploadsForCompletion = useScreenInventoryImageStore((s) => s.images);
+
+    const completion = useMemo(() => {
+        if (!aiImageEnabled || !versionId) return null;
+        const states: ScreenImageState[] = screens.map((screen) => {
+            const scope = buildScreenScopeKey(versionId, screen.id);
+            const hasAi = Object.keys(aiImages).some((k) => k.startsWith(scope));
+            const slug = slugifyScreenName(screen.name);
+            const hasUpload = Object.values(uploadsForCompletion).some(
+                (r) => r.artifactVersionId === versionId && r.screenSlug === slug && r.isPreferred,
+            );
+            const generated = hasAi || hasUpload;
+            return {
+                screenId: screen.id,
+                generated,
+                generating: !generated && !!imgInFlight[scope],
+                failed: !generated && !imgInFlight[scope] && !!imgErrors[scope],
+            };
+        });
+        return computeMockupImageCompletion(states);
+    }, [aiImageEnabled, versionId, screens, aiImages, uploadsForCompletion, imgInFlight, imgErrors]);
+
+    const retryFailedImages = () => {
+        if (!completion || !versionId || !projectId || !artifactId) return;
+        for (const screenId of completion.failedScreenIds) {
+            const screen = screens.find((s) => s.id === screenId);
+            if (!screen) continue;
+            clearImageError(versionId, screenId);
+            void generateImage({ projectId, artifactId, versionId, screen, payload, settings, quality: 'low' });
+        }
+    };
+
     // Pages navigator: collapsed on mobile once the user picks a row so the
     // long page list doesn't trap them at the top.
     const [navOpen, setNavOpen] = useState(true);
@@ -287,10 +328,37 @@ export function MockupViewer({
 
                     <div className="flex items-center justify-between gap-2 flex-wrap mt-3">
                         <div className="flex items-center gap-2 flex-wrap">
-                            <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium">
-                                <Sparkles size={10} />
-                                AI Generated
-                            </span>
+                            {/* Only claim "AI Generated" when every screen's image is
+                                present. Partial/awaiting/generating/failed states must
+                                not read as complete visuals. When completion can't be
+                                computed (AI preview unavailable in this context), keep
+                                the neutral "AI Generated" label. */}
+                            {completion && completion.failed > 0 ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-700 font-medium">
+                                    <AlertTriangle size={10} />
+                                    Images incomplete · {completion.generated}/{completion.total}
+                                </span>
+                            ) : completion && completion.status === 'generating' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-700 font-medium">
+                                    <Loader2 size={10} className="animate-spin" />
+                                    Generating images · {completion.generated}/{completion.total}
+                                </span>
+                            ) : completion && completion.status === 'none' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium">
+                                    <Clock size={10} />
+                                    Awaiting images · 0/{completion.total}
+                                </span>
+                            ) : completion && completion.status === 'partial' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium">
+                                    <Images size={10} />
+                                    Images · {completion.generated}/{completion.total}
+                                </span>
+                            ) : (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium">
+                                    <Sparkles size={10} />
+                                    AI Generated
+                                </span>
+                            )}
                             <span className="text-[11px] text-neutral-500">{pageCountLabel}</span>
                             <StalenessBadge staleness={staleness} />
                         </div>
@@ -298,6 +366,28 @@ export function MockupViewer({
                             v{versionNumber} · {formatDate(createdAt)}
                         </span>
                     </div>
+                    {completion && completion.failed > 0 && (
+                        <div className="mt-3 flex items-start justify-between gap-3 flex-wrap rounded-lg border border-red-200 bg-red-50 p-3">
+                            <div className="flex items-start gap-2 min-w-0">
+                                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-red-600" />
+                                <div className="min-w-0">
+                                    <p className="text-sm font-medium text-red-900">
+                                        {completion.failed} of {completion.total} screen image{completion.failed > 1 ? 's' : ''} failed to generate
+                                    </p>
+                                    <p className="text-xs text-red-700 mt-0.5">
+                                        This mockup's visuals are incomplete. Retry the failed images below.
+                                    </p>
+                                </div>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={retryFailedImages}
+                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-red-600 hover:bg-red-700 text-white rounded-md transition shrink-0"
+                            >
+                                <RefreshCcw size={12} /> Retry failed images
+                            </button>
+                        </div>
+                    )}
                 </div>
 
                 {/* --- Pages navigator ----------------------------------- */}
