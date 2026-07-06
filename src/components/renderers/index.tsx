@@ -1,5 +1,5 @@
 import type {
-    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, UXPage,
+    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, StalenessState, UXPage,
 } from '../../types';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
@@ -51,6 +51,10 @@ interface DispatchProps {
     generatedAt?: number;
     /** Only consumed by `prompt_pack`; current artifact version number. */
     versionNumber?: number;
+    /** Only consumed by `data_model`: source PRD version label for the overview header. */
+    prdVersionLabel?: string;
+    /** Only consumed by `data_model`: freshness state for the overview header. */
+    staleness?: StalenessState;
 }
 
 /**
@@ -96,12 +100,14 @@ export function ArtifactContentRenderer({
     onUpdatePromptEdits,
     generatedAt,
     versionNumber,
+    prdVersionLabel,
+    staleness,
 }: DispatchProps) {
     if (subtype === 'screen_inventory' && isJsonString(content)) {
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
     if (subtype === 'data_model') {
-        return <DataModelRenderer content={content} />;
+        return <DataModelRenderer content={content} prdVersionLabel={prdVersionLabel} staleness={staleness} />;
     }
     if (subtype === 'component_inventory' && isJsonString(content)) {
         return <ComponentInventoryRenderer content={content} />;

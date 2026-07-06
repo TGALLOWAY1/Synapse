@@ -822,6 +822,37 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     `schemas/artifactSchemas.ts`, then convert to markdown via
     `structuredArtifactToMarkdown()` for storage; renderers in
     `src/components/renderers/` parse that markdown back to card layouts.
+    The **`data_model` renderer** (`DataModelRenderer.tsx` +
+    `src/components/renderers/dataModel/`) presents the artifact as an
+    interactive entity-relationship design surface rather than a schema dump:
+    a compact **overview header** (`DataModelOverview` — provenance/freshness +
+    entity/relationship/constraint/index/PII counts), an **ER-style diagram**
+    (`EntityGraph`) that mirrors the artifact dependency graph / user-flow
+    diagrams (rounded node cards, deterministic layered SVG layout, directional
+    cardinality-labelled edges, click-a-node-to-open-its-card), and
+    **collapsible entity cards** (`EntityCard`) whose expanded state shows
+    grouped field tables (colour-coded type chips, required/indexed markers) and
+    compact **inspector rows** (`InspectorRow`) for relationships / constraints /
+    privacy / indexes in a fixed colour language (relationship=blue,
+    constraint=purple, privacy=rose, index=slate, warning=amber). All of it is
+    **derived, never hand-drawn**, by the pure, unit-tested
+    **`src/lib/dataModelGraph.ts`** (`analyzeDataModel` → graph + summary): it
+    recovers structured relationships from the parser's `RELATIONSHIP` callouts
+    (so cardinality is a faithful derivation of the schema's `DataRelationship`
+    `type`, never invented), **dedupes reciprocal `has_many`/`belongs_to` pairs**
+    into one parent→child edge, resolves plural/singular targets, tracks
+    unresolved/self references separately, and derives conservative entity
+    **categories** (`core`/`user_config`/`generated`/`system`/`external`, from
+    userFacing/mutability/integration-shaped signals only) used for the optional
+    "Group by category" swimlanes and node accents. The renderer keeps the legacy
+    ReactMarkdown fallback for unparseable content and preserves the
+    "How This Data Model Works", "How This Appears in the Product", and
+    "API Endpoints" sections. Multi-entity models start collapsed (single-entity
+    expanded) for scannability; provenance/freshness reach the overview via the
+    optional `prdVersionLabel`/`staleness` props threaded through
+    `ArtifactContentRenderer` for `data_model` only. Do **not** change
+    `dataModelMarkdown.ts`'s parser output shape without re-checking
+    `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
     The `component_inventory` renderer is a mobile-first, searchable
     component library (sticky search + category/complexity/used-in
     filters, expandable cards with live previews) decomposed under
