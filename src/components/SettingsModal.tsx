@@ -1,12 +1,12 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github, ChevronRight, Bug } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Github, ChevronRight, Bug, KeyRound } from 'lucide-react';
 import { getOwnerToken } from '../lib/snapshotClient';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
 import { ConnectedAccountsSection } from './settings/ConnectedAccountsSection';
 import { ArtifactModelsSection } from './settings/ArtifactModelsSection';
-import { MODEL_CATALOG, CURRENT_MODELS, LEGACY_MODELS, type ModelOption } from '../lib/modelCatalog';
+import { CURRENT_MODELS, LEGACY_MODELS, type ModelOption } from '../lib/modelCatalog';
 import {
     getArtifactModelOverrides,
     setArtifactModelOverrides,
@@ -62,6 +62,48 @@ function ModelRadio({
                 <p className="text-xs text-neutral-400">{option.description}</p>
             </div>
         </button>
+    );
+}
+
+/**
+ * Progressive-disclosure section for the settings modal. Collapsed by default
+ * so advanced/fallback controls (local browser keys, integrations, refine
+ * model) don't clutter the primary view. Dark-themed to match the modal.
+ */
+function Disclosure({
+    icon,
+    title,
+    subtitle,
+    defaultOpen = false,
+    children,
+}: {
+    icon: ReactNode;
+    title: string;
+    subtitle?: string;
+    defaultOpen?: boolean;
+    children: ReactNode;
+}) {
+    const [open, setOpen] = useState(defaultOpen);
+    return (
+        <div className="border border-white/10 rounded-2xl bg-white/[0.02] overflow-hidden">
+            <button
+                type="button"
+                onClick={() => setOpen((v) => !v)}
+                aria-expanded={open}
+                className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.03] transition-colors"
+            >
+                <div className="text-neutral-400 shrink-0">{icon}</div>
+                <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold text-neutral-200">{title}</p>
+                    {subtitle && <p className="text-[11px] text-neutral-500 leading-snug">{subtitle}</p>}
+                </div>
+                <ChevronDown
+                    size={16}
+                    className={`shrink-0 text-neutral-500 transition-transform ${open ? 'rotate-180' : ''}`}
+                />
+            </button>
+            {open && <div className="px-4 pb-4 pt-1 space-y-3 border-t border-white/5">{children}</div>}
+        </div>
     );
 }
 
@@ -157,51 +199,15 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     {/* Encrypted, server-side provider key vault (recommended) */}
                     <ProviderKeysSection />
 
-                    <div className="border-t border-white/5 pt-6 space-y-1">
-                        <h3 className="text-sm font-semibold text-neutral-400">Local browser keys (advanced fallback)</h3>
-                        <p className="text-[11px] text-neutral-500 leading-relaxed">
-                            These keys are stored only in this browser's localStorage. The encrypted
-                            vault above is preferred; local keys are used as a fallback when no vault key
-                            is configured (e.g. offline or local development).
-                        </p>
-                    </div>
-
-                    {/* API Key Section */}
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                                <Shield size={14} className="text-indigo-400" />
-                                Google Gemini API Key
-                            </label>
-                            <a
-                                href="https://aistudio.google.com/app/apikey"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
-                            >
-                                Get Key <ExternalLink size={10} />
-                            </a>
-                        </div>
-                        <input
-                            type="password"
-                            value={apiKey}
-                            onChange={(e) => setApiKey(e.target.value)}
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
-                            placeholder="Paste your AIzaSy... key here"
-                            autoFocus
-                        />
-                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
-                            Your key is stored locally in your browser and never leaves your machine.
-                        </p>
-                    </div>
-
-                    {/* Billing Project ID — forces paid-tier quota */}
-                    <div className="space-y-3">
-                        <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                            <Briefcase size={14} className="text-indigo-400" />
-                            Billing Project ID
-                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
-                        </label>
+                    {/* Gemini billing project — a Gemini-wide setting applied to
+                        every request regardless of key source (vault OR local),
+                        so it sits with the vault above rather than only in the
+                        local-keys fallback. Collapsed to keep the primary view clean. */}
+                    <Disclosure
+                        icon={<Briefcase size={16} />}
+                        title="Gemini billing project"
+                        subtitle="Optional — force paid-tier quota for your Gemini key"
+                    >
                         <input
                             type="text"
                             value={projectId}
@@ -209,57 +215,100 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
                             placeholder="e.g. my-gcp-project-123"
                         />
-                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
-                            If you enabled billing on a specific Google Cloud project, paste its ID here.
-                            Synapse sends it as <code className="text-neutral-400">x-goog-user-project</code> so
-                            Gemini meters requests against that project — fixes the case where a key defaults
-                            to free-tier quota even after billing is on.
+                        <p className="text-[11px] text-neutral-500 leading-relaxed">
+                            Applies to <strong>all</strong> Gemini requests — whether the key comes from
+                            the encrypted vault above or the local fallback below. If you enabled billing
+                            on a specific Google Cloud project, paste its ID here; Synapse sends it as{' '}
+                            <code className="text-neutral-400">x-goog-user-project</code> so Gemini meters
+                            requests against that project — fixing the case where a key defaults to
+                            free-tier quota even after billing is on.
                         </p>
-                        <p className="text-[11px] text-amber-300/80 leading-relaxed px-1">
+                        <p className="text-[11px] text-amber-300/80 leading-relaxed">
                             Use the Project <strong>ID</strong> (e.g. <code className="text-neutral-400">my-project-123</code>),
                             not the Project Number. The <strong>Generative Language API</strong> must be
                             enabled on this project (Google Cloud Console → APIs &amp; Services → Library).
                         </p>
-                    </div>
+                    </Disclosure>
 
-                    {/* OpenAI image preview (optional) */}
-                    <div className="space-y-3">
-                        <div className="flex items-center justify-between">
-                            <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                                <Sparkles size={14} className="text-indigo-400" />
-                                OpenAI Image Preview
-                                <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
-                            </label>
-                            <a
-                                href="https://platform.openai.com/api-keys"
-                                target="_blank"
-                                rel="noreferrer"
-                                className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
-                            >
-                                Get Key <ExternalLink size={10} />
-                            </a>
-                        </div>
-                        <input
-                            type="password"
-                            value={openaiKey}
-                            onChange={(e) => setOpenaiKey(e.target.value)}
-                            className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
-                            placeholder="Paste your sk-... OpenAI key here"
-                        />
-                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
-                            Adds an "AI Image" tab to each mockup screen, powered by OpenAI <code className="text-neutral-400">gpt-image-2</code>.
-                            Click to generate a low-quality draft image; if you like it, regenerate at high quality.
-                            Your key is stored locally in your browser and never leaves your machine.
+                    {/* Local browser keys — advanced fallback, collapsed by default. */}
+                    <Disclosure
+                        icon={<KeyRound size={16} />}
+                        title="Local browser keys"
+                        subtitle="Advanced fallback — stored only in this browser"
+                    >
+                        <p className="text-[11px] text-neutral-500 leading-relaxed">
+                            These keys are stored only in this browser's localStorage. The encrypted
+                            vault above is preferred; local keys are used as a fallback when no vault key
+                            is configured (e.g. offline or local development).
                         </p>
-                    </div>
 
-                    {/* Integrations — credentials for task export targets */}
-                    <div className="space-y-3">
+                        {/* Local Gemini key */}
+                        <div className="space-y-2 pt-1">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-neutral-300 flex items-center gap-2">
+                                    <Shield size={13} className="text-indigo-400" />
+                                    Google Gemini API Key
+                                </label>
+                                <a
+                                    href="https://aistudio.google.com/app/apikey"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
+                                >
+                                    Get Key <ExternalLink size={10} />
+                                </a>
+                            </div>
+                            <input
+                                type="password"
+                                value={apiKey}
+                                onChange={(e) => setApiKey(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
+                                placeholder="Paste your AIzaSy... key here"
+                            />
+                        </div>
+
+                        {/* Local OpenAI key */}
+                        <div className="space-y-2 pt-2">
+                            <div className="flex items-center justify-between">
+                                <label className="text-xs font-semibold text-neutral-300 flex items-center gap-2">
+                                    <Sparkles size={13} className="text-indigo-400" />
+                                    OpenAI Image Preview
+                                    <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
+                                </label>
+                                <a
+                                    href="https://platform.openai.com/api-keys"
+                                    target="_blank"
+                                    rel="noreferrer"
+                                    className="text-[11px] font-bold uppercase tracking-wider text-indigo-400 hover:text-indigo-300 transition flex items-center gap-1"
+                                >
+                                    Get Key <ExternalLink size={10} />
+                                </a>
+                            </div>
+                            <input
+                                type="password"
+                                value={openaiKey}
+                                onChange={(e) => setOpenaiKey(e.target.value)}
+                                className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
+                                placeholder="Paste your sk-... OpenAI key here"
+                            />
+                            <p className="text-[11px] text-neutral-500 leading-relaxed">
+                                Adds an "AI Image" tab to each mockup screen, powered by OpenAI <code className="text-neutral-400">gpt-image-2</code>.
+                                Click to generate a low-quality draft image; if you like it, regenerate at high quality.
+                            </p>
+                        </div>
+                    </Disclosure>
+
+                    {/* Integrations — task-export credentials, collapsed by default.
+                        Not a key-vault fallback, so it lives in its own group. */}
+                    <Disclosure
+                        icon={<Github size={16} />}
+                        title="Integrations"
+                        subtitle="Optional — GitHub for exporting tasks"
+                    >
                         <div className="flex items-center justify-between">
-                            <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                                <Github size={14} className="text-indigo-400" />
+                            <label className="text-xs font-semibold text-neutral-300 flex items-center gap-2">
+                                <Github size={13} className="text-indigo-400" />
                                 GitHub Integration
-                                <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Optional</span>
                             </label>
                             <a
                                 href="https://github.com/settings/tokens?type=beta"
@@ -284,80 +333,39 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             className="w-full bg-black/40 border border-white/10 rounded-xl px-5 py-3 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 placeholder:text-neutral-600 transition-all font-mono text-sm"
                             placeholder="owner/repo (default destination for exported tasks)"
                         />
-                        <p className="text-[11px] text-neutral-500 leading-relaxed px-1">
+                        <p className="text-[11px] text-neutral-500 leading-relaxed">
                             Used by <strong>Convert to Tasks</strong> on the Implementation Plan artifact to create
                             real GitHub issues. Token needs <code className="text-neutral-400">issues:write</code>
                             scope on the target repo. Stored locally in your browser only.
                         </p>
+                    </Disclosure>
+
+                    {/* Generation models — the single place PRD + artifact models
+                        are configured (the PRD row now owns the Fast/Expert controls). */}
+                    <div className="border-t border-white/5 pt-6">
+                        <ArtifactModelsSection
+                            fastModel={fastModel}
+                            strongModel={strongModel}
+                            onFastModelChange={setFastModel}
+                            onStrongModelChange={setStrongModel}
+                            overrides={artifactOverrides}
+                            onOverridesChange={setArtifactOverrides}
+                            mockupMode={mockupMode}
+                            onMockupModeChange={setMockupMode}
+                        />
                     </div>
 
-                    {/* Model Tiers for Progressive PRD */}
-                    <div className="space-y-4">
-                        <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                            <Brain size={14} className="text-indigo-400" />
-                            PRD Generation Models
-                        </label>
-                        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
-                            PRD sections are generated concurrently using two models: Flash for simpler sections (product basics, grounding, risks, metrics) and Pro for complex sections (features, architecture, data model). If you hit rate limits, set both to the same model.
-                        </p>
-                        <div className="grid grid-cols-2 gap-3">
-                            <div className="space-y-2">
-                                <label className="flex items-center gap-1.5 text-xs font-semibold text-teal-400">
-                                    <Zap size={11} />
-                                    Fast model (Flash)
-                                </label>
-                                <select
-                                    value={fastModel}
-                                    onChange={(e) => setFastModel(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-teal-500/50 focus:border-teal-500 text-neutral-100 text-xs transition-all"
-                                >
-                                    {MODEL_CATALOG.map((m) => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                            <div className="space-y-2">
-                                <label className="flex items-center gap-1.5 text-xs font-semibold text-indigo-400">
-                                    <Brain size={11} />
-                                    Expert model (Pro)
-                                </label>
-                                <select
-                                    value={strongModel}
-                                    onChange={(e) => setStrongModel(e.target.value)}
-                                    className="w-full bg-black/40 border border-white/10 rounded-xl px-3 py-2 focus:outline-none focus:ring-2 focus:ring-indigo-500/50 focus:border-indigo-500 text-neutral-100 text-xs transition-all"
-                                >
-                                    {MODEL_CATALOG.map((m) => (
-                                        <option key={m.id} value={m.id}>{m.name}</option>
-                                    ))}
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-
-                    {/* Per-artifact model routing */}
-                    <ArtifactModelsSection
-                        fastModel={fastModel}
-                        strongModel={strongModel}
-                        overrides={artifactOverrides}
-                        onOverridesChange={setArtifactOverrides}
-                        mockupMode={mockupMode}
-                        onMockupModeChange={setMockupMode}
-                    />
-
-                    {/* Model Selection */}
-                    <div className="space-y-4">
-                        <label className="text-sm font-semibold text-neutral-300 flex items-center gap-2">
-                            <Cpu size={14} className="text-indigo-400" />
-                            Default model
-                            <span className="text-[10px] uppercase tracking-wider font-bold text-neutral-500">Refine & enhance</span>
-                        </label>
-                        <p className="text-[11px] text-neutral-500 leading-relaxed -mt-1">
-                            Used for everything that isn't tiered above — the PRD refinement
-                            conversations (highlight &rarr; branch &rarr; consolidate) and the
-                            "Enhance" prompt helper. PRD sections and the core artifacts route
-                            automatically between the Fast and Expert models by complexity (see
-                            "PRD Generation Models"); this also acts as the fallback for those
-                            tiers when they're left unset.
+                    {/* Refine & enhance model — advanced, collapsed by default. */}
+                    <Disclosure
+                        icon={<Cpu size={16} />}
+                        title="Refine & enhance model"
+                        subtitle="Default model for PRD refinement and the Enhance helper"
+                    >
+                        <p className="text-[11px] text-neutral-500 leading-relaxed">
+                            Used for everything that isn't a Generation Model above — the PRD
+                            refinement conversations (highlight &rarr; branch &rarr; consolidate) and the
+                            "Enhance" prompt helper. It also acts as the fallback for the Fast/Expert
+                            tiers when either is left unset.
                         </p>
 
                         <div className="grid grid-cols-1 gap-3">
@@ -410,7 +418,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                                 </div>
                             )}
                         </div>
-                    </div>
+                    </Disclosure>
 
                     {/* Orchestration Metrics link */}
                     <div className="pt-4 border-t border-white/5">

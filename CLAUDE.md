@@ -704,10 +704,19 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
     otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
     `MockupImageStatusChip` summarizes per-version status (AI-generated /
-    uploaded / awaiting). The Settings section is `settings/ArtifactModelsSection.tsx`
-    (PRD shown as expandable "Multi", text artifacts with Complex/Simple badges,
-    Mockups with an "Image Source" select); the model list is the shared
-    `src/lib/modelCatalog.ts`.
+    uploaded / awaiting). The Settings section is `settings/ArtifactModelsSection.tsx`,
+    now the single place PRD **and** artifact models are configured: the PRD row
+    (badge "Per-section") expands to reveal the authoritative Fast (Flash) /
+    Expert (Pro) model pickers **plus** a read-only per-section preview showing
+    which tier each PRD section actually runs on — this replaced the old,
+    separate "PRD Generation Models" block in `SettingsModal` (removing the
+    redundancy that made PRD look like it "defaulted to Flash"). Text artifacts
+    have one selector each; Mockups has an "Image Source" select. The `SettingsModal`
+    itself groups advanced/fallback controls (Gemini billing project, Local
+    browser keys, Integrations, Refine & enhance model) behind collapsed
+    `Disclosure` sections; the Gemini billing project ID sits with the vault (it
+    applies to every Gemini request regardless of key source), not buried in the
+    local-keys fallback. The model list is the shared `src/lib/modelCatalog.ts`.
     Three of these
     (screen/data/component inventory) use Gemini JSON mode with schemas in
     `schemas/artifactSchemas.ts`, then convert to markdown via
