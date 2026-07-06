@@ -166,8 +166,8 @@ export function buildArtifactPrompt(inputs: ArtifactPromptInputs): string {
             '',
             '## 2. STRUCTURED DEPENDENCY SUMMARIES (authoritative for generated artifacts)',
             dependencyContext,
-            conflictBlock,
             optionsSection,
+            conflictBlock,
             appendix,
         ].join('\n');
     }
@@ -190,8 +190,8 @@ export function buildArtifactPrompt(inputs: ArtifactPromptInputs): string {
         dependencyContext,
         '',
         summary,
-        conflictBlock,
         optionsSection,
+        conflictBlock,
         appendix,
     ].join('\n');
 }
