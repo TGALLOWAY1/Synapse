@@ -263,7 +263,29 @@ export default async function handler(req, res) {
       }
       // The project id is owner-scoped on the server; ignore any id in the body
       // that disagrees with the URL.
-      const saved = await upsertProject(userId, id, bundle);
+      //
+      // Optimistic concurrency: if the client tells us which server revision it
+      // expects to overwrite (its last-seen baseline) and the server has since
+      // advanced on another device, reject with 409 instead of clobbering the
+      // newer copy. A first-time save (no expectedRevision) is unaffected.
+      const expectedRaw = req.query?.expectedRevision;
+      const expectedRevision =
+        expectedRaw !== undefined && expectedRaw !== '' && Number.isFinite(Number(expectedRaw))
+          ? Number(expectedRaw)
+          : undefined;
+      // Fallback guard for legacy rows that predate the revision counter: the
+      // client sends the updatedAt it last saw instead.
+      const expectedUpdatedAtRaw = req.query?.expectedUpdatedAt;
+      const expectedUpdatedAt =
+        typeof expectedUpdatedAtRaw === 'string' && expectedUpdatedAtRaw ? expectedUpdatedAtRaw : undefined;
+      const saved = await upsertProject(userId, id, bundle, { expectedRevision, expectedUpdatedAt });
+      if (saved?.conflict) {
+        return json(res, 409, {
+          error: 'revision_conflict',
+          currentRevision: saved.currentRevision,
+          id,
+        });
+      }
       return json(res, 200, { project: saved });
     }
 

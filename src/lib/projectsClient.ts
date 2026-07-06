@@ -79,17 +79,55 @@ export async function fetchProject(id: string): Promise<ServerProject | null> {
   return data.project ?? null;
 }
 
-/** Create-or-update (upsert) a project from a bundle. */
-export async function saveProject(id: string, bundle: ProjectBundle): Promise<ServerProjectSummary> {
-  const data = await requestJson<{ project: ServerProjectSummary }>(
-    `${API_BASE}?id=${encodeURIComponent(id)}`,
-    {
-      method: 'PUT',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ bundle }),
-    },
-    'save_failed',
-  );
+/** Raised when a conditional save is rejected because the server copy advanced
+ *  on another device. Carries the current server revision so the client can
+ *  mark the project as conflicted. */
+export class RevisionConflictError extends Error {
+  code = 'revision_conflict' as const;
+  currentRevision?: number;
+  constructor(currentRevision?: number) {
+    super('revision_conflict');
+    this.name = 'RevisionConflictError';
+    this.currentRevision = currentRevision;
+  }
+}
+
+/**
+ * Create-or-update (upsert) a project from a bundle. When `expectedRevision` is
+ * supplied, the save is conditional: the server rejects it (throwing
+ * `RevisionConflictError`) if the stored revision no longer matches, so a stale
+ * client can't blindly overwrite a newer copy saved on another device.
+ */
+export async function saveProject(
+  id: string,
+  bundle: ProjectBundle,
+  opts: { expectedRevision?: number; expectedUpdatedAt?: string } = {},
+): Promise<ServerProjectSummary> {
+  const params = new URLSearchParams({ id });
+  if (typeof opts.expectedRevision === 'number') {
+    params.set('expectedRevision', String(opts.expectedRevision));
+  } else if (opts.expectedUpdatedAt) {
+    // Legacy fallback: guard on the last-seen updatedAt when the row has no
+    // revision baseline yet.
+    params.set('expectedUpdatedAt', opts.expectedUpdatedAt);
+  }
+  const resp = await fetch(`${API_BASE}?${params.toString()}`, {
+    method: 'PUT',
+    credentials: 'include',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bundle }),
+  });
+  if (resp.status === 409) {
+    let body: { currentRevision?: number } | null = null;
+    try {
+      body = (await resp.json()) as { currentRevision?: number };
+    } catch {
+      body = null;
+    }
+    throw new RevisionConflictError(body?.currentRevision);
+  }
+  if (!resp.ok) throw await parseError(resp, 'save_failed');
+  const data = (await resp.json()) as { project: ServerProjectSummary };
   return data.project;
 }
 

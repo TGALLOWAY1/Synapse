@@ -42,6 +42,7 @@ import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
+import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
@@ -630,6 +631,11 @@ export function ProjectWorkspace() {
                                     : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
                             : 'Initializing...'}
                     </span>
+                    {projectId !== DEMO_PROJECT_ID && (
+                        <span className="hidden md:inline-flex shrink-0">
+                            <ProjectCloudStatus projectId={projectId} signedIn={!!authUser} />
+                        </span>
+                    )}
                 </div>
 
                 {/* Primary nav actions — always visible */}
@@ -877,6 +883,15 @@ export function ProjectWorkspace() {
                     <span>
                         You&apos;re viewing the demo project. Regenerating or refining requires your own Gemini API key — add one in Settings to customize.
                     </span>
+                </div>
+            )}
+
+            {/* Cross-device conflict banner: the cloud copy changed on another
+                device while this device has unsynced edits. Blocks silent
+                overwrite — the user picks keep-local / use-cloud / download. */}
+            {projectId !== DEMO_PROJECT_ID && authUser && (
+                <div className="shrink-0 px-4 py-2 z-10 empty:hidden">
+                    <ProjectConflictBanner projectId={projectId} />
                 </div>
             )}
 

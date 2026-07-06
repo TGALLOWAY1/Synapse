@@ -107,6 +107,77 @@ describe('upsertProject', () => {
   it('rejects an invalid project id', async () => {
     await expect(store.upsertProject('user-a', 'bad id', bundle())).rejects.toThrow(/invalid/);
   });
+
+  it('reads back the authoritative revision on an unconditional upsert', async () => {
+    runMongoAction.mockImplementation(async (action) => {
+      if (action === 'findOne') return { document: { revision: 6 } }; // post-write readback
+      if (action === 'updateOne') return { matchedCount: 1 };
+      return {};
+    });
+    const saved = await store.upsertProject('user-a', 'p1', bundle());
+    expect(saved.revision).toBe(6);
+    expect(saved.conflict).toBeUndefined();
+  });
+
+  it('writes atomically when expectedRevision matches (revision is IN the filter)', async () => {
+    runMongoAction.mockImplementation(async (action, payload) => {
+      // Only the guarded (upsert:false) conditional write should run.
+      if (action === 'updateOne' && payload.upsert === false) return { matchedCount: 1 };
+      return {};
+    });
+    const saved = await store.upsertProject('user-a', 'p1', bundle(), { expectedRevision: 5 });
+    expect(saved.revision).toBe(6);
+    const guarded = runMongoAction.mock.calls.find(([a, p]) => a === 'updateOne' && p.upsert === false)[1];
+    // The atomicity guarantee: the expected revision is part of the write filter.
+    expect(guarded.filter).toEqual({ userId: 'user-a', id: 'p1', revision: 5 });
+    // No unconditional (upsert:true) overwrite path was taken.
+    expect(runMongoAction.mock.calls.some(([a, p]) => a === 'updateOne' && p.upsert === true)).toBe(false);
+  });
+
+  it('blocks a stale write (expectedRevision mismatch) without overwriting', async () => {
+    runMongoAction.mockImplementation(async (action, payload) => {
+      // Guarded conditional write finds no matching doc (server advanced).
+      if (action === 'updateOne' && payload.upsert === false) return { matchedCount: 0 };
+      // Re-read of current state after the miss.
+      if (action === 'findOne') return { document: { revision: 7 } };
+      return {};
+    });
+    const result = await store.upsertProject('user-a', 'p1', bundle(), { expectedRevision: 5 });
+    expect(result).toMatchObject({ conflict: true, currentRevision: 7, id: 'p1' });
+    // Crucially, no unconditional overwrite/insert happened.
+    expect(runMongoAction.mock.calls.some(([a, p]) => a === 'updateOne' && p.upsert === true)).toBe(false);
+  });
+
+  it('guards a legacy row on expectedUpdatedAt when it has no revision', async () => {
+    let guardFilter = null;
+    runMongoAction.mockImplementation(async (action, payload) => {
+      if (action === 'updateOne' && payload.upsert === false) {
+        guardFilter = payload.filter;
+        return { matchedCount: 0 }; // server advanced under the stale device
+      }
+      if (action === 'findOne') return { document: { revision: 1 } };
+      return {};
+    });
+    const result = await store.upsertProject('user-a', 'p1', bundle(), {
+      expectedUpdatedAt: '2026-01-01T00:00:00.000Z',
+    });
+    expect(result).toMatchObject({ conflict: true, currentRevision: 1 });
+    // The updatedAt condition is part of the atomic write filter.
+    expect(guardFilter.updatedAt).toBeInstanceOf(Date);
+    expect(runMongoAction.mock.calls.some(([a, p]) => a === 'updateOne' && p.upsert === true)).toBe(false);
+  });
+
+  it('re-creates a remotely-deleted row instead of reporting a phantom conflict', async () => {
+    runMongoAction.mockImplementation(async (action, payload) => {
+      if (action === 'updateOne' && payload.upsert === false) return { matchedCount: 0 };
+      if (action === 'findOne') return {}; // row is gone
+      if (action === 'updateOne' && payload.upsert === true) return { matchedCount: 0, upsertedId: { _id: 'x' } };
+      return {};
+    });
+    const saved = await store.upsertProject('user-a', 'p1', bundle(), { expectedRevision: 3 });
+    expect(saved.conflict).toBeUndefined();
+    expect(saved.created).toBe(true);
+  });
 });
 
 describe('soft delete / restore / archive', () => {

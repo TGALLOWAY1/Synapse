@@ -122,10 +122,25 @@ export async function getProject(userId, projectId) {
 /**
  * Create or update (upsert) a project from a client bundle. Covers PRD updates
  * and artifact saves — the whole project state is one bundle. Returns the saved
- * summary. The id is owner-scoped, so a client can never overwrite another
- * user's project even by guessing its id (the filter pins `userId`).
+ * summary (including the new `revision`). The id is owner-scoped, so a client
+ * can never overwrite another user's project even by guessing its id (the
+ * filter pins `userId`).
+ *
+ * When `expectedRevision` (or, for legacy rows without a revision counter,
+ * `expectedUpdatedAt`) is supplied and the stored version has advanced past it
+ * (a concurrent save on another device), this does NOT write — it returns
+ * `{ conflict: true, currentRevision }` so the caller can surface a conflict
+ * instead of clobbering the newer copy. The guard is applied as part of the SAME
+ * updateOne filter, so the check-and-write is ATOMIC: two devices saving
+ * concurrently with the same expected version can't both win — the loser's
+ * filter no longer matches and it gets the conflict, not a silent overwrite.
  */
-export async function upsertProject(userId, projectId, bundle, { createdAt } = {}) {
+export async function upsertProject(
+  userId,
+  projectId,
+  bundle,
+  { createdAt, expectedRevision, expectedUpdatedAt } = {},
+) {
   if (!userId) throw new Error('upsertProject: userId is required');
   if (!isValidProjectId(projectId)) throw new Error('upsertProject: invalid project id');
   await ensureProjectIndexes();
@@ -135,21 +150,79 @@ export async function upsertProject(userId, projectId, bundle, { createdAt } = {
   const archived = bundle?.project?.archived === true;
   const status = archived ? 'archived' : 'active';
 
+  const setFields = {
+    userId,
+    id: projectId,
+    title,
+    idea,
+    status,
+    archived,
+    deletedAt: null,
+    data: bundle,
+    updatedAt: now,
+  };
+
+  const hasRevisionGuard = typeof expectedRevision === 'number';
+  const hasUpdatedAtGuard =
+    !hasRevisionGuard && typeof expectedUpdatedAt === 'string' && expectedUpdatedAt.length > 0;
+
+  // Conditional (guarded) write: pin the expected version INTO the update
+  // filter, with upsert:false, so the increment only lands on the exact version
+  // the caller expected. A concurrent writer that already advanced the row makes
+  // this filter miss — atomic, no read-then-write race.
+  if (hasRevisionGuard || hasUpdatedAtGuard) {
+    const guardFilter = { userId, id: projectId };
+    if (hasRevisionGuard) guardFilter.revision = expectedRevision;
+    else guardFilter.updatedAt = new Date(expectedUpdatedAt);
+
+    const guarded = await runMongoAction('updateOne', {
+      collection: PROJECTS_COLLECTION,
+      filter: guardFilter,
+      update: { $set: setFields, $inc: { revision: 1 } },
+      upsert: false,
+    });
+
+    if ((guarded?.matchedCount ?? 0) > 0) {
+      // We matched exactly the expected version and incremented it atomically.
+      // For the revision guard the new value is expectedRevision + 1; for the
+      // updatedAt guard we don't know it, so read it back.
+      let revision = hasRevisionGuard ? expectedRevision + 1 : undefined;
+      if (revision === undefined) {
+        const after = await runMongoAction('findOne', {
+          collection: PROJECTS_COLLECTION,
+          filter: { userId, id: projectId },
+          projection: { _id: 0, revision: 1 },
+        });
+        revision = typeof after?.document?.revision === 'number' ? after.document.revision : undefined;
+      }
+      return { id: projectId, title, idea, status, archived, updatedAt: now, revision, created: false };
+    }
+
+    // No match: the row either advanced under us (conflict) or no longer exists.
+    const current = await runMongoAction('findOne', {
+      collection: PROJECTS_COLLECTION,
+      filter: { userId, id: projectId },
+      projection: { _id: 0, revision: 1 },
+    });
+    if (current?.document) {
+      return {
+        conflict: true,
+        currentRevision:
+          typeof current.document.revision === 'number' ? current.document.revision : null,
+        id: projectId,
+      };
+    }
+    // Row is gone (remote-deleted) — fall through to a fresh insert below.
+  }
+
+  // Unconditional upsert: first save / migration / re-create after a remote
+  // delete. No concurrency guard here by design (the caller has no baseline to
+  // protect), so last-writer-wins is acceptable — no NEWER copy is at risk.
   const result = await runMongoAction('updateOne', {
     collection: PROJECTS_COLLECTION,
     filter: { userId, id: projectId },
     update: {
-      $set: {
-        userId,
-        id: projectId,
-        title,
-        idea,
-        status,
-        archived,
-        deletedAt: null,
-        data: bundle,
-        updatedAt: now,
-      },
+      $set: setFields,
       $setOnInsert: {
         createdAt: createdAt ? new Date(createdAt) : now,
       },
@@ -159,7 +232,16 @@ export async function upsertProject(userId, projectId, bundle, { createdAt } = {
   });
 
   const created = Boolean(result?.upsertedId);
-  return { id: projectId, title, idea, status, archived, updatedAt: now, created };
+  // Read back the authoritative revision so the returned baseline reflects the
+  // actual post-write value (avoids returning a stale computed number).
+  const after = await runMongoAction('findOne', {
+    collection: PROJECTS_COLLECTION,
+    filter: { userId, id: projectId },
+    projection: { _id: 0, revision: 1 },
+  });
+  const revision =
+    typeof after?.document?.revision === 'number' ? after.document.revision : created ? 1 : undefined;
+  return { id: projectId, title, idea, status, archived, updatedAt: now, revision, created };
 }
 
 /**
