@@ -9,6 +9,7 @@ import type { StructuredPRD, ProjectPlatform } from '../../types';
 import { type SectionId, SECTION_SCHEMAS } from '../schemas/prdSchemas';
 import { buildSectionPrompt } from '../prompts/prdSectionPrompts';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
+import { sanitizeRolePermissions } from '../prdRolesSanitizer';
 import {
     DEFAULT_PRD_SECTIONS,
     RETIRED_PRD_SECTIONS,
@@ -93,6 +94,9 @@ export const regeneratePrdSection = async (
         }
 
         const structuredPRD = { ...currentPRD, ...parsed } as StructuredPRD;
+        // Repair a re-run ux_loops slice the same way the full merge does, so a
+        // single-section retry can't reintroduce implementation-detail roles.
+        if (structuredPRD.roles) structuredPRD.roles = sanitizeRolePermissions(structuredPRD.roles);
         const markdown = renderPremiumMarkdown(structuredPRD);
         const ms = performance.now() - start;
 

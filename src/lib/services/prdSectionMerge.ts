@@ -1,6 +1,7 @@
 import type { StructuredPRD } from '../../types';
 import { DEFAULT_PRD_SECTIONS } from './progressivePrdGeneration';
 import { repairTruncatedJson } from '../jsonRepair';
+import { sanitizeRolePermissions } from '../prdRolesSanitizer';
 
 export type SectionResults = Record<string, { value: Partial<StructuredPRD> | null; ok: boolean }>;
 
@@ -71,6 +72,11 @@ export const mergeSectionsToStructuredPrd = (results: SectionResults): Structure
     if (!out.constraints) out.constraints = [];
     if (!out.domainEntities) out.domainEntities = [];
     if (!out.primaryActions) out.primaryActions = [];
+
+    // Quality gate: keep Permissions & Roles business-oriented and concise —
+    // strip any implementation/infrastructure/security-config items and cap
+    // list sizes so the artifact never reads like security documentation.
+    if (out.roles) out.roles = sanitizeRolePermissions(out.roles);
 
     return out as StructuredPRD;
 };

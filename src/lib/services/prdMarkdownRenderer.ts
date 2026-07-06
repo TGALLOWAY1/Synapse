@@ -29,6 +29,7 @@ import {
     deriveImplementationSummary,
     isImplementationSummaryEmpty,
 } from '../derive/implementationSummary';
+import { sanitizeRolePermissions } from '../prdRolesSanitizer';
 
 const tierTag = (tier?: string): string => {
     if (!tier) return '';
@@ -193,7 +194,10 @@ const renderStateMachine = (m: StateMachine): string[] => {
     return lines;
 };
 
-const renderRoles = (roles: RolePermission[]): string[] => {
+const renderRoles = (rawRoles: RolePermission[]): string[] => {
+    // Sanitize at render so legacy persisted PRDs (generated before the roles
+    // quality gate) still display business-oriented, concise permissions.
+    const roles = sanitizeRolePermissions(rawRoles) ?? rawRoles;
     const lines: string[] = [];
     roles.forEach(r => {
         lines.push(`### ${r.role}`);
