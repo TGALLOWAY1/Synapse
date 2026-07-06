@@ -704,7 +704,19 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
     otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
     `MockupImageStatusChip` summarizes per-version status (AI-generated /
-    uploaded / awaiting). The Settings section is `settings/ArtifactModelsSection.tsx`
+    uploaded / awaiting). **Two-phase completion:** a mockup has a SPEC phase
+    (the ArtifactVersion, marked done by the job controller as soon as the spec
+    lands) and an independent IMAGE phase (one render per screen, async, can
+    partially fail). `computeMockupImageCompletion` (`src/lib/mockupImageCompletion.ts`,
+    pure) derives the visual status (`none`/`generating`/`partial`/`complete` +
+    `failedScreenIds`) from per-screen image results so the UI never presents a
+    mockup as fully complete when images failed: `MockupImageStatusChip` shows a
+    red "Images incomplete · N failed" state, and `MockupViewer`'s header swaps
+    the flat "AI Generated" badge for the live status and renders a
+    "Retry failed images" banner (per-screen retry already exists in
+    `MockupScreenImage`). Image failures are tracked in the session-scoped
+    `mockupImageStore` `errors`/`inFlight` maps (transient — a reload re-attempts
+    on view). The Settings section is `settings/ArtifactModelsSection.tsx`
     (PRD shown as expandable "Multi", text artifacts with Complex/Simple badges,
     Mockups with an "Image Source" select); the model list is the shared
     `src/lib/modelCatalog.ts`.
