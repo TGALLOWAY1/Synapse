@@ -1,6 +1,7 @@
 import { useState } from 'react';
 import { useNavigate } from 'react-router-dom';
-import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github, ChevronRight } from 'lucide-react';
+import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Zap, Brain, Github, ChevronRight, Bug } from 'lucide-react';
+import { getOwnerToken } from '../lib/snapshotClient';
 import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
 import { ConnectedAccountsSection } from './settings/ConnectedAccountsSection';
@@ -66,6 +67,9 @@ function ModelRadio({
 
 export function SettingsModal({ onClose }: SettingsModalProps) {
     const navigate = useNavigate();
+    // Owner-only affordances are gated on possession of the SYNAPSE_OWNER_TOKEN,
+    // the same client signal the Snapshots panel uses.
+    const hasOwnerToken = Boolean(getOwnerToken());
     const [apiKey, setApiKey] = useState(() => getLocalCredential(GEMINI_API_KEY) || '');
     const [projectId, setProjectId] = useState(() => localStorage.getItem('GEMINI_PROJECT_ID') || '');
     const [model, setModel] = useState(() => localStorage.getItem('GEMINI_MODEL') || DEFAULT_GEMINI_MODEL);
@@ -427,6 +431,30 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                             <ChevronRight size={16} className="text-neutral-500" />
                         </button>
                     </div>
+
+                    {/* Developer — owner-only (gated on possession of the
+                        SYNAPSE_OWNER_TOKEN, mirroring the Snapshots panel). */}
+                    {hasOwnerToken && (
+                        <div className="pt-4 border-t border-white/5">
+                            <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-2">Developer</p>
+                            <button
+                                type="button"
+                                onClick={() => { onClose(); navigate('/developer/llm-trace'); }}
+                                className="w-full bg-white/5 rounded-2xl p-4 flex items-center justify-between border border-white/5 hover:bg-white/10 transition-all text-left"
+                            >
+                                <div className="flex items-center gap-3">
+                                    <div className="p-2 rounded-lg bg-amber-500/10 text-amber-400">
+                                        <Bug size={14} />
+                                    </div>
+                                    <div>
+                                        <p className="text-[10px] uppercase tracking-widest font-bold text-neutral-500 mb-0.5">LLM Trace Viewer</p>
+                                        <p className="text-xs text-neutral-300 font-medium">Inspect every LLM call, prompt & response</p>
+                                    </div>
+                                </div>
+                                <ChevronRight size={16} className="text-neutral-500" />
+                            </button>
+                        </div>
+                    )}
 
                     {/* Meta Info */}
                     <div className="pt-4 border-t border-white/5">

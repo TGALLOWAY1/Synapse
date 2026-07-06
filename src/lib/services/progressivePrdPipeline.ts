@@ -70,6 +70,11 @@ export const runProgressivePrdPipeline = async (
     const { onStatus, onPartial, onProgress, onSectionStatus, signal, enableConsistencyReview, surface,
         onWorkflowRun, projectId, projectName } = options;
 
+    // One trace session id per PRD run so the developer-only Trace Viewer groups
+    // every section (and the consistency review) under a single generation.
+    const traceSessionId = `prd-${projectId ?? 'anon'}-${Date.now()}`;
+    const traceContext = { sessionId: traceSessionId, projectId, projectName };
+
     const fastModel = getFastModel();
     const strongModel = getStrongModel();
     const overallStart = performance.now();
@@ -103,6 +108,7 @@ export const runProgressivePrdPipeline = async (
             enableRefinementPass: false,
         },
         signal,
+        traceContext,
         onSectionResult: (sectionId, value) => {
             partialResults[sectionId] = value;
             // Emit a live partial PRD after each successful section.
@@ -262,7 +268,23 @@ export const runProgressivePrdPipeline = async (
         const reviewStart = performance.now();
         const reviewStartEpoch = nowEpoch();
         try {
-            const review = await reviewPrdConsistency(structuredPRD, { signal });
+            const review = await reviewPrdConsistency(structuredPRD, {
+                signal,
+                traceMeta: {
+                    sessionId: traceSessionId,
+                    sessionLabel: projectName ? `PRD · ${projectName}` : 'PRD Generation',
+                    stage: 'PRD',
+                    purpose: 'Consistency Review',
+                    artifact: 'consistency_review',
+                    projectId,
+                    projectName,
+                    inputs: ['Merged PRD (all sections)'],
+                    promptPieces: [
+                        { label: 'Merged StructuredPRD', present: true },
+                        { label: 'Consistency review instructions', present: true },
+                    ],
+                },
+            });
             const reviewMs = performance.now() - reviewStart;
             consistencyMs = reviewMs;
             reviewed = review.applied;

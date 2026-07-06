@@ -1,6 +1,7 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan, CanonicalPrdSpine } from '../../types';
 import { callGemini, callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
+import type { LlmTraceMeta } from '../trace/traceTypes';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
@@ -476,6 +477,8 @@ export const generateCoreArtifact = async (
          * an empty spine (no features) falls back to the legacy summary prompt.
          */
         canonicalSpine?: CanonicalPrdSpine;
+        /** Developer-only LLM trace identity (session grouping + project). */
+        traceContext?: { sessionId?: string; projectId?: string; projectName?: string };
     },
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
@@ -566,6 +569,39 @@ Architecture: ${structuredPRD.architecture}${
         spineSchemaVersion: canonicalSpine.meta.schemaVersion,
     };
 
+    // Developer-only trace enrichment (LLM Trace Viewer). Describes how this
+    // artifact's prompt was assembled so prompt contamination is debuggable.
+    const artifactLabel = subtype.replace(/_/g, ' ');
+    const dependencyKeys = Object.keys(options?.generatedArtifacts ?? {});
+    const traceMeta: LlmTraceMeta = {
+        sessionId: options?.traceContext?.sessionId,
+        sessionLabel: options?.traceContext?.projectName
+            ? `Assets · ${options.traceContext.projectName}`
+            : 'Artifact Generation',
+        stage: 'Artifact',
+        purpose: `Generate ${artifactLabel}`,
+        artifact: subtype,
+        projectId: options?.traceContext?.projectId,
+        projectName: options?.traceContext?.projectName,
+        inputs: [
+            spineContextUsed ? 'Canonical PRD Spine (authoritative)' : 'Legacy PRD summary + feature glossary',
+            dependencyKeys.length ? `Dependency artifacts: ${dependencyKeys.join(', ')}` : 'No dependency artifacts',
+            options?.mockupContext ? 'Mockup context' : 'No mockup context',
+            ...(presetDirective ? ['Design-system preset directive'] : []),
+            'Full PRD (secondary reference)',
+        ],
+        promptPieces: [
+            { label: 'Artifact template (userPrefix)', present: true },
+            { label: 'Narrative guardrails', present: true },
+            { label: 'Canonical PRD Spine', present: spineContextUsed },
+            { label: 'Legacy feature glossary + summary', present: !spineContextUsed },
+            { label: 'Dependency artifacts', present: dependencyKeys.length > 0, detail: dependencyKeys.join(', ') || undefined },
+            { label: 'Design-system preset directive', present: Boolean(presetDirective) },
+            { label: 'Mockup context', present: Boolean(options?.mockupContext) },
+            { label: 'Full PRD (secondary)', present: true },
+        ],
+    };
+
     // Cap progress messages at ~3/s; emit every 250 chars OR 350ms to keep the
     // UI feeling alive without thrashing the store.
     const makeChunkEmitter = (label: (chars: number) => string) => {
@@ -608,7 +644,7 @@ Architecture: ${structuredPRD.architecture}${
                 onError: () => {},
             },
             options?.signal,
-            { responseMimeType: 'application/json', responseSchema: schema, model },
+            { responseMimeType: 'application/json', responseSchema: schema, model, traceMeta },
         );
         onProgress?.('Validating output…');
 
@@ -654,7 +690,7 @@ Architecture: ${structuredPRD.architecture}${
             onError: () => {},
         },
         options?.signal,
-        { model },
+        { model, traceMeta },
     );
     onProgress?.('Validating output…');
     return { content: normalizeArtifactMarkdown(result), metadata: spineMeta };
@@ -673,6 +709,12 @@ export const refineCoreArtifact = async (
     // Refine on the same complexity tier the artifact was generated with.
     const model = selectArtifactModel(subtype);
     const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
+    const refineTraceMeta: LlmTraceMeta = {
+        stage: 'Artifact',
+        purpose: `Refine ${subtype.replace(/_/g, ' ')}`,
+        artifact: subtype,
+        inputs: ['Current artifact', 'Refinement instruction', 'PRD context', 'Feature summary'],
+    };
 
     if (subtype === 'screen_inventory') {
         const system = `You are a senior product designer producing production-grade artifacts for engineering teams, refining a structured Screen Inventory. Use formal, professional, implementation-ready language.
@@ -691,7 +733,7 @@ Rules:
         const result = await callGemini(
             system,
             `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-            { responseMimeType: 'application/json', responseSchema: screenInventorySchema, model },
+            { responseMimeType: 'application/json', responseSchema: screenInventorySchema, model, traceMeta: refineTraceMeta },
             options?.signal,
         );
 
@@ -716,7 +758,7 @@ Rules:
     return callGemini(
         system,
         `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-        { model },
+        { model, traceMeta: refineTraceMeta },
         options?.signal,
     );
 };

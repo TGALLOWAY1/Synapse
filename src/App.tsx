@@ -8,6 +8,8 @@ import { ProjectWorkspace } from './components/ProjectWorkspace';
 import { DEMO_PROJECT_ID } from './data/demoProject';
 import { TourPage } from './components/tour/TourPage';
 import { MetricsPage } from './components/metrics/MetricsPage';
+import { LlmTraceViewerPage } from './components/developer/LlmTraceViewerPage';
+import { getOwnerToken } from './lib/snapshotClient';
 import { PrivacyPolicyPage } from './components/PrivacyPolicyPage';
 import { RecruiterAdminPage } from './components/RecruiterAdminPage';
 import { GlobalErrorBoundary } from './components/GlobalErrorBoundary';
@@ -97,6 +99,31 @@ function ProjectRoute() {
 }
 
 /**
+ * Owner-only guard for the developer tools (LLM Trace Viewer). Requires both a
+ * signed-in session AND possession of the SYNAPSE_OWNER_TOKEN — the same client
+ * signal the Snapshots panel uses. A non-owner is redirected to `/`, so the
+ * experience for every other user is unchanged. This is a client-side UX gate
+ * for a purely client-side debugging surface (the traces are read from local
+ * IndexedDB, never the server), consistent with the rest of the app's
+ * owner-affordance gating.
+ */
+function RequireOwner({ children }: { children: ReactElement }) {
+  const user = useAuthStore((s) => s.user);
+  const loading = useAuthStore((s) => s.loading);
+
+  if (loading) {
+    return (
+      <div className="min-h-screen flex items-center justify-center">
+        <Loader2 className="animate-spin text-neutral-400" size={24} />
+      </div>
+    );
+  }
+
+  if (!user || !getOwnerToken()) return <Navigate to="/" replace />;
+  return children;
+}
+
+/**
  * One-shot migration: move anyone still on `gemini-2.5-flash` to the new
  * default (`gemini-3-flash-preview`) which has better capacity headroom.
  * Gated by a sentinel localStorage key so it only runs once — a user who
@@ -142,6 +169,14 @@ function App() {
               <RequireAuth>
                 <MetricsPage />
               </RequireAuth>
+            }
+          />
+          <Route
+            path="/developer/llm-trace"
+            element={
+              <RequireOwner>
+                <LlmTraceViewerPage />
+              </RequireOwner>
             }
           />
           <Route path="/privacy" element={<PrivacyPolicyPage />} />

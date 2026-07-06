@@ -150,6 +150,7 @@ async function runCoreArtifactSlot(
     subtype: CoreArtifactSubtype,
     signal: AbortSignal,
     generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>>,
+    traceSessionId?: string,
 ): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD } = args;
 
@@ -190,6 +191,11 @@ async function runCoreArtifactSlot(
             signal,
             designSystemPreset,
             canonicalSpine,
+            traceContext: {
+                sessionId: traceSessionId,
+                projectId,
+                projectName: project?.productName || project?.name,
+            },
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
         });
         content = result.content;
@@ -429,6 +435,9 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
     // capture for artifacts is a known TODO (see tasks/TODO.md).
     const artifactRunStart = Date.now();
     const nodeObs: NodeObservation[] = [];
+    // One trace session id per artifact-bundle run so the developer-only Trace
+    // Viewer groups every slot (and the mockup) under a single generation.
+    const traceSessionId = `assets-${projectId}-${artifactRunStart}`;
 
     // Seed `generatedArtifacts` from the store for any core slot already done
     // for this spine — later layers may consume them as dependency context.
@@ -451,7 +460,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                 .map(meta => async () => {
                     const startedAt = Date.now();
                     try {
-                        await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts);
+                        await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId);
                         nodeObs.push({
                             nodeId: meta.subtype,
                             nodeName: meta.title,

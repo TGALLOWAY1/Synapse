@@ -84,6 +84,12 @@ export const regeneratePrdSection = async (
                 maxOutputTokens: 8192,
                 temperature: 0.4,
                 topP: 0.9,
+                traceMeta: {
+                    stage: 'PRD',
+                    purpose: `Retry section: ${template.title}`,
+                    artifact: sectionId,
+                    inputs: ['Product idea', 'Current PRD (upstream context)'],
+                },
             },
             signal,
         );

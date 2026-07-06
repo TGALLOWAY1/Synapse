@@ -373,7 +373,40 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
   Stream callers should implement `StreamCallbacks.onRestart` to reset any
   chunk-derived state (char counters, phase trackers) when the stream is
   re-attempted. `isRetryableNetworkError` is exported for callers that
-  need to reason about retry policy.
+  need to reason about retry policy. **Both modes now parse Gemini's
+  `usageMetadata`** and fire `JsonModeConfig.onUsage` — the streaming path
+  reads it off the final SSE chunk, closing the old artifact-token-capture gap.
+  `callGemini`/`callGeminiStream` are the **single chokepoint** for every LLM
+  call in the app; both are instrumented by the LLM Trace Viewer (see below).
+
+- **LLM Trace Viewer (`src/lib/trace/`, `src/components/developer/`) — a
+  developer-only debugging surface.** Every call through the geminiClient
+  chokepoint is captured (request, redacted body, raw response, parsed JSON,
+  token usage, finishReason, retries, timing) via `beginTrace()`
+  (`traceRecorder.ts`). **Capture is OFF by default** — enabled per browser via
+  the viewer's toggle (localStorage `synapse-llm-trace`) or a `?llmtrace` query
+  param; when off, `beginTrace` returns a zero-cost no-op handle. Enabled traces
+  land in an in-memory registry (subscribable via `useLlmTraces` /
+  useSyncExternalStore) **and** IndexedDB (`traceStore.ts`, capped at 1000) so
+  past generations are inspectable after a reload. **Secrets are redacted at
+  capture time** (`traceRedaction.ts`, pure/unit-tested) so no api key / bearer
+  token / cookie / secret ever reaches the registry or disk — never weaken this.
+  Call sites enrich traces with `JsonModeConfig.traceMeta`
+  (`LlmTraceMeta`: purpose / stage / artifact / project / inputs / promptPieces
+  / contextItems / sessionId) — wired into the PRD sections (via
+  `ModelProvider.generateText`), core artifacts (`generateCoreArtifact`
+  `traceContext`), consistency review, safety, preflight, and single-section
+  retry. One `sessionId` per PRD run / artifact-bundle run groups a whole
+  generation; calls without one group heuristically (`traceSessions.ts`, pure).
+  The viewer lives at **`/developer/llm-trace`**, gated by `RequireOwner`
+  (auth + possession of `SYNAPSE_OWNER_TOKEN`, the same client signal the
+  Snapshots panel uses) and surfaced only in Settings' owner-gated **Developer**
+  section — every non-owner experience is unchanged. It offers a session-grouped
+  filterable call list, a tabbed inspector (Overview / Input / Prompt / Context /
+  Raw Request / Raw Response / Parsed / Validation / Prompt Construction), diff
+  mode (compare two calls), and standalone offline-HTML export
+  (`traceExport.ts`, pure). This is purely observational — it never affects
+  generation. See `docs/LLM_TRACE_VIEWER.md`.
 
 - **`services/`** — one file per AI feature. Importing through the
   `llmProvider.ts` barrel keeps legacy call sites stable.
@@ -1570,12 +1603,15 @@ PRD section generation was already genuinely concurrent** (the DAG executor —
 see the LLM layer) before this; the metrics layer makes that concurrency
 *visible*, it did not introduce it. See `docs/ORCHESTRATION_AND_METRICS.md`.
 
-- **Token capture.** `callGemini` reads Gemini's `usageMetadata` and surfaces it
-  via an optional `JsonModeConfig.onUsage` callback (callGemini still returns the
-  same `string` — no call site breaks). The PRD section worker threads it
-  through `ModelProvider.generateText` → `makeJsonProvider` and emits it on the
+- **Token capture.** **Both** `callGemini` and `callGeminiStream` read Gemini's
+  `usageMetadata` (the streaming path off the final SSE chunk) and surface it via
+  an optional `JsonModeConfig.onUsage` callback (both still return the same
+  `string` — no call site breaks). The PRD section worker threads it through
+  `ModelProvider.generateText` → `makeJsonProvider` and emits it on the
   `section_completed` event. **New provider call sites that want token metrics
-  must forward `onUsage`.** (Artifact services don't yet — a documented TODO.)
+  must forward `onUsage`.** (The artifact-bundle `WorkflowRun` node observations
+  in `artifactJobController` still don't record tokens even though the transport
+  now reports them — wiring that through is the remaining TODO.)
 - **Pure metric math** (`src/lib/metrics/`, unit-tested, no store/LLM access):
   `workflowMetrics.ts` (sequential estimate, actual runtime, speedup, max/avg
   concurrency via interval sweep, critical path via memoized DFS),
