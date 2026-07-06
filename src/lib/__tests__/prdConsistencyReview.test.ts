@@ -118,4 +118,171 @@ describe('reviewPrdConsistency', () => {
     // The restriction survives via merge-over-original.
     expect(result.prd.constraints).toEqual(['No collection of medical data']);
   });
+
+  // --- Semantic preservation guards (Phase 3) ---
+
+  it('rejects a revision that keeps the feature id but drops acceptance criteria', async () => {
+    const original = basePrd();
+    original.features[0].acceptanceCriteria = ['AC 1', 'AC 2', 'AC 3'];
+    // Same id, but the acceptance-criteria list is shortened.
+    const revisedFeatures = original.features.map((f, i) =>
+      i === 0 ? { ...f, acceptanceCriteria: ['AC 1'] } : f,
+    );
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: revisedFeatures }, changeLog: 'trimmed AC' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('acceptance-criteria-dropped');
+    expect(result.prd.features[0].acceptanceCriteria).toHaveLength(3);
+  });
+
+  it('rejects a revision that removes a feature dependency reference', async () => {
+    const original = basePrd();
+    original.features[1].dependencies = ['f1'];
+    const revisedFeatures = original.features.map((f, i) =>
+      i === 1 ? { ...f, dependencies: [] } : f,
+    );
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: revisedFeatures }, changeLog: 'cleaned deps' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('feature-dependencies-dropped');
+    expect(result.prd.features[1].dependencies).toEqual(['f1']);
+  });
+
+  it('rejects a revision that removes a safety/privacy restriction', async () => {
+    // A large constraints list so dropping the single safety item stays above
+    // the 70% detail-loss threshold — proving the safety guard catches what
+    // detail-loss misses.
+    const original: StructuredPRD = {
+      ...basePrd(),
+      constraints: [
+        'Must not store PII in plaintext',
+        'Support dark mode',
+        'Offline-capable',
+        'Localized to English and Spanish',
+      ],
+    };
+    // Model returns constraints with only the safety rule removed (3 of 4 kept).
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          constraints: ['Support dark mode', 'Offline-capable', 'Localized to English and Spanish'],
+        },
+        changeLog: 'deduped constraints',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('safety-weakened');
+    expect(result.prd.constraints).toContain('Must not store PII in plaintext');
+  });
+
+  it('rejects a revision that drops an entity field or relationship', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          {
+            name: 'Order',
+            description: 'A purchase',
+            fields: [
+              { name: 'id', type: 'string' },
+              { name: 'total', type: 'number' },
+            ],
+            relationships: ['belongs_to User'],
+          },
+        ],
+      },
+    };
+    // Model returns the entity with a field removed.
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          richDataModel: {
+            entities: [
+              {
+                name: 'Order',
+                description: 'A purchase',
+                fields: [{ name: 'id', type: 'string' }],
+                relationships: ['belongs_to User'],
+              },
+            ],
+          },
+        },
+        changeLog: 'trimmed entity',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-dropped');
+    expect(result.prd.richDataModel?.entities[0].fields).toHaveLength(2);
+  });
+
+  it('rejects a revision that drops an entity relationship', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          {
+            name: 'Order',
+            description: 'A purchase',
+            fields: [{ name: 'id', type: 'string' }],
+            relationships: ['belongs_to User', 'has_many LineItem'],
+          },
+        ],
+      },
+    };
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          richDataModel: {
+            entities: [
+              {
+                name: 'Order',
+                description: 'A purchase',
+                fields: [{ name: 'id', type: 'string' }],
+                relationships: ['belongs_to User'],
+              },
+            ],
+          },
+        },
+        changeLog: 'simplified relationships',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-dropped');
+  });
+
+  it('records a structured diff of an accepted feature rename (id stable)', async () => {
+    const original = basePrd();
+    const renamed = original.features.map((f, i) =>
+      i === 0 ? { ...f, name: 'Feature One (canonical)' } : f,
+    );
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: renamed }, changeLog: 'renamed feature 1' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(true);
+    expect(result.diff?.changedSections).toContain('features');
+    expect(result.diff?.featureRenames).toEqual([
+      { id: 'f1', from: 'Feature 1', to: 'Feature One (canonical)' },
+    ]);
+  });
+
+  it('records the triggered guard on a rejected revision diff', async () => {
+    const original = basePrd();
+    const transport = vi.fn(async () =>
+      JSON.stringify({ prd: { ...original, features: makeFeatures(2) }, changeLog: 'shortened' }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.diff?.guardsTriggered).toEqual(['detail-loss']);
+  });
 });

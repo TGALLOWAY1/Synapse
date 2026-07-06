@@ -50,14 +50,27 @@ describe('generateCoreArtifact — canonical spine prompt', () => {
         const prompt = lastUserPrompt();
         expect(prompt).toMatch(/Canonical PRD Spine \(AUTHORITATIVE/);
         expect(prompt).toMatch(/"id": "f1"/);
-        // Full PRD present but explicitly marked secondary.
-        expect(prompt).toMatch(/Full PRD \(SECONDARY reference only/);
+        // Full PRD present but explicitly marked a secondary appendix.
+        expect(prompt).toMatch(/APPENDIX — Full PRD markdown \(SECONDARY reference only/);
         expect(prompt).toContain('Full rendered PRD markdown body.');
-        // The spine section must appear before the full PRD.
-        expect(prompt.indexOf('Canonical PRD Spine')).toBeLessThan(prompt.indexOf('Full PRD (SECONDARY'));
+        // The spine section must appear before the full PRD appendix.
+        expect(prompt.indexOf('CANONICAL PRD SPINE')).toBeLessThan(prompt.indexOf('APPENDIX — Full PRD'));
         // The redundant standalone glossary/summary headers are gone.
         expect(prompt).not.toContain('Canonical Feature Glossary:');
         expect(prompt).not.toContain('Vision: Match music to mood');
+    });
+
+    it('surfaces a KNOWN CONFLICTS block when the full PRD prose omits canonical feature names', async () => {
+        // PRD_MARKDOWN does not mention "Mood Capture" / "Resonance Playlist",
+        // so the stale-name detector fires end-to-end through generateCoreArtifact.
+        const spine = buildCanonicalPrdSpine(PRD, { now: () => 1 });
+        await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine, allowMissingDependencies: true });
+        const prompt = lastUserPrompt();
+        expect(prompt).toContain('KNOWN CONFLICTS / STALENESS');
+        expect(prompt).toContain('Mood Capture');
+        expect(prompt).toContain('Resonance Playlist');
+        // The conflict block must sit above the secondary PRD appendix.
+        expect(prompt.indexOf('KNOWN CONFLICTS / STALENESS')).toBeLessThan(prompt.indexOf('APPENDIX — Full PRD'));
     });
 
     it('records spineContextUsed + spineSchemaVersion in the returned metadata', async () => {
@@ -78,7 +91,7 @@ describe('generateCoreArtifact — canonical spine prompt', () => {
         const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, prdNoFeatures, { allowMissingDependencies: true });
         const prompt = lastUserPrompt();
         expect(result.metadata?.spineContextUsed).toBe(false);
-        expect(prompt).toContain('Canonical Feature Glossary:');
+        expect(prompt).toContain('CANONICAL FEATURE GLOSSARY');
         expect(prompt).toContain('Vision: Match music to mood');
         expect(prompt).not.toMatch(/Canonical PRD Spine \(AUTHORITATIVE/);
         // Legacy path still includes the full PRD.

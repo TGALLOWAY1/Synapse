@@ -297,6 +297,31 @@ export type ConsistencyReviewMeta = {
     status: 'applied' | 'rejected' | 'skipped' | 'error';
     /** Present only when status is 'rejected' or 'error'. */
     rejectionReason?: string;
+    /**
+     * Compact structured diff of what the review pass attempted, recorded for
+     * transparency/debugging (surfaced read-only in PRD version history). Present
+     * whenever the model returned a parseable PRD — even on rejection, so the
+     * discarded change is inspectable. Optional/back-compat: legacy meta lacks it.
+     */
+    diff?: ConsistencyReviewDiff;
+};
+
+// A small, human-readable record of what the consistency-review pass changed
+// (or attempted to change, when rejected). Derived deterministically by
+// diffing the merged PRD against the reviewed PRD — never model-authored — so
+// it can be trusted for the transparency panel. All fields optional/back-compat.
+export type ConsistencyReviewDiff = {
+    /** Top-level StructuredPRD fields whose serialized value changed. */
+    changedSections: string[];
+    /** Features whose NAME changed while the canonical id stayed stable. */
+    featureRenames: { id: string; from: string; to: string }[];
+    /** Product name canonicalization, when it changed. */
+    productNameChange?: { from: string; to: string };
+    /**
+     * Guards that fired against this revision. Empty/absent when the revision
+     * was accepted; populated with the rejection reason when discarded.
+     */
+    guardsTriggered?: string[];
 };
 
 export type GenerationMeta = {

@@ -8,6 +8,7 @@ import { screenInventorySchema, dataModelSchema, componentInventorySchema, desig
 import { buildDependencyContext, buildFeatureGlossary, buildNarrativeGuardrails, normalizeArtifactMarkdown } from '../artifactOrchestration';
 import { assertDependenciesSufficient } from '../artifactDependencyGate';
 import { buildCanonicalPrdSpine, buildCanonicalSpinePromptSection } from '../canonicalPrdSpine';
+import { buildArtifactPrompt, detectStaleFeatureNames, detectDegradedDependencies } from '../artifactPromptBuilder';
 import { normalizeScreenInventory, screenInventoryToMarkdown } from '../screenInventoryNormalize';
 import { dataModelToMarkdown } from './dataModelMarkdown';
 import {
@@ -538,16 +539,25 @@ export const generateCoreArtifact = async (
     const spineSection = buildCanonicalSpinePromptSection(canonicalSpine);
     const spineContextUsed = spineSection !== null;
 
-    // Prompt hierarchy: persona/system → guardrails → Canonical PRD Spine
-    // (authoritative) → dependency artifacts → full PRD markdown (secondary
-    // fallback only). The spine subsumes the old feature glossary + inline PRD
-    // summary, so those are dropped when the spine is used to avoid feeding
-    // several differently-worded views of the same product facts.
-    let userPrompt: string;
-    if (spineSection) {
-        userPrompt = `${config.userPrefix}\n\n${guardrails}\n\n${spineSection}\n\nDependency Artifacts:\n${dependencyContext}${presetSection}\n\n---\n\nFull PRD (SECONDARY reference only — defer to the Canonical PRD Spine above on any conflict; use this solely for detail the spine omits):\n${prdContent}${mockupSection}`;
-    } else {
-        // Legacy fallback: no reliable spine (e.g. a PRD with no features).
+    // Prompt hierarchy: persona/system → guardrails → explicit SOURCE HIERARCHY
+    // → Canonical PRD Spine (authoritative) → structured dependency summaries
+    // (authoritative for generated artifacts) → task options/preset → known
+    // conflicts/staleness → full PRD markdown (secondary appendix only). The
+    // spine subsumes the old feature glossary + inline PRD summary, so those are
+    // dropped when the spine is used. Assembly is delegated to the pure,
+    // machine-checkable `buildArtifactPrompt` (see artifactPromptBuilder.ts).
+    //
+    // Known conflicts/staleness (e.g. a canonical feature name the stale prose
+    // no longer uses, or a degraded required dependency) are detected
+    // deterministically and surfaced in-band so the model prefers the structured
+    // sources rather than silently drifting to prose names.
+    const conflicts = [
+        ...(spineSection ? detectStaleFeatureNames(canonicalSpine, prdContent) : []),
+        ...detectDegradedDependencies(dependencyContext),
+    ];
+
+    let legacy: { featureGlossary: string; prdSummary: string } | undefined;
+    if (!spineSection) {
         const featureList = structuredPRD.features.map(f => {
             let line = `- [${f.id}] ${f.name} (${f.complexity}${f.priority ? `, ${f.priority}` : ''}): ${f.description}`;
             if (f.acceptanceCriteria && f.acceptanceCriteria.length > 0) {
@@ -574,9 +584,20 @@ Architecture: ${structuredPRD.architecture}${
                 ? `\n\nConstraints:\n${structuredPRD.constraints.map(c => `- ${c}`).join('\n')}`
                 : ''
         }`;
-        const featureGlossary = buildFeatureGlossary(structuredPRD);
-        userPrompt = `${config.userPrefix}\n\n${guardrails}\n\nCanonical Feature Glossary:\n${featureGlossary}\n\nDependency Artifacts:\n${dependencyContext}\n\n${prdSummary}${presetSection}\n\n---\n\nFull PRD:\n${prdContent}${mockupSection}`;
+        legacy = { featureGlossary: buildFeatureGlossary(structuredPRD), prdSummary };
     }
+
+    const userPrompt = buildArtifactPrompt({
+        userPrefix: config.userPrefix,
+        guardrails,
+        spineSection,
+        dependencyContext,
+        presetSection,
+        mockupSection,
+        prdMarkdown: prdContent,
+        conflicts,
+        legacy,
+    });
 
     // Diagnostics stamped onto every artifact version — records whether the
     // canonical spine drove generation or the legacy summary path was used.
@@ -604,17 +625,20 @@ Architecture: ${structuredPRD.architecture}${
             dependencyKeys.length ? `Dependency artifacts: ${dependencyKeys.join(', ')}` : 'No dependency artifacts',
             options?.mockupContext ? 'Mockup context' : 'No mockup context',
             ...(presetDirective ? ['Design-system preset directive'] : []),
-            'Full PRD (secondary reference)',
+            ...(conflicts.length ? [`Known conflicts/staleness: ${conflicts.length}`] : []),
+            'Full PRD (secondary appendix)',
         ],
         promptPieces: [
             { label: 'Artifact template (userPrefix)', present: true },
             { label: 'Narrative guardrails', present: true },
+            { label: 'Source hierarchy preamble', present: true },
             { label: 'Canonical PRD Spine', present: spineContextUsed },
             { label: 'Legacy feature glossary + summary', present: !spineContextUsed },
             { label: 'Dependency artifacts', present: dependencyKeys.length > 0, detail: dependencyKeys.join(', ') || undefined },
             { label: 'Design-system preset directive', present: Boolean(presetDirective) },
+            { label: 'Known conflicts/staleness', present: conflicts.length > 0, detail: conflicts.map(c => c.kind).join(', ') || undefined },
             { label: 'Mockup context', present: Boolean(options?.mockupContext) },
-            { label: 'Full PRD (secondary)', present: true },
+            { label: 'Full PRD (secondary appendix)', present: true },
         ],
     };
 

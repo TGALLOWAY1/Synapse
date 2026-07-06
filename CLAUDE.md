@@ -546,11 +546,24 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       - **feature-id stability** (every original `Feature.id` must survive —
         downstream artifacts/tasks reference them),
       - **product-identity guard** (a present `productName` may be canonicalized
-        but never blanked).
+        but never blanked),
+      - **semantic-preservation guards** (protect facts downstream artifacts
+        rely on): per-feature **acceptance criteria** must not shrink and
+        **dependency references** must not be dropped (for features that survive
+        by id); **safety/privacy/security/compliance** constraints (in
+        `constraints`/`nonFunctionalRequirements`) must not be removed or
+        reworded away (fail-closed → keep merged PRD); and `richDataModel`
+        **entity fields/relationships** must not be dropped (nor the entity
+        renamed away). These catch fact changes the detail-loss guard misses
+        (e.g. dropping one AC while the array stays above 70%).
       On apply it sets `generationMeta.revised` and adds a `consistency_review`
-      pass record. The outcome (`ran`/`applied`/`status`/`rejectionReason`) is
-      recorded in `generationMeta.consistencyReview` (`ConsistencyReviewMeta`)
-      for diagnostics — never surfaced in the UI. It is **skipped** for a
+      pass record. The outcome (`ran`/`applied`/`status`/`rejectionReason`) plus
+      a deterministic **structured diff** (`ConsistencyReviewDiff`: changed
+      sections, feature wording changes with id stable, product-name change,
+      guards triggered — recorded even on rejection) is stored in
+      `generationMeta.consistencyReview` (`ConsistencyReviewMeta`) for
+      diagnostics, and surfaced **read-only** in the PRD version history panel
+      (`ConsistencyReviewDetail`) for transparency. It is **skipped** for a
       partial run (a section failed → PRD already surfaced as incomplete). The
       localStorage `synapse-prd-consistency-review` key is now only a
       **developer/debug opt-out** (`'false'` → skip via `enableConsistencyReview:
@@ -708,16 +721,29 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     on final settle (`updateSpineStructuredPRD`, only when `generationMeta` is
     present — a diagnostic/diffing copy; artifact generation always **rebuilds it
     lazily** from `structuredPRD` so old projects and post-edit PRDs stay
-    consistent). In `generateCoreArtifact` the prompt hierarchy is **persona →
-    guardrails → Canonical PRD Spine (authoritative) → dependency artifacts →
-    full PRD markdown (SECONDARY fallback only)**; the spine subsumes and
-    **replaces** the old standalone feature glossary + inline PRD summary (they
-    are dropped when a spine is present). A spine with **no features** yields a
-    null prompt section → the legacy summary prompt. Each artifact version stamps
-    `metadata.spineContextUsed` / `spineSchemaVersion`. Do **not** re-add the
-    duplicate glossary/summary blocks alongside the spine, and do **not** feed
-    long markdown into the spine (it must stay compact/structured). See
-    `docs/CANONICAL_PRD_SPINE.md`.
+    consistent). In `generateCoreArtifact` the user prompt is assembled by the
+    pure, unit-tested **`buildArtifactPrompt` (`src/lib/artifactPromptBuilder.ts`)**
+    with an **explicit, machine-checkable source hierarchy**: an up-front
+    `SOURCE HIERARCHY` preamble, then **(1) Canonical PRD Spine (authoritative)
+    → (2) structured dependency summaries (authoritative for the generated
+    artifacts they describe) → (3) task options/preset → (4) known
+    conflicts/staleness → (5) full PRD markdown, demoted to a clearly-labeled
+    SECONDARY appendix that must NEVER override a structured source**. Any
+    conflict between structured sources and the prose is resolved in favor of
+    the structured source, and features must be cited by canonical id/name (not
+    prose-only names). Two deterministic detectors surface known drift in-band:
+    `detectStaleFeatureNames` flags a canonical feature name missing from the
+    (possibly stale) prose, and `detectDegradedDependencies` flags a missing
+    required dependency; both render a `KNOWN CONFLICTS / STALENESS` block.
+    The spine subsumes and **replaces** the old standalone feature glossary +
+    inline PRD summary (they are dropped when a spine is present). A spine with
+    **no features** yields a null spine section → the legacy glossary+summary
+    fallback (still routed through `buildArtifactPrompt` with the same hierarchy
+    framing). Each artifact version stamps `metadata.spineContextUsed` /
+    `spineSchemaVersion`. Do **not** re-add the duplicate glossary/summary
+    blocks alongside the spine, do **not** feed long markdown into the spine (it
+    must stay compact/structured), and do **not** re-order the full PRD markdown
+    ahead of the structured sources. See `docs/CANONICAL_PRD_SPINE.md`.
   - `coreArtifactService.ts` — the 7 core artifact types
     (screen_inventory, data_model, component_inventory, user_flows,
     implementation_plan, prompt_pack, design_system). **`prompt_pack` is

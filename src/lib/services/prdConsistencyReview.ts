@@ -19,10 +19,17 @@
 //   3. Required top-level fields must survive, feature IDs must stay stable
 //      (downstream artifacts reference them), and product identity must be
 //      preserved — any violation discards the revision.
+//   4. Semantic-preservation guards protect facts downstream artifacts rely on:
+//      per-feature acceptance criteria and dependency references, safety/privacy
+//      restrictions, and entity fields/relationships must not be dropped — any
+//      violation discards the revision.
+//
+// Whenever the model returns a parseable PRD, a deterministic structured diff of
+// the attempted change is recorded (even on rejection) for transparency.
 
 import { callGemini, getFastModel } from '../geminiClient';
 import type { LlmTraceMeta } from '../trace/traceTypes';
-import type { StructuredPRD } from '../../types';
+import type { ConsistencyReviewDiff, Feature, StructuredPRD } from '../../types';
 import { repairTruncatedJson } from '../jsonRepair';
 import { structuredPRDSchema } from '../schemas/prdSchemas';
 
@@ -62,7 +69,11 @@ export type ReviewRejectionReason =
     | 'detail-loss'           // a key content array materially shrank
     | 'missing-required'      // a required top-level field was emptied/dropped
     | 'feature-ids-changed'   // one or more original feature IDs disappeared
-    | 'product-identity-lost'; // productName was present originally, now empty
+    | 'product-identity-lost' // productName was present originally, now empty
+    | 'acceptance-criteria-dropped'  // a feature lost acceptance criteria
+    | 'feature-dependencies-dropped' // a feature lost a dependency reference
+    | 'safety-weakened'       // a safety/privacy restriction was removed
+    | 'entity-detail-dropped'; // an entity lost fields/relationships (or vanished)
 
 export interface ReviewResult {
     /** The PRD to use downstream (revised when `applied`, else the original). */
@@ -73,6 +84,12 @@ export interface ReviewResult {
     changeLog?: string;
     /** Present only when `applied` is false: why the revision was discarded. */
     rejectionReason?: ReviewRejectionReason;
+    /**
+     * Deterministic diff of what the review attempted (merged PRD → reviewed
+     * PRD). Present whenever a parseable PRD came back, even on rejection, so the
+     * change is inspectable for transparency/debugging.
+     */
+    diff?: ConsistencyReviewDiff;
 }
 
 const SYSTEM = `You are a meticulous product editor performing a final consistency pass on a Product Requirements Document. The PRD was assembled from independently-generated sections, so it may contain inconsistencies.
@@ -87,6 +104,10 @@ Reconcile ONLY the following, and change nothing else:
 HARD RULES:
 - Do NOT remove or summarize substantive detail. Preserve every feature, entity, user loop, page, risk, metric, and plan item. Array lengths must not shrink.
 - Do NOT invent new features, entities, or scope.
+- Do NOT change any feature "id". Ids are referenced by downstream artifacts; you may reword a feature "name" for consistency but its "id" must stay identical.
+- Do NOT drop or shorten any feature's "acceptanceCriteria" or "dependencies". These encode facts downstream artifacts rely on.
+- Do NOT remove or weaken any safety, privacy, security, or compliance constraint (in "constraints" or "nonFunctionalRequirements").
+- Do NOT drop entity fields, entity relationships, or rename entities in "domainEntities" / "richDataModel".
 - Preserve the exact JSON shape and all field names of the input.
 - Return ONLY a JSON object with two keys: "prd" (the full corrected PRD, same shape as the input) and "changeLog" (a one-sentence summary of what you reconciled, or "No changes needed").`;
 
@@ -178,6 +199,141 @@ const losesProductIdentity = (original: StructuredPRD, revised: StructuredPRD): 
     return typeof after !== 'string' || after.trim().length === 0;
 };
 
+const normalizeText = (s: string): string => s.toLowerCase().replace(/\s+/g, ' ').trim();
+
+const featureById = (prd: StructuredPRD): Map<string, Feature> =>
+    new Map((prd.features ?? []).map(f => [f.id, f]));
+
+/**
+ * Per-feature acceptance criteria must not shrink. Downstream artifacts (screen
+ * inventory, user flows, tasks) derive testable behavior from these, so a
+ * "reconciliation" that quietly drops or merges them is a fact change, not a
+ * wording fix. Only features that survive by id are checked (a dropped/renamed
+ * id is already caught by `changesFeatureIds`).
+ */
+const dropsAcceptanceCriteria = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const revisedMap = featureById(revised);
+    for (const f of original.features ?? []) {
+        const before = f.acceptanceCriteria?.length ?? 0;
+        if (before === 0) continue;
+        const rev = revisedMap.get(f.id);
+        if (!rev) continue;
+        if ((rev.acceptanceCriteria?.length ?? 0) < before) return true;
+    }
+    return false;
+};
+
+/**
+ * Explicit feature dependency references must survive. `Feature.dependencies`
+ * holds feature ids; dropping one silently breaks the dependency graph used by
+ * the implementation plan and traceability checks.
+ */
+const dropsFeatureDependencies = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const revisedMap = featureById(revised);
+    for (const f of original.features ?? []) {
+        const before = f.dependencies ?? [];
+        if (before.length === 0) continue;
+        const rev = revisedMap.get(f.id);
+        if (!rev) continue;
+        const after = new Set(rev.dependencies ?? []);
+        if (before.some(dep => !after.has(dep))) return true;
+    }
+    return false;
+};
+
+const SAFETY_RE =
+    /privacy|security|compliance|gdpr|hipaa|ccpa|pii|encrypt|consent|audit|retention|data protection|soc\s?2|safety|restrict|prohibit|forbid|must not|do not (collect|store|share|retain)|sensitive|medical/i;
+
+const safetyItems = (prd: StructuredPRD): string[] =>
+    [...(prd.constraints ?? []), ...(prd.nonFunctionalRequirements ?? [])]
+        .filter((x): x is string => typeof x === 'string' && SAFETY_RE.test(x));
+
+/**
+ * Safety / privacy / security / compliance restrictions must not be removed or
+ * weakened. The merge-over-original preserves an OMITTED constraints array, so
+ * this only fires when the model explicitly returns a constraints/NFR list that
+ * no longer carries an original safety item (verbatim modulo case/whitespace).
+ * Rewording a safety rule is treated as removal (fail-closed → keep merged PRD).
+ */
+const weakensSafetyRestrictions = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const before = safetyItems(original);
+    if (before.length === 0) return false;
+    const corpus = [...(revised.constraints ?? []), ...(revised.nonFunctionalRequirements ?? [])]
+        .filter((x): x is string => typeof x === 'string')
+        .map(normalizeText)
+        .join('  ');
+    return before.some(item => !corpus.includes(normalizeText(item)));
+};
+
+/**
+ * Entity structure must survive. For each `richDataModel` entity the reviewed
+ * PRD must keep the entity (by name), keep at least as many fields, and keep
+ * every relationship. A dropped entity, field, or relationship silently strips
+ * detail the data-model and downstream artifacts depend on. Only enforced when
+ * the model actually returned a richDataModel (an omitted one is preserved by
+ * the merge).
+ */
+const dropsEntityDetail = (original: StructuredPRD, revised: StructuredPRD): boolean => {
+    const before = original.richDataModel?.entities ?? [];
+    if (before.length === 0) return false;
+    // Omitted by the model → merge kept the original reference → nothing to check.
+    if (revised.richDataModel === original.richDataModel) return false;
+    const after = new Map(
+        (revised.richDataModel?.entities ?? []).map(e => [normalizeText(e.name), e]),
+    );
+    for (const e of before) {
+        const rev = after.get(normalizeText(e.name));
+        if (!rev) return true; // entity dropped or renamed → reference lost
+        if ((rev.fields?.length ?? 0) < (e.fields?.length ?? 0)) return true;
+        const relBefore = e.relationships ?? [];
+        if (relBefore.length > 0) {
+            const relAfter = new Set((rev.relationships ?? []).map(normalizeText));
+            if (relBefore.some(r => !relAfter.has(normalizeText(r)))) return true;
+        }
+    }
+    return false;
+};
+
+/**
+ * Deterministic diff of the review's attempted change (merged PRD → reviewed
+ * PRD). Never model-authored — safe to surface for transparency. Computed even
+ * when the revision is later rejected, so the discarded change is inspectable.
+ */
+const computeReviewDiff = (
+    original: StructuredPRD,
+    revised: StructuredPRD,
+): ConsistencyReviewDiff => {
+    const TOP_LEVEL_FIELDS: Array<keyof StructuredPRD> = [
+        'vision', 'coreProblem', 'architecture', 'productName', 'targetUsers',
+        'features', 'risks', 'nonFunctionalRequirements', 'constraints',
+        'domainEntities', 'userLoops', 'uxPages', 'successMetrics', 'assumptions',
+        'risksDetailed', 'roles', 'richDataModel', 'stateMachines',
+    ];
+    const changedSections: string[] = [];
+    for (const key of TOP_LEVEL_FIELDS) {
+        if (JSON.stringify(original[key]) !== JSON.stringify(revised[key])) {
+            changedSections.push(String(key));
+        }
+    }
+
+    const revisedMap = featureById(revised);
+    const featureRenames: ConsistencyReviewDiff['featureRenames'] = [];
+    for (const f of original.features ?? []) {
+        const rev = revisedMap.get(f.id);
+        if (rev && rev.name !== f.name) {
+            featureRenames.push({ id: f.id, from: f.name, to: rev.name });
+        }
+    }
+
+    const diff: ConsistencyReviewDiff = { changedSections, featureRenames };
+    const beforeName = (original.productName ?? '').trim();
+    const afterName = (revised.productName ?? '').trim();
+    if (beforeName && afterName && beforeName !== afterName) {
+        diff.productNameChange = { from: original.productName!, to: revised.productName! };
+    }
+    return diff;
+};
+
 const parse = (raw: string): { prd?: Partial<StructuredPRD>; changeLog?: string } | null => {
     const tryParse = (s: string) => {
         try {
@@ -212,20 +368,33 @@ export const reviewPrdConsistency = async (
     // Merge over the original so any omitted field is preserved.
     const revised: StructuredPRD = { ...prd, ...parsed.prd };
 
+    // Structured diff of the attempted change — computed up front so it is
+    // recorded even when a guard later discards the revision.
+    const diff = computeReviewDiff(prd, revised);
+
     // Conservative acceptance guards — any violation discards the whole
-    // revision and keeps the deterministically-merged PRD.
-    if (losesDetail(prd, revised)) {
-        return { prd, applied: false, rejectionReason: 'detail-loss' };
-    }
-    if (dropsRequiredField(prd, revised)) {
-        return { prd, applied: false, rejectionReason: 'missing-required' };
-    }
-    if (changesFeatureIds(prd, revised)) {
-        return { prd, applied: false, rejectionReason: 'feature-ids-changed' };
-    }
-    if (losesProductIdentity(prd, revised)) {
-        return { prd, applied: false, rejectionReason: 'product-identity-lost' };
+    // revision and keeps the deterministically-merged PRD. Ordered
+    // cheapest/broadest first; the first hit is the reported reason.
+    const guards: Array<[ReviewRejectionReason, boolean]> = [
+        ['detail-loss', losesDetail(prd, revised)],
+        ['missing-required', dropsRequiredField(prd, revised)],
+        ['feature-ids-changed', changesFeatureIds(prd, revised)],
+        ['product-identity-lost', losesProductIdentity(prd, revised)],
+        ['acceptance-criteria-dropped', dropsAcceptanceCriteria(prd, revised)],
+        ['feature-dependencies-dropped', dropsFeatureDependencies(prd, revised)],
+        ['safety-weakened', weakensSafetyRestrictions(prd, revised)],
+        ['entity-detail-dropped', dropsEntityDetail(prd, revised)],
+    ];
+    const failed = guards.find(([, tripped]) => tripped);
+    if (failed) {
+        const rejectionReason = failed[0];
+        return {
+            prd,
+            applied: false,
+            rejectionReason,
+            diff: { ...diff, guardsTriggered: [rejectionReason] },
+        };
     }
 
-    return { prd: revised, applied: true, changeLog: parsed.changeLog };
+    return { prd: revised, applied: true, changeLog: parsed.changeLog, diff };
 };

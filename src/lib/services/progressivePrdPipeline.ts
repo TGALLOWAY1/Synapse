@@ -293,6 +293,7 @@ export const runProgressivePrdPipeline = async (
                 applied: review.applied,
                 status: review.applied ? 'applied' : 'rejected',
                 rejectionReason: review.applied ? undefined : review.rejectionReason,
+                diff: review.diff,
             };
             if (review.applied) structuredPRD = review.prd;
             // Record the consistency pass as a final, all-sections-dependent
