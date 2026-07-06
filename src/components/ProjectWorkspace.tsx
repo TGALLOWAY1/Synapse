@@ -263,6 +263,7 @@ export function ProjectWorkspace() {
             createdAt: s.createdAt,
             changeSource: s.provenance?.changeSource,
             editSummary: s.provenance?.editSummary,
+            consistencyReview: s.generationMeta?.consistencyReview,
         }))
         .reverse();
 

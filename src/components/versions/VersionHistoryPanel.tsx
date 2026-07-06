@@ -1,6 +1,6 @@
 import { useState } from 'react';
-import { History, X, GitCompare, RotateCcw, Check } from 'lucide-react';
-import type { VersionChangeSource } from '../../types';
+import { History, X, GitCompare, RotateCcw, Check, ShieldCheck } from 'lucide-react';
+import type { ConsistencyReviewMeta, VersionChangeSource } from '../../types';
 import { VersionCompareView, type CompareInput } from './VersionCompareView';
 import { RevertConfirmModal } from './RevertConfirmModal';
 
@@ -13,7 +13,73 @@ export type VersionEntry = {
     createdAt: number;
     changeSource?: VersionChangeSource;
     editSummary?: string;
+    // PRD only: outcome of the automatic consistency-review pass for this
+    // version, surfaced read-only for transparency/debugging.
+    consistencyReview?: ConsistencyReviewMeta;
 };
+
+// Read-only summary of what the consistency-review pass did to this PRD
+// version. Purely for transparency — no actions, no state mutation.
+function ConsistencyReviewDetail({ review }: { review: ConsistencyReviewMeta }) {
+    if (!review.ran) return null;
+    const { diff } = review;
+    const applied = review.status === 'applied';
+    const badgeClass = applied
+        ? 'bg-teal-50 text-teal-700 border-teal-200'
+        : 'bg-neutral-100 text-neutral-500 border-neutral-200';
+    const statusLabel = applied
+        ? 'Consistency review applied'
+        : review.status === 'error'
+            ? 'Consistency review errored'
+            : 'Consistency review discarded';
+    return (
+        <details className="mt-2 group">
+            <summary className="flex items-center gap-1.5 cursor-pointer list-none text-[11px] text-neutral-500 hover:text-neutral-700">
+                <ShieldCheck size={12} className="text-teal-600" />
+                <span className={`px-1.5 py-0.5 rounded border font-medium ${badgeClass}`}>
+                    {statusLabel}
+                </span>
+                {!applied && review.rejectionReason && (
+                    <span className="text-neutral-400">· {review.rejectionReason}</span>
+                )}
+            </summary>
+            <div className="mt-1.5 pl-4 space-y-1 text-[11px] text-neutral-600">
+                {diff?.changedSections?.length ? (
+                    <div>
+                        <span className="font-medium text-neutral-500">Sections changed:</span>{' '}
+                        {diff.changedSections.join(', ')}
+                    </div>
+                ) : (
+                    <div className="text-neutral-400">No section-level changes recorded.</div>
+                )}
+                {diff?.featureRenames?.length ? (
+                    <div>
+                        <span className="font-medium text-neutral-500">Feature wording (id stable):</span>
+                        <ul className="list-disc ml-4 mt-0.5">
+                            {diff.featureRenames.map(r => (
+                                <li key={r.id}>
+                                    <code className="text-neutral-500">{r.id}</code>: "{r.from}" → "{r.to}"
+                                </li>
+                            ))}
+                        </ul>
+                    </div>
+                ) : null}
+                {diff?.productNameChange && (
+                    <div>
+                        <span className="font-medium text-neutral-500">Product name:</span>{' '}
+                        "{diff.productNameChange.from}" → "{diff.productNameChange.to}"
+                    </div>
+                )}
+                {diff?.guardsTriggered?.length ? (
+                    <div>
+                        <span className="font-medium text-amber-600">Guards triggered:</span>{' '}
+                        {diff.guardsTriggered.join(', ')}
+                    </div>
+                ) : null}
+            </div>
+        </details>
+    );
+}
 
 interface VersionHistoryPanelProps {
     title: string;
@@ -119,6 +185,9 @@ export function VersionHistoryPanel({
                                     <div className="text-xs text-neutral-400 mt-1">{formatTime(entry.createdAt)}</div>
                                     {entry.editSummary && (
                                         <div className="text-xs text-neutral-600 mt-1 break-words">{entry.editSummary}</div>
+                                    )}
+                                    {entry.consistencyReview && (
+                                        <ConsistencyReviewDetail review={entry.consistencyReview} />
                                     )}
                                     {!entry.isCurrent && (
                                         <div className="flex items-center gap-2 mt-2">
