@@ -1302,7 +1302,20 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
 - **Status/fallbacks:** the Screens sidebar dot and generation/error states map
   to the **`screen_inventory` slot** (its retry re-runs that slot, since it no
   longer has its own row); the Mockups tab surfaces the `mockup` slot's
-  generating/error states. A screen_inventory version whose content isn't
+  generating/error states. **But the Screens row is fed by TWO slots** —
+  `screen_inventory` (the screen "breakdown") and `mockup` — which settle at
+  different times (the breakdown almost always lands well before the mockups).
+  So the row's dot is **not** a plain `StatusDot` of `screen_inventory`: it uses
+  `ScreensStatusDot(inventory, mockup)` (exported from `ArtifactWorkspace.tsx`,
+  unit-tested), which shows the breakdown's raw status until the breakdown is
+  `done`, then — while mockups are still `generating`/`queued` (or `error`/
+  `interrupted`) — pairs the breakdown's green check with the mockups' live
+  spinner/warning (plus a "Breakdown ready · mockups generating…" sub-label on
+  the row and a matching tooltip) instead of a flat "done". Once mockups finish
+  (or were never requested → `idle`) the check stands alone. Used in both the
+  sidebar row and the mobile header. Do **not** revert the Screens dot to a bare
+  `screen_inventory` `StatusDot` — that misled users into thinking mockups were
+  ready when only the breakdown was. A screen_inventory version whose content isn't
   parseable structured JSON (legacy markdown) falls back to the standalone
   `ScreenInventoryRenderer` path inside the Screens view. The legacy
   `screen_inventory` and `mockup` renderMain branches remain intact and
