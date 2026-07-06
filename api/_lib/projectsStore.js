@@ -122,10 +122,16 @@ export async function getProject(userId, projectId) {
 /**
  * Create or update (upsert) a project from a client bundle. Covers PRD updates
  * and artifact saves — the whole project state is one bundle. Returns the saved
- * summary. The id is owner-scoped, so a client can never overwrite another
- * user's project even by guessing its id (the filter pins `userId`).
+ * summary (including the new `revision`). The id is owner-scoped, so a client
+ * can never overwrite another user's project even by guessing its id (the
+ * filter pins `userId`).
+ *
+ * When `expectedRevision` is supplied and the stored revision has advanced past
+ * it (a concurrent save on another device), this does NOT write — it returns
+ * `{ conflict: true, currentRevision }` so the caller can surface a conflict
+ * instead of clobbering the newer copy.
  */
-export async function upsertProject(userId, projectId, bundle, { createdAt } = {}) {
+export async function upsertProject(userId, projectId, bundle, { createdAt, expectedRevision } = {}) {
   if (!userId) throw new Error('upsertProject: userId is required');
   if (!isValidProjectId(projectId)) throw new Error('upsertProject: invalid project id');
   await ensureProjectIndexes();
@@ -134,6 +140,29 @@ export async function upsertProject(userId, projectId, bundle, { createdAt } = {
   const { title, idea } = deriveMeta(bundle);
   const archived = bundle?.project?.archived === true;
   const status = archived ? 'archived' : 'active';
+
+  // Read the prior revision so we can return the new one (Mongo's updateOne
+  // doesn't echo the incremented value). Also lets us reject a stale write when
+  // the caller supplies the revision it expects to overwrite.
+  const existing = await runMongoAction('findOne', {
+    collection: PROJECTS_COLLECTION,
+    filter: { userId, id: projectId },
+    projection: { _id: 0, revision: 1 },
+  });
+  const priorRevision =
+    typeof existing?.document?.revision === 'number' ? existing.document.revision : null;
+
+  // Optimistic-concurrency guard: when the caller passes the revision it last
+  // saw and the server has since advanced (another device saved), do NOT
+  // overwrite — report the conflict so the client can resolve it. A brand-new
+  // project (no existing row) skips the guard.
+  if (
+    typeof expectedRevision === 'number' &&
+    priorRevision !== null &&
+    priorRevision !== expectedRevision
+  ) {
+    return { conflict: true, currentRevision: priorRevision, id: projectId };
+  }
 
   const result = await runMongoAction('updateOne', {
     collection: PROJECTS_COLLECTION,
@@ -159,7 +188,8 @@ export async function upsertProject(userId, projectId, bundle, { createdAt } = {
   });
 
   const created = Boolean(result?.upsertedId);
-  return { id: projectId, title, idea, status, archived, updatedAt: now, created };
+  const revision = priorRevision === null ? 1 : priorRevision + 1;
+  return { id: projectId, title, idea, status, archived, updatedAt: now, revision, created };
 }
 
 /**
