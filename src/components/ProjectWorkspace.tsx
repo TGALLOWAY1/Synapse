@@ -16,6 +16,7 @@ import {
 import { ProgressTimeline } from './progress/ProgressTimeline';
 import { buildGenerationSteps } from './progress/buildGenerationSteps';
 import { regeneratePrdSection } from '../lib/services/prdSectionRetry';
+import { summarizeConsistencyReview } from '../lib/services/prdConsistencyReview';
 import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
@@ -263,6 +264,7 @@ export function ProjectWorkspace() {
             createdAt: s.createdAt,
             changeSource: s.provenance?.changeSource,
             editSummary: s.provenance?.editSummary,
+            consistencyReview: summarizeConsistencyReview(s.generationMeta?.consistencyReview) ?? undefined,
         }))
         .reverse();
 
