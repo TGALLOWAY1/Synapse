@@ -1418,6 +1418,16 @@ stale and why, and the safe update order. See
   graph-derived batch to `executeJob` without this expansion, or the mockup
   can rebuild against a `component_inventory` generated from the old
   screen inventory.
+- **Retry respects the dependency closure.** `retrySlot` no longer regenerates a
+  slot against missing/errored/stale/needs_review upstreams. It calls the pure
+  `planSlotRetry(slot, isHealthy)` (`coreArtifactPipeline.ts`), which walks the
+  slot's dependency closure (including hidden deps like `component_inventory`)
+  and, when a dependency is unhealthy (`isDependencyHealthy`: not done for the
+  spine, or its preferred version carries `validationBlockers`), routes to
+  `regenerateSlots([…unhealthy deps, slot])` so the upstreams regenerate first —
+  reusing the same graph-driven `executeJob` path — instead of saving a
+  downstream result built from invalid dependency state. Routes only when no run
+  is active; an all-healthy plan falls through to the plain single-slot retry.
 - **Workspace wiring rules.** The selection is excluded from the finalize
   auto-open candidates and renders no `StatusDot` (`slotStatusFor` returns a
   constant `'done'` for it). "Open artifact" routes `screen_inventory`/

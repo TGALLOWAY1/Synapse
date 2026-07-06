@@ -198,6 +198,47 @@ export function expandWithHiddenDependencyClosure(
     return [...slots, ...[...requested].filter(s => !slots.includes(s))];
 }
 
+/** The direct dependencies a slot consumes (core deps, or MOCKUP_DEPENDENCIES for the mockup). */
+export function slotDependencies(slot: ArtifactSlotKey): CoreArtifactSubtype[] {
+    if (slot === 'mockup') return [...MOCKUP_DEPENDENCIES];
+    return getArtifactMeta(slot).dependsOn;
+}
+
+export interface RetryPlan {
+    /** Slots to (re)generate in dependency order — unhealthy upstreams first, then the target. */
+    slots: ArtifactSlotKey[];
+    /** Upstream dependencies found unhealthy (drove the closure). Empty → a plain single-slot retry. */
+    unhealthyDeps: CoreArtifactSubtype[];
+}
+
+/**
+ * Plan a single-slot retry so it never regenerates against missing/errored/
+ * stale/needs-review upstream dependencies. Walks the slot's dependency
+ * closure (including hidden deps like component_inventory that the mockup
+ * consumes) and, for any dependency the caller reports as unhealthy, pulls it
+ * (and transitively its own unhealthy inputs) into the batch so it regenerates
+ * BEFORE the target slot. When every dependency is healthy, returns just the
+ * target slot (a plain retry). Pure: the caller supplies `isHealthy`.
+ */
+export function planSlotRetry(
+    slot: ArtifactSlotKey,
+    isHealthy: (subtype: CoreArtifactSubtype) => boolean,
+): RetryPlan {
+    const unhealthy = new Set<CoreArtifactSubtype>();
+    const visit = (deps: CoreArtifactSubtype[]) => {
+        for (const dep of deps) {
+            if (isRetiredArtifactSubtype(dep) || unhealthy.has(dep)) continue;
+            if (!isHealthy(dep)) {
+                unhealthy.add(dep);
+                // The dep will be regenerated, so its own inputs must be sound too.
+                visit(getArtifactMeta(dep).dependsOn);
+            }
+        }
+    };
+    visit(slotDependencies(slot));
+    return { slots: [...unhealthy, slot], unhealthyDeps: [...unhealthy] };
+}
+
 /**
  * Group the pipeline into dependency layers. Items in the same layer have no
  * dependency on each other and may be generated in parallel. Layers must run

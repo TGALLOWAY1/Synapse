@@ -22,6 +22,7 @@ import {
     buildDependencyLayers,
     getArtifactMeta,
     isHiddenArtifactSubtype,
+    planSlotRetry,
 } from '../coreArtifactPipeline';
 import { findMissingRequiredDependencies } from '../artifactDependencyGate';
 import { isAbortError } from '../concurrency';
@@ -628,6 +629,21 @@ function pendingSlotsForSpine(args: StartArgs): ArtifactSlotKey[] {
 const isHiddenSlot = (slot: ArtifactSlotKey): boolean =>
     slot !== 'mockup' && isHiddenArtifactSubtype(slot);
 
+// A dependency slot is "healthy" (safe to build a dependent against) when it is
+// done for this spine AND its preferred version carries no blocking-validation
+// issues. Missing/errored deps aren't done → unhealthy; needs_review deps are
+// present but not trustworthy → unhealthy. Retry uses this to regenerate an
+// unhealthy dependency before the slot that consumes it.
+function isDependencyHealthy(projectId: string, subtype: CoreArtifactSubtype, spineVersionId: string): boolean {
+    if (!isSlotDoneForSpine(projectId, subtype, spineVersionId)) return false;
+    const store = useProjectStore.getState();
+    const artifact = store.getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
+    if (!artifact) return false;
+    const preferred = store.getPreferredVersion(projectId, artifact.id);
+    if (!preferred) return false;
+    return !(Array.isArray(preferred.metadata?.validationBlockers) && preferred.metadata.validationBlockers.length > 0);
+}
+
 export const artifactJobController = {
     isActive(projectId: string): boolean {
         const run = runs.get(projectId);
@@ -749,6 +765,26 @@ export const artifactJobController = {
             });
             return;
         }
+
+        // Dependency closure: never regenerate this slot against missing,
+        // errored, stale, or needs_review upstream dependencies. When a
+        // dependency (including a hidden one like component_inventory that the
+        // mockup consumes) is unhealthy, regenerate the closure — the unhealthy
+        // upstreams first, then this slot — via the same graph-driven path the
+        // Dependency Graph's batch update uses, rather than saving a downstream
+        // result built from invalid dependency state. Only routes when no run is
+        // active (regenerateSlots is a no-op otherwise).
+        if (!this.isActive(args.projectId)) {
+            const plan = planSlotRetry(
+                slot,
+                subtype => isDependencyHealthy(args.projectId, subtype, args.spineVersionId),
+            );
+            if (plan.unhealthyDeps.length > 0) {
+                this.regenerateSlots(plan.slots, args);
+                return;
+            }
+        }
+
         const existingRun = runs.get(args.projectId);
         const reuseExisting = existingRun && !existingRun.controller.signal.aborted;
         const controller = reuseExisting ? existingRun!.controller : new AbortController();
