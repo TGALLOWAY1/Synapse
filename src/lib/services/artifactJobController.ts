@@ -13,6 +13,7 @@ import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
+import { detectArtifactBlockers } from '../artifactBlockingValidation';
 import {
     CORE_ARTIFACT_PIPELINE,
     MOCKUP_DEPENDENCIES,
@@ -228,6 +229,11 @@ async function runCoreArtifactSlot(
     const validation = validateArtifactContent(subtype, content);
     const consistencyWarnings = validateCrossArtifactConsistency(subtype, content, structuredPRD);
     const warnings = [...validation.warnings, ...consistencyWarnings];
+    // Blocking (vs advisory) validation: a narrow set of high-confidence,
+    // user-facing defects mean the artifact must not read as a trustworthy
+    // completed output. The content is still saved (for review), but the slot
+    // is flagged needs_review rather than done.
+    const blockers = detectArtifactBlockers(subtype, content, structuredPRD);
 
     const writeStore = useProjectStore.getState();
     writeStore.appendSlotProgress(projectId, subtype, 'Saving artifact…');
@@ -274,6 +280,7 @@ async function runCoreArtifactSlot(
             subtype,
             dependencyTrace,
             validationWarnings: warnings,
+            ...(blockers.length ? { validationBlockers: blockers } : {}),
             ...(incompletePrdSections.length
                 ? { generatedFromIncompletePrd: true, incompletePrdSections }
                 : {}),
@@ -284,7 +291,10 @@ async function runCoreArtifactSlot(
         parentVersionId,
     );
 
-    writeStore.setSlotStatus(projectId, subtype, { status: 'done', finishedAt: Date.now() });
+    writeStore.setSlotStatus(projectId, subtype, {
+        status: blockers.length ? 'needs_review' : 'done',
+        finishedAt: Date.now(),
+    });
 }
 
 const readPreferredArtifactForSpine = (

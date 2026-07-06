@@ -800,6 +800,26 @@ request…").
   (`SafetyClassification`, `SafetyClassificationResult`, `SpineSafetyReview`)
   live in `src/types`; the safety module re-exports them.
 
+### Artifact validation: blocking vs advisory (`src/lib/artifactBlockingValidation.ts`)
+
+Most artifact validation is **advisory** — `validateArtifactContent` /
+`validateCrossArtifactConsistency` produce warnings stamped into
+`ArtifactVersion.metadata.validationWarnings` but never change status. A narrow,
+high-confidence set of defects is **blocking**: `detectArtifactBlockers(subtype,
+content, prd)` (pure) flags (1) a `data_model` with no API surface, (2)
+`user_flows` with no error paths, (3) an implementation-critical artifact
+(`data_model`/`user_flows`/`implementation_plan`) that references **none** of the
+PRD features (no traceability), and (4) a JSON-mode artifact
+(screen/data/component inventory) that parses but is structurally empty. When
+blockers exist, `runCoreArtifactSlot` still **saves the version** (content
+preserved for review) but stamps `metadata.validationBlockers` and sets the slot
+status to the new `GenerationStatus` value **`needs_review`** instead of `done`.
+The state is durable: `ArtifactWorkspace.slotStatusFor` re-derives `needs_review`
+from `readValidationBlockers(preferred.metadata)` after the transient job slot is
+cleared (post-reload). UI: an amber `ShieldAlert` `StatusDot` + an in-view
+"Needs review" banner listing the issues with a Regenerate action. Keep the
+blocker list conservative — advisory warnings must stay non-blocking.
+
 ### Preflight clarification (`src/lib/services/preflightService.ts`, `src/components/preflight/`)
 
 An **optional** pre-PRD step. After entering an idea on `HomePage`, a

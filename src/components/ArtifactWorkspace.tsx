@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, Menu, X, ListChecks, History, Lock,
+    RefreshCcw, Menu, X, ListChecks, History, Lock, ShieldAlert,
     Layers, Database, Code2, AppWindow, Waypoints,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -11,6 +11,7 @@ import { useProjectStore } from '../store/projectStore';
 import { useIsMobile } from '../lib/useIsMobile';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
+import { readValidationBlockers } from '../lib/artifactBlockingValidation';
 import { ArtifactContentRenderer } from './renderers';
 import { StructuredPRDView } from './StructuredPRDView';
 import { MockupViewer } from './mockups/MockupViewer';
@@ -163,6 +164,15 @@ function StatusDot({ status }: { status: GenerationStatus }) {
     if (status === 'done') return <CheckCircle2 size={14} className="text-green-500 shrink-0" />;
     if (status === 'generating' || status === 'queued') {
         return <Loader2 size={14} className="text-sky-500 animate-spin shrink-0" />;
+    }
+    if (status === 'needs_review') {
+        return (
+            <ShieldAlert
+                size={14}
+                className="text-amber-600 shrink-0"
+                aria-label="Needs review"
+            />
+        );
     }
     if (status === 'error') return <AlertTriangle size={14} className="text-red-500 shrink-0" />;
     if (status === 'interrupted') return <AlertTriangle size={14} className="text-amber-500 shrink-0" />;
@@ -513,7 +523,14 @@ export function ArtifactWorkspace({
         const subtype: CoreArtifactSubtype | undefined = slotKey === 'mockup' ? undefined : slotKey;
         const artifacts = getArtifacts(projectId, type);
         const existing = subtype ? artifacts.find(a => a.subtype === subtype) : artifacts[0];
-        if (existing && existing.currentVersionId) return 'done';
+        if (existing && existing.currentVersionId) {
+            // Durably reflect a blocking-validation flag even after the job slot
+            // state is cleared (post-reload), reading it off the preferred
+            // version's metadata rather than the transient slot status.
+            const preferred = getPreferredVersion(projectId, existing.id);
+            if (preferred && readValidationBlockers(preferred.metadata).length > 0) return 'needs_review';
+            return 'done';
+        }
         return 'idle';
     };
 
@@ -1042,11 +1059,35 @@ export function ArtifactWorkspace({
                 updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next });
             }
             : undefined;
+        const blockingIssues = readValidationBlockers(preferred.metadata);
         return (
             <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
                 <div className="flex items-center justify-start">
                     {renderVersionControls(artifact.id, preferred)}
                 </div>
+                {blockingIssues.length > 0 && (
+                    <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
+                        <ShieldAlert size={18} className="mt-0.5 shrink-0 text-amber-600" />
+                        <div className="min-w-0">
+                            <p className="text-sm font-semibold text-amber-900">
+                                Needs review — this artifact has a blocking validation issue
+                            </p>
+                            <ul className="mt-1 list-disc pl-4 text-sm text-amber-800 space-y-0.5">
+                                {blockingIssues.map((issue, i) => <li key={i}>{issue}</li>)}
+                            </ul>
+                            <p className="text-xs text-amber-700 mt-2">
+                                The content below is preserved for review. Regenerate this artifact to try to resolve it.
+                            </p>
+                            <button
+                                type="button"
+                                onClick={() => handleRetrySlot(activeSelection)}
+                                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 hover:bg-amber-700 text-white transition"
+                            >
+                                <RefreshCcw size={12} /> Regenerate
+                            </button>
+                        </div>
+                    </div>
+                )}
                 {subtype === 'design_system' && (
                     <DesignDirectionControl
                         presetId={designSystemPreset}

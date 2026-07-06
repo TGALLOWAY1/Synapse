@@ -1040,6 +1040,10 @@ export type GenerationStatus =
     | 'queued'
     | 'generating'
     | 'done'
+    // Content generated and preserved, but a blocking validation issue means it
+    // must not read as a trustworthy, completed artifact — see
+    // artifactBlockingValidation.ts.
+    | 'needs_review'
     | 'error'
     | 'interrupted';
 
