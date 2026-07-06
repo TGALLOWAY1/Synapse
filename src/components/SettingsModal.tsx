@@ -2,7 +2,7 @@ import { useState, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { X, Key, Cpu, Shield, ExternalLink, Activity, ChevronDown, AlertTriangle, Briefcase, Sparkles, Github, ChevronRight, Bug, KeyRound } from 'lucide-react';
 import { getOwnerToken } from '../lib/snapshotClient';
-import { DEFAULT_GEMINI_MODEL } from '../lib/geminiClient';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_FAST_MODEL, DEFAULT_STRONG_MODEL } from '../lib/geminiClient';
 import { ProviderKeysSection } from './settings/ProviderKeysSection';
 import { ConnectedAccountsSection } from './settings/ConnectedAccountsSection';
 import { ArtifactModelsSection } from './settings/ArtifactModelsSection';
@@ -23,9 +23,6 @@ import {
     OPENAI_API_KEY,
     GITHUB_TOKEN,
 } from '../lib/localCredentials';
-
-const DEFAULT_FAST_MODEL = 'gemini-3.5-flash';
-const DEFAULT_STRONG_MODEL = 'gemini-3.1-pro-preview';
 
 interface SettingsModalProps {
     onClose: () => void;

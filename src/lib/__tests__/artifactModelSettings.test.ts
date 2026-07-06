@@ -10,7 +10,7 @@ import {
     DEFAULT_MOCKUP_IMAGE_MODE,
     resolveMockupRender,
 } from '../artifactModelSettings';
-import { DEFAULT_GEMINI_MODEL } from '../geminiClient';
+import { DEFAULT_GEMINI_MODEL, DEFAULT_FAST_MODEL, DEFAULT_STRONG_MODEL } from '../geminiClient';
 import type { CoreArtifactSubtype } from '../../types';
 
 describe('artifact model settings — persistence & defaults', () => {
@@ -28,12 +28,21 @@ describe('artifact model settings — persistence & defaults', () => {
         expect(getArtifactModel('design_system')).toBe('flash-x');
     });
 
-    it('falls back through the tier resolvers to the single Default model', () => {
-        // Nothing set at all → DEFAULT_GEMINI_MODEL for every artifact.
+    it('falls back through the tier resolvers to the per-tier defaults', () => {
+        // Nothing set at all → each tier's own default: high artifacts get the
+        // strong (Pro) default, low artifacts get the fast (Flash) default. The
+        // strong default must NOT collapse to Flash, or Settings' advertised
+        // "Pro for complex" would silently run on Flash.
         for (const subtype of Object.keys(CORE_ARTIFACT_COMPLEXITY) as CoreArtifactSubtype[]) {
-            expect(getArtifactModel(subtype)).toBe(DEFAULT_GEMINI_MODEL);
+            const expected = CORE_ARTIFACT_COMPLEXITY[subtype] === 'high'
+                ? DEFAULT_STRONG_MODEL
+                : DEFAULT_FAST_MODEL;
+            expect(getArtifactModel(subtype)).toBe(expected);
         }
+        expect(DEFAULT_FAST_MODEL).toBe(DEFAULT_GEMINI_MODEL);
+        expect(DEFAULT_STRONG_MODEL).not.toBe(DEFAULT_GEMINI_MODEL);
 
+        // With only the single Default model set, both tiers resolve to it.
         localStorage.setItem('GEMINI_MODEL', 'single-x');
         expect(getArtifactModel('data_model')).toBe('single-x');
         expect(getArtifactModel('prompt_pack')).toBe('single-x');
