@@ -60,6 +60,19 @@ describe('generateCoreArtifact — canonical spine prompt', () => {
         expect(prompt).not.toContain('Vision: Match music to mood');
     });
 
+    it('surfaces a KNOWN CONFLICTS block when the full PRD prose omits canonical feature names', async () => {
+        // PRD_MARKDOWN does not mention "Mood Capture" / "Resonance Playlist",
+        // so the stale-name detector fires end-to-end through generateCoreArtifact.
+        const spine = buildCanonicalPrdSpine(PRD, { now: () => 1 });
+        await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine, allowMissingDependencies: true });
+        const prompt = lastUserPrompt();
+        expect(prompt).toContain('KNOWN CONFLICTS / STALENESS');
+        expect(prompt).toContain('Mood Capture');
+        expect(prompt).toContain('Resonance Playlist');
+        // The conflict block must sit above the secondary PRD appendix.
+        expect(prompt.indexOf('KNOWN CONFLICTS / STALENESS')).toBeLessThan(prompt.indexOf('APPENDIX — Full PRD'));
+    });
+
     it('records spineContextUsed + spineSchemaVersion in the returned metadata', async () => {
         const spine = buildCanonicalPrdSpine(PRD, { now: () => 1 });
         const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine, allowMissingDependencies: true });
