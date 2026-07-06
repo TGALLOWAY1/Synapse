@@ -5,6 +5,7 @@ import type {
     FieldGroup,
     FieldGroupName,
 } from '../../types';
+import { TRACEABILITY_SECTION_HEADING } from '../artifactTraceabilityRepair';
 
 const GROUP_ORDER: FieldGroupName[] = [
     'Key Product Fields',
@@ -22,6 +23,10 @@ const TOP_SECTION_HEADINGS = new Set([
     'API Endpoints',
     'How This Appears in the Product',
     'Data Model',
+    // Appended by automatic traceability repair (artifactTraceabilityRepair.ts).
+    // It is metadata, not a data entity — skip it here so it never renders as a
+    // bogus 0-field entity in the outline/card view.
+    TRACEABILITY_SECTION_HEADING,
 ]);
 
 const CALLOUT_RE = /^>\s*\[!(CONSTRAINT|PRIVACY|INDEX|RELATIONSHIP)\]\s*(.*)$/i;

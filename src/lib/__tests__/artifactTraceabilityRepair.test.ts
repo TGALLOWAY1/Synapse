@@ -6,6 +6,7 @@ import {
     TRACEABILITY_SECTION_HEADING,
 } from '../artifactTraceabilityRepair';
 import { detectArtifactBlockers } from '../artifactBlockingValidation';
+import { parseDataModelMarkdown } from '../services/dataModelMarkdown';
 import type { StructuredPRD } from '../../types';
 
 // A "Take A Hike"-style PRD: features whose names/tokens appear in generated
@@ -129,6 +130,16 @@ describe('repairTraceability — data_model', () => {
         // Original entity headings are untouched.
         expect(repair.content).toContain('## TripItinerary');
         expect(repair.content).toContain('## RouteSegments');
+    });
+
+    it('does not render the appended traceability section as a bogus entity', () => {
+        const repair = repairTraceability('data_model', dataModelContent, prd);
+        const parsed = parseDataModelMarkdown(repair.content);
+        expect(parsed).not.toBeNull();
+        const entityNames = parsed!.entities.map(e => e.name);
+        expect(entityNames).not.toContain(TRACEABILITY_SECTION_HEADING);
+        // The real entities still parse.
+        expect(entityNames).toContain('TripItinerary');
     });
 });
 
