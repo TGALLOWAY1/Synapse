@@ -169,6 +169,46 @@ function StatusDot({ status }: { status: GenerationStatus }) {
     return <Circle size={14} className="text-neutral-300 shrink-0" />;
 }
 
+// The Screens row is fed by TWO slots — screen_inventory (the screen
+// "breakdown") and mockup (the visual mockups) — which finish at different
+// times: the breakdown almost always completes well before the mockups. A
+// single green check on the row therefore misleads the user into thinking the
+// mockups are ready too. This dot keeps the two sub-statuses distinct: while
+// the breakdown is done but mockups are still in flight (or need attention) it
+// pairs the breakdown's check with the mockups' live indicator, so the row
+// reads "breakdown ready · mockups still working" instead of a flat "done".
+export function ScreensStatusDot({ inventory, mockup }: { inventory: GenerationStatus; mockup: GenerationStatus }) {
+    // Breakdown itself isn't ready yet → show its raw status; the mockups are
+    // downstream of it and don't matter until it lands.
+    if (inventory !== 'done') return <StatusDot status={inventory} />;
+    // Breakdown ready, mockups still generating/queued → partial state.
+    if (mockup === 'generating' || mockup === 'queued') {
+        return (
+            <span
+                title="Screen breakdown ready — mockups still generating"
+                className="inline-flex items-center gap-0.5 shrink-0"
+            >
+                <CheckCircle2 size={14} className="text-green-500" />
+                <Loader2 size={12} className="text-sky-500 animate-spin" />
+            </span>
+        );
+    }
+    // Breakdown ready, mockups failed/interrupted → surface that on the row.
+    if (mockup === 'error' || mockup === 'interrupted') {
+        return (
+            <span
+                title="Screen breakdown ready — mockups need attention"
+                className="inline-flex items-center gap-0.5 shrink-0"
+            >
+                <CheckCircle2 size={14} className="text-green-500" />
+                <AlertTriangle size={12} className={mockup === 'error' ? 'text-red-500' : 'text-amber-500'} />
+            </span>
+        );
+    }
+    // Mockups done, idle, or never requested → the breakdown check stands alone.
+    return <StatusDot status={inventory} />;
+}
+
 // The lock lives on the Design System row only. Every downstream asset is
 // generated *against* the design system, so the lock signals "your visual
 // direction is locked in" — one aesthetic, committed — rather than tagging
@@ -1151,6 +1191,12 @@ export function ArtifactWorkspace({
                                         const status = slotStatusFor(slot.key);
                                         const isSel = activeSelection === slot.key;
                                         const Icon = slot.icon;
+                                        // The Screens row spans two slots; when the breakdown is
+                                        // done but mockups are still working, say so on the row.
+                                        const mockupStatus = slot.key === 'screens' ? slotStatusFor('mockup') : 'idle';
+                                        const screensMockupsPending =
+                                            slot.key === 'screens' && status === 'done'
+                                            && (mockupStatus === 'generating' || mockupStatus === 'queued');
                                         return (
                                             <li key={slot.key}>
                                                 <button
@@ -1168,13 +1214,15 @@ export function ArtifactWorkspace({
                                                             <span className={`text-sm font-medium truncate ${isSel ? 'text-indigo-900' : 'text-neutral-800'}`}>
                                                                 {slot.title}
                                                             </span>
-                                                            {slot.key !== 'dependency_graph' && <StatusDot status={status} />}
+                                                            {slot.key === 'screens' ? (
+                                                                <ScreensStatusDot inventory={status} mockup={mockupStatus} />
+                                                            ) : slot.key !== 'dependency_graph' && <StatusDot status={status} />}
                                                             {status === 'done' && isLockedAsset(slot.key) && (
                                                                 <AssetLock />
                                                             )}
                                                         </div>
-                                                        <div className="text-[11px] text-neutral-500 leading-tight truncate">
-                                                            {slot.description}
+                                                        <div className={`text-[11px] leading-tight truncate ${screensMockupsPending ? 'text-sky-600' : 'text-neutral-500'}`}>
+                                                            {screensMockupsPending ? 'Breakdown ready · mockups generating…' : slot.description}
                                                         </div>
                                                     </div>
                                                 </button>
@@ -1205,7 +1253,11 @@ export function ArtifactWorkspace({
                     </span>
                     {activeSelection !== 'prd' && activeSelection !== 'dependency_graph' && (
                         <span className="ml-auto shrink-0 flex items-center gap-1.5">
-                            <StatusDot status={slotStatusFor(activeSelection)} />
+                            {activeSelection === 'screens' ? (
+                                <ScreensStatusDot inventory={slotStatusFor('screens')} mockup={slotStatusFor('mockup')} />
+                            ) : (
+                                <StatusDot status={slotStatusFor(activeSelection)} />
+                            )}
                             {slotStatusFor(activeSelection) === 'done' && isLockedAsset(activeSelection) && (
                                 <AssetLock />
                             )}
