@@ -258,6 +258,75 @@ describe('reviewPrdConsistency', () => {
     expect(result.rejectionReason).toBe('entity-detail-lost');
   });
 
+  it('rejects a revision that drops one entity out of several (identity, not count)', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          { name: 'Patient', description: 'p', fields: [{ name: 'id', type: 'string' }] },
+          { name: 'Appointment', description: 'a', fields: [{ name: 'id', type: 'string' }] },
+          { name: 'Provider', description: 'v', fields: [{ name: 'id', type: 'string' }] },
+        ],
+      },
+    };
+    // Drops 1 of 3 entities → 2/3 = 67%... use 4 entities so it stays above the
+    // 70% detail-loss floor and only the identity check can catch it.
+    original.richDataModel!.entities.push({ name: 'Invoice', description: 'i', fields: [{ name: 'id', type: 'string' }] });
+    const survivors = original.richDataModel!.entities.filter(e => e.name !== 'Provider'); // 3 of 4 = 75%
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: { ...original, richDataModel: { entities: survivors } },
+        changeLog: 'dropped an entity',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-lost');
+    expect(result.prd.richDataModel?.entities).toHaveLength(4);
+  });
+
+  it('rejects a revision that swaps an entity field while preserving the count', async () => {
+    const original: StructuredPRD = {
+      ...basePrd(),
+      richDataModel: {
+        entities: [
+          {
+            name: 'Patient',
+            description: 'p',
+            fields: [
+              { name: 'id', type: 'string' },
+              { name: 'dob', type: 'date' },
+            ],
+          },
+        ],
+      },
+    };
+    // Same field count (2), but "dob" replaced by an unrelated "nickname".
+    const transport = vi.fn(async () =>
+      JSON.stringify({
+        prd: {
+          ...original,
+          richDataModel: {
+            entities: [
+              {
+                name: 'Patient',
+                description: 'p',
+                fields: [
+                  { name: 'id', type: 'string' },
+                  { name: 'nickname', type: 'string' },
+                ],
+              },
+            ],
+          },
+        },
+        changeLog: 'swapped a field',
+      }),
+    );
+    const result = await reviewPrdConsistency(original, { transport });
+    expect(result.applied).toBe(false);
+    expect(result.rejectionReason).toBe('entity-detail-lost');
+  });
+
   it('records a structured diff on an accepted revision', async () => {
     const original = basePrd();
     const transport = vi.fn(async () =>

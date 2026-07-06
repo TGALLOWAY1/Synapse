@@ -259,6 +259,14 @@ const weakensSafetyRestrictions = (original: StructuredPRD, revised: StructuredP
  * domain-entity example values) must not be dropped. The data-model artifact
  * and mockup grounding read these; losing a field or relationship silently
  * changes the schema downstream artifacts generate against.
+ *
+ * Comparisons are by IDENTITY, not count: every original entity (by name) must
+ * survive, and every original field (by name) within it must survive. A
+ * count-only check would miss (a) dropping one entity out of several while
+ * staying above the detail-loss 70% floor, and (b) swapping a field for a
+ * different one while keeping the array length. Both silently lose schema facts,
+ * so we reject them. This mirrors the feature-id stability guard: entity/field
+ * names are the downstream join keys and must stay canonical.
  */
 const dropsEntityDetail = (original: StructuredPRD, revised: StructuredPRD): boolean => {
     const origEntities = original.richDataModel?.entities ?? [];
@@ -266,8 +274,12 @@ const dropsEntityDetail = (original: StructuredPRD, revised: StructuredPRD): boo
         const revById = new Map((revised.richDataModel?.entities ?? []).map(e => [e.name, e]));
         for (const orig of origEntities) {
             const rev = revById.get(orig.name);
-            if (!rev) continue; // entity count drop caught by detail-loss guard
-            if (len(orig.fields) > 0 && len(rev.fields) < len(orig.fields)) return true;
+            if (!rev) return true; // an original entity was dropped or renamed
+            // Field identity: every original field name must still be present.
+            const revFieldNames = new Set((rev.fields ?? []).map(f => f.name).filter(Boolean));
+            const origFieldNames = (orig.fields ?? []).map(f => f.name).filter(Boolean);
+            if (origFieldNames.some(n => !revFieldNames.has(n))) return true;
+            // Relationships preserved as a superset.
             const origRel = (orig.relationships ?? []).filter(Boolean);
             if (origRel.length > 0) {
                 const revRel = new Set((rev.relationships ?? []).filter(Boolean));
@@ -280,7 +292,7 @@ const dropsEntityDetail = (original: StructuredPRD, revised: StructuredPRD): boo
         const revById = new Map((revised.domainEntities ?? []).map(e => [e.name, e]));
         for (const orig of origDomain) {
             const rev = revById.get(orig.name);
-            if (!rev) continue;
+            if (!rev) return true; // an original domain entity was dropped or renamed
             if (len(orig.exampleValues) > 0 && len(rev.exampleValues) < len(orig.exampleValues)) return true;
         }
     }
