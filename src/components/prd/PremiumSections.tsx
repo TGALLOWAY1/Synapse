@@ -4,6 +4,7 @@ import type {
     SuccessMetric, Assumption, ProductThesis,
 } from '../../types';
 import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
+import { sanitizeRolePermissions } from '../../lib/prdRolesSanitizer';
 
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
 // for visual consistency.
@@ -401,10 +402,13 @@ export function StateMachinesSection({ machines }: { machines: StateMachine[] })
 }
 
 export function RolesSection({ roles }: { roles: RolePermission[] }) {
+    // Sanitize at render so legacy persisted PRDs (generated before the roles
+    // quality gate) still display business-oriented, concise permissions.
+    const cleanRoles = sanitizeRolePermissions(roles) ?? roles;
     return (
         <Section title="Permissions & Roles" id="prd-roles">
             <div className="grid sm:grid-cols-2 gap-3">
-                {roles.map((r, i) => (
+                {cleanRoles.map((r, i) => (
                     <div key={i} className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
                         <p className="text-sm font-bold text-neutral-900">{r.role}</p>
                         {r.dataVisibility && (

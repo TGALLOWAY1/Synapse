@@ -197,7 +197,11 @@ ${thesis !== UNAVAILABLE ? `Product thesis: ${thesis}` : ''}
 Return JSON with:
 - userLoops: array of 2–4 retention loops, each: { name, trigger, action, systemResponse, reward, retentionMechanic }
 - uxPages: array of 5–10 screens, each: { id (pg1…), name, purpose, primaryUser?, components (3–6 short items — the key content and primary actions the user sees on this screen) }. Stay at the decision level: do NOT write component-by-component UI specs, interaction lists, or empty/loading/error state definitions — the dedicated Screen Inventory artifact owns that detail.
-- roles: array of user roles, each: { role, allowed (array), restricted?, dataVisibility?, notes? }`,
+- roles: array of 3–6 user roles, each: { role, allowed (array), restricted?, dataVisibility?, notes? }.
+  Permissions & Roles describe **business capabilities a user has inside the product** — the things they can do — NOT how the software is built or secured. Write them the way a product manager would.
+  • allowed: 5–15 concise, capability-based actions phrased "verb + product object" — e.g. "Create workouts", "Invite team members", "View analytics", "Approve requests", "Export reports". Summarize responsibilities; do not enumerate every action.
+  • restricted: OPTIONAL and small (3–10 items) — include ONLY when a limit communicates meaningful product behavior (e.g. "Cannot modify coach-created programs", "Cannot view other clients"). Omit the field entirely when there is nothing product-meaningful to say. Never pad it with obvious or exhaustive negatives.
+  Every permission must answer "is this something a user can do inside the product?". NEVER include backend, infrastructure, database, operating-system, networking, or security-implementation details (e.g. SSL/TLS, JWT/OAuth, SQLite/Postgres/Redis, caches, migrations, telemetry, encryption keys, API endpoints/timeouts, rate limiting, feature flags, sandboxes, Kubernetes/Docker, diagnostic endpoints, server configuration). Those belong in architecture or security docs, not here. Support richer models (role hierarchies, org-level access, subscription tiers) when the product needs them, but keep every item business-oriented.`,
         };
     },
 
