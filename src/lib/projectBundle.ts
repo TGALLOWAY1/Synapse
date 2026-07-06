@@ -111,6 +111,43 @@ export function mergeBundlesIntoSource(
 }
 
 /**
+ * REPLACE the slices for each bundle's project id with the server copy. Unlike
+ * mergeBundlesIntoSource (which is additive and lets local win), this overwrites
+ * existing local slices — used ONLY for a safe server-newer refresh when the
+ * local copy has no unsynced changes, or when the user explicitly chooses "use
+ * the cloud version" to resolve a conflict. Never call this over dirty local
+ * work without the user's consent. Returns the updated slice maps.
+ */
+export function overwriteBundlesIntoSource(
+  source: BundleSource,
+  bundles: ProjectBundle[],
+): { next: BundleSource; replacedIds: string[] } {
+  const next: BundleSource = {
+    projects: { ...source.projects },
+    spineVersions: { ...source.spineVersions },
+    historyEvents: { ...source.historyEvents },
+    branches: { ...source.branches },
+    artifacts: { ...source.artifacts },
+    artifactVersions: { ...source.artifactVersions },
+    feedbackItems: { ...source.feedbackItems },
+    tasks: { ...source.tasks },
+    workflowRuns: { ...source.workflowRuns },
+  };
+  const replacedIds: string[] = [];
+  for (const bundle of bundles) {
+    if (!isValidBundle(bundle)) continue;
+    const id = bundle.project.id;
+    next.projects[id] = bundle.project;
+    for (const key of ARRAY_COLLECTIONS) {
+      const value = (bundle as unknown as Record<string, unknown>)[key];
+      (next[key] as Record<string, unknown[]>)[id] = Array.isArray(value) ? (value as unknown[]) : [];
+    }
+    replacedIds.push(id);
+  }
+  return { next, replacedIds };
+}
+
+/**
  * Reference-equality check for whether project `projectId`'s slices changed
  * between two store snapshots. Relies on the store's immutable updates (spreads),
  * so a changed slice is a new reference. Used to decide which project to push.

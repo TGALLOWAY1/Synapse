@@ -1,12 +1,24 @@
 import { describe, it, expect, beforeEach, afterEach, vi } from 'vitest';
 
 // Mock the server transport so we can drive reconcile/push without a backend.
-const client = vi.hoisted(() => ({
-  fetchProjectList: vi.fn(),
-  fetchProject: vi.fn(),
-  saveProject: vi.fn(),
-  deleteProject: vi.fn(),
-}));
+const client = vi.hoisted(() => {
+  class RevisionConflictError extends Error {
+    code = 'revision_conflict' as const;
+    currentRevision?: number;
+    constructor(currentRevision?: number) {
+      super('revision_conflict');
+      this.name = 'RevisionConflictError';
+      this.currentRevision = currentRevision;
+    }
+  }
+  return {
+    fetchProjectList: vi.fn(),
+    fetchProject: vi.fn(),
+    saveProject: vi.fn(),
+    deleteProject: vi.fn(),
+    RevisionConflictError,
+  };
+});
 vi.mock('../../lib/projectsClient', () => client);
 
 import { useProjectStore } from '../projectStore';
@@ -45,7 +57,9 @@ function serverBundle(id: string): ProjectBundle {
 }
 
 beforeEach(() => {
-  Object.values(client).forEach((fn) => fn.mockReset());
+  Object.values(client).forEach((fn) => {
+    if (typeof fn === 'function' && 'mockReset' in fn) fn.mockReset();
+  });
   useProjectStore.setState(emptyState());
   useProjectSyncStore.getState().reset();
   localStorage.clear();
@@ -86,7 +100,7 @@ describe('reconcile (push) — local-only projects migrate to the server', () =>
     startProjectSync('user-a');
 
     await vi.waitFor(() => {
-      expect(client.saveProject).toHaveBeenCalledWith('p1', expect.objectContaining({ project: expect.any(Object) }));
+      expect(client.saveProject).toHaveBeenCalledWith('p1', expect.objectContaining({ project: expect.any(Object) }), expect.anything());
     });
     expect(useProjectSyncStore.getState().migratedCount).toBe(1);
   });
@@ -147,6 +161,6 @@ describe('live local changes push (debounced) after the initial reconcile', () =
     const { projectId } = useProjectStore.getState().createProject('New', 'an idea');
     await vi.advanceTimersByTimeAsync(2000); // past the push debounce
 
-    expect(client.saveProject).toHaveBeenCalledWith(projectId, expect.objectContaining({ project: expect.any(Object) }));
+    expect(client.saveProject).toHaveBeenCalledWith(projectId, expect.objectContaining({ project: expect.any(Object) }), expect.anything());
   });
 });
