@@ -107,6 +107,53 @@ describe('upsertProject', () => {
   it('rejects an invalid project id', async () => {
     await expect(store.upsertProject('user-a', 'bad id', bundle())).rejects.toThrow(/invalid/);
   });
+
+  it('returns the new revision derived from the prior one', async () => {
+    runMongoAction.mockImplementation(async (action) => {
+      if (action === 'findOne') return { document: { revision: 5 } };
+      if (action === 'updateOne') return { matchedCount: 1 };
+      return {};
+    });
+    const saved = await store.upsertProject('user-a', 'p1', bundle());
+    expect(saved.revision).toBe(6);
+    expect(saved.conflict).toBeUndefined();
+  });
+
+  it('writes when expectedRevision matches the stored revision', async () => {
+    runMongoAction.mockImplementation(async (action) => {
+      if (action === 'findOne') return { document: { revision: 5 } };
+      if (action === 'updateOne') return { matchedCount: 1 };
+      return {};
+    });
+    const saved = await store.upsertProject('user-a', 'p1', bundle(), { expectedRevision: 5 });
+    expect(saved.revision).toBe(6);
+    // The conditional write did proceed.
+    expect(runMongoAction.mock.calls.some(([a]) => a === 'updateOne')).toBe(true);
+  });
+
+  it('blocks a stale write (expectedRevision mismatch) without overwriting', async () => {
+    runMongoAction.mockImplementation(async (action) => {
+      if (action === 'findOne') return { document: { revision: 7 } };
+      if (action === 'updateOne') return { matchedCount: 1 };
+      return {};
+    });
+    const result = await store.upsertProject('user-a', 'p1', bundle(), { expectedRevision: 5 });
+    expect(result).toMatchObject({ conflict: true, currentRevision: 7, id: 'p1' });
+    // Crucially, no write happened — the newer server copy is preserved.
+    expect(runMongoAction.mock.calls.some(([a]) => a === 'updateOne')).toBe(false);
+  });
+
+  it('ignores expectedRevision for a brand-new project (no existing row)', async () => {
+    runMongoAction.mockImplementation(async (action) => {
+      if (action === 'findOne') return {}; // no existing doc
+      if (action === 'updateOne') return { matchedCount: 0, upsertedId: { _id: 'x' } };
+      return {};
+    });
+    const saved = await store.upsertProject('user-a', 'p1', bundle(), { expectedRevision: 3 });
+    expect(saved.conflict).toBeUndefined();
+    expect(saved.created).toBe(true);
+    expect(saved.revision).toBe(1);
+  });
 });
 
 describe('soft delete / restore / archive', () => {

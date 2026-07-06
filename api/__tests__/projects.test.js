@@ -133,7 +133,29 @@ describe('PUT /api/projects', () => {
     await handler({ method: 'PUT', query: { id: 'p1' }, headers: {}, body }, res);
     expect(res.statusCode).toBe(200);
     // URL id + session user win — the body's project.id never selects the row.
-    expect(dataLayer.upsertProject).toHaveBeenCalledWith('user-a', 'p1', body.bundle);
+    expect(dataLayer.upsertProject).toHaveBeenCalledWith('user-a', 'p1', body.bundle, {
+      expectedRevision: undefined,
+    });
+  });
+
+  it('passes ?expectedRevision through to the conditional upsert', async () => {
+    dataLayer.upsertProject.mockResolvedValue({ id: 'p1', revision: 6 });
+    const res = mockRes();
+    const body = { bundle: { project: { id: 'p1', name: 'X' } } };
+    await handler({ method: 'PUT', query: { id: 'p1', expectedRevision: '5' }, headers: {}, body }, res);
+    expect(res.statusCode).toBe(200);
+    expect(dataLayer.upsertProject).toHaveBeenCalledWith('user-a', 'p1', body.bundle, {
+      expectedRevision: 5,
+    });
+  });
+
+  it('returns 409 when the data layer reports a revision conflict (no overwrite)', async () => {
+    dataLayer.upsertProject.mockResolvedValue({ conflict: true, currentRevision: 9, id: 'p1' });
+    const res = mockRes();
+    const body = { bundle: { project: { id: 'p1', name: 'X' } } };
+    await handler({ method: 'PUT', query: { id: 'p1', expectedRevision: '4' }, headers: {}, body }, res);
+    expect(res.statusCode).toBe(409);
+    expect(parsed(res)).toMatchObject({ error: 'revision_conflict', currentRevision: 9 });
   });
 
   it('rejects a body with no project', async () => {

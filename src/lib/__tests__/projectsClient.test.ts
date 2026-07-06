@@ -67,6 +67,22 @@ describe('projectsClient', () => {
     await expect(saveProject('p1', bundle)).rejects.toThrow(/projects_failed/);
   });
 
+  it('saveProject sends expectedRevision as a query param (conditional write)', async () => {
+    const fetchMock = vi.fn(async () => okJson({ project: { id: 'p1', revision: 6 } }));
+    vi.stubGlobal('fetch', fetchMock);
+    await saveProject('p1', bundle, { expectedRevision: 5 });
+    const [url] = fetchMock.mock.calls[0] as unknown as [string];
+    expect(url).toBe('/api/projects?id=p1&expectedRevision=5');
+  });
+
+  it('saveProject throws a typed RevisionConflictError on 409 (stale push blocked)', async () => {
+    vi.stubGlobal('fetch', vi.fn(async () => errJson(409, { error: 'revision_conflict', currentRevision: 9 })));
+    await expect(saveProject('p1', bundle, { expectedRevision: 4 })).rejects.toMatchObject({
+      code: 'revision_conflict',
+      currentRevision: 9,
+    });
+  });
+
   it('deleteProject tolerates a 404 (already gone)', async () => {
     vi.stubGlobal('fetch', vi.fn(async () => errJson(404, { error: 'not_found' })));
     await expect(deleteProject('p1')).resolves.toBeUndefined();
