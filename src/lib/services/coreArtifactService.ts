@@ -79,6 +79,7 @@ For each flow, use this exact format:
 
 ### Flow: [Flow Name]
 **Goal:** What the user is trying to accomplish.
+**Related Features:** the canonical PRD feature ids and names this flow implements, drawn from the Canonical Feature Glossary / Canonical PRD Spine (e.g. "[f1] Trip Creation, [f2] Route Planning"). Every flow MUST map to at least one real feature; use ONLY ids/names from the glossary — never invent a feature id.
 **Preconditions:** What must be true before this flow starts.
 **Steps:**
 1. [Screen Name] — User action → System response
@@ -164,7 +165,7 @@ Per task:
 - status: ALWAYS "todo", without exception. You are generating a plan, not tracking execution; never emit any other status value.
 - dependencies: array of OTHER task ids (from this same plan) that must be done first. Empty array if none.
 - linkedArtifacts: { prd, dataModel, mockups }
-  - prd: PRD feature names this task implements, drawn from the Canonical Feature Glossary in the user prompt.
+  - prd: PRD feature names (and/or ids) this task implements, drawn from the Canonical Feature Glossary in the user prompt. Across the whole plan, every canonical feature should be implemented by at least one task; use ONLY names/ids from the glossary — never invent a feature reference.
   - dataModel: entity names from the data_model dependency context that this task touches.
   - mockups: screen names from the screen_inventory dependency context that this task implements.
   - Link an artifact only when the task directly implements or modifies it. Omit (or use empty arrays) otherwise. Don't invent artifact references.
@@ -220,6 +221,7 @@ For each entity, populate:
   - "System Metadata" (id, created_at, updated_at, version, audit fields)
   - "API / Integration" (webhook URLs, external IDs, integration payloads)
   - "Privacy / Safety" (PII, secrets, sensitive data subject to safety rules)
+- featureRefs: the canonical PRD feature ids (e.g. "f1", "f3") — and/or their exact names — that this entity supports, drawn from the Canonical Feature Glossary in the user prompt. EVERY entity must map to at least one real feature. Use ONLY ids/names that appear in the glossary; never invent a feature id. If an entity is cross-cutting, list multiple.
 - relationships: existing array of { type: has_many|belongs_to|has_one|many_to_many, target, description? }.
 - indexes: recommended database indexes for query performance; name the field(s) each index covers.
 - constraints: business/database constraints (uniqueness, check constraints, cardinality limits) — NOT privacy concerns.

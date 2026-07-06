@@ -792,6 +792,13 @@ export interface DataEntity {
     privacyRules?: string[];
     /** Stored as a JSON-encoded string in Gemini output; the converter parses it. */
     exampleRecord?: string;
+    /**
+     * Canonical PRD feature ids/names this entity supports (structured
+     * traceability back to the PRD). Optional & backward-compatible — legacy
+     * data models lack it. Rendered into the markdown so traceability validation
+     * can see the mapping without prose text-search.
+     */
+    featureRefs?: string[];
 }
 
 export interface DataModelOverview {

@@ -134,6 +134,11 @@ export const dataModelSchema = {
                     constraints: { type: "ARRAY", items: { type: "STRING" } },
                     privacyRules: { type: "ARRAY", items: { type: "STRING" } },
                     exampleRecord: { type: "STRING" },
+                    featureRefs: {
+                        type: "ARRAY",
+                        description: "Canonical PRD feature ids (and/or names) this entity supports, drawn from the Canonical Feature Glossary. Do not invent ids.",
+                        items: { type: "STRING" },
+                    },
                 },
                 required: ["name", "description", "fields", "relationships"],
             },

@@ -929,6 +929,40 @@ cleared (post-reload). UI: an amber `ShieldAlert` `StatusDot` + an in-view
 "Needs review" banner listing the issues with a Regenerate action. Keep the
 blocker list conservative — advisory warnings must stay non-blocking.
 
+**Automatic traceability repair — never surface a "no traceability" blocker
+before attempting repair** (`src/lib/artifactTraceabilityRepair.ts`, pure).
+Blocker (3) — missing PRD-feature traceability — is often a false positive: an
+artifact genuinely derived from the product's features but not spelling out a
+feature id/name verbatim. So `runCoreArtifactSlot` reclassifies blockers via
+`classifyBlockers` and, when the traceability blocker is the **sole** issue (the
+artifact is otherwise structurally valid — `otherBlockers.length === 0`),
+attempts a deterministic enrichment pass **before** exposing any blocker:
+`repairTraceability` runs `matchFeaturesToContent` (token-overlap match of the
+canonical PRD features against the artifact's own content — it can NEVER invent
+an id, every mapped id/name comes from `prd.features`) and, on a confident
+match, **appends** a `## PRD Feature Traceability` section citing the mapped
+ids/names (append-only — substantive content is never rewritten). The artifact
+is then **re-validated**; if clean it saves as normal `done`, and a small
+neutral advisory note (not the amber banner) is shown. Repair provenance is
+stamped into version metadata regardless of outcome (`repairAttempted`,
+`repairType: 'traceability_enrichment'`, `repairSucceeded`,
+`originalValidationBlockers`, `postRepairValidationBlockers`, `repairWarnings`,
+`traceabilityMappedFeatures`) and the version's change summary notes the
+enrichment, so history distinguishes an original vs. auto-enriched preferred
+version. When repair is **ineligible** (other blockers present) or **fails** (no
+confident feature match), the slot stays `needs_review` but the raw blocker is
+reworded to the clearer `TRACEABILITY_UNRESOLVED_MESSAGE` ("Synapse could not
+verify how this artifact maps back to the PRD…") rather than "references none of
+the PRD features". Only the initial validation is stricter now-structural:
+traceability is emitted **structurally** by generation (data_model entities carry
+`featureRefs`, rendered as a `**Related Features:**` line; user_flows emit a
+`**Related Features:**` line per flow; implementation_plan carries per-task
+`linkedArtifacts.prd` in its `synapse-plan` JSON fence), reducing how often
+repair is even needed. Legacy artifacts are unaffected on load — blockers are
+only computed at generation time and read from persisted metadata, so an old
+artifact without structured traceability never shows a blocking banner unless it
+is regenerated/revalidated.
+
 ### Dependency sufficiency gate (`src/lib/artifactDependencyGate.ts`)
 
 An artifact must not silently generate from missing/errored **required** upstream
