@@ -101,11 +101,15 @@ export class RevisionConflictError extends Error {
 export async function saveProject(
   id: string,
   bundle: ProjectBundle,
-  opts: { expectedRevision?: number } = {},
+  opts: { expectedRevision?: number; expectedUpdatedAt?: string } = {},
 ): Promise<ServerProjectSummary> {
   const params = new URLSearchParams({ id });
   if (typeof opts.expectedRevision === 'number') {
     params.set('expectedRevision', String(opts.expectedRevision));
+  } else if (opts.expectedUpdatedAt) {
+    // Legacy fallback: guard on the last-seen updatedAt when the row has no
+    // revision baseline yet.
+    params.set('expectedUpdatedAt', opts.expectedUpdatedAt);
   }
   const resp = await fetch(`${API_BASE}?${params.toString()}`, {
     method: 'PUT',

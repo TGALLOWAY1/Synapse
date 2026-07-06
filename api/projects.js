@@ -273,7 +273,12 @@ export default async function handler(req, res) {
         expectedRaw !== undefined && expectedRaw !== '' && Number.isFinite(Number(expectedRaw))
           ? Number(expectedRaw)
           : undefined;
-      const saved = await upsertProject(userId, id, bundle, { expectedRevision });
+      // Fallback guard for legacy rows that predate the revision counter: the
+      // client sends the updatedAt it last saw instead.
+      const expectedUpdatedAtRaw = req.query?.expectedUpdatedAt;
+      const expectedUpdatedAt =
+        typeof expectedUpdatedAtRaw === 'string' && expectedUpdatedAtRaw ? expectedUpdatedAtRaw : undefined;
+      const saved = await upsertProject(userId, id, bundle, { expectedRevision, expectedUpdatedAt });
       if (saved?.conflict) {
         return json(res, 409, {
           error: 'revision_conflict',

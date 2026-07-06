@@ -137,10 +137,16 @@ async function pushProjectNow(projectId: string): Promise<void> {
   sync.patchProjectSync(projectId, { state: 'saving', updatedAt: Date.now() });
   try {
     // Conditional write: send the revision we last saw so the server rejects the
-    // save (409) if it advanced on another device instead of overwriting it.
+    // save (409) if it advanced on another device instead of overwriting it. For
+    // a legacy row with no revision baseline, fall back to the last-seen
+    // updatedAt so the guard still applies instead of pushing unconditionally.
     const expectedRevision =
       typeof meta.lastSeenServerRevision === 'number' ? meta.lastSeenServerRevision : undefined;
-    const saved = await saveProject(projectId, bundle, { expectedRevision });
+    const expectedUpdatedAt =
+      expectedRevision === undefined && typeof meta.lastSeenServerUpdatedAt === 'string'
+        ? meta.lastSeenServerUpdatedAt
+        : undefined;
+    const saved = await saveProject(projectId, bundle, { expectedRevision, expectedUpdatedAt });
     if (activeUserId === userId) markProjectsMigrated(userId, [projectId]);
     recordCloudSaved(userId, projectId, saved);
     projectsDebug('project pushed to server', { projectId, revision: saved?.revision });
@@ -270,6 +276,11 @@ async function reconcile(userId: string): Promise<void> {
     // device while the local copy is clean (a safe refresh — overwrite local).
     const toAdd: ServerProjectSummary[] = [];
     const toRefresh: ServerProjectSummary[] = [];
+    // Both-exist projects with unsynced local edits that the server has NOT
+    // advanced past — a failed save or a tab-close after schedulePush can leave
+    // these pending across a reload. Re-push them so they don't silently linger
+    // as local-only while the banner reads "synced".
+    const toRetryPush: string[] = [];
     for (const summary of summaries) {
       if (!localIds.has(summary.id)) {
         toAdd.push(summary);
@@ -286,15 +297,20 @@ async function reconcile(userId: string): Promise<void> {
           revision: summary.revision,
           updatedAt: summary.updatedAt,
         });
-      } else if (meta.lastSeenServerRevision === undefined && !meta.conflict) {
-        // First time we've reconciled this project post-baseline (e.g. data
-        // saved before conflict tracking existed) — record the current server
-        // revision so future reconciles can detect divergence. Does not touch a
-        // pending unsynced flag.
-        setProjectSyncMeta(userId, summary.id, {
-          lastSeenServerRevision: typeof summary.revision === 'number' ? summary.revision : undefined,
-          lastSeenServerUpdatedAt: typeof summary.updatedAt === 'string' ? summary.updatedAt : undefined,
-        });
+      } else {
+        // Not server-newer.
+        if (meta.lastSeenServerRevision === undefined && !meta.conflict) {
+          // First reconcile post-baseline (e.g. data saved before conflict
+          // tracking existed) — record the current server version so future
+          // reconciles can detect divergence. Does not touch the unsynced flag.
+          setProjectSyncMeta(userId, summary.id, {
+            lastSeenServerRevision: typeof summary.revision === 'number' ? summary.revision : undefined,
+            lastSeenServerUpdatedAt: typeof summary.updatedAt === 'string' ? summary.updatedAt : undefined,
+          });
+        }
+        if (dirty && !meta.conflict) {
+          toRetryPush.push(summary.id); // pending upload survived a reload — retry it
+        }
       }
     }
 
@@ -344,6 +360,14 @@ async function reconcile(userId: string): Promise<void> {
       const wasMigrated = migrated.has(id);
       await pushProjectNow(id);
       if (!wasMigrated) migratedCount += 1;
+    }
+
+    // Retry pending uploads (dirty, both-exist, not server-newer) that a prior
+    // failed save / tab-close left unsynced. pushProjectNow is conditional, so a
+    // race that advanced the server since fetchProjectList still becomes a
+    // conflict rather than an overwrite.
+    for (const id of toRetryPush) {
+      await pushProjectNow(id);
     }
 
     knownProjectIds = new Set(syncableIds(useProjectStore.getState()));

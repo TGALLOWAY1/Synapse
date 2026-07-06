@@ -255,12 +255,15 @@ device-scoped and never syncs) and full design.
   fetch-one, PUT upsert — covers PRD/artifact saves, bulk import, soft-delete/
   restore, archive toggles, hard-delete). No public/shared access exists. Each
   doc carries a monotonic `revision` counter (`$inc` per upsert); `upsertProject`
-  returns the new revision and accepts an optional **`expectedRevision`**
-  (threaded from `?expectedRevision`) — an **optimistic-concurrency guard**: when
-  the caller's expected revision no longer matches the stored one (another device
-  saved in the interim), it does NOT write and returns `{ conflict, currentRevision }`,
-  which the handler maps to **HTTP 409**. A first-time save (no expectedRevision)
-  is unaffected.
+  returns the new revision and accepts an optional **`expectedRevision`** (or, for
+  legacy rows with no revision yet, **`expectedUpdatedAt`**; both threaded from the
+  query string) — an **atomic optimistic-concurrency guard**: the expected version
+  is pinned INTO the `updateOne` filter (`upsert:false`), so the check-and-write
+  is atomic and two devices saving concurrently with the same baseline can't both
+  win — the loser's filter misses and it gets `{ conflict, currentRevision }`
+  (mapped to **HTTP 409**) rather than a silent overwrite. On a miss the store
+  distinguishes conflict (row advanced) from a remotely-deleted row (re-created
+  via the unconditional path). A first-time save (no guard) is unaffected.
 - **Client serialization.** A **ProjectBundle** (`src/lib/projectBundle.ts`,
   pure) is the transport unit: `extractProjectBundle` gathers a project's nine
   store slices; `mergeBundlesIntoSource` merges server bundles back **additively

@@ -247,6 +247,31 @@ describe('push guard → a stale push is rejected and becomes a conflict', () =>
   });
 });
 
+describe('dirty project is retried on reconcile after a reload', () => {
+  it('re-pushes a pending (dirty, not server-newer) project instead of leaving it stuck', async () => {
+    seedLocalProject('p1', 'Local p1');
+    // A prior save failed / the tab closed after schedulePush — durable dirty
+    // flag survived the reload; server has NOT advanced.
+    setProjectSyncMeta('user-a', 'p1', { lastSeenServerRevision: 2, hasUnsyncedChanges: true });
+    client.fetchProjectList.mockResolvedValue([{ id: 'p1', revision: 2 }]);
+    client.saveProject.mockResolvedValue({ id: 'p1', revision: 3 });
+
+    startProjectSync('user-a');
+
+    await vi.waitFor(() => {
+      expect(client.saveProject).toHaveBeenCalledWith(
+        'p1',
+        expect.objectContaining({ project: expect.any(Object) }),
+        expect.objectContaining({ expectedRevision: 2 }),
+      );
+    });
+    // The pending upload cleared.
+    await vi.waitFor(() => {
+      expect(getProjectSyncMeta('user-a', 'p1').hasUnsyncedChanges).toBe(false);
+    });
+  });
+});
+
 describe('cloud save failure exposes unsynced / failed durability state', () => {
   it('sets an error state and records the failure without dropping local data', async () => {
     seedLocalProject('p1', 'Local p1');
