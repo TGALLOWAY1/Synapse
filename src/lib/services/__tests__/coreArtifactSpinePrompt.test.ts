@@ -45,7 +45,7 @@ beforeEach(() => {
 describe('generateCoreArtifact — canonical spine prompt', () => {
     it('leads with the authoritative Canonical PRD Spine and demotes full PRD to a fallback', async () => {
         const spine = buildCanonicalPrdSpine(PRD, { now: () => 1 });
-        await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine });
+        await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine, allowMissingDependencies: true });
 
         const prompt = lastUserPrompt();
         expect(prompt).toMatch(/Canonical PRD Spine \(AUTHORITATIVE/);
@@ -62,20 +62,20 @@ describe('generateCoreArtifact — canonical spine prompt', () => {
 
     it('records spineContextUsed + spineSchemaVersion in the returned metadata', async () => {
         const spine = buildCanonicalPrdSpine(PRD, { now: () => 1 });
-        const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine });
+        const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { canonicalSpine: spine, allowMissingDependencies: true });
         expect(result.metadata?.spineContextUsed).toBe(true);
         expect(result.metadata?.spineSchemaVersion).toBe(spine.meta.schemaVersion);
     });
 
     it('rebuilds a spine when the caller passes none (old projects without a saved spine)', async () => {
-        const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD);
+        const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, PRD, { allowMissingDependencies: true });
         expect(result.metadata?.spineContextUsed).toBe(true);
         expect(lastUserPrompt()).toMatch(/Canonical PRD Spine \(AUTHORITATIVE/);
     });
 
     it('falls back to the legacy summary prompt when the PRD has no features', async () => {
         const prdNoFeatures: StructuredPRD = { ...PRD, features: [] };
-        const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, prdNoFeatures);
+        const result = await generateCoreArtifact('user_flows', PRD_MARKDOWN, prdNoFeatures, { allowMissingDependencies: true });
         const prompt = lastUserPrompt();
         expect(result.metadata?.spineContextUsed).toBe(false);
         expect(prompt).toContain('Canonical Feature Glossary:');
