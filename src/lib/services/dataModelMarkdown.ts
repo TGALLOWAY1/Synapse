@@ -281,7 +281,10 @@ export function dataModelToMarkdown(model: DataModelContent): string {
         if (mut) {
             lines.push(`**Mutability:** ${mut}`);
         }
-        if (entity.purpose || entity.userFacing !== undefined || mut) {
+        if (entity.featureRefs?.length) {
+            lines.push(`**Related Features:** ${entity.featureRefs.join(', ')}`);
+        }
+        if (entity.purpose || entity.userFacing !== undefined || mut || entity.featureRefs?.length) {
             lines.push('');
         }
 
