@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp, MessageSquareText, AlertTriangle, Loader2, RefreshCcw } from 'lucide-react';
+import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp, MessageSquareText, AlertTriangle, Loader2, RefreshCcw, Clock, Images } from 'lucide-react';
 import type { MockupImageRecord, MockupPayload, MockupScreen, MockupSettings, StalenessState } from '../../types';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
@@ -328,6 +328,11 @@ export function MockupViewer({
 
                     <div className="flex items-center justify-between gap-2 flex-wrap mt-3">
                         <div className="flex items-center gap-2 flex-wrap">
+                            {/* Only claim "AI Generated" when every screen's image is
+                                present. Partial/awaiting/generating/failed states must
+                                not read as complete visuals. When completion can't be
+                                computed (AI preview unavailable in this context), keep
+                                the neutral "AI Generated" label. */}
                             {completion && completion.failed > 0 ? (
                                 <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-red-200 bg-red-50 text-red-700 font-medium">
                                     <AlertTriangle size={10} />
@@ -337,6 +342,16 @@ export function MockupViewer({
                                 <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-sky-200 bg-sky-50 text-sky-700 font-medium">
                                     <Loader2 size={10} className="animate-spin" />
                                     Generating images · {completion.generated}/{completion.total}
+                                </span>
+                            ) : completion && completion.status === 'none' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium">
+                                    <Clock size={10} />
+                                    Awaiting images · 0/{completion.total}
+                                </span>
+                            ) : completion && completion.status === 'partial' ? (
+                                <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 font-medium">
+                                    <Images size={10} />
+                                    Images · {completion.generated}/{completion.total}
                                 </span>
                             ) : (
                                 <span className="inline-flex items-center gap-1 text-[10px] uppercase tracking-wider px-2 py-0.5 rounded-full border border-indigo-200 bg-indigo-50 text-indigo-700 font-medium">
