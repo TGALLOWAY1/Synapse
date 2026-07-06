@@ -92,14 +92,16 @@ function Disclosure({
                 aria-expanded={open}
                 className="w-full flex items-center gap-3 px-4 py-3.5 text-left hover:bg-white/[0.03] transition-colors"
             >
-                <div className="text-neutral-400 shrink-0">{icon}</div>
+                <div className="w-9 h-9 rounded-xl bg-indigo-500/10 text-indigo-300 flex items-center justify-center shrink-0">
+                    {icon}
+                </div>
                 <div className="min-w-0 flex-1">
                     <p className="text-sm font-semibold text-neutral-200">{title}</p>
                     {subtitle && <p className="text-[11px] text-neutral-500 leading-snug">{subtitle}</p>}
                 </div>
-                <ChevronDown
+                <ChevronRight
                     size={16}
-                    className={`shrink-0 text-neutral-500 transition-transform ${open ? 'rotate-180' : ''}`}
+                    className={`shrink-0 text-neutral-500 transition-transform ${open ? 'rotate-90' : ''}`}
                 />
             </button>
             {open && <div className="px-4 pb-4 pt-1 space-y-3 border-t border-white/5">{children}</div>}
@@ -186,7 +188,7 @@ export function SettingsModal({ onClose }: SettingsModalProps) {
                     </div>
                     <button
                         onClick={onClose}
-                        className="w-8 h-8 rounded-full flex items-center justify-center text-neutral-500 hover:text-white hover:bg-white/5 transition-all"
+                        className="w-9 h-9 rounded-full flex items-center justify-center text-neutral-400 bg-white/5 hover:text-white hover:bg-white/10 transition-all"
                     >
                         <X size={20} />
                     </button>
