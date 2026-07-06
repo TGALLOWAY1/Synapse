@@ -6,6 +6,7 @@
 
 import type { DesignTokens, ScreenItem } from '../../types';
 import { buildDesignSystemBrief } from '../designTokens';
+import { IMAGE_PLATFORM_HINTS, IMAGE_CLOSING_RULES, fidelityStyleHint } from '../prompts/imagePromptFragments';
 
 interface ScreenImagePromptContext {
     /** Product title for grounding the mockup. */
@@ -25,11 +26,8 @@ interface ScreenImagePromptContext {
     designTokens?: DesignTokens;
 }
 
-const PLATFORM_HINTS: Record<NonNullable<ScreenImagePromptContext['platformHint']>, string> = {
-    mobile: 'mobile app screen, portrait orientation',
-    desktop: 'desktop web app screen, landscape orientation',
-    responsive: 'responsive web app screen',
-};
+// Shared with the internal gpt-image-2 builder — see imagePromptFragments.
+const PLATFORM_HINTS = IMAGE_PLATFORM_HINTS;
 
 /**
  * Build a copy-pasteable image-generation prompt for one screen-inventory
@@ -75,13 +73,12 @@ export const buildExternalMockupPrompt = (
         : '';
 
     // When the project has a design system, the brief dictates the palette,
-    // typography, radius, etc. — so we drop the generic "neutral palette with
-    // one accent color" claim that would otherwise contradict it. Without a
-    // design system we keep that neutral fallback so the prompt still works.
+    // typography, radius, etc. — so the shared token-aware hint drops the
+    // generic "neutral palette with one accent color" claim that would
+    // otherwise contradict it. Without a design system the neutral fallback
+    // keeps the prompt self-sufficient.
     const tokens = context.designTokens;
-    const styleLine = tokens
-        ? `Style: mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, no decorative imagery.`
-        : `Style: mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, neutral palette with one accent color, no decorative imagery.`;
+    const styleLine = `Style: ${fidelityStyleHint('mid', Boolean(tokens))}.`;
     const designBriefLine = tokens ? buildDesignSystemBrief(tokens) : '';
 
     return [
@@ -95,7 +92,6 @@ export const buildExternalMockupPrompt = (
         `Render as a ${platform}.`,
         styleLine,
         designBriefLine,
-        `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,
-        `No watermarks, no logos of real companies, no photographic people.`,
+        ...IMAGE_CLOSING_RULES,
     ].filter(Boolean).join(' ');
 };

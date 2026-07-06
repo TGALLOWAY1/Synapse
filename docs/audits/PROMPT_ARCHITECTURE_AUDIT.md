@@ -3,9 +3,17 @@
 **Date:** 2026-07-06
 **Scope:** every prompt, prompt fragment, prompt-building utility, and prompt-adjacent
 contract in the Synapse codebase (`src/` + `api/`), treated as one architecture.
-**Status:** audit + proposal only — no prompt text has been changed. Individual prompt
-rewrites should happen only after this architecture is reviewed and the shared layers
-in §6 exist.
+**Status:** the low-behavioral-risk phases are **implemented** (same branch, follow-up
+commit): R1+R2 (dead-prompt removal + retired-prompt isolation), R3 (single
+safety-policy source: `src/lib/safety/safetyPolicy.ts`), R4 conflicts C1/C2/C3/C7,
+the R5 fragment extractions (`prompts/artifactPromptFragments.ts`,
+`prompts/imagePromptFragments.ts`), and an R10-lite snapshot net
+(`src/lib/__tests__/promptSurfaces.test.ts`, 46 snapshots). The
+behavior-affecting migrations — R6 (unified upstream-context serialization),
+R7 (real system/user split on the PRD side), R8 (preamble cost reduction) —
+remain deferred per §7's sequencing, now with the snapshot net in place to make
+their diffs reviewable. R9 was resolved by deleting the unwired
+`refineCoreArtifact` (its C5/C6 conflicts died with it). R11/R12 remain open.
 
 ---
 

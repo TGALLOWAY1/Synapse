@@ -90,7 +90,7 @@ export const computeWaves = (
 const mapStatus = (s?: PrdSectionStatusEntry['status']): GenerationStepStatus => {
     if (s === 'complete') return 'completed';
     if (s === 'error') return 'failed';
-    if (s === 'generating' || s === 'refining') return 'in_progress';
+    if (s === 'generating') return 'in_progress';
     // 'queued' = dependencies satisfied, waiting for a concurrency slot — kept
     // distinct from 'pending' (waiting on deps) so the UI can label them apart.
     if (s === 'queued') return 'queued';

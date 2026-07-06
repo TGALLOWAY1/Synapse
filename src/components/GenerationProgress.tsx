@@ -4,7 +4,7 @@ import type { ProgressStage } from './generationStages';
 
 export interface SectionStatusInfo {
     tier: 'fast' | 'strong';
-    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
+    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error';
     model?: string;
     ms?: number;
     error?: string;
@@ -128,7 +128,7 @@ export function GenerationProgress({
     // Tick once per second while any section is mid-generation so the
     // "elapsed/estimate" counter on each active pip stays current.
     const hasActiveSection = hasSectionStatus && Object.values(sectionStatus!).some(
-        info => info.status === 'generating' || info.status === 'refining',
+        info => info.status === 'generating',
     );
     useEffect(() => {
         if (!hasActiveSection) return;
@@ -338,7 +338,7 @@ export function GenerationProgress({
                                         : info.model.slice(0, 6))
                                     : (isFast ? 'Flash' : 'Pro');
 
-                                const isActive = info.status === 'generating' || info.status === 'refining';
+                                const isActive = info.status === 'generating';
                                 const isComplete = info.status === 'complete';
                                 const isError = info.status === 'error';
 

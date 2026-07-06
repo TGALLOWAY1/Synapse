@@ -1,7 +1,8 @@
 // Multi-agent progressive PRD pipeline. Replaces the single-pass
-// runPrdPipeline call with a DAG-orchestrated approach: 10 schema-aligned
-// sections run concurrently with Flash (fast) or Pro (strong) per section.
-// Returns the same PrdPipelineResult shape for drop-in compatibility.
+// runPrdPipeline call with a DAG-orchestrated approach: the 8 schema-aligned
+// sections in DEFAULT_PRD_SECTIONS run concurrently with Flash (fast) or Pro
+// (strong) per section. Returns the same PrdPipelineResult shape for drop-in
+// compatibility.
 
 import { getFastModel, getStrongModel } from '../geminiClient';
 import { generateProgressivePrd, DEFAULT_PRD_SECTIONS, selectModelTier } from './progressivePrdGeneration';
@@ -19,7 +20,7 @@ export const PRD_SCHEMA_VERSION = 2;
 
 export type SectionStatusUpdate = {
     tier: 'fast' | 'strong';
-    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
+    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error';
     model?: string;
     ms?: number;
     error?: string;
@@ -105,7 +106,6 @@ export const runProgressivePrdPipeline = async (
             strongModel,
             maxFastConcurrency: 4,
             maxStrongConcurrency: 3,
-            enableRefinementPass: false,
         },
         signal,
         traceContext,
@@ -231,13 +231,6 @@ export const runProgressivePrdPipeline = async (
                     error: event.error,
                 });
                 passes.push({ stage: event.sectionId, ms, ok: false });
-            } else if (event.type === 'section_refining') {
-                const section = SECTION_BY_ID[event.sectionId];
-                const tier = section ? selectModelTier(section.risk) : 'strong';
-                onSectionStatus?.(event.sectionId as SectionId, {
-                    tier: tier === 'fast' ? 'fast' : 'strong',
-                    status: 'refining',
-                });
             }
         },
     });

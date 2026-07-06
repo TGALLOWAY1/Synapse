@@ -458,9 +458,16 @@ export const implementationPlanSchema = {
                                 id: { type: "STRING" },
                                 title: { type: "STRING" },
                                 description: { type: "STRING" },
+                                // Generation-time enum. A generated plan is a plan,
+                                // not an execution record, so only "todo" is valid
+                                // here (the prompt demands it; the schema now
+                                // enforces it). Execution statuses live on
+                                // ProjectTask in tasksSlice — legacy persisted
+                                // artifacts with other values still parse because
+                                // this schema constrains generation only.
                                 status: {
                                     type: "STRING",
-                                    enum: ["todo", "in_progress", "done", "blocked"],
+                                    enum: ["todo"],
                                 },
                                 dependencies: { type: "ARRAY", items: { type: "STRING" } },
                                 linkedArtifacts: {

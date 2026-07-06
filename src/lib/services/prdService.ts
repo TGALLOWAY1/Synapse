@@ -27,14 +27,15 @@ Rules:
 };
 
 /**
- * Runs the multi-pass PRD generation pipeline (Strategy → Render+Score →
- * conditional Revision) and returns the final structured PRD.
+ * Runs the section-by-section DAG PRD pipeline (safety gate → concurrent
+ * section generation → merge → silent consistency review) and returns the
+ * final structured PRD.
  *
  * The legacy single-return signature is preserved so existing call sites
- * continue to compile. Callers that want the markdown, quality scores, and
- * generation meta should pass `options.onResult` (a richer callback) and use
- * `options.onPartial` to render the Pass A draft progressively. The returned
- * promise still resolves with the final StructuredPRD for backwards compat.
+ * continue to compile. Callers that want the markdown and generation meta
+ * should pass `options.onResult` (a richer callback) and use
+ * `options.onPartial` to render the in-progress draft. The returned promise
+ * still resolves with the final StructuredPRD for backwards compat.
  */
 export const generateStructuredPRD = async (
     promptText: string,

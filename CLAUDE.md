@@ -580,8 +580,8 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       hundreds of implementation/security-config "restricted" items ("Disable
       SSL pinning", "Modify SQLite database", "Bypass rate limiting") that read
       like hallucinated infra docs or prompt injection. The fix is two-layer:
-      **(1) prompting** — both `prdSectionPrompts.ts` (`ux_loops`) and the
-      legacy `prdPrompts.ts` roles spec demand concise capability-based
+      **(1) prompting** — the `prdSectionPrompts.ts` (`ux_loops`) roles spec
+      demands concise capability-based
       permissions (allowed 5–15, restricted optional & small 3–10, omitted when
       nothing product-meaningful), and forbid backend/infra/DB/OS/networking/
       security-implementation detail; **(2) deterministic validation+repair** —
@@ -903,11 +903,32 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     to fallbacks (generic question set / local recap) on non-safety failure.
   - `artifactJobController.ts` — concurrency control for artifact bundle
     generation.
-- **`prompts/prdPrompts.ts`** — strategy system instruction; the
-  `RUBRIC_DEFINITION` "quality bar" is appended so Pass A self-targets the
-  rubric in its first response. `SAFETY_OVERRIDE` is prepended ahead of all
-  formatting/rubric text in every section preamble (`prdSectionPrompts.ts`) as
-  defense-in-depth.
+- **`prompts/prdPrompts.ts`** — the shared PRD prompt fragments
+  (`SAFETY_OVERRIDE`, `PROMPT_CONTRACT`, `RUBRIC_DEFINITION`) composed into
+  every section preamble by `prdSectionPrompts.ts`; `SAFETY_OVERRIDE` is
+  prepended ahead of all formatting/rubric text as defense-in-depth and is
+  **rendered from `safety/safetyPolicy.ts`** (see the Safety gate section) so
+  the capability list can never drift from the classifier's. The legacy
+  single-pass strategy instruction was removed (no runtime callers; it still
+  demanded retired-section content).
+- **Shared prompt fragments & snapshot net.**
+  `prompts/artifactPromptFragments.ts` holds the artifact-prompt sentences that
+  used to be copy-pasted across `CORE_ARTIFACT_PROMPTS` subtypes
+  (`artifactRole(role)`, `AGENT_AGNOSTIC_RULE`, `ANTI_PREAMBLE_RULE`);
+  `prompts/imagePromptFragments.ts` holds the image-prompt strings shared by
+  the internal gpt-image-2 builder and the external copy prompt
+  (`IMAGE_PLATFORM_HINTS`, `IMAGE_CLOSING_RULES`, and `fidelityStyleHint(fidelity,
+  hasDesignSystem)` — the token-aware variant drops the generic "neutral
+  palette"/"accent color" claims whenever the Design System Brief is appended,
+  so one prompt never asks for a neutral palette AND a brand palette at once).
+  Do not restate these fragments inline in a task prompt — import them.
+  **Every major prompt surface is snapshot-locked** by
+  `src/lib/__tests__/promptSurfaces.test.ts` (PRD fragments + all section
+  prompts, safety classifier + restriction directive, preflight, all
+  `CORE_ARTIFACT_PROMPTS`, both image builders): an intentional prompt edit
+  must update the snapshot in the same change; an unreviewed snapshot diff is
+  drift. See `docs/audits/PROMPT_ARCHITECTURE_AUDIT.md` for the full prompt
+  architecture map and remaining recommendations.
 
 ### Safety gate (`src/lib/safety/`)
 
@@ -921,6 +942,13 @@ request…").
 - The classifier (`classifyProjectSafety.ts`) returns a `SafetyClassificationResult`
   (`allowed` | `allowed_with_restrictions` | `disallowed`) via Gemini JSON mode
   (`schemas/safetySchemas.ts`). Transport is injectable for tests.
+- **`safetyPolicy.ts` is the single source of the policy TEXT.** The
+  disallowed-capability list, the classifier system instruction, the in-prompt
+  `SAFETY_OVERRIDE` (re-exported via `prompts/prdPrompts.ts`), and the two
+  concern-summary fallbacks in `safetyReviewArtifact.ts` all render from this
+  one module — they used to be four independently-drifting literals. Edit the
+  policy there, never inline at a surface; `safetyPolicy.test.ts` asserts every
+  surface carries every capability term.
 - **`disallowed`** → `generateStructuredPRD` throws `SafetyBlockedError`; the
   pipeline never runs. Call sites (`HomePage`, `ProjectWorkspace.handleRegenerate`)
   catch it and persist a `blocked` `SpineVersion.safetyReview` (+ a canonical
@@ -1747,6 +1775,12 @@ component). It is driven directly by the live `prdSectionStatus` store slice
   `parseSectionJson()` helper (in `progressivePrdGeneration.ts`) is reused by
   both the DAG worker and the retry path. `SECTION_DESCRIPTIONS` (next to
   `SECTION_TITLES` in `prdSectionPrompts.ts`) supplies the row descriptions.
+  **Restricted projects retry under their original constraints:** the caller
+  passes the spine's persisted `safetyReview`, and `regeneratePrdSection`
+  re-appends the reconstructed restriction directive to the idea exactly as
+  `generateStructuredPRD` does on a full run (the stored `promptText` is the
+  raw idea, so without this the retry would silently drop the constraints).
+  Pass `safetyReview` from any new retry call site.
 
 The card is shown while `isPRDActivelyGenerating || hasFailedSection`, so a
 partial-failure run (which returns a partial PRD without setting

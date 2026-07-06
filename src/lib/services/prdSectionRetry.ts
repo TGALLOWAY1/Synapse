@@ -10,6 +10,8 @@ import { type SectionId, SECTION_SCHEMAS } from '../schemas/prdSchemas';
 import { buildSectionPrompt } from '../prompts/prdSectionPrompts';
 import { renderPremiumMarkdown } from './prdMarkdownRenderer';
 import { sanitizeRolePermissions } from '../prdRolesSanitizer';
+import { buildRestrictionDirective } from '../safety/safetyReviewArtifact';
+import type { SafetyClassificationResult, SpineSafetyReview } from '../safety/safetyTypes';
 import {
     DEFAULT_PRD_SECTIONS,
     RETIRED_PRD_SECTIONS,
@@ -29,6 +31,34 @@ export type RetrySectionOptions = {
     platform?: ProjectPlatform;
     signal?: AbortSignal;
     onSectionStatus?: (sectionId: SectionId, update: SectionStatusUpdate) => void;
+    /**
+     * The spine's persisted safety review. For a `restricted` run the binding
+     * restriction directive is re-appended to the idea exactly as
+     * `generateStructuredPRD` does on a full run — without this, a restricted
+     * project's section retry would regenerate with only the generic safety
+     * override, silently dropping its specific constraints.
+     */
+    safetyReview?: SpineSafetyReview;
+};
+
+/**
+ * Rebuild the restriction directive from a persisted `SpineSafetyReview`.
+ * Mirrors `canonicalPrdSpine.buildSafety`: the review lacks `confidence`,
+ * which the directive builder does not use, so a placeholder is safe.
+ */
+const restrictionDirectiveFromReview = (review: SpineSafetyReview | undefined): string | null => {
+    if (!review) return null;
+    const restricted =
+        review.status === 'restricted' || review.classification === 'allowed_with_restrictions';
+    if (!restricted) return null;
+    const asResult: SafetyClassificationResult = {
+        classification: review.classification,
+        confidence: 'medium',
+        detectedConcerns: review.detectedConcerns,
+        userFacingReason: review.userFacingReason,
+        safeAlternatives: review.safeAlternatives,
+    };
+    return buildRestrictionDirective(asResult);
 };
 
 /**
@@ -46,7 +76,7 @@ export const regeneratePrdSection = async (
     currentPRD: StructuredPRD,
     options: RetrySectionOptions = {},
 ): Promise<RetrySectionResult> => {
-    const { platform, signal, onSectionStatus } = options;
+    const { platform, signal, onSectionStatus, safetyReview } = options;
 
     // RETIRED_PRD_SECTIONS keeps retry working for legacy spines whose
     // failedSections reference a section no longer in the default graph.
@@ -68,8 +98,16 @@ export const regeneratePrdSection = async (
 
     const start = performance.now();
     try {
+        // Re-apply the restriction directive for restricted projects (the
+        // stored promptText is the raw idea — the directive was appended
+        // downstream of it on the original run).
+        const restrictionDirective = restrictionDirectiveFromReview(safetyReview);
+        const effectiveIdea = restrictionDirective
+            ? `${promptText}\n\n${restrictionDirective}`
+            : promptText;
+
         const { system, user } = buildSectionPrompt(sectionId, {
-            idea: promptText,
+            idea: effectiveIdea,
             platform,
             upstream: currentPRD,
         });

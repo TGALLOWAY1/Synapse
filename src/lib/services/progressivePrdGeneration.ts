@@ -19,7 +19,6 @@ export type PrdSectionStatus =
     | 'generating'
     | 'streaming'
     | 'draft_complete'
-    | 'refining'
     | 'complete'
     | 'error'
     | 'user_edited';
@@ -54,19 +53,12 @@ export type PrdSectionTemplate = {
     estimatedSeconds: number;
 };
 
-export type SectionGenerationResult = {
-    content: string;
-    confidence: number;
-    concerns: string[];
-};
-
 export type ProgressiveGenerationConfig = {
     fastModel: string;
     strongModel: string;
     premiumModel?: string;
     maxFastConcurrency: number;
     maxStrongConcurrency: number;
-    enableRefinementPass: boolean;
 };
 
 /** Token counts captured from a model call (observational; for metrics). */
@@ -97,9 +89,7 @@ export type ProgressiveEvent =
     // "queued — waiting for a slot" UI state (distinct from "waiting on deps").
     | { type: 'section_ready'; sectionId: string }
     | { type: 'section_started'; sectionId: string; modelTier: ModelTier; model: string }
-    | { type: 'section_completed'; sectionId: string; content: string; confidence?: number; usage?: NodeTokenUsage }
-    | { type: 'section_refining'; sectionId: string }
-    | { type: 'section_refined'; sectionId: string; content: string; confidence?: number }
+    | { type: 'section_completed'; sectionId: string; content: string; usage?: NodeTokenUsage }
     | { type: 'section_error'; sectionId: string; error: string }
     | { type: 'session_completed' };
 
@@ -498,38 +488,14 @@ export async function generateProgressivePrd(params: {
             results[section.id] = parsed;
             params.onSectionResult?.(section.id, parsed);
 
-            const confidence = raw.length > 120 ? 0.8 : 0.6;
-            const result: SectionGenerationResult = { content: raw, confidence, concerns: [] };
-            const updated = applyAiUpdate(job, result.content);
-            updated.confidence = result.confidence;
+            const updated = applyAiUpdate(job, raw);
             jobs[section.id] = updated;
             params.onEvent?.({
                 type: 'section_completed',
                 sectionId: section.id,
                 content: updated.content,
-                confidence: updated.confidence,
                 usage,
             });
-
-            if (params.config.enableRefinementPass && result.confidence < 0.72 && tier === 'fast') {
-                jobs[section.id] = { ...jobs[section.id], status: 'refining' };
-                params.onEvent?.({ type: 'section_refining', sectionId: section.id });
-                const refined = await provider.generateText({
-                    model: params.config.strongModel,
-                    prompt: `Refine this PRD section. Increase specificity, remove all ambiguity and hedging, and replace any vague or informal phrasing with formal, professional, implementation-ready language. Preserve the structure and schema exactly — same fields, same shape — and return only the JSON object.\n\n${result.content}`,
-                    schema,
-                    signal: params.signal,
-                    traceMeta: { ...traceMeta, purpose: `Refine ${section.title}` },
-                });
-                const post = applyAiUpdate(jobs[section.id], refined);
-                jobs[section.id] = { ...post, confidence: Math.max(0.75, result.confidence) };
-                params.onEvent?.({
-                    type: 'section_refined',
-                    sectionId: section.id,
-                    content: jobs[section.id].content,
-                    confidence: jobs[section.id].confidence,
-                });
-            }
         } catch (e) {
             results[section.id] = null;
             params.onSectionResult?.(section.id, null);

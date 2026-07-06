@@ -1,7 +1,8 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan, CanonicalPrdSpine } from '../../types';
-import { callGemini, callGeminiStream } from '../geminiClient';
+import { callGeminiStream } from '../geminiClient';
 import type { ProviderOptions } from '../geminiClient';
 import type { LlmTraceMeta } from '../trace/traceTypes';
+import { artifactRole, AGENT_AGNOSTIC_RULE, ANTI_PREAMBLE_RULE } from '../prompts/artifactPromptFragments';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
 import type { ArtifactComplexity } from '../artifactModelSettings';
 import { screenInventorySchema, dataModelSchema, componentInventorySchema, designSystemTokensSchema, implementationPlanSchema } from '../schemas/artifactSchemas';
@@ -46,9 +47,12 @@ export type { ArtifactComplexity };
 export const selectArtifactModel = (subtype: CoreArtifactSubtype): string =>
     getArtifactModel(subtype);
 
-const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
+// Exported ONLY for the prompt-surface snapshot tests (promptSurfaces.test.ts)
+// so any edit to an artifact system prompt shows up as a reviewed snapshot
+// diff. Runtime consumers must keep going through generateCoreArtifact.
+export const CORE_ARTIFACT_PROMPTS: Record<CoreArtifactSubtype, { system: string; userPrefix: string }> = {
     screen_inventory: {
-        system: `You are a senior product designer producing production-grade artifacts for engineering teams. Produce a system-level Screen Inventory — a structured map of the product experience, NOT a flat list.
+        system: `${artifactRole('senior product designer')} Produce a system-level Screen Inventory — a structured map of the product experience, NOT a flat list.
 
 Output strictly the JSON shape supplied. The schema groups screens into product-area sections; for each screen you must model state, intent, entry/exit, and risk.
 
@@ -71,7 +75,7 @@ Rules:
         userPrefix: 'Create a Screen Inventory from this PRD:',
     },
     user_flows: {
-        system: `You are a senior UX designer producing production-grade artifacts for engineering teams. Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD and screen inventory context.
+        system: `${artifactRole('senior UX designer')} Create detailed User Flows — the primary user journeys and key flow sequences derived from the PRD and screen inventory context.
 
 Adhere strictly to the format below. Do not drift into narrative prose; every flow must use the exact headings and the step → response structure. Edge cases must be meaningful failure or boundary scenarios that affect the flow, not filler.
 
@@ -95,27 +99,22 @@ You may also include any of these optional sections when relevant, using the sam
 
 Cover at minimum: first-time user onboarding, the core value workflow, and one administrative/settings flow.
 
-Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
+${ANTI_PREAMBLE_RULE}`,
         userPrefix: 'Create User Flows from this PRD:',
     },
     component_inventory: {
-        system: `You are a senior frontend architect producing production-grade artifacts for engineering teams. Create a Component Inventory — a structured catalog of reusable UI components implied by the product design.
+        system: `${artifactRole('senior frontend architect')} Create a Component Inventory — a structured catalog of reusable UI components implied by the product design.
 
-Maintain consistent granularity: each entry must be a reusable component at the same level of abstraction. Do not list duplicate or overlapping components; consolidate variants of one component under that component's Props/Variants.
+Maintain consistent granularity: each entry must be a reusable component at the same level of abstraction. Do not list duplicate or overlapping components; consolidate variants of one component under that component's props.
 
-Group by category. For each component, use this exact format:
+Return a single JSON object matching the provided schema: \`categories[]\`, each with a \`name\` and its \`components[]\`. For each component, populate:
 
-#### [ComponentName]
-**Purpose:** What this component does.
-**Props/Variants:**
-- \`variant\`: primary | secondary | ghost
-- \`size\`: sm | md | lg
-- (list key props, each with a one-line description of its purpose)
-**Used In:** [Screen 1], [Screen 2], ...
-**Complexity:** Simple | Moderate | Complex
-**Notes:** Any implementation considerations.
-
-For each prop, mark whether it is required. For each component, also provide:
+- name: the component's PascalCase name (e.g. "PrimaryButton", "MoodCaptureCanvas").
+- purpose: one sentence on what this component does.
+- props: the key props, each { name, type, required, description } — include variant/size style props where the component has them (e.g. variant: primary | secondary | ghost; size: sm | md | lg), with a one-line description of each prop's purpose.
+- usedIn: the screen names (from the screen inventory / PRD) where this component appears.
+- complexity: "simple" | "moderate" | "complex".
+- notes: any implementation considerations.
 - previewType: one of "accordion", "input", "toggle", "button", or "custom" — the visual archetype that best represents how the component looks/behaves.
 - accessibility: which of keyboard navigation, focus management, and screen-reader support the component must implement, plus any required ARIA attributes/states. Be honest — only mark a capability when the component genuinely requires it.
 
@@ -123,7 +122,7 @@ Categories to cover: Navigation, Forms & Inputs, Data Display, Feedback & Status
         userPrefix: 'Create a Component Inventory from this PRD:',
     },
     implementation_plan: {
-        system: `You are a senior software architect producing production-grade artifacts for engineering teams. Produce a consolidated Implementation Plan — a milestone-driven execution system that takes a developer from this product design to working software with a coding agent. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
+        system: `${artifactRole('senior software architect')} Produce a consolidated Implementation Plan — a milestone-driven execution system that takes a developer from this product design to working software with a coding agent. The JSON you return drives the rendered UI directly. Every task must be atomic and actionable — concrete engineering work a developer can execute — never an abstract theme. Dependencies must be explicit and accurate so the execution order is unambiguous.
 
 Top-level shape:
 - overview: { summary, criticalPath, teamSize }
@@ -185,7 +184,7 @@ Per prompt pack:
   ## Quality Gates
   ## Validation Commands
   ## Commit Guidance
-  The body must be fully self-contained (the recipient sees ONLY this text — no PRD, no other artifact): restate the relevant product context, feature behavior, screen/entity names, and constraints inline. Refer to features by human name, never bare IDs. Never use triple backticks inside the prompt body. The prompts MUST be agent-agnostic — never name, recommend, or assume a specific tool (e.g. Cursor, Claude Code, ChatGPT, Copilot).
+  The body must be fully self-contained (the recipient sees ONLY this text — no PRD, no other artifact): restate the relevant product context, feature behavior, screen/entity names, and constraints inline. Refer to features by human name, never bare IDs. Never use triple backticks inside the prompt body. ${AGENT_AGNOSTIC_RULE}
 - scope: { include, exclude } — bulleted scope boundaries; exclude MUST list explicit non-goals.
 - acceptanceCriteria: 3-6 specific, testable criteria.
 - recommendedCommitMessage: a conventional, imperative commit message for the resulting change.
@@ -200,7 +199,7 @@ Rules:
         userPrefix: 'Create a consolidated Implementation Plan (milestones + prompt packs + quality gates) from this PRD:',
     },
     data_model: {
-        system: `You are a senior backend architect producing production-grade artifacts for engineering teams. Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup. Define every field at field level — name, type, requiredness, and a precise description. Model only entities and fields that the PRD's features and entities require; do not introduce speculative fields. Keep entity and field names consistent with the PRD's defined entities.
+        system: `${artifactRole('senior backend architect')} Produce a Data Model that reads as a clear product/engineering explanation, not a raw schema dump. The artifact must remain structurally parseable: use the same heading and table conventions on every regeneration, and every field must appear in exactly one fieldGroup. Define every field at field level — name, type, requiredness, and a precise description. Model only entities and fields that the PRD's features and entities require; do not introduce speculative fields. Keep entity and field names consistent with the PRD's defined entities.
 
 The JSON you return drives both downstream artifacts and the rendered UI. Populate these top-level fields:
 
@@ -235,8 +234,15 @@ Top-level productMapping: an array of { field, uiBehavior } mapping the most pro
 Use stable names for entities and fields: reuse the PRD's exact entity and field names. Do not rename PRD concepts unless you provide an alias note. Keep terminology consistent across overview, fieldGroups, productMapping, and the entities themselves.`,
         userPrefix: 'Create a Data Model from this PRD:',
     },
+    // ── RETIRED — legacy rendering contract only. `prompt_pack` is in
+    // RETIRED_ARTIFACT_SUBTYPES and is never generated by new runs (the
+    // implementation_plan's milestone prompt packs replaced it). This block
+    // survives because its `### N. Title` / `**Category:**` /
+    // `**Expected Output:**` shape is the contract promptPackParser.ts parses
+    // for legacy persisted artifacts. Do NOT extend it; extend
+    // implementation_plan instead.
     prompt_pack: {
-        system: `You are a senior prompt engineer producing production-grade artifacts for engineering teams. Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into any coding agent or AI assistant WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language. The prompts MUST be agent-agnostic — never name, recommend, or assume a specific tool (e.g. Cursor, Claude Code, ChatGPT, Copilot). Do not tailor a prompt to any one agent's features.
+        system: `${artifactRole('senior prompt engineer')} Create a Prompt Pack — a bundle of ready-to-use downstream prompts that a developer can copy directly into any coding agent or AI assistant WITHOUT also pasting the PRD. Each prompt must be deterministic and directly tool-usable: precise, specific, and free of stylistic or "creative" language. ${AGENT_AGNOSTIC_RULE} Do not tailor a prompt to any one agent's features.
 
 For each prompt, use this exact format:
 
@@ -285,11 +291,11 @@ Hard rules — these are non-negotiable:
 
 Include at minimum 6 prompts covering: UI implementation, UX critique, testing strategy, API design, copy/content writing, and accessibility audit.
 
-Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert").`,
+${ANTI_PREAMBLE_RULE}`,
         userPrefix: 'Create a Prompt Pack from this PRD:',
     },
     design_system: {
-        system: `You are a senior design systems architect producing production-grade artifacts for engineering teams. Produce a Design System Starter as a STRUCTURED TOKEN CONTRACT. The output is consumed by downstream mockup generation, so every value must be machine-usable and consistent.
+        system: `${artifactRole('senior design systems architect')} Produce a Design System Starter as a STRUCTURED TOKEN CONTRACT. The output is consumed by downstream mockup generation, so every value must be machine-usable and consistent.
 
 Return a single JSON object matching the provided schema. Token namespaces:
 
@@ -751,71 +757,4 @@ Architecture: ${structuredPRD.architecture}${
     );
     onProgress?.('Validating output…');
     return { content: normalizeArtifactMarkdown(result), metadata: spineMeta };
-};
-
-export const refineCoreArtifact = async (
-    subtype: CoreArtifactSubtype,
-    currentContent: string,
-    instruction: string,
-    prdContent: string,
-    structuredPRD: StructuredPRD,
-    options?: ProviderOptions & { signal?: AbortSignal },
-): Promise<string> => {
-    options?.onStatus?.(`Refining ${subtype.replace(/_/g, ' ')}...`);
-
-    // Refine on the same complexity tier the artifact was generated with.
-    const model = selectArtifactModel(subtype);
-    const featureSummary = structuredPRD.features.map(f => `- ${f.name}: ${f.description}`).join('\n');
-    const refineTraceMeta: LlmTraceMeta = {
-        stage: 'Artifact',
-        purpose: `Refine ${subtype.replace(/_/g, ' ')}`,
-        artifact: subtype,
-        inputs: ['Current artifact', 'Refinement instruction', 'PRD context', 'Feature summary'],
-    };
-
-    if (subtype === 'screen_inventory') {
-        const system = `You are a senior product designer producing production-grade artifacts for engineering teams, refining a structured Screen Inventory. Use formal, professional, implementation-ready language.
-
-The current artifact may be either:
-- The post-upgrade JSON shape (sections[].screens[] with states, entryPoints, exitPaths, P0–P3 priority, etc.), OR
-- A legacy markdown or JSON artifact (groups[].screens[] with core/secondary/supporting priority).
-
-Rules:
-1. Apply the user's requested changes precisely. Do not rewrite parts that weren't asked about.
-2. If the input is legacy, migrate it to the post-upgrade shape on output: sections, P0–P3 priorities, states arrays, entryPoints, exitPaths.
-3. Loading / error / empty / permission states belong under \`states[]\` of their parent screen, never as separate screens (unless they own a route).
-4. coreUIElements must be semantic, not implementation-level. Provide userIntent for every screen.
-5. Return strictly the JSON shape supplied — no commentary, no markdown.`;
-
-        const result = await callGemini(
-            system,
-            `Here is the current screen inventory (may be JSON or markdown):\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-            { responseMimeType: 'application/json', responseSchema: screenInventorySchema, model, traceMeta: refineTraceMeta },
-            options?.signal,
-        );
-
-        try {
-            const parsed = JSON.parse(result);
-            const normalized = normalizeScreenInventory(parsed) ?? parsed;
-            return JSON.stringify(normalized, null, 2);
-        } catch {
-            return result;
-        }
-    }
-
-    const system = `You are an expert product designer helping refine a ${subtype.replace(/_/g, ' ')}. The user has an existing artifact and wants specific changes.
-
-Rules:
-1. Preserve the overall structure and formatting of the original artifact.
-2. Apply the user's requested changes precisely.
-3. If the user asks to add content, integrate it naturally into the existing structure.
-4. If the user asks to modify content, change only what's requested — don't rewrite everything.
-5. Return the complete updated artifact (not just the changes).`;
-
-    return callGemini(
-        system,
-        `Here is the current ${subtype.replace(/_/g, ' ')}:\n\n${currentContent}\n\n---\n\nUser's refinement instruction: ${instruction}\n\n---\n\nPRD context for reference:\n${prdContent}\n\nFeatures:\n${featureSummary}`,
-        { model, traceMeta: refineTraceMeta },
-        options?.signal,
-    );
 };

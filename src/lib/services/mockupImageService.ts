@@ -4,12 +4,7 @@
 
 import type { DesignTokens, MockupPayload, MockupScreen, MockupSettings, MockupPlatform } from '../../types';
 import { buildDesignSystemBrief } from '../designTokens';
-
-const FIDELITY_STYLE_HINTS: Record<string, string> = {
-    low: 'low-fidelity wireframe, neutral grey palette, simple rectangular placeholders and labels, sketch-style linework, no imagery',
-    mid: 'mid-fidelity flat UI mockup, structured layout with clear visual hierarchy, neutral palette with one accent color, no decorative imagery',
-    high: 'high-fidelity polished product UI screenshot, clean contemporary product styling, precise typography, soft shadows, accent color used sparingly',
-};
+import { IMAGE_PLATFORM_HINTS, IMAGE_CLOSING_RULES, fidelityStyleHint } from '../prompts/imagePromptFragments';
 
 /**
  * Pick an image size string (gpt-image-2 format `WIDTHxHEIGHT`) appropriate
@@ -44,11 +39,14 @@ export const buildScreenImagePrompt = (
     settings: MockupSettings,
     designTokens?: DesignTokens,
 ): string => {
-    const styleHint = FIDELITY_STYLE_HINTS[settings.fidelity] ?? FIDELITY_STYLE_HINTS.mid;
+    // When a Design System Brief is appended (designTokens present), the
+    // token-aware hint drops the generic palette claims so the prompt cannot
+    // simultaneously ask for a "neutral palette" and a full brand palette.
+    const styleHint = fidelityStyleHint(settings.fidelity, Boolean(designTokens));
     const platformHint =
-        settings.platform === 'mobile' ? 'mobile app screen, portrait orientation' :
-        settings.platform === 'desktop' ? 'desktop web app screen, landscape orientation' :
-        'responsive web app screen';
+        settings.platform === 'mobile' ? IMAGE_PLATFORM_HINTS.mobile :
+        settings.platform === 'desktop' ? IMAGE_PLATFORM_HINTS.desktop :
+        IMAGE_PLATFORM_HINTS.responsive;
 
     const userStyle = settings.style?.trim();
     const styleSuffix = userStyle ? ` Visual direction: ${userStyle}.` : '';
@@ -79,7 +77,6 @@ export const buildScreenImagePrompt = (
         `Product context: ${payload.summary}`,
         `Render as a ${platformHint}.`,
         `Style: ${styleHint}.${styleSuffix}${tokenBrief}`,
-        `Avoid lorem ipsum — use realistic placeholder copy that fits the screen purpose.`,
-        `No watermarks, no logos of real companies, no photographic people.`,
+        ...IMAGE_CLOSING_RULES,
     ].filter(Boolean).join(' ');
 };
