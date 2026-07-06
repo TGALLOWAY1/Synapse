@@ -1,9 +1,8 @@
 // Shared fragments for the two image-prompt builders — the internal
 // gpt-image-2 path (mockupImageService.buildScreenImagePrompt) and the
 // user-copied external prompt (screenInventoryImageService.
-// buildExternalMockupPrompt). These strings used to be byte-duplicated in
-// both files; they live here once so the two prompts cannot drift apart.
-// See docs/audits/PROMPT_ARCHITECTURE_AUDIT.md (B9/B10, C2).
+// buildExternalMockupPrompt). They live here once so the two prompts cannot
+// drift apart.
 
 /** Platform rendering hints, shared by both image prompt builders. */
 export const IMAGE_PLATFORM_HINTS = {

@@ -1,4 +1,4 @@
-// Prompt-surface snapshot net (audit R10-lite).
+// Prompt-surface snapshot net.
 //
 // Every major prompt surface is rendered against a small deterministic
 // fixture and snapshotted, so ANY textual change to a prompt — intentional or

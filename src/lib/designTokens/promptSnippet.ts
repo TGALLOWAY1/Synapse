@@ -1,10 +1,6 @@
-// Design-system serialization for image prompts.
-//
-// `buildDesignSystemBrief` below is the ONE Design System Brief embedded into
-// every prompt that drives a mockup/screen image. The old
-// `tokensToPromptSnippet` HTML-mockup contract was removed: mockup spec
-// generation no longer calls an LLM (see mockupService.ts), so the snippet had
-// no runtime caller. See docs/audits/PROMPT_ARCHITECTURE_AUDIT.md (D2).
+// Design-system serialization for image prompts. `buildDesignSystemBrief` is
+// the ONE Design System Brief embedded into every prompt that drives a
+// mockup/screen image.
 
 import type { DesignTokens } from '../../types';
 

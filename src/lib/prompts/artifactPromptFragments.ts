@@ -1,10 +1,6 @@
 // Shared instruction fragments for the core-artifact system prompts
-// (CORE_ARTIFACT_PROMPTS in coreArtifactService.ts). These sentences used to
-// be copy-pasted across subtype blocks — the role preamble appeared seven
-// times, the agent-agnostic and anti-preamble rules twice each — so an edit
-// to one copy silently missed the others. Task prompts must reference these
-// instead of restating them. See docs/audits/PROMPT_ARCHITECTURE_AUDIT.md
-// (B3/B6/B7).
+// (CORE_ARTIFACT_PROMPTS in coreArtifactService.ts). Task prompts must
+// reference these instead of restating them inline.
 
 /** Standard artifact-generation role preamble: "You are a {role} …". */
 export const artifactRole = (role: string): string =>

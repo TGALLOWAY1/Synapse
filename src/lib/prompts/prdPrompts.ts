@@ -2,11 +2,6 @@
 // progressive section pipeline (prdSectionPrompts.ts), which composes these
 // fragments into every section preamble. Markdown is rendered
 // deterministically on the client from the structured JSON.
-//
-// The legacy single-pass strategy instruction (`buildStrategySystemInstruction`)
-// and its `PLATFORM_CONTEXT` were removed — they had no runtime callers and
-// still demanded retired-section content (richDataModel / stateMachines /
-// implementationPlan). See docs/audits/PROMPT_ARCHITECTURE_AUDIT.md (D1).
 
 import { renderInPromptSafetyOverride } from '../safety/safetyPolicy';
 
