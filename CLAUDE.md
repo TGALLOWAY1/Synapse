@@ -1535,6 +1535,21 @@ per-section "Run again" button wired to the same `handleRetrySection` flow —
 this survives refresh, unlike the timeline. A successful single-section retry
 removes its id from the list (see `handleRetrySection`).
 
+**Incomplete-PRD generation gate** (`src/lib/artifactGenerationGate.ts`, pure).
+A partial PRD (`generationMeta.failedSections` non-empty) must not silently
+drive downstream artifact generation. `evaluateSpineGenerationGate(spine, opts)`
+is the code-level guardrail (defense-in-depth alongside the UI, mirroring the
+safety-blocked check): it returns `allowed:false` for a safety-blocked spine, a
+spine with no `structuredPRD`, or an incomplete spine that is neither
+acknowledged (`acknowledgeIncomplete`) nor already `isFinal` (the durable record
+of acknowledgement, so resume/retry after reload still work). `startAll` /
+`regenerateSlots` early-return when the gate disallows. On the finalize edge,
+`ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
+an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
+"Generate anyway" proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
+version generated while `failedSections` is non-empty is stamped
+`metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
+
 ### Other-flow progress UI (`src/components/GenerationProgress.tsx`)
 
 The mockup / artifact / consolidation flows still use `GenerationProgress`.
