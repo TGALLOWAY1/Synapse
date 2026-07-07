@@ -181,6 +181,40 @@ export function readScreenLinks(metadata: Record<string, unknown> | undefined): 
 
 export const EMPTY_SCREEN_LINKS: Record<string, string> = {};
 
+export function formatScreenLabel(screenId: string): string {
+    const cleaned = screenId
+        .replace(/^(scr|mod|flow|screen)[-_]/i, '')
+        .replace(/[-_]+/g, ' ')
+        .trim();
+    if (!cleaned) return screenId;
+    return cleaned.replace(/\b\w/g, c => c.toUpperCase());
+}
+
+export function buildMockupCoverage(
+    items: readonly ScreenExperienceItem[],
+    trueIssueCount = 0,
+): MockupCoverageModel {
+    const mockedScreens = items.filter(i => i.mockupScreen).length;
+    const totalScreens = items.length;
+    const unmockedScreens = items
+        .filter(i => !i.mockupScreen)
+        .map((item): UnmockedScreenCoverageItem => ({
+            screenId: item.id,
+            screenName: item.screen.name || formatScreenLabel(item.id),
+            reason: item.screen.priority === 'P0' ? 'not_generated_yet' : 'supporting_screen',
+        }));
+    return {
+        summary: {
+            totalScreens,
+            mockedScreens,
+            notMockedYetScreens: unmockedScreens.length,
+            trueIssues: trueIssueCount,
+            coveragePercent: totalScreens > 0 ? Math.round((mockedScreens / totalScreens) * 100) : 0,
+        },
+        unmockedScreens,
+    };
+}
+
 /**
  * Dismissed validation-issue keys, stored on the screen_inventory
  * ArtifactVersion as `metadata.dismissedScreenIssues` (the Screens view's
@@ -195,6 +229,32 @@ export function readDismissedScreenIssues(metadata: Record<string, unknown> | un
 
 export const EMPTY_DISMISSED_ISSUES: ReadonlySet<string> = new Set();
 
+export type MockupCoverageStatus =
+    | 'mocked'
+    | 'not_mocked_yet'
+    | 'missing_reference'
+    | 'invalid_mockup'
+    | 'ambiguous_reference';
+
+export interface UnmockedScreenCoverageItem {
+    screenId: string;
+    screenName: string;
+    reason: 'not_prioritized' | 'supporting_screen' | 'not_generated_yet';
+}
+
+export interface MockupCoverageSummary {
+    totalScreens: number;
+    mockedScreens: number;
+    notMockedYetScreens: number;
+    trueIssues: number;
+    coveragePercent: number;
+}
+
+export interface MockupCoverageModel {
+    summary: MockupCoverageSummary;
+    unmockedScreens: UnmockedScreenCoverageItem[];
+}
+
 export interface ScreenExperienceIndex {
     items: ScreenExperienceItem[];
     /** Canonical lookup — id is the stable, rename-safe key. */
@@ -206,6 +266,8 @@ export interface ScreenExperienceIndex {
     collisions: ScreenSlugCollision[];
     /** Slugs with a canonical screen — used to gate flow-node navigation. */
     availableSlugs: ReadonlySet<string>;
+    /** Expected partial mockup coverage, separated from true reference issues. */
+    mockupCoverage: MockupCoverageModel;
     /** Non-blocking reference-validation findings (see kinds above). Full,
      * undismissed set — callers filter against readDismissedScreenIssues. */
     issues: ScreenReferenceIssue[];
@@ -221,6 +283,10 @@ export const EMPTY_SCREEN_EXPERIENCE_INDEX: ScreenExperienceIndex = {
     sections: [],
     collisions: [],
     availableSlugs: new Set(),
+    mockupCoverage: {
+        summary: { totalScreens: 0, mockedScreens: 0, notMockedYetScreens: 0, trueIssues: 0, coveragePercent: 0 },
+        unmockedScreens: [],
+    },
     issues: [],
 };
 
@@ -344,7 +410,7 @@ export function buildScreenIndex(
         issues.push({
             key: `flowstep:${slug}`,
             kind: 'unmatched_flow_step',
-            message: `Flow step "${name}" could not be matched to a screen.`,
+            message: `Unknown screen reference: ${formatScreenLabel(name)}.`,
         });
     }
 
@@ -391,7 +457,7 @@ export function buildScreenIndex(
             issues.push({
                 key: `mockup:${mockupScreen.id}`,
                 kind: 'unmatched_mockup_screen',
-                message: `Mockup "${mockupScreen.name}" could not be matched to a screen.`,
+                message: `Mockup references missing screen: ${formatScreenLabel(mockupScreen.name)}.`,
                 mockupScreenId: mockupScreen.id,
             });
         }
@@ -417,6 +483,7 @@ export function buildScreenIndex(
         sections,
         collisions,
         availableSlugs: new Set(bySlug.keys()),
+        mockupCoverage: buildMockupCoverage(items, issues.filter(i => i.kind !== 'legacy_name_match').length),
         issues,
     };
 }
