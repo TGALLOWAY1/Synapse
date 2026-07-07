@@ -155,9 +155,9 @@ For every must- and should-priority feature, populate successCriteria, edgeCases
         };
     },
 
-    // Retired from default generation (see RETIRED_PRD_SECTIONS) — the
-    // data_model artifact owns this detail now. Retained so single-section
-    // retry of legacy PRDs' failedSections keeps working.
+    // ── RETIRED — legacy single-section retry only (see RETIRED_PRD_SECTIONS).
+    // The data_model artifact owns this detail now. Do NOT extend this builder
+    // or re-add the section to DEFAULT_PRD_SECTIONS.
     data_model: (ctx) => {
         const features = pick(ctx.upstream, 'features', 'featureSystems');
         const grounding = pick(ctx.upstream, 'domainEntities', 'primaryActions');
@@ -268,9 +268,9 @@ Return JSON with:
         };
     },
 
-    // Retired from default generation (see RETIRED_PRD_SECTIONS) — the
-    // implementation_plan artifact owns this detail now. Retained so
-    // single-section retry of legacy PRDs' failedSections keeps working.
+    // ── RETIRED — legacy single-section retry only (see RETIRED_PRD_SECTIONS).
+    // The implementation_plan artifact owns this detail now. Do NOT extend this
+    // builder or re-add the section to DEFAULT_PRD_SECTIONS.
     implementation_plan: (ctx) => {
         const features = pick(ctx.upstream, 'features', 'featureSystems');
         const dataModel = pick(ctx.upstream, 'richDataModel');

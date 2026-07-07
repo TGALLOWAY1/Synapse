@@ -13,10 +13,9 @@ export interface PrdSectionStatusEntry {
      * - `pending`    — waiting on dependencies (an upstream section is not done)
      * - `queued`     — dependencies satisfied, waiting for a free concurrency slot
      * - `generating` — model call in flight
-     * - `refining`   — optional confidence refinement pass
      * - `complete` / `error` — settled
      */
-    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error' | 'refining';
+    status: 'pending' | 'queued' | 'generating' | 'complete' | 'error';
     model?: string;
     ms?: number;
     error?: string;

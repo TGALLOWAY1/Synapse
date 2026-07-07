@@ -5,6 +5,7 @@
 
 import type { SafetyClassificationResult, SpineSafetyReview } from './safetyTypes';
 import { DEFAULT_SAFE_ALTERNATIVES } from './safetyTypes';
+import { BLOCKED_CONCERN_FALLBACK, RESTRICTED_CONCERN_FALLBACK } from './safetyPolicy';
 
 /**
  * Thrown by `generateStructuredPRD` when a request is classified `disallowed`.
@@ -63,7 +64,7 @@ export const buildSafetyReviewMarkdown = (
 
     const concerns = result.detectedConcerns.length > 0
         ? result.detectedConcerns.join(', ')
-        : 'unauthorized access, credential theft, surveillance, malware behavior, evasion, persistence, or data exfiltration';
+        : BLOCKED_CONCERN_FALLBACK;
 
     return [
         '# Request Cannot Be Fulfilled',
@@ -73,8 +74,7 @@ export const buildSafetyReviewMarkdown = (
         '## Why this was blocked',
         '',
         result.userFacingReason ||
-            'This request appears to involve software that could enable unauthorized access, ' +
-            'credential theft, surveillance, malware behavior, evasion, persistence, or data exfiltration.',
+            `This request appears to involve software that could enable ${BLOCKED_CONCERN_FALLBACK}.`,
         '',
         `Detected concerns: ${concerns}.`,
         '',
@@ -112,7 +112,7 @@ export const buildRestrictionDirective = (
 ): string => {
     const concerns = result.detectedConcerns.length > 0
         ? result.detectedConcerns.join(', ')
-        : 'misuse, covert collection, evasion, or unauthorized access';
+        : RESTRICTED_CONCERN_FALLBACK;
 
     return [
         'SAFETY CONSTRAINTS (binding):',

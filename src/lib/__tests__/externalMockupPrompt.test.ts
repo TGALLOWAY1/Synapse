@@ -72,7 +72,7 @@ describe('buildExternalMockupPrompt (Screen Inventory copy prompt)', () => {
     it('stays concise — not an enormous prompt', () => {
         const prompt = buildExternalMockupPrompt(screen, { ...context, designTokens: tokens });
         // A complete spec, but nowhere near the wall-of-text the full
-        // `tokensToPromptSnippet` catalog would produce for an image tool.
+        // old HTML-mockup token catalog would produce for an image tool.
         expect(prompt.length).toBeLessThan(2400);
     });
 });

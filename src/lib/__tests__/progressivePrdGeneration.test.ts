@@ -14,7 +14,6 @@ const baseConfig = {
   strongModel: 'strong',
   maxFastConcurrency: 4,
   maxStrongConcurrency: 3,
-  enableRefinementPass: false,
 };
 
 /**
@@ -88,7 +87,6 @@ describe('progressive PRD generation', () => {
         strongModel: 'strong',
         maxFastConcurrency: 2,
         maxStrongConcurrency: 1,
-        enableRefinementPass: false,
       },
       onEvent: e => events.push(e.type),
     });
@@ -121,35 +119,6 @@ describe('progressive PRD generation', () => {
     expect(seenSignals[0]).toBe(controller.signal);
   });
 
-  it('escalates low-confidence fast outputs to strong refinement', async () => {
-    const calls: string[] = [];
-    const provider = {
-      async generateText(input: { prompt: string; model: string; schema: object }) {
-        calls.push(input.model);
-        if (input.model === 'fast') return '{"v":1}'; // parseable but < 120 chars → confidence 0.6
-        return '{"vision":"refined","coreProblem":"solved","targetUsers":["user1"],"productName":"App"}';
-      },
-    };
-
-    // product_basics is 'low' risk → fast tier → will trigger refinement when response is short
-    const { jobs } = await generateProgressivePrd({
-      prompt: 'Build note app',
-      provider,
-      sections: [DEFAULT_PRD_SECTIONS.find(s => s.id === 'product_basics')!],
-      config: {
-        fastModel: 'fast',
-        strongModel: 'strong',
-        maxFastConcurrency: 1,
-        maxStrongConcurrency: 1,
-        enableRefinementPass: true,
-      },
-    });
-
-    expect(calls).toEqual(['fast', 'strong']);
-    expect(jobs.product_basics.status).toBe('complete');
-    expect((jobs.product_basics.confidence ?? 0) >= 0.75).toBe(true);
-  });
-
   it('runs dependent sections only after their deps complete', async () => {
     const completionOrder: string[] = [];
     const provider = {
@@ -170,7 +139,6 @@ describe('progressive PRD generation', () => {
         strongModel: 'strong',
         maxFastConcurrency: 2,
         maxStrongConcurrency: 2,
-        enableRefinementPass: false,
       },
       onEvent: e => {
         if (e.type === 'section_completed') completionOrder.push(e.sectionId);
@@ -202,7 +170,6 @@ describe('progressive PRD generation', () => {
         strongModel: 'strong',
         maxFastConcurrency: 1,
         maxStrongConcurrency: 1,
-        enableRefinementPass: false,
       },
     });
 
@@ -234,7 +201,6 @@ describe('progressive PRD generation', () => {
         strongModel: 'strong',
         maxFastConcurrency: 2,
         maxStrongConcurrency: 2,
-        enableRefinementPass: false,
       },
     });
 

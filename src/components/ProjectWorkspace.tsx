@@ -196,7 +196,7 @@ export function ProjectWorkspace() {
     // Multi-agent pipeline emits onPartial after each of ~10 sections, so
     // structuredPRD becomes truthy long before generation finishes. Use the
     // section-status grid as the source of truth for "still working" — any
-    // section in pending/queued/generating/refining state means the panel
+    // section in pending/queued/generating state means the panel
     // should stay visible. Combined with isPRDGenerating to cover the brief
     // initial window before the first section_started event arrives.
     const sectionsStillRunning = !!prdSectionStatus && Object.values(prdSectionStatus).some(
@@ -430,6 +430,9 @@ export function ProjectWorkspace() {
                 activeSpine.structuredPRD,
                 {
                     platform: project?.platform,
+                    // Restricted projects must retry under the same binding
+                    // safety constraints the original run used.
+                    safetyReview: activeSpine.safetyReview,
                     onSectionStatus: (sid, update) => {
                         const enriched = !retryCountStamped
                             ? { ...update, retryCount: nextRetryCount }

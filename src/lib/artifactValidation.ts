@@ -24,6 +24,11 @@ const MIN_CONTENT_LENGTH: Record<CoreArtifactSubtype, number> = {
 };
 
 const EXPECTED_HEADERS: Record<CoreArtifactSubtype, string[]> = {
+    // NOTE: the screen_inventory entry matches the LEGACY markdown shape only.
+    // Current inventories are structured JSON and take the
+    // validateScreenInventoryStructured path below, never this list — the
+    // "Components"/"Navigation" labels here are what the old markdown
+    // renderer emitted, kept solely for legacy persisted artifacts.
     screen_inventory: ['###', 'Purpose', 'Components', 'Navigation', 'Priority'],
     user_flows: ['Flow', 'Goal', 'Steps', 'Success', 'Error'],
     component_inventory: ['Purpose', 'Props', 'Used In', 'Complexity'],

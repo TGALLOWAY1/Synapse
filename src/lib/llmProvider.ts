@@ -10,4 +10,4 @@ export {
 } from './services/preflightService';
 export type { PreflightContext } from './prompts/preflightPrompts';
 export { generateMockup, type ParseResult as MockupParseResult } from './services/mockupService';
-export { generateCoreArtifact, refineCoreArtifact } from './services/coreArtifactService';
+export { generateCoreArtifact } from './services/coreArtifactService';

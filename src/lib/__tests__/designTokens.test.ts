@@ -4,7 +4,6 @@ import {
     hashDesignTokens,
     tokensToCssVariables,
     tokensToCssStyleBlock,
-    tokensToPromptSnippet,
     buildDesignSystemBrief,
     designSystemTokensToMarkdown,
 } from '../designTokens';
@@ -150,30 +149,6 @@ describe('tokensToCssVariables', () => {
         expect(block).toContain(':root {');
         expect(block).toContain('--color-brand-primary');
         expect(block).toContain('</style>');
-    });
-});
-
-describe('tokensToPromptSnippet', () => {
-    it('includes the binding header and color list', () => {
-        const tokens = normalizeDesignTokens({});
-        const snippet = tokensToPromptSnippet(tokens);
-        expect(snippet).toMatch(/Design system contract/i);
-        expect(snippet).toContain('### Color tokens');
-        expect(snippet).toContain('brand.primary');
-    });
-
-    it('includes the rule list verbatim', () => {
-        const tokens = normalizeDesignTokens({
-            rules: ['Always use brand.primary for primary CTAs.'],
-        });
-        const snippet = tokensToPromptSnippet(tokens);
-        expect(snippet).toContain('Always use brand.primary for primary CTAs.');
-    });
-
-    it('mentions CSS variable usage instructions', () => {
-        const tokens = normalizeDesignTokens({});
-        const snippet = tokensToPromptSnippet(tokens);
-        expect(snippet).toMatch(/var\(--color-brand-primary\)/);
     });
 });
 
