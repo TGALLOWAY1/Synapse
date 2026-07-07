@@ -4,6 +4,9 @@
 > §10 has shipped — non-destructive edits, PRD + artifact version history,
 > compare/diff, restore-as-new-version, provenance, and downstream-staleness
 > warnings. Items under "Future enhancements" remain unbuilt.
+> **Superseded for the next increment by `docs/VERSIONING_V2_PLAN.md`** (Phase A
+> shipped: change-aware staleness, the re-finalize Update Assets plan,
+> mark-as-up-to-date, provenance completion, export version manifest).
 > Scope: PRD (spine) versioning, PRD section/inline edits, generated artifacts,
 > downstream-artifact staleness, project history/audit log, and snapshots.
 

@@ -1,6 +1,15 @@
 # Synapse Versioning V2 — Capability Audit, Scenario Analysis & Improvement Plan
 
-> Status: **Proposal — awaiting approval. No implementation yet.**
+> Status: **Phase A (the recommended MVP, §7/§8) implemented** — change-aware
+> staleness (`spineChangeAnalysis.ts`), the Update Assets plan dialog at
+> re-finalize, `markArtifactCurrentForSpine`, provenance completion,
+> overlay-edit history events, and the export version manifest. Phases B/C and
+> the deferred list remain unbuilt. Implementation notes deviating from this
+> plan: the `consistency_review` changeSource is deliberately NOT stamped as a
+> version change source (the review happens inside a single generation before
+> settle and is already recorded in `generationMeta.consistencyReview`); the
+> re-finalize dialog's per-row choices are Regenerate / Mark up to date /
+> Decide later applied atomically on confirm.
 > Builds on `docs/VERSIONING_AUDIT.md` (Phase 1, shipped: non-destructive edits,
 > version history panels, compare/diff, restore-as-new-version, provenance,
 > staleness warnings). This document audits what shipped against ten real

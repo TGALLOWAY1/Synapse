@@ -1655,6 +1655,16 @@ PRD + build-relevant core artifacts (mockups excluded), with copy and download.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
 
+**Exports are version-aware.** `src/lib/exportManifest.ts` (pure) builds an
+**export manifest** — per asset: version number, generated-from PRD version
+label, and staleness at export time — rendered by `renderManifestMarkdown` into
+the top of the full markdown bundle, a `manifest` field in the structured JSON,
+and (via `HandoffInput.manifestMarkdown`) between the preamble and the PRD in
+the agent handoff. When any exported asset is stale, `ExportModal` shows an
+amber warning banner (same pattern as the cloud-at-risk banner) naming the
+assets; exports are never blocked — the manifest keeps the document honest.
+Keep the manifest in sync if export composition changes.
+
 ### Version history & revert (`src/components/versions/`)
 
 Shared, presentation-only components for browsing, comparing, and restoring
@@ -1678,7 +1688,60 @@ nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 Version X" chip + `StalenessBadge` above each generated artifact. Restores route
 to `revertSpineToVersion` / `revertArtifactToVersion`. **Revert always appends a
 new version and never deletes history.** See `docs/VERSIONING_AUDIT.md` for the
-full design (Phase 1 implemented).
+Phase 1 design and `docs/VERSIONING_V2_PLAN.md` for the change-awareness layer
+(Phase A implemented).
+
+**Change-aware staleness (`src/lib/spineChangeAnalysis.ts`, pure).** The "what
+changed" layer behind every stale flag: `diffFeatures` (by stable `Feature.id`
+— added/removed/renamed/changed), `summarizeSpineChange` (section diffs via
+`versionDiff` + a deterministic one-line headline — never an LLM call),
+`ARTIFACT_SECTION_AFFINITY`/`isLikelyUnaffected` (advisory "no changes in the
+sections this asset chiefly derives from" — identity/safety sections sit in
+every affinity set so the note only fires on genuinely narrow changes, and it
+must NEVER suppress a hard `needs_update`), `findFeatureReferences`
+(conservative removed-feature reference scan; whole-word, ≥4-char needles), and
+`makeSpineChangeResolver` (memoized "since spine X vs latest" resolver).
+`evaluateDependencyGraph` accepts an optional `spineChangeFor` input and
+attaches a `changeSummary` to `prd_changed` reasons + a node-level
+`likelyUnaffected` flag (only when the PRD change is the sole reason). Surfaced
+in the graph detail panel ("What changed: …", removed-feature still-referenced
+warnings), the `StalenessBadge` tooltip, and the artifact-header strip.
+Everything is computed at read time from stored snapshots — nothing persisted.
+
+**Provenance is complete.** Every version-creating path stamps
+`provenance.changeSource`: `ai_generation` (initial settle in
+`updateSpineStructuredPRD` when none exists; `createArtifactVersion` default
+for v1), `ai_regeneration` (`regenerateSpine`; `createArtifactVersion` default
+for v2+), `branch_merge` (`mergeBranch`), plus the existing `user_edit` /
+`ai_section_retry` / `revert` and the new **`marked_current`**. User overlay
+edits (screenEdits/promptEdits) pass `opts.historyDescription` through
+`updateArtifactVersionMetadata` to record an `Edited` history event, and the
+graph treats a non-empty overlay as manually-edited. New version-creating code
+paths must stamp a changeSource.
+
+**"Mark as up to date" (`artifactSlice.markArtifactCurrentForSpine`).** The
+escape hatch for trivial PRD changes: appends a CLONED preferred version whose
+`sourceRefs` are **rebased** — spine ref → the confirmed spine version AND
+every `core_artifact` ref → that dependency's current preferred version
+(refreshing a recorded design tokensHash `anchorInfo`). Rebasing only the spine
+ref would leave the graph still reporting `dependency_changed`; never do a
+partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph
+detail panel and the artifact-header strip when stale.
+
+**Re-finalize goes through the Update Assets plan.** When Mark-as-Final runs
+and downstream assets already exist (and no generation job is active),
+`ProjectWorkspace.finalizeAndGenerate` does NOT call `startAll` — it evaluates
+the dependency graph against the spine being finalized and opens
+`UpdateAssetsPlanModal` (`src/components/versions/`): a "what changed" header
+(vs the assets' newest baseline PRD version) and a per-asset choice —
+Regenerate / Mark up to date / Decide later — defaulted from
+`computeRecommendedUpdates`. Confirm finalizes, applies mark-current FIRST
+(healing confirmed upstreams), then regenerates the selection expanded via
+`expandSelectionWithTroubledUpstreams` (a selected dependent must never rebuild
+from a stale unselected visible input; marked-current upstreams count as
+healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
+(spine stays non-final). First finalize / demo / job-active keep the direct
+`startAll` path. Do not reintroduce a blind full regeneration on re-finalize.
 
 ### PRD highlight → branch selection pipeline
 
