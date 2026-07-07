@@ -3,7 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { getLegacyImportOffer, declineLegacyImport, importLegacyProjects } from '../store/projectUserSync';
 import { refreshProjectsFromServer } from '../store/projectServerSync';
-import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X, FolderOpen } from 'lucide-react';
+import { Settings, List, Plus, ArrowUp, Sparkles, Smartphone, Monitor, Loader2, Compass, LogOut, Download, X, FolderOpen, FileText } from 'lucide-react';
 import type { AuthProvider } from '../lib/recruiterApi';
 import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
@@ -190,9 +190,23 @@ export function HomePage() {
     const [isDrawerOpen, setIsDrawerOpen] = useState(false);
     const [isEnhancing, setIsEnhancing] = useState(false);
     const [isChoosingMode, setIsChoosingMode] = useState(false);
+    const [showUploadMenu, setShowUploadMenu] = useState(false);
 
     const fileInputRef = useRef<HTMLInputElement>(null);
     const textareaRef = useRef<HTMLTextAreaElement>(null);
+    const uploadMenuRef = useRef<HTMLDivElement>(null);
+
+    // Close the upload menu on an outside click.
+    useEffect(() => {
+        if (!showUploadMenu) return;
+        const handleClick = (e: MouseEvent) => {
+            if (!uploadMenuRef.current?.contains(e.target as Node)) {
+                setShowUploadMenu(false);
+            }
+        };
+        document.addEventListener('mousedown', handleClick);
+        return () => document.removeEventListener('mousedown', handleClick);
+    }, [showUploadMenu]);
 
     // Step 1: validate input + API key, then present the start-mode choice.
     const handleCreateProject = async () => {
@@ -511,21 +525,47 @@ export function HomePage() {
                             <div className="flex items-center justify-between px-4 py-3 border-t border-neutral-200">
                                 <div className="flex items-center gap-2">
                                     {/* File upload */}
-                                    <input
-                                        ref={fileInputRef}
-                                        type="file"
-                                        accept=".md,.txt,.markdown"
-                                        onChange={handleFileUpload}
-                                        className="hidden"
-                                    />
-                                    <button
-                                        type="button"
-                                        onClick={() => fileInputRef.current?.click()}
-                                        className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-lg transition"
-                                        title="Upload .md or .txt file"
-                                    >
-                                        <Plus size={18} />
-                                    </button>
+                                    <div className="relative" ref={uploadMenuRef}>
+                                        <input
+                                            ref={fileInputRef}
+                                            type="file"
+                                            accept=".md,.txt,.markdown"
+                                            onChange={handleFileUpload}
+                                            className="hidden"
+                                        />
+                                        <button
+                                            type="button"
+                                            onClick={() => setShowUploadMenu((v) => !v)}
+                                            className="p-2 text-neutral-500 hover:text-neutral-900 hover:bg-neutral-200/70 rounded-lg transition"
+                                            title="Attach a file"
+                                            aria-haspopup="menu"
+                                            aria-expanded={showUploadMenu}
+                                        >
+                                            <Plus size={18} />
+                                        </button>
+                                        {showUploadMenu && (
+                                            <div
+                                                role="menu"
+                                                className="absolute bottom-full left-0 mb-2 w-60 rounded-xl border border-neutral-200 bg-white shadow-lg py-1.5 z-20"
+                                            >
+                                                <button
+                                                    type="button"
+                                                    role="menuitem"
+                                                    onClick={() => {
+                                                        setShowUploadMenu(false);
+                                                        fileInputRef.current?.click();
+                                                    }}
+                                                    className="w-full flex items-start gap-2.5 px-3 py-2 text-left hover:bg-neutral-50 transition rounded-lg"
+                                                >
+                                                    <FileText size={16} className="mt-0.5 text-neutral-500 shrink-0" />
+                                                    <span>
+                                                        <span className="block text-sm text-neutral-900">Add text file</span>
+                                                        <span className="block text-xs text-neutral-400">Markdown or text files (.md, .txt)</span>
+                                                    </span>
+                                                </button>
+                                            </div>
+                                        )}
+                                    </div>
 
                                     {/* Platform toggle */}
                                     <div className="flex items-center bg-neutral-100 rounded-lg p-0.5">
