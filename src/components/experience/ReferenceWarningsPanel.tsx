@@ -11,7 +11,7 @@ import { AlertTriangle, Check, ChevronDown, ChevronRight, EyeOff, Link2 } from '
 import type { ScreenReferenceIssue, ScreenReferenceIssueKind } from '../../lib/screenExperience';
 
 const KIND_META: Record<ScreenReferenceIssueKind, { label: string; chip: string }> = {
-    unmatched_flow_step: { label: 'Flow', chip: 'bg-amber-100 text-amber-800' },
+    unmatched_flow_step: { label: 'Unknown screen', chip: 'bg-amber-100 text-amber-800' },
     unmatched_mockup_screen: { label: 'Mockup', chip: 'bg-red-50 text-red-700' },
     slug_collision: { label: 'Naming', chip: 'bg-amber-100 text-amber-800' },
     legacy_name_match: { label: 'Legacy match', chip: 'bg-neutral-100 text-neutral-600' },
@@ -39,14 +39,19 @@ export function ReferenceWarningsPanel({ issues, screenOptions, onRelink, onDism
             >
                 <span className="inline-flex items-center gap-2 text-xs font-medium text-amber-900">
                     <AlertTriangle size={13} className="text-amber-600 shrink-0" />
-                    {issues.length} {issues.length === 1 ? 'reference needs' : 'references need'} review
+                    Needs Review
+                    <span className="font-normal text-amber-700">
+                        {issues.length} {issues.length === 1 ? 'reference could' : 'references could'} not be resolved
+                    </span>
                 </span>
                 {open
                     ? <ChevronDown size={14} className="text-amber-500 shrink-0" />
                     : <ChevronRight size={14} className="text-amber-500 shrink-0" />}
             </button>
             {open && (
-                <ul className="px-4 pb-3 space-y-2">
+                <div className="px-4 pb-3">
+                    <p className="mb-2 text-xs text-amber-800">These may affect artifact consistency.</p>
+                    <ul className="space-y-2">
                     {issues.map(issue => (
                         <IssueRow
                             key={issue.key}
@@ -56,7 +61,8 @@ export function ReferenceWarningsPanel({ issues, screenOptions, onRelink, onDism
                             onDismiss={onDismiss}
                         />
                     ))}
-                </ul>
+                    </ul>
+                </div>
             )}
         </div>
     );

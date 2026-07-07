@@ -419,6 +419,47 @@ describe('reference validation issues', () => {
     });
 });
 
+
+describe('mockup coverage classification', () => {
+    it('treats partial mockup coverage as coverage, not a warning', () => {
+        const inv: ScreenInventoryContent = { sections: [{ title: 'All', screens: Array.from({ length: 10 }, (_, i) => ({ id: `scr-${i + 1}`, name: `Screen ${i + 1}`, priority: i < 6 ? 'P0' : 'P2', purpose: 'Test.' })) }] };
+        const payload: MockupPayload = { version: 'mockup_spec_v1', title: 'T', summary: 'S', screens: Array.from({ length: 6 }, (_, i) => ({ id: `mock-${i + 1}`, name: `Screen ${i + 1}`, purpose: 'Test.', sourceScreenId: `scr-${i + 1}` })) };
+        const index = buildScreenIndex(inv, [], payload);
+        expect(index.mockupCoverage.summary).toMatchObject({ totalScreens: 10, mockedScreens: 6, notMockedYetScreens: 4, trueIssues: 0 });
+        expect(index.issues.filter(i => i.kind !== 'legacy_name_match')).toEqual([]);
+    });
+
+    it('classifies a flow step referencing a known screen without a mockup as not mocked yet', () => {
+        const inv: ScreenInventoryContent = { sections: [{ title: 'All', screens: [{ id: 'scr-study-summary', name: 'Study Summary', priority: 'P2', purpose: 'Summarize.' }] }] };
+        const flows = parseFlows(`### Flow: Study\n**Goal:** Test.\n**Steps:**\n1. [Study Summary] — User reviews → System displays summary\n**Success Outcome:** Done.`);
+        const index = buildScreenIndex(inv, flows, { version: 'mockup_spec_v1', title: 'T', summary: 'S', screens: [] });
+        expect(index.byId.get('scr-study-summary')?.relatedFlows).toHaveLength(1);
+        expect(index.mockupCoverage.unmockedScreens).toEqual([{ screenId: 'scr-study-summary', screenName: 'Study Summary', reason: 'supporting_screen' }]);
+        expect(index.issues.filter(i => i.kind !== 'legacy_name_match')).toEqual([]);
+    });
+
+    it('classifies a flow step referencing an unknown screen as a missing reference', () => {
+        const flows = parseFlows(`### Flow: Broken\n**Goal:** Test.\n**Steps:**\n1. [Does Not Exist] — User taps → System opens it\n**Success Outcome:** Done.`);
+        const index = buildScreenIndex(INVENTORY, flows, null);
+        expect(index.issues.some(i => i.kind === 'unmatched_flow_step' && i.key === 'flowstep:does-not-exist')).toBe(true);
+        expect(index.mockupCoverage.summary.trueIssues).toBe(1);
+    });
+
+    it('classifies a mockup referencing an unknown screen as a missing reference', () => {
+        const payload: MockupPayload = { version: 'mockup_spec_v1', title: 'T', summary: 'S', screens: [{ id: 'mock-unknown', name: 'Unknown', purpose: 'No source.', sourceScreenId: 'scr-unknown' }] };
+        const index = buildScreenIndex(INVENTORY, [], payload);
+        expect(index.issues.some(i => i.kind === 'unmatched_mockup_screen' && i.mockupScreenId === 'mock-unknown')).toBe(true);
+        expect(index.mockupCoverage.summary.trueIssues).toBe(1);
+    });
+
+    it('handles empty mockups as all screens available to generate without warnings', () => {
+        const index = buildScreenIndex(INVENTORY, [], { version: 'mockup_spec_v1', title: 'T', summary: 'S', screens: [] });
+        expect(index.mockupCoverage.summary).toMatchObject({ totalScreens: 5, mockedScreens: 0, notMockedYetScreens: 5, trueIssues: 0, coveragePercent: 0 });
+        expect(index.mockupCoverage.unmockedScreens).toHaveLength(5);
+        expect(index.issues.filter(i => i.kind !== 'legacy_name_match')).toEqual([]);
+    });
+});
+
 describe('screen links (relink repairs)', () => {
     it('an explicit link outranks sourceScreenId and name matching', () => {
         const payload: MockupPayload = {

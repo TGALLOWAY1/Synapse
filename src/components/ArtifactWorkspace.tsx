@@ -372,7 +372,7 @@ export function ArtifactWorkspace({
     // Validation issues minus the user's persisted dismissals.
     const visibleScreenIssues = useMemo(() => {
         const dismissed = readDismissedScreenIssues(invPreferred?.metadata);
-        return screenIndex.issues.filter(i => !dismissed.has(i.key));
+        return screenIndex.issues.filter(i => i.kind !== 'legacy_name_match' && !dismissed.has(i.key));
     }, [screenIndex, invPreferred]);
 
     // Repair: pin/relink a mockup screen to a canonical screen (persisted on
