@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
     AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle,
     Code2, Database, ExternalLink, FileText, Image, Info, Loader2, Package, Palette,
-    PencilLine, RefreshCcw, Waypoints, X,
+    PencilLine, RefreshCcw, ShieldCheck, Waypoints, X,
 } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 import { artifactJobController } from '../../lib/services/artifactJobController';
@@ -22,6 +22,7 @@ import {
     type DependencyNodeId,
     type DependencyNodeStatus,
 } from '../../lib/artifactDependencyGraph';
+import { findFeatureReferences, makeSpineChangeResolver } from '../../lib/spineChangeAnalysis';
 import type {
     ArtifactSlotKey, GenerationStatus, ProjectPlatform, StructuredPRD,
 } from '../../types';
@@ -158,12 +159,20 @@ export function DependencyGraphView({
                     createdAt: preferred.createdAt,
                     sourceRefs: preferred.sourceRefs,
                     provenance: preferred.provenance,
+                    metadata: preferred.metadata,
                 },
             };
         }
         const live = job?.slots[slotKey]?.status;
         if (live && live !== 'idle') slotStatus[slotKey] = live;
     }
+
+    // Change-aware staleness: resolves "what changed since spine X" against
+    // the latest spine (memoized per spine pair inside the resolver).
+    const spineChangeFor = useMemo(
+        () => makeSpineChangeResolver(spines, latestSpine?.id),
+        [spines, latestSpine?.id],
+    );
 
     const evaluations = evaluateDependencyGraph(graph, {
         spineVersionIds: spines.map(s => s.id),
@@ -172,6 +181,7 @@ export function DependencyGraphView({
         currentDesignTokensHash: currentDesign?.tokensHash,
         snapshots,
         slotStatus,
+        spineChangeFor,
     });
 
     const recommendedUpdates = computeRecommendedUpdates(graph, evaluations);
@@ -250,6 +260,35 @@ export function DependencyGraphView({
     }
 
     const selectedEval = selectedId ? evalOf(selectedId) : undefined;
+
+    // "Mark as up to date" — the user asserts the artifact is still valid for
+    // the current PRD; the store appends a rebased clone (honest history).
+    const canMarkCurrent = (id: DependencyNodeId): boolean => {
+        const ev = evalOf(id);
+        return !!latestSpine
+            && artifactIdByNode.has(id)
+            && (ev?.status === 'needs_update' || ev?.status === 'update_recommended');
+    };
+    const markCurrentNode = (id: DependencyNodeId) => {
+        const artifactId = artifactIdByNode.get(id);
+        if (!artifactId || !latestSpine) return;
+        useProjectStore.getState().markArtifactCurrentForSpine(projectId, artifactId, latestSpine.id);
+    };
+
+    // Removed features (per the selected node's PRD change summary) that the
+    // artifact's current content still mentions — the deletion blast radius.
+    const selectedRemovedFeatureRefs: string[] = (() => {
+        if (!selectedId || selectedId === 'prd' || !selectedEval) return [];
+        const summary = selectedEval.reasons.find(r => r.kind === 'prd_changed')?.changeSummary;
+        if (!summary || summary.features.removed.length === 0) return [];
+        const artifactId = artifactIdByNode.get(selectedId);
+        const content = artifactId ? getPreferredVersion(projectId, artifactId)?.content ?? '' : '';
+        if (!content) return [];
+        const candidate = [{ artifactId: artifactId!, title: titleOf(selectedId), content }];
+        return summary.features.removed
+            .filter(f => findFeatureReferences(f, candidate).length > 0)
+            .map(f => f.name);
+    })();
 
     return (
         <div className="max-w-5xl mx-auto space-y-4">
@@ -444,6 +483,8 @@ export function DependencyGraphView({
                     onOpenNode={onOpenNode}
                     onUpdate={() => confirmSingleUpdate(selectedId)}
                     onUpdateImpacted={() => confirmImpactedUpdate(selectedId)}
+                    onMarkCurrent={canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
+                    removedFeatureRefs={selectedRemovedFeatureRefs}
                     jobActive={jobActive}
                     titleOf={titleOf}
                     history={
@@ -621,9 +662,16 @@ function ImpactModePanel({ graph, evaluations, selectedId, onSelect, titleOf }: 
             {ev && ev.reasons.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                     <div className="text-sm font-semibold text-amber-900 mb-1">Why update?</div>
-                    <ul className="space-y-1">
+                    <ul className="space-y-1.5">
                         {ev.reasons.map((r, i) => (
-                            <li key={i} className="text-xs text-amber-800 leading-relaxed">{r.detail}</li>
+                            <li key={i} className="text-xs text-amber-800 leading-relaxed">
+                                {r.detail}
+                                {r.changeSummary && (
+                                    <span className="block mt-0.5 font-medium text-amber-900">
+                                        What changed: {r.changeSummary.headline}
+                                    </span>
+                                )}
+                            </li>
                         ))}
                     </ul>
                 </div>
@@ -671,6 +719,10 @@ interface DetailPanelProps {
     onOpenNode: (id: DependencyNodeId) => void;
     onUpdate: () => void;
     onUpdateImpacted: () => void;
+    /** Present only when the node is stale and can be confirmed current. */
+    onMarkCurrent?: () => void;
+    /** Removed-feature names this artifact's content still mentions. */
+    removedFeatureRefs: string[];
     jobActive: boolean;
     titleOf: (id: DependencyNodeId) => string;
     history: HistoryEntry[];
@@ -688,7 +740,8 @@ const CHANGE_SOURCE_LABELS: Record<string, string> = {
 
 function DetailPanel({
     nodeId, evaluation, graph, evaluations, tab, onTabChange, onClose, onSelect,
-    onOpenNode, onUpdate, onUpdateImpacted, jobActive, titleOf, history,
+    onOpenNode, onUpdate, onUpdateImpacted, onMarkCurrent, removedFeatureRefs,
+    jobActive, titleOf, history,
 }: DetailPanelProps) {
     const node = getDependencyNode(graph, nodeId);
     const Icon = NODE_ICONS[nodeId] ?? Package;
@@ -755,6 +808,16 @@ function DetailPanel({
                     >
                         <ExternalLink size={12} /> Open
                     </button>
+                    {onMarkCurrent && (
+                        <button
+                            type="button"
+                            onClick={onMarkCurrent}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-md hover:bg-emerald-100 transition"
+                            title="Confirm this artifact is still valid for the current PRD without regenerating it"
+                        >
+                            <ShieldCheck size={12} /> Mark up to date
+                        </button>
+                    )}
                     {canUpdate && (
                         <button
                             type="button"
@@ -838,11 +901,32 @@ function DetailPanel({
                             {evaluation.reasons.length > 0 ? (
                                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
                                     <div className="text-sm font-semibold text-amber-900 mb-1">Why update?</div>
-                                    <ul className="space-y-1">
+                                    <ul className="space-y-1.5">
                                         {evaluation.reasons.map((r, i) => (
-                                            <li key={i} className="text-xs text-amber-800 leading-relaxed">{r.detail}</li>
+                                            <li key={i} className="text-xs text-amber-800 leading-relaxed">
+                                                {r.detail}
+                                                {r.changeSummary && (
+                                                    <span className="block mt-0.5 font-medium text-amber-900">
+                                                        What changed: {r.changeSummary.headline}
+                                                    </span>
+                                                )}
+                                            </li>
                                         ))}
                                     </ul>
+                                    {removedFeatureRefs.length > 0 && (
+                                        <p className="mt-2 pt-2 border-t border-amber-200 text-xs text-red-700 leading-relaxed">
+                                            Still references removed feature{removedFeatureRefs.length === 1 ? '' : 's'}:{' '}
+                                            <span className="font-semibold">{removedFeatureRefs.join(', ')}</span> —
+                                            regenerate this artifact so deleted features stop appearing in it.
+                                        </p>
+                                    )}
+                                    {evaluation.likelyUnaffected && removedFeatureRefs.length === 0 && (
+                                        <p className="mt-2 pt-2 border-t border-amber-200 text-xs text-neutral-600 leading-relaxed">
+                                            The PRD sections this asset chiefly derives from did not change —
+                                            if it still looks right, you can <span className="font-medium">mark it up to date</span> instead
+                                            of regenerating.
+                                        </p>
+                                    )}
                                 </div>
                             ) : nodeId !== 'prd' && evaluation.status === 'up_to_date' && !impacted ? (
                                 <div className="rounded-lg border border-green-200 bg-green-50 p-3">

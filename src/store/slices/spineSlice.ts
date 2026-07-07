@@ -86,6 +86,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                provenance: { changeSource: 'ai_regeneration' },
             };
 
             const regenEvent: HistoryEvent = {
@@ -275,6 +276,12 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 // (onPartial) updates leave the run marked as still running.
                 if (meta?.generationMeta !== undefined) {
                     next.generationPhase = 'complete';
+                    // Attribution: a settling run whose spine carries no
+                    // provenance yet is the initial generation (regenerate /
+                    // merge stamp theirs at creation and are preserved here).
+                    if (!next.provenance) {
+                        next.provenance = { changeSource: 'ai_generation' };
+                    }
                     // Attach the canonical PRD spine on final settle only. It is
                     // rebuilt deterministically at artifact-generation time too,
                     // so this persisted copy is a diagnostic/diffing convenience

@@ -5,7 +5,7 @@
 // Backed by jsdiff (`diff`), word-level. Kept framework-free and unit-tested.
 
 import { diffWordsWithSpace } from 'diff';
-import type { StructuredPRD, Feature, DomainEntity, PrimaryAction } from '../types';
+import type { StructuredPRD, Feature, DomainEntity, PrimaryAction, UXPage } from '../types';
 
 /** One contiguous run of text classified relative to the "after" version. */
 export type DiffSegment = {
@@ -87,6 +87,14 @@ const renderActions = (actions?: PrimaryAction[]): string =>
 
 const renderList = (items?: string[]): string => (items ?? []).join('\n');
 
+// Lean render — name + purpose only. The premium per-page interaction/state
+// fields are deliberately excluded (they were retired from the lean uxPages
+// shape and would make legacy-vs-new comparisons noisy).
+const renderUxPages = (pages?: UXPage[]): string =>
+    (pages ?? [])
+        .map((p) => (p.purpose ? `${p.name}\n${p.purpose}` : p.name))
+        .join('\n\n');
+
 // Known, comparable sections (core + commonly-edited grounding fields). Premium
 // nested structures beyond these are intentionally out of scope for the MVP
 // compare view.
@@ -95,6 +103,7 @@ const SECTION_SPECS: SectionSpec[] = [
     { key: 'coreProblem', label: 'Core Problem', render: (p) => p.coreProblem ?? '' },
     { key: 'targetUsers', label: 'Target Users', render: (p) => renderList(p.targetUsers) },
     { key: 'features', label: 'Features', render: (p) => renderFeatures(p.features) },
+    { key: 'uxPages', label: 'UX Pages', render: (p) => renderUxPages(p.uxPages) },
     { key: 'architecture', label: 'Architecture', render: (p) => p.architecture ?? '' },
     { key: 'risks', label: 'Risks', render: (p) => renderList(p.risks) },
     { key: 'nonFunctionalRequirements', label: 'Non-Functional Requirements', render: (p) => renderList(p.nonFunctionalRequirements) },

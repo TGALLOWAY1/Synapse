@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype, SourceRef, HistoryEvent } from '../../types';
+import type { Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype, SourceRef, HistoryEvent, VersionProvenance } from '../../types';
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
 
@@ -15,6 +15,7 @@ export type ArtifactSlice = {
     createArtifactVersion: ProjectState['createArtifactVersion'];
     setPreferredVersion: ProjectState['setPreferredVersion'];
     revertArtifactToVersion: ProjectState['revertArtifactToVersion'];
+    markArtifactCurrentForSpine: ProjectState['markArtifactCurrentForSpine'];
     getArtifactVersions: ProjectState['getArtifactVersions'];
     getPreferredVersion: ProjectState['getPreferredVersion'];
     getLatestArtifactVersion: ProjectState['getLatestArtifactVersion'];
@@ -93,7 +94,8 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         metadata: Record<string, unknown>,
         sourceRefs: SourceRef[],
         generationPrompt: string,
-        parentVersionId?: string | null
+        parentVersionId?: string | null,
+        provenance?: VersionProvenance,
     ) => {
         const versionId = uuidv4();
         const now = Date.now();
@@ -124,6 +126,11 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
                 generationPrompt,
                 isPreferred: true,
                 createdAt: now,
+                // Default attribution: first version = generation, later ones =
+                // regeneration. Callers with richer context can override.
+                provenance: provenance ?? {
+                    changeSource: versionNumber === 1 ? 'ai_generation' : 'ai_regeneration',
+                },
             };
 
             const projectArtifacts = state.artifacts[projectId] || [];
@@ -238,6 +245,116 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         return { versionId };
     },
 
+    // Versioning: "Mark as up to date" — the user asserts this artifact is
+    // still current for a NEWER spine despite not being regenerated (e.g. a
+    // typo-level PRD edit). Appends a CLONED version (same content, honest
+    // history) whose sourceRefs are REBASED onto the current state: the spine
+    // ref points at the given spine version, and every core_artifact ref is
+    // re-pointed at that dependency's current preferred version (refreshing a
+    // recorded design tokensHash anchor) — rewriting only the spine ref would
+    // leave the graph reporting dependency_changed. All reads inside set()
+    // (concurrency rule).
+    markArtifactCurrentForSpine: (projectId: string, artifactId: string, spineVersionId: string) => {
+        const preferred = (get().artifactVersions[projectId] || [])
+            .find(v => v.artifactId === artifactId && v.isPreferred);
+        if (!preferred) throw new Error('No preferred artifact version to mark current');
+
+        const versionId = uuidv4();
+        const now = Date.now();
+        const historyEventId = uuidv4();
+
+        set((state) => {
+            const versions = state.artifactVersions[projectId] || [];
+            const src = versions.find(v => v.artifactId === artifactId && v.isPreferred);
+            if (!src) return state;
+
+            const projectArtifacts = state.artifacts[projectId] || [];
+            const artifact = projectArtifacts.find(a => a.id === artifactId);
+            const versionNumber = versions.filter(v => v.artifactId === artifactId).length + 1;
+
+            // Rebase every ref. Spine ref → the confirmed spine version (added
+            // if the legacy version had none); dependency refs → each source
+            // artifact's CURRENT preferred version.
+            let sawSpineRef = false;
+            const rebasedRefs: SourceRef[] = src.sourceRefs.map((ref) => {
+                if (ref.sourceType === 'spine') {
+                    sawSpineRef = true;
+                    return { ...ref, id: uuidv4(), sourceArtifactVersionId: spineVersionId };
+                }
+                const depPreferred = versions.find(
+                    v => v.artifactId === ref.sourceArtifactId && v.isPreferred,
+                );
+                if (!depPreferred) return { ...ref, id: uuidv4() };
+                const tokensHash = depPreferred.metadata?.tokensHash;
+                return {
+                    ...ref,
+                    id: uuidv4(),
+                    sourceArtifactVersionId: depPreferred.id,
+                    // A recorded design tokensHash anchor is refreshed to the
+                    // dependency's current hash — the user is asserting
+                    // currency against today's design direction.
+                    ...(ref.anchorInfo !== undefined && typeof tokensHash === 'string'
+                        ? { anchorInfo: tokensHash }
+                        : {}),
+                };
+            });
+            if (!sawSpineRef) {
+                rebasedRefs.unshift({
+                    id: uuidv4(),
+                    sourceArtifactId: projectId,
+                    sourceArtifactVersionId: spineVersionId,
+                    sourceType: 'spine',
+                });
+            }
+
+            const spineIdx = (state.spineVersions[projectId] || []).findIndex(s => s.id === spineVersionId);
+            const spineLabel = spineIdx >= 0 ? `PRD Version ${spineIdx + 1}` : 'the current PRD';
+
+            const updatedVersions = versions.map(v =>
+                v.artifactId === artifactId ? { ...v, isPreferred: false } : v
+            );
+
+            const newVersion: ArtifactVersion = {
+                id: versionId,
+                artifactId,
+                versionNumber,
+                parentVersionId: src.id,
+                content: src.content,
+                metadata: src.metadata,
+                sourceRefs: rebasedRefs,
+                generationPrompt: src.generationPrompt,
+                isPreferred: true,
+                createdAt: now,
+                provenance: {
+                    changeSource: 'marked_current',
+                    editSummary: `Confirmed current for ${spineLabel}`,
+                },
+            };
+
+            const updatedArtifacts = projectArtifacts.map(a =>
+                a.id === artifactId ? { ...a, currentVersionId: versionId, status: 'active' as const, updatedAt: now } : a
+            );
+
+            const historyEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                artifactId,
+                artifactVersionId: versionId,
+                type: 'MarkedCurrent',
+                description: `${artifact?.title || 'Artifact'} confirmed current for ${spineLabel}`,
+                createdAt: now,
+            };
+
+            return {
+                artifactVersions: { ...state.artifactVersions, [projectId]: [...updatedVersions, newVersion] },
+                artifacts: { ...state.artifacts, [projectId]: updatedArtifacts },
+                historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), historyEvent] },
+            };
+        });
+
+        return { versionId };
+    },
+
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => {
         set((state) => {
             const allVersions = state.artifactVersions[projectId] || [];
@@ -282,6 +399,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         artifactId: string,
         versionId: string,
         patch: Record<string, unknown>,
+        opts?: { historyDescription?: string },
     ) => {
         set((state) => {
             const allVersions = state.artifactVersions[projectId] || [];
@@ -295,9 +413,32 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
             const updatedArtifacts = projectArtifacts.map(a =>
                 a.id === artifactId ? { ...a, updatedAt: now } : a
             );
+            // User-authored overlay edits (screenEdits/promptEdits) pass a
+            // description so the audit timeline records them; plain metadata
+            // patches (relink/dismiss/extraScreens plumbing) stay silent.
+            const historyEvents = opts?.historyDescription
+                ? {
+                    historyEvents: {
+                        ...state.historyEvents,
+                        [projectId]: [
+                            ...(state.historyEvents[projectId] || []),
+                            {
+                                id: uuidv4(),
+                                projectId,
+                                artifactId,
+                                artifactVersionId: versionId,
+                                type: 'Edited' as const,
+                                description: opts.historyDescription,
+                                createdAt: now,
+                            },
+                        ],
+                    },
+                }
+                : {};
             return {
                 artifactVersions: { ...state.artifactVersions, [projectId]: updatedVersions },
                 artifacts: { ...state.artifacts, [projectId]: updatedArtifacts },
+                ...historyEvents,
             };
         });
     },

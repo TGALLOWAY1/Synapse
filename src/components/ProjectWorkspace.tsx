@@ -33,7 +33,18 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
-import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
+import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, UpdateAssetsPlanModal, type VersionEntry, type UpdatePlanChoice, type UpdatePlanRow } from './versions';
+import {
+    buildArtifactDependencyGraph,
+    computeRecommendedUpdates,
+    evaluateDependencyGraph,
+    expandSelectionWithTroubledUpstreams,
+    type DependencyEvaluationInput,
+    type DependencyNodeId,
+    type DependencyNodeStatus,
+} from '../lib/artifactDependencyGraph';
+import { findFeatureReferences, makeSpineChangeResolver, summarizeSpineChange } from '../lib/spineChangeAnalysis';
+import { selectPreferredDesignSystem } from '../lib/designTokens';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
@@ -41,7 +52,7 @@ import { BranchCanvas } from './BranchCanvas';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { SectionId } from '../lib/schemas/prdSchemas';
-import type { Branch, PipelineStage, FeedbackItem } from '../types';
+import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
 
@@ -50,7 +61,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -89,6 +100,15 @@ export function ProjectWorkspace() {
     // Carries the incomplete-PRD acknowledgement across the design-preset gate
     // (which can interpose between acknowledgement and finalize).
     const pendingIncompleteAck = useRef(false);
+    // Update Assets plan — shown on the re-finalize edge when downstream
+    // assets already exist, replacing the old silent full regeneration.
+    // Cancel aborts the finalize entirely (the spine stays non-final).
+    const [updatePlan, setUpdatePlan] = useState<null | {
+        rows: UpdatePlanRow[];
+        changeHeadline?: string;
+        baselineLabel?: string;
+        ack: boolean;
+    }>(null);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -563,10 +583,190 @@ export function ProjectWorkspace() {
         finalizeAndGenerate(ackIncomplete);
     };
 
+    // --- Update Assets plan (re-finalize with existing assets) --------------
+    // Evaluate the dependency graph against the spine being finalized, exactly
+    // like DependencyGraphView does, so the plan dialog shows the same
+    // statuses/reasons the Project Map would.
+    const buildUpdatePlanContext = () => {
+        if (!projectId || !activeSpine?.structuredPRD) return null;
+        const store = useProjectStore.getState();
+        const graph = buildArtifactDependencyGraph();
+        const spines = store.spineVersions[projectId] || [];
+        const projectArtifacts = store.artifacts[projectId] || [];
+        const mockupArtifact = projectArtifacts.find(a => a.type === 'mockup');
+
+        const snapshots: DependencyEvaluationInput['snapshots'] = {};
+        const artifactIdBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
+        const contentBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
+        for (const node of graph.nodes) {
+            if (node.id === 'prd') continue;
+            const slotKey = node.id as ArtifactSlotKey;
+            const artifact = slotKey === 'mockup'
+                ? mockupArtifact
+                : projectArtifacts.find(a => a.type === 'core_artifact' && a.subtype === slotKey && a.status !== 'archived');
+            const preferred = artifact ? store.getPreferredVersion(projectId, artifact.id) : undefined;
+            if (artifact && preferred) {
+                artifactIdBySlot[slotKey] = artifact.id;
+                contentBySlot[slotKey] = preferred.content;
+                snapshots[slotKey] = {
+                    artifactId: artifact.id,
+                    version: {
+                        id: preferred.id,
+                        versionNumber: preferred.versionNumber,
+                        createdAt: preferred.createdAt,
+                        sourceRefs: preferred.sourceRefs,
+                        provenance: preferred.provenance,
+                        metadata: preferred.metadata,
+                    },
+                };
+            }
+        }
+
+        const evaluations = evaluateDependencyGraph(graph, {
+            spineVersionIds: spines.map(s => s.id),
+            latestSpineId: activeSpine.id,
+            currentDesignTokensHash: selectPreferredDesignSystem(store, projectId)?.tokensHash,
+            snapshots,
+            spineChangeFor: makeSpineChangeResolver(spines, activeSpine.id),
+        });
+
+        return { graph, evaluations, snapshots, artifactIdBySlot, contentBySlot, spines };
+    };
+
+    const PLAN_STATUS_LABELS: Record<DependencyNodeStatus, string> = {
+        source: 'Source of truth',
+        up_to_date: 'Up to date',
+        needs_update: 'Needs update',
+        update_recommended: 'Update recommended',
+        generating: 'Generating…',
+        error: 'Failed',
+        missing: 'Not generated',
+    };
+
+    const openUpdatePlan = (ctx: NonNullable<ReturnType<typeof buildUpdatePlanContext>>, ack: boolean) => {
+        if (!activeSpine) return;
+        const recommended = new Set(computeRecommendedUpdates(ctx.graph, ctx.evaluations));
+        const rows: UpdatePlanRow[] = ctx.graph.nodes
+            .filter(n => n.id !== 'prd')
+            .map(node => {
+                const ev = ctx.evaluations.get(node.id);
+                const status = ev?.status ?? 'missing';
+                const summary = ev?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary;
+                const content = ctx.contentBySlot[node.id as ArtifactSlotKey] ?? '';
+                const removedFeatureNames = summary && content
+                    ? summary.features.removed
+                        .filter(f => findFeatureReferences(f, [{ artifactId: node.id, title: node.title, content }]).length > 0)
+                        .map(f => f.name)
+                    : [];
+                return {
+                    id: node.id,
+                    title: node.title,
+                    statusLabel: PLAN_STATUS_LABELS[status],
+                    isStale: recommended.has(node.id),
+                    changeHeadline: summary
+                        ? `Since ${ev?.prdVersionLabel ?? 'generation'}: ${summary.headline}`
+                        : undefined,
+                    removedFeatureNames,
+                    likelyUnaffected: ev?.likelyUnaffected,
+                    defaultChoice: recommended.has(node.id) ? 'update' as const : 'skip' as const,
+                    canMarkCurrent: !!ctx.artifactIdBySlot[node.id as ArtifactSlotKey]
+                        && (status === 'needs_update' || status === 'update_recommended'),
+                };
+            });
+
+        // Header "what changed": compare against the newest spine any asset was
+        // generated from (assets can span several baselines after repeated edits).
+        let baselineIdx = -1;
+        for (const snap of Object.values(ctx.snapshots)) {
+            const refId = snap?.version.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
+            if (!refId) continue;
+            const idx = ctx.spines.findIndex(s => s.id === refId);
+            if (idx > baselineIdx && ctx.spines[idx]?.id !== activeSpine.id) baselineIdx = idx;
+        }
+        const baselineSpine = baselineIdx >= 0 ? ctx.spines[baselineIdx] : undefined;
+        const headerSummary = baselineSpine
+            ? summarizeSpineChange(baselineSpine.structuredPRD, activeSpine.structuredPRD)
+            : null;
+
+        setUpdatePlan({
+            rows,
+            changeHeadline: headerSummary?.headline,
+            baselineLabel: baselineSpine ? `since Version ${baselineIdx + 1}` : undefined,
+            ack,
+        });
+    };
+
+    const handleUpdatePlanConfirm = (choices: Record<string, UpdatePlanChoice>) => {
+        if (!projectId || !activeSpine?.structuredPRD || !updatePlan) return;
+        // Finalize first — the durable record every path below depends on.
+        markSpineFinal(projectId, activeSpine.id, true);
+
+        // Re-evaluate against fresh store state (the dialog may have been open
+        // a while), then apply mark-current BEFORE regeneration so a confirmed
+        // upstream is healthy when its dependents regenerate.
+        const ctx = buildUpdatePlanContext();
+        if (ctx) {
+            const marked = Object.entries(choices)
+                .filter(([, c]) => c === 'mark_current')
+                .map(([id]) => id as DependencyNodeId);
+            for (const slot of marked) {
+                const artifactId = ctx.artifactIdBySlot[slot as ArtifactSlotKey];
+                if (!artifactId) continue;
+                try {
+                    markArtifactCurrentForSpine(projectId, artifactId, activeSpine.id);
+                } catch {
+                    // No preferred version — nothing to confirm; leave as-is.
+                }
+            }
+
+            const selected = Object.entries(choices)
+                .filter(([, c]) => c === 'update')
+                .map(([id]) => id as DependencyNodeId);
+            if (selected.length > 0) {
+                // Pull in troubled visible upstreams the user left unselected —
+                // regenerating a dependent against a stale input would rebuild
+                // from stale context (marked-current upstreams count as healed).
+                const batch = expandSelectionWithTroubledUpstreams(
+                    ctx.graph, ctx.evaluations, selected, new Set(marked),
+                );
+                artifactJobController.regenerateSlots(
+                    batch.filter((id): id is ArtifactSlotKey => id !== 'prd'),
+                    {
+                        projectId,
+                        spineVersionId: activeSpine.id,
+                        prdContent: activeSpine.responseText,
+                        structuredPRD: activeSpine.structuredPRD,
+                        projectPlatform: project?.platform,
+                        acknowledgeIncomplete: updatePlan.ack,
+                    },
+                );
+            }
+        }
+        setUpdatePlan(null);
+        setShowFinalizeSuccess(true);
+    };
+
     // Performs the actual finalize + asset kickoff. Split out so it can run
     // either directly (preset already chosen / demo) or after the preset gate.
     const finalizeAndGenerate = (ackIncomplete: boolean) => {
         if (!projectId || !activeSpine) return;
+
+        // Re-finalize with existing assets: route through the Update Assets
+        // plan instead of blindly regenerating everything. First finalize (no
+        // assets yet), the demo, and mid-run finalizes keep the direct path.
+        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
+            const jobActive = !!assetJob && Object.values(assetJob.slots).some(
+                s => s && (s.status === 'generating' || s.status === 'queued'),
+            );
+            if (!jobActive) {
+                const ctx = buildUpdatePlanContext();
+                if (ctx && Object.keys(ctx.snapshots).length > 0) {
+                    openUpdatePlan(ctx, ackIncomplete);
+                    return; // not finalized yet — the plan dialog owns it
+                }
+            }
+        }
+
         markSpineFinal(projectId, activeSpine.id, true);
 
         // Kick off artifact generation immediately so assets are underway
@@ -816,6 +1016,16 @@ export function ProjectWorkspace() {
                 <DesignSystemPresetChoice
                     onChoose={handleChooseDesignSystemPreset}
                     onClose={() => setShowPresetChoice(false)}
+                />
+            )}
+            {updatePlan && activeSpine && (
+                <UpdateAssetsPlanModal
+                    prdLabel={getVersionLabel(activeSpine.id)}
+                    changeHeadline={updatePlan.changeHeadline}
+                    baselineLabel={updatePlan.baselineLabel}
+                    rows={updatePlan.rows}
+                    onConfirm={handleUpdatePlanConfirm}
+                    onCancel={() => setUpdatePlan(null)}
                 />
             )}
             {showFinalizeSuccess && (

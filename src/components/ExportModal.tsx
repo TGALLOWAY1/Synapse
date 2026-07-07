@@ -9,6 +9,7 @@ import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenIn
 import { downloadFile } from '../lib/utils/downloadFile';
 import { copyToClipboard } from '../lib/utils/copyToClipboard';
 import { buildAgentHandoff } from '../lib/exportHandoff';
+import { buildExportManifest, renderManifestMarkdown, type ExportManifestEntry } from '../lib/exportManifest';
 import {
     CORE_ARTIFACT_DISPLAY_ORDER,
     getArtifactMeta,
@@ -33,7 +34,10 @@ interface ExportModalProps {
 }
 
 export function ExportModal({ projectId, onClose }: ExportModalProps) {
-    const { getProject, getLatestSpine, getArtifacts, getArtifactVersions } = useProjectStore();
+    const {
+        getProject, getLatestSpine, getArtifacts, getArtifactVersions,
+        getArtifactStaleness, getSpineVersions,
+    } = useProjectStore();
     const { addToast } = useToastStore();
     const syncInfo = useProjectSyncStore((s) => s.projects[projectId]);
     const [exporting, setExporting] = useState(false);
@@ -88,6 +92,31 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         .map(meta => coreArtifacts.find(a => a.subtype === meta.subtype))
         .filter((a): a is Artifact => Boolean(a));
 
+    // --- Version manifest + staleness (what exactly is being exported) ------
+    const spines = getSpineVersions(projectId);
+    const spineLabelOf = (spineId?: string): string | undefined => {
+        if (!spineId) return undefined;
+        const idx = spines.findIndex(s => s.id === spineId);
+        return idx >= 0 ? `Version ${idx + 1}` : undefined;
+    };
+    const manifestEntries: ExportManifestEntry[] = [...orderedCoreArtifacts, ...mockupArtifacts].map(a => {
+        const preferred = getArtifactVersions(projectId, a.id).find(v => v.isPreferred);
+        return {
+            title: displayTitle(a),
+            versionNumber: preferred?.versionNumber,
+            generatedFromPrdLabel: spineLabelOf(
+                preferred?.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId,
+            ),
+            staleness: getArtifactStaleness(projectId, a.id),
+        };
+    });
+    const manifest = buildExportManifest({
+        projectName: project?.name || 'project',
+        prdLabel: spineLabelOf(latestSpine?.id),
+        entries: manifestEntries,
+    });
+    const staleTitles = manifestEntries.filter(e => e.staleness !== 'current').map(e => e.title);
+
     const exportPRD = () => {
         if (!latestSpine) return;
         downloadFile(latestSpine.responseText, `${project?.name || 'project'}-prd.md`);
@@ -107,6 +136,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         if (!latestSpine?.structuredPRD) return;
         const data = {
             project: project,
+            manifest,
             structuredPRD: latestSpine.structuredPRD,
             artifacts: orderedCoreArtifacts.map(a => {
                 const versions = getArtifactVersions(projectId, a.id);
@@ -133,7 +163,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     };
 
     const buildFullBundle = (): string => {
-        const sections: string[] = [];
+        const sections: string[] = [renderManifestMarkdown(manifest), '\n---\n'];
         if (latestSpine) {
             sections.push('# Product Requirements Document\n', latestSpine.responseText, '\n---\n');
         }
@@ -155,6 +185,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         buildAgentHandoff({
             projectName: project?.name || 'This product',
             prdMarkdown: latestSpine?.responseText,
+            manifestMarkdown: renderManifestMarkdown(manifest),
             artifacts: orderedCoreArtifacts.map(a => ({
                 subtype: a.subtype ?? '',
                 title: displayTitle(a),
@@ -209,6 +240,25 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                                         {recoverySaved ? <Check size={12} /> : <Download size={12} />}
                                         {recoverySaved ? 'Recovery bundle saved' : 'Download recovery bundle'}
                                     </button>
+                                </div>
+                            </div>
+                        </div>
+                    )}
+
+                    {manifest.staleCount > 0 && (
+                        <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">
+                            <div className="flex items-start gap-2">
+                                <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
+                                <div className="min-w-0 flex-1">
+                                    <p className="text-sm font-medium">
+                                        {manifest.staleCount} asset{manifest.staleCount === 1 ? '' : 's'} may be out of
+                                        date with the current PRD
+                                    </p>
+                                    <p className="mt-0.5 text-xs text-amber-800">
+                                        {staleTitles.join(', ')} — exports include each asset&rsquo;s latest saved
+                                        version and note this in the export manifest. Review them in Project Map →
+                                        Dependency Graph first, or export anyway.
+                                    </p>
                                 </div>
                             </div>
                         </div>

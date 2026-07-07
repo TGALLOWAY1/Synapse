@@ -2,6 +2,8 @@ import type { StalenessState } from '../types';
 
 interface StalenessBadgeProps {
     staleness: StalenessState;
+    /** Optional "what changed" tooltip shown on hover (native title). */
+    detail?: string;
 }
 
 const config: Record<StalenessState, { label: string; className: string }> = {
@@ -19,13 +21,16 @@ const config: Record<StalenessState, { label: string; className: string }> = {
     },
 };
 
-export function StalenessBadge({ staleness }: StalenessBadgeProps) {
+export function StalenessBadge({ staleness, detail }: StalenessBadgeProps) {
     if (staleness === 'current') return null;
 
     const { label, className } = config[staleness];
 
     return (
-        <span className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${className}`}>
+        <span
+            className={`text-[10px] px-1.5 py-0.5 rounded border font-medium ${className} ${detail ? 'cursor-help' : ''}`}
+            title={detail}
+        >
             {label}
         </span>
     );

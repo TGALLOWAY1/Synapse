@@ -7,6 +7,7 @@ import {
     computeRecommendedUpdates,
     computeUpdateOrder,
     evaluateDependencyGraph,
+    expandSelectionWithTroubledUpstreams,
     getDirectDependencies,
     getDirectDependents,
     type DependencyEvaluationInput,
@@ -17,7 +18,8 @@ import {
     HIDDEN_ARTIFACT_SUBTYPES,
     RETIRED_ARTIFACT_SUBTYPES,
 } from '../coreArtifactPipeline';
-import type { SourceRef } from '../../types';
+import { summarizeSpineChange, type SpineChangeSummary } from '../spineChangeAnalysis';
+import type { SourceRef, StructuredPRD } from '../../types';
 
 const graph = buildArtifactDependencyGraph();
 
@@ -47,6 +49,7 @@ interface SnapshotOpts {
     createdAt?: number;
     sourceRefs?: SourceRef[];
     manuallyEdited?: boolean;
+    metadata?: Record<string, unknown>;
 }
 
 const snapshot = (nodeId: string, opts: SnapshotOpts = {}) => ({
@@ -57,6 +60,7 @@ const snapshot = (nodeId: string, opts: SnapshotOpts = {}) => ({
         createdAt: opts.createdAt ?? 1000,
         sourceRefs: opts.sourceRefs ?? [spineRef(SPINE_V1)],
         ...(opts.manuallyEdited ? { provenance: { changeSource: 'user_edit' as const } } : {}),
+        ...(opts.metadata ? { metadata: opts.metadata } : {}),
     },
 });
 
@@ -410,5 +414,95 @@ describe('computeRecommendedUpdates', () => {
         // data_model missing → implementation_plan is impacted and included.
         expect(order).toContain('implementation_plan');
         expect(order.indexOf('data_model')).toBeLessThan(order.indexOf('implementation_plan'));
+    });
+});
+
+// --- change-aware evaluation (spineChangeFor) --------------------------------
+
+describe('change-aware evaluation', () => {
+    const basePrd = (overrides: Partial<StructuredPRD> = {}): StructuredPRD => ({
+        vision: 'v',
+        targetUsers: ['u'],
+        coreProblem: 'p',
+        features: [{ id: 'f1', name: 'Feature One', description: 'd', userValue: 'v', complexity: 'low' }],
+        architecture: 'a',
+        risks: ['r'],
+        ...overrides,
+    });
+
+    const prdChangedInput = (summary: SpineChangeSummary): DependencyEvaluationInput => {
+        const input = healthyInput();
+        input.spineVersionIds = [SPINE_V1, SPINE_V2];
+        input.latestSpineId = SPINE_V2;
+        input.spineChangeFor = (from) => (from === SPINE_V1 ? summary : null);
+        return input;
+    };
+
+    it('attaches the change summary to prd_changed reasons; advisory never downgrades the status', () => {
+        // Risks-only change: outside screen_inventory's affinity, inside
+        // implementation_plan's.
+        const summary = summarizeSpineChange(basePrd(), basePrd({ risks: ['r', 'r2'] }));
+        const evals = evaluateDependencyGraph(graph, prdChangedInput(summary));
+
+        const screens = evals.get('screen_inventory')!;
+        expect(screens.status).toBe('needs_update');
+        expect(screens.reasons.find(r => r.kind === 'prd_changed')?.changeSummary).toBe(summary);
+        expect(screens.likelyUnaffected).toBe(true);
+
+        expect(evals.get('implementation_plan')?.likelyUnaffected).toBeUndefined();
+    });
+
+    it('never flags likelyUnaffected when other evidence exists alongside the PRD change', () => {
+        const summary = summarizeSpineChange(basePrd(), basePrd({ risks: ['r', 'r2'] }));
+        const input = prdChangedInput(summary);
+        // Mockup also has design token drift → two reasons → no advisory flag.
+        input.currentDesignTokensHash = 'hash-b';
+        const evals = evaluateDependencyGraph(graph, input);
+        const mockup = evals.get('mockup')!;
+        expect(mockup.reasons.length).toBeGreaterThan(1);
+        expect(mockup.likelyUnaffected).toBeUndefined();
+    });
+
+    it('treats overlay-edited metadata (screenEdits/promptEdits) as manually edited', () => {
+        const input = healthyInput();
+        input.snapshots.screen_inventory = snapshot('screen_inventory', {
+            metadata: { screenEdits: { 'scr-home': { name: 'Home!' } } },
+        });
+        const evals = evaluateDependencyGraph(graph, input);
+        expect(evals.get('screen_inventory')?.manuallyEdited).toBe(true);
+        expect(evals.get('data_model')?.manuallyEdited).toBe(false);
+    });
+});
+
+// --- expandSelectionWithTroubledUpstreams -------------------------------------
+
+describe('expandSelectionWithTroubledUpstreams', () => {
+    it('force-includes a stale visible upstream of a selected dependent, in safe order', () => {
+        // PRD drifted: everything needs_update. Selecting only user_flows must
+        // pull in its stale screen_inventory input ahead of it.
+        const input = healthyInput();
+        input.spineVersionIds = [SPINE_V1, SPINE_V2];
+        input.latestSpineId = SPINE_V2;
+        const evals = evaluateDependencyGraph(graph, input);
+        const batch = expandSelectionWithTroubledUpstreams(graph, evals, ['user_flows']);
+        expect(batch).toContain('screen_inventory');
+        expect(batch.indexOf('screen_inventory')).toBeLessThan(batch.indexOf('user_flows'));
+    });
+
+    it('treats healed (marked-current) upstreams as healthy and leaves them out', () => {
+        const input = healthyInput();
+        input.spineVersionIds = [SPINE_V1, SPINE_V2];
+        input.latestSpineId = SPINE_V2;
+        const evals = evaluateDependencyGraph(graph, input);
+        const batch = expandSelectionWithTroubledUpstreams(
+            graph, evals, ['user_flows'], new Set<DependencyNodeId>(['screen_inventory']),
+        );
+        expect(batch).toEqual(['user_flows']);
+    });
+
+    it('leaves healthy upstreams alone and never includes the PRD', () => {
+        const evals = evaluateDependencyGraph(graph, healthyInput());
+        const batch = expandSelectionWithTroubledUpstreams(graph, evals, ['mockup', 'prd']);
+        expect(batch).toEqual(['mockup']);
     });
 });

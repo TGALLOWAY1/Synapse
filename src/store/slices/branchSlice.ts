@@ -98,6 +98,10 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                provenance: {
+                    changeSource: 'branch_merge',
+                    editSummary: `Merged branch: "${branch.anchorText.substring(0, 40)}${branch.anchorText.length > 40 ? '…' : ''}"`,
+                },
             };
 
             const mergeEvent: HistoryEvent = {

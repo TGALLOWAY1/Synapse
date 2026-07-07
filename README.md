@@ -42,7 +42,7 @@
 | ✍️ | **Highlight-to-refine** | Select any passage → Clarify / Expand / Specify / Alternative / Replace → a threaded branch merges back in. | Surgical edits on one span instead of regenerating the whole document. |
 | 🕓 | **Everything is versioned** | Every regenerate, edit, branch-merge, and restore appends a new version with a section-aware diff. | Non-destructive history — nothing is ever overwritten or lost. |
 | 📊 | **Orchestration metrics** | A `/metrics` dashboard records real telemetry: speedup, concurrency, critical path, token usage, cost estimates. | The concurrency is **measured, not claimed** — with per-run Gantt charts. |
-| 🔌 | **Dependency graph & staleness** | Artifacts carry source references to their inputs; a **Project Map → Dependency Graph** view shows how every asset derives from the PRD and each other, which are stale (and why), and updates all impacted artifacts in safe dependency order. | The whole workspace stays coherent as the product evolves — and drift is visible, explainable, and one click from fixed. |
+| 🔌 | **Dependency graph & change-aware staleness** | Artifacts carry source references to their inputs; a **Project Map → Dependency Graph** view shows how every asset derives from the PRD and each other, which are stale — and *what changed* ("1 feature removed · Architecture changed", including deleted features an asset still references) — and updates impacted artifacts in safe dependency order. Re-finalizing an edited PRD opens an **Update Assets plan** (regenerate / mark up to date / decide later per asset) instead of silently rebuilding everything, and exports carry a **version manifest** that flags stale content. | The whole workspace stays coherent as the product evolves — drift is visible, explainable, and surgical to fix instead of all-or-nothing. |
 | ☁️ | **Cross-device web app** | A Vercel-hosted web app: signed-in users' projects sync to a per-account server collection and follow them across machines. | Access your work from any browser — nothing is trapped on one device. |
 | 📱 | **Mobile-ready by design** | Responsive layouts, safe-area insets, touch-aware selection, swipe navigation, and reduced-motion support throughout. | The full workflow — including highlight-to-refine — works on a phone, not just desktop. |
 | 🤝 | **Coding-agent hand-off** | One-click "Copy for coding agent" bundles PRD + build artifacts for Claude Code / Cursor. | Closes the loop from idea straight to implementation. |
@@ -223,7 +223,7 @@ The backend's job is bursty and request-scoped — sync upserts, vault reads, OA
 **🔮 Future**
 - [ ] Additional LLM providers (Anthropic / Azure OpenAI) via the routing layer
 - [ ] Real-time collaborative editing on a shared spine
-- [ ] Improved versioning functionality
+- [x] Improved versioning functionality — change-aware staleness, per-asset update planning on re-finalize, export version manifest
 - [ ] Enhanced build plan features
 
 ---
