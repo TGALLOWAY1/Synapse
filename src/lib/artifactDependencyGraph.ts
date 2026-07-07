@@ -35,6 +35,7 @@ import {
     isHiddenArtifactSubtype,
     isRetiredArtifactSubtype,
 } from './coreArtifactPipeline';
+import { isLikelyUnaffected, type SpineChangeSummary } from './spineChangeAnalysis';
 
 // ---------------------------------------------------------------------------
 // Graph shape
@@ -314,6 +315,12 @@ export interface StaleReason {
     /** The upstream node this reason points at (absent for no_provenance). */
     dependencyId?: DependencyNodeId;
     detail: string;
+    /**
+     * For prd_changed: WHAT changed between the artifact's source spine and
+     * the latest spine (feature-level + section-level, deterministic).
+     * Present only when the caller supplies `spineChangeFor`.
+     */
+    changeSummary?: SpineChangeSummary;
 }
 
 /** Minimal slice of an ArtifactVersion the evaluator needs. */
@@ -323,6 +330,8 @@ export interface DependencyVersionSnapshot {
     createdAt: number;
     sourceRefs: SourceRef[];
     provenance?: VersionProvenance;
+    /** Optional version metadata — used to detect user overlay edits. */
+    metadata?: Record<string, unknown>;
 }
 
 export interface DependencyNodeSnapshot {
@@ -341,6 +350,13 @@ export interface DependencyEvaluationInput {
     snapshots: Partial<Record<ArtifactSlotKey, DependencyNodeSnapshot>>;
     /** Live generation status per slot (transient job state). */
     slotStatus?: Partial<Record<ArtifactSlotKey, GenerationStatus>>;
+    /**
+     * Optional change-awareness hook (see spineChangeAnalysis's
+     * makeSpineChangeResolver): "what changed between spine X and the latest
+     * spine?". When present, prd_changed reasons carry a changeSummary and
+     * nodes may gain the advisory `likelyUnaffected` flag.
+     */
+    spineChangeFor?: (fromSpineVersionId: string) => SpineChangeSummary | null;
 }
 
 export interface DependencyNodeEvaluation {
@@ -359,6 +375,13 @@ export interface DependencyNodeEvaluation {
     generatedAt?: number;
     /** "Version N" label of the PRD version this artifact was generated from. */
     prdVersionLabel?: string;
+    /**
+     * ADVISORY: the PRD did change, but no changed section is one this slot
+     * chiefly derives from (ARTIFACT_SECTION_AFFINITY). Never downgrades the
+     * hard needs_update status — it is a hint for "mark as up to date", not a
+     * verdict. Only set when the sole hard evidence is prd_changed.
+     */
+    likelyUnaffected?: boolean;
 }
 
 const spineLabel = (spineVersionIds: string[], spineId: string | undefined): string | undefined => {
@@ -369,6 +392,18 @@ const spineLabel = (spineVersionIds: string[], spineId: string | undefined): str
 
 const nodeTitle = (graph: ArtifactDependencyGraph, id: DependencyNodeId): string =>
     getDependencyNode(graph, id)?.title ?? id;
+
+// User overlay edits (screenEdits / promptEdits) customize the preferred
+// version's metadata without creating a version — surface them with the same
+// "edited manually" caution flag as provenance-tracked edits.
+const hasOverlayEdits = (metadata?: Record<string, unknown>): boolean => {
+    if (!metadata) return false;
+    for (const key of ['screenEdits', 'promptEdits'] as const) {
+        const overlay = metadata[key];
+        if (overlay && typeof overlay === 'object' && Object.keys(overlay).length > 0) return true;
+    }
+    return false;
+};
 
 /**
  * Evaluate every node's local staleness, then propagate upstream trouble
@@ -429,10 +464,12 @@ export function evaluateDependencyGraph(
             advisory = true;
         } else if (input.latestSpineId && spineRef.sourceArtifactVersionId !== input.latestSpineId) {
             const latestLabel = spineLabel(input.spineVersionIds, input.latestSpineId);
+            const changeSummary = input.spineChangeFor?.(spineRef.sourceArtifactVersionId) ?? undefined;
             reasons.push({
                 kind: 'prd_changed',
                 dependencyId: 'prd',
                 detail: `The PRD changed after this was generated${refLabel && latestLabel ? ` (generated from ${refLabel}, now on ${latestLabel})` : ''}.`,
+                ...(changeSummary ? { changeSummary } : {}),
             });
         }
 
@@ -496,15 +533,26 @@ export function evaluateDependencyGraph(
                 ? 'update_recommended'
                 : 'up_to_date';
 
+        // Advisory scoping: only when the PRD change is the SOLE reason (any
+        // dependency/token drift or legacy heuristic is its own evidence) and
+        // the change avoided every section this slot chiefly derives from.
+        const prdReason = reasons.find(r => r.kind === 'prd_changed');
+        const likelyUnaffected =
+            reasons.length === 1
+            && prdReason?.changeSummary !== undefined
+            && isLikelyUnaffected(slotKey, prdReason.changeSummary);
+
         evaluations.set(node.id, {
             nodeId: node.id,
             status,
             reasons,
             impactedBy: [],
-            manuallyEdited: version.provenance?.changeSource === 'user_edit',
+            manuallyEdited: version.provenance?.changeSource === 'user_edit'
+                || hasOverlayEdits(version.metadata),
             versionNumber: version.versionNumber,
             generatedAt: version.createdAt,
             prdVersionLabel: refLabel,
+            ...(likelyUnaffected ? { likelyUnaffected: true } : {}),
         });
     }
 

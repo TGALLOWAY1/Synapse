@@ -45,6 +45,7 @@ import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
+import { makeSpineChangeResolver } from '../lib/spineChangeAnalysis';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -247,7 +248,7 @@ export function ArtifactWorkspace({
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
-        revertArtifactToVersion, setProjectDesignSystemPreset,
+        revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
     } = useProjectStore();
     // Reactive read of the project's chosen visual direction, so the Design
     // System "Design direction" control re-renders when it changes.
@@ -630,8 +631,18 @@ export function ArtifactWorkspace({
         return idx >= 0 ? `Version ${idx + 1}` : undefined;
     };
 
+    // Change-aware staleness: "what changed since spine X" against the latest
+    // spine, memoized per spine pair for the render pass.
+    const allSpines = getSpineVersions(projectId);
+    const latestSpineId = allSpines.find(s => s.isLatest)?.id;
+    const spineChangeFor = useMemo(
+        () => makeSpineChangeResolver(allSpines, latestSpineId),
+        [allSpines, latestSpineId],
+    );
+
     // Header strip shown above a generated artifact: provenance chip ("Generated
-    // from PRD Version X"), staleness badge, and a Version history entry point.
+    // from PRD Version X"), staleness badge (+ what-changed detail), a
+    // "Mark up to date" escape hatch when stale, and a Version history entry.
     const renderVersionControls = (
         artifactId: string,
         preferred: { sourceRefs: { sourceType: string; sourceArtifactVersionId: string }[] },
@@ -639,6 +650,7 @@ export function ArtifactWorkspace({
         const staleness = getArtifactStaleness(projectId, artifactId);
         const spineRef = preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
         const prdLabel = resolveSpineLabel(spineRef);
+        const changeSummary = staleness !== 'current' && spineRef ? spineChangeFor(spineRef) : null;
         return (
             <div className="flex items-center gap-2 flex-wrap">
                 {prdLabel && (
@@ -646,7 +658,27 @@ export function ArtifactWorkspace({
                         Generated from PRD {prdLabel}
                     </span>
                 )}
-                <StalenessBadge staleness={staleness} />
+                <StalenessBadge
+                    staleness={staleness}
+                    detail={changeSummary
+                        ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
+                        : undefined}
+                />
+                {changeSummary?.hasChanges && (
+                    <span className="text-[11px] text-amber-700 truncate max-w-full">
+                        Since {prdLabel ?? 'generation'}: {changeSummary.headline}
+                    </span>
+                )}
+                {staleness !== 'current' && latestSpineId && (
+                    <button
+                        type="button"
+                        onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
+                        title="Confirm this artifact is still valid for the current PRD without regenerating it"
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                    >
+                        <ShieldCheck size={12} /> Mark up to date
+                    </button>
+                )}
                 <button
                     type="button"
                     onClick={() => setVersionHistoryArtifactId(artifactId)}
