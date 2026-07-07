@@ -1319,7 +1319,8 @@ export type HistoryEventType =
     | 'FeedbackApplied'
     | 'GenerationFailed'
     | 'Edited'
-    | 'Reverted';
+    | 'Reverted'
+    | 'MarkedCurrent';
 
 // --- Version provenance ----------------------------------------------------
 // Attribution for "who/what produced this version". Attached to both
@@ -1332,7 +1333,8 @@ export type VersionChangeSource =
     | 'branch_merge'        // consolidation back into the spine
     | 'user_edit'           // inline edit in the workspace
     | 'revert'              // restore of an earlier version
-    | 'consistency_review'; // optional final reconciliation pass
+    | 'consistency_review'  // optional final reconciliation pass
+    | 'marked_current';     // user confirmed an artifact is still current for a newer PRD
 
 export type VersionProvenance = {
     changeSource?: VersionChangeSource;

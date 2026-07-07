@@ -17,6 +17,7 @@ const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string
     GenerationFailed: { icon: XCircle, color: 'text-red-600', bgColor: 'bg-red-50' },
     Edited: { icon: Pencil, color: 'text-violet-600', bgColor: 'bg-violet-50' },
     Reverted: { icon: RotateCcw, color: 'text-amber-600', bgColor: 'bg-amber-50' },
+    MarkedCurrent: { icon: CheckCircle, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
 };
 
 export function HistoryView({ projectId }: HistoryViewProps) {
