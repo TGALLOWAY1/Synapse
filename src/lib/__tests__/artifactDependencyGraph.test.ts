@@ -7,6 +7,7 @@ import {
     computeRecommendedUpdates,
     computeUpdateOrder,
     evaluateDependencyGraph,
+    expandSelectionWithTroubledUpstreams,
     getDirectDependencies,
     getDirectDependents,
     type DependencyEvaluationInput,
@@ -470,5 +471,38 @@ describe('change-aware evaluation', () => {
         const evals = evaluateDependencyGraph(graph, input);
         expect(evals.get('screen_inventory')?.manuallyEdited).toBe(true);
         expect(evals.get('data_model')?.manuallyEdited).toBe(false);
+    });
+});
+
+// --- expandSelectionWithTroubledUpstreams -------------------------------------
+
+describe('expandSelectionWithTroubledUpstreams', () => {
+    it('force-includes a stale visible upstream of a selected dependent, in safe order', () => {
+        // PRD drifted: everything needs_update. Selecting only user_flows must
+        // pull in its stale screen_inventory input ahead of it.
+        const input = healthyInput();
+        input.spineVersionIds = [SPINE_V1, SPINE_V2];
+        input.latestSpineId = SPINE_V2;
+        const evals = evaluateDependencyGraph(graph, input);
+        const batch = expandSelectionWithTroubledUpstreams(graph, evals, ['user_flows']);
+        expect(batch).toContain('screen_inventory');
+        expect(batch.indexOf('screen_inventory')).toBeLessThan(batch.indexOf('user_flows'));
+    });
+
+    it('treats healed (marked-current) upstreams as healthy and leaves them out', () => {
+        const input = healthyInput();
+        input.spineVersionIds = [SPINE_V1, SPINE_V2];
+        input.latestSpineId = SPINE_V2;
+        const evals = evaluateDependencyGraph(graph, input);
+        const batch = expandSelectionWithTroubledUpstreams(
+            graph, evals, ['user_flows'], new Set<DependencyNodeId>(['screen_inventory']),
+        );
+        expect(batch).toEqual(['user_flows']);
+    });
+
+    it('leaves healthy upstreams alone and never includes the PRD', () => {
+        const evals = evaluateDependencyGraph(graph, healthyInput());
+        const batch = expandSelectionWithTroubledUpstreams(graph, evals, ['mockup', 'prd']);
+        expect(batch).toEqual(['mockup']);
     });
 });

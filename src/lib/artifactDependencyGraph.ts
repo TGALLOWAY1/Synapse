@@ -587,6 +587,45 @@ export function evaluateDependencyGraph(
  * this order never rebuilds an artifact from a stale input. Nodes currently
  * generating are excluded (they're already being handled).
  */
+/**
+ * Expand a user-selected regeneration batch with its troubled VISIBLE
+ * upstreams. `regenerateSlots` expands hidden subtypes and orders execution,
+ * but it does NOT pull in a stale/missing/errored visible input the user left
+ * unselected — regenerating a dependent against it would rebuild from stale
+ * context. Upstreams in `healed` (about to be marked current in the same
+ * action) are treated as healthy and never force-included. Returns the batch
+ * in safe update order.
+ */
+export function expandSelectionWithTroubledUpstreams(
+    graph: ArtifactDependencyGraph,
+    evaluations: Map<DependencyNodeId, DependencyNodeEvaluation>,
+    selected: DependencyNodeId[],
+    healed: ReadonlySet<DependencyNodeId> = new Set(),
+): DependencyNodeId[] {
+    const batch = new Set(selected.filter(id => id !== 'prd'));
+    const troubled = (id: DependencyNodeId): boolean => {
+        const s = evaluations.get(id)?.status;
+        return s === 'needs_update' || s === 'update_recommended' || s === 'missing' || s === 'error';
+    };
+    let grew = true;
+    while (grew) {
+        grew = false;
+        for (const id of [...batch]) {
+            const hardDeps = graph.edges
+                .filter(e => e.to === id && e.kind === 'hard')
+                .map(e => e.from);
+            for (const dep of hardDeps) {
+                if (dep === 'prd' || batch.has(dep) || healed.has(dep)) continue;
+                if (troubled(dep)) {
+                    batch.add(dep);
+                    grew = true;
+                }
+            }
+        }
+    }
+    return computeUpdateOrder(graph, [...batch]);
+}
+
 export function computeRecommendedUpdates(
     graph: ArtifactDependencyGraph,
     evaluations: Map<DependencyNodeId, DependencyNodeEvaluation>,
