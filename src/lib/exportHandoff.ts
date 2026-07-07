@@ -14,6 +14,12 @@ export interface HandoffInput {
     prdMarkdown?: string;
     /** Core artifacts in display order; mockups are intentionally excluded. */
     artifacts: HandoffArtifact[];
+    /**
+     * Pre-rendered export-manifest markdown (see exportManifest.ts). Emitted
+     * right after the preamble so the agent sees which versions it holds and
+     * whether anything was stale at export time.
+     */
+    manifestMarkdown?: string;
 }
 
 const PREAMBLE = (projectName: string) =>
@@ -34,8 +40,12 @@ How to use this document:
  * is non-empty, so a partial project still produces a coherent document.
  */
 export function buildAgentHandoff(input: HandoffInput): string {
-    const { projectName, prdMarkdown, artifacts } = input;
+    const { projectName, prdMarkdown, artifacts, manifestMarkdown } = input;
     const parts: string[] = [PREAMBLE(projectName || 'This product')];
+
+    if (manifestMarkdown && manifestMarkdown.trim()) {
+        parts.push(manifestMarkdown.trim(), '\n---\n');
+    }
 
     if (prdMarkdown && prdMarkdown.trim()) {
         parts.push('## Product Requirements\n', prdMarkdown.trim(), '\n---\n');
