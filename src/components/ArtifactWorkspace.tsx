@@ -399,7 +399,11 @@ export function ArtifactWorkspace({
         const next: Record<string, ScreenMetadataEdit> = { ...current };
         if (edit) next[screenId] = edit;
         else delete next[screenId];
-        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, { screenEdits: next });
+        updateArtifactVersionMetadata(projectId, invArtifact.id, invPreferred.id, { screenEdits: next }, {
+            historyDescription: edit
+                ? `Screen details edited: ${edit.name ?? screenId}`
+                : `Screen details reset to generated: ${screenId}`,
+        });
     };
 
     // --- Mockup coverage actions --------------------------------------------
@@ -1056,7 +1060,9 @@ export function ArtifactWorkspace({
             : undefined;
         const handleUpdatePromptEdits = subtype === 'prompt_pack'
             ? (next: Record<number, string>) => {
-                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next });
+                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next }, {
+                    historyDescription: 'Developer prompt edited',
+                });
             }
             : undefined;
         const blockingIssues = readValidationBlockers(preferred.metadata);

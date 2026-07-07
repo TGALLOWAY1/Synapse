@@ -7,7 +7,7 @@ import type {
     QualityScores, GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
     ProjectTask, TaskStatus, TaskExternalRef,
-    WorkflowRun,
+    WorkflowRun, VersionProvenance,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
@@ -152,13 +152,20 @@ export interface ProjectState {
         metadata: Record<string, unknown>,
         sourceRefs: SourceRef[],
         generationPrompt: string,
-        parentVersionId?: string | null
+        parentVersionId?: string | null,
+        // Optional attribution override; defaults to ai_generation /
+        // ai_regeneration by version number.
+        provenance?: VersionProvenance,
     ) => { versionId: string };
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => void;
     // Versioning: restore a historical artifact version by appending a cloned
     // ArtifactVersion (increments versionNumber, becomes preferred) rather than
     // only re-pointing isPreferred — keeps the audit log honest.
     revertArtifactToVersion: (projectId: string, artifactId: string, sourceVersionId: string) => { versionId: string };
+    // Versioning: user asserts the preferred version is still current for a
+    // newer spine — appends a cloned version whose sourceRefs are rebased onto
+    // the given spine version and each dependency's current preferred version.
+    markArtifactCurrentForSpine: (projectId: string, artifactId: string, spineVersionId: string) => { versionId: string };
     getArtifactVersions: (projectId: string, artifactId: string) => ArtifactVersion[];
     getPreferredVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
     getLatestArtifactVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
@@ -167,6 +174,10 @@ export interface ProjectState {
         artifactId: string,
         versionId: string,
         patch: Record<string, unknown>,
+        // When the patch is a user-authored overlay edit (screenEdits /
+        // promptEdits), pass a description so an 'Edited' history event is
+        // recorded; plumbing patches omit it and stay silent.
+        opts?: { historyDescription?: string },
     ) => void;
 
     // Feedback actions
