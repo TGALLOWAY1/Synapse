@@ -70,10 +70,15 @@ export function ConsolidatedPlanView({
         if (onUpdateProgress) onUpdateProgress(next);
         else setLocalProgress(next);
     };
-    const markPackCopied = (packId: string) => {
-        if (progress.copiedPacks.includes(packId)) return;
-        updateProgress({ ...progress, copiedPacks: [...progress.copiedPacks, packId] });
+    // Single update for N packs — bulk copy actions ("Copy all", "Copy
+    // milestone prompts") must advance the next-prompt pointer too, and a
+    // per-id loop would clobber itself on the stale `progress` closure.
+    const markPacksCopied = (packIds: string[]) => {
+        const missing = packIds.filter(id => !progress.copiedPacks.includes(id));
+        if (missing.length === 0) return;
+        updateProgress({ ...progress, copiedPacks: [...progress.copiedPacks, ...missing] });
     };
+    const markPackCopied = (packId: string) => markPacksCopied([packId]);
     const setGateStatus = (gateId: string, status: QualityGateRunStatus) => {
         updateProgress({ ...progress, gateStatuses: { ...progress.gateStatuses, [gateId]: status } });
     };
@@ -186,6 +191,7 @@ export function ConsolidatedPlanView({
                                 onSetGateStatus={setGateStatus}
                                 copiedPackIds={copiedPackIds}
                                 onPackCopied={markPackCopied}
+                                onPacksCopied={markPacksCopied}
                             />
                         ))
                     )}
@@ -245,6 +251,7 @@ export function ConsolidatedPlanView({
                                             text={allPacks.map(promptPackToClipboardText).join('\n\n---\n\n')}
                                             label="Copy all prompt packs"
                                             variant="secondary"
+                                            onCopied={() => markPacksCopied(ordered.map(o => o.pack.id))}
                                         />
                                     </div>
                                 </div>
@@ -337,6 +344,7 @@ export function ConsolidatedPlanView({
                         text={allPacks.map(promptPackToClipboardText).join('\n\n---\n\n')}
                         label="Copy all prompt packs"
                         variant="secondary"
+                        onCopied={() => markPacksCopied(ordered.map(o => o.pack.id))}
                     />
                 )}
             </div>

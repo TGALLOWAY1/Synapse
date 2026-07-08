@@ -61,6 +61,8 @@ interface Props {
     /** Prompt packs the user already copied (drives the Copied chip). */
     copiedPackIds?: ReadonlySet<string>;
     onPackCopied?: (packId: string) => void;
+    /** Bulk variant for "Copy milestone prompts" — one progress update. */
+    onPacksCopied?: (packIds: string[]) => void;
 }
 
 /**
@@ -80,6 +82,7 @@ export function MilestoneCard({
     onSetGateStatus,
     copiedPackIds,
     onPackCopied,
+    onPacksCopied,
 }: Props) {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const packs: ImplementationPromptPack[] = m.promptPacks ?? [];
@@ -232,7 +235,12 @@ export function MilestoneCard({
                                     Prompt Packs
                                 </p>
                                 {packs.length > 1 && (
-                                    <CopyTextButton text={allPromptsText} label="Copy milestone prompts" variant="secondary" />
+                                    <CopyTextButton
+                                        text={allPromptsText}
+                                        label="Copy milestone prompts"
+                                        variant="secondary"
+                                        onCopied={onPacksCopied ? () => onPacksCopied(packs.map(p => p.id)) : undefined}
+                                    />
                                 )}
                             </div>
                             <div className="space-y-3">

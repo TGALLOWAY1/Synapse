@@ -129,6 +129,17 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(copied).toContain('chore: scaffold project');
     });
 
+    it('marks every pack copied after "Copy all prompt packs" so next-prompt advances', async () => {
+        render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
+        fireEvent.click(screen.getByRole('button', { name: /Prompts/ }));
+        fireEvent.click(screen.getAllByRole('button', { name: /Copy all prompt packs/ })[0]);
+        await vi.waitFor(() => {
+            // The only pack is now copied → the header CTA flips off "next".
+            expect(screen.getByText(/All prompt packs copied/)).toBeInTheDocument();
+        });
+        expect(screen.queryByRole('button', { name: /Copy next prompt/ })).not.toBeInTheDocument();
+    });
+
     it('shows gates as Not run by default — no assumed passes', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} />);
         fireEvent.click(screen.getByRole('button', { name: /Validation/ }));
