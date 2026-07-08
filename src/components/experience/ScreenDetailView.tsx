@@ -868,14 +868,24 @@ function MockupVariantsCard({
                                             Mark accepted
                                         </button>
                                     ) : row.status === 'missing' ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onSetVariantStatus(row.id, 'not_needed')}
-                                            className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
-                                            title="Skip this recommended variant — it stops counting as a readiness gap"
-                                        >
-                                            Not needed
-                                        </button>
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSetVariantStatus(row.id, 'accepted')}
+                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                                title="Confirm this variant is covered — e.g. you uploaded or verified it outside the generated set"
+                                            >
+                                                Mark accepted
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSetVariantStatus(row.id, 'not_needed')}
+                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                                title="Skip this recommended variant — it stops counting as a readiness gap"
+                                            >
+                                                Not needed
+                                            </button>
+                                        </>
                                     ) : null
                                 )}
                             </div>

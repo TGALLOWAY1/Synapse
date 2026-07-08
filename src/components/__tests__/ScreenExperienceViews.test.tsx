@@ -354,3 +354,17 @@ describe('Phase 2 contract rendering', () => {
         expect(getByText(/Before building:/)).toBeTruthy();
     });
 });
+
+describe('missing variant acceptance (review-feedback regression)', () => {
+    it('a missing variant row can be marked accepted (e.g. verified via upload), not just not-needed', () => {
+        const onSave = vi.fn();
+        const { getAllByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
+        // Row order: default (generated) → Empty history (missing) → Upload
+        // error (missing); the first "Mark accepted" after the default row's
+        // belongs to the missing Empty history row.
+        fireEvent.click(getAllByText('Mark accepted')[1]);
+        expect(onSave).toHaveBeenCalledTimes(1);
+        const [, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
+        expect(edit.mockupVariantStatus).toEqual({ 'state:empty-history': 'accepted' });
+    });
+});

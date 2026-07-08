@@ -1603,9 +1603,13 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Mockups-tab `MockupVariantsCard` offers only the real actions (mark
   accepted / not needed / undo) and says "tracked from generated mockup
   metadata"; never add a dead "generate variant" button or wording that
-  implies Synapse inspected the rendered image. A required row left
-  `missing` is the `missing_state_variants` readiness gap; `not_needed`
-  resolves it deliberately. `parseDecisionBranches` (arrow-form +
+  implies Synapse inspected the rendered image. A missing row offers BOTH
+  "Mark accepted" (the user verified/uploaded the variant externally) and
+  "Not needed". A **state** row (never the default row — that's
+  `missing_mockup_p0`'s job, and counting it would downgrade legacy
+  mockup-less P2/P3 screens) left `missing` while `required` is the
+  `missing_state_variants` readiness gap; `accepted`/`not_needed` resolve it
+  deliberately. `parseDecisionBranches` (arrow-form +
   if/otherwise) powers both the branch-aware Flow-tab rendering
   (`DecisionBranches`) and the `decision_missing_branches` gap — an
   unparseable decision renders the raw text with an honest "branch outcomes

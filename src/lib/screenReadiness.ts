@@ -308,7 +308,12 @@ export function buildReadinessIndex(
             flowRefCount: item.relatedFlows.length,
             userStatus: item.edit?.reviewStatus,
             features,
-            missingRequiredVariants: variants.filter(v => v.required && v.status === 'missing').length,
+            // State rows only — the default view is the existing
+            // missing_mockup_p0 gap's job, and counting it here would
+            // downgrade every legacy screen without a mockup (even P2/P3)
+            // to needs_review.
+            missingRequiredVariants: variants.filter(v =>
+                v.id !== DEFAULT_VARIANT_ID && v.required && v.status === 'missing').length,
             decisionsWithoutBranches: countDecisionsWithoutBranches(item),
         }));
     }

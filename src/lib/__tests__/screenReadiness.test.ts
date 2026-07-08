@@ -631,3 +631,19 @@ describe('parseDecisionBranches', () => {
         expect(r.status).toBe('needs_review');
     });
 });
+
+describe('missing_state_variants scope (review-feedback regression)', () => {
+    it('a legacy screen without a mockup never gets a state-variant gap (default row excluded)', () => {
+        // readyScreen as P2 with no mockup: Phase 1 behavior is NO
+        // missing_mockup_p0 gap and it must not be replaced by a
+        // missing_state_variants downgrade from the default variant row.
+        const p2Screen: ScreenItem = { ...readyScreen, priority: 'P2' };
+        const flows = parseFlows(FLOWS_MD);
+        const index = buildScreenIndex(makeInventory([p2Screen]), flows, null);
+        const readiness = buildReadinessIndex(index, FEATURES);
+        const r = readiness.get('scr-home')!;
+        expect(r.gaps.map(g => g.kind)).not.toContain('missing_state_variants');
+        expect(r.gaps.map(g => g.kind)).not.toContain('missing_mockup_p0');
+        expect(r.status).toBe('implementation_ready');
+    });
+});
