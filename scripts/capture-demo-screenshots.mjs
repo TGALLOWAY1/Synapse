@@ -30,12 +30,16 @@
 //
 //   The fix: when a proxy is detected (or `--fetch-relay` is passed) the script
 //   launches Chromium WITHOUT a browser proxy and instead intercepts every page
-//   request (`context.route`) and fulfils it from a Node `fetch` (which inherits
-//   HTTPS_PROXY and works). The browser never opens a real socket, so there is
-//   no TLS handshake to reset and no fingerprint to filter. This transparently
-//   covers the app HTML, the `/api/*` calls, AND the cross-origin Blob image
-//   fetches, so mockup images load too. Auto-enabled when HTTPS_PROXY/https_proxy
-//   is set; force with `--fetch-relay`, disable with `--no-relay`.
+//   request (`context.route`) and fulfils it from a Node `fetch` that is pinned
+//   to the proxy via an undici `ProxyAgent` dispatcher (Node's built-in fetch
+//   does NOT tunnel through HTTPS_PROXY on its own, so the proxy is configured
+//   explicitly rather than relied on ambiently; if undici is somehow unavailable
+//   it falls back to global fetch). The browser never opens a real socket, so
+//   there is no TLS handshake to reset and no fingerprint to filter. This
+//   transparently covers the app HTML, the `/api/*` calls, AND the cross-origin
+//   Blob image fetches, so mockup images load too. Auto-enabled when
+//   HTTPS_PROXY/https_proxy is set; force with `--fetch-relay`, disable with
+//   `--no-relay`.
 //
 // SYNAPSE_OWNER_TOKEN (optional env var): capturing the demo needs NO auth, but
 //   if this is set the script first verifies a demo snapshot is actually pinned
@@ -191,7 +195,27 @@ async function waitForServer(url, timeoutMs = 60000) {
 const RELAY_STRIP_REQ = new Set(['host', 'accept-encoding']);
 const RELAY_STRIP_RES = new Set(['content-encoding', 'content-length', 'transfer-encoding']);
 
-async function attachFetchRelay(context) {
+// Build the fetch the relay uses. When a proxy is configured, pin the request to
+// it with an undici ProxyAgent — Node's built-in fetch does NOT honor
+// HTTPS_PROXY on its own, so relying on the global fetch would (silently) make
+// direct connections that the restricted egress refuses. Falls back to global
+// fetch if undici can't be loaded.
+async function buildRelayFetch() {
+    if (!PROXY_URL) return globalThis.fetch;
+    try {
+        const undici = await import('undici');
+        const dispatcher = new undici.ProxyAgent(PROXY_URL);
+        return (url, opts) => undici.fetch(url, { ...opts, dispatcher });
+    } catch (err) {
+        console.warn(
+            `undici ProxyAgent unavailable (${err?.message || err}); ` +
+            'relay falling back to global fetch, which may not tunnel through the proxy.',
+        );
+        return globalThis.fetch;
+    }
+}
+
+async function attachFetchRelay(context, relayFetch) {
     await context.route('**/*', async (route) => {
         const req = route.request();
         const url = req.url();
@@ -203,7 +227,7 @@ async function attachFetchRelay(context) {
             }
             const method = req.method();
             const body = method === 'GET' || method === 'HEAD' ? undefined : req.postDataBuffer() || undefined;
-            const resp = await fetch(url, { method, headers, body, redirect: 'manual' });
+            const resp = await relayFetch(url, { method, headers, body, redirect: 'manual' });
             const buf = Buffer.from(await resp.arrayBuffer());
             const outHeaders = {};
             resp.headers.forEach((v, k) => {
@@ -336,15 +360,16 @@ async function captureArtifact(page, viewport, art) {
     await selectArtifact(page, viewport, art.label);
     await page.waitForTimeout(SETTLE_MS(art.label));
 
-    const tabs = art.tabs;
-    const captureTabs = tabs && (!tabs.desktopOnly || !viewport.mobile);
-    if (!captureTabs) {
-        await shoot(page, `demo-${art.slug}-${viewport.name}.png`);
-        return;
-    }
+    // Always write the artifact-level shot first, so the documented, stable
+    // filename demo-<artifact>-<viewport>.png exists for every artifact (a
+    // tabbed artifact shows its default tab here) — downstream comparisons /
+    // publishing steps rely on it.
+    await shoot(page, `demo-${art.slug}-${viewport.name}.png`);
 
-    // One full-page snapshot per tab. `fullPage` captures the whole panel below
-    // the tab nav even when it extends past the viewport.
+    // Then, for tabbed artifacts, additionally capture each tab. `fullPage`
+    // captures the whole panel below the tab nav even when it overflows.
+    const tabs = art.tabs;
+    if (!tabs || (tabs.desktopOnly && viewport.mobile)) return;
     for (const t of tabs.items) {
         try {
             await selectTab(page, tabs.navLabel, t.label);
@@ -356,14 +381,14 @@ async function captureArtifact(page, viewport, art) {
     }
 }
 
-async function captureViewport(browser, viewport) {
+async function captureViewport(browser, viewport, relayFetch) {
     const context = await browser.newContext({
         viewport: { width: viewport.width, height: viewport.height },
         deviceScaleFactor: 2,
         reducedMotion: 'reduce',
         ignoreHTTPSErrors: true,
     });
-    if (USE_RELAY) await attachFetchRelay(context);
+    if (USE_RELAY) await attachFetchRelay(context, relayFetch);
     const page = await context.newPage();
     try {
         await openDemo(page);
@@ -397,6 +422,8 @@ async function main() {
         const ownerToken = process.env.SYNAPSE_OWNER_TOKEN;
         if (ownerToken) await preflightDemoPinned(ownerToken);
 
+        const relayFetch = USE_RELAY ? await buildRelayFetch() : undefined;
+
         const executablePath = findChromiumExecutable();
         // When the relay is active the browser must NOT use a proxy of its own —
         // it makes no real network connections; every request is fulfilled from
@@ -405,7 +432,7 @@ async function main() {
 
         for (const viewport of VIEWPORTS) {
             console.log(`\n— ${viewport.name} (${viewport.width}x${viewport.height}) —`);
-            await captureViewport(browser, viewport);
+            await captureViewport(browser, viewport, relayFetch);
         }
 
         console.log(`\nDone — screenshots written to ${outDir}`);
