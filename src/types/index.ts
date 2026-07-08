@@ -703,11 +703,63 @@ export type ScreenPriority = 'P0' | 'P1' | 'P2' | 'P3';
 export type LegacyScreenPriority = 'core' | 'secondary' | 'supporting';
 export type ScreenType = 'screen' | 'modal' | 'overlay' | 'system-state';
 
+/** Semantic category of a screen state (Phase 2 screen contract). */
+export type ScreenStateType =
+    | 'default'
+    | 'loading'
+    | 'empty'
+    | 'error'
+    | 'success'
+    | 'disabled'
+    | 'permission'
+    | 'responsive'
+    | 'other';
+
 export interface ScreenState {
     name: string;
+    /** User-visible behavior of this state. */
     description: string;
     trigger?: string;
     recoveryPath?: string;
+    // --- Phase 2 screen-contract fields (all optional/back-compat — legacy
+    // persisted inventories lack them and fall back to derived values) ---
+    type?: ScreenStateType;
+    /** What the system does in this state (vs. what the user sees). */
+    systemBehavior?: string;
+    /** True when the state must exist before the screen is buildable. */
+    required?: boolean;
+    /** True when this state warrants its own mockup variant. */
+    needsMockup?: boolean;
+    acceptanceCriteria?: string[];
+}
+
+/** Structured risk entry (Phase 2). Legacy inventories carry plain-string
+ * `risks[]`; when `riskDetails` exists the string list is derived from it. */
+export interface ScreenRiskDetail {
+    description: string;
+    severity?: 'low' | 'medium' | 'high';
+    proposedHandling?: string;
+}
+
+export interface ScreenHandoffEvent {
+    name: string;
+    trigger?: string;
+    effect?: string;
+}
+
+/** Generated developer-handoff fields (Phase 2). Every field optional —
+ * generation omits what the PRD doesn't support, and the UI shows
+ * "Not specified" rather than fabricating detail. */
+export interface ScreenHandoffSpec {
+    route?: string;
+    routeParams?: string[];
+    primaryComponents?: string[];
+    stateVariables?: string[];
+    events?: ScreenHandoffEvent[];
+    dataDependencies?: string[];
+    apiDependencies?: string[];
+    accessibilityNotes?: string[];
+    responsiveNotes?: string[];
 }
 
 export interface ExitPath {
@@ -733,6 +785,15 @@ export interface ScreenItem {
     outputData?: string[];
     risks?: string[];
     featureRefs?: string[];
+    // --- Phase 2 screen-contract fields (optional/back-compat) ---
+    /** Structured risks with severity + proposed handling. When present,
+     * `risks` is derived from these descriptions on normalization. */
+    riskDetails?: ScreenRiskDetail[];
+    /** Generated screen-level acceptance criteria (states may carry their
+     * own). Absent → the Screens view derives criteria from the spec. */
+    acceptanceCriteria?: string[];
+    /** Generated developer-handoff fields (route, components, events, …). */
+    handoff?: ScreenHandoffSpec;
     // Legacy navigation fields, retained so persisted localStorage data
     // still satisfies the type without rewrites.
     navigationFrom?: string[];

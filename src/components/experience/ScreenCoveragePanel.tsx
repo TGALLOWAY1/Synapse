@@ -43,7 +43,7 @@ function MetricRow({
 export function ScreenCoveragePanel({ summary, onGenerateMissingMockups }: Props) {
     const [showUncovered, setShowUncovered] = useState(false);
     const {
-        totalScreens, prdFeatures, flows, p0, states, mockups, openRisks,
+        totalScreens, prdFeatures, stateVariants, flows, p0, states, mockups, openRisks,
         ready, readyWithWarnings, message,
     } = summary;
     if (totalScreens === 0) return null;
@@ -111,6 +111,14 @@ export function ScreenCoveragePanel({ summary, onGenerateMissingMockups }: Props
                                 value={`${mockups.covered} / ${mockups.total} screens`}
                                 tone={missingMockups > 0 ? 'neutral' : 'good'}
                             />
+                            {stateVariants && (
+                                <MetricRow
+                                    label="Recommended state variants"
+                                    value={`${stateVariants.covered} / ${stateVariants.required}`}
+                                    hint="State mockup variants the generated spec recommends — tracked from mockup metadata and your accepted/not-needed marks, never from inspecting images"
+                                    tone={stateVariants.covered < stateVariants.required ? 'warn' : 'good'}
+                                />
+                            )}
                             <MetricRow
                                 label="Open risks"
                                 value={openRisks === 0 ? 'None noted' : `${openRisks} to review`}
@@ -125,6 +133,14 @@ export function ScreenCoveragePanel({ summary, onGenerateMissingMockups }: Props
                         </div>
                     </div>
 
+                    {prdFeatures && prdFeatures.mustWithoutPrimaryScreen.length > 0 && (
+                        <p className="mt-2 text-[11px] text-amber-700">
+                            {prdFeatures.mustWithoutPrimaryScreen.length === 1
+                                ? `Must-have feature ${prdFeatures.mustWithoutPrimaryScreen[0].id} (${prdFeatures.mustWithoutPrimaryScreen[0].name}) is only covered by lower-priority screens`
+                                : `${prdFeatures.mustWithoutPrimaryScreen.length} must-have features are only covered by lower-priority screens`}
+                            {' '}— check whether a P0/P1 screen should own {prdFeatures.mustWithoutPrimaryScreen.length === 1 ? 'it' : 'them'}.
+                        </p>
+                    )}
                     {prdFeatures && prdFeatures.uncovered.length > 0 && (
                         <div className="mt-2">
                             <button

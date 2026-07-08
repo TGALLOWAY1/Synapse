@@ -3,6 +3,7 @@ import type { Feature, MockupPayload, ScreenInventoryContent, ScreenItem } from 
 import { buildScreenIndex } from '../screenExperience';
 import {
     buildMockupSpecCoverage,
+    buildMockupVariantRows,
     buildReadinessIndex,
     buildScreenCoverageSummary,
     buildScreenHandoff,
@@ -11,6 +12,9 @@ import {
     deriveScreenReadiness,
     detectScreenGaps,
     normalizeFeatureId,
+    parseDecisionBranches,
+    resolveAcceptanceCriteria,
+    resolveScreenHandoff,
     screenMatchesFilter,
 } from '../screenReadiness';
 import { parseFlows } from '../../components/renderers/userFlows/parseFlow';
@@ -162,26 +166,36 @@ describe('deriveScreenReadiness', () => {
 // --- Traceability -----------------------------------------------------------------
 
 describe('buildScreenTraceability', () => {
-    it('resolves featureRefs id tokens against the PRD feature list', () => {
+    it('reports explicit confidence when every ref resolves to a PRD feature', () => {
         const index = buildScreenIndex(makeInventory([readyScreen]), [], null);
         const t = buildScreenTraceability(index.items[0], FEATURES);
-        expect(t.completeness).toBe('estimated');
+        expect(t.confidence).toBe('explicit');
+        expect(t.invalidRefIds).toEqual([]);
         expect(t.features).toHaveLength(1);
         expect(t.features[0].feature?.name).toBe('Activity feed');
     });
 
-    it('keeps unresolved refs visible instead of dropping them', () => {
+    it('keeps unresolved refs visible and downgrades confidence to estimated', () => {
         const screen = { ...readyScreen, featureRefs: ['F9: Unknown thing'] };
         const index = buildScreenIndex(makeInventory([screen]), [], null);
         const t = buildScreenTraceability(index.items[0], FEATURES);
         expect(t.features[0].refId).toBe('F9');
         expect(t.features[0].feature).toBeUndefined();
+        expect(t.confidence).toBe('estimated');
+        expect(t.invalidRefIds).toEqual(['F9']);
     });
 
-    it('reports missing completeness when no refs exist', () => {
+    it('stays estimated (never explicit) when there is no feature list to validate against', () => {
+        const index = buildScreenIndex(makeInventory([readyScreen]), [], null);
+        const t = buildScreenTraceability(index.items[0], undefined);
+        expect(t.confidence).toBe('estimated');
+        expect(t.invalidRefIds).toEqual([]);
+    });
+
+    it('reports missing confidence when no refs exist', () => {
         const index = buildScreenIndex(makeInventory([bareScreen]), [], null);
         const t = buildScreenTraceability(index.items[0], FEATURES);
-        expect(t.completeness).toBe('missing');
+        expect(t.confidence).toBe('missing');
         expect(t.features).toEqual([]);
     });
 
@@ -270,7 +284,10 @@ describe('buildScreenCoverageSummary', () => {
             covered: 1,
             total: 2,
             uncovered: [{ id: 'F2', name: 'Sharing' }],
+            mustWithoutPrimaryScreen: [],
         });
+        // No screen carries contract-recommended (needsMockup) states.
+        expect(summary.stateVariants).toBeNull();
         // Only Flow 1 references a known screen.
         expect(summary.flows).toEqual({ represented: 1, total: 2 });
         expect(summary.p0).toEqual({ total: 1, withMockup: 1 });
@@ -394,5 +411,223 @@ describe('buildReadinessIndex with edit overlays', () => {
         const r = readiness.get('scr-bare')!;
         expect(r.status).toBe('implementation_ready');
         expect(r.source).toBe('user');
+    });
+});
+
+// --- Phase 2: source-grounded screen contract -------------------------------------------------------
+
+/** A Phase 2 contract-grade screen: structured states, handled risks,
+ * generated acceptance criteria, and a developer handoff spec. */
+const contractScreen: ScreenItem = {
+    id: 'scr-submission',
+    name: 'Submission Wizard',
+    priority: 'P0',
+    purpose: 'Guided project submission.',
+    userIntent: 'Submit my project for evaluation',
+    featureRefs: ['F1: Activity feed'],
+    states: [
+        {
+            name: 'Default', description: 'Wizard steps shown', trigger: 'screen opens',
+            type: 'default', required: true,
+        },
+        {
+            name: 'Empty history', description: 'Empty state with start CTA', trigger: 'no saved evaluations',
+            type: 'empty', systemBehavior: 'Local lookup returns no records',
+            required: true, needsMockup: true,
+            acceptanceCriteria: ['Empty history state appears when no evaluations are found'],
+        },
+        {
+            name: 'Upload error', description: 'Inline error with retry', trigger: 'upload fails',
+            type: 'error', required: true, needsMockup: true,
+        },
+    ],
+    entryPoints: ['Home CTA'],
+    exitPaths: [{ label: 'Submit', target: 'Readiness Dashboard' }],
+    coreUIElements: ['Wizard steps', 'Upload area'],
+    riskDetails: [
+        { description: 'Large file uploads time out', severity: 'medium', proposedHandling: 'Chunked uploads with resume' },
+    ],
+    acceptanceCriteria: ['User can submit a project end to end'],
+    handoff: {
+        route: '/submission',
+        routeParams: ['projectId'],
+        primaryComponents: ['SubmissionWizard', 'AssetUploadStep'],
+        stateVariables: ['selectedTargetRoleId', 'uploadedAssets'],
+        events: [{ name: 'onSubmitProject', trigger: 'Submit clicked', effect: 'POST /submissions' }],
+        accessibilityNotes: ['Wizard steps must be keyboard navigable'],
+    },
+};
+
+describe('Phase 2 source-grounded resolvers', () => {
+    it('resolveAcceptanceCriteria prefers generated screen+state criteria', () => {
+        const r = resolveAcceptanceCriteria(contractScreen);
+        expect(r.source).toBe('generated');
+        expect(r.criteria).toContain('User can submit a project end to end');
+        expect(r.criteria).toContain('Empty history state appears when no evaluations are found');
+    });
+
+    it('resolveAcceptanceCriteria falls back to derived criteria for legacy screens', () => {
+        const r = resolveAcceptanceCriteria(readyScreen);
+        expect(r.source).toBe('derived');
+        expect(r.criteria.length).toBeGreaterThan(0);
+    });
+
+    it('resolveScreenHandoff prefers the generated handoff contract', () => {
+        const h = resolveScreenHandoff(contractScreen);
+        expect(h.source).toBe('generated');
+        expect(h.route).toBe('/submission');
+        expect(h.components).toEqual(['SubmissionWizard', 'AssetUploadStep']);
+        expect(h.stateVariables).toContain('uploadedAssets');
+        expect(h.events[0].name).toBe('onSubmitProject');
+        expect(h.accessibilityNotes).toEqual(['Wizard steps must be keyboard navigable']);
+    });
+
+    it('resolveScreenHandoff falls back to the derived projection for legacy screens', () => {
+        const h = resolveScreenHandoff(readyScreen);
+        expect(h.source).toBe('derived');
+        expect(h.route).toBeUndefined();
+        expect(h.components).toEqual(['Activity feed', 'Header bar']);
+        expect(h.events).toEqual([]);
+        expect(h.exitEvents).toHaveLength(1);
+    });
+
+    it('risks with proposed handling do not count as unresolved', () => {
+        const gaps = detectScreenGaps({ screen: contractScreen, hasMockup: true, flowRefCount: 1 });
+        expect(gaps.map(g => g.kind)).not.toContain('unresolved_risks');
+    });
+
+    it('a structured risk without handling still counts as unresolved', () => {
+        const screen: ScreenItem = {
+            ...contractScreen,
+            riskDetails: [{ description: 'Unhandled thing', severity: 'high' }],
+        };
+        const gaps = detectScreenGaps({ screen, hasMockup: true, flowRefCount: 1 });
+        expect(gaps.map(g => g.kind)).toContain('unresolved_risks');
+    });
+
+    it('flags invalid feature refs against the PRD feature list', () => {
+        const screen: ScreenItem = { ...contractScreen, featureRefs: ['F1: Activity feed', 'F9: Ghost feature'] };
+        const gaps = detectScreenGaps({
+            screen, hasMockup: true, flowRefCount: 1, features: FEATURES,
+        });
+        const invalid = gaps.find(g => g.kind === 'invalid_traceability');
+        expect(invalid).toBeDefined();
+        expect(invalid!.message).toContain('F9');
+    });
+
+    it('flags missing required state variants and clears once resolved', () => {
+        const withGap = detectScreenGaps({
+            screen: contractScreen, hasMockup: true, flowRefCount: 1, missingRequiredVariants: 2,
+        });
+        expect(withGap.map(g => g.kind)).toContain('missing_state_variants');
+        const without = detectScreenGaps({
+            screen: contractScreen, hasMockup: true, flowRefCount: 1, missingRequiredVariants: 0,
+        });
+        expect(without.map(g => g.kind)).not.toContain('missing_state_variants');
+    });
+});
+
+describe('buildMockupVariantRows', () => {
+    const inventory = makeInventory([contractScreen]);
+    const payload = makeMockupPayload([
+        { id: 'm1', name: 'Submission Wizard', sourceScreenId: 'scr-submission' },
+    ]);
+
+    it('tracks the default view from mockup metadata and states as missing', () => {
+        const index = buildScreenIndex(inventory, [], payload);
+        const rows = buildMockupVariantRows(index.items[0], 'desktop');
+        const byId = new Map(rows.map(r => [r.id, r]));
+        expect(byId.get('default')!.status).toBe('generated');
+        expect(byId.get('default')!.platform).toBe('desktop');
+        // The explicit default-type state folds into the default row.
+        expect(rows.filter(r => r.stateName === 'Default')).toHaveLength(1);
+        expect(byId.get('state:empty-history')!.status).toBe('missing');
+        expect(byId.get('state:empty-history')!.required).toBe(true);
+        expect(byId.get('state:upload-error')!.required).toBe(true);
+    });
+
+    it('reports the default view missing when the screen has no mockup', () => {
+        const index = buildScreenIndex(inventory, [], null);
+        const rows = buildMockupVariantRows(index.items[0]);
+        expect(rows.find(r => r.id === 'default')!.status).toBe('missing');
+    });
+
+    it('honors the user mockupVariantStatus overlay', () => {
+        const index = buildScreenIndex(inventory, [], payload, {
+            'scr-submission': {
+                mockupVariantStatus: { 'default': 'accepted', 'state:upload-error': 'not_needed' },
+            },
+        });
+        const rows = buildMockupVariantRows(index.items[0]);
+        const byId = new Map(rows.map(r => [r.id, r]));
+        expect(byId.get('default')!.status).toBe('accepted');
+        expect(byId.get('default')!.userSet).toBe(true);
+        expect(byId.get('state:upload-error')!.status).toBe('not_needed');
+        expect(byId.get('state:empty-history')!.status).toBe('missing');
+    });
+
+    it('feeds readiness: missing recommended variants → needs_review; not_needed resolves it', () => {
+        const flows = parseFlows(`### Flow: Submit
+**Goal:** Submit
+**Steps:**
+1. [Submission Wizard] — User submits → System processes
+`);
+        const open = buildReadinessIndex(buildScreenIndex(inventory, flows, payload), FEATURES);
+        const r1 = open.get('scr-submission')!;
+        expect(r1.status).toBe('needs_review');
+        expect(r1.gaps.map(g => g.kind)).toContain('missing_state_variants');
+
+        const resolved = buildReadinessIndex(buildScreenIndex(inventory, flows, payload, {
+            'scr-submission': {
+                mockupVariantStatus: { 'state:empty-history': 'accepted', 'state:upload-error': 'not_needed' },
+            },
+        }), FEATURES);
+        const r2 = resolved.get('scr-submission')!;
+        expect(r2.gaps.map(g => g.kind)).not.toContain('missing_state_variants');
+        expect(r2.status).toBe('implementation_ready');
+    });
+
+    it('counts recommended variants in the coverage summary', () => {
+        const index = buildScreenIndex(inventory, [], payload);
+        const readiness = buildReadinessIndex(index, FEATURES);
+        const summary = buildScreenCoverageSummary(index, readiness, null, FEATURES);
+        expect(summary.stateVariants).toEqual({ covered: 0, required: 2 });
+    });
+});
+
+describe('parseDecisionBranches', () => {
+    it('parses arrow-form branch lists', () => {
+        expect(parseDecisionBranches('Start new → Submission form; Resume → Readiness dashboard')).toEqual([
+            { condition: 'Start new', outcome: 'Submission form' },
+            { condition: 'Resume', outcome: 'Readiness dashboard' },
+        ]);
+    });
+
+    it('parses if/otherwise decisions', () => {
+        expect(parseDecisionBranches('If no role selected, go to step 4; otherwise step 5')).toEqual([
+            { condition: 'no role selected', outcome: 'go to step 4' },
+            { condition: 'Otherwise', outcome: 'step 5' },
+        ]);
+    });
+
+    it('returns [] for vague decisions instead of inventing branches', () => {
+        expect(parseDecisionBranches('User chooses path')).toEqual([]);
+        expect(parseDecisionBranches('')).toEqual([]);
+    });
+
+    it('feeds the decision_missing_branches gap through the readiness index', () => {
+        const flows = parseFlows(`### Flow: Choose
+**Goal:** Choose
+**Steps:**
+1. [Home Dashboard] — User decides → System waits
+   - **Decision:** User chooses path
+`);
+        const index = buildScreenIndex(makeInventory([readyScreen]), flows, makeMockupPayload([
+            { id: 'm1', name: 'Home Dashboard', sourceScreenId: 'scr-home' },
+        ]));
+        const readiness = buildReadinessIndex(index, FEATURES);
+        const r = readiness.get('scr-home')!;
+        expect(r.gaps.map(g => g.kind)).toContain('decision_missing_branches');
+        expect(r.status).toBe('needs_review');
     });
 });

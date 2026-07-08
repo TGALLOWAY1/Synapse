@@ -50,6 +50,14 @@ export interface ScreenMetadataEdit {
      * Optional & backward-compatible like every other overlay field.
      */
     reviewStatus?: 'draft' | 'needs_review' | 'accepted' | 'implementation_ready';
+    /**
+     * User-set status per mockup variant row (see buildMockupVariantRows in
+     * src/lib/screenReadiness.ts), keyed by the deterministic variant row id.
+     * 'accepted' = the user confirmed the variant is good; 'not_needed' =
+     * the recommended variant is deliberately skipped (it stops counting as
+     * a readiness gap). Absent entries stay derived.
+     */
+    mockupVariantStatus?: Record<string, 'accepted' | 'not_needed'>;
 }
 
 export type ScreenEditsMap = Record<string, ScreenMetadataEdit>;
@@ -58,6 +66,14 @@ const VALID_EDIT_PRIORITIES: ReadonlySet<string> = new Set(['P0', 'P1', 'P2', 'P
 const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([
     'draft', 'needs_review', 'accepted', 'implementation_ready',
 ]);
+
+/** Overlay keys this module understands. Anything else is preserved verbatim
+ * (forward compatibility — an older build must never drop a newer build's
+ * overlay fields on a read-modify-write). */
+const KNOWN_EDIT_KEYS: ReadonlySet<string> = new Set([
+    'name', 'purpose', 'userIntent', 'priority', 'notes', 'reviewStatus', 'mockupVariantStatus',
+]);
+const VALID_VARIANT_STATUSES: ReadonlySet<string> = new Set(['accepted', 'not_needed']);
 
 /** Safely extract the screenEdits overlay from ArtifactVersion metadata. */
 export function readScreenEdits(metadata: Record<string, unknown> | undefined): ScreenEditsMap {
@@ -77,6 +93,22 @@ export function readScreenEdits(metadata: Record<string, unknown> | undefined): 
         if (typeof v.notes === 'string') edit.notes = v.notes;
         if (typeof v.reviewStatus === 'string' && VALID_REVIEW_STATUSES.has(v.reviewStatus)) {
             edit.reviewStatus = v.reviewStatus as ScreenMetadataEdit['reviewStatus'];
+        }
+        if (v.mockupVariantStatus && typeof v.mockupVariantStatus === 'object' && !Array.isArray(v.mockupVariantStatus)) {
+            const statuses: Record<string, 'accepted' | 'not_needed'> = {};
+            for (const [variantId, status] of Object.entries(v.mockupVariantStatus as Record<string, unknown>)) {
+                if (typeof status === 'string' && VALID_VARIANT_STATUSES.has(status)) {
+                    statuses[variantId] = status as 'accepted' | 'not_needed';
+                }
+            }
+            if (Object.keys(statuses).length > 0) edit.mockupVariantStatus = statuses;
+        }
+        // Preserve unknown fields verbatim so a save round-trip never drops
+        // overlay data written by newer code.
+        for (const [key, unknownValue] of Object.entries(v)) {
+            if (!KNOWN_EDIT_KEYS.has(key) && unknownValue !== undefined) {
+                (edit as Record<string, unknown>)[key] = unknownValue;
+            }
         }
         if (Object.keys(edit).length > 0) out[id] = edit;
     }

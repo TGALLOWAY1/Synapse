@@ -1516,30 +1516,43 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   (appearance i of k)"; decision steps flag unspecified branch outcomes);
   Mockups = `MockupScreenImage` (which internally routes to the manual
   upload sheet) plus a metadata line (platform · fidelity · generated-from
-  PRD version · mockup version, threaded via `ScreenDetailMockupContext`), a
-  states-represented panel, and a `buildMockupSpecCoverage` spec-mapping
+  PRD version · mockup version, threaded via `ScreenDetailMockupContext`), the
+  **Mockup variants card** (`MockupVariantsCard` — per-state/per-platform
+  variant rows from `buildMockupVariantRows`, replacing the old
+  states-represented panel; see the Phase 2 bullet below), and a
+  `buildMockupSpecCoverage` spec-mapping
   panel. Shared priority-chip styles live in
   `src/components/renderers/screenPriority.ts`
   (own module — the react-refresh/only-export-components rule forbids constant
   exports from component files).
-- **Derived readiness & coverage layer (`src/lib/screenReadiness.ts`, pure,
+- **Readiness & coverage layer (`src/lib/screenReadiness.ts`, pure,
   unit-tested — no store/LLM/persistence).** Computed at read time over the
   join layer: per-screen **gap detection** (`detectScreenGaps`: missing
-  purpose / traceability / navigation / states, states without behavior, P0
-  without mockup, risks without recorded handling, no flow refs) rolls into a
+  purpose / traceability / navigation / states, **invalid (stale) feature
+  refs when a PRD feature list is supplied**, states without behavior, P0
+  without mockup, **contract-recommended state variants without mockups**,
+  risks without recorded handling, **flow decisions without parseable branch
+  outcomes**, no flow refs) rolls into a
   per-screen **readiness status** (`deriveScreenReadiness` → draft /
   needs_review / accepted / implementation_ready). A **user-set status** —
   the optional `reviewStatus` field on the existing `ScreenMetadataEdit`
   overlay — always wins (`source: 'user'`) but never hides derived warnings
   (an `accepted_with_warnings` gap is appended); a derived status is always
   presented as estimated (`source: 'derived'`, `ReadinessBadge` renders an
-  "est." suffix). `buildScreenCoverageSummary` feeds the list panel —
-  PRD-feature coverage estimated from `featureRefs` id tokens, flow
+  "est." suffix). `buildReadinessIndex(index, features?)` computes the
+  variant/decision inputs itself. `buildScreenCoverageSummary` feeds the list
+  panel — PRD-feature coverage estimated from `featureRefs` id tokens (plus
+  `mustWithoutPrimaryScreen`: must-priority features only covered by P2/P3
+  screens), a **recommended-state-variant rollup** (`stateVariants`, null for
+  legacy specs), flow
   representation (requires the FULL parsed flows list, since the index only
-  records matched flows), P0/mockup/state counts, open risks, ready count,
+  records matched flows), P0/mockup/state counts, open risks (riskDetails
+  with a `proposedHandling` don't count), ready count,
   and one deterministic readiness sentence. Also here:
   `buildScreenTraceability` (featureRefs resolved against PRD `features`;
-  completeness `estimated`/`missing`), `deriveAcceptanceCriteria`
+  **confidence `explicit` (every ref resolves) / `estimated` / `missing`** +
+  `invalidRefIds` — "explicit" is still a generation-time claim, label it
+  "mapped at generation", never "verified"), `deriveAcceptanceCriteria`
   (deterministic restatement of intent/exits/states/risks — capped, deduped,
   labeled derived), `buildScreenHandoff` (re-projection of existing fields
   only; route/accessibility have no data source and render "Not specified"),
@@ -1557,13 +1570,59 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   rollup** (`buildMessage` uses `ready − readyWithWarnings`; `ScreenCoveragePanel`
   gates its green all-clear on `readyWithWarnings === 0`) so a human override
   can never make the artifact-level summary read clean while warnings remain.
+- **Phase 2 — source-grounded screen contracts.** New screen_inventory
+  generations emit an explicit contract per screen (all fields optional &
+  back-compat on `ScreenItem`/`ScreenState` in `src/types`): structured
+  states (`type` (`ScreenStateType`), `systemBehavior`, `required`,
+  `needsMockup`, per-state `acceptanceCriteria`), structured
+  **`riskDetails`** (`severity` + `proposedHandling` — normalization derives
+  the legacy `risks` string list from these when absent, so old consumers
+  keep working; the schema no longer asks for plain `risks`), screen-level
+  **`acceptanceCriteria`**, and a **`handoff`** spec (`ScreenHandoffSpec`:
+  route/routeParams/primaryComponents/stateVariables/events/data+api
+  dependencies/accessibility+responsive notes). The prompt instructs the
+  model to omit fields the PRD doesn't support — the UI shows "Not
+  specified", never invented detail. **Resolution order everywhere: user
+  overlay → source contract fields → Phase 1 derived values → safe
+  fallbacks** — `resolveAcceptanceCriteria` / `resolveScreenHandoff` return a
+  `source: 'generated' | 'derived'` tag the UI must surface ("From generated
+  spec" vs "Derived from this spec"). Round-trip lives in
+  `screenInventoryNormalize.ts` (parse + `screenInventoryToMarkdown`) and the
+  Gemini schema in `artifactSchemas.ts` — extend all three together (JSON
+  mode can't emit properties absent from the schema). Legacy artifacts keep
+  rendering through the Phase 1 derived layer — never require contract
+  fields.
+- **Per-state mockup variant tracking is metadata-based, never visual.**
+  `buildMockupVariantRows(item, platform?)` derives one row for the default
+  view (status `generated` iff the screen joins a mockup screen) plus one per
+  documented non-default state (`required` iff `state.needsMockup`); a
+  default-`type` state folds into the default row. Rows carry a
+  deterministic id (`default` / `state:<slug>`), the overlay key for the
+  user-set **`mockupVariantStatus`** map (`'accepted' | 'not_needed'`) on
+  `ScreenMetadataEdit`. Per-variant image generation is NOT wired — the
+  Mockups-tab `MockupVariantsCard` offers only the real actions (mark
+  accepted / not needed / undo) and says "tracked from generated mockup
+  metadata"; never add a dead "generate variant" button or wording that
+  implies Synapse inspected the rendered image. A required row left
+  `missing` is the `missing_state_variants` readiness gap; `not_needed`
+  resolves it deliberately. `parseDecisionBranches` (arrow-form +
+  if/otherwise) powers both the branch-aware Flow-tab rendering
+  (`DecisionBranches`) and the `decision_missing_branches` gap — an
+  unparseable decision renders the raw text with an honest "branch outcomes
+  not specified" nudge, never an invented branch.
 - **Screen metadata edits are an overlay, never a content rewrite.** User
   edits (name / purpose / userIntent / priority / notes / **reviewStatus** —
-  the readiness override above) are stored per
+  the readiness override above — / **mockupVariantStatus** — the per-variant
+  override above) are stored per
   canonical screen id in the screen_inventory **ArtifactVersion's
   `metadata.screenEdits`** (`ScreenMetadataEdit` / `readScreenEdits` in
   `screenExperience.ts`, persisted via the existing
   `updateArtifactVersionMetadata` — the prompt_pack `promptEdits` pattern).
+  **`readScreenEdits` preserves unknown overlay keys verbatim and every
+  writer must merge from the existing edit** (the edit form spreads
+  `item.edit` before setting its own fields; the variants card merges
+  `mockupVariantStatus`) so a read-modify-write never drops fields written by
+  newer code.
   `buildScreenIndex` applies the overlay to produce the *effective*
   `item.screen` while keeping `item.baseScreen` (stored content) as the source
   of every join and image key — so **renames cannot orphan mockups, flow refs,

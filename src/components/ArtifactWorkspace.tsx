@@ -380,7 +380,10 @@ export function ArtifactWorkspace({
     // Derived per-screen readiness (user-set status wins via the edit overlay)
     // + the artifact-level coverage rollup for the Screens list panel. Pure &
     // read-time only — see src/lib/screenReadiness.ts.
-    const screenReadiness = useMemo(() => buildReadinessIndex(screenIndex), [screenIndex]);
+    const screenReadiness = useMemo(
+        () => buildReadinessIndex(screenIndex, structuredPRD.features),
+        [screenIndex, structuredPRD.features],
+    );
     const screenCoverage = useMemo(
         () => buildScreenCoverageSummary(
             screenIndex,
