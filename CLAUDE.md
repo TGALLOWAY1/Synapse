@@ -1500,19 +1500,61 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Selector-stability rule). Slug collisions keep **all** screens as items
   (unique ids), resolve `bySlug` to the first, and are surfaced via
   `index.collisions` (warning banner in the list).
-- **Views** — `src/components/experience/`: `ScreenListView` (sectioned list of
-  all inventory screens with flow-ref/mockup coverage chips),
-  `ScreenDetailView` + `ScreenDetailTabs` (per-screen **Overview / Flow /
-  Mockups** tabs). They reuse existing pieces rather than duplicating them:
-  Overview = the exported `ScreenCard` from `ScreenInventoryRenderer` (+ the
-  upload gallery); Flow = `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with
-  the current screen's steps highlighted (`highlightedStepIndices`); Mockups =
-  `MockupScreenImage` (which internally routes to the manual upload sheet).
-  Shared priority-chip styles live in `src/components/renderers/screenPriority.ts`
+- **Views** — `src/components/experience/`: `ScreenListView` (sectioned,
+  filterable list of all inventory screens topped by the **Screen Coverage &
+  Readiness** panel — `ScreenCoveragePanel`; per-card readiness badge,
+  linked-feature/risk chips, state/mockup/flow metadata and
+  "N incoming · N outgoing" navigation labels), `ScreenDetailView` +
+  `ScreenDetailTabs` (per-screen **Overview / Flow / Mockups** tabs). They
+  reuse existing pieces rather than duplicating them: Overview = the
+  structured `ScreenOverviewPanel` (screen contract — see the readiness
+  layer below; the legacy `ScreenCard` survives in the standalone
+  `ScreenInventoryRenderer` fallback) + the upload gallery; Flow =
+  `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with the current screen's
+  steps highlighted (`highlightedStepIndices`) plus a per-flow "This screen
+  appears in" context block (repeated appearances labeled "— Step N
+  (appearance i of k)"; decision steps flag unspecified branch outcomes);
+  Mockups = `MockupScreenImage` (which internally routes to the manual
+  upload sheet) plus a metadata line (platform · fidelity · generated-from
+  PRD version · mockup version, threaded via `ScreenDetailMockupContext`), a
+  states-represented panel, and a `buildMockupSpecCoverage` spec-mapping
+  panel. Shared priority-chip styles live in
+  `src/components/renderers/screenPriority.ts`
   (own module — the react-refresh/only-export-components rule forbids constant
   exports from component files).
+- **Derived readiness & coverage layer (`src/lib/screenReadiness.ts`, pure,
+  unit-tested — no store/LLM/persistence).** Computed at read time over the
+  join layer: per-screen **gap detection** (`detectScreenGaps`: missing
+  purpose / traceability / navigation / states, states without behavior, P0
+  without mockup, risks without recorded handling, no flow refs) rolls into a
+  per-screen **readiness status** (`deriveScreenReadiness` → draft /
+  needs_review / accepted / implementation_ready). A **user-set status** —
+  the optional `reviewStatus` field on the existing `ScreenMetadataEdit`
+  overlay — always wins (`source: 'user'`) but never hides derived warnings
+  (an `accepted_with_warnings` gap is appended); a derived status is always
+  presented as estimated (`source: 'derived'`, `ReadinessBadge` renders an
+  "est." suffix). `buildScreenCoverageSummary` feeds the list panel —
+  PRD-feature coverage estimated from `featureRefs` id tokens, flow
+  representation (requires the FULL parsed flows list, since the index only
+  records matched flows), P0/mockup/state counts, open risks, ready count,
+  and one deterministic readiness sentence. Also here:
+  `buildScreenTraceability` (featureRefs resolved against PRD `features`;
+  completeness `estimated`/`missing`), `deriveAcceptanceCriteria`
+  (deterministic restatement of intent/exits/states/risks — capped, deduped,
+  labeled derived), `buildScreenHandoff` (re-projection of existing fields
+  only; route/accessibility have no data source and render "Not specified"),
+  `buildMockupSpecCoverage` (token-overlap spec-to-spec comparison — present
+  as "in the mockup spec", NEVER as visual detection of the image), and the
+  list filters (`SCREEN_LIST_FILTERS`/`screenMatchesFilter`: All / P0 /
+  Needs review / Missing mockups / Has risks / Ready). **Honesty rule:
+  everything derived is an estimate — keep the "estimated"/"derived" labels
+  and "Not specified"/"Review recommended" fallbacks; never fabricate risk
+  severity, mockup variants, routes, or per-state mockup coverage, and never
+  present a derived status as user-confirmed.** All of it stays advisory —
+  nothing gates rendering or generation.
 - **Screen metadata edits are an overlay, never a content rewrite.** User
-  edits (name / purpose / userIntent / priority / notes) are stored per
+  edits (name / purpose / userIntent / priority / notes / **reviewStatus** —
+  the readiness override above) are stored per
   canonical screen id in the screen_inventory **ArtifactVersion's
   `metadata.screenEdits`** (`ScreenMetadataEdit` / `readScreenEdits` in
   `screenExperience.ts`, persisted via the existing

@@ -44,11 +44,20 @@ export interface ScreenMetadataEdit {
     priority?: ScreenPriority;
     /** Free-form user notes shown on the screen's Overview tab. */
     notes?: string;
+    /**
+     * Explicit user-set review status (see src/lib/screenReadiness.ts).
+     * Absent → the Screens view derives a status from the spec instead.
+     * Optional & backward-compatible like every other overlay field.
+     */
+    reviewStatus?: 'draft' | 'needs_review' | 'accepted' | 'implementation_ready';
 }
 
 export type ScreenEditsMap = Record<string, ScreenMetadataEdit>;
 
 const VALID_EDIT_PRIORITIES: ReadonlySet<string> = new Set(['P0', 'P1', 'P2', 'P3']);
+const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([
+    'draft', 'needs_review', 'accepted', 'implementation_ready',
+]);
 
 /** Safely extract the screenEdits overlay from ArtifactVersion metadata. */
 export function readScreenEdits(metadata: Record<string, unknown> | undefined): ScreenEditsMap {
@@ -66,6 +75,9 @@ export function readScreenEdits(metadata: Record<string, unknown> | undefined): 
             edit.priority = v.priority as ScreenPriority;
         }
         if (typeof v.notes === 'string') edit.notes = v.notes;
+        if (typeof v.reviewStatus === 'string' && VALID_REVIEW_STATUSES.has(v.reviewStatus)) {
+            edit.reviewStatus = v.reviewStatus as ScreenMetadataEdit['reviewStatus'];
+        }
         if (Object.keys(edit).length > 0) out[id] = edit;
     }
     return Object.keys(out).length > 0 ? out : EMPTY_SCREEN_EDITS;
