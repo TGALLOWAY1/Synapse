@@ -1,14 +1,19 @@
 import { useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { Calendar, ChevronRight, Flag, Layers, Target, Users } from 'lucide-react';
+import { Calendar, ChevronRight, Flag, Layers, ListChecks, Target, Users } from 'lucide-react';
 import { SectionTabs, type SectionTabItem } from '../SectionTabs';
+import type { ProjectTask, StalenessState } from '../../types';
 import {
     parseImplementationPlan,
     parseMilestoneBody,
     type ParsedMilestone,
 } from '../../lib/services/implementationPlanParser';
 import { buildConsolidatedPlan } from '../../lib/services/implementationPlanAdapter';
+import {
+    readPlanProgress,
+    type ImplementationPlanProgress,
+} from '../../lib/services/implementationPlanInsights';
 import { ConsolidatedPlanView } from './implementationPlan/ConsolidatedPlanView';
 
 // Render an `implementation_plan` artifact.
@@ -33,6 +38,19 @@ interface Props {
      * consolidated view. Omitted for new projects (packs are native).
      */
     promptPackContent?: string;
+    /** "Version 2" — the PRD version this plan was generated from. */
+    prdVersionLabel?: string;
+    staleness?: StalenessState;
+    /** Source artifact versions recorded at generation time ("Data Model v1"). */
+    sourceVersions?: string[];
+    /** Saved (converted) tasks for this artifact — marks plan tasks as tracked. */
+    savedTasks?: ProjectTask[];
+    /** Opens the Convert-to-Tasks modal (lives in the plan header). */
+    onConvertToTasks?: () => void;
+    /** Version metadata — carries the persisted `planProgress` overlay. */
+    metadata?: Record<string, unknown>;
+    /** Persists the copy/gate-status progress overlay onto the version. */
+    onUpdatePlanProgress?: (next: ImplementationPlanProgress) => void;
 }
 
 function inlineMd(text: string) {
@@ -142,12 +160,34 @@ function AppendixSection({ markdown }: { markdown: string }) {
     );
 }
 
-function LegacyTimeline({ content }: { content: string }) {
+function LegacyTimeline({ content, onConvertToTasks, savedTaskCount = 0 }: {
+    content: string;
+    onConvertToTasks?: () => void;
+    savedTaskCount?: number;
+}) {
     const plan = useMemo(() => parseImplementationPlan(content), [content]);
+    // The Convert-to-Tasks entry point lives inside the plan view (the
+    // consolidated header, or this row on the legacy path) — keep it reachable
+    // for plans the adapter can't consolidate.
+    const convertAction = onConvertToTasks ? (
+        <div className="flex items-center justify-end not-prose">
+            <button
+                type="button"
+                onClick={onConvertToTasks}
+                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
+            >
+                <ListChecks size={12} />
+                {savedTaskCount > 0 ? `Manage Tasks (${savedTaskCount})` : 'Convert to Tasks'}
+            </button>
+        </div>
+    ) : null;
     if (plan.milestones.length === 0) {
         return (
-            <div className="prose prose-sm prose-neutral max-w-none">
-                <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+            <div className="space-y-4">
+                {convertAction}
+                <div className="prose prose-sm prose-neutral max-w-none">
+                    <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+                </div>
             </div>
         );
     }
@@ -157,6 +197,7 @@ function LegacyTimeline({ content }: { content: string }) {
     }));
     return (
         <div className="space-y-5">
+            {convertAction}
             <SectionTabs items={tabs} />
             {plan.preamble && blockMd(plan.preamble)}
             {plan.milestones.map(m => (
@@ -167,7 +208,17 @@ function LegacyTimeline({ content }: { content: string }) {
     );
 }
 
-export function ImplementationPlanRenderer({ content, promptPackContent }: Props) {
+export function ImplementationPlanRenderer({
+    content,
+    promptPackContent,
+    prdVersionLabel,
+    staleness,
+    sourceVersions,
+    savedTasks,
+    onConvertToTasks,
+    metadata,
+    onUpdatePlanProgress,
+}: Props) {
     const consolidated = useMemo(
         () => {
             try {
@@ -180,8 +231,26 @@ export function ImplementationPlanRenderer({ content, promptPackContent }: Props
         },
         [content, promptPackContent],
     );
+    const progress = useMemo(() => readPlanProgress(metadata), [metadata]);
     if (consolidated) {
-        return <ConsolidatedPlanView plan={consolidated} />;
+        return (
+            <ConsolidatedPlanView
+                plan={consolidated}
+                prdVersionLabel={prdVersionLabel}
+                staleness={staleness}
+                sourceVersions={sourceVersions}
+                savedTasks={savedTasks}
+                onConvertToTasks={onConvertToTasks}
+                progress={onUpdatePlanProgress ? progress : undefined}
+                onUpdateProgress={onUpdatePlanProgress}
+            />
+        );
     }
-    return <LegacyTimeline content={content} />;
+    return (
+        <LegacyTimeline
+            content={content}
+            onConvertToTasks={onConvertToTasks}
+            savedTaskCount={savedTasks?.length ?? 0}
+        />
+    );
 }

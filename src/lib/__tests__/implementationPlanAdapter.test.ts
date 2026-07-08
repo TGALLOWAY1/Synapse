@@ -149,8 +149,9 @@ describe('buildConsolidatedPlan', () => {
             promptPackIds: ['pp_setup'],
             qualityGateIds: ['qg1'],
         });
-        // Risks surface as readiness warnings.
-        expect(plan!.readiness.warnings.some(w => w.includes('rate limits'))).toBe(true);
+        // Risks stay out of readiness warnings (they render in their own card).
+        expect(plan!.risks).toEqual([{ description: 'Third-party API rate limits', mitigation: 'Cache responses' }]);
+        expect(plan!.readiness.warnings.some(w => w.includes('rate limits'))).toBe(false);
     });
 
     it('adapts legacy structured plan + prompt_pack, attaching by best-effort match', () => {
@@ -216,7 +217,8 @@ Foundation then core.`;
         expect(plan!.milestones[0].tasks).toHaveLength(2);
         expect(plan!.milestones[0].tasks[1].status).toBe('done');
         expect(plan!.milestones[0].definitionOfDone).toEqual(['CI runs on every push']);
-        expect(plan!.readiness.warnings.some(w => w.includes('Scope creep'))).toBe(true);
+        // Milestone risks flow into plan.risks, not readiness warnings.
+        expect(plan!.risks.some(r => r.description.includes('Scope creep'))).toBe(true);
         expect(plan!.readiness.missingInputs).toContain('Prompt packs');
     });
 

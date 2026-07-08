@@ -2,7 +2,7 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
-    RefreshCcw, Menu, X, ListChecks, History, Lock, ShieldAlert, ShieldCheck,
+    RefreshCcw, Menu, X, History, Lock, ShieldAlert, ShieldCheck,
     Layers, Database, Code2, AppWindow, Waypoints,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
@@ -1097,6 +1097,39 @@ export function ArtifactWorkspace({
                 });
             }
             : undefined;
+        // Implementation Plan extras: saved tasks (tracked-task matching +
+        // "Manage tasks (N)"), the Convert-to-Tasks entry point (now inside
+        // the plan header), the persisted copy/gate progress overlay, and
+        // source-version provenance for the Coverage tab.
+        const planSavedTasks = subtype === 'implementation_plan'
+            ? projectTasks.filter(t => t.sourceArtifactId === artifact.id)
+            : undefined;
+        const handleConvertToTasks = subtype === 'implementation_plan'
+            ? () => setTasksModalSource({ artifactId: artifact.id, content: preferred.content })
+            : undefined;
+        // Progress is per-version plumbing (like relink/dismiss), not a
+        // content edit — no history event.
+        const handleUpdatePlanProgress = subtype === 'implementation_plan'
+            ? (next: unknown) => {
+                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { planProgress: next });
+            }
+            : undefined;
+        const planSourceVersions = subtype === 'implementation_plan'
+            ? (() => {
+                const state = useProjectStore.getState();
+                const projectArtifacts = state.artifacts[projectId] ?? [];
+                const projectVersions = state.artifactVersions[projectId] ?? [];
+                return preferred.sourceRefs
+                    .filter(r => r.sourceType === 'core_artifact')
+                    .map(r => {
+                        const src = projectArtifacts.find(a => a.id === r.sourceArtifactId);
+                        if (!src) return null;
+                        const v = projectVersions.find(x => x.id === r.sourceArtifactVersionId);
+                        return `${src.title}${v ? ` v${v.versionNumber}` : ''}`;
+                    })
+                    .filter((label): label is string => Boolean(label));
+            })()
+            : undefined;
         const blockingIssues = readValidationBlockers(preferred.metadata);
         // Small advisory note when a clean artifact was auto-enriched with PRD
         // traceability (repair succeeded → no blocking banner, just a note).
@@ -1150,30 +1183,16 @@ export function ArtifactWorkspace({
                         }
                     />
                 )}
-                {subtype === 'implementation_plan' && (() => {
-                    const savedCount = projectTasks.filter(t => t.sourceArtifactId === artifact.id).length;
-                    return (
-                        <div className="flex items-center justify-end">
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    setTasksModalSource({
-                                        artifactId: artifact.id,
-                                        content: preferred.content,
-                                    })
-                                }
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                            >
-                                <ListChecks size={12} />
-                                {savedCount > 0 ? `Manage Tasks (${savedCount})` : 'Convert to Tasks'}
-                            </button>
-                        </div>
-                    );
-                })()}
                 {subtype === 'implementation_plan' && (
                     <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} />
                 )}
-                <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
+                <div className={
+                    subtype === 'implementation_plan'
+                        // The consolidated plan brings its own cards — a nested
+                        // white card just adds dead space around them.
+                        ? 'max-w-none overflow-auto'
+                        : 'bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto'
+                }>
                     <MockupErrorBoundary
                         resetKey={preferred.id}
                         fallback={
@@ -1204,16 +1223,24 @@ export function ArtifactWorkspace({
                         onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
                         availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
                         promptPackContent={legacyPromptPackContent}
+                        savedTasks={planSavedTasks}
+                        onConvertToTasks={handleConvertToTasks}
+                        onUpdatePlanProgress={handleUpdatePlanProgress}
+                        sourceVersions={planSourceVersions}
                         promptEdits={promptEdits}
                         onUpdatePromptEdits={handleUpdatePromptEdits}
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
                         versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
                         prdVersionLabel={
-                            subtype === 'data_model'
+                            subtype === 'data_model' || subtype === 'implementation_plan'
                                 ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
                                 : undefined
                         }
-                        staleness={subtype === 'data_model' ? getArtifactStaleness(projectId, artifact.id) : undefined}
+                        staleness={
+                            subtype === 'data_model' || subtype === 'implementation_plan'
+                                ? getArtifactStaleness(projectId, artifact.id)
+                                : undefined
+                        }
                     />
                     </MockupErrorBoundary>
                 </div>

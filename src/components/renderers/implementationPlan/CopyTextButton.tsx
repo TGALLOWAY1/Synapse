@@ -7,10 +7,12 @@ interface Props {
     label: string;
     /** Compact indigo pill (primary) or bordered neutral (secondary). */
     variant?: 'primary' | 'secondary';
+    /** Fired after a successful copy (e.g. to record copy progress). */
+    onCopied?: () => void;
 }
 
 /** Small copy-to-clipboard button with a transient "Copied" state. */
-export function CopyTextButton({ text, label, variant = 'primary' }: Props) {
+export function CopyTextButton({ text, label, variant = 'primary', onCopied }: Props) {
     const [copied, setCopied] = useState(false);
     const cls = variant === 'primary'
         ? 'bg-indigo-600 text-white hover:bg-indigo-700'
@@ -23,6 +25,7 @@ export function CopyTextButton({ text, label, variant = 'primary' }: Props) {
                 if (ok) {
                     setCopied(true);
                     setTimeout(() => setCopied(false), 1500);
+                    onCopied?.();
                 }
             }}
             className={`inline-flex items-center gap-1 px-2.5 py-1.5 text-xs font-medium rounded-md transition min-h-[32px] ${cls}`}
