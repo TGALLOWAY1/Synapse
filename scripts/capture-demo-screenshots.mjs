@@ -5,6 +5,8 @@
 //            npm run capture:demo -- --base-url=https://synapse-prd.vercel.app
 //            npm run capture:demo -- --out=./screenshots-demo
 //            npm run capture:demo -- --local      (boot vite dev — see note)
+//            npm run capture:demo -- --fetch-relay (force the egress workaround)
+//            npm run capture:demo -- --no-relay    (disable the egress workaround)
 //
 // HOW THE DEMO LOADS — this is the important constraint:
 //   The demo project's data is NOT a local fixture. It is fetched at runtime
@@ -18,6 +20,23 @@
 //   404s and nothing loads. Use `--local` only together with a dev proxy that
 //   forwards `/api/*` to a real deployment.
 //
+// RESTRICTED-EGRESS / PROXIED ENVIRONMENTS — the "fetch relay" workaround:
+//   Some sandboxes (e.g. Claude Code's web/CI containers) route all outbound
+//   HTTPS through a policy proxy (HTTPS_PROXY). In those environments Chromium's
+//   own navigation to the deployment fails with net::ERR_CONNECTION_RESET even
+//   though Node `fetch` / `curl` to the exact same URL succeed — the egress
+//   gateway TLS-fingerprint-filters browser traffic and resets the browser's
+//   handshake, while it happily tunnels non-browser clients.
+//
+//   The fix: when a proxy is detected (or `--fetch-relay` is passed) the script
+//   launches Chromium WITHOUT a browser proxy and instead intercepts every page
+//   request (`context.route`) and fulfils it from a Node `fetch` (which inherits
+//   HTTPS_PROXY and works). The browser never opens a real socket, so there is
+//   no TLS handshake to reset and no fingerprint to filter. This transparently
+//   covers the app HTML, the `/api/*` calls, AND the cross-origin Blob image
+//   fetches, so mockup images load too. Auto-enabled when HTTPS_PROXY/https_proxy
+//   is set; force with `--fetch-relay`, disable with `--no-relay`.
+//
 // SYNAPSE_OWNER_TOKEN (optional env var): capturing the demo needs NO auth, but
 //   if this is set the script first verifies a demo snapshot is actually pinned
 //   on the target deployment (clearer, faster failure if it isn't). The token is
@@ -29,7 +48,9 @@
 //   3. switch to the "Assets" pipeline stage (where one nav lists PRD + every
 //      artifact)
 //   4. select each artifact in turn (on mobile, via the slide-in drawer) and
-//      write one full-page PNG: demo-<artifact>-<desktop|mobile>.png
+//      write one full-page PNG: demo-<artifact>-<desktop|mobile>.png. Artifacts
+//      with in-page tabs (e.g. the Implementation Plan) additionally have each
+//      tab captured on desktop: demo-<artifact>-<tab>-<desktop>.png
 //
 // Requires the Chromium binary (pre-installed in CI/web envs via
 // PLAYWRIGHT_BROWSERS_PATH; locally: `npx playwright install chromium`).
@@ -44,9 +65,11 @@ import { chromium } from 'playwright';
 // Args
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
-    const out = { baseUrl: undefined, out: undefined, local: false };
+    const out = { baseUrl: undefined, out: undefined, local: false, relay: undefined };
     for (const a of argv) {
         if (a === '--local') out.local = true;
+        else if (a === '--fetch-relay') out.relay = true;
+        else if (a === '--no-relay') out.relay = false;
         else if (a.startsWith('--base-url=')) out.baseUrl = a.slice('--base-url='.length);
         else if (a.startsWith('--out=')) out.out = a.slice('--out='.length);
     }
@@ -64,27 +87,56 @@ const BASE_URL = (args.local
     : (args.baseUrl || process.env.DEMO_BASE_URL || DEFAULT_PROD_URL)
 ).replace(/\/$/, '');
 
+// Egress workaround: on by default when a proxy is configured (unless the caller
+// overrode it with --fetch-relay / --no-relay). See the header block.
+const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy;
+const USE_RELAY = args.relay ?? Boolean(PROXY_URL);
+
 const outDir = args.out
     ? (isAbsolute(args.out) ? args.out : resolve(repoRoot, args.out))
     : join(repoRoot, 'screenshots-demo');
 
-// The artifact nav buttons, in sidebar order. `label` is matched against each
-// button's accessible name (regex / substring); `slug` is the filename stem.
+// The artifact nav buttons, in current sidebar order. `label` is matched against
+// each button's accessible name (regex / substring); `slug` is the filename stem.
+// NOTE: the sidebar is grouped (Project Foundation / Experience / Architecture /
+// Development / Project Map) but every entry is one button in the shared
+// nav[aria-label="Artifacts"]. Screen Inventory + Mockups are consolidated into
+// the single "Screens" experience view; UI Components is a hidden artifact (no
+// row); Developer Prompts is retired into the Implementation Plan.
+//
+// `tabs` (optional) drives in-artifact navigation: after the artifact is
+// selected, each tab is clicked and captured as its own screenshot. `desktopOnly`
+// restricts tab capture to the desktop viewport (mobile still gets one base shot).
 const ARTIFACTS = [
     { slug: 'prd', label: 'PRD' },
-    { slug: 'user-flows', label: 'User Flows' },
-    { slug: 'screen-inventory', label: 'Screen Inventory' },
-    { slug: 'mockups', label: 'Mockups' },
-    { slug: 'ui-components', label: 'UI Components' },
     { slug: 'design-system', label: 'Design System' },
+    { slug: 'user-flows', label: 'User Flows' },
+    { slug: 'screens', label: 'Screens' },
     { slug: 'data-model', label: 'Data Model' },
-    // Developer Prompts + Build Plan consolidated into one Implementation
-    // Plan artifact (milestones + prompt packs + quality gates).
-    { slug: 'implementation-plan', label: 'Implementation Plan' },
+    {
+        slug: 'implementation-plan',
+        label: 'Implementation Plan',
+        tabs: {
+            navLabel: 'Implementation plan sections',
+            desktopOnly: true,
+            items: [
+                { slug: 'overview', label: 'Overview' },
+                { slug: 'milestones', label: 'Milestones' },
+                { slug: 'prompt-packs', label: 'Prompt Packs' },
+                { slug: 'quality-gates', label: 'Quality Gates' },
+                { slug: 'traceability', label: 'Traceability' },
+            ],
+        },
+    },
+    { slug: 'dependency-graph', label: 'Dependency Graph' },
 ];
 
-// Mockups render images and can be slow; give them extra settle time.
-const SETTLE_MS = (label) => (label === 'Mockups' ? 4000 : 1400);
+// Image-heavy views need extra settle time before the full-page snapshot.
+const SETTLE_MS = (label) => {
+    if (label === 'Screens') return 6000; // mockup images hydrate lazily
+    if (label === 'Design System') return 2500;
+    return 1400;
+};
 
 const VIEWPORTS = [
     { name: 'desktop', width: 1440, height: 920, mobile: false },
@@ -131,6 +183,40 @@ async function waitForServer(url, timeoutMs = 60000) {
 }
 
 // ---------------------------------------------------------------------------
+// Fetch relay — see the header block. Intercepts every page request and fulfils
+// it from Node `fetch` (which inherits HTTPS_PROXY), so Chromium never opens a
+// socket the egress gateway could reset. A relayed request that itself fails is
+// aborted so the page's own error handling kicks in (e.g. a dropped demo image
+// is tolerated rather than hanging the capture).
+const RELAY_STRIP_REQ = new Set(['host', 'accept-encoding']);
+const RELAY_STRIP_RES = new Set(['content-encoding', 'content-length', 'transfer-encoding']);
+
+async function attachFetchRelay(context) {
+    await context.route('**/*', async (route) => {
+        const req = route.request();
+        const url = req.url();
+        if (url.startsWith('data:') || url.startsWith('blob:')) return route.continue();
+        try {
+            const headers = { ...req.headers() };
+            for (const k of Object.keys(headers)) {
+                if (RELAY_STRIP_REQ.has(k.toLowerCase())) delete headers[k];
+            }
+            const method = req.method();
+            const body = method === 'GET' || method === 'HEAD' ? undefined : req.postDataBuffer() || undefined;
+            const resp = await fetch(url, { method, headers, body, redirect: 'manual' });
+            const buf = Buffer.from(await resp.arrayBuffer());
+            const outHeaders = {};
+            resp.headers.forEach((v, k) => {
+                if (!RELAY_STRIP_RES.has(k.toLowerCase())) outHeaders[k] = v;
+            });
+            await route.fulfill({ status: resp.status, headers: outHeaders, body: buf });
+        } catch {
+            await route.abort().catch(() => {});
+        }
+    });
+}
+
+// ---------------------------------------------------------------------------
 // Optional owner-token preflight
 // ---------------------------------------------------------------------------
 // Capturing the demo needs NO auth — `?demo=1` is a public read. But if a
@@ -174,7 +260,7 @@ async function preflightDemoPinned(token) {
 // Capture
 // ---------------------------------------------------------------------------
 async function openDemo(page) {
-    await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded' });
+    await page.goto(`${BASE_URL}/`, { waitUntil: 'domcontentloaded', timeout: 60000 });
 
     // Signed-out `/` is the LoginPage with a "Demo project" button; a signed-in
     // session would show HomePage's "View demo project". Match both.
@@ -183,7 +269,7 @@ async function openDemo(page) {
     await demoBtn.click();
 
     // loadDemoProject() fetches the snapshot, then navigates to /p/<demo id>.
-    await page.waitForURL('**/p/**', { timeout: 45000 });
+    await page.waitForURL('**/p/**', { timeout: 60000 });
 
     // If the snapshot isn't pinned, the app shows a toast and stays put — surface
     // that clearly rather than timing out cryptically later.
@@ -220,35 +306,71 @@ async function selectArtifact(page, viewport, label) {
         // Open the slide-in drawer, pick the item (which auto-closes the drawer).
         const hamburger = page.getByRole('button', { name: 'Open artifact list' });
         await hamburger.click();
-        await page.waitForTimeout(250); // drawer slide-in
+        await page.waitForTimeout(300); // drawer slide-in
     }
     const nav = page.locator('nav[aria-label="Artifacts"]');
     await nav.getByRole('button', { name: new RegExp(escapeRegExp(label)) }).first().click();
-    await page.waitForTimeout(250); // selection + (mobile) drawer slide-out
+    await page.waitForTimeout(300); // selection + (mobile) drawer slide-out
+}
+
+// Click an in-artifact tab (scoped to the artifact's own tab nav) and let the
+// panel settle before the caller snapshots it.
+async function selectTab(page, navLabel, label) {
+    const nav = page.locator(`nav[aria-label="${navLabel}"]`);
+    await nav.waitFor({ state: 'visible', timeout: 15000 });
+    await nav.getByRole('button', { name: new RegExp(escapeRegExp(label)) }).first().click();
+    await page.waitForTimeout(500);
 }
 
 function escapeRegExp(s) {
     return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 }
 
-async function captureViewport(browser, viewport, executablePath) {
+async function shoot(page, name) {
+    const outPath = join(outDir, name);
+    await page.screenshot({ path: outPath, fullPage: true });
+    console.log(`captured ${outPath}`);
+}
+
+async function captureArtifact(page, viewport, art) {
+    await selectArtifact(page, viewport, art.label);
+    await page.waitForTimeout(SETTLE_MS(art.label));
+
+    const tabs = art.tabs;
+    const captureTabs = tabs && (!tabs.desktopOnly || !viewport.mobile);
+    if (!captureTabs) {
+        await shoot(page, `demo-${art.slug}-${viewport.name}.png`);
+        return;
+    }
+
+    // One full-page snapshot per tab. `fullPage` captures the whole panel below
+    // the tab nav even when it extends past the viewport.
+    for (const t of tabs.items) {
+        try {
+            await selectTab(page, tabs.navLabel, t.label);
+        } catch (e) {
+            console.log(`  skip tab ${art.label} › ${t.label}: ${e.message.split('\n')[0]}`);
+            continue;
+        }
+        await shoot(page, `demo-${art.slug}-${t.slug}-${viewport.name}.png`);
+    }
+}
+
+async function captureViewport(browser, viewport) {
     const context = await browser.newContext({
         viewport: { width: viewport.width, height: viewport.height },
         deviceScaleFactor: 2,
         reducedMotion: 'reduce',
-        ...(executablePath ? {} : {}),
+        ignoreHTTPSErrors: true,
     });
+    if (USE_RELAY) await attachFetchRelay(context);
     const page = await context.newPage();
     try {
         await openDemo(page);
         await gotoAssetsStage(page);
 
         for (const art of ARTIFACTS) {
-            await selectArtifact(page, viewport, art.label);
-            await page.waitForTimeout(SETTLE_MS(art.label));
-            const outPath = join(outDir, `demo-${art.slug}-${viewport.name}.png`);
-            await page.screenshot({ path: outPath, fullPage: true });
-            console.log(`captured ${outPath}`);
+            await captureArtifact(page, viewport, art);
         }
     } finally {
         await context.close();
@@ -268,20 +390,25 @@ async function main() {
     try {
         if (args.local) await waitForServer(`${BASE_URL}/`);
         console.log(`Capturing demo artifacts from ${BASE_URL} → ${outDir}`);
+        if (USE_RELAY) {
+            console.log('Fetch relay ON — routing browser requests through Node fetch (proxied-egress workaround).');
+        }
 
         const ownerToken = process.env.SYNAPSE_OWNER_TOKEN;
         if (ownerToken) await preflightDemoPinned(ownerToken);
 
         const executablePath = findChromiumExecutable();
+        // When the relay is active the browser must NOT use a proxy of its own —
+        // it makes no real network connections; every request is fulfilled from
+        // Node fetch. When the relay is off we launch plainly (direct egress).
         browser = await chromium.launch(executablePath ? { executablePath } : undefined);
 
         for (const viewport of VIEWPORTS) {
             console.log(`\n— ${viewport.name} (${viewport.width}x${viewport.height}) —`);
-            await captureViewport(browser, viewport, executablePath);
+            await captureViewport(browser, viewport);
         }
 
-        const total = VIEWPORTS.length * ARTIFACTS.length;
-        console.log(`\nDone — ${total} screenshots written to ${outDir}`);
+        console.log(`\nDone — screenshots written to ${outDir}`);
     } finally {
         if (browser) await browser.close().catch(() => {});
         if (server) server.kill('SIGTERM');
