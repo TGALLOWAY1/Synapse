@@ -1408,19 +1408,47 @@ Convert-to-Tasks all keep working). See
   attached to milestones by conservative token matching (≥2 shared meaningful
   tokens; unmatched → a labeled **Unassigned Prompt Packs** group); legacy
   plan-wide Definition of Done → categorized global quality gates; legacy
-  Architecture → summary stack; Risks → readiness warnings. `readiness` and
-  `traceability` are always **derived, never persisted/generated**. The
-  legacy prompt-card parser is shared via
+  Architecture → summary stack; Risks (milestone or appendix) → `plan.risks`
+  (their own overview card — deliberately **not** folded into
+  `readiness.warnings`, so the readiness signal stays trustworthy).
+  `readiness` and `traceability` are always **derived, never
+  persisted/generated**. The legacy prompt-card parser is shared via
   `src/lib/services/promptPackParser.ts` (extracted from
   `PromptPackRenderer`).
 - **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
-  `renderers/implementationPlan/ConsolidatedPlanView.tsx` (tabs: Overview /
-  Milestones / Prompt Packs / Quality Gates / Traceability + copy actions:
-  per-prompt, per-milestone, all packs, whole plan as markdown via the
-  adapter's helpers). Fence-less, milestone-less content falls back to the
-  old timeline / plain markdown. `ArtifactWorkspace` threads the legacy
-  standalone prompt_pack artifact's preferred content in as
-  `promptPackContent` (via `ArtifactContentRenderer`).
+  `renderers/implementationPlan/ConsolidatedPlanView.tsx` — a guided build
+  launcher, not a report. Tab **ids** keep the internal vocabulary
+  (`overview`/`milestones`/`prompt_packs`/`quality_gates`/`traceability`) but
+  the **labels** are Build Brief / Roadmap / Prompts / Validation / Coverage.
+  An executive `PlanHeader` sits above the tabs: readiness pill, scope
+  counts, generated-from PRD version + staleness (threaded like data_model's
+  `prdVersionLabel`/`staleness` props), a primary **Copy next prompt** CTA,
+  and the **Convert to tasks** entry point (moved out of `ArtifactWorkspace`'s
+  floating row; the legacy markdown fallback renders its own
+  Convert-to-Tasks row so the modal stays reachable either way, and the
+  outer white prose card is skipped for `implementation_plan` since the view
+  brings its own cards). Decision-surface data is derived by the pure,
+  unit-tested **`src/lib/services/implementationPlanInsights.ts`**:
+  prompt-pack build order + next-pack resolution, gate rows with
+  milestone/prompt linkage and verify commands, the coverage matrix (cells
+  are explicitly `covered`/`missing`/`not_tracked` — `missing` only when the
+  plan links that artifact kind somewhere, so absence is never
+  over-reported), change-impact scoping per upstream artifact, critical-path
+  resolution (ids/names → clickable milestone chips), and structured prompt
+  previews. **Honest gate statuses:** every quality gate defaults to **Not
+  run** — green/passed styling only ever reflects a user-recorded outcome;
+  never re-add implied-pass icons. User progress (gate outcomes + copied
+  packs) persists as the **`planProgress` metadata overlay** on the
+  implementation_plan ArtifactVersion (`readPlanProgress`; same per-version
+  pattern as screenEdits/promptEdits — regeneration starts clean; written
+  silently via `updateArtifactVersionMetadata`, no history event). Saved
+  `ProjectTask`s are threaded in as `savedTasks` so structured-plan task ids
+  (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs merely
+  planned. Fence-less, milestone-less content falls back to the old timeline
+  / plain markdown. `ArtifactWorkspace` threads the legacy standalone
+  prompt_pack artifact's preferred content in as `promptPackContent`, plus
+  `sourceVersions` (core_artifact sourceRefs resolved to "Data Model v2"
+  labels for Coverage provenance), via `ArtifactContentRenderer`.
 - **Generation.** The `implementation_plan` prompt + Gemini schema
   (`artifactSchemas.ts`) emit the consolidated shape with **milestone-centered
   prompt packs** (self-contained, agent-agnostic, fixed heading structure:

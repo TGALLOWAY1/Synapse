@@ -1,6 +1,7 @@
 import type {
-    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, StalenessState, UXPage,
+    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, ProjectTask, StalenessState, UXPage,
 } from '../../types';
+import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -18,8 +19,9 @@ interface DispatchProps {
     /** Only consumed by `screen_inventory` today. Other subtypes ignore it. */
     screenImageContext?: ScreenImageGalleryContext;
     /**
-     * Per-version metadata. Currently consumed only by `design_system` to
-     * surface structured token contracts; other subtypes ignore it.
+     * Per-version metadata. Consumed by `design_system` (structured token
+     * contracts) and `implementation_plan` (the `planProgress` copy/gate
+     * overlay); other subtypes ignore it.
      */
     metadata?: Record<string, unknown>;
     /**
@@ -43,6 +45,17 @@ interface DispatchProps {
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
     promptPackContent?: string;
+    /** Only consumed by `implementation_plan`: saved (converted) project tasks
+     * for this artifact — marks matching plan tasks as tracked. */
+    savedTasks?: ProjectTask[];
+    /** Only consumed by `implementation_plan`: opens the Convert-to-Tasks modal. */
+    onConvertToTasks?: () => void;
+    /** Only consumed by `implementation_plan`: persists the copy/gate-status
+     * progress overlay (`metadata.planProgress`) on the version. */
+    onUpdatePlanProgress?: (next: ImplementationPlanProgress) => void;
+    /** Only consumed by `implementation_plan`: source artifact versions the
+     * plan was generated from ("Data Model v1"), for coverage provenance. */
+    sourceVersions?: string[];
     /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
     promptEdits?: Record<number, string>;
     /** Only consumed by `prompt_pack`; persists the new edit overlay. */
@@ -51,9 +64,9 @@ interface DispatchProps {
     generatedAt?: number;
     /** Only consumed by `prompt_pack`; current artifact version number. */
     versionNumber?: number;
-    /** Only consumed by `data_model`: source PRD version label for the overview header. */
+    /** Consumed by `data_model` and `implementation_plan`: source PRD version label. */
     prdVersionLabel?: string;
-    /** Only consumed by `data_model`: freshness state for the overview header. */
+    /** Consumed by `data_model` and `implementation_plan`: freshness state. */
     staleness?: StalenessState;
 }
 
@@ -96,6 +109,10 @@ export function ArtifactContentRenderer({
     onNavigateToScreen,
     availableScreenSlugs,
     promptPackContent,
+    savedTasks,
+    onConvertToTasks,
+    onUpdatePlanProgress,
+    sourceVersions,
     promptEdits,
     onUpdatePromptEdits,
     generatedAt,
@@ -130,7 +147,19 @@ export function ArtifactContentRenderer({
         );
     }
     if (subtype === 'implementation_plan') {
-        return <ImplementationPlanRenderer content={content} promptPackContent={promptPackContent} />;
+        return (
+            <ImplementationPlanRenderer
+                content={content}
+                promptPackContent={promptPackContent}
+                prdVersionLabel={prdVersionLabel}
+                staleness={staleness}
+                sourceVersions={sourceVersions}
+                savedTasks={savedTasks}
+                onConvertToTasks={onConvertToTasks}
+                metadata={metadata}
+                onUpdatePlanProgress={onUpdatePlanProgress}
+            />
+        );
     }
     if (subtype === 'prompt_pack') {
         return (

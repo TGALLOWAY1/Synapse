@@ -95,8 +95,9 @@ quality gates, validation commands, and definitions of done.
    markdown-only plan; prompt_pack only. Legacy prompts become prompt packs
    attached to milestones by best-effort title/keyword matching, else an
    "Unassigned Prompt Packs" group. Legacy DoD → quality gates; architecture →
-   summary stack; risks → readiness warnings. Traceability and readiness are
-   *derived*, never generated.
+   summary stack; risks → `plan.risks` (rendered in their own Risks &
+   Constraints card, kept out of readiness warnings). Traceability and
+   readiness are *derived*, never generated.
 4. **Retire `prompt_pack` from new generation and the sidebar** via a new
    `RETIRED_ARTIFACT_SUBTYPES` set in `coreArtifactPipeline.ts` (distinct from
    HIDDEN, which still generates). Retired subtypes: excluded from
@@ -121,8 +122,10 @@ quality gates, validation commands, and definitions of done.
 2. Additive types + Gemini schema extension.
 3. Adapter/normalizer + prompt-pack parser extraction + unit tests.
 4. Assets-page consolidation (retired subtype wiring).
-5. Consolidated renderer (Overview / Roadmap & Milestones / Prompt Packs /
-   Quality Gates / Traceability / export-copy actions).
+5. Consolidated renderer (tab labels now Build Brief / Roadmap / Prompts /
+   Validation / Coverage — internal ids unchanged — plus the executive
+   PlanHeader, honest gate statuses via the `planProgress` overlay, and the
+   coverage/impact matrix; see the CLAUDE.md renderer section).
 6. Generation prompt + deps + progress labels.
 7. Tour/demo copy + screenshot script + docs (README, CLAUDE.md,
    artifact-flow).

@@ -18,8 +18,8 @@
  *
  * Everything here is derived at render time; legacy artifacts are never
  * rewritten or migrated. Data is preserved: legacy Definition of Done items
- * become quality gates, Architecture feeds the summary, Risks become
- * readiness warnings.
+ * become quality gates, Architecture feeds the summary, and Risks (milestone
+ * or appendix) surface through `plan.risks` (their own overview card).
  */
 
 import type {
@@ -326,9 +326,8 @@ function deriveReadiness(args: {
     packSource: ConsolidatedImplementationPlan['sources']['promptPacks'];
     milestones: ImplementationPlanMilestone[];
     unassignedCount: number;
-    riskTexts: string[];
 }): ImplementationReadiness {
-    const { planSource, packSource, milestones, unassignedCount, riskTexts } = args;
+    const { planSource, packSource, milestones, unassignedCount } = args;
     const warnings: string[] = [];
     const missingInputs: string[] = [];
 
@@ -350,9 +349,8 @@ function deriveReadiness(args: {
     if (milestones.length > 0 && withoutValidation === milestones.length && planSource !== 'none') {
         warnings.push('Milestones have no validation commands — regenerate the Implementation Plan to get per-milestone validation guidance.');
     }
-    for (const risk of riskTexts.slice(0, 5)) {
-        warnings.push(`Risk: ${risk}`);
-    }
+    // Risks deliberately do NOT feed readiness warnings — they render in their
+    // own Risks & Constraints card so the readiness signal stays trustworthy.
 
     const status: ImplementationReadiness['status'] =
         planSource === 'none' ? 'blocked'
@@ -502,7 +500,6 @@ export function buildConsolidatedPlan(input: ConsolidatedPlanInput): Consolidate
         packSource,
         milestones,
         unassignedCount: unassignedPromptPacks.length,
-        riskTexts,
     });
 
     const risks: RiskItem[] = structured?.risks
