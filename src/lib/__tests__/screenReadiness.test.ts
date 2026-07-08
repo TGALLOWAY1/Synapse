@@ -277,6 +277,7 @@ describe('buildScreenCoverageSummary', () => {
         expect(summary.mockups).toEqual({ covered: 1, total: 2 });
         expect(summary.openRisks).toBe(0);
         expect(summary.ready).toBe(1);
+        expect(summary.readyWithWarnings).toBe(0);
         expect(summary.needsReview).toBe(1);
         expect(summary.message).toContain('1 of 2 screens');
     });
@@ -298,7 +299,27 @@ describe('buildScreenCoverageSummary', () => {
         const readiness = buildReadinessIndex(index);
         const summary = buildScreenCoverageSummary(index, readiness, flows, FEATURES);
         expect(summary.ready).toBe(1);
+        expect(summary.readyWithWarnings).toBe(0);
         expect(summary.message).toContain('All 1 screens');
+    });
+
+    it('does not report all-clear when a warned override is the only "ready" screen', () => {
+        // A single bare screen (lots of derived gaps) marked implementation_ready
+        // by the user. It counts as ready, but the derived warnings remain, so the
+        // rollup must NOT claim "All screens pass".
+        const index = buildScreenIndex(
+            makeInventory([bareScreen]),
+            [],
+            null,
+            { 'scr-bare': { reviewStatus: 'implementation_ready' } },
+        );
+        const readiness = buildReadinessIndex(index);
+        const summary = buildScreenCoverageSummary(index, readiness, null, undefined);
+        expect(summary.ready).toBe(1);
+        expect(summary.readyWithWarnings).toBe(1);
+        expect(summary.message).not.toContain('All 1 screens');
+        expect(summary.message).toContain('0 of 1 screens');
+        expect(summary.message).toContain('still has open warnings');
     });
 });
 

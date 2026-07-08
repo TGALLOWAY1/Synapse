@@ -375,6 +375,10 @@ export interface ScreenCoverageSummary {
     openRisks: number;
     /** Screens whose (user-set or derived) status is implementation_ready. */
     ready: number;
+    /** Subset of `ready` that was user-overridden while derived review-trigger
+     * warnings remain (accepted_with_warnings) — these must never let the
+     * rollup claim the derived checks pass. */
+    readyWithWarnings: number;
     needsReview: number;
     /** One friendly, deterministic readiness sentence for the panel. */
     message: string;
@@ -391,15 +395,20 @@ const GAP_KIND_SHORT: Partial<Record<ScreenGapKind, string>> = {
 function buildMessage(
     total: number,
     ready: number,
+    readyWithWarnings: number,
     needsReview: number,
     topGapKinds: ScreenGapKind[],
 ): string {
     if (total === 0) return 'No screens yet.';
-    if (ready === total) {
+    // "Ready" alone isn't clean if a user marked a screen ready over unresolved
+    // derived warnings — those must still be surfaced, never hidden behind an
+    // all-clear message.
+    const cleanReady = ready - readyWithWarnings;
+    if (cleanReady === total) {
         return `All ${total} screens pass the derived readiness checks. Review them once more before implementation.`;
     }
     const parts: string[] = [
-        `${ready} of ${total} screens pass the derived readiness checks.`,
+        `${cleanReady} of ${total} screens pass the derived readiness checks.`,
     ];
     if (needsReview > 0) {
         const gapText = topGapKinds
@@ -410,6 +419,11 @@ function buildMessage(
         parts.push(gapText
             ? `${needsReview} need${needsReview === 1 ? 's' : ''} review — mostly ${gapText}.`
             : `${needsReview} need${needsReview === 1 ? 's' : ''} review.`);
+    }
+    if (readyWithWarnings > 0) {
+        parts.push(
+            `${readyWithWarnings} marked ready ${readyWithWarnings === 1 ? 'still has' : 'still have'} open warnings.`,
+        );
     }
     return parts.join(' ');
 }
@@ -473,12 +487,19 @@ export function buildScreenCoverageSummary(
     }
 
     let ready = 0;
+    let readyWithWarnings = 0;
     let needsReview = 0;
     const gapCounts = new Map<ScreenGapKind, number>();
     for (const item of items) {
         const r = readiness.get(item.id);
         if (!r) continue;
-        if (r.status === 'implementation_ready') ready += 1;
+        if (r.status === 'implementation_ready') {
+            ready += 1;
+            // A user override that still carries review-trigger warnings is
+            // "ready" only because a human said so — it must not make the
+            // artifact-level rollup read as all-clear.
+            if (r.gaps.some(g => g.kind === 'accepted_with_warnings')) readyWithWarnings += 1;
+        }
         if (r.status === 'needs_review') needsReview += 1;
         for (const gap of r.gaps) {
             gapCounts.set(gap.kind, (gapCounts.get(gap.kind) ?? 0) + 1);
@@ -498,8 +519,9 @@ export function buildScreenCoverageSummary(
         mockups: { covered: index.mockupCoverage.summary.mockedScreens, total },
         openRisks,
         ready,
+        readyWithWarnings,
         needsReview,
-        message: buildMessage(total, ready, needsReview, topGapKinds),
+        message: buildMessage(total, ready, readyWithWarnings, needsReview, topGapKinds),
     };
 }
 

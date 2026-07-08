@@ -43,11 +43,15 @@ function MetricRow({
 export function ScreenCoveragePanel({ summary, onGenerateMissingMockups }: Props) {
     const [showUncovered, setShowUncovered] = useState(false);
     const {
-        totalScreens, prdFeatures, flows, p0, states, mockups, openRisks, ready, message,
+        totalScreens, prdFeatures, flows, p0, states, mockups, openRisks,
+        ready, readyWithWarnings, message,
     } = summary;
     if (totalScreens === 0) return null;
 
-    const allReady = ready === totalScreens;
+    // "All clear" only when every screen is ready AND none of those are
+    // user-overridden while derived warnings remain — otherwise the green
+    // all-clear treatment would hide unresolved warnings at the artifact level.
+    const allReady = ready === totalScreens && readyWithWarnings === 0;
     const missingMockups = mockups.total - mockups.covered;
 
     return (

@@ -1551,7 +1551,12 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   and "Not specified"/"Review recommended" fallbacks; never fabricate risk
   severity, mockup variants, routes, or per-state mockup coverage, and never
   present a derived status as user-confirmed.** All of it stays advisory —
-  nothing gates rendering or generation.
+  nothing gates rendering or generation. **A user override of
+  `implementation_ready` over unresolved review-trigger gaps is counted in
+  `summary.readyWithWarnings` and excluded from the "all screens pass"
+  rollup** (`buildMessage` uses `ready − readyWithWarnings`; `ScreenCoveragePanel`
+  gates its green all-clear on `readyWithWarnings === 0`) so a human override
+  can never make the artifact-level summary read clean while warnings remain.
 - **Screen metadata edits are an overlay, never a content rewrite.** User
   edits (name / purpose / userIntent / priority / notes / **reviewStatus** —
   the readiness override above) are stored per
