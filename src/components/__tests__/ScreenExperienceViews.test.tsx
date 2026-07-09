@@ -2,7 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, fireEvent } from '@testing-library/react';
 import type { Feature, MockupPayload, ScreenInventoryContent, ScreenItem } from '../../types';
 import { buildScreenIndex, type ScreenMetadataEdit } from '../../lib/screenExperience';
-import { buildReadinessIndex, buildScreenCoverageSummary } from '../../lib/screenReadiness';
+import { buildReadinessIndex, buildScreenCoverageSummary, type ScreenCoverageSummary } from '../../lib/screenReadiness';
 import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
 import { parseFlows } from '../renderers/userFlows/parseFlow';
 import { ScreenListView } from '../experience/ScreenListView';
@@ -137,6 +137,62 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         expect(getByText(/available on demand/)).toBeTruthy();
         // The old mandatory-sounding "N / M recommended" ratio is gone.
         expect(queryByText(/17 recommended/)).toBeNull();
+    });
+
+    it('withholds the green all-clear when a PRD feature is uncovered, even if every screen is ready', () => {
+        const { index, readiness } = buildFixtures();
+        // Every screen ready, no warnings — but one PRD feature links to no
+        // screen, which is genuine implementation risk. The all-clear headline
+        // must NOT fire (it would contradict the amber uncovered-feature row).
+        const coverage: ScreenCoverageSummary = {
+            totalScreens: 2,
+            prdFeatures: { covered: 1, total: 2, uncovered: [{ id: 'F2', name: 'Sharing' }], mustWithoutPrimaryScreen: [] },
+            stateVariants: null,
+            flows: { represented: 1, total: 1 },
+            p0: { total: 0, withMockup: 0 },
+            states: { screensWithStates: 2, totalStates: 2, statesWithBehavior: 2 },
+            mockups: { covered: 2, total: 2 },
+            openRisks: 0,
+            ready: 2, readyWithWarnings: 0, needsReview: 0,
+            // Per-screen readiness sentence reads all-clear — it must NOT be
+            // used as the headline while an artifact-level risk remains.
+            message: 'All 2 screens pass the derived readiness checks. Review them once more before implementation.',
+        };
+        const { queryByText, getByText } = render(
+            <ScreenListView index={index} readiness={readiness} coverage={coverage} onSelectScreen={() => {}} />,
+        );
+        // Neither the green all-clear nor the celebratory per-screen message.
+        expect(queryByText(/Implementation coverage is complete/)).toBeNull();
+        expect(queryByText(/All 2 screens pass the derived readiness checks/)).toBeNull();
+        // A dedicated risk-aware headline is shown instead.
+        expect(getByText(/some required coverage still needs review/)).toBeTruthy();
+        expect(getByText(/1 PRD feature not linked to any screen/)).toBeTruthy();
+    });
+
+    it('surfaces stale/legacy primary-mockup signals even when no variants are recommended', () => {
+        const { index, readiness, coverage } = buildFixtures();
+        const { getByText, queryByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                coverage={coverage}
+                // Desktop/simple project: only primary mockups, no additional
+                // variants recommended — but one is stale and one is legacy.
+                variantCoverage={{
+                    recommendedGenerated: 2, recommendedTotal: 2,
+                    additionalGenerated: 0, additionalTotal: 0,
+                    p0WithMobile: 0, p0Total: 0,
+                    legacyUnknownMockups: 1, manifestBackedGenerated: 0,
+                    freshness: { total: 2, current: 1, review: 1, unknown: 0 },
+                }}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // No optional-variant section (nothing to expand into)...
+        expect(queryByText('Expanded Design Coverage')).toBeNull();
+        // ...yet the freshness + legacy signals for existing mockups still show.
+        expect(getByText(/may be worth refreshing/)).toBeTruthy();
+        expect(getByText(/predate coverage metadata/)).toBeTruthy();
     });
 
     it('filters screens (Has risks shows only the risky screen)', () => {
