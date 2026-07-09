@@ -154,18 +154,27 @@ id**) **and its user-uploaded Screen Inventory images** (from
 behind a `SYNAPSE_OWNER_TOKEN` gate. The bundle also carries the project's
 **implementation tasks** (`tasks` slice) and **orchestration metrics**
 (`workflowRuns` slice) — every *persisted* store slice for the project, so a
-restored snapshot is a faithful copy. Both image kinds split out of the JSON
+restored snapshot is a faithful copy. It also carries the project's
+**per-variant mockup images** (Phase 3D — the Screens Mockups-tab variant
+gallery, from the dedicated `src/lib/mockupVariantImageStore.ts` IDB store, keyed
+`versionId:screenId:variantId:quality`) as `SnapshotProjectBundle.mockupVariantImages`
+(a `MockupVariantImageSnapshot` — see `src/lib/mockupVariantSnapshot.ts` and the
+Phase 3D bullet under Screens). All three image kinds split out of the JSON
 envelope and ship one request each (reusing the **same** per-image blob channel
-— each blob is keyed by a hash of the image key, and the two key shapes never
-collide) so neither upload nor download crosses Vercel's ~4.5 MB cap. The wire
-format carries mockup images in `payload.images` and screen-inventory images in
-`payload.screenImages`. One snapshot can be pinned as **the demo** (`_demo.json`
-pointer + public `?demo=1` read); `loadDemoProject` restores it under the stable
-`DEMO_PROJECT_ID`. Snapshot fields (`tasks`/`workflowRuns`/`screenImages`) are
+— each blob is keyed by a hash of the image key, and the key shapes never
+collide: mockup `versionId:screenId:quality`, screen `artifactVersionId:screenSlug:versionNumber`,
+variant bytes under `vimg:`-prefixed keys) so neither upload nor download crosses
+Vercel's ~4.5 MB cap. The wire format carries mockup images in `payload.images`,
+screen-inventory images in `payload.screenImages`, and variant image metadata
+inside `payload.project.mockupVariantImages` (bytes via the `vimg:` channel).
+One snapshot can be pinned as **the demo** (`_demo.json` pointer + public
+`?demo=1` read); `loadDemoProject` restores it under the stable `DEMO_PROJECT_ID`.
+Snapshot fields (`tasks`/`workflowRuns`/`screenImages`/`mockupVariantImages`) are
 all **optional on the wire** — pre-existing snapshots lack them and restore
-defaults each to `[]`. When adding a new persisted slice or IDB image store,
-add it to `collectProjectBundle`/`collectScreenImages`, the restore writers, and
-`namespaceSnapshotForRestore`, or it silently won't travel in snapshots.
+defaults each to empty. When adding a new persisted slice or IDB image store,
+add it to `collectProjectBundle`/`collectScreenImages`/`collectVariantImages`, the
+restore writers, and `namespaceSnapshotForRestore`, or it silently won't travel
+in snapshots.
 
 - **Demo cache freshness — never short-circuit on a `DEMO_PROJECT_ID` cache hit
   alone.** Each restored demo project stores its source snapshot id in the
@@ -1659,9 +1668,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     "covered" without structured metadata. Generation is gated on an OpenAI key
     (`hasOpenAIKey`) + `gpt_image` image mode — demo / keyless users see a
     disabled action with a clear explanation, never a silent failure. The
-    per-variant store is **independent of snapshots & cross-device sync** (a
-    documented Phase 3D gap, mirroring the screen-inventory-image sync gap) — do
-    not entangle it with `snapshotClient` / `imageRefsStore`.
+    per-variant store's image BYTES stay in its own dedicated IndexedDB store
+    (never in `imageRefsStore` or the legacy mockup store); Phase 3D made the
+    RECORDS portable through owner snapshots (see the Phase 3D bullet) but the
+    variant store is still **not on the per-user `/api/projects` cross-device
+    sync path** — do not entangle it with `imageRefsStore`.
   - **Phase 3C variant trust — freshness, history, default sidecar
     (`src/lib/mockupVariantTrust.ts`, pure).** A generated variant is captured
     with a **`MockupVariantSourceSignature`** — a deterministic snapshot of the
@@ -1701,11 +1712,47 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     callers unaffected). **Old defaults with no sidecar stay coverage-unknown; no
     fabricated coverage, and the legacy default image is never moved into the
     variant store.**
-    **Local-only clarity:** the Mockups tab and per-variant detail state that
-    generated variant images are saved on this device only until snapshot/sync
-    lands. **Snapshot/sync of variant images remains a documented gap →
-    Phase 3D: Portable variant image snapshots / cross-device sync.** Do not
-    entangle the variant store with `snapshotClient` / `imageRefsStore`.
+    **Storage clarity (updated by Phase 3D):** the Mockups tab and per-variant
+    detail now state that generated variant images are saved on this device AND
+    included in project snapshots (restorable on another device from a saved
+    snapshot); they do not yet auto-sync across devices.
+  - **Phase 3D — portable variant image snapshots
+    (`src/lib/mockupVariantSnapshot.ts`, pure except the injected-IDB restore).**
+    Generated variant images, coverage manifests, source signatures,
+    `generatedFrom` provenance, and variant history now travel in owner
+    **snapshots** (and therefore the demo) — closing the Phase 3C local-only
+    gap. `buildMockupVariantImageSnapshot(records)` serializes the dedicated
+    variant IDB store into a **schema-versioned** (`schemaVersion: 1`),
+    size-guarded transport (`MockupVariantImageSnapshot`);
+    `validateMockupVariantImageSnapshot` / `estimateMockupVariantSnapshotSize`
+    are the pure guards. **Wire path reuses the existing per-image blob
+    channel** (NO server change — `api/snapshots.js` hashes any key and persists
+    `project` verbatim): `splitVariantSnapshotImages` moves image bytes out of
+    the JSON envelope under `vimg:`-prefixed keys (never collide with
+    mockup/screen keys) so nothing crosses Vercel's ~4.5 MB cap; the stripped
+    metadata rides INSIDE `SnapshotProjectBundle.mockupVariantImages`;
+    `joinVariantSnapshotImages` re-attaches bytes on load (a failed per-image
+    fetch drops just that image, never the restore, and factors into the demo's
+    `imagesComplete`). **Safety:** only `image/png|jpeg|webp` (never SVG);
+    per-image cap 8 MB, total cap 50 MB, history cap 10 — oversized/unsafe
+    records are skipped with calm warnings (surfaced in `SnapshotsPanel` after
+    save). **Restore is CONSERVATIVE merge, not a clobber**
+    (`restoreMockupVariantImageSnapshot` + pure `mergeVariantRecords`): per key —
+    no local → restore; duplicate → keep one; snapshot newer → snapshot current,
+    local folds to history; local newer → keep local, snapshot folds to history;
+    inconclusive → keep local, snapshot to history + warning; an imageless
+    incoming never replaces a successful local image; history dedupes by
+    (image, generatedAt) and is capped. A malformed variant section is skipped
+    without ever breaking the surrounding project restore. Restore updates the
+    reactive cache via the new `useMockupVariantImageStore.mergeRecords`.
+    **Non-default variants require a real safe image to restore** (they render
+    an `<img>`); only the `variantId === 'default'` **sidecar** is metadata-only
+    (no image — the legacy default image path is untouched, old defaults without
+    a sidecar stay coverage-unknown). Demo restore under `DEMO_PROJECT_ID`
+    namespaces variant records via `namespaceVariantSnapshot` (remap versionId +
+    rebuild the composite key + `generatedFrom`, idempotent), invoked from
+    `namespaceSnapshotForRestore`. Still **not** on the `/api/projects`
+    cross-device sync path — that remains the documented next step.
   `parseDecisionBranches` (arrow-form +
   if/otherwise) powers both the branch-aware Flow-tab rendering
   (`DecisionBranches`) and the `decision_missing_branches` gap — an

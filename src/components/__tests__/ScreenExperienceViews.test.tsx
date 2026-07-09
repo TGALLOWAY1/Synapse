@@ -414,9 +414,11 @@ describe('Phase 3C variant freshness & history UI', () => {
         useMockupVariantImageStore.setState({ images: {}, inFlight: {}, errors: {} });
     });
 
-    it('shows the local-only storage note in the Mockups tab', () => {
+    it('shows the snapshot-inclusion storage note in the Mockups tab', () => {
         const { getByText } = renderContractDetail('mockups');
-        expect(getByText(/saved on this device for now/)).toBeTruthy();
+        // Phase 3D: variant images now travel in project snapshots, so the copy
+        // states they can be restored on another device (no longer "local-only").
+        expect(getByText(/included in project snapshots/)).toBeTruthy();
     });
 
     it('a legacy default with no source metadata reads Freshness unknown', () => {

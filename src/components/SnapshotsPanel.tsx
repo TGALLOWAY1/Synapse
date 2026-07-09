@@ -38,6 +38,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     const [busy, setBusy] = useState<string | null>(null);
     const [saveProgress, setSaveProgress] = useState<SnapshotProgress | null>(null);
     const [error, setError] = useState<string | null>(null);
+    const [notices, setNotices] = useState<string[]>([]);
     const [title, setTitle] = useState<string>(project?.name ?? 'Untitled');
 
     const refresh = async () => {
@@ -76,8 +77,14 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
         setBusy('saving');
         setSaveProgress(null);
         setError(null);
+        setNotices([]);
         try {
-            await saveSnapshot(projectId, title.trim() || 'Untitled', (p) => setSaveProgress(p));
+            await saveSnapshot(
+                projectId,
+                title.trim() || 'Untitled',
+                (p) => setSaveProgress(p),
+                (warnings) => setNotices(warnings),
+            );
             await refresh();
         } catch (err) {
             setError(err instanceof Error ? err.message : String(err));
@@ -330,6 +337,18 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                     {error && (
                         <div className="mt-4 px-3 py-2 text-xs text-red-300 bg-red-500/10 border border-red-500/30 rounded">
                             {error}
+                        </div>
+                    )}
+                    {notices.length > 0 && (
+                        <div className="mt-4 px-3 py-2 text-xs text-amber-200 bg-amber-500/10 border border-amber-500/30 rounded">
+                            <div className="font-medium mb-1">Saved with a note</div>
+                            <ul className="list-disc list-inside space-y-0.5 text-amber-200/90">
+                                {notices.map((n, i) => <li key={i}>{n}</li>)}
+                            </ul>
+                            <p className="mt-1.5 text-amber-200/70">
+                                The screen specs and mockup metadata are still saved — only some
+                                variant images were left out.
+                            </p>
                         </div>
                     )}
                 </div>
