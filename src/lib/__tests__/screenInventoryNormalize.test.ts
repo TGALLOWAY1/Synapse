@@ -190,3 +190,98 @@ describe('screenInventoryNormalize', () => {
         });
     });
 });
+
+// --- Phase 2 screen-contract fields -------------------------------------------------
+
+describe('Phase 2 screen contract normalization', () => {
+    const contractJson = JSON.stringify({
+        sections: [{
+            title: 'Submission',
+            screens: [{
+                name: 'Submission Wizard',
+                priority: 'P0',
+                purpose: 'Guided submission.',
+                states: [{
+                    name: 'Empty history',
+                    description: 'Empty state with CTA',
+                    type: 'empty',
+                    trigger: 'no saved evaluations',
+                    systemBehavior: 'Lookup returns no records',
+                    required: true,
+                    needsMockup: true,
+                    acceptanceCriteria: ['Empty state appears when no evaluations exist'],
+                }],
+                riskDetails: [
+                    { description: 'Uploads time out', severity: 'medium', proposedHandling: 'Chunked uploads' },
+                    { description: 'Bad severity dropped', severity: 'catastrophic' },
+                ],
+                acceptanceCriteria: ['User can submit end to end'],
+                handoff: {
+                    route: '/submission',
+                    routeParams: ['projectId'],
+                    primaryComponents: ['SubmissionWizard'],
+                    stateVariables: ['uploadedAssets'],
+                    events: [{ name: 'onSubmitProject', trigger: 'Submit', effect: 'POST /submissions' }, { notName: 'dropped' }],
+                    accessibilityNotes: ['Keyboard navigable steps'],
+                    responsiveNotes: ['Single column on mobile'],
+                },
+            }],
+        }],
+    });
+
+    it('round-trips contract fields through normalization', () => {
+        const inv = parseScreenInventory(contractJson);
+        expect(inv).not.toBeNull();
+        const screen = inv!.sections[0].screens[0];
+        const state = screen.states![0];
+        expect(state.type).toBe('empty');
+        expect(state.systemBehavior).toBe('Lookup returns no records');
+        expect(state.required).toBe(true);
+        expect(state.needsMockup).toBe(true);
+        expect(state.acceptanceCriteria).toEqual(['Empty state appears when no evaluations exist']);
+        expect(screen.riskDetails).toEqual([
+            { description: 'Uploads time out', severity: 'medium', proposedHandling: 'Chunked uploads' },
+            { description: 'Bad severity dropped' },
+        ]);
+        // Legacy risks list derives from riskDetails descriptions.
+        expect(screen.risks).toEqual(['Uploads time out', 'Bad severity dropped']);
+        expect(screen.acceptanceCriteria).toEqual(['User can submit end to end']);
+        expect(screen.handoff).toEqual({
+            route: '/submission',
+            routeParams: ['projectId'],
+            primaryComponents: ['SubmissionWizard'],
+            stateVariables: ['uploadedAssets'],
+            events: [{ name: 'onSubmitProject', trigger: 'Submit', effect: 'POST /submissions' }],
+            accessibilityNotes: ['Keyboard navigable steps'],
+            responsiveNotes: ['Single column on mobile'],
+        });
+    });
+
+    it('renders contract fields into the markdown export', () => {
+        const inv = parseScreenInventory(contractJson)!;
+        const md = screenInventoryToMarkdown(inv);
+        expect(md).toContain('- Empty history [empty, required, needs mockup]: Empty state with CTA');
+        expect(md).toContain('  - System: Lookup returns no records');
+        expect(md).toContain('  - Accept: Empty state appears when no evaluations exist');
+        expect(md).toContain('- Uploads time out _(severity: medium)_');
+        expect(md).toContain('  - Handling: Chunked uploads');
+        expect(md).toContain('**Acceptance criteria:**');
+        expect(md).toContain('- Route: /submission (params: projectId)');
+        expect(md).toContain('- Components: SubmissionWizard');
+        expect(md).toContain('- Accessibility:');
+    });
+
+    it('leaves legacy screens untouched (no contract fields invented)', () => {
+        const inv = parseScreenInventory(JSON.stringify({
+            sections: [{
+                title: 'Main',
+                screens: [{ name: 'Old Screen', priority: 'P1', purpose: 'p', risks: ['A risk'] }],
+            }],
+        }));
+        const screen = inv!.sections[0].screens[0];
+        expect(screen.riskDetails).toBeUndefined();
+        expect(screen.risks).toEqual(['A risk']);
+        expect(screen.acceptanceCriteria).toBeUndefined();
+        expect(screen.handoff).toBeUndefined();
+    });
+});

@@ -28,8 +28,9 @@ import {
     type ScreenMetadataEdit,
 } from '../../lib/screenExperience';
 import {
-    buildMockupSpecCoverage, REVIEW_STATUS_LABELS,
-    type ScreenReadiness, type ScreenReviewStatus,
+    buildMockupSpecCoverage, buildMockupVariantRows, parseDecisionBranches,
+    REVIEW_STATUS_LABELS,
+    type MockupVariantRow, type ScreenReadiness, type ScreenReviewStatus,
 } from '../../lib/screenReadiness';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import { ReadinessBadge } from './ReadinessBadge';
@@ -250,6 +251,7 @@ export function ScreenDetailView({
                     onAddToMockups={onAddToMockups}
                     unmatchedMockups={unmatchedMockups}
                     onLinkMockup={onLinkMockup}
+                    onSaveScreenEdit={onSaveScreenEdit}
                 />
             )}
         </div>
@@ -282,7 +284,16 @@ function ScreenEditForm({
     const [reviewStatus, setReviewStatus] = useState<ScreenReviewStatus | ''>(item.edit?.reviewStatus ?? '');
 
     const handleSave = () => {
-        const edit: ScreenMetadataEdit = {};
+        // Start from the existing overlay so fields this form doesn't edit
+        // (mockupVariantStatus, anything written by newer code) survive a
+        // read-modify-write — then own only this form's fields.
+        const edit: ScreenMetadataEdit = { ...(item.edit ?? {}) };
+        delete edit.name;
+        delete edit.purpose;
+        delete edit.userIntent;
+        delete edit.priority;
+        delete edit.notes;
+        delete edit.reviewStatus;
         const trimmedName = name.trim();
         if (trimmedName && trimmedName !== baseScreen.name) edit.name = trimmedName;
         if (purpose !== (baseScreen.purpose ?? '')) edit.purpose = purpose;
@@ -459,7 +470,6 @@ function FlowTab({
                             <ul className="space-y-1.5">
                                 {group.steps.map(({ step, stepIndex }, appearanceIdx) => {
                                     const decisionCount = step.decisions.length;
-                                    const branchesSpecified = step.decisions.some(d => /→|->/.test(d));
                                     // The flow only knows this screen by name, so a repeated
                                     // appearance is labeled by its step position; the User/System
                                     // lines below distinguish the phase where the flow does.
@@ -490,11 +500,9 @@ function FlowTab({
                                                     {step.systemBehavior}
                                                 </div>
                                             )}
-                                            {decisionCount > 0 && !branchesSpecified && (
-                                                <div className="mt-0.5 text-[11px] text-amber-700">
-                                                    Branch outcomes not specified in the flow. Review recommended.
-                                                </div>
-                                            )}
+                                            {step.decisions.map((decision, di) => (
+                                                <DecisionBranches key={di} decision={decision} />
+                                            ))}
                                         </li>
                                     );
                                 })}
@@ -541,6 +549,41 @@ function FlowTab({
     );
 }
 
+/**
+ * One flow decision rendered branch-aware: when the decision text parses into
+ * condition → outcome pairs (see parseDecisionBranches) they render as an
+ * explicit branch list; otherwise the raw text shows with an honest
+ * "branch outcomes not specified" nudge — never an invented branch.
+ */
+function DecisionBranches({ decision }: { decision: string }) {
+    const branches = parseDecisionBranches(decision);
+    if (branches.length === 0) {
+        return (
+            <div className="mt-0.5 text-[11px]">
+                <span className="text-neutral-500">
+                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">Decision</span>
+                    {decision}
+                </span>
+                <span className="text-amber-700"> — branch outcomes not specified in the flow. Review recommended.</span>
+            </div>
+        );
+    }
+    return (
+        <div className="mt-1 text-[11px]">
+            <div className="font-medium text-neutral-400 uppercase tracking-wide text-[9px]">Decision branches</div>
+            <ul className="mt-0.5 space-y-0.5">
+                {branches.map((b, i) => (
+                    <li key={i} className="flex items-center gap-1 flex-wrap text-neutral-600">
+                        <span>{b.condition}</span>
+                        <span className="text-neutral-300" aria-hidden>→</span>
+                        <span className="text-neutral-800">{b.outcome}</span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
 // --- Mockups tab ------------------------------------------------------------
 
 const PLATFORM_LABELS: Record<MockupPlatform, string> = {
@@ -557,7 +600,7 @@ const FIDELITY_LABELS: Record<MockupFidelity, string> = {
 
 function MockupsTab({
     item, mockupContext, mockupStatus, onRetryMockup, onAddToMockups,
-    unmatchedMockups, onLinkMockup,
+    unmatchedMockups, onLinkMockup, onSaveScreenEdit,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
@@ -566,14 +609,32 @@ function MockupsTab({
     onAddToMockups?: () => void;
     unmatchedMockups?: Array<{ id: string; name: string }>;
     onLinkMockup?: (mockupScreenId: string) => void;
+    onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
 }) {
     const [linkTarget, setLinkTarget] = useState('');
+
+    // Persist a per-variant status into the screen's edit overlay (null
+    // clears the override back to the tracked/derived status). Merges into
+    // the existing edit so name/notes/reviewStatus and any unknown overlay
+    // fields survive untouched.
+    const setVariantStatus = onSaveScreenEdit
+        ? (variantId: string, status: 'accepted' | 'not_needed' | null) => {
+            const current: ScreenMetadataEdit = { ...(item.edit ?? {}) };
+            const statuses = { ...(current.mockupVariantStatus ?? {}) };
+            if (status) statuses[variantId] = status;
+            else delete statuses[variantId];
+            if (Object.keys(statuses).length > 0) current.mockupVariantStatus = statuses;
+            else delete current.mockupVariantStatus;
+            onSaveScreenEdit(item.id, Object.keys(current).length > 0 ? current : null);
+        }
+        : undefined;
+
     if (mockupContext && item.mockupScreen) {
         const specCoverage = buildMockupSpecCoverage(
             item.baseScreen,
             item.mockupScreen.coreUIElements,
         );
-        const states = item.screen.states ?? [];
+        const variantRows = buildMockupVariantRows(item, mockupContext.settings.platform);
         const metaParts = [
             'Generated product screen preview',
             PLATFORM_LABELS[mockupContext.settings.platform],
@@ -597,31 +658,12 @@ function MockupsTab({
                     />
                 </div>
 
-                {states.length > 0 && (
-                    <div className="bg-white rounded-lg border border-neutral-200 p-4">
-                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 mb-2">
-                            States represented
-                        </h4>
-                        <ul className="space-y-1 text-xs">
-                            <li className="flex items-center justify-between gap-2">
-                                <span className="text-neutral-700">
-                                    Default ({PLATFORM_LABELS[mockupContext.settings.platform]})
-                                </span>
-                                <span className="text-emerald-700 font-medium">In mockup set</span>
-                            </li>
-                            {states.map((s, i) => (
-                                <li key={i} className="flex items-center justify-between gap-2">
-                                    <span className="text-neutral-700">{s.name}</span>
-                                    <span className="text-neutral-400">No dedicated mockup</span>
-                                </li>
-                            ))}
-                        </ul>
-                        <p className="text-[11px] text-neutral-400 mt-2">
-                            Per-state mockup variants aren&rsquo;t tracked yet — documented states share
-                            the default view until you generate or upload variants separately.
-                        </p>
-                    </div>
-                )}
+                <MockupVariantsCard
+                    rows={variantRows}
+                    prdVersionLabel={mockupContext.prdVersionLabel}
+                    mockupVersionNumber={mockupContext.versionNumber}
+                    onSetVariantStatus={setVariantStatus}
+                />
 
                 {specCoverage.length > 0 && (
                     <div className="bg-white rounded-lg border border-neutral-200 p-4">
@@ -729,6 +771,135 @@ function MockupsTab({
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// --- Mockup variants card -----------------------------------------------------
+
+const VARIANT_STATUS_META: Record<MockupVariantRow['status'], { label: string; className: string }> = {
+    generated: { label: 'Generated', className: 'text-emerald-700 bg-emerald-50 ring-emerald-200' },
+    missing: { label: 'Missing', className: 'text-amber-700 bg-amber-50 ring-amber-200' },
+    accepted: { label: 'Accepted', className: 'text-sky-700 bg-sky-50 ring-sky-200' },
+    not_needed: { label: 'Not needed', className: 'text-neutral-500 bg-neutral-100 ring-neutral-200' },
+};
+
+/**
+ * Per-state / per-platform mockup variant tracking. Status comes from
+ * generated mockup METADATA (the spec-to-spec join) plus the user's overlay —
+ * never from inspecting the rendered image, and the copy says so. Per-variant
+ * image generation isn't wired yet, so the only actions offered are the two
+ * that really work: mark a variant accepted, or mark a recommended variant
+ * not needed (both persist to the screen's edit overlay).
+ */
+function MockupVariantsCard({
+    rows, prdVersionLabel, mockupVersionNumber, onSetVariantStatus,
+}: {
+    rows: MockupVariantRow[];
+    prdVersionLabel?: string;
+    mockupVersionNumber?: number;
+    onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
+}) {
+    if (rows.length === 0) return null;
+    const missingRequired = rows.filter(r => r.required && r.status === 'missing').length;
+    const generatedFrom = [
+        prdVersionLabel ? `PRD ${prdVersionLabel}` : null,
+        mockupVersionNumber ? `mockup v${mockupVersionNumber}` : null,
+    ].filter(Boolean).join(' · ');
+    return (
+        <div className="bg-white rounded-lg border border-neutral-200 p-4">
+            <header className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Mockup variants
+                </h4>
+                <span className="text-[9px] uppercase tracking-wide text-indigo-500 bg-indigo-50 ring-1 ring-indigo-100 px-1.5 py-0.5 rounded">
+                    Tracked from generated mockup metadata
+                </span>
+            </header>
+            <ul className="divide-y divide-neutral-100">
+                {rows.map(row => {
+                    const meta = VARIANT_STATUS_META[row.status];
+                    return (
+                        <li key={row.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-medium text-neutral-800">{row.label}</span>
+                                    {row.platform && (
+                                        <span className="text-[10px] text-neutral-500 bg-neutral-100 px-1.5 py-px rounded">
+                                            {PLATFORM_LABELS[row.platform]}
+                                        </span>
+                                    )}
+                                    {row.stateType && row.stateType !== 'default' && (
+                                        <span className="text-[9px] uppercase tracking-wide text-sky-700 bg-sky-50 ring-1 ring-sky-100 px-1.5 py-px rounded">
+                                            {row.stateType}
+                                        </span>
+                                    )}
+                                    {row.required && row.id !== 'default' && (
+                                        <span className="text-[9px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-100 px-1.5 py-px rounded">
+                                            Recommended
+                                        </span>
+                                    )}
+                                </div>
+                                {row.status === 'generated' && generatedFrom && (
+                                    <div className="text-[10px] text-neutral-400 mt-0.5">
+                                        Generated from {generatedFrom}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${meta.className}`}>
+                                    {meta.label}
+                                </span>
+                                {onSetVariantStatus && (
+                                    row.userSet ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSetVariantStatus(row.id, null)}
+                                            className="text-[10px] text-neutral-500 hover:text-neutral-700 underline decoration-dotted"
+                                        >
+                                            Undo
+                                        </button>
+                                    ) : row.status === 'generated' ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSetVariantStatus(row.id, 'accepted')}
+                                            className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                        >
+                                            Mark accepted
+                                        </button>
+                                    ) : row.status === 'missing' ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSetVariantStatus(row.id, 'accepted')}
+                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                                title="Confirm this variant is covered — e.g. you uploaded or verified it outside the generated set"
+                                            >
+                                                Mark accepted
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSetVariantStatus(row.id, 'not_needed')}
+                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                                title="Skip this recommended variant — it stops counting as a readiness gap"
+                                            >
+                                                Not needed
+                                            </button>
+                                        </>
+                                    ) : null
+                                )}
+                            </div>
+                        </li>
+                    );
+                })}
+            </ul>
+            <p className="text-[11px] text-neutral-400 mt-2">
+                {missingRequired > 0
+                    ? `${missingRequired} recommended ${missingRequired === 1 ? 'variant has' : 'variants have'} no mockup yet. `
+                    : ''}
+                Per-variant generation isn&rsquo;t wired yet — regenerate the full mockup from the
+                artifact actions, or upload a variant image and mark it accepted here.
+            </p>
         </div>
     );
 }

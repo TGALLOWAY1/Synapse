@@ -1,19 +1,32 @@
-// Pure, derived readiness / coverage / traceability layer for the Screens
-// experience view. Everything in this module is computed at read time from
-// the joined ScreenExperienceIndex (src/lib/screenExperience.ts) plus the
-// PRD's canonical feature list — nothing here is persisted, calls an LLM, or
-// touches the store. The ONLY persisted input is the optional user-set
-// `reviewStatus` riding the existing per-version `metadata.screenEdits`
-// overlay (see ScreenMetadataEdit).
+// Pure readiness / coverage / traceability layer for the Screens experience
+// view. Everything in this module is computed at read time from the joined
+// ScreenExperienceIndex (src/lib/screenExperience.ts) plus the PRD's
+// canonical feature list — nothing here is persisted, calls an LLM, or
+// touches the store. The ONLY persisted inputs are the optional user-set
+// `reviewStatus` / `mockupVariantStatus` riding the existing per-version
+// `metadata.screenEdits` overlay (see ScreenMetadataEdit).
+//
+// Phase 2 source-grounding: newly generated inventories carry an explicit
+// screen contract (structured states, riskDetails with handling, screen-level
+// acceptanceCriteria, a handoff spec — see ScreenItem in src/types). The
+// resolvers here PREFER those source fields and fall back to the Phase 1
+// derived values for legacy artifacts. Resolution priority everywhere:
+//   1. user-set overlay (reviewStatus / mockupVariantStatus),
+//   2. source-grounded contract fields from the generated artifact,
+//   3. Phase 1 derived values,
+//   4. safe "Not specified" fallbacks.
 //
 // Honesty rule: every derived signal is an *estimate* from the generated
 // spec (linked features, states, navigation, risks, mockup joins). Consumers
-// must label it as such ("estimated", "derived") and must never present a
-// derived status as user-confirmed — ScreenReadiness.source distinguishes
-// the two.
+// must label it as such ("estimated", "derived", "generated — not
+// semantically verified") and must never present a derived status as
+// user-confirmed — ScreenReadiness.source / *.source distinguish these.
 
-import type { Feature, ScreenItem, ScreenState } from '../types';
+import type {
+    Feature, MockupPlatform, ScreenHandoffEvent, ScreenItem, ScreenState, ScreenStateType,
+} from '../types';
 import type { ParsedFlow } from '../components/renderers/userFlows/types';
+import { slugifyScreenName } from './screenInventoryImageStore';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from './screenExperience';
 
 // --- Review status -----------------------------------------------------------
@@ -42,11 +55,17 @@ export const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([
 export type ScreenGapKind =
     | 'missing_purpose'
     | 'missing_traceability'
+    /** A linked feature ref parses to an id that matches no PRD feature. */
+    | 'invalid_traceability'
     | 'missing_navigation'
     | 'missing_states'
     | 'states_without_behavior'
     | 'missing_mockup_p0'
+    /** Contract-recommended state mockup variants that don't exist yet. */
+    | 'missing_state_variants'
     | 'unresolved_risks'
+    /** Flow decision steps touching this screen with no branch outcomes. */
+    | 'decision_missing_branches'
     | 'no_flow_refs'
     /** User marked the screen accepted/ready while derived warnings remain. */
     | 'accepted_with_warnings';
@@ -61,8 +80,11 @@ const REVIEW_TRIGGER_GAPS: ReadonlySet<ScreenGapKind> = new Set([
     'unresolved_risks',
     'missing_states',
     'missing_traceability',
+    'invalid_traceability',
     'missing_mockup_p0',
+    'missing_state_variants',
     'states_without_behavior',
+    'decision_missing_branches',
 ]);
 
 export interface ScreenReadiness {
@@ -82,13 +104,25 @@ interface ReadinessInput {
     flowRefCount: number;
     /** Explicit user-set status from the screenEdits overlay, if any. */
     userStatus?: ScreenReviewStatus;
+    /** Canonical PRD features — enables invalid-ref validation when present. */
+    features?: readonly Feature[];
+    /** Contract-recommended state variants still missing a mockup (from
+     * buildMockupVariantRows) — 0/absent for legacy screens. */
+    missingRequiredVariants?: number;
+    /** Flow decision steps referencing this screen whose decisions carry no
+     * parseable branch outcomes (see parseDecisionBranches). */
+    decisionsWithoutBranches?: number;
 }
 
 const isP0 = (screen: ScreenItem): boolean =>
     screen.priority === 'P0' || screen.priority === 'core';
 
 function stateHasBehavior(state: ScreenState): boolean {
-    return Boolean((state.description && state.description.trim()) || (state.trigger && state.trigger.trim()));
+    return Boolean(
+        (state.description && state.description.trim())
+        || (state.trigger && state.trigger.trim())
+        || (state.systemBehavior && state.systemBehavior.trim()),
+    );
 }
 
 /** Derive the gap list for one screen. Pure spec inspection — conservative,
@@ -105,6 +139,23 @@ export function detectScreenGaps(input: Omit<ReadinessInput, 'userStatus'>): Scr
             kind: 'missing_traceability',
             message: 'No linked PRD features — coverage of this screen is unclear.',
         });
+    } else if (input.features && input.features.length > 0) {
+        // Refs exist AND we have a feature list to validate against: flag id
+        // tokens that resolve to no PRD feature (stale or invented refs).
+        const validIds = new Set(input.features.map(f => normalizeFeatureId(f.id)));
+        const invalid = screen.featureRefs
+            .map(raw => raw.trim().match(FEATURE_REF_ID_PATTERN))
+            .filter((m): m is RegExpMatchArray => Boolean(m))
+            .map(m => m[1])
+            .filter(refId => !validIds.has(normalizeFeatureId(refId)));
+        if (invalid.length > 0) {
+            gaps.push({
+                kind: 'invalid_traceability',
+                message: invalid.length === 1
+                    ? `Linked feature id "${invalid[0]}" doesn't match any PRD feature — the reference may be stale.`
+                    : `${invalid.length} linked feature ids (${invalid.join(', ')}) don't match any PRD feature — the references may be stale.`,
+            });
+        }
     }
     const hasEntry = (screen.entryPoints?.length ?? 0) > 0;
     const hasExit = (screen.exitPaths?.length ?? 0) > 0;
@@ -141,15 +192,48 @@ export function detectScreenGaps(input: Omit<ReadinessInput, 'userStatus'>): Scr
             message: 'P0 screen without a mockup.',
         });
     }
-    const riskCount = screen.risks?.length ?? 0;
-    if (riskCount > 0) {
-        // The generated spec records risks as plain text with no mitigation or
-        // severity fields, so every risk counts as unresolved until reviewed.
+    if (screen.riskDetails && screen.riskDetails.length > 0) {
+        // Source-grounded risks: only those without a proposed handling are
+        // unresolved — a generated risk with concrete handling is documented,
+        // not an open review item.
+        const unhandled = screen.riskDetails.filter(r => !r.proposedHandling?.trim());
+        if (unhandled.length > 0) {
+            gaps.push({
+                kind: 'unresolved_risks',
+                message: unhandled.length === 1
+                    ? '1 risk noted with no proposed handling recorded.'
+                    : `${unhandled.length} risks noted with no proposed handling recorded.`,
+            });
+        }
+    } else {
+        const riskCount = screen.risks?.length ?? 0;
+        if (riskCount > 0) {
+            // Legacy spec: risks are plain text with no mitigation or severity
+            // fields, so every risk counts as unresolved until reviewed.
+            gaps.push({
+                kind: 'unresolved_risks',
+                message: riskCount === 1
+                    ? '1 risk noted with no proposed handling recorded.'
+                    : `${riskCount} risks noted with no proposed handling recorded.`,
+            });
+        }
+    }
+    const missingVariants = input.missingRequiredVariants ?? 0;
+    if (missingVariants > 0) {
         gaps.push({
-            kind: 'unresolved_risks',
-            message: riskCount === 1
-                ? '1 risk noted with no proposed handling recorded.'
-                : `${riskCount} risks noted with no proposed handling recorded.`,
+            kind: 'missing_state_variants',
+            message: missingVariants === 1
+                ? '1 recommended state has no mockup variant.'
+                : `${missingVariants} recommended states have no mockup variants.`,
+        });
+    }
+    const branchlessDecisions = input.decisionsWithoutBranches ?? 0;
+    if (branchlessDecisions > 0) {
+        gaps.push({
+            kind: 'decision_missing_branches',
+            message: branchlessDecisions === 1
+                ? 'A flow decision on this screen has no branch outcomes specified.'
+                : `${branchlessDecisions} flow decisions on this screen have no branch outcomes specified.`,
         });
     }
     if (flowRefCount === 0) {
@@ -208,17 +292,29 @@ export function deriveScreenReadiness(input: ReadinessInput): ScreenReadiness {
 
 /** Readiness for every screen in the index, keyed by canonical screen id.
  * The user-set status (when any) rides the item's edit overlay
- * (ScreenMetadataEdit.reviewStatus). */
+ * (ScreenMetadataEdit.reviewStatus). Passing `features` enables invalid-ref
+ * validation; Phase 2 contract fields (state variants, decision branches)
+ * feed in automatically and are absent for legacy artifacts. */
 export function buildReadinessIndex(
     index: ScreenExperienceIndex,
+    features?: readonly Feature[],
 ): Map<string, ScreenReadiness> {
     const out = new Map<string, ScreenReadiness>();
     for (const item of index.items) {
+        const variants = buildMockupVariantRows(item);
         out.set(item.id, deriveScreenReadiness({
             screen: item.screen,
             hasMockup: Boolean(item.mockupScreen),
             flowRefCount: item.relatedFlows.length,
             userStatus: item.edit?.reviewStatus,
+            features,
+            // State rows only — the default view is the existing
+            // missing_mockup_p0 gap's job, and counting it here would
+            // downgrade every legacy screen without a mockup (even P2/P3)
+            // to needs_review.
+            missingRequiredVariants: variants.filter(v =>
+                v.id !== DEFAULT_VARIANT_ID && v.required && v.status === 'missing').length,
+            decisionsWithoutBranches: countDecisionsWithoutBranches(item),
         }));
     }
     return out;
@@ -244,15 +340,24 @@ export interface ScreenFeatureLink {
     feature?: Feature;
 }
 
+/**
+ * Traceability confidence:
+ *   'explicit'  — every ref parses to an id resolving to a real PRD feature
+ *                 (the generation-time mapping checks out — still a model
+ *                 claim, not a semantic proof; label it as such);
+ *   'estimated' — refs exist but at least one doesn't resolve cleanly, so
+ *                 coverage is estimated from what does link;
+ *   'missing'   — no refs at all.
+ */
+export type TraceabilityConfidence = 'explicit' | 'estimated' | 'missing';
+
 export interface ScreenTraceability {
     features: ScreenFeatureLink[];
     /** Titles of the user flows referencing this screen (unique, in order). */
     flows: string[];
-    /**
-     * 'estimated' — linked feature refs exist (traceability derived from
-     * them, not from a full PRD validation); 'missing' — no refs at all.
-     */
-    completeness: 'estimated' | 'missing';
+    confidence: TraceabilityConfidence;
+    /** Parsed ref-id tokens that resolve to no PRD feature (stale refs). */
+    invalidRefIds: string[];
 }
 
 export function buildScreenTraceability(
@@ -276,10 +381,19 @@ export function buildScreenTraceability(
         seen.add(ref.flowIndex);
         flowTitles.push(ref.flow.title);
     }
+    const invalidRefIds = links
+        .filter(l => l.refId && !l.feature && byNormId.size > 0)
+        .map(l => l.refId as string);
+    const confidence: TraceabilityConfidence = links.length === 0
+        ? 'missing'
+        : byNormId.size > 0 && links.every(l => l.feature)
+            ? 'explicit'
+            : 'estimated';
     return {
         features: links,
         flows: flowTitles,
-        completeness: links.length > 0 ? 'estimated' : 'missing',
+        confidence,
+        invalidRefIds,
     };
 }
 
@@ -328,6 +442,37 @@ export function deriveAcceptanceCriteria(screen: ScreenItem): string[] {
     return deduped.slice(0, MAX_CRITERIA);
 }
 
+export interface ResolvedAcceptanceCriteria {
+    criteria: string[];
+    /** 'generated' — from the artifact's own acceptanceCriteria contract
+     * fields (screen-level + per-state); 'derived' — Phase 1 restatement of
+     * the spec. UI labels must distinguish the two. */
+    source: 'generated' | 'derived';
+}
+
+const MAX_GENERATED_CRITERIA = 14;
+
+/** Source-grounded acceptance criteria when the generated contract carries
+ * them (screen-level plus per-state), Phase 1 derived criteria otherwise. */
+export function resolveAcceptanceCriteria(screen: ScreenItem): ResolvedAcceptanceCriteria {
+    const generated: string[] = [...(screen.acceptanceCriteria ?? [])];
+    for (const state of screen.states ?? []) {
+        for (const c of state.acceptanceCriteria ?? []) generated.push(c);
+    }
+    const cleaned = generated.map(c => c.trim()).filter(Boolean);
+    if (cleaned.length > 0) {
+        const seen = new Set<string>();
+        const deduped = cleaned.filter(c => {
+            const key = c.toLowerCase();
+            if (seen.has(key)) return false;
+            seen.add(key);
+            return true;
+        });
+        return { criteria: deduped.slice(0, MAX_GENERATED_CRITERIA), source: 'generated' };
+    }
+    return { criteria: deriveAcceptanceCriteria(screen), source: 'derived' };
+}
+
 // --- Developer handoff (derived) -----------------------------------------------
 
 export interface ScreenHandoff {
@@ -343,7 +488,8 @@ export interface ScreenHandoff {
 
 /** Lightweight developer-handoff view of the spec. Purely a re-projection of
  * existing fields — no route, prop, or accessibility data exists in the
- * generated spec, so none is fabricated here; the UI shows "Not specified". */
+ * legacy generated spec, so none is fabricated here; the UI shows
+ * "Not specified". (Phase 2 contract artifacts use resolveScreenHandoff.) */
 export function buildScreenHandoff(screen: ScreenItem): ScreenHandoff {
     const components = (screen.coreUIElements && screen.coreUIElements.length > 0
         ? screen.coreUIElements
@@ -358,13 +504,223 @@ export function buildScreenHandoff(screen: ScreenItem): ScreenHandoff {
     };
 }
 
+export interface ResolvedScreenHandoff {
+    /** 'generated' — the artifact carries a handoff contract; 'derived' —
+     * Phase 1 re-projection of the spec. Individual fields may still be
+     * absent either way — the UI says "Not specified". */
+    source: 'generated' | 'derived';
+    route?: string;
+    routeParams: string[];
+    /** primaryComponents from the contract, else the spec's UI regions. */
+    components: string[];
+    /** State names the implementation must cover. */
+    states: string[];
+    stateVariables: string[];
+    /** Generated events (name/trigger/effect) — empty for legacy specs. */
+    events: ScreenHandoffEvent[];
+    /** Exit-path interactions (always derivable, shown when no events). */
+    exitEvents: Array<{ label: string; target: string; condition?: string }>;
+    outputs: string[];
+    dataDependencies: string[];
+    apiDependencies: string[];
+    accessibilityNotes: string[];
+    responsiveNotes: string[];
+}
+
+/** Developer handoff preferring the generated Phase 2 contract, falling back
+ * per-field to the Phase 1 derived projection. */
+export function resolveScreenHandoff(screen: ScreenItem): ResolvedScreenHandoff {
+    const derived = buildScreenHandoff(screen);
+    const h = screen.handoff;
+    return {
+        source: h ? 'generated' : 'derived',
+        route: h?.route,
+        routeParams: h?.routeParams ?? [],
+        components: h?.primaryComponents?.length ? h.primaryComponents : derived.components,
+        states: derived.states,
+        stateVariables: h?.stateVariables ?? [],
+        events: h?.events ?? [],
+        exitEvents: derived.events,
+        outputs: derived.outputs,
+        dataDependencies: h?.dataDependencies ?? [],
+        apiDependencies: h?.apiDependencies ?? [],
+        accessibilityNotes: h?.accessibilityNotes ?? [],
+        responsiveNotes: h?.responsiveNotes ?? [],
+    };
+}
+
+// --- Mockup variant tracking (metadata-based, never visual) ---------------------
+
+export type MockupVariantRowStatus = 'generated' | 'missing' | 'accepted' | 'not_needed';
+
+/**
+ * One mockup-variant row for a screen: the default view plus one row per
+ * documented state. Status is tracked from generated mockup METADATA and the
+ * user's overlay — never from inspecting the image. UI copy must say so
+ * ("tracked from generated mockup metadata"), and must never claim Synapse
+ * looked at the pixels.
+ */
+export interface MockupVariantRow {
+    /** Deterministic id — the overlay key (ScreenMetadataEdit.mockupVariantStatus). */
+    id: string;
+    label: string;
+    /** Platform of the mockup set, when known (mockup settings). */
+    platform?: MockupPlatform;
+    stateName: string;
+    stateType?: ScreenStateType;
+    /** Recommended by the generated contract (state.needsMockup) or the
+     * default view of the screen. Missing required rows count as a gap. */
+    required: boolean;
+    status: MockupVariantRowStatus;
+    /** True when status comes from the user's overlay (accepted/not_needed). */
+    userSet: boolean;
+    /** 'mockup_metadata' — joined to an actual generated mockup screen;
+     * 'contract' — recommended by the generated state contract;
+     * 'derived' — listed because the state exists in the spec. */
+    source: 'mockup_metadata' | 'contract' | 'derived';
+}
+
+export const DEFAULT_VARIANT_ID = 'default';
+
+/**
+ * Variant rows for one screen. The default row reflects whether the screen is
+ * in the mockup set (spec-to-spec join — see ScreenExperienceItem.mockupScreen).
+ * State rows exist for every documented state; per-state mockup generation
+ * isn't wired yet, so a state row is 'missing' unless the user marked it
+ * accepted (e.g. covered by an upload) or not needed.
+ */
+export function buildMockupVariantRows(
+    item: Pick<ScreenExperienceItem, 'screen' | 'mockupScreen' | 'edit'>,
+    platform?: MockupPlatform,
+): MockupVariantRow[] {
+    const overlay = item.edit?.mockupVariantStatus ?? {};
+    const rows: MockupVariantRow[] = [];
+
+    const defaultOverride = overlay[DEFAULT_VARIANT_ID];
+    rows.push({
+        id: DEFAULT_VARIANT_ID,
+        label: 'Default view',
+        platform,
+        stateName: 'Default',
+        stateType: 'default',
+        required: true,
+        status: defaultOverride ?? (item.mockupScreen ? 'generated' : 'missing'),
+        userSet: Boolean(defaultOverride),
+        source: item.mockupScreen ? 'mockup_metadata' : 'derived',
+    });
+
+    const seen = new Set<string>([DEFAULT_VARIANT_ID]);
+    for (const state of item.screen.states ?? []) {
+        if (!state.name?.trim()) continue;
+        // A generated contract may model the default view as an explicit
+        // state — fold it into the default row rather than duplicating it.
+        if (state.type === 'default') continue;
+        const base = `state:${slugifyScreenName(state.name)}`;
+        let id = base;
+        let n = 2;
+        while (seen.has(id)) {
+            id = `${base}-${n}`;
+            n += 1;
+        }
+        seen.add(id);
+        const override = overlay[id];
+        const hasContract = state.needsMockup !== undefined || state.required !== undefined
+            || state.type !== undefined;
+        rows.push({
+            id,
+            label: state.name,
+            platform,
+            stateName: state.name,
+            stateType: state.type,
+            required: state.needsMockup === true,
+            status: override ?? 'missing',
+            userSet: Boolean(override),
+            source: hasContract ? 'contract' : 'derived',
+        });
+    }
+    return rows;
+}
+
+// --- Flow decision branches ------------------------------------------------------
+
+export interface DecisionBranch {
+    condition: string;
+    outcome: string;
+}
+
+const ARROW_SPLIT = /→|->/;
+
+/**
+ * Parse a flow decision line into structured branches. Handles the two shapes
+ * the user_flows format produces:
+ *   - arrow lists:  "Start new → Submission form; Resume → Dashboard"
+ *   - if/otherwise: "If no role selected, go to step 4; otherwise step 5"
+ * Returns [] when no branch outcomes are parseable — callers surface that as
+ * "branch outcomes not specified", never invent one.
+ */
+export function parseDecisionBranches(decision: string): DecisionBranch[] {
+    const text = decision.trim();
+    if (!text) return [];
+    const branches: DecisionBranch[] = [];
+
+    const segments = text.split(/;|\n/).map(s => s.trim()).filter(Boolean);
+    for (const segment of segments) {
+        if (ARROW_SPLIT.test(segment)) {
+            const [condition, ...rest] = segment.split(ARROW_SPLIT);
+            const outcome = rest.join(' → ').trim();
+            if (condition.trim() && outcome) {
+                branches.push({ condition: cleanBranchText(condition), outcome: cleanBranchText(outcome) });
+            }
+            continue;
+        }
+        const ifMatch = segment.match(/^if\s+(.+?),\s*(?:then\s+)?(.+)$/i);
+        if (ifMatch) {
+            branches.push({ condition: cleanBranchText(ifMatch[1]), outcome: cleanBranchText(ifMatch[2]) });
+            continue;
+        }
+        const otherwiseMatch = segment.match(/^(?:otherwise|else)[,\s]+(.+)$/i);
+        if (otherwiseMatch && branches.length > 0) {
+            branches.push({ condition: 'Otherwise', outcome: cleanBranchText(otherwiseMatch[1]) });
+        }
+    }
+    return branches;
+}
+
+const cleanBranchText = (text: string): string =>
+    text.trim().replace(/^\*+|\*+$/g, '').replace(/[.,;]+$/, '').trim();
+
+/** Flow decision steps referencing this screen whose decisions have NO
+ * parseable branch outcome — the "Decision: user chooses path" smell. */
+export function countDecisionsWithoutBranches(
+    item: Pick<ScreenExperienceItem, 'relatedFlows'>,
+): number {
+    let count = 0;
+    for (const ref of item.relatedFlows) {
+        for (const decision of ref.step.decisions) {
+            if (parseDecisionBranches(decision).length === 0) count += 1;
+        }
+    }
+    return count;
+}
+
 // --- Artifact-level coverage summary --------------------------------------------
 
 export interface ScreenCoverageSummary {
     totalScreens: number;
     /** PRD features covered by ≥1 screen's featureRefs. Null when the PRD has
-     * no feature list to compare against. Estimated — say so in the UI. */
-    prdFeatures: { covered: number; total: number; uncovered: Array<{ id: string; name: string }> } | null;
+     * no feature list to compare against. Estimated — say so in the UI.
+     * `mustWithoutPrimaryScreen`: must-have features whose only coverage (if
+     * any) comes from P2/P3 screens — a priority-mismatch warning. */
+    prdFeatures: {
+        covered: number;
+        total: number;
+        uncovered: Array<{ id: string; name: string }>;
+        mustWithoutPrimaryScreen: Array<{ id: string; name: string }>;
+    } | null;
+    /** Contract-recommended state mockup variants (state.needsMockup) across
+     * all screens. Null when no screen carries the Phase 2 contract fields.
+     * Tracked from mockup metadata + user overlay — never visual detection. */
+    stateVariants: { covered: number; required: number } | null;
     /** User flows with ≥1 step matched to a screen. Null when no flows
      * artifact exists (distinct from "flows exist but none matched"). */
     flows: { represented: number; total: number } | null;
@@ -388,8 +744,11 @@ const GAP_KIND_SHORT: Partial<Record<ScreenGapKind, string>> = {
     unresolved_risks: 'unresolved risks',
     missing_states: 'missing states',
     missing_traceability: 'missing PRD links',
+    invalid_traceability: 'stale PRD links',
     missing_mockup_p0: 'P0 screens without mockups',
+    missing_state_variants: 'states without mockup variants',
     states_without_behavior: 'states without behavior',
+    decision_missing_branches: 'decisions without branch outcomes',
 };
 
 function buildMessage(
@@ -447,19 +806,34 @@ export function buildScreenCoverageSummary(
     let prdFeatures: ScreenCoverageSummary['prdFeatures'] = null;
     if (features && features.length > 0) {
         const referenced = new Set<string>();
+        const referencedByPrimary = new Set<string>(); // by a P0/P1 screen
         for (const item of items) {
+            const primary = isP0(item.screen) || item.screen.priority === 'P1'
+                || item.screen.priority === 'secondary';
             for (const raw of item.screen.featureRefs ?? []) {
                 const match = raw.trim().match(FEATURE_REF_ID_PATTERN);
-                if (match) referenced.add(normalizeFeatureId(match[1]));
+                if (!match) continue;
+                const norm = normalizeFeatureId(match[1]);
+                referenced.add(norm);
+                if (primary) referencedByPrimary.add(norm);
             }
         }
         const uncovered = features
             .filter(f => !referenced.has(normalizeFeatureId(f.id)))
             .map(f => ({ id: f.id, name: f.name }));
+        // Priority mismatch: a must-have feature whose only screen coverage
+        // comes from P2/P3 screens (features with NO coverage at all are
+        // already in `uncovered` — don't double-report them here).
+        const mustWithoutPrimaryScreen = features
+            .filter(f => f.priority === 'must'
+                && referenced.has(normalizeFeatureId(f.id))
+                && !referencedByPrimary.has(normalizeFeatureId(f.id)))
+            .map(f => ({ id: f.id, name: f.name }));
         prdFeatures = {
             covered: features.length - uncovered.length,
             total: features.length,
             uncovered,
+            mustWithoutPrimaryScreen,
         };
     }
 
@@ -478,12 +852,22 @@ export function buildScreenCoverageSummary(
     let totalStates = 0;
     let statesWithBehavior = 0;
     let openRisks = 0;
+    let requiredVariants = 0;
+    let coveredVariants = 0;
     for (const item of items) {
         const states = item.screen.states ?? [];
         if (states.length > 0) screensWithStates += 1;
         totalStates += states.length;
         statesWithBehavior += states.filter(stateHasBehavior).length;
-        openRisks += item.screen.risks?.length ?? 0;
+        // Source-grounded risks with a proposed handling aren't open items.
+        openRisks += item.screen.riskDetails
+            ? item.screen.riskDetails.filter(r => !r.proposedHandling?.trim()).length
+            : item.screen.risks?.length ?? 0;
+        for (const row of buildMockupVariantRows(item)) {
+            if (row.id === DEFAULT_VARIANT_ID || !row.required) continue;
+            requiredVariants += 1;
+            if (row.status !== 'missing') coveredVariants += 1;
+        }
     }
 
     let ready = 0;
@@ -513,6 +897,9 @@ export function buildScreenCoverageSummary(
     return {
         totalScreens: total,
         prdFeatures,
+        stateVariants: requiredVariants > 0
+            ? { covered: coveredVariants, required: requiredVariants }
+            : null,
         flows: flowCoverage,
         p0: { total: p0Items.length, withMockup: p0Items.filter(i => i.mockupScreen).length },
         states: { screensWithStates, totalStates, statesWithBehavior },
