@@ -127,7 +127,7 @@ export function ScreenCoveragePanel({ summary, variantCoverage, onGenerateMissin
                                 <MetricRow
                                     label="Mobile coverage (P0)"
                                     value={`${variantCoverage.p0WithMobile} / ${variantCoverage.p0Total} P0 screens`}
-                                    hint="P0 screens with a generated or accepted Mobile default variant"
+                                    hint="P0 screens whose Mobile default variant is generated, accepted, or marked not needed"
                                     tone={variantCoverage.p0WithMobile < variantCoverage.p0Total ? 'warn' : 'good'}
                                 />
                             )}

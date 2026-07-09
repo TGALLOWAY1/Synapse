@@ -204,6 +204,38 @@ describe('summarizeScreenVariants', () => {
         expect(summary.hasMockup).toBe(false);
         expect(summary.label).toBe('No mockup yet');
     });
+
+    it('excludes not_needed variants from the recommended total (resolved gap)', () => {
+        const index = buildScreenIndex(makeInventory([p0Screen]), [], null, {
+            'scr-home': {
+                mockupVariantStatus: {
+                    'mobile:default': 'not_needed',
+                    'state:empty-history': 'not_needed',
+                    'state:loading': 'not_needed',
+                },
+            },
+        });
+        const summary = summarizeScreenVariants(buildScreenMockupVariants(index.items[0]));
+        // Only the desktop default remains recommended; not-needed rows drop out
+        // of both the denominator and the missing count.
+        expect(summary.recommended).toBe(1);
+        expect(summary.missing).toBe(1); // desktop default has no mockup
+        expect(summary.mobileMissing).toBe(false);
+    });
+
+    it('keeps hasMockup/coverageUnknown true after the generated default is accepted', () => {
+        const index = buildScreenIndex(
+            makeInventory([{ id: 'scr-x', name: 'Screen X', priority: 'P0', purpose: 'p' }]),
+            [],
+            makeMockupPayload([{ id: 'm1', name: 'Screen X', sourceScreenId: 'scr-x' }]),
+            { 'scr-x': { mockupVariantStatus: { 'default': 'accepted' } } },
+        );
+        const summary = summarizeScreenVariants(buildScreenMockupVariants(index.items[0]));
+        // Marking the default accepted flips its status off 'generated', but the
+        // image still exists — presence must survive.
+        expect(summary.hasMockup).toBe(true);
+        expect(summary.coverageUnknown).toBe(true);
+    });
 });
 
 // --- buildMockupVariantCoverageSummary ----------------------------------------
@@ -226,5 +258,24 @@ describe('buildMockupVariantCoverageSummary', () => {
     it('returns null for an empty index', () => {
         const index = buildScreenIndex(null, [], null);
         expect(buildMockupVariantCoverageSummary(index)).toBeNull();
+    });
+
+    it('drops not_needed variants from the recommended total and treats not_needed mobile as handled', () => {
+        const index = buildScreenIndex(makeInventory([p0Screen]), [], null, {
+            'scr-home': {
+                mockupVariantStatus: {
+                    'mobile:default': 'not_needed',
+                    'state:empty-history': 'not_needed',
+                    'state:loading': 'not_needed',
+                },
+            },
+        });
+        const rollup = buildMockupVariantCoverageSummary(index)!;
+        // Only desktop default counts toward the denominator now.
+        expect(rollup.recommendedTotal).toBe(1);
+        expect(rollup.recommendedGenerated).toBe(0);
+        // A deliberately-skipped mobile default is "handled", not a gap.
+        expect(rollup.p0WithMobile).toBe(1);
+        expect(rollup.p0Total).toBe(1);
     });
 });

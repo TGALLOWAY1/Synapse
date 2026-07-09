@@ -330,18 +330,27 @@ export interface ScreenMockupVariantSummary {
 const isGeneratedOrAccepted = (s: MockupVariantStatus): boolean =>
     s === 'generated' || s === 'accepted';
 
+/** True when the variant holds (or is derived from) a real generated mockup
+ * image — independent of the mutable status. A user marking the generated
+ * default "accepted" flips status off 'generated' but the image still exists,
+ * so presence must key off the mockup join (source), not the status. */
+const hasGeneratedImage = (v: DerivedMockupVariant): boolean =>
+    v.source === 'legacy' || v.source === 'variant';
+
 export function summarizeScreenVariants(variants: readonly DerivedMockupVariant[]): ScreenMockupVariantSummary {
-    const recommendedRows = variants.filter(v => v.required);
+    // A "not_needed" recommended variant is deliberately skipped — it is not a
+    // gap, so it must drop out of BOTH the denominator and the missing count
+    // (consistent with the readiness layer, where not_needed resolves the gap);
+    // otherwise the coverage line would warn "1 / 2 recommended" forever.
+    const recommendedRows = variants.filter(v => v.required && v.status !== 'not_needed');
     const recommended = recommendedRows.length;
     const generated = recommendedRows.filter(v => isGeneratedOrAccepted(v.status)).length;
-    // A "not_needed" recommended variant is deliberately skipped — it is not a
-    // gap, so exclude it from the missing count.
     const missing = recommendedRows.filter(v => v.status === 'missing').length;
     const mobileMissing = recommendedRows.some(
         v => v.viewport === 'mobile' && v.stateType === 'default' && v.status === 'missing',
     );
-    const hasMockup = variants.some(v => v.status === 'generated');
-    const coverageUnknown = variants.some(v => v.status === 'generated' && v.coverageStatus === 'unknown');
+    const hasMockup = variants.some(hasGeneratedImage);
+    const coverageUnknown = variants.some(v => hasGeneratedImage(v) && v.coverageStatus === 'unknown');
 
     const missingRows = recommendedRows.filter(v => v.status === 'missing');
     const missingDefaults = missingRows.filter(v => v.stateType === 'default');
@@ -405,15 +414,19 @@ export function buildMockupVariantCoverageSummary(
         const isP0 = normalizeScreenPriority(item.screen.priority) === 'P0';
         if (isP0) p0Total += 1;
         for (const v of variants) {
-            if (v.required) {
+            // A not_needed variant is deliberately skipped — drop it from the
+            // denominator so a resolved gap never keeps the panel warning.
+            if (v.required && v.status !== 'not_needed') {
                 recommendedTotal += 1;
                 if (isGeneratedOrAccepted(v.status)) recommendedGenerated += 1;
             }
+            // "Handled" = generated, accepted, or explicitly not needed, so a
+            // deliberately-skipped mobile default doesn't read as a gap.
             if (isP0 && v.viewport === 'mobile' && v.stateType === 'default'
-                && isGeneratedOrAccepted(v.status)) {
+                && (isGeneratedOrAccepted(v.status) || v.status === 'not_needed')) {
                 p0WithMobile += 1;
             }
-            if (v.status === 'generated' && v.coverageStatus === 'unknown') {
+            if (hasGeneratedImage(v) && v.coverageStatus === 'unknown') {
                 legacyUnknownMockups += 1;
             }
         }
