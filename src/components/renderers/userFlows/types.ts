@@ -71,6 +71,9 @@ export type FlowJourneyNode = {
     stepIndex: number;
     label: string;
     kind: FlowJourneyNodeKind;
+    /** The step's user action ("Fill in project details"), shown as the
+     * sub-step label when steps are grouped under a shared screen header. */
+    action?: string;
 };
 
 export type ParsedFlow = {

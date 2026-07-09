@@ -58,7 +58,66 @@ export function buildJourneyNodes(steps: ParsedStep[]): FlowJourneyNode[] {
         stepIndex: step.index,
         label: step.title?.trim() || step.userAction?.trim() || step.rawText.trim(),
         kind: inferNodeKind(step),
+        action: step.userAction?.trim() || undefined,
     }));
+}
+
+const BACKTICKS = /^`+|`+$/g;
+
+/** A run of consecutive journey steps that all happen on the same screen. */
+export interface FlowJourneyGroup {
+    /** Key shared by every step in the group (a screen slug), or null for a
+     * standalone step with no usable screen title. */
+    screenSlug: string | null;
+    /** The screen name, shown once as the group header. */
+    screenLabel: string;
+    /** The step nodes belonging to this screen, in flow order. */
+    nodes: FlowJourneyNode[];
+    /** 0-based indices of the first/last step — drives the "Steps N–M" range. */
+    firstStepIndex: number;
+    lastStepIndex: number;
+}
+
+/** Default screen key: the step's title, backtick-stripped and lowercased.
+ * Callers pass `stepScreenSlug` so grouping aligns with screen navigation. */
+function defaultScreenKey(step: ParsedStep): string | null {
+    const title = step.title ? step.title.replace(BACKTICKS, '').trim().toLowerCase() : '';
+    return title || null;
+}
+
+/**
+ * Collapse the flat step list into per-screen groups: consecutive steps that
+ * resolve to the same screen key become one group (rendered as a card with the
+ * screen name in the header and the steps as sub-rows), so a screen that owns
+ * several sequential steps is no longer repeated node-after-node. Steps with no
+ * screen key (null) never merge and stand alone. Order and step indices are
+ * preserved, so the grouping stays a pure presentation layer over the same
+ * parsed steps.
+ */
+export function buildJourneyGroups(
+    steps: ParsedStep[],
+    screenKeyFor: (step: ParsedStep) => string | null = defaultScreenKey,
+): FlowJourneyGroup[] {
+    const nodes = buildJourneyNodes(steps);
+    const groups: FlowJourneyGroup[] = [];
+    nodes.forEach((node, i) => {
+        const step = steps[i];
+        const key = screenKeyFor(step);
+        const prev = groups[groups.length - 1];
+        if (prev && key !== null && prev.screenSlug === key) {
+            prev.nodes.push(node);
+            prev.lastStepIndex = step.index;
+        } else {
+            groups.push({
+                screenSlug: key,
+                screenLabel: (step.title?.trim() || node.label).replace(BACKTICKS, '').trim(),
+                nodes: [node],
+                firstStepIndex: step.index,
+                lastStepIndex: step.index,
+            });
+        }
+    });
+    return groups;
 }
 
 export const NODE_KIND_LABEL: Record<FlowJourneyNodeKind, string> = {
