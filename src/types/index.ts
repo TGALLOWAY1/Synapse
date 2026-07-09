@@ -800,6 +800,61 @@ export interface ScreenItem {
     navigationTo?: string[];
 }
 
+// --- Screen review workflow (Phase 4A) ---------------------------------------
+// Lightweight, per-screen review metadata persisted on the screen_inventory
+// ArtifactVersion's `metadata.screenEdits[id].review` overlay (see
+// ScreenMetadataEdit). The user's review STATUS stays in the existing
+// `reviewStatus` overlay field (draft/needs_review/accepted/implementation_ready);
+// this object carries the supporting record: the review checklist, a note, an
+// override reason (when a screen is accepted/promoted over open warnings), the
+// source signature captured at sign-off (for re-review detection), and
+// transition timestamps. Every field is optional & back-compat — legacy
+// overlays have none of it and default cleanly.
+
+/** Review checklist the user ticks off in the Screen Detail view. Optional
+ * support — checking items never gates a status change. */
+export interface ScreenReviewChecklist {
+    purposeMatchesPrd?: boolean;
+    entryExitPathsReviewed?: boolean;
+    statesReviewed?: boolean;
+    risksReviewed?: boolean;
+    mockupsReviewed?: boolean;
+    mobileReviewed?: boolean;
+    acceptanceCriteriaReviewed?: boolean;
+    developerHandoffReviewed?: boolean;
+}
+
+/** A deterministic snapshot of the screen-spec inputs at review sign-off,
+ * captured when a screen is accepted / marked implementation-ready. Compared
+ * against the current spec later to surface "this screen changed after it was
+ * accepted — re-review recommended" (see src/lib/screenReviewWorkflow.ts). */
+export interface ScreenReviewSignature {
+    /** Hash of the screen-contract fields the reviewer signed off on. */
+    screenContractHash: string;
+    /** PRD/spine version id at sign-off (provenance). */
+    prdVersionId?: string;
+    /** screen_inventory artifact version id at sign-off. */
+    screenVersionId?: string;
+    /** design_system artifact version id at sign-off. */
+    designSystemVersionId?: string;
+}
+
+/** Supporting record for a screen's review, riding the screenEdits overlay
+ * alongside the status in `reviewStatus`. */
+export interface ScreenReviewMeta {
+    checklist?: ScreenReviewChecklist;
+    /** Optional "what needs to change?" note (Request changes) or sign-off note. */
+    notes?: string;
+    /** Reason recorded when a screen is accepted / promoted over open warnings. */
+    overrideReason?: string;
+    /** Signature captured at accept / implementation-ready (re-review baseline). */
+    signature?: ScreenReviewSignature;
+    updatedAt?: string;
+    acceptedAt?: string;
+    requestedChangesAt?: string;
+    implementationReadyAt?: string;
+}
+
 export interface ScreenInventorySection {
     title: string;
     description?: string;

@@ -37,6 +37,7 @@ import {
     type ScreenMetadataEdit,
 } from '../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
+import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../lib/screenReviewWorkflow';
 import { buildMockupVariantCoverageSummary, type GeneratedVariantMap } from '../lib/mockupVariants';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
@@ -449,6 +450,24 @@ export function ArtifactWorkspace({
             generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
         }),
         [screenIndex, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
+    );
+
+    // Phase 4A: per-screen review models (user status vs. system readiness,
+    // issues, checklist, freshness) + the artifact-level readiness gate for the
+    // coverage panel. Pure & read-time — see src/lib/screenReviewWorkflow.ts.
+    const screenReviewModels = useMemo(
+        () => buildScreenReviewIndex(screenIndex, {
+            features: structuredPRD.features,
+            platform: mockupPlatform,
+            mobileRelevant,
+            trustContext,
+            generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
+        }),
+        [screenIndex, structuredPRD.features, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
+    );
+    const artifactReview = useMemo(
+        () => summarizeArtifactReviewReadiness(screenIndex, screenReviewModels),
+        [screenIndex, screenReviewModels],
     );
 
     // Validation issues minus the user's persisted dismissals.
@@ -998,6 +1017,8 @@ export function ArtifactWorkspace({
                     <ScreenListView
                         index={screenIndex}
                         readiness={screenReadiness}
+                        reviewModels={screenReviewModels}
+                        artifactReview={artifactReview}
                         coverage={screenCoverage}
                         variantCoverage={variantCoverage}
                         mockupPlatform={mockupPlatform}

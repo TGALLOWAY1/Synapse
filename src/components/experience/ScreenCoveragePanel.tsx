@@ -8,9 +8,10 @@
 
 import { useState } from 'react';
 import {
-    AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Gauge, Image as ImageIcon,
+    AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Gauge, Image as ImageIcon,
 } from 'lucide-react';
 import type { ScreenCoverageSummary } from '../../lib/screenReadiness';
+import type { ScreenArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
 import type { MockupVariantCoverageSummary } from '../../lib/mockupVariants';
 import type { VariantFreshnessRollup } from '../../lib/mockupVariantTrust';
 
@@ -28,6 +29,9 @@ interface Props {
     /** Artifact-level mockup-variant rollup (Phase 3A). Absent/null → the
      * variant rows are hidden (e.g. no screens). */
     variantCoverage?: MockupVariantCoverageSummary | null;
+    /** Artifact-level review readiness gate (Phase 4A). Absent → the review
+     * readiness section is hidden (legacy callers). */
+    artifactReview?: ScreenArtifactReviewReadiness;
     /** Opens the confirmed "Generate remaining mockups" flow (absent → no
      * mockup artifact yet; the action row is hidden). */
     onGenerateMissingMockups?: () => void;
@@ -54,7 +58,7 @@ function MetricRow({
     );
 }
 
-export function ScreenCoveragePanel({ summary, variantCoverage, onGenerateMissingMockups }: Props) {
+export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, onGenerateMissingMockups }: Props) {
     const [showUncovered, setShowUncovered] = useState(false);
     const {
         totalScreens, prdFeatures, stateVariants, flows, p0, states, mockups, openRisks,
@@ -234,6 +238,59 @@ export function ScreenCoveragePanel({ summary, variantCoverage, onGenerateMissin
                         <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-emerald-700">
                             <CheckCircle2 size={12} /> Derived checks pass — statuses are estimates, so give screens a final review.
                         </p>
+                    )}
+
+                    {artifactReview && artifactReview.totalScreens > 0 && (
+                        <ReviewReadinessSection review={artifactReview} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/** Phase 4A: the review & approval rollup + implementation-readiness gate. A
+ * readiness signal, never a hard lock — the UI stays fully usable either way. */
+function ReviewReadinessSection({ review }: { review: ScreenArtifactReviewReadiness }) {
+    return (
+        <div className="mt-4 pt-4 border-t border-neutral-100">
+            <div className="flex items-center gap-1.5 mb-2">
+                <ClipboardCheck size={13} className="text-neutral-400" aria-hidden />
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Review readiness</h4>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">
+                <span>{review.totalScreens} {review.totalScreens === 1 ? 'screen' : 'screens'} total</span>
+                <span className="text-sky-700">{review.accepted} accepted</span>
+                <span className="text-emerald-700">{review.implementationReady} ready to build</span>
+                <span className="text-amber-700">{review.needsReview + review.draft} need review</span>
+                {review.blockers > 0 && (
+                    <span className="text-red-700">{review.blockers} {review.blockers === 1 ? 'blocker' : 'blockers'}</span>
+                )}
+                {review.reviewItems > 0 && (
+                    <span className="text-amber-700">{review.reviewItems} review {review.reviewItems === 1 ? 'item' : 'items'}</span>
+                )}
+            </div>
+
+            <div className={`mt-3 rounded-lg border p-3 flex items-start gap-2 ${
+                review.ready ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
+            }`}>
+                {review.ready
+                    ? <CheckCircle2 size={15} className="text-emerald-600 mt-0.5 shrink-0" aria-hidden />
+                    : <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" aria-hidden />}
+                <div className="min-w-0">
+                    <p className={`text-xs font-medium ${review.ready ? 'text-emerald-800' : 'text-amber-800'}`}>
+                        {review.ready ? 'Ready for implementation planning' : 'Not ready for implementation planning yet'}
+                    </p>
+                    <p className="text-[11px] text-neutral-600 mt-0.5">{review.message}</p>
+                    {!review.ready && review.reasons.length > 0 && (
+                        <ul className="mt-1.5 space-y-0.5 text-[11px] text-amber-700">
+                            {review.reasons.map((r, i) => (
+                                <li key={i} className="flex gap-1.5">
+                                    <span className="text-amber-400 select-none">·</span>
+                                    <span>{r}</span>
+                                </li>
+                            ))}
+                        </ul>
                     )}
                 </div>
             </div>

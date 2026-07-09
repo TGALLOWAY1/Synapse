@@ -21,6 +21,9 @@ import type {
     ScreenInventoryContent,
     ScreenItem,
     ScreenPriority,
+    ScreenReviewChecklist,
+    ScreenReviewMeta,
+    ScreenReviewSignature,
 } from '../types';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import type {
@@ -58,6 +61,13 @@ export interface ScreenMetadataEdit {
      * a readiness gap). Absent entries stay derived.
      */
     mockupVariantStatus?: Record<string, 'accepted' | 'not_needed'>;
+    /**
+     * Phase 4A: supporting review record (checklist, note, override reason,
+     * sign-off signature, transition timestamps). The review *status* stays in
+     * `reviewStatus` above — this is the metadata around it. Optional &
+     * back-compat; see ScreenReviewMeta in src/types.
+     */
+    review?: ScreenReviewMeta;
 }
 
 export type ScreenEditsMap = Record<string, ScreenMetadataEdit>;
@@ -71,9 +81,46 @@ const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([
  * (forward compatibility — an older build must never drop a newer build's
  * overlay fields on a read-modify-write). */
 const KNOWN_EDIT_KEYS: ReadonlySet<string> = new Set([
-    'name', 'purpose', 'userIntent', 'priority', 'notes', 'reviewStatus', 'mockupVariantStatus',
+    'name', 'purpose', 'userIntent', 'priority', 'notes', 'reviewStatus', 'mockupVariantStatus', 'review',
 ]);
 const VALID_VARIANT_STATUSES: ReadonlySet<string> = new Set(['accepted', 'not_needed']);
+const CHECKLIST_KEYS: ReadonlySet<string> = new Set([
+    'purposeMatchesPrd', 'entryExitPathsReviewed', 'statesReviewed', 'risksReviewed',
+    'mockupsReviewed', 'mobileReviewed', 'acceptanceCriteriaReviewed', 'developerHandoffReviewed',
+]);
+
+/** Parse the Phase 4A review metadata overlay defensively. Returns undefined
+ * when nothing usable is present so an empty object never lands on the edit. */
+function parseReviewMeta(raw: unknown): ScreenReviewMeta | undefined {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const r = raw as Record<string, unknown>;
+    const meta: ScreenReviewMeta = {};
+    if (r.checklist && typeof r.checklist === 'object' && !Array.isArray(r.checklist)) {
+        const checklist: ScreenReviewChecklist = {};
+        for (const [k, v] of Object.entries(r.checklist as Record<string, unknown>)) {
+            if (CHECKLIST_KEYS.has(k) && typeof v === 'boolean') {
+                (checklist as Record<string, boolean>)[k] = v;
+            }
+        }
+        if (Object.keys(checklist).length > 0) meta.checklist = checklist;
+    }
+    if (typeof r.notes === 'string' && r.notes.trim()) meta.notes = r.notes;
+    if (typeof r.overrideReason === 'string' && r.overrideReason.trim()) meta.overrideReason = r.overrideReason;
+    if (r.signature && typeof r.signature === 'object' && !Array.isArray(r.signature)) {
+        const s = r.signature as Record<string, unknown>;
+        if (typeof s.screenContractHash === 'string' && s.screenContractHash) {
+            const sig: ScreenReviewSignature = { screenContractHash: s.screenContractHash };
+            if (typeof s.prdVersionId === 'string') sig.prdVersionId = s.prdVersionId;
+            if (typeof s.screenVersionId === 'string') sig.screenVersionId = s.screenVersionId;
+            if (typeof s.designSystemVersionId === 'string') sig.designSystemVersionId = s.designSystemVersionId;
+            meta.signature = sig;
+        }
+    }
+    for (const key of ['updatedAt', 'acceptedAt', 'requestedChangesAt', 'implementationReadyAt'] as const) {
+        if (typeof r[key] === 'string' && r[key]) meta[key] = r[key] as string;
+    }
+    return Object.keys(meta).length > 0 ? meta : undefined;
+}
 
 /** Safely extract the screenEdits overlay from ArtifactVersion metadata. */
 export function readScreenEdits(metadata: Record<string, unknown> | undefined): ScreenEditsMap {
@@ -103,6 +150,8 @@ export function readScreenEdits(metadata: Record<string, unknown> | undefined): 
             }
             if (Object.keys(statuses).length > 0) edit.mockupVariantStatus = statuses;
         }
+        const review = parseReviewMeta(v.review);
+        if (review) edit.review = review;
         // Preserve unknown fields verbatim so a save round-trip never drops
         // overlay data written by newer code.
         for (const [key, unknownValue] of Object.entries(v)) {

@@ -917,38 +917,69 @@ export function buildScreenCoverageSummary(
 export type ScreenListFilter =
     | 'all'
     | 'p0'
+    | 'draft'
     | 'needs_review'
+    | 'accepted'
+    | 'ready'
+    | 'has_blockers'
+    | 'review_recommended'
     | 'missing_mockups'
-    | 'has_risks'
-    | 'ready';
+    | 'has_risks';
 
 export const SCREEN_LIST_FILTERS: Array<{ id: ScreenListFilter; label: string }> = [
     { id: 'all', label: 'All' },
     { id: 'p0', label: 'P0' },
+    { id: 'draft', label: 'Draft' },
     { id: 'needs_review', label: 'Needs review' },
+    { id: 'accepted', label: 'Accepted' },
+    { id: 'ready', label: 'Ready' },
+    { id: 'has_blockers', label: 'Has blockers' },
+    { id: 'review_recommended', label: 'Review recommended' },
     { id: 'missing_mockups', label: 'Missing mockups' },
     { id: 'has_risks', label: 'Has risks' },
-    { id: 'ready', label: 'Ready' },
 ];
+
+/** Optional review signals (Phase 4A) so filters can key off the user review
+ * status and derived blockers/review items, not just the combined readiness. */
+export interface ScreenFilterReview {
+    /** Explicit user-set status, or undefined when unreviewed (treated as draft). */
+    userStatus?: ScreenReviewStatus;
+    blockingCount: number;
+    reviewCount: number;
+}
 
 export function screenMatchesFilter(
     item: ScreenExperienceItem,
     readiness: ScreenReadiness | undefined,
     filter: ScreenListFilter,
+    review?: ScreenFilterReview,
 ): boolean {
+    const userStatus = review?.userStatus;
     switch (filter) {
         case 'all':
             return true;
         case 'p0':
             return isP0(item.screen);
+        case 'draft':
+            // Unreviewed screens read as draft (the derived default), so match
+            // either an explicit draft status or no user status at all.
+            return userStatus === 'draft' || (!userStatus && readiness?.source === 'derived');
         case 'needs_review':
-            return readiness?.status === 'needs_review';
+            return userStatus === 'needs_review'
+                || (!userStatus && readiness?.status === 'needs_review');
+        case 'accepted':
+            return userStatus === 'accepted' || userStatus === 'implementation_ready';
+        case 'ready':
+            return userStatus === 'implementation_ready'
+                || (!userStatus && readiness?.status === 'implementation_ready');
+        case 'has_blockers':
+            return (review?.blockingCount ?? 0) > 0;
+        case 'review_recommended':
+            return (review?.blockingCount ?? 0) > 0 || (review?.reviewCount ?? 0) > 0;
         case 'missing_mockups':
             return !item.mockupScreen;
         case 'has_risks':
             return (item.screen.risks?.length ?? 0) > 0;
-        case 'ready':
-            return readiness?.status === 'implementation_ready';
     }
 }
 

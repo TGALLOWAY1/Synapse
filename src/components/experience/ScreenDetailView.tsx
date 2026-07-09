@@ -19,7 +19,7 @@ import {
 } from 'lucide-react';
 import type {
     Feature, GenerationStatus, MockupPayload,
-    MockupSettings, ScreenPriority,
+    MockupSettings, ScreenPriority, ScreenReviewChecklist, ScreenReviewMeta,
 } from '../../types';
 import {
     groupFlowRefsByFlow,
@@ -33,12 +33,17 @@ import {
     type ScreenReadiness, type ScreenReviewStatus,
 } from '../../lib/screenReadiness';
 import {
+    buildScreenReviewModelForItem, buildScreenReviewSignature,
+    type ScreenReviewModel,
+} from '../../lib/screenReviewWorkflow';
+import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
     VARIANT_STATUS_LABELS, type GeneratedVariantMap,
 } from '../../lib/mockupVariants';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
+import { ScreenReviewPanel } from './ScreenReviewPanel';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import { ReadinessBadge } from './ReadinessBadge';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
@@ -125,6 +130,93 @@ export function ScreenDetailView({
         if (artifactVersionId) void loadForArtifactVersion(artifactVersionId);
     }, [artifactVersionId, loadForArtifactVersion]);
 
+    // Phase 3B/4A: manifest-backed generated variants for this screen (viewport ×
+    // state), loaded lazily so the review model + Mockups tab both reflect real
+    // generation state. Lifted from MockupsTab so the review header can factor in
+    // per-variant coverage/freshness.
+    const versionId = mockupContext?.versionId;
+    const loadVariantImages = useMockupVariantImageStore(s => s.loadForVersion);
+    const variantImages = useMockupVariantImageStore(s => s.images);
+    useEffect(() => {
+        if (versionId) void loadVariantImages(versionId);
+    }, [versionId, loadVariantImages]);
+    const generatedVariants = useMemo<GeneratedVariantMap>(() => {
+        if (!versionId) return {};
+        const out: GeneratedVariantMap = {};
+        for (const key of Object.keys(variantImages)) {
+            const r = variantImages[key];
+            if (r.versionId !== versionId || r.screenId !== item.id) continue;
+            out[r.variantId] = {
+                coverage: r.coverageManifest?.overallStatus ?? 'unknown',
+                sourceSignature: r.sourceSignature as MockupVariantSourceSignature | undefined,
+            };
+        }
+        return out;
+    }, [variantImages, versionId, item.id]);
+
+    // Phase 4A: derived review model (user status vs. system readiness, issues,
+    // checklist, freshness). Uses the same variant inputs as the Mockups tab.
+    const reviewModel = useMemo<ScreenReviewModel>(() => buildScreenReviewModelForItem(item, {
+        platform: mockupContext?.settings.platform,
+        mobileRelevant,
+        features,
+        trustContext: mockupContext?.trustContext,
+        generatedVariants,
+    }), [item, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, features, generatedVariants]);
+
+    // Persist a review change into the screenEdits overlay. Status rides
+    // `reviewStatus`; the supporting record (checklist / note / override reason /
+    // sign-off signature / timestamps) rides `review`. Merges from the existing
+    // edit so name/notes/variant marks and any unknown fields survive.
+    const persistReview = useCallback((change: {
+        status?: ScreenReviewStatus;
+        reviewPatch?: Partial<ScreenReviewMeta>;
+        captureSignature?: boolean;
+    }) => {
+        if (!onSaveScreenEdit) return;
+        const now = new Date().toISOString();
+        const edit: ScreenMetadataEdit = { ...(item.edit ?? {}) };
+        if (change.status) edit.reviewStatus = change.status;
+        const review: ScreenReviewMeta = { ...(edit.review ?? {}), ...change.reviewPatch, updatedAt: now };
+        if (change.captureSignature) {
+            review.signature = buildScreenReviewSignature(item.screen, {
+                prdVersionId: mockupContext?.trustContext?.prdVersionId,
+                screenVersionId: mockupContext?.trustContext?.screenVersionId,
+                designSystemVersionId: mockupContext?.trustContext?.designSystemVersionId,
+            });
+        }
+        edit.review = review;
+        onSaveScreenEdit(item.id, edit);
+    }, [onSaveScreenEdit, item.edit, item.id, item.screen, mockupContext?.trustContext]);
+
+    const handleAccept = useCallback((overrideReason?: string) => {
+        const now = new Date().toISOString();
+        persistReview({
+            status: 'accepted',
+            reviewPatch: { acceptedAt: now, overrideReason: overrideReason || undefined },
+            captureSignature: true,
+        });
+    }, [persistReview]);
+    const handleRequestChanges = useCallback((note?: string) => {
+        const now = new Date().toISOString();
+        persistReview({ status: 'needs_review', reviewPatch: { requestedChangesAt: now, notes: note || undefined } });
+    }, [persistReview]);
+    const handleMarkImplReady = useCallback((overrideReason?: string) => {
+        const now = new Date().toISOString();
+        persistReview({
+            status: 'implementation_ready',
+            reviewPatch: { implementationReadyAt: now, overrideReason: overrideReason || undefined },
+            captureSignature: true,
+        });
+    }, [persistReview]);
+    const handleReReview = useCallback(() => persistReview({ captureSignature: true }), [persistReview]);
+    const handleToggleChecklist = useCallback((key: keyof ScreenReviewChecklist, checked: boolean) => {
+        const checklist: ScreenReviewChecklist = { ...(item.edit?.review?.checklist ?? {}) };
+        if (checked) checklist[key] = true;
+        else delete checklist[key];
+        persistReview({ reviewPatch: { checklist: Object.keys(checklist).length > 0 ? checklist : undefined } });
+    }, [persistReview, item.edit?.review?.checklist]);
+
     const flowGroups = useMemo(
         () => groupFlowRefsByFlow(item.relatedFlows),
         [item.relatedFlows],
@@ -180,6 +272,16 @@ export function ScreenDetailView({
                     </p>
                 )}
             </div>
+
+            <ScreenReviewPanel
+                model={reviewModel}
+                onAccept={handleAccept}
+                onRequestChanges={handleRequestChanges}
+                onMarkImplementationReady={handleMarkImplReady}
+                onToggleChecklist={handleToggleChecklist}
+                onReReview={handleReReview}
+                readOnly={!onSaveScreenEdit}
+            />
 
             <ScreenDetailTabs
                 active={activeTab}
@@ -265,6 +367,7 @@ export function ScreenDetailView({
                     unmatchedMockups={unmatchedMockups}
                     onLinkMockup={onLinkMockup}
                     onSaveScreenEdit={onSaveScreenEdit}
+                    generatedVariants={generatedVariants}
                 />
             )}
         </div>
@@ -601,7 +704,7 @@ function DecisionBranches({ decision }: { decision: string }) {
 
 function MockupsTab({
     item, mockupContext, mobileRelevant, mockupStatus, onRetryMockup, onAddToMockups,
-    unmatchedMockups, onLinkMockup, onSaveScreenEdit,
+    unmatchedMockups, onLinkMockup, onSaveScreenEdit, generatedVariants,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
@@ -612,31 +715,10 @@ function MockupsTab({
     unmatchedMockups?: Array<{ id: string; name: string }>;
     onLinkMockup?: (mockupScreenId: string) => void;
     onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
+    /** Manifest-backed generated variants for this screen (loaded by the parent). */
+    generatedVariants: GeneratedVariantMap;
 }) {
     const [linkTarget, setLinkTarget] = useState('');
-
-    // Phase 3B: manifest-backed generated variants for this screen (viewport ×
-    // state), from the per-variant image store. Loaded lazily on view; a
-    // generated variant flips the derived model from missing → generated.
-    const versionId = mockupContext?.versionId;
-    const loadVariantImages = useMockupVariantImageStore(s => s.loadForVersion);
-    const variantImages = useMockupVariantImageStore(s => s.images);
-    useEffect(() => {
-        if (versionId) void loadVariantImages(versionId);
-    }, [versionId, loadVariantImages]);
-    const generatedVariants = useMemo<GeneratedVariantMap>(() => {
-        if (!versionId) return {};
-        const out: GeneratedVariantMap = {};
-        for (const key of Object.keys(variantImages)) {
-            const r = variantImages[key];
-            if (r.versionId !== versionId || r.screenId !== item.id) continue;
-            out[r.variantId] = {
-                coverage: r.coverageManifest?.overallStatus ?? 'unknown',
-                sourceSignature: r.sourceSignature as MockupVariantSourceSignature | undefined,
-            };
-        }
-        return out;
-    }, [variantImages, versionId, item.id]);
 
     // Derived viewport × state variant grid (see src/lib/mockupVariants.ts).
     const variants = buildScreenMockupVariants(item, {
