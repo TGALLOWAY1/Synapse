@@ -5,6 +5,7 @@ import type {
 } from '../../types';
 import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
 import { sanitizeRolePermissions } from '../../lib/prdRolesSanitizer';
+import { stripLeadingListNumber } from '../../lib/utils/stripLeadingListNumber';
 
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
 // for visual consistency.
@@ -445,7 +446,7 @@ export function ArchFlowsSection({ flows }: { flows: ArchFlow[] }) {
                     <div key={i} className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
                         <p className="text-sm font-bold text-neutral-900 mb-2">{f.name}</p>
                         <ol className="list-decimal pl-5 text-sm text-neutral-700 space-y-1">
-                            {f.steps.map((s, k) => <li key={k}>{s}</li>)}
+                            {f.steps.map((s, k) => <li key={k}>{stripLeadingListNumber(s)}</li>)}
                         </ol>
                     </div>
                 ))}
