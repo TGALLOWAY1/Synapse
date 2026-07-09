@@ -71,3 +71,48 @@ describe('FlowJourney screen-node navigation', () => {
         expect(screen.getByRole('button', { name: /Landing Page/ })).not.toHaveAttribute('aria-current');
     });
 });
+
+// A flow where several consecutive steps happen on the same screen — the exact
+// shape that used to render as repeated identical nodes (the demo quirk).
+const GROUPED_MARKDOWN = `### Flow: Submit
+**Goal:** Submit a project.
+**Steps:**
+1. [Landing Page] — User picks a role → System routes onward
+2. [Project Form] — User chooses submission type → System branches
+   - **Decision:** If guided, go to step 3; otherwise step 4
+3. [Project Form] — User fills in project details → System validates
+4. [Project Form] — User adds evaluation criteria → System saves draft
+5. [Progress Screen] — User watches analysis → System streams progress
+**Success Outcome:** Done.`;
+
+const groupedSteps = parseFlows(GROUPED_MARKDOWN)[0].steps;
+
+describe('FlowJourney screen grouping', () => {
+    it('renders one screen header per run of same-screen steps', () => {
+        render(<FlowJourney flowIndex={0} steps={groupedSteps} issuesByStep={new Map()} />);
+        // "Project Form" owns steps 2–4 but the name appears once as a header.
+        expect(screen.getAllByText('Project Form')).toHaveLength(1);
+        expect(screen.getByText('Steps 2–4')).toBeInTheDocument();
+    });
+
+    it('labels grouped sub-steps by their user action, not the screen name', () => {
+        render(<FlowJourney flowIndex={0} steps={groupedSteps} issuesByStep={new Map()} />);
+        expect(screen.getByText('User chooses submission type')).toBeInTheDocument();
+        expect(screen.getByText('User fills in project details')).toBeInTheDocument();
+        expect(screen.getByText('User adds evaluation criteria')).toBeInTheDocument();
+    });
+
+    it('highlights the sub-step for the current screen inside a group', () => {
+        render(
+            <FlowJourney
+                flowIndex={0}
+                steps={groupedSteps}
+                issuesByStep={new Map()}
+                highlightedStepIndices={new Set([2])}
+            />,
+        );
+        expect(
+            screen.getByRole('button', { name: /User fills in project details/ }),
+        ).toHaveAttribute('aria-current', 'true');
+    });
+});

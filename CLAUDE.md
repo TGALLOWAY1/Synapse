@@ -1522,7 +1522,19 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with the current screen's
   steps highlighted (`highlightedStepIndices`) plus a per-flow "This screen
   appears in" context block (repeated appearances labeled "— Step N
-  (appearance i of k)"; decision steps flag unspecified branch outcomes);
+  (appearance i of k)"; decision steps flag unspecified branch outcomes).
+  The `FlowJourney` timeline **groups consecutive steps that share a screen**
+  (`buildJourneyGroups` in `journeyNode.ts`, grouped by `stepScreenSlug`) into
+  one card: the screen name shows once as the header (with a "Steps N–M"
+  range), and each step reads as a sub-row **labeled by its user action** (the
+  "— User action → System response" half the flat node list hid), so a screen
+  owning several sequential steps is no longer repeated node-after-node. It is
+  **pure presentation over the same parsed `user_flows` steps** — no schema,
+  prompt, or persistence change, so it fixes legacy/demo flows without
+  regeneration. The header navigates to the screen (slug-gated, unchanged),
+  sub-rows scroll to their step card, and single-step screens collapse to one
+  row (keep `buildJourneyGroups` keyed on the same slug navigation uses, or a
+  group header could point at the wrong screen);
   Mockups = the **Phase 3A `MockupVariantsPanel`**
   (`src/components/experience/MockupVariantsPanel.tsx`): a viewport × state
   **variant gallery** driven by `buildScreenMockupVariants`
