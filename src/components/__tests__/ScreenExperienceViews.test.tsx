@@ -246,24 +246,22 @@ describe('ScreenDetailView tabs', () => {
         );
     }
 
-    it('Overview renders the structured contract sections with honest fallbacks', () => {
-        const { getByText, getAllByText } = renderDetail('scr-home', 'overview');
-        expect(getByText('PRD Traceability')).toBeTruthy();
-        expect(getAllByText('Activity feed').length).toBeGreaterThan(0);
-        expect(getByText('Required States')).toBeTruthy();
-        expect(getByText('Risks & Edge Cases')).toBeTruthy();
-        expect(getByText('Acceptance Criteria')).toBeTruthy();
-        expect(getByText('Developer Handoff')).toBeTruthy();
-        // The behavior-less "Empty" state renders "Not specified", not fabricated detail.
-        expect(getAllByText('Not specified').length).toBeGreaterThan(0);
+    it('Overview leads with the screen (Purpose, Acceptance checklist) and hides detail/handoff', () => {
+        const { getByText, queryByText } = renderDetail('scr-home', 'overview');
+        expect(getByText('Purpose')).toBeTruthy();
+        expect(getByText('Acceptance checklist')).toBeTruthy();
+        // PRD features + screen detail are progressively disclosed, not top-level.
+        expect(getByText('PRD features')).toBeTruthy();
+        expect(getByText('Screen details')).toBeTruthy();
+        // Developer Handoff was moved out of the Screens artifact entirely.
+        expect(queryByText('Developer Handoff')).toBeNull();
+        expect(queryByText('Handoff')).toBeNull();
     });
 
     it('Overview survives a legacy screen with no optional fields', () => {
-        const { getByText, getAllByText } = renderDetail('bare-legacy-screen', 'overview');
-        expect(getByText(/No linked PRD features found/)).toBeTruthy();
-        // "No UI states documented" now appears in both the Overview section and
-        // the Phase 4A review-issue list — assert it's present rather than unique.
-        expect(getAllByText(/No UI states documented/).length).toBeGreaterThan(0);
+        const { getByText } = renderDetail('bare-legacy-screen', 'overview');
+        expect(getByText('Purpose')).toBeTruthy();
+        // Acceptance checklist degrades to a calm "not enough detail" line.
         expect(getByText(/Not enough detail/)).toBeTruthy();
     });
 
@@ -330,14 +328,12 @@ const contractPayload: MockupPayload = {
 };
 
 function renderContractDetail(
-    tab: 'overview' | 'flow' | 'mockups' | 'handoff',
+    tab: 'overview' | 'flow' | 'mockups',
     opts: {
         edits?: Parameters<typeof buildScreenIndex>[3];
         onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
         withMockupContext?: boolean;
         trustContext?: import('../../lib/mockupVariantTrust').VariantTrustContext;
-        traceDataModel?: import('../../types').DataModelContent | null;
-        tracePlan?: import('../../types').StructuredImplementationPlan | null;
     } = {},
 ) {
     const index = buildScreenIndex(contractInventory, [], contractPayload, opts.edits);
@@ -353,8 +349,6 @@ function renderContractDetail(
             onNavigateToScreen={() => {}}
             availableScreenSlugs={index.availableSlugs}
             features={FEATURES}
-            traceDataModel={opts.traceDataModel}
-            tracePlan={opts.tracePlan}
             mobileRelevant
             onSaveScreenEdit={opts.onSaveScreenEdit}
             mockupContext={opts.withMockupContext === false ? undefined : {
@@ -372,26 +366,19 @@ function renderContractDetail(
 }
 
 describe('Phase 2 contract rendering', () => {
-    it('Overview shows generated handoff, criteria, state contract, and risk handling', () => {
-        const { getByText, getAllByText } = renderContractDetail('overview');
-        // Generated handoff fields.
-        expect(getByText('/submission')).toBeTruthy();
-        expect(getByText('SubmissionWizard')).toBeTruthy();
-        expect(getByText('uploadedAssets')).toBeTruthy();
-        expect(getByText('onSubmitProject')).toBeTruthy();
-        expect(getByText('Wizard steps must be keyboard navigable')).toBeTruthy();
-        expect(getAllByText('From generated spec').length).toBe(2); // criteria + handoff
-        // Explicit traceability label (all refs resolve).
-        expect(getByText('Mapped at generation')).toBeTruthy();
-        // State contract chips + system behavior.
-        expect(getAllByText('Needs mockup').length).toBeGreaterThan(0);
-        expect(getByText('Lookup returns no records')).toBeTruthy();
-        // Risk with proposed handling is documented, not "needs review".
-        expect(getByText(/Handling: Chunked uploads/)).toBeTruthy();
-        // Generated acceptance criteria (screen-level + per-state; state
-        // criteria also render inside their own state row).
+    it('Overview leads with the acceptance checklist; handoff detail is gone', () => {
+        const { getByText, queryByText, getAllByText } = renderContractDetail('overview');
+        // Acceptance criteria are a concise checklist (screen-level + per-state).
+        expect(getByText('Acceptance checklist')).toBeTruthy();
         expect(getByText('User can submit end to end')).toBeTruthy();
         expect(getAllByText('Empty state appears when no evaluations exist').length).toBeGreaterThan(0);
+        // Developer-handoff fields (route/components/events) no longer appear here.
+        expect(queryByText('/submission')).toBeNull();
+        expect(queryByText('onSubmitProject')).toBeNull();
+        expect(queryByText('Wizard steps must be keyboard navigable')).toBeNull();
+        // Noisy provenance badges are gone.
+        expect(queryByText('From generated spec')).toBeNull();
+        expect(queryByText('Mapped at generation')).toBeNull();
     });
 
     it('Mockups tab presents a viewport × state variant gallery with honest statuses', () => {
@@ -454,31 +441,34 @@ describe('Phase 2 contract rendering', () => {
         expect(edit.futureField).toBe('do not drop');
     });
 
-    it('user-set review status overrides the estimate while warnings stay visible', () => {
-        const { getAllByText, getByText } = renderContractDetail('overview', {
-            edits: { 'scr-submission': { reviewStatus: 'implementation_ready' } } as never,
+    it('a confirmed screen shows the confirmed state + Edit again', () => {
+        const { getByText } = renderContractDetail('overview', {
+            edits: { 'scr-submission': { reviewStatus: 'accepted' } } as never,
+            onSaveScreenEdit: vi.fn(),
         });
-        expect(getAllByText('Ready to build').length).toBeGreaterThan(0);
-        // The derived warnings are still surfaced in the handoff footer.
-        expect(getByText(/Before building:/)).toBeTruthy();
+        expect(getByText('Screen confirmed')).toBeTruthy();
+        expect(getByText('Edit again')).toBeTruthy();
     });
 });
 
 // --- Phase 4A: review & approval workflow ------------------------------------
 
-describe('Phase 4A review workflow UI', () => {
-    it('Screen Detail renders the review header, status, and actions', () => {
-        const { getByText } = renderContractDetail('overview', { onSaveScreenEdit: vi.fn() });
-        expect(getByText('User review')).toBeTruthy();
-        expect(getByText('System readiness')).toBeTruthy();
-        expect(getByText('Accept screen')).toBeTruthy();
-        expect(getByText('Mark ready to build')).toBeTruthy();
+describe('single confirmation flow', () => {
+    it('an unconfirmed screen shows the one review action: Confirm screen', () => {
+        const { getByText, queryByText } = renderContractDetail('overview', { onSaveScreenEdit: vi.fn() });
+        expect(getByText('Needs review')).toBeTruthy();
+        expect(getByText('Confirm screen')).toBeTruthy();
+        // The old competing review states are gone.
+        expect(queryByText('Accept screen')).toBeNull();
+        expect(queryByText('Mark ready to build')).toBeNull();
+        expect(queryByText('Request changes')).toBeNull();
+        expect(queryByText('System readiness')).toBeNull();
     });
 
-    it('accepting a clean screen persists the accepted status + a sign-off signature', () => {
+    it('confirming persists accepted + a sign-off signature', () => {
         const onSave = vi.fn();
         const { getByText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
-        fireEvent.click(getByText('Accept screen'));
+        fireEvent.click(getByText('Confirm screen'));
         expect(onSave).toHaveBeenCalledTimes(1);
         const [id, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
         expect(id).toBe('scr-submission');
@@ -488,15 +478,54 @@ describe('Phase 4A review workflow UI', () => {
         expect((review.signature as Record<string, unknown>).screenContractHash).toBeTruthy();
     });
 
-    it('the review checklist persists a ticked item into the overlay', () => {
+    it('Edit again on a confirmed screen returns it to Needs Review', () => {
         const onSave = vi.fn();
-        const { getByText, getByLabelText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
-        fireEvent.click(getByText('Review checklist'));
-        fireEvent.click(getByLabelText('Purpose matches the PRD'));
+        const { getByText } = renderContractDetail('overview', {
+            edits: { 'scr-submission': { reviewStatus: 'accepted' } } as never,
+            onSaveScreenEdit: onSave,
+        });
+        fireEvent.click(getByText('Edit again'));
         expect(onSave).toHaveBeenCalledTimes(1);
         const [, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
+        expect(edit.reviewStatus).toBe('needs_review');
+    });
+
+    it('editing details returns a confirmed screen to Needs Review', () => {
+        const onSave = vi.fn();
+        const { getByText, getByDisplayValue } = renderContractDetail('overview', {
+            edits: { 'scr-submission': { reviewStatus: 'accepted' } } as never,
+            onSaveScreenEdit: onSave,
+        });
+        fireEvent.click(getByText('Edit details'));
+        fireEvent.change(getByDisplayValue('Guided project submission.'), { target: { value: 'Changed purpose.' } });
+        fireEvent.click(getByText('Save'));
+        const [, edit] = onSave.mock.calls[onSave.mock.calls.length - 1] as [string, Record<string, unknown>];
+        expect(edit.reviewStatus).toBe('needs_review');
+    });
+});
+
+describe('review notes', () => {
+    it('flags issues behind a collapsed banner and lets the user address them', () => {
+        const onSave = vi.fn();
+        const { getByText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
+        // Collapsed banner names the count; expanding reveals the notes.
+        expect(getByText('Review notes')).toBeTruthy();
+        fireEvent.click(getByText('Review notes'));
+        // A risk resolution box is offered ("How should this be handled?").
+        expect(getByText('How should this be handled?')).toBeTruthy();
+    });
+
+    it('resolving a risk persists structured input onto the overlay', () => {
+        const onSave = vi.fn();
+        const { getByText, getByPlaceholderText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
+        fireEvent.click(getByText('Review notes'));
+        const box = getByPlaceholderText(/friendly retry prompt/);
+        fireEvent.change(box, { target: { value: 'Retry then fall back' } });
+        fireEvent.click(getByText('Mark resolved'));
+        const [, edit] = onSave.mock.calls[onSave.mock.calls.length - 1] as [string, Record<string, unknown>];
         const review = edit.review as Record<string, unknown>;
-        expect((review.checklist as Record<string, unknown>).purposeMatchesPrd).toBe(true);
+        expect(review.riskResolutions).toBeTruthy();
+        expect(Object.values(review.riskResolutions as Record<string, string>)).toContain('Retry then fall back');
     });
 });
 
@@ -617,11 +646,11 @@ describe('Phase 3C variant freshness & history UI', () => {
         expect(getByText(/included in project snapshots/)).toBeTruthy();
     });
 
-    it('a legacy default with no source metadata reads Freshness unknown', () => {
+    it('a legacy default with no source metadata reads PRD sync unknown', () => {
         const { getAllByText, getByText } = renderContractDetail('mockups', { trustContext: TRUST });
         // Default variant is generated via the legacy join but carries no
         // signature → unknown, never falsely stale.
-        expect(getAllByText('Freshness unknown').length).toBeGreaterThan(0);
+        expect(getAllByText('PRD sync unknown').length).toBeGreaterThan(0);
         expect(getByText(/Source comparison unavailable for this older mockup/)).toBeTruthy();
     });
 
@@ -642,7 +671,7 @@ describe('Phase 3C variant freshness & history UI', () => {
         });
         const { getByText, getAllByText } = renderContractDetail('mockups', { trustContext: TRUST });
         fireEvent.click(getByText('Desktop · Empty history'));
-        expect(getAllByText('Stale').length).toBeGreaterThan(0);
+        expect(getAllByText('Needs regeneration').length).toBeGreaterThan(0);
         expect(getAllByText(/Screen spec changed after this mockup was generated/).length).toBeGreaterThan(0);
     });
 
@@ -661,7 +690,7 @@ describe('Phase 3C variant freshness & history UI', () => {
         });
         const { getByText, getAllByText } = renderContractDetail('mockups', { trustContext: TRUST });
         fireEvent.click(getByText('Desktop · Empty history'));
-        expect(getAllByText('Current').length).toBeGreaterThan(0);
+        expect(getAllByText('In sync with PRD').length).toBeGreaterThan(0);
     });
 
     it('renders the variant history section when history exists', () => {
@@ -812,45 +841,13 @@ describe('Phase 4B preflight panel', () => {
     });
 });
 
-// --- Phase 5A: implementation handoff tab ------------------------------------
+// --- Phase 5A: implementation handoff rollup (list level) ---------------------
+// The per-screen Handoff TAB was moved out of the Screens artifact into the
+// Implementation Plan. The list-level handoff rollup (derived from the same
+// libs, which are preserved) still surfaces in the coverage panel + card
+// details, so those remain covered here.
 
-describe('Phase 5A handoff tab', () => {
-    it('19. the Handoff tab renders the developer sections', () => {
-        const { getByText, getAllByText } = renderContractDetail('handoff', { onSaveScreenEdit: vi.fn() });
-        expect(getAllByText('Implementation handoff').length).toBeGreaterThan(0);
-        expect(getByText('Route')).toBeTruthy();
-        expect(getByText('Components')).toBeTruthy();
-        expect(getByText('QA checklist')).toBeTruthy();
-        expect(getByText('Build task checklist')).toBeTruthy();
-        // The generated handoff route renders.
-        expect(getAllByText('/submission').length).toBeGreaterThan(0);
-    });
-
-    it('20. an unsigned P0 screen shows Handoff blocked; accepting clears it', () => {
-        const blocked = renderContractDetail('handoff', { onSaveScreenEdit: vi.fn() });
-        expect(blocked.getByText('Handoff blocked')).toBeTruthy();
-        blocked.unmount();
-
-        const accepted = renderContractDetail('handoff', {
-            edits: { 'scr-submission': { reviewStatus: 'accepted' } } as never,
-            onSaveScreenEdit: vi.fn(),
-        });
-        expect(accepted.queryByText('Handoff blocked')).toBeNull();
-    });
-
-    it('21. Copy handoff produces markdown with the main sections', async () => {
-        const writeText = vi.fn().mockResolvedValue(undefined);
-        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-        const { getByText } = renderContractDetail('handoff', { onSaveScreenEdit: vi.fn() });
-        fireEvent.click(getByText('Copy handoff'));
-        await Promise.resolve();
-        expect(writeText).toHaveBeenCalledTimes(1);
-        const md = writeText.mock.calls[0][0] as string;
-        expect(md).toMatch(/# Submission Wizard .*Implementation Handoff/);
-        expect(md).toContain('## Route');
-        expect(md).toContain('## Build Tasks');
-    });
-
+describe('Phase 5A handoff rollup (list)', () => {
     it('22. a screen card shows a handoff readiness chip', () => {
         const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
         const { getAllByText } = render(
@@ -905,7 +902,10 @@ describe('Phase 5A handoff tab', () => {
     });
 });
 
-// --- Phase 5B: trace bridge on the Handoff tab -------------------------------
+// --- Phase 5B: trace bridge (list-level rollup) ------------------------------
+// The per-screen trace bridge on the Handoff tab moved out of Screens with the
+// rest of the developer handoff. The list-level trace rollup in the coverage
+// panel (derived from the preserved libs) still surfaces here.
 
 const TRACE_DATA_MODEL: import('../../types').DataModelContent = {
     entities: [
@@ -922,81 +922,7 @@ const TRACE_DATA_MODEL: import('../../types').DataModelContent = {
     ],
 };
 
-const TRACE_PLAN: import('../../types').StructuredImplementationPlan = {
-    milestones: [
-        {
-            id: 'm1',
-            name: 'Foundation',
-            linkedArtifacts: { screens: ['Submission Wizard'] },
-            tasks: [
-                { id: 't1', title: 'Build the /submission route and SubmissionWizard', description: 'Wire it.', status: 'todo' },
-            ],
-        },
-    ],
-} as unknown as import('../../types').StructuredImplementationPlan;
-
-describe('Phase 5B handoff trace bridge', () => {
-    it('17-18. renders the trace confidence summary + Data Model support match', () => {
-        const { getByText, getAllByText } = renderContractDetail('handoff', {
-            onSaveScreenEdit: vi.fn(),
-            traceDataModel: TRACE_DATA_MODEL,
-            tracePlan: TRACE_PLAN,
-        });
-        expect(getByText('Trace confidence')).toBeTruthy();
-        expect(getByText('Data Model support')).toBeTruthy();
-        // The Submission entity matches by shared PRD feature F1.
-        expect(getAllByText('Submission').length).toBeGreaterThan(0);
-        expect(getAllByText('Explicit trace').length).toBeGreaterThan(0);
-    });
-
-    it('19. renders the missing Data Model state when nothing matches', () => {
-        const { getByText } = renderContractDetail('handoff', {
-            onSaveScreenEdit: vi.fn(),
-            traceDataModel: { entities: [
-                { name: 'ZebraOnly', description: '', fields: [], relationships: [] },
-            ] },
-            tracePlan: null,
-        });
-        expect(getByText(/No linked Data Model entities found/)).toBeTruthy();
-    });
-
-    it('20. renders related Implementation Plan items when matched', () => {
-        const { getByText } = renderContractDetail('handoff', {
-            onSaveScreenEdit: vi.fn(),
-            traceDataModel: TRACE_DATA_MODEL,
-            tracePlan: TRACE_PLAN,
-        });
-        expect(getByText('Related implementation plan items')).toBeTruthy();
-        expect(getByText(/Build the \/submission route/)).toBeTruthy();
-    });
-
-    it('21. renders the missing Implementation Plan state', () => {
-        const { getByText } = renderContractDetail('handoff', {
-            onSaveScreenEdit: vi.fn(),
-            traceDataModel: TRACE_DATA_MODEL,
-            tracePlan: { milestones: [{ id: 'm', name: 'M', tasks: [
-                { id: 't', title: 'Unrelated work', description: 'nothing', status: 'todo' },
-            ] }] } as unknown as import('../../types').StructuredImplementationPlan,
-        });
-        expect(getByText(/No related Implementation Plan tasks found/)).toBeTruthy();
-    });
-
-    it('22. Copy handoff includes the trace sections', async () => {
-        const writeText = vi.fn().mockResolvedValue(undefined);
-        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
-        const { getByText } = renderContractDetail('handoff', {
-            onSaveScreenEdit: vi.fn(),
-            traceDataModel: TRACE_DATA_MODEL,
-            tracePlan: TRACE_PLAN,
-        });
-        fireEvent.click(getByText('Copy handoff'));
-        await Promise.resolve();
-        const md = writeText.mock.calls[0][0] as string;
-        expect(md).toContain('## Trace Confidence');
-        expect(md).toContain('## Data Model Support');
-        expect(md).toContain('## Related Implementation Plan Items');
-    });
-
+describe('Phase 5B handoff trace bridge (list rollup)', () => {
     it('23. the coverage panel shows the handoff trace rollup', () => {
         const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
         const { getByText } = render(

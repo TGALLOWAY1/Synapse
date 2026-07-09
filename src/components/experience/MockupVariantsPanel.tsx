@@ -32,7 +32,7 @@ import {
     type ScreenMockupVariantSummary,
 } from '../../lib/mockupVariants';
 import {
-    FRESHNESS_LABELS, buildVariantSourceSignature,
+    buildVariantSourceSignature,
     type MockupVariantFreshnessStatus, type MockupVariantSourceSignature,
 } from '../../lib/mockupVariantTrust';
 import { buildMockupSpecCoverage } from '../../lib/screenReadiness';
@@ -77,14 +77,24 @@ const FRESHNESS_PILL: Record<MockupVariantFreshnessStatus, string> = {
     unknown: 'text-neutral-500 bg-neutral-100 ring-neutral-200',
 };
 
-/** Compact freshness badge for a generated variant (nothing shown for a
+// "PRD sync" is the user-facing language for a mockup's freshness — it tells the
+// user what they actually care about (is this image still in sync with the
+// current PRD / spec / design system?) instead of the internal "freshness" term.
+const PRD_SYNC_LABELS: Record<MockupVariantFreshnessStatus, string> = {
+    current: 'In sync with PRD',
+    possibly_stale: 'May need regeneration',
+    stale: 'Needs regeneration',
+    unknown: 'PRD sync unknown',
+};
+
+/** Compact PRD-sync badge for a generated variant (nothing shown for a
  * variant that holds no generated image). */
 function FreshnessBadge({ status }: { status: MockupVariantFreshnessStatus }) {
     const Icon = status === 'current' ? CheckCircle2 : status === 'unknown' ? ShieldQuestion : Clock;
     return (
         <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${FRESHNESS_PILL[status]}`}>
             <Icon size={10} aria-hidden />
-            {FRESHNESS_LABELS[status]}
+            {PRD_SYNC_LABELS[status]}
         </span>
     );
 }
@@ -509,7 +519,7 @@ function FreshnessExplanation({
         <div className={`rounded-lg border p-3 text-[11px] ${tone}`}>
             <div className="flex items-center gap-1.5 font-medium">
                 <Icon size={12} aria-hidden />
-                {FRESHNESS_LABELS[status]}
+                {PRD_SYNC_LABELS[status]}
             </div>
             {reasons.length > 0 && (
                 <ul className="mt-1 space-y-0.5 list-disc list-inside">

@@ -1,16 +1,17 @@
-// Screen Detail — the "I am working on this screen" page of the Experience
-// workspace. Joins the three experience artifacts for ONE screen:
-//   Overview → the existing ScreenCard (screen_inventory details + upload
-//              gallery), unchanged presentation;
-//   Flow     → every user_flows flow that references this screen, rendered
-//              with the existing FlowJourney/StepCard pieces and the current
-//              screen's steps highlighted;
-//   Mockups  → the matching MockupScreenImage (which internally routes to the
-//              manual upload sheet per the image-source mode), or an honest
-//              empty state — mockup generation only covers key screens.
-// Read-only except for behavior the reused components already support
-// (image generate/upload). All data arrives via props from ArtifactWorkspace;
-// this component never queries artifacts from the store itself.
+// Screen Detail — the "I am reviewing this screen" page of the Experience
+// workspace. A lightweight PRODUCT-DESIGN review surface, not an implementation
+// dashboard. It joins the experience artifacts for ONE screen:
+//   Overview → purpose + user goal, the primary mockup, review notes, an
+//              acceptance checklist, and (collapsed) PRD features + screen detail;
+//   Flow     → every user_flows flow that references this screen;
+//   Mockups  → the viewport × state variant gallery.
+//
+// There is ONE review action — Confirm Screen (ScreenConfirmPanel). Developer
+// handoff was moved OUT to the Implementation Plan artifact; risks + readiness
+// issues fold into the calm, collapsed Review Notes. Read-only except for the
+// behaviors the reused components already support (image generate/upload) and
+// the screenEdits overlay writes. All data arrives via props from
+// ArtifactWorkspace.
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
@@ -18,9 +19,8 @@ import {
     RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
-    DataModelContent, Feature, GenerationStatus, MockupPayload,
-    MockupSettings, ScreenPriority, ScreenReviewChecklist, ScreenReviewMeta,
-    StructuredImplementationPlan,
+    Feature, GenerationStatus, MockupPayload, MockupSettings, ScreenPriority,
+    ScreenRiskDetail, ScreenReviewMeta,
 } from '../../types';
 import {
     groupFlowRefsByFlow,
@@ -30,7 +30,6 @@ import {
 } from '../../lib/screenExperience';
 import {
     parseDecisionBranches,
-    REVIEW_STATUS_LABELS,
     type ScreenReadiness, type ScreenReviewStatus,
 } from '../../lib/screenReadiness';
 import {
@@ -38,24 +37,19 @@ import {
     type ScreenReviewModel,
 } from '../../lib/screenReviewWorkflow';
 import {
-    buildScreenDownstreamImpact, screenDownstreamInputFromModel,
-} from '../../lib/screenDownstreamImpact';
-import { buildScreenImplementationHandoff } from '../../lib/screenImplementationHandoff';
-import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
     VARIANT_STATUS_LABELS, type GeneratedVariantMap,
 } from '../../lib/mockupVariants';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
-import { ScreenReviewPanel } from './ScreenReviewPanel';
-import { ScreenHandoffView } from './ScreenHandoffView';
-import { ScreenDownstreamImpactSection } from './ScreenDownstreamImpactSection';
+import { ScreenConfirmPanel } from './ScreenConfirmPanel';
+import { ScreenReviewNotes } from './ScreenReviewNotes';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
-import { ReadinessBadge } from './ReadinessBadge';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import type { ScreenImageGalleryContext } from '../renderers/ScreenImageGallery';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
+import { MockupScreenImage } from '../mockups/MockupScreenImage';
 import { FlowJourney } from '../renderers/userFlows/FlowJourney';
 import { StepCard } from '../renderers/userFlows/StepCard';
 import { FeatureDetailDrawer } from '../renderers/userFlows/FeatureDetailDrawer';
@@ -100,12 +94,6 @@ interface Props {
     onRetryMockup?: () => void;
     /** Canonical feature catalog for StepCard feature chips + the drawer. */
     features?: Feature[];
-    /** Phase 5B: resolved Data Model content for the handoff trace bridge
-     * (null when no data model artifact exists). */
-    traceDataModel?: DataModelContent | null;
-    /** Phase 5B: resolved Implementation Plan content for the trace bridge
-     * (null when no plan artifact exists). */
-    tracePlan?: StructuredImplementationPlan | null;
     /**
      * Persists a metadata edit overlay for this screen (null clears it back
      * to the generated content). Absent → the detail view stays read-only.
@@ -129,24 +117,21 @@ export function ScreenDetailView({
     item, readiness, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
-    features, traceDataModel, tracePlan, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
+    features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
     const [editing, setEditing] = useState(false);
 
-    // Hydrate the per-screen upload gallery (Overview tab) exactly like the
-    // standalone ScreenInventoryRenderer does.
+    // Hydrate the per-screen upload gallery (Overview tab).
     const loadForArtifactVersion = useScreenInventoryImageStore(s => s.loadForArtifactVersion);
     const artifactVersionId = screenImageContext?.artifactVersionId;
     useEffect(() => {
         if (artifactVersionId) void loadForArtifactVersion(artifactVersionId);
     }, [artifactVersionId, loadForArtifactVersion]);
 
-    // Phase 3B/4A: manifest-backed generated variants for this screen (viewport ×
-    // state), loaded lazily so the review model + Mockups tab both reflect real
-    // generation state. Lifted from MockupsTab so the review header can factor in
-    // per-variant coverage/freshness.
+    // Manifest-backed generated variants for this screen (viewport × state),
+    // loaded lazily so the review model + Mockups tab both reflect real state.
     const versionId = mockupContext?.versionId;
     const loadVariantImages = useMockupVariantImageStore(s => s.loadForVersion);
     const variantImages = useMockupVariantImageStore(s => s.images);
@@ -167,8 +152,8 @@ export function ScreenDetailView({
         return out;
     }, [variantImages, versionId, item.id]);
 
-    // Phase 4A: derived review model (user status vs. system readiness, issues,
-    // checklist, freshness). Uses the same variant inputs as the Mockups tab.
+    // Derived review model — user confirmation status vs. derived issues +
+    // freshness. Drives the confirm panel and the review notes.
     const reviewModel = useMemo<ScreenReviewModel>(() => buildScreenReviewModelForItem(item, {
         platform: mockupContext?.settings.platform,
         mobileRelevant,
@@ -177,38 +162,9 @@ export function ScreenDetailView({
         generatedVariants,
     }), [item, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, features, generatedVariants]);
 
-    // Phase 4B: derived downstream impact for this screen (which artifacts a
-    // change / blocker on this screen may have invalidated). Purely derived
-    // from the same review model — never persisted.
-    const downstreamImpact = useMemo(
-        () => buildScreenDownstreamImpact(screenDownstreamInputFromModel(item, reviewModel)),
-        [item, reviewModel],
-    );
-
-    // Phase 5A: derived implementation handoff package (route, components,
-    // state, events, data deps, mockups, acceptance, QA, build tasks, trace) +
-    // its readiness verdict. Uses the same variant inputs as the review model /
-    // Mockups tab. Purely derived — never persisted.
-    const handoff = useMemo(() => {
-        const variants = buildScreenMockupVariants(item, {
-            platform: mockupContext?.settings.platform,
-            mobileRelevant,
-            trustContext: mockupContext?.trustContext,
-            generatedVariants,
-        });
-        return buildScreenImplementationHandoff({
-            item, reviewModel, variants, downstream: downstreamImpact, features,
-            dataModel: traceDataModel, implementationPlan: tracePlan,
-        });
-    }, [item, reviewModel, downstreamImpact, features, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, generatedVariants, traceDataModel, tracePlan]);
-    const handoffTone = handoff.readiness.status === 'ready'
-        ? 'good' as const
-        : handoff.readiness.status === 'blocked' ? 'block' as const : 'warn' as const;
-
-    // Persist a review change into the screenEdits overlay. Status rides
-    // `reviewStatus`; the supporting record (checklist / note / override reason /
-    // sign-off signature / timestamps) rides `review`. Merges from the existing
-    // edit so name/notes/variant marks and any unknown fields survive.
+    // Persist a review change into the screenEdits overlay (status on
+    // `reviewStatus`; supporting record on `review`). Merges from the existing
+    // edit so name/notes/variant marks and unknown fields survive.
     const persistReview = useCallback((change: {
         status?: ScreenReviewStatus;
         reviewPatch?: Partial<ScreenReviewMeta>;
@@ -230,43 +186,85 @@ export function ScreenDetailView({
         onSaveScreenEdit(item.id, edit);
     }, [onSaveScreenEdit, item.edit, item.id, item.screen, mockupContext?.trustContext]);
 
-    const handleAccept = useCallback((overrideReason?: string) => {
+    // The single confirmation flow. Confirm → accepted + signature; Edit again →
+    // needs_review; Re-confirm → re-affirm accepted against the current spec.
+    const handleConfirm = useCallback(() => {
         const now = new Date().toISOString();
-        persistReview({
-            status: 'accepted',
-            reviewPatch: { acceptedAt: now, overrideReason: overrideReason || undefined },
-            captureSignature: true,
-        });
+        persistReview({ status: 'accepted', reviewPatch: { acceptedAt: now }, captureSignature: true });
     }, [persistReview]);
-    const handleRequestChanges = useCallback((note?: string) => {
-        const now = new Date().toISOString();
-        persistReview({ status: 'needs_review', reviewPatch: { requestedChangesAt: now, notes: note || undefined } });
+    const handleEditAgain = useCallback(() => {
+        persistReview({ status: 'needs_review', reviewPatch: { requestedChangesAt: new Date().toISOString() } });
     }, [persistReview]);
-    const handleMarkImplReady = useCallback((overrideReason?: string) => {
-        const now = new Date().toISOString();
-        persistReview({
-            status: 'implementation_ready',
-            reviewPatch: { implementationReadyAt: now, overrideReason: overrideReason || undefined },
-            captureSignature: true,
-        });
+    const handleReconfirm = useCallback(() => {
+        persistReview({ status: 'accepted', captureSignature: true });
     }, [persistReview]);
-    const handleReReview = useCallback(() => persistReview({ captureSignature: true }), [persistReview]);
-    const handleToggleChecklist = useCallback((key: keyof ScreenReviewChecklist, checked: boolean) => {
-        const checklist: ScreenReviewChecklist = { ...(item.edit?.review?.checklist ?? {}) };
-        if (checked) checklist[key] = true;
-        else delete checklist[key];
-        persistReview({ reviewPatch: { checklist: Object.keys(checklist).length > 0 ? checklist : undefined } });
-    }, [persistReview, item.edit?.review?.checklist]);
 
-    const flowGroups = useMemo(
-        () => groupFlowRefsByFlow(item.relatedFlows),
-        [item.relatedFlows],
+    // Review-notes actions. Dismissed issue ids + risk resolutions ride the
+    // `review` overlay (both additive, back-compat).
+    const dismissed = useMemo(
+        () => new Set(item.edit?.review?.dismissedIssues ?? []),
+        [item.edit?.review?.dismissedIssues],
     );
+    const riskResolutions = useMemo(
+        () => item.edit?.review?.riskResolutions ?? {},
+        [item.edit?.review?.riskResolutions],
+    );
+    const risks = useMemo<ScreenRiskDetail[]>(() => (
+        screen.riskDetails && screen.riskDetails.length > 0
+            ? screen.riskDetails
+            : (screen.risks ?? []).map(description => ({ description }))
+    ), [screen.riskDetails, screen.risks]);
 
+    const handleDismissIssue = useCallback((id: string, isDismissed: boolean) => {
+        const set = new Set(item.edit?.review?.dismissedIssues ?? []);
+        if (isDismissed) set.add(id); else set.delete(id);
+        persistReview({ reviewPatch: { dismissedIssues: set.size > 0 ? [...set] : undefined } });
+    }, [persistReview, item.edit?.review?.dismissedIssues]);
+    const handleResolveRisk = useCallback((key: string, resolution: string | null) => {
+        const map = { ...(item.edit?.review?.riskResolutions ?? {}) };
+        if (resolution) map[key] = resolution; else delete map[key];
+        persistReview({ reviewPatch: { riskResolutions: Object.keys(map).length > 0 ? map : undefined } });
+    }, [persistReview, item.edit?.review?.riskResolutions]);
+
+    const flowGroups = useMemo(() => groupFlowRefsByFlow(item.relatedFlows), [item.relatedFlows]);
     const renamed = item.isEdited && item.screen.name !== item.baseScreen.name;
 
+    // Primary mockup preview — the screen itself, shown inline near the top of
+    // the Overview (storyboard feel). Reuses the same image component as the
+    // Mockups tab; only the active tab mounts, so there is no double render.
+    const primaryMockup = (mockupContext && item.mockupScreen) ? (
+        <div className="bg-white rounded-lg border border-neutral-200 p-3">
+            <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 mb-2">Primary mockup</div>
+            <div className="rounded-lg border border-neutral-200 overflow-hidden">
+                <MockupScreenImage
+                    projectId={mockupContext.projectId}
+                    artifactId={mockupContext.artifactId}
+                    versionId={mockupContext.versionId}
+                    screen={item.mockupScreen}
+                    payload={mockupContext.payload}
+                    settings={mockupContext.settings}
+                />
+            </div>
+        </div>
+    ) : undefined;
+
+    const reviewNotes = (
+        <ScreenReviewNotes
+            issues={reviewModel.issues}
+            risks={risks}
+            dismissed={dismissed}
+            riskResolutions={riskResolutions}
+            onDismissIssue={handleDismissIssue}
+            onResolveRisk={handleResolveRisk}
+            onNavigate={(tab) => onTabChange(tab)}
+            onEdit={() => { onTabChange('overview'); setEditing(true); }}
+            readOnly={!onSaveScreenEdit}
+        />
+    );
+
     return (
-        <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-4">
+        <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-3">
+            {/* Header — kept small so the screen content appears immediately. */}
             <div>
                 <button
                     type="button"
@@ -275,63 +273,36 @@ export function ScreenDetailView({
                 >
                     <ArrowLeft size={13} /> All screens
                 </button>
-                <div className="mt-2 flex items-start justify-between gap-3 flex-wrap">
+                <div className="mt-2 flex items-center justify-between gap-3 flex-wrap">
                     <div className="min-w-0">
-                        <h2 className="text-lg font-bold text-neutral-900 leading-tight">
-                            {screen.name}
-                        </h2>
-                        <p className="text-[11px] uppercase tracking-wide text-neutral-400 mt-0.5">
-                            {item.sectionTitle}
-                            {renamed && (
-                                <span className="normal-case tracking-normal text-neutral-400">
-                                    {' '}· generated as &ldquo;{item.baseScreen.name}&rdquo;
-                                </span>
-                            )}
-                        </p>
-                    </div>
-                    <div className="flex items-center gap-1.5 shrink-0">
-                        {item.isEdited && (
-                            <span className="text-[10px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-200 px-1.5 py-0.5 rounded">
-                                Edited
-                            </span>
+                        <h2 className="text-lg font-bold text-neutral-900 leading-tight">{screen.name}</h2>
+                        {renamed && (
+                            <p className="text-[11px] text-neutral-400 mt-0.5">
+                                generated as &ldquo;{item.baseScreen.name}&rdquo;
+                            </p>
                         )}
-                        {screen.type && screen.type !== 'screen' && (
-                            <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
-                                {screen.type}
-                            </span>
-                        )}
-                        {readiness && <ReadinessBadge readiness={readiness} />}
-                        <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_STYLES[priority]}`}>
-                            {priority}
-                        </span>
                     </div>
+                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium shrink-0 ${PRIORITY_STYLES[priority]}`}>
+                        {priority}
+                    </span>
                 </div>
-                {readiness && readiness.status !== 'implementation_ready' && readiness.reasons.length > 0 && (
-                    <p className="mt-1.5 text-[11px] text-amber-700">
-                        {readiness.source === 'derived' ? 'Estimated status — ' : ''}
-                        {readiness.reasons.join(' ')}
-                    </p>
-                )}
             </div>
 
-            <ScreenReviewPanel
+            {/* The one review action. */}
+            <ScreenConfirmPanel
                 model={reviewModel}
-                onAccept={handleAccept}
-                onRequestChanges={handleRequestChanges}
-                onMarkImplementationReady={handleMarkImplReady}
-                onToggleChecklist={handleToggleChecklist}
-                onReReview={handleReReview}
+                confirmedFromPrd={mockupContext?.prdVersionLabel}
+                onConfirm={handleConfirm}
+                onEditAgain={handleEditAgain}
+                onReconfirm={handleReconfirm}
                 readOnly={!onSaveScreenEdit}
             />
-
-            <ScreenDownstreamImpactSection impact={downstreamImpact} />
 
             <ScreenDetailTabs
                 active={activeTab}
                 onChange={onTabChange}
                 flowRefCount={item.relatedFlows.length}
                 hasMockup={Boolean(item.mockupScreen)}
-                handoffTone={handoffTone}
             />
 
             {activeTab === 'overview' && (
@@ -367,25 +338,21 @@ export function ScreenDetailView({
                             onCancel={() => setEditing(false)}
                         />
                     ) : (
-                        <>
-                            <ScreenOverviewPanel
-                                item={item}
-                                readiness={readiness}
-                                features={features}
-                                imageContext={screenImageContext}
-                                imageStorageName={item.baseScreen.name}
-                            />
-                            {item.edit?.notes && (
-                                <div className="bg-violet-50/60 rounded-lg border border-violet-200 p-3">
-                                    <div className="text-[10px] uppercase tracking-wide text-violet-600 mb-1">
-                                        Notes
-                                    </div>
-                                    <p className="text-xs text-neutral-700 whitespace-pre-wrap">
-                                        {item.edit.notes}
-                                    </p>
-                                </div>
-                            )}
-                        </>
+                        <ScreenOverviewPanel
+                            item={item}
+                            readiness={readiness}
+                            features={features}
+                            imageContext={screenImageContext}
+                            imageStorageName={item.baseScreen.name}
+                            primaryMockup={primaryMockup}
+                            reviewNotes={reviewNotes}
+                        />
+                    )}
+                    {item.edit?.notes && !editing && (
+                        <div className="bg-violet-50/60 rounded-lg border border-violet-200 p-3">
+                            <div className="text-[10px] uppercase tracking-wide text-violet-600 mb-1">Notes</div>
+                            <p className="text-xs text-neutral-700 whitespace-pre-wrap">{item.edit.notes}</p>
+                        </div>
                     )}
                 </div>
             )}
@@ -414,8 +381,6 @@ export function ScreenDetailView({
                     generatedVariants={generatedVariants}
                 />
             )}
-
-            {activeTab === 'handoff' && <ScreenHandoffView handoff={handoff} />}
         </div>
     );
 }
@@ -427,8 +392,8 @@ const EDIT_PRIORITIES: ScreenPriority[] = ['P0', 'P1', 'P2', 'P3'];
 /**
  * Minimal, rename-safe metadata editor. Saves an overlay (see
  * ScreenMetadataEdit) containing only the fields that differ from the stored
- * generated screen — an overlay equal to the generated content saves as null,
- * clearing the edit. The generated artifact content is never rewritten.
+ * generated screen. Editing a CONFIRMED screen automatically returns it to
+ * Needs Review — there is only ever one review state at a time.
  */
 function ScreenEditForm({
     item, onSave, onCancel,
@@ -443,26 +408,26 @@ function ScreenEditForm({
     const [userIntent, setUserIntent] = useState(screen.userIntent ?? '');
     const [priority, setPriority] = useState<ScreenPriority>(stylablePriority(screen.priority));
     const [notes, setNotes] = useState(item.edit?.notes ?? '');
-    const [reviewStatus, setReviewStatus] = useState<ScreenReviewStatus | ''>(item.edit?.reviewStatus ?? '');
 
     const handleSave = () => {
         // Start from the existing overlay so fields this form doesn't edit
-        // (mockupVariantStatus, anything written by newer code) survive a
-        // read-modify-write — then own only this form's fields.
+        // survive a read-modify-write, then own only this form's fields.
         const edit: ScreenMetadataEdit = { ...(item.edit ?? {}) };
         delete edit.name;
         delete edit.purpose;
         delete edit.userIntent;
         delete edit.priority;
         delete edit.notes;
-        delete edit.reviewStatus;
         const trimmedName = name.trim();
         if (trimmedName && trimmedName !== baseScreen.name) edit.name = trimmedName;
         if (purpose !== (baseScreen.purpose ?? '')) edit.purpose = purpose;
         if (userIntent !== (baseScreen.userIntent ?? '')) edit.userIntent = userIntent;
         if (priority !== stylablePriority(baseScreen.priority)) edit.priority = priority;
         if (notes.trim()) edit.notes = notes;
-        if (reviewStatus) edit.reviewStatus = reviewStatus;
+        // Editing returns a confirmed screen to Needs Review.
+        if (edit.reviewStatus === 'accepted' || edit.reviewStatus === 'implementation_ready') {
+            edit.reviewStatus = 'needs_review';
+        }
         onSave(Object.keys(edit).length > 0 ? edit : null);
     };
 
@@ -471,9 +436,9 @@ function ScreenEditForm({
     return (
         <div className="bg-white rounded-lg border border-indigo-200 p-4 space-y-3">
             <p className="text-[11px] text-neutral-500">
-                Edits are saved as an overlay on this artifact version — the generated
-                content is kept, and mockups, flows, and uploaded images stay attached
-                even when you rename the screen.
+                Edits are saved as an overlay on this artifact version — the generated content is kept,
+                and mockups, flows, and uploaded images stay attached even when you rename the screen.
+                Saving returns the screen to Needs Review.
             </p>
             <label className="block">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-400">Name</span>
@@ -484,34 +449,14 @@ function ScreenEditForm({
                 <textarea className={field} rows={2} value={purpose} onChange={e => setPurpose(e.target.value)} />
             </label>
             <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">User intent</span>
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">User goal</span>
                 <textarea className={field} rows={2} value={userIntent} onChange={e => setUserIntent(e.target.value)} />
             </label>
             <label className="block">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-400">Priority</span>
-                <select
-                    className={field}
-                    value={priority}
-                    onChange={e => setPriority(e.target.value as ScreenPriority)}
-                >
+                <select className={field} value={priority} onChange={e => setPriority(e.target.value as ScreenPriority)}>
                     {EDIT_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
-            </label>
-            <label className="block">
-                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Review status</span>
-                <select
-                    className={field}
-                    value={reviewStatus}
-                    onChange={e => setReviewStatus(e.target.value as ScreenReviewStatus | '')}
-                >
-                    <option value="">Estimate automatically (default)</option>
-                    {(Object.keys(REVIEW_STATUS_LABELS) as ScreenReviewStatus[]).map(s => (
-                        <option key={s} value={s}>{REVIEW_STATUS_LABELS[s]}</option>
-                    ))}
-                </select>
-                <span className="block mt-0.5 text-[11px] text-neutral-400">
-                    Setting a status overrides the estimated one — derived warnings stay visible.
-                </span>
             </label>
             <label className="block">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-400">Notes (internal)</span>
@@ -524,18 +469,10 @@ function ScreenEditForm({
                 />
             </label>
             <div className="flex items-center justify-end gap-2 pt-1">
-                <button
-                    type="button"
-                    onClick={onCancel}
-                    className="px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 rounded-md transition"
-                >
+                <button type="button" onClick={onCancel} className="px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 rounded-md transition">
                     Cancel
                 </button>
-                <button
-                    type="button"
-                    onClick={handleSave}
-                    className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition font-medium"
-                >
+                <button type="button" onClick={handleSave} className="px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition font-medium">
                     Save
                 </button>
             </div>
@@ -554,8 +491,6 @@ function FlowTab({
     availableScreenSlugs: ReadonlySet<string>;
     features?: Feature[];
 }) {
-    // Feature-chip drawer, mirroring UserFlowsRenderer's wiring so StepCard
-    // chips stay functional inside the detail view.
     const featuresById = useMemo(() => {
         if (!features) return undefined;
         const map = new Map<string, Feature>();
@@ -596,7 +531,6 @@ function FlowTab({
             {flowGroups.map(group => {
                 const highlighted = new Set(group.steps.map(s => s.stepIndex));
                 const repeated = group.steps.length > 1;
-                // Per-step issue links, mirroring UserFlowsRenderer.
                 const inlineByStep = new Map<number, FlowIssue[]>();
                 const issuesByStep = new Map<number, number>();
                 for (const issue of group.flow.issues) {
@@ -612,9 +546,7 @@ function FlowTab({
                 return (
                     <section key={group.flowIndex}>
                         <header className="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
-                            <h3 className="text-sm font-semibold text-neutral-800">
-                                {group.flow.title}
-                            </h3>
+                            <h3 className="text-sm font-semibold text-neutral-800">{group.flow.title}</h3>
                             <span className="text-[11px] text-neutral-400">
                                 Flow {group.flowIndex + 1} · appears in{' '}
                                 {group.steps.length === 1
@@ -632,9 +564,6 @@ function FlowTab({
                             <ul className="space-y-1.5">
                                 {group.steps.map(({ step, stepIndex }, appearanceIdx) => {
                                     const decisionCount = step.decisions.length;
-                                    // The flow only knows this screen by name, so a repeated
-                                    // appearance is labeled by its step position; the User/System
-                                    // lines below distinguish the phase where the flow does.
                                     return (
                                         <li key={stepIndex} className="text-xs text-neutral-700">
                                             <div className="flex items-center gap-1.5 flex-wrap">
@@ -713,9 +642,8 @@ function FlowTab({
 
 /**
  * One flow decision rendered branch-aware: when the decision text parses into
- * condition → outcome pairs (see parseDecisionBranches) they render as an
- * explicit branch list; otherwise the raw text shows with an honest
- * "branch outcomes not specified" nudge — never an invented branch.
+ * condition → outcome pairs they render as an explicit branch list; otherwise
+ * the raw text shows with an honest "branch outcomes not specified" nudge.
  */
 function DecisionBranches({ decision }: { decision: string }) {
     const branches = parseDecisionBranches(decision);
@@ -726,7 +654,7 @@ function DecisionBranches({ decision }: { decision: string }) {
                     <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">Decision</span>
                     {decision}
                 </span>
-                <span className="text-amber-700"> — branch outcomes not specified in the flow. Review recommended.</span>
+                <span className="text-amber-700"> — branch outcomes not specified in the flow.</span>
             </div>
         );
     }
@@ -766,7 +694,6 @@ function MockupsTab({
 }) {
     const [linkTarget, setLinkTarget] = useState('');
 
-    // Derived viewport × state variant grid (see src/lib/mockupVariants.ts).
     const variants = buildScreenMockupVariants(item, {
         platform: mockupContext?.settings.platform,
         mobileRelevant,
@@ -775,10 +702,6 @@ function MockupsTab({
     });
     const variantSummary = summarizeScreenVariants(variants);
 
-    // Persist a per-variant status into the screen's edit overlay (null
-    // clears the override back to the tracked/derived status). Merges into
-    // the existing edit so name/notes/reviewStatus and any unknown overlay
-    // fields survive untouched.
     const setVariantStatus = onSaveScreenEdit
         ? (variantId: string, status: 'accepted' | 'not_needed' | null) => {
             const current: ScreenMetadataEdit = { ...(item.edit ?? {}) };
@@ -835,89 +758,88 @@ function MockupsTab({
 
     return (
         <div className="space-y-3">
-        <div className="bg-white rounded-xl border border-dashed border-neutral-300 p-8 text-center">
-            <ImageIcon size={20} className="text-neutral-300 mx-auto mb-2" />
-            <p className="text-sm font-medium text-neutral-700">
-                No mockup has been generated for this screen yet.
-            </p>
-            <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
-                Mockup generation covers the key screens by default. Add this screen to the
-                mockup set to generate an AI image or upload your own — adding it is free;
-                image generation stays a separate, clearly-priced action.
-            </p>
-            {onAddToMockups && (
-                <button
-                    type="button"
-                    onClick={onAddToMockups}
-                    className="mt-4 inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition font-medium"
-                >
-                    <ImageIcon size={14} /> Add to mockups
-                </button>
-            )}
-            {onLinkMockup && unmatchedMockups && unmatchedMockups.length > 0 && (
-                <div className="mt-5 pt-4 border-t border-neutral-200 max-w-sm mx-auto">
-                    <p className="text-[11px] text-neutral-500 mb-2">
-                        Or link an existing mockup that lost its screen match
-                        (e.g. after a regeneration renamed things):
-                    </p>
-                    <div className="flex items-center justify-center gap-2 flex-wrap">
-                        <select
-                            value={linkTarget}
-                            onChange={e => setLinkTarget(e.target.value)}
-                            aria-label="Orphaned mockup to link to this screen"
-                            className="text-xs border border-neutral-300 rounded-md px-2 py-1.5 max-w-[220px]"
-                        >
-                            <option value="">Choose mockup…</option>
-                            {unmatchedMockups.map(m => (
-                                <option key={m.id} value={m.id}>{m.name}</option>
-                            ))}
-                        </select>
-                        <button
-                            type="button"
-                            disabled={!linkTarget}
-                            onClick={() => linkTarget && onLinkMockup(linkTarget)}
-                            className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-md bg-neutral-100 hover:bg-neutral-200 text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
-                        >
-                            <Link2 size={12} /> Link mockup
-                        </button>
-                    </div>
-                </div>
-            )}
-        </div>
-
-        {/* Recommended variants discovery — even without a mockup, show what
-            this screen probably wants so missing viewports/states are visible. */}
-        {variantSummary.recommended > 0 && (
-            <div className="bg-white rounded-lg border border-neutral-200 p-4">
-                <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
-                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                        Recommended variants
-                    </h4>
-                    <span className="text-[10px] text-neutral-400">
-                        {variantSummary.generated} of {variantSummary.recommended} generated
-                    </span>
-                </div>
-                <ul className="space-y-1 text-xs">
-                    {variants.filter(v => v.required).map(v => (
-                        <li key={v.id} className="flex items-center justify-between gap-2">
-                            <span className="text-neutral-700">{formatVariantLabel(v)}</span>
-                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${
-                                v.status === 'missing'
-                                    ? 'text-amber-700 bg-amber-50 ring-amber-200'
-                                    : 'text-emerald-700 bg-emerald-50 ring-emerald-200'
-                            }`}>
-                                {VARIANT_STATUS_LABELS[v.status]}
-                            </span>
-                        </li>
-                    ))}
-                </ul>
-                <p className="text-[11px] text-neutral-400 mt-2">
-                    Derived from this screen&rsquo;s priority and documented states — tracked from
-                    generated metadata, never from inspecting images. Add this screen to the mockups to
-                    generate individual variants.
+            <div className="bg-white rounded-xl border border-dashed border-neutral-300 p-8 text-center">
+                <ImageIcon size={20} className="text-neutral-300 mx-auto mb-2" />
+                <p className="text-sm font-medium text-neutral-700">
+                    No mockup has been generated for this screen yet.
                 </p>
+                <p className="text-xs text-neutral-500 mt-1 max-w-sm mx-auto">
+                    Mockup generation covers the key screens by default. Add this screen to the mockup set
+                    to generate an AI image or upload your own — adding it is free; image generation stays
+                    a separate, clearly-priced action.
+                </p>
+                {onAddToMockups && (
+                    <button
+                        type="button"
+                        onClick={onAddToMockups}
+                        className="mt-4 inline-flex items-center gap-1.5 text-sm px-4 py-2 rounded-md bg-indigo-600 text-white hover:bg-indigo-700 transition font-medium"
+                    >
+                        <ImageIcon size={14} /> Add to mockups
+                    </button>
+                )}
+                {onLinkMockup && unmatchedMockups && unmatchedMockups.length > 0 && (
+                    <div className="mt-5 pt-4 border-t border-neutral-200 max-w-sm mx-auto">
+                        <p className="text-[11px] text-neutral-500 mb-2">
+                            Or link an existing mockup that lost its screen match
+                            (e.g. after a regeneration renamed things):
+                        </p>
+                        <div className="flex items-center justify-center gap-2 flex-wrap">
+                            <select
+                                value={linkTarget}
+                                onChange={e => setLinkTarget(e.target.value)}
+                                aria-label="Orphaned mockup to link to this screen"
+                                className="text-xs border border-neutral-300 rounded-md px-2 py-1.5 max-w-[220px]"
+                            >
+                                <option value="">Choose mockup…</option>
+                                {unmatchedMockups.map(m => (
+                                    <option key={m.id} value={m.id}>{m.name}</option>
+                                ))}
+                            </select>
+                            <button
+                                type="button"
+                                disabled={!linkTarget}
+                                onClick={() => linkTarget && onLinkMockup(linkTarget)}
+                                className="inline-flex items-center gap-1 px-3 py-1.5 text-xs rounded-md bg-neutral-100 hover:bg-neutral-200 text-neutral-700 disabled:opacity-50 disabled:cursor-not-allowed transition"
+                            >
+                                <Link2 size={12} /> Link mockup
+                            </button>
+                        </div>
+                    </div>
+                )}
             </div>
-        )}
+
+            {/* Recommended variants discovery — even without a mockup, show what
+                this screen probably wants so missing viewports/states are visible. */}
+            {variantSummary.recommended > 0 && (
+                <div className="bg-white rounded-lg border border-neutral-200 p-4">
+                    <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                            Recommended variants
+                        </h4>
+                        <span className="text-[10px] text-neutral-400">
+                            {variantSummary.generated} of {variantSummary.recommended} generated
+                        </span>
+                    </div>
+                    <ul className="space-y-1 text-xs">
+                        {variants.filter(v => v.required).map(v => (
+                            <li key={v.id} className="flex items-center justify-between gap-2">
+                                <span className="text-neutral-700">{formatVariantLabel(v)}</span>
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${
+                                    v.status === 'missing'
+                                        ? 'text-amber-700 bg-amber-50 ring-amber-200'
+                                        : 'text-emerald-700 bg-emerald-50 ring-emerald-200'
+                                }`}>
+                                    {VARIANT_STATUS_LABELS[v.status]}
+                                </span>
+                            </li>
+                        ))}
+                    </ul>
+                    <p className="text-[11px] text-neutral-400 mt-2">
+                        Derived from this screen&rsquo;s priority and documented states. Add this screen to the
+                        mockups to generate individual variants.
+                    </p>
+                </div>
+            )}
         </div>
     );
 }

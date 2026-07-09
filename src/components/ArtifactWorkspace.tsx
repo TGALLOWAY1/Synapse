@@ -305,7 +305,7 @@ export function ArtifactWorkspace({
     const selectedScreenId = searchParams.get('screen');
     const rawScreenTab = searchParams.get('screenTab');
     const screenTab: ScreenDetailTab =
-        rawScreenTab === 'flow' || rawScreenTab === 'mockups' || rawScreenTab === 'handoff'
+        rawScreenTab === 'flow' || rawScreenTab === 'mockups'
             ? rawScreenTab : 'overview';
 
     // Update the screen params, preserving unrelated query params (debug
@@ -956,8 +956,6 @@ export function ArtifactWorkspace({
                         mockupStatus={slotStatusFor('mockup')}
                         onRetryMockup={() => handleRetrySlot('mockup')}
                         features={structuredPRD.features}
-                        traceDataModel={traceDataModel}
-                        tracePlan={tracePlan}
                         onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
                         onAddToMockups={
                             mockupDetailContext && !detailItem.mockupScreen

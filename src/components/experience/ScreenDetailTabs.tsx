@@ -2,8 +2,12 @@
 // Controlled — the active tab lives in ArtifactWorkspace's local state so
 // navigation from a flow node can land on a specific tab. Mirrors the
 // underline-tab idiom already used by ProjectWorkspace's right-rail tabs.
+//
+// The Screens artifact is a product-design review surface: Overview (the
+// screen itself), Flow, and Mockups. The developer Handoff tab was moved out —
+// implementation planning lives in the Implementation Plan artifact.
 
-export type ScreenDetailTab = 'overview' | 'flow' | 'mockups' | 'handoff';
+export type ScreenDetailTab = 'overview' | 'flow' | 'mockups';
 
 interface Props {
     active: ScreenDetailTab;
@@ -12,24 +16,15 @@ interface Props {
     flowRefCount: number;
     /** Whether a matching mockup screen exists — shown as a subtle dot. */
     hasMockup: boolean;
-    /** Phase 5A: implementation-handoff readiness — colors the Handoff tab dot. */
-    handoffTone?: 'good' | 'warn' | 'block';
 }
 
 const TABS: Array<{ id: ScreenDetailTab; label: string }> = [
     { id: 'overview', label: 'Overview' },
     { id: 'flow', label: 'Flow' },
     { id: 'mockups', label: 'Mockups' },
-    { id: 'handoff', label: 'Handoff' },
 ];
 
-const HANDOFF_DOT: Record<'good' | 'warn' | 'block', string> = {
-    good: 'bg-emerald-500',
-    warn: 'bg-amber-500',
-    block: 'bg-red-500',
-};
-
-export function ScreenDetailTabs({ active, onChange, flowRefCount, hasMockup, handoffTone }: Props) {
+export function ScreenDetailTabs({ active, onChange, flowRefCount, hasMockup }: Props) {
     return (
         <div
             role="tablist"
@@ -63,13 +58,6 @@ export function ScreenDetailTabs({ active, onChange, flowRefCount, hasMockup, ha
                             <span
                                 className="w-1.5 h-1.5 rounded-full bg-emerald-500"
                                 title="A mockup exists for this screen"
-                                aria-hidden="true"
-                            />
-                        )}
-                        {tab.id === 'handoff' && handoffTone && (
-                            <span
-                                className={`w-1.5 h-1.5 rounded-full ${HANDOFF_DOT[handoffTone]}`}
-                                title="Implementation handoff readiness"
                                 aria-hidden="true"
                             />
                         )}

@@ -849,6 +849,13 @@ export interface ScreenReviewMeta {
     overrideReason?: string;
     /** Signature captured at accept / implementation-ready (re-review baseline). */
     signature?: ScreenReviewSignature;
+    /** Review-note issue ids the user marked Addressed / Dismissed (so a resolved
+     * note stops re-surfacing). Additive & back-compat — legacy overlays omit it. */
+    dismissedIssues?: string[];
+    /** Product-owner answers to "how should this be handled?" for a screen risk,
+     * keyed by a stable slug of the risk description. Becomes structured input the
+     * downstream artifacts can consume. Additive & back-compat. */
+    riskResolutions?: Record<string, string>;
     updatedAt?: string;
     acceptedAt?: string;
     requestedChangesAt?: string;
