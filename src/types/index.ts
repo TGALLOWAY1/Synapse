@@ -1335,6 +1335,67 @@ export type MockupImageRecord = {
     generatedAt: number;
 };
 
+// --- Mockup variant coverage manifest (Phase 3B) ---
+//
+// A structured, GENERATION-TIME self-report of what a single mockup variant
+// (viewport × state) was asked to render. This is NOT computer vision — it is
+// derived deterministically from the generation-request spec and is always
+// labeled as an estimate (`estimated: true`). Legacy mockups have no manifest
+// and stay "unknown"; the UI never claims visual verification.
+export type MockupCoverageItemStatus =
+    | 'covered' | 'partial' | 'missing' | 'unknown' | 'not_applicable';
+
+export type MockupCoverageOverallStatus =
+    | 'aligned' | 'partial' | 'missing_items' | 'unknown';
+
+export interface MockupCoverageItem {
+    label: string;
+    status: MockupCoverageItemStatus;
+    /** Short note on why the item carries its status (e.g. "requested in the
+     * generation spec"). Never a claim about the rendered pixels. */
+    evidence?: string;
+}
+
+export interface MockupCoverageManifest {
+    variant: {
+        viewport: 'desktop' | 'mobile' | 'tablet';
+        stateName: string;
+    };
+    overallStatus: MockupCoverageOverallStatus;
+    /** Always true today — the manifest is a generation-time self-report,
+     * never a visual inspection of the rendered image. */
+    estimated: boolean;
+    uiRegions: MockupCoverageItem[];
+    states: MockupCoverageItem[];
+    userActions: MockupCoverageItem[];
+    acceptanceCriteria: MockupCoverageItem[];
+    warnings: string[];
+}
+
+// --- Mockup variant image records (Phase 3B) ---
+//
+// Per-variant AI image + coverage manifest, stored in a DEDICATED IndexedDB
+// store (src/lib/mockupVariantImageStore.ts) keyed by
+// `${versionId}:${screenId}:${variantId}:${quality}` so generating one variant
+// never overwrites another (e.g. Mobile · Default vs Desktop · Default). This
+// is intentionally independent of the legacy single-image MockupImageRecord
+// path, which keeps rendering the "Desktop · Default" variant untouched.
+export type MockupVariantImageRecord = {
+    key: string;              // `${versionId}:${screenId}:${variantId}:${quality}`
+    projectId: string;
+    artifactId: string;
+    versionId: string;
+    screenId: string;
+    variantId: string;        // overlay-compatible id: `mobile:default`, `state:<slug>`, …
+    viewport: 'desktop' | 'mobile' | 'tablet';
+    stateName: string;
+    dataUrl: string;          // `data:image/png;base64,...`
+    quality: MockupImageQuality;
+    prompt: string;           // prompt sent to gpt-image-2 (for traceability)
+    coverageManifest?: MockupCoverageManifest;
+    generatedAt: number;
+};
+
 // --- Screen Inventory user-uploaded images ---
 //
 // Per-screen image history attached to a Screen Inventory artifact. Users

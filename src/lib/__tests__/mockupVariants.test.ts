@@ -260,6 +260,54 @@ describe('buildMockupVariantCoverageSummary', () => {
         expect(buildMockupVariantCoverageSummary(index)).toBeNull();
     });
 
+    it('counts manifest-backed generated variants separately from legacy-unknown coverage', () => {
+        const index = buildScreenIndex(
+            makeInventory([p0Screen]),
+            [],
+            makeMockupPayload([{ id: 'm1', name: 'Home Dashboard', sourceScreenId: 'scr-home' }]),
+        );
+        // The Mobile · Default variant is generated with an "aligned" manifest.
+        const rollup = buildMockupVariantCoverageSummary(index, {
+            generatedVariantsByScreen: (id) =>
+                id === 'scr-home' ? { 'mobile:default': { coverage: 'aligned' } } : undefined,
+        })!;
+        expect(rollup.manifestBackedGenerated).toBe(1);
+        // Legacy default mockup still has no manifest → unknown.
+        expect(rollup.legacyUnknownMockups).toBe(1);
+        // Mobile default now counts as generated + P0 mobile covered.
+        expect(rollup.p0WithMobile).toBe(1);
+        expect(rollup.recommendedGenerated).toBe(2); // desktop default (legacy) + mobile default
+    });
+});
+
+// --- Phase 3B: generated-variant threading ------------------------------------
+
+describe('buildScreenMockupVariants with generatedVariants (Phase 3B)', () => {
+    it('flips a missing non-default variant to generated with manifest coverage', () => {
+        const index = buildScreenIndex(makeInventory([p0Screen]), [], null);
+        const variants = buildScreenMockupVariants(index.items[0], {
+            generatedVariants: { 'mobile:default': { coverage: 'aligned' } },
+        });
+        const mobile = variants.find(v => v.id === 'mobile:default')!;
+        expect(mobile.status).toBe('generated');
+        expect(mobile.source).toBe('variant');
+        expect(mobile.coverageStatus).toBe('aligned');
+        // Other variants stay missing.
+        expect(variants.find(v => v.id === 'state:loading')!.status).toBe('missing');
+    });
+
+    it('never applies generatedVariants to the legacy default slot', () => {
+        const index = buildScreenIndex(makeInventory([supportingScreen]), [], null);
+        // Even if a stray "default" entry exists, the default slot reads the
+        // legacy mockup join, not this map.
+        const variants = buildScreenMockupVariants(index.items[0], {
+            generatedVariants: { 'default': { coverage: 'aligned' } },
+        });
+        const dflt = variants.find(v => v.id === 'default')!;
+        expect(dflt.status).toBe('missing');
+        expect(dflt.source).toBe('derived_missing');
+    });
+
     it('drops not_needed variants from the recommended total and treats not_needed mobile as handled', () => {
         const index = buildScreenIndex(makeInventory([p0Screen]), [], null, {
             'scr-home': {

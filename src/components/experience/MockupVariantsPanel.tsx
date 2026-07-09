@@ -15,9 +15,11 @@
 
 import { useMemo, useState } from 'react';
 import {
-    CheckCircle2, ImageOff, Info, Layers, Monitor, Smartphone, Tablet,
+    CheckCircle2, Info, Layers, Monitor, ShieldQuestion, Smartphone, Tablet,
 } from 'lucide-react';
-import type { MockupPlatform } from '../../types';
+import type {
+    MockupCoverageItem, MockupCoverageItemStatus, MockupCoverageManifest, MockupPlatform,
+} from '../../types';
 import {
     COVERAGE_STATUS_LABELS,
     VARIANT_STATUS_LABELS,
@@ -28,8 +30,11 @@ import {
     type ScreenMockupVariantSummary,
 } from '../../lib/mockupVariants';
 import { buildMockupSpecCoverage } from '../../lib/screenReadiness';
+import { buildVariantGenerationRequest, type VariantRequestContext } from '../../lib/mockupVariantRequest';
+import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import type { ScreenExperienceItem } from '../../lib/screenExperience';
 import { MockupScreenImage } from '../mockups/MockupScreenImage';
+import { MockupVariantImage } from './MockupVariantImage';
 import type { ScreenDetailMockupContext } from './ScreenDetailView';
 
 const VIEWPORT_ICON: Record<MockupViewport, typeof Monitor> = {
@@ -191,11 +196,40 @@ function VariantDetail({
     onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
 }) {
     const primaryGenerated = holdsGeneratedImage(variant, Boolean(item.mockupScreen));
+    // The default variant keeps the legacy MockupScreenImage; every other
+    // variant (mobile/desktop default, state variants) uses the Phase 3B
+    // per-variant generation path.
+    const isVariantPath = variant.id !== 'default';
+
     const metaParts = [
         PLATFORM_LABELS[mockupContext.settings.platform],
         mockupContext.prdVersionLabel ? `Generated from PRD ${mockupContext.prdVersionLabel}` : null,
         mockupContext.versionNumber ? `Mockup v${mockupContext.versionNumber}` : null,
     ].filter(Boolean);
+
+    // Variant-specific generation request (Phase 3B). Derived from the effective
+    // screen + this variant + the mockup context (product title/summary,
+    // fidelity, sibling default mockup for visual consistency).
+    const requestContext: VariantRequestContext = {
+        projectName: mockupContext.payload.title,
+        productSummary: mockupContext.payload.summary,
+        fidelity: mockupContext.settings.fidelity,
+        siblingMockup: item.mockupScreen,
+    };
+    const variantRequest = useMemo(
+        () => (isVariantPath
+            ? buildVariantGenerationRequest(item.screen, item.id, variant, requestContext)
+            : null),
+        // requestContext is derived from stable mockupContext fields.
+        // eslint-disable-next-line react-hooks/exhaustive-deps
+        [isVariantPath, item.screen, item.id, variant, mockupContext.payload.title,
+            mockupContext.payload.summary, mockupContext.settings.fidelity, item.mockupScreen],
+    );
+
+    // Manifest-backed coverage for this variant (from the per-variant image store).
+    const variantRecord = useMockupVariantImageStore(
+        s => (isVariantPath ? s.getBestRecord(mockupContext.versionId, item.id, variant.id) : undefined),
+    );
 
     return (
         <div className="bg-white rounded-xl border border-neutral-200 p-4 space-y-3">
@@ -206,6 +240,7 @@ function VariantDetail({
                         Status: {VARIANT_STATUS_LABELS[variant.status]}
                         {variant.userSet && ' (set by you)'}
                         {variant.status === 'generated' && variant.source === 'legacy' && ' · Source: existing mockup'}
+                        {variant.status === 'generated' && variant.source === 'variant' && ' · Source: generated variant'}
                     </p>
                 </div>
                 <VariantActions variant={variant} onSetVariantStatus={onSetVariantStatus} />
@@ -228,20 +263,15 @@ function VariantDetail({
                         <p className="text-[11px] text-neutral-400">{metaParts.join(' · ')}</p>
                     )}
                 </div>
-            ) : variant.status === 'missing' ? (
-                <div className="rounded-lg border border-dashed border-neutral-300 bg-neutral-50/60 p-6 text-center">
-                    <ImageOff size={18} className="text-neutral-300 mx-auto mb-2" aria-hidden />
-                    <p className="text-xs font-medium text-neutral-700">
-                        No mockup for {formatVariantLabel(variant)} yet.
-                    </p>
-                    <p className="text-[11px] text-neutral-500 mt-1 max-w-sm mx-auto">
-                        {variant.notes[0] ?? 'Recommended for this screen.'}
-                    </p>
-                    <p className="text-[11px] text-neutral-400 mt-2">
-                        Per-variant generation lands in Phase 3B. For now, regenerate the full mockup
-                        or upload an image and mark this variant accepted.
-                    </p>
-                </div>
+            ) : isVariantPath && variantRequest && variant.status !== 'not_needed' ? (
+                <MockupVariantImage
+                    projectId={mockupContext.projectId}
+                    artifactId={mockupContext.artifactId}
+                    versionId={mockupContext.versionId}
+                    platform={mockupContext.settings.platform}
+                    variant={variant}
+                    request={variantRequest}
+                />
             ) : (
                 <div className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-4 text-center">
                     <p className="text-xs text-neutral-600">
@@ -252,8 +282,13 @@ function VariantDetail({
                 </div>
             )}
 
-            {/* Spec coverage — only for the variant that holds the real image. */}
-            <SpecCoverageSection show={primaryGenerated} specCoverage={specCoverage} />
+            {/* Coverage — manifest-backed for generated variants, spec-to-spec
+                for the legacy default, honest "unknown" otherwise. */}
+            {variantRecord?.coverageManifest ? (
+                <VariantManifestCoverage manifest={variantRecord.coverageManifest} />
+            ) : (
+                <SpecCoverageSection show={primaryGenerated} specCoverage={specCoverage} />
+            )}
 
             {/* Notes */}
             {variant.notes.length > 0 && variant.status !== 'missing' && (
@@ -266,6 +301,79 @@ function VariantDetail({
                     ))}
                 </ul>
             )}
+        </div>
+    );
+}
+
+const MANIFEST_ITEM_TONE: Record<MockupCoverageItemStatus, string> = {
+    covered: 'text-emerald-700',
+    partial: 'text-amber-700',
+    missing: 'text-amber-700',
+    unknown: 'text-neutral-500',
+    not_applicable: 'text-neutral-400',
+};
+
+const MANIFEST_ITEM_LABEL: Record<MockupCoverageItemStatus, string> = {
+    covered: 'In spec',
+    partial: 'Partial',
+    missing: 'Missing',
+    unknown: 'Unknown',
+    not_applicable: 'N/A',
+};
+
+/** Renders the generation-time coverage manifest for a generated variant. This
+ * is a self-report of the generation spec, NOT a visual inspection — the copy
+ * says so explicitly. */
+function VariantManifestCoverage({ manifest }: { manifest: MockupCoverageManifest }) {
+    const groups: Array<{ label: string; items: MockupCoverageItem[] }> = [
+        { label: 'UI regions', items: manifest.uiRegions },
+        { label: 'User actions', items: manifest.userActions },
+        { label: 'Acceptance criteria', items: manifest.acceptanceCriteria },
+    ].filter(g => g.items.length > 0);
+
+    return (
+        <div className="rounded-lg border border-neutral-200 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+                <ShieldQuestion size={12} className="text-neutral-400" aria-hidden />
+                <h5 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Coverage manifest
+                </h5>
+                <span className="text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 bg-neutral-50 text-neutral-600 ring-neutral-200">
+                    {COVERAGE_STATUS_LABELS[manifest.overallStatus]}
+                </span>
+            </div>
+            {groups.length === 0 ? (
+                <p className="text-[11px] text-neutral-500">
+                    No spec items were documented for this screen — coverage is a best-effort estimate.
+                </p>
+            ) : (
+                <div className="space-y-2">
+                    {groups.map(group => (
+                        <div key={group.label}>
+                            <div className="text-[10px] uppercase tracking-wide text-neutral-400 mb-0.5">
+                                {group.label}
+                            </div>
+                            <ul className="space-y-0.5 text-xs">
+                                {group.items.map((item, i) => (
+                                    <li key={i} className="flex items-center justify-between gap-2">
+                                        <span className="text-neutral-700 truncate">{item.label}</span>
+                                        <span className={`shrink-0 ${MANIFEST_ITEM_TONE[item.status]}`}>
+                                            {MANIFEST_ITEM_LABEL[item.status]}
+                                        </span>
+                                    </li>
+                                ))}
+                            </ul>
+                        </div>
+                    ))}
+                </div>
+            )}
+            {manifest.warnings.map((w, i) => (
+                <p key={i} className="text-[11px] text-amber-700 mt-2">{w}</p>
+            ))}
+            <p className="text-[11px] text-neutral-400 mt-2">
+                Coverage manifest captured during generation — a structured self-report of what the
+                render was asked to include, not a visual inspection of the image.
+            </p>
         </div>
     );
 }

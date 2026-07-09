@@ -34,8 +34,9 @@ import {
 } from '../../lib/screenReadiness';
 import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
-    VARIANT_STATUS_LABELS,
+    VARIANT_STATUS_LABELS, type GeneratedVariantMap,
 } from '../../lib/mockupVariants';
+import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import { ReadinessBadge } from './ReadinessBadge';
@@ -610,10 +611,31 @@ function MockupsTab({
 }) {
     const [linkTarget, setLinkTarget] = useState('');
 
+    // Phase 3B: manifest-backed generated variants for this screen (viewport ×
+    // state), from the per-variant image store. Loaded lazily on view; a
+    // generated variant flips the derived model from missing → generated.
+    const versionId = mockupContext?.versionId;
+    const loadVariantImages = useMockupVariantImageStore(s => s.loadForVersion);
+    const variantImages = useMockupVariantImageStore(s => s.images);
+    useEffect(() => {
+        if (versionId) void loadVariantImages(versionId);
+    }, [versionId, loadVariantImages]);
+    const generatedVariants = useMemo<GeneratedVariantMap>(() => {
+        if (!versionId) return {};
+        const out: GeneratedVariantMap = {};
+        for (const key of Object.keys(variantImages)) {
+            const r = variantImages[key];
+            if (r.versionId !== versionId || r.screenId !== item.id) continue;
+            out[r.variantId] = { coverage: r.coverageManifest?.overallStatus ?? 'unknown' };
+        }
+        return out;
+    }, [variantImages, versionId, item.id]);
+
     // Derived viewport × state variant grid (see src/lib/mockupVariants.ts).
     const variants = buildScreenMockupVariants(item, {
         platform: mockupContext?.settings.platform,
         mobileRelevant,
+        generatedVariants,
     });
     const variantSummary = summarizeScreenVariants(variants);
 
@@ -755,8 +777,8 @@ function MockupsTab({
                 </ul>
                 <p className="text-[11px] text-neutral-400 mt-2">
                     Derived from this screen&rsquo;s priority and documented states — tracked from
-                    generated metadata, never from inspecting images. Single-variant generation lands
-                    in Phase 3B.
+                    generated metadata, never from inspecting images. Add this screen to the mockups to
+                    generate individual variants.
                 </p>
             </div>
         )}

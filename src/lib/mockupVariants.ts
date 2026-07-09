@@ -134,6 +134,17 @@ function isImportantState(name: string, type?: ScreenStateType): boolean {
     return IMPORTANT_STATE_KEYWORDS.some(k => lower.includes(k));
 }
 
+/** Phase 3B: real generation state for one variant, keyed by variant id.
+ * Threaded in from the per-variant image store so a derived-missing variant
+ * flips to 'generated' once its image + coverage manifest exist. */
+export interface GeneratedVariantInfo {
+    /** Coverage from the stored manifest's overallStatus. */
+    coverage: MockupVariantCoverage;
+}
+
+/** Per-screen map of variantId -> generation info (from the variant image store). */
+export type GeneratedVariantMap = Record<string, GeneratedVariantInfo>;
+
 export interface BuildVariantOptions {
     /** Generation platform of the current mockup set (mockup settings). */
     platform?: MockupPlatform;
@@ -141,6 +152,12 @@ export interface BuildVariantOptions {
      * enables a recommended Mobile default on P1 / supporting screens. P0
      * always recommends mobile regardless. */
     mobileRelevant?: boolean;
+    /** Phase 3B: manifest-backed generated variants for THIS screen, keyed by
+     * variant id. A non-default variant present here renders as 'generated'
+     * with its manifest coverage. Absent → the Phase 3A derived-missing model.
+     * The default variant's generation state still comes from the legacy
+     * mockup join (item.mockupScreen), never this map. */
+    generatedVariants?: GeneratedVariantMap;
 }
 
 interface VariantSeed {
@@ -241,22 +258,36 @@ export function buildScreenMockupVariants(
         });
     }
 
-    return seeds.map(seed => buildVariant(item, seed, overlay));
+    const generatedVariants = options.generatedVariants ?? {};
+    return seeds.map(seed => buildVariant(item, seed, overlay, generatedVariants));
 }
 
 function buildVariant(
     item: Pick<ScreenExperienceItem, 'screen' | 'baseScreen' | 'mockupScreen' | 'id'>,
     seed: VariantSeed,
     overlay: Record<string, 'accepted' | 'not_needed'>,
+    generatedVariants: GeneratedVariantMap,
 ): DerivedMockupVariant {
     const override: 'accepted' | 'not_needed' | undefined = overlay[seed.overlayKey];
-    const generated = seed.generatedSlot && Boolean(item.mockupScreen);
+    // The legacy default variant is generated iff the screen joins a mockup.
+    const legacyGenerated = seed.generatedSlot && Boolean(item.mockupScreen);
+    // A non-default variant is generated iff the per-variant image store has a
+    // record for it (Phase 3B). The default slot never reads this map — its
+    // image lives in the legacy store.
+    const variantImage = !seed.generatedSlot ? generatedVariants[seed.overlayKey] : undefined;
+    const generated = legacyGenerated || Boolean(variantImage);
     const status: MockupVariantStatus = override ?? (generated ? 'generated' : 'missing');
-    const source: MockupVariantSource = generated ? 'legacy' : 'derived_missing';
+    const source: MockupVariantSource = variantImage
+        ? 'variant'
+        : legacyGenerated ? 'legacy' : 'derived_missing';
 
     let coverageStatus: MockupVariantCoverage = 'unknown';
     const notes: string[] = [];
-    if (generated) {
+    if (variantImage) {
+        // Manifest-backed coverage captured during this variant's generation.
+        coverageStatus = variantImage.coverage;
+        notes.push('Coverage manifest captured during generation — a self-report of the generation spec, not a visual inspection of the image.');
+    } else if (legacyGenerated) {
         const rows = buildMockupSpecCoverage(item.baseScreen, item.mockupScreen?.coreUIElements);
         if (rows.length === 0) {
             coverageStatus = 'unknown';
@@ -273,7 +304,6 @@ function buildVariant(
     } else if (seed.required) {
         // Not generated, not user-marked → a recommended-but-missing variant.
         notes.push(recommendationReason(item.screen, seed));
-        notes.push('Single-variant generation lands in Phase 3B — for now, regenerate the full mockup or upload and mark this variant accepted.');
     }
 
     return {
@@ -394,13 +424,24 @@ export interface MockupVariantCoverageSummary {
     p0Total: number;
     /** Generated mockups with no captured coverage metadata (legacy). */
     legacyUnknownMockups: number;
+    /** Phase 3B: generated variants backed by a captured coverage manifest —
+     * counted separately from legacy "unknown" coverage. */
+    manifestBackedGenerated: number;
+}
+
+/** Options for the artifact-level rollup. Extends BuildVariantOptions with a
+ * per-screen generated-variant lookup so manifest-backed coverage is counted. */
+export interface CoverageSummaryOptions extends Omit<BuildVariantOptions, 'generatedVariants'> {
+    /** Resolve THIS screen's manifest-backed generated variants (variant image
+     * store), keyed by variant id. Absent → the derived-only rollup. */
+    generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
 }
 
 /** Roll up variant coverage across the whole screen index for the Screen
  * Coverage & Readiness panel. Returns null when there are no screens. */
 export function buildMockupVariantCoverageSummary(
     index: ScreenExperienceIndex,
-    options: BuildVariantOptions = {},
+    options: CoverageSummaryOptions = {},
 ): MockupVariantCoverageSummary | null {
     if (index.items.length === 0) return null;
     let recommendedGenerated = 0;
@@ -408,9 +449,13 @@ export function buildMockupVariantCoverageSummary(
     let p0WithMobile = 0;
     let p0Total = 0;
     let legacyUnknownMockups = 0;
+    let manifestBackedGenerated = 0;
+
+    const { generatedVariantsByScreen, ...variantOptions } = options;
 
     for (const item of index.items) {
-        const variants = buildScreenMockupVariants(item, options);
+        const generatedVariants = generatedVariantsByScreen?.(item.id);
+        const variants = buildScreenMockupVariants(item, { ...variantOptions, generatedVariants });
         const isP0 = normalizeScreenPriority(item.screen.priority) === 'P0';
         if (isP0) p0Total += 1;
         for (const v of variants) {
@@ -429,6 +474,9 @@ export function buildMockupVariantCoverageSummary(
             if (hasGeneratedImage(v) && v.coverageStatus === 'unknown') {
                 legacyUnknownMockups += 1;
             }
+            if (v.source === 'variant' && isGeneratedOrAccepted(v.status)) {
+                manifestBackedGenerated += 1;
+            }
         }
     }
 
@@ -438,6 +486,7 @@ export function buildMockupVariantCoverageSummary(
         p0WithMobile,
         p0Total,
         legacyUnknownMockups,
+        manifestBackedGenerated,
     };
 }
 

@@ -1628,12 +1628,40 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `buildMockupVariantCoverageSummary` (artifact rollup: recommended
     generated/total, P0 mobile coverage, legacy-unknown count) drive the UI.
     This layer is **display/discovery only — it never changes review status.**
-  Per-variant image generation is NOT wired (Phase 3B) — the Mockups-tab
-  `MockupVariantsPanel` offers only the real actions (mark accepted / not
-  needed / undo) and says coverage is "tracked from generated mockup
-  metadata"; never add a dead "generate variant" button or wording that
-  implies Synapse inspected the rendered image, and never claim visual
-  alignment / show "covered" without structured metadata (legacy → "unknown").
+  - **Phase 3B single-variant generation (`src/lib/mockupVariantRequest.ts`
+    pure + `src/lib/mockupVariantImageStore.ts` IDB +
+    `src/store/mockupVariantImageStore.ts` Zustand +
+    `src/components/experience/MockupVariantImage.tsx`)** — the Mockups tab can
+    now GENERATE / regenerate / retry ONE specific non-default variant
+    (`Mobile · Default`, `Desktop · Empty History`, …). The **default variant
+    (`id === 'default'`) is deliberately left on the legacy `MockupScreenImage`
+    path unchanged** (keys `versionId:screenId:quality`, coverage stays
+    "unknown"); every OTHER variant uses a **dedicated, independent** per-variant
+    IDB store keyed **`versionId:screenId:variantId:quality`** so generating one
+    variant never overwrites another. `buildVariantGenerationRequest` assembles a
+    variant-scoped request (viewport + state + core regions/actions/criteria/
+    risks, derived only from existing screen-contract fields);
+    `buildVariantImagePrompt` scopes the gpt-image-2 prompt to that exact viewport
+    + state (forbids other states / a generic default; realistic mobile viewport;
+    explicit empty/loading/error/permission/success guidance);
+    `buildVariantCoverageManifest` captures a **generation-time coverage
+    manifest** (`MockupCoverageManifest` in `src/types`) — a deterministic,
+    structured self-report of what the render was ASKED to include (`estimated:
+    true`), **never a visual inspection**. The manifest is stored WITH the variant
+    image and threaded back into the derived model
+    (`buildScreenMockupVariants`'s optional `generatedVariants` map →
+    `source: 'variant'`, real `coverageStatus`), the screen cards, and the
+    artifact rollup (`buildMockupVariantCoverageSummary`'s
+    `generatedVariantsByScreen` → `manifestBackedGenerated`, counted separately
+    from `legacyUnknownMockups`). **Honesty rules stand:** legacy mockups without
+    a manifest stay "unknown"; UI copy says "Coverage manifest captured during
+    generation … not a visual inspection", never "visually verified"; never show
+    "covered" without structured metadata. Generation is gated on an OpenAI key
+    (`hasOpenAIKey`) + `gpt_image` image mode — demo / keyless users see a
+    disabled action with a clear explanation, never a silent failure. The
+    per-variant store is **independent of snapshots & cross-device sync** (a
+    documented Phase 3C gap, mirroring the screen-inventory-image sync gap) — do
+    not entangle it with `snapshotClient` / `imageRefsStore`.
   `parseDecisionBranches` (arrow-form +
   if/otherwise) powers both the branch-aware Flow-tab rendering
   (`DecisionBranches`) and the `decision_missing_branches` gap — an
