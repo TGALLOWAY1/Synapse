@@ -19,6 +19,7 @@ import {
     buildScreenMockupVariants, summarizeScreenVariants,
     type GeneratedVariantMap, type MockupVariantCoverageSummary,
 } from '../../lib/mockupVariants';
+import type { VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ReadinessBadge } from './ReadinessBadge';
@@ -39,6 +40,8 @@ interface Props {
     /** Phase 3B: resolves a screen's manifest-backed generated variants so the
      * card reflects real generation (e.g. "Mobile: generated"). */
     generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
+    /** Phase 3C: current trust context for per-screen variant freshness. */
+    trustContext?: VariantTrustContext;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -51,7 +54,7 @@ interface Props {
 
 export function ScreenListView({
     index, readiness, coverage, variantCoverage, mockupPlatform, mobileRelevant,
-    generatedVariantsByScreen, onSelectScreen, onGenerateMissingMockups,
+    generatedVariantsByScreen, trustContext, onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
@@ -154,6 +157,7 @@ export function ScreenListView({
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
+                                    trustContext={trustContext}
                                     onSelect={() => onSelectScreen(item.id)}
                                 />
                             </li>
@@ -166,13 +170,14 @@ export function ScreenListView({
 }
 
 function ScreenRow({
-    item, readiness, mockupPlatform, mobileRelevant, generatedVariants, onSelect,
+    item, readiness, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
 }: {
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
+    trustContext?: VariantTrustContext;
     onSelect: () => void;
 }) {
     const { screen } = item;
@@ -183,9 +188,14 @@ function ScreenRow({
     const stateCount = screen.states?.length ?? 0;
     const riskCount = screen.risks?.length ?? 0;
     const featureRefs = screen.featureRefs ?? [];
-    const variantSummary = summarizeScreenVariants(
-        buildScreenMockupVariants(item, { platform: mockupPlatform, mobileRelevant, generatedVariants }),
-    );
+    const variants = buildScreenMockupVariants(item, {
+        platform: mockupPlatform, mobileRelevant, generatedVariants, trustContext,
+    });
+    const variantSummary = summarizeScreenVariants(variants);
+    // Compact freshness signal — count generated variants worth a review.
+    const freshReview = variants.filter(
+        v => v.freshness && (v.freshness.status === 'stale' || v.freshness.status === 'possibly_stale'),
+    ).length;
 
     return (
         <button
@@ -249,6 +259,14 @@ function ScreenRow({
                         title="No mobile mockup variant yet"
                     >
                         Mobile: missing
+                    </span>
+                )}
+                {freshReview > 0 && (
+                    <span
+                        className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full"
+                        title="One or more generated mockup variants may be stale — the screen spec, design system, or PRD changed after generation"
+                    >
+                        Freshness: {freshReview} to review
                     </span>
                 )}
                 {variantSummary.coverageUnknown && (

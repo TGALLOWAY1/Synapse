@@ -36,6 +36,7 @@ import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
     VARIANT_STATUS_LABELS, type GeneratedVariantMap,
 } from '../../lib/mockupVariants';
+import type { MockupVariantSourceSignature, VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
@@ -60,6 +61,9 @@ export interface ScreenDetailMockupContext {
     versionNumber?: number;
     /** "Version N" label of the PRD the mockup was generated from. */
     prdVersionLabel?: string;
+    /** Phase 3C: current screen/design/PRD context — captured into new variant
+     * source signatures and used to derive freshness. */
+    trustContext?: VariantTrustContext;
 }
 
 interface Props {
@@ -626,7 +630,10 @@ function MockupsTab({
         for (const key of Object.keys(variantImages)) {
             const r = variantImages[key];
             if (r.versionId !== versionId || r.screenId !== item.id) continue;
-            out[r.variantId] = { coverage: r.coverageManifest?.overallStatus ?? 'unknown' };
+            out[r.variantId] = {
+                coverage: r.coverageManifest?.overallStatus ?? 'unknown',
+                sourceSignature: r.sourceSignature as MockupVariantSourceSignature | undefined,
+            };
         }
         return out;
     }, [variantImages, versionId, item.id]);
@@ -635,6 +642,7 @@ function MockupsTab({
     const variants = buildScreenMockupVariants(item, {
         platform: mockupContext?.settings.platform,
         mobileRelevant,
+        trustContext: mockupContext?.trustContext,
         generatedVariants,
     });
     const variantSummary = summarizeScreenVariants(variants);

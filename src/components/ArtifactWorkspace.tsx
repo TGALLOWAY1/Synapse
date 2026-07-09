@@ -38,6 +38,7 @@ import {
 } from '../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
 import { buildMockupVariantCoverageSummary, type GeneratedVariantMap } from '../lib/mockupVariants';
+import type { MockupVariantSourceSignature, VariantTrustContext } from '../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
 import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
@@ -420,19 +421,34 @@ export function ArtifactWorkspace({
             const r = variantImagesMap[key];
             if (r.versionId !== mockupVersionId) continue;
             const existing = map.get(r.screenId) ?? {};
-            existing[r.variantId] = { coverage: r.coverageManifest?.overallStatus ?? 'unknown' };
+            existing[r.variantId] = {
+                coverage: r.coverageManifest?.overallStatus ?? 'unknown',
+                sourceSignature: r.sourceSignature as MockupVariantSourceSignature | undefined,
+            };
             map.set(r.screenId, existing);
         }
         return map;
     }, [variantImagesMap, mockupVersionId]);
 
+    // Phase 3C: current screen/design/PRD context for variant freshness. Primitive
+    // selects (not the wrapper object) keep the selector output reference-stable.
+    const designSystemVersionId = useProjectStore(s => selectPreferredDesignSystem(s, projectId)?.versionId);
+    const designSystemHash = useProjectStore(s => selectPreferredDesignSystem(s, projectId)?.tokensHash);
+    const trustContext = useMemo<VariantTrustContext>(() => ({
+        prdVersionId: spineVersionId,
+        screenVersionId: invPreferred?.id,
+        designSystemVersionId,
+        designSystemHash,
+    }), [spineVersionId, invPreferred?.id, designSystemVersionId, designSystemHash]);
+
     const variantCoverage = useMemo(
         () => buildMockupVariantCoverageSummary(screenIndex, {
             platform: mockupPlatform,
             mobileRelevant,
+            trustContext,
             generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
         }),
-        [screenIndex, mockupPlatform, mobileRelevant, generatedVariantsByScreen],
+        [screenIndex, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
     );
 
     // Validation issues minus the user's persisted dismissals.
@@ -568,6 +584,9 @@ export function ArtifactWorkspace({
             settings: extractMockupSettings(mockupPreferred),
             versionNumber: mockupPreferred.versionNumber,
             prdVersionLabel: mockupSpineIdx >= 0 ? `Version ${mockupSpineIdx + 1}` : undefined,
+            // Phase 3C: current trust context so the Mockups tab can capture
+            // source signatures on generation and derive per-variant freshness.
+            trustContext,
         }
         : undefined;
 
@@ -983,6 +1002,7 @@ export function ArtifactWorkspace({
                         variantCoverage={variantCoverage}
                         mockupPlatform={mockupPlatform}
                         mobileRelevant={mobileRelevant}
+                        trustContext={trustContext}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
