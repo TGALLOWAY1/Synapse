@@ -481,4 +481,18 @@ describe('Phase 5B trace-backed handoff', () => {
         const rollup = buildScreensHandoffRollup([h], new Set(['scr-landing']));
         expect(rollup.trace).toBeNull();
     });
+
+    it('an ABSENT plan (null) is never flagged as an unmatched-task defect', () => {
+        // Data model present, plan genuinely absent — must not nag "no related
+        // Implementation Plan tasks" nor count it as a P0 plan gap.
+        const h = buildScreenImplementationHandoff(handoffInput({
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: null,
+        }));
+        const contrib = buildHandoffPreflightContribution([h], new Set(['scr-landing']));
+        expect(contrib.review.some(r => /Implementation Plan tasks/i.test(r))).toBe(false);
+        const rollup = buildScreensHandoffRollup([h], new Set(['scr-landing']));
+        expect(rollup.trace?.p0PlanMissing).toBe(0);
+    });
 });

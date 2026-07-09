@@ -297,3 +297,43 @@ describe('resolvePlanForTrace', () => {
         expect(resolvePlanForTrace('')).toBeNull();
     });
 });
+
+// --- Codex review fixes ------------------------------------------------------
+
+describe('review-fix regressions', () => {
+    it('honors task-level linkedArtifacts.mockups screen links', () => {
+        const plan = { milestones: [{ id: 'm', name: 'M', tasks: [
+            {
+                id: 't', title: 'Backend wiring', description: 'No screen name here.',
+                status: 'todo', linkedArtifacts: { mockups: ['Dashboard'] },
+            },
+        ] }] } as unknown as StructuredImplementationPlan;
+        const res = matchScreenToPlan(ctx({ featureRefs: [], route: undefined, components: [], screenTitle: 'Dashboard' }), plan);
+        expect(res.matches[0].confidence).toBe('explicit');
+        expect(res.matches[0].source).toBe('explicit_screen_ref');
+    });
+
+    it('recovers Data Model feature refs from stored markdown', () => {
+        const md = [
+            '## Evaluation',
+            '',
+            'A submitted evaluation.',
+            '**Related Features:** F1',
+            '',
+            '**Key Product Fields**',
+            '',
+            '| Field | Type | Required | Description |',
+            '| --- | --- | --- | --- |',
+            '| id | string | Yes | Identifier |',
+            '| status | string | Yes | State |',
+        ].join('\n');
+        const resolved = resolveDataModelForTrace(md);
+        expect(resolved?.entities[0].featureRefs).toEqual(['F1']);
+        // And the explicit shared-feature match fires off the recovered refs.
+        const res = matchScreenToDataModel(
+            ctx({ featureRefs: ['F1: Recent evaluations'], dataLabels: [], components: [], screenTitle: 'X' }),
+            resolved,
+        );
+        expect(res.matches.find(m => m.entityName === 'Evaluation')?.confidence).toBe('explicit');
+    });
+});

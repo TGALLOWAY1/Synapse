@@ -1072,9 +1072,12 @@ export function buildScreensHandoffRollup(
         else if (oc === 'weak' || oc === 'estimated') estimated += 1;
         else missing += 1;
         if (p0Ids.has(h.screenId)) {
-            if (bridge.implementationPlan.confidence === 'missing') p0PlanMissing += 1;
-            if (bridge.dataModel.confidence === 'missing'
-                && bridge.dataModel.warnings.some(w => /No linked Data Model entities/.test(w))) {
+            // Only count a PRESENT-but-unmatched artifact (warning-gated), never
+            // an absent one — an absent plan/data-model is an info note, not a gap.
+            if (bridge.implementationPlan.warnings.some(w => /No related Implementation Plan tasks/.test(w))) {
+                p0PlanMissing += 1;
+            }
+            if (bridge.dataModel.warnings.some(w => /No linked Data Model entities/.test(w))) {
                 p0DataModelMissing += 1;
             }
         }
@@ -1145,13 +1148,15 @@ export function buildHandoffPreflightContribution(
             info.push(`${h.screenTitle} uses a derived route — confirm before building.`);
         }
         // Phase 5B: fold in the trace bridge's own review guidance for P0 screens.
+        // Only fire when the artifact was PRESENT-but-unmatched (its warning says
+        // so) — never when the artifact is simply absent (a new/partial project
+        // must not look like it has plan/data-model coverage defects).
         const bridge = h.traceBridge;
         if (bridge && isScreenP0) {
-            if (bridge.dataModel.confidence === 'missing' && bridge.dataModel.matches.length === 0
-                && bridge.dataModel.warnings.some(w => /No linked Data Model entities/.test(w))) {
+            if (bridge.dataModel.warnings.some(w => /No linked Data Model entities/.test(w))) {
                 review.push(`${h.screenTitle} has data dependencies but no matched Data Model entities.`);
             }
-            if (bridge.implementationPlan.confidence === 'missing') {
+            if (bridge.implementationPlan.warnings.some(w => /No related Implementation Plan tasks/.test(w))) {
                 review.push(`${h.screenTitle} has no related Implementation Plan tasks.`);
             }
         }

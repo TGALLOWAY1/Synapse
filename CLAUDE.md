@@ -1767,9 +1767,19 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `weak`, never "confirmed"; a **missing artifact** (`null`) is an info note, never
   a review nag; a **present-but-unmatched** artifact is review-worthy, never a
   hard blocker. Content resolvers `resolveDataModelForTrace` / `resolvePlanForTrace`
-  (pure) accept the structured JSON shapes AND legacy markdown (mapping parsed
-  entities / milestone deliverables into the typed shape) so legacy artifacts
-  still correlate by name/route/title.
+  (pure) accept the structured JSON shapes AND markdown (the standard data_model
+  storage format is markdown via `structuredArtifactToMarkdown`, so the resolver
+  recovers each entity's `**Related Features:**` line so explicit shared-feature
+  matches still fire; the plan resolver maps milestone deliverables into
+  pseudo-tasks) so stored/legacy artifacts still correlate by
+  feature/name/route/title. Plan matching also honors task-level
+  `linkedArtifacts.mockups` (screen names) in addition to milestone
+  `linkedArtifacts.screens`. **Absent vs. unmatched:** an ABSENT artifact
+  (`null`) yields `missing` confidence with an "artifact not available" warning
+  and is NEVER surfaced as a coverage gap — preflight review items and the
+  rollup `p0PlanMissing` / `p0DataModelMissing` counts are warning-gated on the
+  present-but-unmatched wording, so a new/partial project isn't flagged before
+  the downstream artifact exists.
   - **Handoff integration** (`screenImplementationHandoff.ts`).
     `buildScreenImplementationHandoff` gained optional `dataModel` /
     `implementationPlan` inputs — **`undefined` (omitted) → no bridge (Phase 5A

@@ -395,6 +395,12 @@ function flattenPlan(plan: StructuredImplementationPlan): FlatPlanTask[] {
             continue;
         }
         for (const t of tasks) {
+            // A task can name the screen it implements through
+            // `linkedArtifacts.mockups` (screen names from the inventory) as
+            // well as the milestone's `linkedArtifacts.screens` — honor both so
+            // an explicit task link is never lost when the title/description
+            // don't repeat the screen name.
+            const taskScreens = [...explicitScreens, ...(t.linkedArtifacts?.mockups ?? [])];
             out.push({
                 taskId: t.id,
                 title: t.title,
@@ -404,7 +410,7 @@ function flattenPlan(plan: StructuredImplementationPlan): FlatPlanTask[] {
                 status: t.status,
                 priority: m.priority,
                 featureRefs: t.linkedArtifacts?.prd ?? [],
-                explicitScreens,
+                explicitScreens: taskScreens,
             });
         }
     }
@@ -627,9 +633,14 @@ export function resolveDataModelForTrace(content: string | undefined | null): Da
     } catch {
         // not JSON — fall through to markdown
     }
-    // 2. Legacy markdown.
+    // 2. Legacy / stored markdown (the standard storage format —
+    //    structuredArtifactToMarkdown converts data models to markdown).
     const md = parseDataModelMarkdown(content);
     if (!md || md.entities.length === 0) return null;
+    // The markdown carries `**Related Features:**` per entity, but the parser
+    // drops it — recover the feature refs by name so explicit shared-feature
+    // matches still fire on stored artifacts.
+    const featureRefsByEntity = extractFeatureRefsFromMarkdown(content);
     const entities: DataEntity[] = md.entities.map(e => ({
         name: e.name,
         description: e.description,
@@ -637,8 +648,33 @@ export function resolveDataModelForTrace(content: string | undefined | null): Da
             name: f.name, type: f.type ?? '', required: false, description: f.description ?? '',
         }))),
         relationships: [],
+        featureRefs: featureRefsByEntity.get(e.name),
     }));
     return { entities };
+}
+
+/**
+ * Recover `## Entity` → feature-refs from data-model markdown. Entities are
+ * emitted as `## <name>` headers with an optional `**Related Features:** a, b`
+ * line before the next `## ` header (see dataModelToMarkdown). Pure text scan.
+ */
+function extractFeatureRefsFromMarkdown(markdown: string): Map<string, string[]> {
+    const out = new Map<string, string[]>();
+    let currentEntity: string | undefined;
+    for (const raw of markdown.split('\n')) {
+        const line = raw.trim();
+        const header = line.match(/^##\s+(.+?)\s*$/);
+        if (header && !line.startsWith('###')) {
+            currentEntity = header[1].trim();
+            continue;
+        }
+        const related = line.match(/^\*\*Related Features:\*\*\s*(.+)$/i);
+        if (related && currentEntity) {
+            const refs = related[1].split(',').map(s => s.trim()).filter(Boolean);
+            if (refs.length > 0) out.set(currentEntity, refs);
+        }
+    }
+    return out;
 }
 
 /**
