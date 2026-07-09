@@ -37,6 +37,7 @@ import {
     type ScreenMetadataEdit,
 } from '../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
+import { buildMockupVariantCoverageSummary } from '../lib/mockupVariants';
 import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 import { parseFlows } from './renderers/userFlows/parseFlow';
@@ -392,6 +393,17 @@ export function ArtifactWorkspace({
             structuredPRD.features,
         ),
         [screenIndex, screenReadiness, flowsPreferred, parsedFlows, structuredPRD.features],
+    );
+
+    // Phase 3A: derived mockup-variant coverage (viewport × state). Platform
+    // comes from the current mockup settings (drives the primary viewport);
+    // mobile-relevance broadens recommended Mobile variants beyond P0.
+    const mockupPlatform = mockupPreferred ? extractMockupSettings(mockupPreferred).platform : undefined;
+    const mobileRelevant = projectPlatform === 'app'
+        || mockupPlatform === 'mobile' || mockupPlatform === 'responsive';
+    const variantCoverage = useMemo(
+        () => buildMockupVariantCoverageSummary(screenIndex, { platform: mockupPlatform, mobileRelevant }),
+        [screenIndex, mockupPlatform, mobileRelevant],
     );
 
     // Validation issues minus the user's persisted dismissals.
@@ -836,6 +848,7 @@ export function ArtifactWorkspace({
                         availableScreenSlugs={screenIndex.availableSlugs}
                         screenImageContext={invScreenImageContext}
                         mockupContext={mockupDetailContext}
+                        mobileRelevant={mobileRelevant}
                         mockupStatus={slotStatusFor('mockup')}
                         onRetryMockup={() => handleRetrySlot('mockup')}
                         features={structuredPRD.features}
@@ -938,6 +951,9 @@ export function ArtifactWorkspace({
                         index={screenIndex}
                         readiness={screenReadiness}
                         coverage={screenCoverage}
+                        variantCoverage={variantCoverage}
+                        mockupPlatform={mockupPlatform}
+                        mobileRelevant={mobileRelevant}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
                             mockupDetailContext
