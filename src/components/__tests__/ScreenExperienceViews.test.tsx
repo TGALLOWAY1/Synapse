@@ -245,7 +245,7 @@ const contractPayload: MockupPayload = {
 };
 
 function renderContractDetail(
-    tab: 'overview' | 'flow' | 'mockups',
+    tab: 'overview' | 'flow' | 'mockups' | 'handoff',
     opts: {
         edits?: Parameters<typeof buildScreenIndex>[3];
         onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
@@ -715,5 +715,96 @@ describe('Phase 4B preflight panel', () => {
         );
         const { getByText } = render(<ScreenPreflightPanel preflight={preflight} />);
         expect(getByText('Ready for implementation planning')).toBeTruthy();
+    });
+});
+
+// --- Phase 5A: implementation handoff tab ------------------------------------
+
+describe('Phase 5A handoff tab', () => {
+    it('19. the Handoff tab renders the developer sections', () => {
+        const { getByText, getAllByText } = renderContractDetail('handoff', { onSaveScreenEdit: vi.fn() });
+        expect(getAllByText('Implementation handoff').length).toBeGreaterThan(0);
+        expect(getByText('Route')).toBeTruthy();
+        expect(getByText('Components')).toBeTruthy();
+        expect(getByText('QA checklist')).toBeTruthy();
+        expect(getByText('Build task checklist')).toBeTruthy();
+        // The generated handoff route renders.
+        expect(getAllByText('/submission').length).toBeGreaterThan(0);
+    });
+
+    it('20. an unsigned P0 screen shows Handoff blocked; accepting clears it', () => {
+        const blocked = renderContractDetail('handoff', { onSaveScreenEdit: vi.fn() });
+        expect(blocked.getByText('Handoff blocked')).toBeTruthy();
+        blocked.unmount();
+
+        const accepted = renderContractDetail('handoff', {
+            edits: { 'scr-submission': { reviewStatus: 'accepted' } } as never,
+            onSaveScreenEdit: vi.fn(),
+        });
+        expect(accepted.queryByText('Handoff blocked')).toBeNull();
+    });
+
+    it('21. Copy handoff produces markdown with the main sections', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+        const { getByText } = renderContractDetail('handoff', { onSaveScreenEdit: vi.fn() });
+        fireEvent.click(getByText('Copy handoff'));
+        await Promise.resolve();
+        expect(writeText).toHaveBeenCalledTimes(1);
+        const md = writeText.mock.calls[0][0] as string;
+        expect(md).toMatch(/# Submission Wizard .*Implementation Handoff/);
+        expect(md).toContain('## Route');
+        expect(md).toContain('## Build Tasks');
+    });
+
+    it('22. a screen card shows a handoff readiness chip', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getAllByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                features={FEATURES}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // The unsigned P0 Home Dashboard has a blocked handoff.
+        expect(getAllByText('Handoff blocked').length).toBeGreaterThan(0);
+    });
+
+    it('23. the coverage panel shows the handoff rollup', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                features={FEATURES}
+                onSelectScreen={() => {}}
+            />,
+        );
+        expect(getByText('Implementation handoff')).toBeTruthy();
+        expect(getByText('Implementation handoff not ready')).toBeTruthy();
+    });
+
+    it('24. the preflight includes handoff blocking items', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                features={FEATURES}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // The blocked P0 handoff surfaces in the implementation preflight.
+        expect(getByText(/Home Dashboard handoff is blocked/)).toBeTruthy();
     });
 });

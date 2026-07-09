@@ -9,7 +9,7 @@
 
 import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Layers, Workflow } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { MockupPlatform } from '../../types';
+import type { Feature, MockupPlatform } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     SCREEN_LIST_FILTERS, screenMatchesFilter,
@@ -20,9 +20,13 @@ import {
     type ScreenArtifactReviewReadiness, type ScreenReviewModel,
 } from '../../lib/screenReviewWorkflow';
 import {
-    analyzeScreensDownstream,
+    analyzeScreensDownstream, buildScreensPreflight,
     type ScreenDownstreamImpact,
 } from '../../lib/screenDownstreamImpact';
+import {
+    buildScreenImplementationHandoff, buildScreensHandoffRollup, buildHandoffPreflightContribution,
+    type ScreenImplementationHandoff,
+} from '../../lib/screenImplementationHandoff';
 import {
     buildScreenMockupVariants, summarizeScreenVariants,
     type GeneratedVariantMap, type MockupVariantCoverageSummary,
@@ -58,6 +62,8 @@ interface Props {
     generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
     /** Phase 3C: current trust context for per-screen variant freshness. */
     trustContext?: VariantTrustContext;
+    /** Canonical PRD features — enables handoff/traceability derivation (Phase 5A). */
+    features?: readonly Feature[];
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -71,7 +77,7 @@ interface Props {
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
-    generatedVariantsByScreen, trustContext, onSelectScreen, onGenerateMissingMockups,
+    generatedVariantsByScreen, trustContext, features, onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
@@ -83,6 +89,41 @@ export function ScreenListView({
         [index, reviewModels, artifactReview],
     );
     const downstreamByScreen = downstream.impactsByScreen;
+
+    // Phase 5A: per-screen implementation handoff packages (route/components/
+    // state/events/data/mockups/QA/build tasks + readiness). Derived from the
+    // review model + variant grid + downstream impact — pure & memoized.
+    const handoffByScreen = useMemo(() => {
+        const map = new Map<string, ScreenImplementationHandoff>();
+        for (const item of index.items) {
+            const model = reviewModels.get(item.id);
+            if (!model) continue;
+            const variants = buildScreenMockupVariants(item, {
+                platform: mockupPlatform, mobileRelevant,
+                generatedVariants: generatedVariantsByScreen?.(item.id), trustContext,
+            });
+            map.set(item.id, buildScreenImplementationHandoff({
+                item, reviewModel: model, variants,
+                downstream: downstreamByScreen.get(item.id), features,
+            }));
+        }
+        return map;
+    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features]);
+
+    const p0Ids = useMemo(
+        () => new Set(index.items.filter(i => i.screen.priority === 'P0' || i.screen.priority === 'core').map(i => i.id)),
+        [index],
+    );
+    const handoffRollup = useMemo(
+        () => buildScreensHandoffRollup([...handoffByScreen.values()], p0Ids),
+        [handoffByScreen, p0Ids],
+    );
+    // Fold handoff issues into the Phase 4B preflight (handoff contributions are
+    // structural — screenDownstreamImpact never imports the handoff module).
+    const preflight = useMemo(() => {
+        const contribution = buildHandoffPreflightContribution([...handoffByScreen.values()], p0Ids);
+        return buildScreensPreflight(downstream.inputs, artifactReview, contribution);
+    }, [handoffByScreen, p0Ids, downstream.inputs, artifactReview]);
 
     const filterReviewFor = (item: ScreenExperienceItem): ScreenFilterReview | undefined => {
         const model = reviewModels.get(item.id);
@@ -96,6 +137,7 @@ export function ScreenListView({
             downstreamReviewNeeded: impact
                 ? impact.summary.hasBlockingImpact || impact.summary.reviewCount > 0
                 : false,
+            handoffReadiness: handoffByScreen.get(item.id)?.readiness.status,
         };
     };
 
@@ -108,7 +150,7 @@ export function ScreenListView({
         }
         return counts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [index, readiness, reviewModels, downstreamByScreen]);
+    }, [index, readiness, reviewModels, downstreamByScreen, handoffByScreen]);
 
     if (index.items.length === 0) {
         return (
@@ -139,10 +181,11 @@ export function ScreenListView({
                 variantCoverage={variantCoverage}
                 artifactReview={artifactReview}
                 downstreamRollup={downstream.rollup}
+                handoffRollup={handoffRollup}
                 onGenerateMissingMockups={onGenerateMissingMockups}
             />
 
-            <ScreenPreflightPanel preflight={downstream.preflight} />
+            <ScreenPreflightPanel preflight={preflight} />
 
 
             <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter screens">
@@ -203,6 +246,7 @@ export function ScreenListView({
                                     readiness={readiness.get(item.id)}
                                     reviewModel={reviewModels.get(item.id)}
                                     downstreamImpact={downstreamByScreen.get(item.id)}
+                                    handoff={handoffByScreen.get(item.id)}
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
@@ -225,12 +269,13 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
 };
 
 function ScreenRow({
-    item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
+    item, readiness, reviewModel, downstreamImpact, handoff, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
 }: {
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
     reviewModel?: ScreenReviewModel;
     downstreamImpact?: ScreenDownstreamImpact;
+    handoff?: ScreenImplementationHandoff;
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
@@ -343,6 +388,7 @@ function ScreenRow({
                     </span>
                 )}
                 {downstreamImpact && <DownstreamChip impact={downstreamImpact} />}
+                {handoff && <HandoffChip status={handoff.readiness.status} />}
             </div>
 
             {reviewModel && (
@@ -436,6 +482,36 @@ function DownstreamChip({ impact }: { impact: ScreenDownstreamImpact }) {
                 : 'This screen changed or needs review — the named downstream artifacts may be worth re-checking'}
         >
             {label}
+        </span>
+    );
+}
+
+const HANDOFF_CHIP_META: Record<ScreenImplementationHandoff['readiness']['status'], {
+    label: string; tone: string; title: string;
+}> = {
+    ready: {
+        label: 'Handoff ready',
+        tone: 'text-emerald-700 bg-emerald-50 ring-emerald-200',
+        title: 'This screen has an accepted spec and a build-ready handoff package',
+    },
+    review_recommended: {
+        label: 'Handoff needs review',
+        tone: 'text-amber-700 bg-amber-50 ring-amber-200',
+        title: 'The handoff package is usable but has review items — confirm before building',
+    },
+    blocked: {
+        label: 'Handoff blocked',
+        tone: 'text-red-700 bg-red-50 ring-red-200',
+        title: 'Resolve the blockers before using this screen as a build source',
+    },
+};
+
+/** Compact implementation-handoff readiness chip (Phase 5A). */
+function HandoffChip({ status }: { status: ScreenImplementationHandoff['readiness']['status'] }) {
+    const meta = HANDOFF_CHIP_META[status];
+    return (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${meta.tone}`} title={meta.title}>
+            {meta.label}
         </span>
     );
 }

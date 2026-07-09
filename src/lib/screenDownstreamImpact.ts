@@ -116,6 +116,18 @@ export interface ScreensDownstreamAnalysis {
     preflight: ScreensPreflightModel;
 }
 
+/**
+ * Extra preflight items contributed by a higher layer (Phase 5A implementation
+ * handoff). Kept structural — screenDownstreamImpact never imports the handoff
+ * module (that would cycle), so the caller passes this in. All fields optional.
+ */
+export interface PreflightContribution {
+    blocking?: readonly string[];
+    review?: readonly string[];
+    info?: readonly string[];
+    recommendedNextActions?: readonly string[];
+}
+
 // --- Helpers -----------------------------------------------------------------
 
 const isSignedOff = (status: ScreenReviewStatus | undefined): boolean =>
@@ -399,6 +411,7 @@ const plural = (n: number, one: string, many = `${one}s`): string => (n === 1 ? 
 export function buildScreensPreflight(
     inputs: readonly DownstreamScreenInput[],
     artifactReview?: ScreenArtifactReviewReadiness,
+    handoff?: PreflightContribution,
 ): ScreensPreflightModel {
     const rollup = buildScreensDownstreamImpactRollup(inputs, artifactReview);
     const blocking: string[] = [];
@@ -448,13 +461,29 @@ export function buildScreensPreflight(
         caveats.push('Generated mockup variant images are saved on this device and in project snapshots, but do not yet sync across devices.');
     }
 
+    // Phase 5A: fold in implementation-handoff contributions (deduped). A
+    // handoff blocker pushes the status to not_ready; a handoff review item
+    // downgrades a ready status to review_recommended.
+    const dedupePush = (target: string[], items?: readonly string[]) => {
+        for (const it of items ?? []) if (it && !target.includes(it)) target.push(it);
+    };
+    dedupePush(blocking, handoff?.blocking);
+    dedupePush(review, handoff?.review);
+    dedupePush(info, handoff?.info);
+    const recommendedNextActions = [...rollup.recommendedNextActions];
+    dedupePush(recommendedNextActions, handoff?.recommendedNextActions);
+
+    let status = rollup.overallStatus;
+    if ((handoff?.blocking?.length ?? 0) > 0) status = 'not_ready';
+    else if (status === 'ready' && (handoff?.review?.length ?? 0) > 0) status = 'review_recommended';
+
     return {
-        status: rollup.overallStatus,
-        headline: PREFLIGHT_HEADLINES[rollup.overallStatus],
+        status,
+        headline: PREFLIGHT_HEADLINES[status],
         blocking,
         review,
         info,
-        recommendedNextActions: rollup.recommendedNextActions,
+        recommendedNextActions: recommendedNextActions.slice(0, 6),
         caveats,
     };
 }
@@ -467,6 +496,7 @@ export function analyzeScreensDownstream(
     index: ScreenExperienceIndex,
     reviewModels: ReadonlyMap<string, ScreenReviewModel>,
     artifactReview?: ScreenArtifactReviewReadiness,
+    handoffPreflight?: PreflightContribution,
 ): ScreensDownstreamAnalysis {
     const inputs: DownstreamScreenInput[] = [];
     const impactsByScreen = new Map<string, ScreenDownstreamImpact>();
@@ -481,6 +511,6 @@ export function analyzeScreensDownstream(
         inputs,
         impactsByScreen,
         rollup: buildScreensDownstreamImpactRollup(inputs, artifactReview),
-        preflight: buildScreensPreflight(inputs, artifactReview),
+        preflight: buildScreensPreflight(inputs, artifactReview, handoffPreflight),
     };
 }
