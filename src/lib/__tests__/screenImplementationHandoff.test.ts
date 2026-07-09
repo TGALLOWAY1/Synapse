@@ -281,7 +281,7 @@ describe('buildScreensHandoffRollup', () => {
     it('16. counts ready / review / blocked and gates on P0', () => {
         const ready = buildScreenImplementationHandoff(handoffInput({
             reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
-            variants: [variant({ freshness: { status: 'current', reasons: [] } })],
+            variants: [variant({ freshness: { status: 'current', reasons: [], severity: 'info', estimated: true } })],
         }));
         const blocked = buildScreenImplementationHandoff(handoffInput({
             item: item(screen({ purpose: '', acceptanceCriteria: [], userIntent: '', states: [], exitPaths: [], name: 'Broken', handoff: undefined, coreUIElements: [], components: [] }), { id: 'scr-broken' }),
@@ -296,7 +296,7 @@ describe('buildScreensHandoffRollup', () => {
     it('is ready when every P0 handoff is ready', () => {
         const ready = buildScreenImplementationHandoff(handoffInput({
             reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
-            variants: [variant({ freshness: { status: 'current', reasons: [] } })],
+            variants: [variant({ freshness: { status: 'current', reasons: [], severity: 'info', estimated: true } })],
         }));
         const rollup = buildScreensHandoffRollup([ready], new Set(['scr-landing']));
         expect(rollup.status).toBe('ready');

@@ -26,7 +26,7 @@ import type { Feature, ScreenItem } from '../types';
 import type { ScreenExperienceItem } from './screenExperience';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import {
-    buildScreenTraceability, resolveAcceptanceCriteria, resolveScreenHandoff,
+    buildScreenTraceability, resolveAcceptanceCriteria,
     type ScreenReviewStatus,
 } from './screenReadiness';
 import {
@@ -185,7 +185,7 @@ const displayPriority = (screen: ScreenItem): string | undefined => {
     }
 };
 
-const clean = (values: Array<string | undefined | null>): string[] => {
+const clean = (values: readonly (string | undefined | null)[]): string[] => {
     const out: string[] = [];
     const seen = new Set<string>();
     for (const v of values) {

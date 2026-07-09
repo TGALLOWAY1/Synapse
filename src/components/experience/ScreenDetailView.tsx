@@ -39,6 +39,7 @@ import {
 import {
     buildScreenDownstreamImpact, screenDownstreamInputFromModel,
 } from '../../lib/screenDownstreamImpact';
+import { buildScreenImplementationHandoff } from '../../lib/screenImplementationHandoff';
 import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
     VARIANT_STATUS_LABELS, type GeneratedVariantMap,
@@ -47,6 +48,7 @@ import type { MockupVariantSourceSignature, VariantTrustContext } from '../../li
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenReviewPanel } from './ScreenReviewPanel';
+import { ScreenHandoffView } from './ScreenHandoffView';
 import { ScreenDownstreamImpactSection } from './ScreenDownstreamImpactSection';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import { ReadinessBadge } from './ReadinessBadge';
@@ -176,6 +178,25 @@ export function ScreenDetailView({
         [item, reviewModel],
     );
 
+    // Phase 5A: derived implementation handoff package (route, components,
+    // state, events, data deps, mockups, acceptance, QA, build tasks, trace) +
+    // its readiness verdict. Uses the same variant inputs as the review model /
+    // Mockups tab. Purely derived — never persisted.
+    const handoff = useMemo(() => {
+        const variants = buildScreenMockupVariants(item, {
+            platform: mockupContext?.settings.platform,
+            mobileRelevant,
+            trustContext: mockupContext?.trustContext,
+            generatedVariants,
+        });
+        return buildScreenImplementationHandoff({
+            item, reviewModel, variants, downstream: downstreamImpact, features,
+        });
+    }, [item, reviewModel, downstreamImpact, features, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, generatedVariants]);
+    const handoffTone = handoff.readiness.status === 'ready'
+        ? 'good' as const
+        : handoff.readiness.status === 'blocked' ? 'block' as const : 'warn' as const;
+
     // Persist a review change into the screenEdits overlay. Status rides
     // `reviewStatus`; the supporting record (checklist / note / override reason /
     // sign-off signature / timestamps) rides `review`. Merges from the existing
@@ -302,6 +323,7 @@ export function ScreenDetailView({
                 onChange={onTabChange}
                 flowRefCount={item.relatedFlows.length}
                 hasMockup={Boolean(item.mockupScreen)}
+                handoffTone={handoffTone}
             />
 
             {activeTab === 'overview' && (
@@ -384,6 +406,8 @@ export function ScreenDetailView({
                     generatedVariants={generatedVariants}
                 />
             )}
+
+            {activeTab === 'handoff' && <ScreenHandoffView handoff={handoff} />}
         </div>
     );
 }

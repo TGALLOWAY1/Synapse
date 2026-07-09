@@ -304,7 +304,8 @@ export function ArtifactWorkspace({
     const selectedScreenId = searchParams.get('screen');
     const rawScreenTab = searchParams.get('screenTab');
     const screenTab: ScreenDetailTab =
-        rawScreenTab === 'flow' || rawScreenTab === 'mockups' ? rawScreenTab : 'overview';
+        rawScreenTab === 'flow' || rawScreenTab === 'mockups' || rawScreenTab === 'handoff'
+            ? rawScreenTab : 'overview';
 
     // Update the screen params, preserving unrelated query params (debug
     // flags etc). `replace` is used for tab switches so history stays one
