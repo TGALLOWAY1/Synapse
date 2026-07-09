@@ -1560,7 +1560,20 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   risks without recorded handling, **flow decisions without parseable branch
   outcomes**, no flow refs) rolls into a
   per-screen **readiness status** (`deriveScreenReadiness` → draft /
-  needs_review / accepted / implementation_ready). A **user-set status** —
+  needs_review / accepted / implementation_ready).
+  **Mockup variants are an optional enhancement, never a readiness
+  requirement.** Synapse deliberately generates ONE primary
+  implementation-quality mockup per screen (a missing P0 primary mockup is
+  still `missing_mockup_p0`, review-triggering) and offers the extra viewport ×
+  state variants on demand. So `OPTIONAL_ENHANCEMENT_GAPS`
+  (`missing_state_variants`) is **excluded from status scoring**:
+  `deriveScreenReadiness` scores off `gaps.filter(g => !OPTIONAL_ENHANCEMENT_GAPS.has(g.kind))`
+  while still returning the full gap list (incl. the optional variant gap) so
+  the detail view can surface it as an opportunity. A screen with every
+  required asset is `implementation_ready` even when its optional variants are
+  ungenerated. `missing_state_variants` is NOT in `REVIEW_TRIGGER_GAPS`. Never
+  re-add variant gaps to readiness scoring — they are additive documentation.
+  A **user-set status** —
   the optional `reviewStatus` field on the existing `ScreenMetadataEdit`
   overlay — always wins (`source: 'user'`) but never hides derived warnings
   (an `accepted_with_warnings` gap is appended); a derived status is always
@@ -1616,10 +1629,14 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Blocking = missing purpose, missing traceability/navigation on a **primary**
   (P0/P1) screen, P0 without a default mockup, a required state with no behavior,
   no derivable acceptance criteria, an unresolved high-severity risk on a P0
-  screen. Review = missing mobile mockup, stale mockups, unresolved risks,
-  decisions without branch outcomes, thin handoff, missing state variants, stale
+  screen. Review = stale mockups, unresolved risks,
+  decisions without branch outcomes, thin handoff, stale
   PRD refs. Info = freshness/coverage unknown (legacy metadata — NEVER a
-  blocker), no flow refs. `buildScreenReviewModel`/`buildScreenReviewModelForItem`/
+  blocker), no flow refs, **and the optional mockup-variant nudges (`mockup_mobile_missing`,
+  `mockup_state_variants_missing`)** — additional viewport/state variants are
+  generated on demand, so a missing one is `info` (discoverable) and must NEVER
+  be `review`/`blocking` (that would let optional design coverage reduce a
+  screen's system readiness). Only the P0 *primary* mockup gates. `buildScreenReviewModel`/`buildScreenReviewModelForItem`/
   `buildScreenReviewIndex` assemble the per-screen `ScreenReviewModel` (status +
   systemReadiness + issues + counts + `acceptedOverWarnings` + freshness +
   checklist progress); the views use the `-ForItem`/`-Index` wrappers (which build
@@ -1894,9 +1911,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     **`mockupVariantStatus`** map (`'accepted' | 'not_needed'`) on
     `ScreenMetadataEdit`. A missing **state** row (never the default row —
     that's `missing_mockup_p0`'s job, and counting it would downgrade legacy
-    mockup-less P2/P3 screens) left `missing` while `required` is the
-    `missing_state_variants` readiness gap; `accepted`/`not_needed` resolve it.
-    This layer alone drives review status.
+    mockup-less P2/P3 screens) left `missing` while `required` produces the
+    `missing_state_variants` gap; `accepted`/`not_needed` resolve it. **That gap
+    is OPTIONAL (`OPTIONAL_ENHANCEMENT_GAPS`) — it is surfaced for discovery but
+    excluded from readiness scoring, so it never downgrades a screen's status**
+    (see the Readiness & coverage layer above).
   - **Phase 3A discovery layer (`src/lib/mockupVariants.ts`, pure,
     unit-tested)** — `buildScreenMockupVariants(item, {platform, mobileRelevant})`
     adds a **viewport dimension** (desktop / mobile / tablet) on top of states,
@@ -1919,8 +1938,21 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     layer); only the secondary-viewport default introduces `${viewport}:default`.
     `summarizeScreenVariants` (per-screen card) and
     `buildMockupVariantCoverageSummary` (artifact rollup: recommended
-    generated/total, P0 mobile coverage, legacy-unknown count) drive the UI.
+    generated/total, **`additionalGenerated`/`additionalTotal`** — recommended
+    variants EXCLUDING each screen's primary Default row, i.e. the optional
+    "expanded coverage" pool the panel shows separately from required primary
+    mockups — P0 mobile coverage, legacy-unknown count) drive the UI.
     This layer is **display/discovery only — it never changes review status.**
+    The **Screen Coverage & Readiness panel (`ScreenCoveragePanel`) presents
+    these variants as optional, NOT a checklist**: a green "Ready for
+    Development" section lists the required implementation assets (PRD links,
+    flows, primary mockups, states, open risks, ready count) with a progress
+    bar, and a separate neutral "Expanded Design Coverage" section frames the
+    additional variants positively ("N generated · M available on demand", an
+    "Optional" bar, a discovery card pointing at the per-screen Mockups tab) —
+    no warning color, no "recommended" ratio. Keep required vs. optional split;
+    orange/amber is reserved for genuine implementation risk (uncovered PRD
+    features, a P0 without its primary mockup, unhandled risks).
   - **Phase 3B single-variant generation (`src/lib/mockupVariantRequest.ts`
     pure + `src/lib/mockupVariantImageStore.ts` IDB +
     `src/store/mockupVariantImageStore.ts` Zustand +

@@ -8,23 +8,14 @@
 
 import { useState } from 'react';
 import {
-    AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, ClipboardCheck, Gauge, Image as ImageIcon,
+    AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Circle, ClipboardCheck, Gauge,
+    Image as ImageIcon, Sparkles,
 } from 'lucide-react';
 import type { ScreenCoverageSummary } from '../../lib/screenReadiness';
 import type { ScreenArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
 import type { ScreensDownstreamImpactRollup } from '../../lib/screenDownstreamImpact';
 import type { ScreensHandoffRollup } from '../../lib/screenImplementationHandoff';
 import type { MockupVariantCoverageSummary } from '../../lib/mockupVariants';
-import type { VariantFreshnessRollup } from '../../lib/mockupVariantTrust';
-
-/** "8 current · 2 review · 3 unknown" (omits zero segments). */
-function freshnessLabel(f: VariantFreshnessRollup): string {
-    const parts: string[] = [];
-    if (f.current > 0) parts.push(`${f.current} current`);
-    if (f.review > 0) parts.push(`${f.review} review`);
-    if (f.unknown > 0) parts.push(`${f.unknown} unknown`);
-    return parts.length ? parts.join(' · ') : 'None generated';
-}
 
 interface Props {
     summary: ScreenCoverageSummary;
@@ -45,23 +36,52 @@ interface Props {
     onGenerateMissingMockups?: () => void;
 }
 
-function MetricRow({
-    label, value, hint, tone = 'neutral',
-}: {
+type RowTone = 'good' | 'todo' | 'risk';
+
+/** One row in the "Ready for Development" required checklist. `good` = a green
+ * check (done), `risk` = a genuine implementation risk (amber), `todo` = still
+ * in progress but NOT alarming (neutral). Only genuine risk ever uses warning
+ * color — an unmet-but-optional item is never amber. */
+function RequiredRow({ label, value, tone, hint }: {
     label: string;
     value: string;
+    tone: RowTone;
     hint?: string;
-    tone?: 'neutral' | 'good' | 'warn';
 }) {
-    const valueColor = tone === 'good'
-        ? 'text-emerald-700'
-        : tone === 'warn'
-            ? 'text-amber-700'
-            : 'text-neutral-800';
+    const Icon = tone === 'good' ? CheckCircle2 : tone === 'risk' ? AlertTriangle : Circle;
+    const iconColor = tone === 'good'
+        ? 'text-emerald-500'
+        : tone === 'risk' ? 'text-amber-500' : 'text-neutral-300';
+    const valueColor = tone === 'risk' ? 'text-amber-700' : 'text-neutral-700';
     return (
-        <div className="flex items-baseline justify-between gap-3 py-1.5" title={hint}>
-            <span className="text-xs text-neutral-600">{label}</span>
-            <span className={`text-xs font-semibold tabular-nums text-right ${valueColor}`}>{value}</span>
+        <div className="flex items-center justify-between gap-3 py-1" title={hint}>
+            <span className="flex items-center gap-1.5 text-xs text-neutral-700 min-w-0">
+                <Icon size={13} className={`shrink-0 ${iconColor}`} aria-hidden />
+                <span className="truncate">{label}</span>
+            </span>
+            <span className={`text-xs font-medium tabular-nums text-right shrink-0 ${valueColor}`}>{value}</span>
+        </div>
+    );
+}
+
+/** Slim progress meter. `good` fills emerald; `neutral` fills indigo and is
+ * never a warning color (used for the optional expanded-coverage bar). */
+function ProgressBar({ pct, tone, trailingLabel }: {
+    pct: number;
+    tone: 'good' | 'neutral';
+    trailingLabel?: string;
+}) {
+    const clamped = Math.max(0, Math.min(1, pct));
+    const track = tone === 'good' ? 'bg-emerald-100' : 'bg-indigo-100';
+    const fill = tone === 'good' ? 'bg-emerald-500' : 'bg-indigo-400';
+    return (
+        <div className="flex items-center gap-2">
+            <div className={`h-2 flex-1 rounded-full overflow-hidden ${track}`}>
+                <div className={`h-full rounded-full ${fill}`} style={{ width: `${Math.round(clamped * 100)}%` }} />
+            </div>
+            {trailingLabel && (
+                <span className="text-[10px] font-medium text-neutral-500 tabular-nums shrink-0">{trailingLabel}</span>
+            )}
         </div>
     );
 }
@@ -69,22 +89,91 @@ function MetricRow({
 export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, downstreamRollup, handoffRollup, onGenerateMissingMockups }: Props) {
     const [showUncovered, setShowUncovered] = useState(false);
     const {
-        totalScreens, prdFeatures, stateVariants, flows, p0, states, mockups, openRisks,
+        totalScreens, prdFeatures, flows, p0, states, openRisks,
         ready, readyWithWarnings, message,
     } = summary;
     if (totalScreens === 0) return null;
 
-    // "All clear" only when every screen is ready AND none of those are
-    // user-overridden while derived warnings remain — otherwise the green
-    // all-clear treatment would hide unresolved warnings at the artifact level.
-    const allReady = ready === totalScreens && readyWithWarnings === 0;
-    const missingMockups = mockups.total - mockups.covered;
+    // Clean-ready screens: implementation-ready and NOT a user override that
+    // still carries derived warnings. When every screen is clean-ready the core
+    // implementation assets are complete (mockup variants never factor in).
+    const readyClean = Math.max(0, ready - readyWithWarnings);
+    const coreComplete = readyClean === totalScreens;
+
+    // --- Required (implementation-critical) checklist -----------------------
+    // Only genuine implementation risk (missing PRD coverage, a P0 without its
+    // primary mockup, unhandled risks) is styled amber. Everything else that is
+    // simply not-yet-done reads as a calm "in progress", never a failure.
+    const required: Array<{ key: string; label: string; value: string; tone: RowTone; hint?: string }> = [];
+    if (prdFeatures) {
+        const done = prdFeatures.covered === prdFeatures.total;
+        required.push({
+            key: 'prd', label: 'PRD features linked',
+            value: `${prdFeatures.covered} / ${prdFeatures.total}`,
+            tone: done ? 'good' : 'risk',
+            hint: 'PRD features referenced by at least one screen — estimated from feature ids, not a full PRD validation',
+        });
+    } else {
+        required.push({ key: 'prd', label: 'PRD features linked', value: 'No feature list', tone: 'todo' });
+    }
+    if (flows) {
+        const done = flows.represented === flows.total;
+        required.push({
+            key: 'flows', label: 'User flows represented',
+            value: `${flows.represented} / ${flows.total}`,
+            tone: done ? 'good' : 'todo',
+            hint: 'User flows with at least one step matched to a screen',
+        });
+    } else {
+        required.push({ key: 'flows', label: 'User flows represented', value: 'No flows yet', tone: 'todo' });
+    }
+    {
+        const usesP0 = p0.total > 0;
+        const done = usesP0 ? p0.withMockup === p0.total : summary.mockups.covered === summary.mockups.total;
+        required.push({
+            key: 'primary', label: 'Primary mockups',
+            value: usesP0 ? `${p0.withMockup} / ${p0.total} key screens` : `${summary.mockups.covered} / ${summary.mockups.total} screens`,
+            // A P0 (key) screen without its one primary mockup is genuine risk;
+            // a non-critical screen still awaiting its mockup is just in progress.
+            tone: done ? 'good' : usesP0 ? 'risk' : 'todo',
+            hint: 'Every key screen should have one primary implementation-quality mockup. Extra variants are optional (see Expanded Design Coverage).',
+        });
+    }
+    {
+        const done = states.screensWithStates === totalScreens;
+        required.push({
+            key: 'states', label: 'Screen states documented',
+            value: `${states.screensWithStates} / ${totalScreens}`,
+            tone: done ? 'good' : 'todo',
+            hint: states.totalStates > 0
+                ? `${states.statesWithBehavior} of ${states.totalStates} documented states describe a trigger or behavior`
+                : undefined,
+        });
+    }
+    required.push({
+        key: 'risks', label: 'Open risks',
+        value: openRisks === 0 ? 'None noted' : `${openRisks} to review`,
+        tone: openRisks === 0 ? 'good' : 'risk',
+        hint: 'Risk notes in the spec with no recorded handling yet — review them per screen',
+    });
+    required.push({
+        key: 'ready', label: 'Ready for implementation',
+        value: `${readyClean} / ${totalScreens} screens`,
+        tone: coreComplete ? 'good' : 'todo',
+    });
+
+    const headline = coreComplete
+        ? 'Implementation coverage is complete. Every screen has its required assets — optional design documentation can be generated whenever you like.'
+        : message;
+
+    const missingMockups = summary.mockups.total - summary.mockups.covered;
+    const hasExpanded = Boolean(variantCoverage && variantCoverage.additionalTotal > 0);
 
     return (
         <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
             <div className="flex items-start gap-3">
-                <div className={`mt-0.5 h-8 w-8 shrink-0 rounded-lg flex items-center justify-center ${allReady ? 'bg-emerald-50' : 'bg-indigo-50'}`}>
-                    <Gauge size={16} className={allReady ? 'text-emerald-600' : 'text-indigo-600'} />
+                <div className={`mt-0.5 h-8 w-8 shrink-0 rounded-lg flex items-center justify-center ${coreComplete ? 'bg-emerald-50' : 'bg-indigo-50'}`}>
+                    <Gauge size={16} className={coreComplete ? 'text-emerald-600' : 'text-indigo-600'} />
                 </div>
                 <div className="min-w-0 flex-1">
                     <div className="flex items-baseline justify-between gap-2 flex-wrap">
@@ -93,101 +182,28 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                             Estimated from the generated spec
                         </span>
                     </div>
-                    <p className="mt-1 text-xs leading-relaxed text-neutral-600">{message}</p>
+                    <p className="mt-1 text-xs leading-relaxed text-neutral-600">{headline}</p>
 
-                    <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-x-6 divide-y divide-neutral-100 sm:divide-y-0 text-xs">
-                        <div className="divide-y divide-neutral-100">
-                            {prdFeatures ? (
-                                <MetricRow
-                                    label="PRD features linked"
-                                    value={`${prdFeatures.covered} / ${prdFeatures.total}`}
-                                    hint="PRD features referenced by at least one screen's linked features — estimated from feature ids, not a full PRD validation"
-                                    tone={prdFeatures.covered === prdFeatures.total ? 'good' : 'warn'}
-                                />
-                            ) : (
-                                <MetricRow label="PRD features linked" value="No feature list to compare" />
-                            )}
-                            {flows ? (
-                                <MetricRow
-                                    label="User flows represented"
-                                    value={`${flows.represented} / ${flows.total}`}
-                                    hint="User flows with at least one step matched to a screen"
-                                    tone={flows.represented === flows.total ? 'good' : 'warn'}
-                                />
-                            ) : (
-                                <MetricRow label="User flows represented" value="No flows generated yet" />
-                            )}
-                            <MetricRow
-                                label="P0 screens with mockups"
-                                value={p0.total === 0 ? 'No P0 screens' : `${p0.withMockup} / ${p0.total}`}
-                                tone={p0.total > 0 && p0.withMockup < p0.total ? 'warn' : p0.total > 0 ? 'good' : 'neutral'}
-                            />
+                    {/* --- Ready for Development (required implementation assets) --- */}
+                    <div className="mt-3">
+                        <div className="flex items-baseline justify-between gap-2 mb-1.5">
+                            <h4 className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                                {coreComplete && <CheckCircle2 size={13} className="text-emerald-500" aria-hidden />}
+                                Ready for Development
+                            </h4>
+                            <span className="text-[11px] font-medium text-neutral-500 tabular-nums">
+                                {readyClean} / {totalScreens} screens
+                            </span>
                         </div>
-                        <div className="divide-y divide-neutral-100">
-                            <MetricRow
-                                label="Screens documenting states"
-                                value={`${states.screensWithStates} / ${totalScreens}`}
-                                hint={states.totalStates > 0
-                                    ? `${states.statesWithBehavior} of ${states.totalStates} documented states describe a trigger or behavior`
-                                    : undefined}
-                                tone={states.screensWithStates < totalScreens ? 'warn' : 'good'}
-                            />
-                            <MetricRow
-                                label="Mockups"
-                                value={`${mockups.covered} / ${mockups.total} screens`}
-                                tone={missingMockups > 0 ? 'neutral' : 'good'}
-                            />
-                            {variantCoverage && variantCoverage.recommendedTotal > 0 && (
-                                <MetricRow
-                                    label="Mockup variants"
-                                    value={`${variantCoverage.recommendedGenerated} / ${variantCoverage.recommendedTotal} recommended`}
-                                    hint="Recommended viewport × state variants generated or accepted across all screens — tracked from mockup metadata and your marks, never from inspecting images"
-                                    tone={variantCoverage.recommendedGenerated < variantCoverage.recommendedTotal ? 'warn' : 'good'}
-                                />
-                            )}
-                            {variantCoverage && variantCoverage.p0Total > 0 && (
-                                <MetricRow
-                                    label="Mobile coverage (P0)"
-                                    value={`${variantCoverage.p0WithMobile} / ${variantCoverage.p0Total} P0 screens`}
-                                    hint="P0 screens whose Mobile default variant is generated, accepted, or marked not needed"
-                                    tone={variantCoverage.p0WithMobile < variantCoverage.p0Total ? 'warn' : 'good'}
-                                />
-                            )}
-                            {variantCoverage && variantCoverage.freshness.total > 0 && (
-                                <MetricRow
-                                    label="Mockup freshness"
-                                    value={freshnessLabel(variantCoverage.freshness)}
-                                    hint="Generated mockup variants compared to the current screen spec, design system, and PRD — from stored generation metadata, never a visual check. Unknown = an older mockup with no source metadata."
-                                    tone={variantCoverage.freshness.review > 0 ? 'warn' : 'good'}
-                                />
-                            )}
-                            {variantCoverage && variantCoverage.legacyUnknownMockups > 0 && (
-                                <MetricRow
-                                    label="Legacy mockups (coverage unknown)"
-                                    value={`${variantCoverage.legacyUnknownMockups}`}
-                                    hint="Mockups generated before coverage metadata was captured — visually useful, but Synapse can't confirm which spec items they represent"
-                                    tone="neutral"
-                                />
-                            )}
-                            {stateVariants && (
-                                <MetricRow
-                                    label="Recommended state variants"
-                                    value={`${stateVariants.covered} / ${stateVariants.required}`}
-                                    hint="State mockup variants the generated spec recommends — tracked from mockup metadata and your accepted/not-needed marks, never from inspecting images"
-                                    tone={stateVariants.covered < stateVariants.required ? 'warn' : 'good'}
-                                />
-                            )}
-                            <MetricRow
-                                label="Open risks"
-                                value={openRisks === 0 ? 'None noted' : `${openRisks} to review`}
-                                hint="Risk notes in the spec have no recorded handling yet — review them per screen"
-                                tone={openRisks > 0 ? 'warn' : 'good'}
-                            />
-                            <MetricRow
-                                label="Ready for implementation"
-                                value={`${ready} / ${totalScreens} screens`}
-                                tone={allReady ? 'good' : 'neutral'}
-                            />
+                        <ProgressBar
+                            pct={totalScreens > 0 ? readyClean / totalScreens : 0}
+                            tone="good"
+                            trailingLabel={totalScreens > 0 ? `${Math.round((readyClean / totalScreens) * 100)}%` : undefined}
+                        />
+                        <div className="mt-2 grid grid-cols-1 sm:grid-cols-2 gap-x-6">
+                            {required.map(r => (
+                                <RequiredRow key={r.key} label={r.label} value={r.value} tone={r.tone} hint={r.hint} />
+                            ))}
                         </div>
                     </div>
 
@@ -242,9 +258,15 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                             </span>
                         </div>
                     )}
-                    {allReady && (
+
+                    {/* --- Expanded Design Coverage (optional enhancement) --- */}
+                    {hasExpanded && variantCoverage && (
+                        <ExpandedCoverageSection variant={variantCoverage} />
+                    )}
+
+                    {coreComplete && (
                         <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-emerald-700">
-                            <CheckCircle2 size={12} /> Derived checks pass — statuses are estimates, so give screens a final review.
+                            <CheckCircle2 size={12} /> Core assets complete — statuses are estimates, so give screens a final review before building.
                         </p>
                     )}
 
@@ -260,6 +282,86 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                         <HandoffReadinessSection rollup={handoffRollup} />
                     )}
                 </div>
+            </div>
+        </div>
+    );
+}
+
+/**
+ * Optional "Expanded Design Coverage" — the additional viewport × state mockup
+ * variants a user can generate on demand. This is deliberately framed as a
+ * premium enhancement, NOT a checklist to complete: no warning color, positive
+ * "N generated · M available on demand" messaging, an "Optional" progress bar,
+ * and a discovery card pointing at the per-screen Mockups tab (where the actual
+ * on-demand variant generation lives). Additional variants never affect a
+ * screen's readiness — see src/lib/screenReadiness.ts.
+ */
+function ExpandedCoverageSection({ variant }: { variant: MockupVariantCoverageSummary }) {
+    const total = variant.additionalTotal;
+    const generated = variant.additionalGenerated;
+    const remaining = Math.max(0, total - generated);
+    const pct = total > 0 ? generated / total : 0;
+    const statLine = generated === 0
+        ? `${total} available on demand`
+        : remaining === 0
+            ? `All ${total} generated`
+            : `${generated} generated · ${remaining} available on demand`;
+
+    return (
+        <div className="mt-4 pt-4 border-t border-neutral-100">
+            <div className="flex items-center justify-between gap-2 mb-1">
+                <div className="flex items-center gap-1.5">
+                    <Sparkles size={13} className="text-indigo-400" aria-hidden />
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Expanded Design Coverage
+                    </h4>
+                </div>
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Optional</span>
+            </div>
+            <p className="text-[11px] leading-relaxed text-neutral-500">
+                Primary screens are prioritized first. Additional variants — empty, loading, error, and
+                responsive layouts — are generated only when you request them, to keep projects fast.
+            </p>
+
+            <div className="mt-2.5 space-y-1.5">
+                <div className="flex items-baseline justify-between gap-3">
+                    <span className="text-xs text-neutral-700">Expanded coverage</span>
+                    <span className="text-xs font-medium text-neutral-700 tabular-nums">{statLine}</span>
+                </div>
+                <ProgressBar pct={pct} tone="neutral" trailingLabel="Optional" />
+
+                {variant.p0Total > 0 && (
+                    <div className="flex items-baseline justify-between gap-3">
+                        <span className="text-xs text-neutral-500">Mobile previews (key screens)</span>
+                        <span className="text-xs text-neutral-500 tabular-nums">
+                            {variant.p0WithMobile} / {variant.p0Total} · optional
+                        </span>
+                    </div>
+                )}
+                {variant.freshness.review > 0 && (
+                    <p className="text-[11px] text-neutral-500">
+                        {variant.freshness.review} generated {variant.freshness.review === 1 ? 'variant' : 'variants'}
+                        {' '}may be worth refreshing after recent spec changes.
+                    </p>
+                )}
+                {variant.legacyUnknownMockups > 0 && (
+                    <p className="text-[11px] text-neutral-400">
+                        {variant.legacyUnknownMockups} older {variant.legacyUnknownMockups === 1 ? 'mockup' : 'mockups'}
+                        {' '}predate coverage metadata.
+                    </p>
+                )}
+            </div>
+
+            <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50/40 p-3">
+                <p className="flex items-center gap-1.5 text-xs font-medium text-neutral-800">
+                    <Sparkles size={12} className="text-indigo-500" aria-hidden />
+                    Expand coverage when you need it
+                </p>
+                <p className="text-[11px] text-neutral-600 mt-1">
+                    Open a screen&rsquo;s <span className="font-medium text-neutral-700">Mockups</span> tab to generate
+                    additional variants — empty, loading, error, and success states, plus mobile and alternate
+                    layouts — on demand.
+                </p>
             </div>
         </div>
     );
