@@ -923,6 +923,8 @@ export type ScreenListFilter =
     | 'ready'
     | 'has_blockers'
     | 'review_recommended'
+    | 'outdated_review'
+    | 'downstream_review'
     | 'missing_mockups'
     | 'has_risks';
 
@@ -935,17 +937,26 @@ export const SCREEN_LIST_FILTERS: Array<{ id: ScreenListFilter; label: string }>
     { id: 'ready', label: 'Ready' },
     { id: 'has_blockers', label: 'Has blockers' },
     { id: 'review_recommended', label: 'Review recommended' },
+    // Phase 4B: re-review + downstream-impact filters. Grouped after the
+    // existing review filters so the review-focused controls stay together.
+    { id: 'outdated_review', label: 'Outdated review' },
+    { id: 'downstream_review', label: 'Downstream review' },
     { id: 'missing_mockups', label: 'Missing mockups' },
     { id: 'has_risks', label: 'Has risks' },
 ];
 
-/** Optional review signals (Phase 4A) so filters can key off the user review
- * status and derived blockers/review items, not just the combined readiness. */
+/** Optional review signals (Phase 4A/4B) so filters can key off the user review
+ * status, derived blockers/review items, re-review freshness, and downstream
+ * impact — not just the combined readiness. */
 export interface ScreenFilterReview {
     /** Explicit user-set status, or undefined when unreviewed (treated as draft). */
     userStatus?: ScreenReviewStatus;
     blockingCount: number;
     reviewCount: number;
+    /** Phase 4B: 'outdated' when an accepted screen changed after sign-off. */
+    reviewFreshness?: 'current' | 'outdated' | 'unknown';
+    /** Phase 4B: true when this screen has a blocking/review downstream impact. */
+    downstreamReviewNeeded?: boolean;
 }
 
 export function screenMatchesFilter(
@@ -976,6 +987,10 @@ export function screenMatchesFilter(
             return (review?.blockingCount ?? 0) > 0;
         case 'review_recommended':
             return (review?.blockingCount ?? 0) > 0 || (review?.reviewCount ?? 0) > 0;
+        case 'outdated_review':
+            return review?.reviewFreshness === 'outdated';
+        case 'downstream_review':
+            return review?.downstreamReviewNeeded === true;
         case 'missing_mockups':
             return !item.mockupScreen;
         case 'has_risks':

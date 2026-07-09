@@ -37,6 +37,9 @@ import {
     type ScreenReviewModel,
 } from '../../lib/screenReviewWorkflow';
 import {
+    buildScreenDownstreamImpact, screenDownstreamInputFromModel,
+} from '../../lib/screenDownstreamImpact';
+import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
     VARIANT_STATUS_LABELS, type GeneratedVariantMap,
 } from '../../lib/mockupVariants';
@@ -44,6 +47,7 @@ import type { MockupVariantSourceSignature, VariantTrustContext } from '../../li
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenReviewPanel } from './ScreenReviewPanel';
+import { ScreenDownstreamImpactSection } from './ScreenDownstreamImpactSection';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import { ReadinessBadge } from './ReadinessBadge';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
@@ -164,6 +168,14 @@ export function ScreenDetailView({
         generatedVariants,
     }), [item, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, features, generatedVariants]);
 
+    // Phase 4B: derived downstream impact for this screen (which artifacts a
+    // change / blocker on this screen may have invalidated). Purely derived
+    // from the same review model — never persisted.
+    const downstreamImpact = useMemo(
+        () => buildScreenDownstreamImpact(screenDownstreamInputFromModel(item, reviewModel)),
+        [item, reviewModel],
+    );
+
     // Persist a review change into the screenEdits overlay. Status rides
     // `reviewStatus`; the supporting record (checklist / note / override reason /
     // sign-off signature / timestamps) rides `review`. Merges from the existing
@@ -282,6 +294,8 @@ export function ScreenDetailView({
                 onReReview={handleReReview}
                 readOnly={!onSaveScreenEdit}
             />
+
+            <ScreenDownstreamImpactSection impact={downstreamImpact} />
 
             <ScreenDetailTabs
                 active={activeTab}

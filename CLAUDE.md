@@ -1648,9 +1648,56 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   callout in `ScreenCoveragePanel`. Persistence flows through the existing
   `handleSaveScreenEdit` → `updateArtifactVersionMetadata` overlay path
   (timestamps/signatures stamped in `ScreenDetailView`, not the pure module).
-  Language stays calm ("Review recommended", never "Invalid"). **Not yet done
-  (Phase 4B):** cross-artifact downstream invalidation when an accepted screen
-  changes (today only a note), and a dedicated export/finalization preflight.
+  Language stays calm ("Review recommended", never "Invalid").
+- **Phase 4B — downstream impact tracking + Screens preflight
+  (`src/lib/screenDownstreamImpact.ts`, pure, unit-tested).** Layers ON TOP of
+  the Phase 4A review layer (never changing it) to answer "an accepted screen
+  changed — now what?". All **derived, never persisted** (a stale persisted
+  verdict is worse than none). `buildScreenDownstreamImpact(input)` maps a
+  screen's review signals to the downstream artifacts a change/blocker may have
+  invalidated, one entry per **`DownstreamArtifactKind`** (mockups / data_model /
+  implementation_plan / prompt_pack / user_flows / design_system / export),
+  highest severity per kind (`blocking` | `review` | `info`). Conservative,
+  explainable rules: (1) an **accepted/implementation-ready screen that changed
+  after sign-off** (`reviewFreshness === 'outdated'` — from Phase 4A's
+  `compareReviewFreshness`) → Mockups (review), Implementation Plan (review, or
+  **blocking** when a P0 was already `implementation_ready`), Data Model (review,
+  only when the screen carries data requirements — `outputData` / handoff
+  data-deps), Prompt Pack (info); (2) a **P0 screen with blockers** → Implementation
+  Plan **blocking**; (3) **stale mockup variants** (Phase 3C freshness, surfaced as
+  the `mockup_freshness_stale` review issue) → Mockups review; (4) **unknown
+  mockup freshness** (legacy metadata) → **info, never a blocker**. A draft/
+  unsigned screen never produces the change-driven impacts.
+  `screenDownstreamInputFromModel(item, model)` derives the input from the Phase 4A
+  `ScreenReviewModel` (so the two layers can't drift). `buildScreensDownstreamImpactRollup`
+  rolls per-screen impacts up to `overallStatus` **ready / review_recommended /
+  not_ready** — **not_ready** iff the Phase 4A gate isn't ready OR any P0
+  accepted/impl-ready screen is outdated OR any P0 has a blocking downstream
+  impact; **review_recommended** for review-level impacts with a clean P0 gate;
+  **ready** otherwise. `buildRecommendedNextActions` produces a prioritized list
+  (P0 blockers → re-review outdated accepted P0 → accept remaining P0 → stale P0
+  mockups → implementation plan → supporting screens → unknown legacy mockups),
+  **capped to 5**. `buildScreensPreflight` assembles the implementation/export
+  preflight (blocking / review / info / recommended next steps / export-snapshot
+  caveats — e.g. the Phase 3D variant-image cross-device-sync gap).
+  `analyzeScreensDownstream(index, reviewModels, artifactReview)` is the single
+  entry point the workspace calls. **UI:** `ScreenDownstreamImpactSection`
+  (Screen Detail, below the review panel — impacted-artifact list, or a calm
+  "No downstream impact detected" / "cannot be fully confirmed for this older
+  review" empty state), a compact `DownstreamChip` on `ScreenListView` cards
+  (only when a blocking/review impact exists — info-only shows nothing), a
+  **Downstream readiness** section in `ScreenCoveragePanel`, and a collapsible
+  **`ScreenPreflightPanel`** ("Implementation preflight") above the screen list.
+  Two new list filters — **Outdated review** (`reviewFreshness === 'outdated'`)
+  and **Downstream review** (`downstreamReviewNeeded`) — extend
+  `SCREEN_LIST_FILTERS` / `ScreenFilterReview` (the caller supplies the new
+  signals; `screenReadiness.ts` must NOT import `screenDownstreamImpact` — that
+  would cycle). **No export/finalization hook was added**: there is no
+  Screens-specific export/share/finalize action today (the PRD Mark-as-Final /
+  UpdateAssetsPlan flow is PRD-level, not per-artifact), so the local preflight
+  panel is the Phase 4B decision surface — a safer choice than hooking into an
+  unrelated flow. Everything stays **advisory** — nothing gates rendering or
+  generation, and legacy artifacts (no review data) show no impact/blocker.
 - **Phase 2 — source-grounded screen contracts.** New screen_inventory
   generations emit an explicit contract per screen (all fields optional &
   back-compat on `ScreenItem`/`ScreenState` in `src/types`): structured
