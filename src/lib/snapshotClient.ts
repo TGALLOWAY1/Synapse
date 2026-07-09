@@ -23,6 +23,7 @@ import type {
     Project, SpineVersion, HistoryEvent, Branch,
     Artifact, ArtifactVersion, FeedbackItem, MockupImageRecord,
     ScreenInventoryImageRecord, ProjectTask, WorkflowRun,
+    MockupVariantImageRecord,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
 import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
@@ -32,6 +33,20 @@ import {
     putScreenImage,
     deleteScreenImagesForArtifactVersion,
 } from './screenInventoryImageStore';
+import {
+    listVariantImagesForVersion,
+    putVariantImage,
+} from './mockupVariantImageStore';
+import {
+    buildMockupVariantImageSnapshot,
+    splitVariantSnapshotImages,
+    collectVariantSnapshotImageRefs,
+    joinVariantSnapshotImages,
+    namespaceVariantSnapshot,
+    restoreMockupVariantImageSnapshot,
+    type MockupVariantImageSnapshot,
+} from './mockupVariantSnapshot';
+import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -49,6 +64,13 @@ export type SnapshotProjectBundle = {
     // existed won't have them, and restore defaults to [].
     tasks?: ProjectTask[];
     workflowRuns?: WorkflowRun[];
+    // Phase 3D: per-variant mockup images (the Screens Mockups-tab variant
+    // gallery) live in a dedicated IndexedDB store. They ride INSIDE the bundle
+    // (which the server persists verbatim) in their WIRE form — image bytes are
+    // stripped and shipped through the same per-image blob channel as the other
+    // two image kinds. Optional on the wire — older snapshots won't have it, and
+    // restore is a no-op when it's absent.
+    mockupVariantImages?: MockupVariantImageSnapshot;
 };
 
 export type SnapshotManifest = {
@@ -191,6 +213,21 @@ const collectScreenImages = async (
     return out;
 };
 
+// Gather every per-variant mockup image record (Phase 3B/3C) tied to one of
+// this project's artifact versions and serialize them into the portable,
+// size-guarded snapshot format. Same by-version walk as the other image
+// collectors — the variant IDB store is indexed by `versionId`.
+const collectVariantImages = async (
+    bundle: SnapshotProjectBundle,
+): Promise<MockupVariantImageSnapshot> => {
+    const records: MockupVariantImageRecord[] = [];
+    for (const v of bundle.artifactVersions) {
+        const forVersion = await listVariantImagesForVersion(v.id);
+        records.push(...forVersion);
+    }
+    return buildMockupVariantImageSnapshot(records, { projectId: bundle.project.id });
+};
+
 // Strip the (large) base64 payload off an image record so the bundle POST
 // only carries the routing metadata. The dataUrl is uploaded in its own
 // request immediately after.
@@ -208,10 +245,24 @@ export const saveSnapshot = async (
     projectId: string,
     title: string,
     onProgress?: SnapshotProgressCallback,
+    onWarnings?: (warnings: string[]) => void,
 ): Promise<SnapshotManifest> => {
     const bundle = collectProjectBundle(projectId);
     const images = await collectProjectImages(bundle);
     const screenImages = await collectScreenImages(bundle);
+
+    // Phase 3D: serialize the per-variant mockup images, then split their bytes
+    // out of the JSON envelope. The stripped (metadata-only) snapshot rides
+    // inside the bundle (the server persists `project` verbatim); the bytes join
+    // the per-image upload channel below. Any records the size guards dropped
+    // surface as non-fatal warnings.
+    const fullVariantSnapshot = await collectVariantImages(bundle);
+    const { snapshot: variantWire, images: variantImages } =
+        splitVariantSnapshotImages(fullVariantSnapshot);
+    bundle.mockupVariantImages = variantWire;
+    if (onWarnings && fullVariantSnapshot.summary.warnings?.length) {
+        onWarnings(fullVariantSnapshot.summary.warnings);
+    }
 
     onProgress?.({ phase: 'bundle', completed: 0, total: 0 });
 
@@ -233,11 +284,13 @@ export const saveSnapshot = async (
 
     // Step 2 — upload each image as a separate request. We go sequentially
     // so a slow/flaky uplink doesn't try to push all images at once and so
-    // browsers don't hold every base64 payload in flight concurrently. Mockup
-    // and screen-inventory images share the same per-image endpoint (the
-    // server keys each blob by a hash of the image key, and the two key shapes
-    // never collide), so we upload them in one combined pass.
-    const allImages: Array<{ key: string; dataUrl: string }> = [...images, ...screenImages];
+    // browsers don't hold every base64 payload in flight concurrently. Mockup,
+    // screen-inventory, and per-variant mockup images share the same per-image
+    // endpoint (the server keys each blob by a hash of the image key, and the
+    // key shapes never collide — variant keys are `vimg:`-prefixed), so we
+    // upload them in one combined pass.
+    const allImages: Array<{ key: string; dataUrl: string }> =
+        [...images, ...screenImages, ...variantImages];
     onProgress?.({ phase: 'images', completed: 0, total: allImages.length });
     for (let i = 0; i < allImages.length; i++) {
         const img = allImages[i];
@@ -381,6 +434,34 @@ const hydrateScreenImages = async (
     );
 };
 
+// Hydrate the per-variant mockup image bytes for a payload. The wire snapshot
+// (inside `payload.project.mockupVariantImages`) references its image bytes by
+// `vimg:`-prefixed keys; we fetch each through the same per-image channel the
+// mockup/screen images use, re-attach them, and write the joined snapshot back
+// onto the payload. A ref that keeps failing is dropped (reported in failedKeys)
+// so one bad image never poisons the whole restore. Returns the failed keys so
+// the caller can factor them into `imagesComplete`.
+const hydrateVariantImages = async (
+    payload: SnapshotPayload,
+    fetchOne: (key: string) => Promise<Response>,
+    options?: { tolerateFailures?: boolean },
+): Promise<string[]> => {
+    const wire = payload.project?.mockupVariantImages;
+    const refs = collectVariantSnapshotImageRefs(wire);
+    if (!wire || refs.length === 0) return [];
+
+    // Reuse the mockup image hydration machinery: it expects
+    // `{ key, dataUrl }`-shaped records keyed by the image key.
+    const { images, failedKeys } = await hydrateImages<{ key: string; dataUrl: string }>(
+        fetchOne,
+        refs.map((key) => ({ key })),
+        options,
+    );
+    const byKey = new Map(images.map((img) => [img.key, img.dataUrl]));
+    payload.project.mockupVariantImages = joinVariantSnapshotImages(wire, byKey);
+    return failedKeys;
+};
+
 // Public, lightweight: read just the demo pointer so callers can decide
 // whether their cached demo project is still current without paying the
 // full bundle+image download. Returns null when no demo has been pinned
@@ -424,11 +505,15 @@ export const loadDemoSnapshotPublic = async (): Promise<SnapshotPayload | null> 
             tolerate,
         );
     const screens = await hydrateScreenImages(payload, fetchOne, tolerate);
+    const variantFailed = await hydrateVariantImages(payload, fetchOne, tolerate);
     return {
         ...payload,
         images: mockups.images,
         screenImages: screens.images,
-        imagesComplete: mockups.failedKeys.length === 0 && screens.failedKeys.length === 0,
+        imagesComplete:
+            mockups.failedKeys.length === 0
+            && screens.failedKeys.length === 0
+            && variantFailed.length === 0,
     };
 };
 
@@ -450,6 +535,7 @@ export const loadSnapshot = async (id: string): Promise<SnapshotPayload> => {
             payload.images as unknown as Array<Omit<MockupImageRecord, 'dataUrl'>>,
         );
     const screens = await hydrateScreenImages(payload, fetchOne);
+    await hydrateVariantImages(payload, fetchOne);
     return { ...payload, images: mockups.images, screenImages: screens.images };
 };
 
@@ -488,6 +574,30 @@ const restoreScreenImagesToIdb = async (
     }
 };
 
+// Phase 3D: hydrate the per-variant mockup images into the dedicated variant
+// IndexedDB store + the reactive cache. Unlike the mockup/screen restores (a
+// clean delete-then-put replace), this uses CONSERVATIVE merge semantics
+// (`restoreMockupVariantImageSnapshot`) so a newer local variant is never
+// clobbered by an older snapshot copy — the snapshot copy is preserved in
+// history instead. A malformed variant section is skipped without throwing, so
+// it never breaks the surrounding project restore. Returns any restore warnings.
+const restoreVariantImagesToIdb = async (
+    snapshot: MockupVariantImageSnapshot | undefined,
+): Promise<string[]> => {
+    if (!snapshot) return [];
+    try {
+        const result = await restoreMockupVariantImageSnapshot(snapshot, {
+            listExisting: listVariantImagesForVersion,
+            put: putVariantImage,
+            notify: (records) => useMockupVariantImageStore.getState().mergeRecords(records),
+        });
+        return result.warnings;
+    } catch (err) {
+        console.warn('[snapshots] mockup variant images could not be restored', err);
+        return ['Mockup variant images could not be restored.'];
+    }
+};
+
 // Restore a snapshot into the live store. Replaces any existing project with
 // the same id (we use the snapshot's project id directly so external
 // references — e.g. screen URLs — keep working). Images are repopulated in
@@ -500,6 +610,7 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
     // so renderers don't briefly see "missing image" placeholders.
     await restoreMockupImagesToIdb(images);
     await restoreScreenImagesToIdb(snapshot.screenImages);
+    await restoreVariantImagesToIdb(bundle.mockupVariantImages);
 
     // Splice the bundle back into the Zustand store. We mutate the store
     // imperatively because there's no public action for "replace one project
@@ -580,6 +691,14 @@ export const namespaceSnapshotForRestore = (
     }
 
     const bundle = rewriteIds(snapshot.project, idMap);
+    // The variant snapshot's composite `key` embeds the versionId (with colons),
+    // so exact-string rewriteIds can't fix it — rebuild the keys (and projectId)
+    // deterministically from the source snapshot so re-restores stay idempotent.
+    if (snapshot.project.mockupVariantImages) {
+        bundle.mockupVariantImages = namespaceVariantSnapshot(
+            snapshot.project.mockupVariantImages, idMap, targetProjectId,
+        );
+    }
     const images = snapshot.images.map((record) => {
         const next = rewriteIds(record, idMap);
         // The composite `key` embeds the versionId, so rebuild it from the
@@ -613,6 +732,7 @@ export const restoreSnapshotAs = async (
 
     await restoreMockupImagesToIdb(images);
     await restoreScreenImagesToIdb(screenImages);
+    await restoreVariantImagesToIdb(remapped.mockupVariantImages);
 
     useProjectStore.setState((state) => ({
         projects: { ...state.projects, [targetProjectId]: remapped.project },

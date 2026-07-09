@@ -139,6 +139,39 @@ describe('namespaceSnapshotForRestore — screen images, tasks, metrics', () => 
         expect(bundle.tasks?.[0].projectId).toBe(DEMO_PROJECT_ID);
         expect(bundle.workflowRuns?.[0].projectId).toBe(DEMO_PROJECT_ID);
     });
+
+    it('namespaces bundled mockup variant images by versionId and rebuilds the key', () => {
+        const snap = makeSnapshot();
+        const withVariants: SnapshotPayload = {
+            ...snap,
+            project: {
+                ...snap.project,
+                mockupVariantImages: {
+                    schemaVersion: 1,
+                    projectId: SOURCE_PROJECT_ID,
+                    exportedAt: 'now',
+                    records: [{
+                        key: `${VERSION_ID}:scr-home:mobile:default:low`,
+                        versionId: VERSION_ID,
+                        screenId: 'scr-home',
+                        variantId: 'mobile:default',
+                        quality: 'low',
+                        projectId: SOURCE_PROJECT_ID,
+                        imageDataUrl: 'data:image/png;base64,aGk=',
+                        source: 'generated_variant',
+                        generatedAt: 1,
+                    }],
+                    summary: { recordCount: 1, historyEntryCount: 0, totalApproxBytes: 0 },
+                },
+            } as unknown as SnapshotPayload['project'],
+        };
+        const { bundle } = namespaceSnapshotForRestore(withVariants, DEMO_PROJECT_ID);
+        const namespacedVersionId = `${DEMO_PROJECT_ID}:${VERSION_ID}`;
+        const rec = bundle.mockupVariantImages?.records[0];
+        expect(rec?.versionId).toBe(namespacedVersionId);
+        expect(rec?.key).toBe(`${namespacedVersionId}:scr-home:mobile:default:low`);
+        expect(rec?.projectId).toBe(DEMO_PROJECT_ID);
+    });
 });
 
 // --- loadDemoSnapshotPublic image hydration -------------------------------
