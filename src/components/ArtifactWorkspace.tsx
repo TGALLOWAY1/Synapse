@@ -1025,6 +1025,7 @@ export function ArtifactWorkspace({
                         mockupPlatform={mockupPlatform}
                         mobileRelevant={mobileRelevant}
                         trustContext={trustContext}
+                        features={structuredPRD.features}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={

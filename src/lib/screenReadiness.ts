@@ -925,6 +925,8 @@ export type ScreenListFilter =
     | 'review_recommended'
     | 'outdated_review'
     | 'downstream_review'
+    | 'handoff_ready'
+    | 'handoff_blocked'
     | 'missing_mockups'
     | 'has_risks';
 
@@ -941,6 +943,9 @@ export const SCREEN_LIST_FILTERS: Array<{ id: ScreenListFilter; label: string }>
     // existing review filters so the review-focused controls stay together.
     { id: 'outdated_review', label: 'Outdated review' },
     { id: 'downstream_review', label: 'Downstream review' },
+    // Phase 5A: implementation-handoff readiness filters.
+    { id: 'handoff_ready', label: 'Handoff ready' },
+    { id: 'handoff_blocked', label: 'Handoff blocked' },
     { id: 'missing_mockups', label: 'Missing mockups' },
     { id: 'has_risks', label: 'Has risks' },
 ];
@@ -957,6 +962,8 @@ export interface ScreenFilterReview {
     reviewFreshness?: 'current' | 'outdated' | 'unknown';
     /** Phase 4B: true when this screen has a blocking/review downstream impact. */
     downstreamReviewNeeded?: boolean;
+    /** Phase 5A: implementation-handoff readiness for this screen. */
+    handoffReadiness?: 'ready' | 'review_recommended' | 'blocked';
 }
 
 export function screenMatchesFilter(
@@ -991,6 +998,10 @@ export function screenMatchesFilter(
             return review?.reviewFreshness === 'outdated';
         case 'downstream_review':
             return review?.downstreamReviewNeeded === true;
+        case 'handoff_ready':
+            return review?.handoffReadiness === 'ready';
+        case 'handoff_blocked':
+            return review?.handoffReadiness === 'blocked';
         case 'missing_mockups':
             return !item.mockupScreen;
         case 'has_risks':

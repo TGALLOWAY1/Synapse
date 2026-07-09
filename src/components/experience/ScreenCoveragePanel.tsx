@@ -13,6 +13,7 @@ import {
 import type { ScreenCoverageSummary } from '../../lib/screenReadiness';
 import type { ScreenArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
 import type { ScreensDownstreamImpactRollup } from '../../lib/screenDownstreamImpact';
+import type { ScreensHandoffRollup } from '../../lib/screenImplementationHandoff';
 import type { MockupVariantCoverageSummary } from '../../lib/mockupVariants';
 import type { VariantFreshnessRollup } from '../../lib/mockupVariantTrust';
 
@@ -36,6 +37,9 @@ interface Props {
     /** Artifact-level downstream-impact rollup (Phase 4B). Absent → the
      * downstream readiness section is hidden (legacy callers). */
     downstreamRollup?: ScreensDownstreamImpactRollup;
+    /** Artifact-level implementation-handoff rollup (Phase 5A). Absent → the
+     * handoff readiness section is hidden (legacy callers). */
+    handoffRollup?: ScreensHandoffRollup;
     /** Opens the confirmed "Generate remaining mockups" flow (absent → no
      * mockup artifact yet; the action row is hidden). */
     onGenerateMissingMockups?: () => void;
@@ -62,7 +66,7 @@ function MetricRow({
     );
 }
 
-export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, downstreamRollup, onGenerateMissingMockups }: Props) {
+export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, downstreamRollup, handoffRollup, onGenerateMissingMockups }: Props) {
     const [showUncovered, setShowUncovered] = useState(false);
     const {
         totalScreens, prdFeatures, stateVariants, flows, p0, states, mockups, openRisks,
@@ -251,6 +255,49 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                     {downstreamRollup && (
                         <DownstreamReadinessSection rollup={downstreamRollup} />
                     )}
+
+                    {handoffRollup && handoffRollup.total > 0 && (
+                        <HandoffReadinessSection rollup={handoffRollup} />
+                    )}
+                </div>
+            </div>
+        </div>
+    );
+}
+
+/** Phase 5A: the artifact-level implementation-handoff readiness rollup — how
+ * many screens have build-ready handoff packages, gated on P0. Advisory only. */
+const HANDOFF_STATUS_META: Record<ScreensHandoffRollup['status'], { label: string; tone: 'good' | 'warn' }> = {
+    ready: { label: 'Implementation handoff ready', tone: 'good' },
+    review_recommended: { label: 'Implementation handoff needs review', tone: 'warn' },
+    blocked: { label: 'Implementation handoff not ready', tone: 'warn' },
+};
+
+function HandoffReadinessSection({ rollup }: { rollup: ScreensHandoffRollup }) {
+    const meta = HANDOFF_STATUS_META[rollup.status];
+    const good = meta.tone === 'good';
+    return (
+        <div className="mt-4 pt-4 border-t border-neutral-100">
+            <div className="flex items-center gap-1.5 mb-2">
+                <ClipboardCheck size={13} className="text-neutral-400" aria-hidden />
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Implementation handoff</h4>
+            </div>
+            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600 mb-2">
+                <span className="text-emerald-700">{rollup.ready} ready</span>
+                <span className="text-amber-700">{rollup.reviewRecommended} review recommended</span>
+                {rollup.blocked > 0 && (
+                    <span className="text-red-700">{rollup.blocked} blocked</span>
+                )}
+            </div>
+            <div className={`rounded-lg border p-3 flex items-start gap-2 ${
+                good ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
+            }`}>
+                {good
+                    ? <CheckCircle2 size={15} className="text-emerald-600 mt-0.5 shrink-0" aria-hidden />
+                    : <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" aria-hidden />}
+                <div className="min-w-0">
+                    <p className={`text-xs font-medium ${good ? 'text-emerald-800' : 'text-amber-800'}`}>{meta.label}</p>
+                    <p className="text-[11px] text-neutral-600 mt-0.5">{rollup.message}</p>
                 </div>
             </div>
         </div>
