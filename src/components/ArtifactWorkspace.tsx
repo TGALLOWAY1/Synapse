@@ -36,6 +36,7 @@ import {
     buildScreenIndex, readScreenEdits, readScreenLinks, readDismissedScreenIssues,
     type ScreenMetadataEdit,
 } from '../lib/screenExperience';
+import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
 import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 import { parseFlows } from './renderers/userFlows/parseFlow';
@@ -351,6 +352,14 @@ export function ArtifactWorkspace({
         return parsed ? mergeExtraScreens(parsed, mockupPreferred.metadata) : null;
     }, [mockupPreferred]);
 
+    // Full parsed user_flows list — the screen index only records flows that
+    // reference a screen, but the coverage summary needs the total flow count
+    // to report "X of Y flows represented" honestly.
+    const parsedFlows = useMemo(
+        () => (flowsPreferred ? parseFlows(flowsPreferred.content) : EMPTY_FLOWS),
+        [flowsPreferred],
+    );
+
     // Read-side screen index: joins the parsed screen_inventory, user_flows,
     // and mockup contents by canonical screen id / slug. Pure + memoized —
     // nothing new is persisted here, and missing artifacts degrade to a
@@ -359,15 +368,31 @@ export function ArtifactWorkspace({
     // version metadata, which swaps the invPreferred reference and recomputes.
     const screenIndex = useMemo(() => {
         const inventory = invPreferred ? parseScreenInventory(invPreferred.content) : null;
-        const flows = flowsPreferred ? parseFlows(flowsPreferred.content) : EMPTY_FLOWS;
         return buildScreenIndex(
             inventory,
-            flows,
+            parsedFlows,
             mockupPayload,
             readScreenEdits(invPreferred?.metadata),
             readScreenLinks(mockupPreferred?.metadata),
         );
-    }, [invPreferred, flowsPreferred, mockupPayload, mockupPreferred]);
+    }, [invPreferred, parsedFlows, mockupPayload, mockupPreferred]);
+
+    // Derived per-screen readiness (user-set status wins via the edit overlay)
+    // + the artifact-level coverage rollup for the Screens list panel. Pure &
+    // read-time only — see src/lib/screenReadiness.ts.
+    const screenReadiness = useMemo(
+        () => buildReadinessIndex(screenIndex, structuredPRD.features),
+        [screenIndex, structuredPRD.features],
+    );
+    const screenCoverage = useMemo(
+        () => buildScreenCoverageSummary(
+            screenIndex,
+            screenReadiness,
+            flowsPreferred ? parsedFlows : null,
+            structuredPRD.features,
+        ),
+        [screenIndex, screenReadiness, flowsPreferred, parsedFlows, structuredPRD.features],
+    );
 
     // Validation issues minus the user's persisted dismissals.
     const visibleScreenIssues = useMemo(() => {
@@ -486,7 +511,13 @@ export function ArtifactWorkspace({
 
     // Mockups-tab context for the detail view. Absent when the mockup
     // artifact is missing or its payload is unparseable — the tab shows an
-    // empty state instead.
+    // empty state instead. The PRD label mirrors renderVersionControls'
+    // provenance chip ("Generated from PRD Version N").
+    const mockupSpineRefId = mockupPreferred?.sourceRefs
+        .find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
+    const mockupSpineIdx = mockupSpineRefId
+        ? getSpineVersions(projectId).findIndex(s => s.id === mockupSpineRefId)
+        : -1;
     const mockupDetailContext = mockupArtifact && mockupPreferred && mockupPayload
         ? {
             projectId,
@@ -494,6 +525,8 @@ export function ArtifactWorkspace({
             versionId: mockupPreferred.id,
             payload: mockupPayload,
             settings: extractMockupSettings(mockupPreferred),
+            versionNumber: mockupPreferred.versionNumber,
+            prdVersionLabel: mockupSpineIdx >= 0 ? `Version ${mockupSpineIdx + 1}` : undefined,
         }
         : undefined;
 
@@ -795,6 +828,7 @@ export function ArtifactWorkspace({
                 return (
                     <ScreenDetailView
                         item={detailItem}
+                        readiness={screenReadiness.get(detailItem.id)}
                         activeTab={screenTab}
                         onTabChange={(tab) => setScreenParams(detailItem.id, tab, { replace: true })}
                         onBack={() => setScreenParams(null)}
@@ -902,6 +936,8 @@ export function ArtifactWorkspace({
                     )}
                     <ScreenListView
                         index={screenIndex}
+                        readiness={screenReadiness}
+                        coverage={screenCoverage}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
                             mockupDetailContext

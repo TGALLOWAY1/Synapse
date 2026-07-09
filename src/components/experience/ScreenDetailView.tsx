@@ -14,10 +14,12 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    AlertTriangle, ArrowLeft, Image as ImageIcon, Link2, Loader2, Pencil, RefreshCcw, RotateCcw, Workflow,
+    AlertTriangle, ArrowLeft, GitBranch, Image as ImageIcon, Link2, Loader2, Pencil,
+    RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
-    Feature, GenerationStatus, MockupPayload, MockupSettings, ScreenPriority,
+    Feature, GenerationStatus, MockupFidelity, MockupPayload, MockupPlatform,
+    MockupSettings, ScreenPriority,
 } from '../../types';
 import {
     groupFlowRefsByFlow,
@@ -25,7 +27,13 @@ import {
     type ScreenFlowGroup,
     type ScreenMetadataEdit,
 } from '../../lib/screenExperience';
-import { ScreenCard } from '../renderers/ScreenInventoryRenderer';
+import {
+    buildMockupSpecCoverage, buildMockupVariantRows, parseDecisionBranches,
+    REVIEW_STATUS_LABELS,
+    type MockupVariantRow, type ScreenReadiness, type ScreenReviewStatus,
+} from '../../lib/screenReadiness';
+import { ScreenOverviewPanel } from './ScreenOverviewPanel';
+import { ReadinessBadge } from './ReadinessBadge';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import type { ScreenImageGalleryContext } from '../renderers/ScreenImageGallery';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
@@ -43,10 +51,16 @@ export interface ScreenDetailMockupContext {
     versionId: string;
     payload: MockupPayload;
     settings: MockupSettings;
+    /** Mockup artifact version number (metadata line). */
+    versionNumber?: number;
+    /** "Version N" label of the PRD the mockup was generated from. */
+    prdVersionLabel?: string;
 }
 
 interface Props {
     item: ScreenExperienceItem;
+    /** Derived/user-set review readiness (src/lib/screenReadiness.ts). */
+    readiness?: ScreenReadiness;
     activeTab: ScreenDetailTab;
     onTabChange: (tab: ScreenDetailTab) => void;
     onBack: () => void;
@@ -82,7 +96,7 @@ interface Props {
 }
 
 export function ScreenDetailView({
-    item, activeTab, onTabChange, onBack,
+    item, readiness, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mockupStatus, onRetryMockup,
     features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
@@ -141,11 +155,18 @@ export function ScreenDetailView({
                                 {screen.type}
                             </span>
                         )}
+                        {readiness && <ReadinessBadge readiness={readiness} />}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_STYLES[priority]}`}>
                             {priority}
                         </span>
                     </div>
                 </div>
+                {readiness && readiness.status !== 'implementation_ready' && readiness.reasons.length > 0 && (
+                    <p className="mt-1.5 text-[11px] text-amber-700">
+                        {readiness.source === 'derived' ? 'Estimated status — ' : ''}
+                        {readiness.reasons.join(' ')}
+                    </p>
+                )}
             </div>
 
             <ScreenDetailTabs
@@ -189,8 +210,10 @@ export function ScreenDetailView({
                         />
                     ) : (
                         <>
-                            <ScreenCard
-                                screen={screen}
+                            <ScreenOverviewPanel
+                                item={item}
+                                readiness={readiness}
+                                features={features}
                                 imageContext={screenImageContext}
                                 imageStorageName={item.baseScreen.name}
                             />
@@ -228,6 +251,7 @@ export function ScreenDetailView({
                     onAddToMockups={onAddToMockups}
                     unmatchedMockups={unmatchedMockups}
                     onLinkMockup={onLinkMockup}
+                    onSaveScreenEdit={onSaveScreenEdit}
                 />
             )}
         </div>
@@ -257,15 +281,26 @@ function ScreenEditForm({
     const [userIntent, setUserIntent] = useState(screen.userIntent ?? '');
     const [priority, setPriority] = useState<ScreenPriority>(stylablePriority(screen.priority));
     const [notes, setNotes] = useState(item.edit?.notes ?? '');
+    const [reviewStatus, setReviewStatus] = useState<ScreenReviewStatus | ''>(item.edit?.reviewStatus ?? '');
 
     const handleSave = () => {
-        const edit: ScreenMetadataEdit = {};
+        // Start from the existing overlay so fields this form doesn't edit
+        // (mockupVariantStatus, anything written by newer code) survive a
+        // read-modify-write — then own only this form's fields.
+        const edit: ScreenMetadataEdit = { ...(item.edit ?? {}) };
+        delete edit.name;
+        delete edit.purpose;
+        delete edit.userIntent;
+        delete edit.priority;
+        delete edit.notes;
+        delete edit.reviewStatus;
         const trimmedName = name.trim();
         if (trimmedName && trimmedName !== baseScreen.name) edit.name = trimmedName;
         if (purpose !== (baseScreen.purpose ?? '')) edit.purpose = purpose;
         if (userIntent !== (baseScreen.userIntent ?? '')) edit.userIntent = userIntent;
         if (priority !== stylablePriority(baseScreen.priority)) edit.priority = priority;
         if (notes.trim()) edit.notes = notes;
+        if (reviewStatus) edit.reviewStatus = reviewStatus;
         onSave(Object.keys(edit).length > 0 ? edit : null);
     };
 
@@ -299,6 +334,22 @@ function ScreenEditForm({
                 >
                     {EDIT_PRIORITIES.map(p => <option key={p} value={p}>{p}</option>)}
                 </select>
+            </label>
+            <label className="block">
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Review status</span>
+                <select
+                    className={field}
+                    value={reviewStatus}
+                    onChange={e => setReviewStatus(e.target.value as ScreenReviewStatus | '')}
+                >
+                    <option value="">Estimate automatically (default)</option>
+                    {(Object.keys(REVIEW_STATUS_LABELS) as ScreenReviewStatus[]).map(s => (
+                        <option key={s} value={s}>{REVIEW_STATUS_LABELS[s]}</option>
+                    ))}
+                </select>
+                <span className="block mt-0.5 text-[11px] text-neutral-400">
+                    Setting a status overrides the estimated one — derived warnings stay visible.
+                </span>
             </label>
             <label className="block">
                 <span className="text-[10px] uppercase tracking-wide text-neutral-400">Notes (internal)</span>
@@ -382,6 +433,7 @@ function FlowTab({
         <div className="not-prose space-y-6">
             {flowGroups.map(group => {
                 const highlighted = new Set(group.steps.map(s => s.stepIndex));
+                const repeated = group.steps.length > 1;
                 // Per-step issue links, mirroring UserFlowsRenderer.
                 const inlineByStep = new Map<number, FlowIssue[]>();
                 const issuesByStep = new Map<number, number>();
@@ -411,6 +463,57 @@ function FlowTab({
                         {group.flow.goal && (
                             <p className="text-xs text-neutral-500 mb-3">{group.flow.goal}</p>
                         )}
+                        <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2.5 mb-3">
+                            <div className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600 mb-1.5">
+                                This screen appears in
+                            </div>
+                            <ul className="space-y-1.5">
+                                {group.steps.map(({ step, stepIndex }, appearanceIdx) => {
+                                    const decisionCount = step.decisions.length;
+                                    // The flow only knows this screen by name, so a repeated
+                                    // appearance is labeled by its step position; the User/System
+                                    // lines below distinguish the phase where the flow does.
+                                    return (
+                                        <li key={stepIndex} className="text-xs text-neutral-700">
+                                            <div className="flex items-center gap-1.5 flex-wrap">
+                                                <span className="font-medium text-indigo-800">
+                                                    {repeated
+                                                        ? `${item.screen.name} — Step ${stepIndex + 1} (appearance ${appearanceIdx + 1} of ${group.steps.length})`
+                                                        : `Step ${stepIndex + 1}`}
+                                                </span>
+                                                {decisionCount > 0 && (
+                                                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full">
+                                                        <GitBranch size={9} aria-hidden />
+                                                        {decisionCount} {decisionCount === 1 ? 'decision' : 'decisions'}
+                                                    </span>
+                                                )}
+                                            </div>
+                                            {step.userAction && (
+                                                <div className="mt-0.5 text-[11px] text-neutral-500">
+                                                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">User</span>
+                                                    {step.userAction}
+                                                </div>
+                                            )}
+                                            {step.systemBehavior && (
+                                                <div className="mt-0.5 text-[11px] text-neutral-500">
+                                                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">System</span>
+                                                    {step.systemBehavior}
+                                                </div>
+                                            )}
+                                            {step.decisions.map((decision, di) => (
+                                                <DecisionBranches key={di} decision={decision} />
+                                            ))}
+                                        </li>
+                                    );
+                                })}
+                            </ul>
+                            {repeated && (
+                                <p className="mt-2 text-[11px] text-neutral-500">
+                                    Repeated appearances usually represent different phases or states of
+                                    this screen — the step details above distinguish them where the flow does.
+                                </p>
+                            )}
+                        </div>
                         <FlowJourney
                             flowIndex={group.flowIndex}
                             steps={group.flow.steps}
@@ -446,11 +549,58 @@ function FlowTab({
     );
 }
 
+/**
+ * One flow decision rendered branch-aware: when the decision text parses into
+ * condition → outcome pairs (see parseDecisionBranches) they render as an
+ * explicit branch list; otherwise the raw text shows with an honest
+ * "branch outcomes not specified" nudge — never an invented branch.
+ */
+function DecisionBranches({ decision }: { decision: string }) {
+    const branches = parseDecisionBranches(decision);
+    if (branches.length === 0) {
+        return (
+            <div className="mt-0.5 text-[11px]">
+                <span className="text-neutral-500">
+                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">Decision</span>
+                    {decision}
+                </span>
+                <span className="text-amber-700"> — branch outcomes not specified in the flow. Review recommended.</span>
+            </div>
+        );
+    }
+    return (
+        <div className="mt-1 text-[11px]">
+            <div className="font-medium text-neutral-400 uppercase tracking-wide text-[9px]">Decision branches</div>
+            <ul className="mt-0.5 space-y-0.5">
+                {branches.map((b, i) => (
+                    <li key={i} className="flex items-center gap-1 flex-wrap text-neutral-600">
+                        <span>{b.condition}</span>
+                        <span className="text-neutral-300" aria-hidden>→</span>
+                        <span className="text-neutral-800">{b.outcome}</span>
+                    </li>
+                ))}
+            </ul>
+        </div>
+    );
+}
+
 // --- Mockups tab ------------------------------------------------------------
+
+const PLATFORM_LABELS: Record<MockupPlatform, string> = {
+    mobile: 'Mobile',
+    desktop: 'Desktop',
+    responsive: 'Responsive',
+};
+
+const FIDELITY_LABELS: Record<MockupFidelity, string> = {
+    low: 'Low fidelity',
+    mid: 'Mid fidelity',
+    high: 'High fidelity',
+};
 
 function MockupsTab({
     item, mockupContext, mockupStatus, onRetryMockup, onAddToMockups,
-    unmatchedMockups, onLinkMockup,
+    unmatchedMockups, onLinkMockup, onSaveScreenEdit,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
@@ -459,19 +609,85 @@ function MockupsTab({
     onAddToMockups?: () => void;
     unmatchedMockups?: Array<{ id: string; name: string }>;
     onLinkMockup?: (mockupScreenId: string) => void;
+    onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
 }) {
     const [linkTarget, setLinkTarget] = useState('');
+
+    // Persist a per-variant status into the screen's edit overlay (null
+    // clears the override back to the tracked/derived status). Merges into
+    // the existing edit so name/notes/reviewStatus and any unknown overlay
+    // fields survive untouched.
+    const setVariantStatus = onSaveScreenEdit
+        ? (variantId: string, status: 'accepted' | 'not_needed' | null) => {
+            const current: ScreenMetadataEdit = { ...(item.edit ?? {}) };
+            const statuses = { ...(current.mockupVariantStatus ?? {}) };
+            if (status) statuses[variantId] = status;
+            else delete statuses[variantId];
+            if (Object.keys(statuses).length > 0) current.mockupVariantStatus = statuses;
+            else delete current.mockupVariantStatus;
+            onSaveScreenEdit(item.id, Object.keys(current).length > 0 ? current : null);
+        }
+        : undefined;
+
     if (mockupContext && item.mockupScreen) {
+        const specCoverage = buildMockupSpecCoverage(
+            item.baseScreen,
+            item.mockupScreen.coreUIElements,
+        );
+        const variantRows = buildMockupVariantRows(item, mockupContext.settings.platform);
+        const metaParts = [
+            'Generated product screen preview',
+            PLATFORM_LABELS[mockupContext.settings.platform],
+            FIDELITY_LABELS[mockupContext.settings.fidelity],
+        ];
+        if (mockupContext.prdVersionLabel) metaParts.push(`Generated from PRD ${mockupContext.prdVersionLabel}`);
+        if (mockupContext.versionNumber) metaParts.push(`Mockup v${mockupContext.versionNumber}`);
         return (
-            <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
-                <MockupScreenImage
-                    projectId={mockupContext.projectId}
-                    artifactId={mockupContext.artifactId}
-                    versionId={mockupContext.versionId}
-                    screen={item.mockupScreen}
-                    payload={mockupContext.payload}
-                    settings={mockupContext.settings}
+            <div className="space-y-3">
+                <p className="text-[11px] text-neutral-500">
+                    {metaParts.join(' · ')}
+                </p>
+                <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
+                    <MockupScreenImage
+                        projectId={mockupContext.projectId}
+                        artifactId={mockupContext.artifactId}
+                        versionId={mockupContext.versionId}
+                        screen={item.mockupScreen}
+                        payload={mockupContext.payload}
+                        settings={mockupContext.settings}
+                    />
+                </div>
+
+                <MockupVariantsCard
+                    rows={variantRows}
+                    prdVersionLabel={mockupContext.prdVersionLabel}
+                    mockupVersionNumber={mockupContext.versionNumber}
+                    onSetVariantStatus={setVariantStatus}
                 />
+
+                {specCoverage.length > 0 && (
+                    <div className="bg-white rounded-lg border border-neutral-200 p-4">
+                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+                            Spec coverage in mockup
+                        </h4>
+                        <ul className="space-y-1 text-xs">
+                            {specCoverage.map((row, i) => (
+                                <li key={i} className="flex items-center justify-between gap-2">
+                                    <span className="text-neutral-700">{row.element}</span>
+                                    {row.status === 'in_spec' ? (
+                                        <span className="text-emerald-700 font-medium">In mockup spec</span>
+                                    ) : (
+                                        <span className="text-amber-700">Not in mockup spec</span>
+                                    )}
+                                </li>
+                            ))}
+                        </ul>
+                        <p className="text-[11px] text-neutral-400 mt-2">
+                            Compared against the mockup&rsquo;s generation spec, not the rendered image —
+                            treat &ldquo;Not in mockup spec&rdquo; as a prompt to double-check the visual.
+                        </p>
+                    </div>
+                )}
             </div>
         );
     }
@@ -555,6 +771,135 @@ function MockupsTab({
                     </div>
                 </div>
             )}
+        </div>
+    );
+}
+
+// --- Mockup variants card -----------------------------------------------------
+
+const VARIANT_STATUS_META: Record<MockupVariantRow['status'], { label: string; className: string }> = {
+    generated: { label: 'Generated', className: 'text-emerald-700 bg-emerald-50 ring-emerald-200' },
+    missing: { label: 'Missing', className: 'text-amber-700 bg-amber-50 ring-amber-200' },
+    accepted: { label: 'Accepted', className: 'text-sky-700 bg-sky-50 ring-sky-200' },
+    not_needed: { label: 'Not needed', className: 'text-neutral-500 bg-neutral-100 ring-neutral-200' },
+};
+
+/**
+ * Per-state / per-platform mockup variant tracking. Status comes from
+ * generated mockup METADATA (the spec-to-spec join) plus the user's overlay —
+ * never from inspecting the rendered image, and the copy says so. Per-variant
+ * image generation isn't wired yet, so the only actions offered are the two
+ * that really work: mark a variant accepted, or mark a recommended variant
+ * not needed (both persist to the screen's edit overlay).
+ */
+function MockupVariantsCard({
+    rows, prdVersionLabel, mockupVersionNumber, onSetVariantStatus,
+}: {
+    rows: MockupVariantRow[];
+    prdVersionLabel?: string;
+    mockupVersionNumber?: number;
+    onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
+}) {
+    if (rows.length === 0) return null;
+    const missingRequired = rows.filter(r => r.required && r.status === 'missing').length;
+    const generatedFrom = [
+        prdVersionLabel ? `PRD ${prdVersionLabel}` : null,
+        mockupVersionNumber ? `mockup v${mockupVersionNumber}` : null,
+    ].filter(Boolean).join(' · ');
+    return (
+        <div className="bg-white rounded-lg border border-neutral-200 p-4">
+            <header className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Mockup variants
+                </h4>
+                <span className="text-[9px] uppercase tracking-wide text-indigo-500 bg-indigo-50 ring-1 ring-indigo-100 px-1.5 py-0.5 rounded">
+                    Tracked from generated mockup metadata
+                </span>
+            </header>
+            <ul className="divide-y divide-neutral-100">
+                {rows.map(row => {
+                    const meta = VARIANT_STATUS_META[row.status];
+                    return (
+                        <li key={row.id} className="py-2 flex items-center justify-between gap-3 text-xs">
+                            <div className="min-w-0">
+                                <div className="flex items-center gap-1.5 flex-wrap">
+                                    <span className="font-medium text-neutral-800">{row.label}</span>
+                                    {row.platform && (
+                                        <span className="text-[10px] text-neutral-500 bg-neutral-100 px-1.5 py-px rounded">
+                                            {PLATFORM_LABELS[row.platform]}
+                                        </span>
+                                    )}
+                                    {row.stateType && row.stateType !== 'default' && (
+                                        <span className="text-[9px] uppercase tracking-wide text-sky-700 bg-sky-50 ring-1 ring-sky-100 px-1.5 py-px rounded">
+                                            {row.stateType}
+                                        </span>
+                                    )}
+                                    {row.required && row.id !== 'default' && (
+                                        <span className="text-[9px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-100 px-1.5 py-px rounded">
+                                            Recommended
+                                        </span>
+                                    )}
+                                </div>
+                                {row.status === 'generated' && generatedFrom && (
+                                    <div className="text-[10px] text-neutral-400 mt-0.5">
+                                        Generated from {generatedFrom}
+                                    </div>
+                                )}
+                            </div>
+                            <div className="flex items-center gap-1.5 shrink-0">
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${meta.className}`}>
+                                    {meta.label}
+                                </span>
+                                {onSetVariantStatus && (
+                                    row.userSet ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSetVariantStatus(row.id, null)}
+                                            className="text-[10px] text-neutral-500 hover:text-neutral-700 underline decoration-dotted"
+                                        >
+                                            Undo
+                                        </button>
+                                    ) : row.status === 'generated' ? (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSetVariantStatus(row.id, 'accepted')}
+                                            className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                        >
+                                            Mark accepted
+                                        </button>
+                                    ) : row.status === 'missing' ? (
+                                        <>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSetVariantStatus(row.id, 'accepted')}
+                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                                title="Confirm this variant is covered — e.g. you uploaded or verified it outside the generated set"
+                                            >
+                                                Mark accepted
+                                            </button>
+                                            <button
+                                                type="button"
+                                                onClick={() => onSetVariantStatus(row.id, 'not_needed')}
+                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
+                                                title="Skip this recommended variant — it stops counting as a readiness gap"
+                                            >
+                                                Not needed
+                                            </button>
+                                        </>
+                                    ) : null
+                                )}
+                            </div>
+                        </li>
+                    );
+                })}
+            </ul>
+            <p className="text-[11px] text-neutral-400 mt-2">
+                {missingRequired > 0
+                    ? `${missingRequired} recommended ${missingRequired === 1 ? 'variant has' : 'variants have'} no mockup yet. `
+                    : ''}
+                Per-variant generation isn&rsquo;t wired yet — regenerate the full mockup from the
+                artifact actions, or upload a variant image and mark it accepted here.
+            </p>
         </div>
     );
 }

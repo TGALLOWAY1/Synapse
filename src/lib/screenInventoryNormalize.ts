@@ -16,11 +16,15 @@
 import type {
     ExitPath,
     LegacyScreenPriority,
+    ScreenHandoffEvent,
+    ScreenHandoffSpec,
     ScreenInventoryContent,
     ScreenInventorySection,
     ScreenItem,
     ScreenPriority,
+    ScreenRiskDetail,
     ScreenState,
+    ScreenStateType,
     ScreenType,
 } from '../types';
 import { slugifyScreenName } from './screenInventoryImageStore';
@@ -33,6 +37,10 @@ const LEGACY_PRIORITY_MAP: Record<LegacyScreenPriority, ScreenPriority> = {
 
 const VALID_PRIORITIES: ReadonlySet<string> = new Set(['P0', 'P1', 'P2', 'P3']);
 const VALID_TYPES: ReadonlySet<string> = new Set(['screen', 'modal', 'overlay', 'system-state']);
+const VALID_STATE_TYPES: ReadonlySet<string> = new Set([
+    'default', 'loading', 'empty', 'error', 'success', 'disabled', 'permission', 'responsive', 'other',
+]);
+const VALID_RISK_SEVERITIES: ReadonlySet<string> = new Set(['low', 'medium', 'high']);
 
 export function parseScreenInventory(content: string): ScreenInventoryContent | null {
     let raw: unknown;
@@ -143,6 +151,12 @@ function normalizeScreen(raw: unknown): ScreenItem | null {
     const exitPaths = normalizeExitPaths(s.exitPaths)
         ?? legacyNavigationToExits(s.navigationTo);
 
+    // Phase 2 structured risks. When present, the legacy plain-string list is
+    // derived from the descriptions so every existing consumer keeps working.
+    const riskDetails = normalizeRiskDetails(s.riskDetails);
+    const risks = stringArray(s.risks)
+        ?? (riskDetails ? riskDetails.map(r => r.description) : undefined);
+
     return {
         id: typeof s.id === 'string' ? s.id : undefined,
         name,
@@ -156,8 +170,11 @@ function normalizeScreen(raw: unknown): ScreenItem | null {
         coreUIElements: components,
         components: stringArray(s.components),
         outputData: stringArray(s.outputData),
-        risks: stringArray(s.risks),
+        risks,
         featureRefs: stringArray(s.featureRefs),
+        riskDetails,
+        acceptanceCriteria: stringArray(s.acceptanceCriteria),
+        handoff: normalizeHandoff(s.handoff),
         navigationFrom: stringArray(s.navigationFrom),
         navigationTo: stringArray(s.navigationTo),
     };
@@ -184,6 +201,17 @@ function normalizeStates(raw: unknown): ScreenState[] | undefined {
             const out: ScreenState = { name, description };
             if (typeof st.trigger === 'string') out.trigger = st.trigger;
             if (typeof st.recoveryPath === 'string') out.recoveryPath = st.recoveryPath;
+            // Phase 2 state-contract fields (optional).
+            if (typeof st.type === 'string' && VALID_STATE_TYPES.has(st.type)) {
+                out.type = st.type as ScreenStateType;
+            }
+            if (typeof st.systemBehavior === 'string' && st.systemBehavior) {
+                out.systemBehavior = st.systemBehavior;
+            }
+            if (typeof st.required === 'boolean') out.required = st.required;
+            if (typeof st.needsMockup === 'boolean') out.needsMockup = st.needsMockup;
+            const criteria = stringArray(st.acceptanceCriteria);
+            if (criteria) out.acceptanceCriteria = criteria;
             return out;
         })
         .filter((s): s is ScreenState => s !== null);
@@ -205,6 +233,65 @@ function normalizeExitPaths(raw: unknown): ExitPath[] | undefined {
         })
         .filter((p): p is ExitPath => p !== null);
     return paths.length > 0 ? paths : undefined;
+}
+
+function normalizeRiskDetails(raw: unknown): ScreenRiskDetail[] | undefined {
+    if (!Array.isArray(raw)) return undefined;
+    const details = raw
+        .map((item): ScreenRiskDetail | null => {
+            if (!item || typeof item !== 'object') return null;
+            const r = item as Record<string, unknown>;
+            const description = typeof r.description === 'string' && r.description
+                ? r.description
+                : null;
+            if (!description) return null;
+            const out: ScreenRiskDetail = { description };
+            if (typeof r.severity === 'string' && VALID_RISK_SEVERITIES.has(r.severity)) {
+                out.severity = r.severity as ScreenRiskDetail['severity'];
+            }
+            if (typeof r.proposedHandling === 'string' && r.proposedHandling) {
+                out.proposedHandling = r.proposedHandling;
+            }
+            return out;
+        })
+        .filter((r): r is ScreenRiskDetail => r !== null);
+    return details.length > 0 ? details : undefined;
+}
+
+function normalizeHandoff(raw: unknown): ScreenHandoffSpec | undefined {
+    if (!raw || typeof raw !== 'object' || Array.isArray(raw)) return undefined;
+    const h = raw as Record<string, unknown>;
+    const out: ScreenHandoffSpec = {};
+    if (typeof h.route === 'string' && h.route.trim()) out.route = h.route.trim();
+    const routeParams = stringArray(h.routeParams);
+    if (routeParams) out.routeParams = routeParams;
+    const primaryComponents = stringArray(h.primaryComponents);
+    if (primaryComponents) out.primaryComponents = primaryComponents;
+    const stateVariables = stringArray(h.stateVariables);
+    if (stateVariables) out.stateVariables = stateVariables;
+    if (Array.isArray(h.events)) {
+        const events = h.events
+            .map((item): ScreenHandoffEvent | null => {
+                if (!item || typeof item !== 'object') return null;
+                const e = item as Record<string, unknown>;
+                if (typeof e.name !== 'string' || !e.name) return null;
+                const ev: ScreenHandoffEvent = { name: e.name };
+                if (typeof e.trigger === 'string' && e.trigger) ev.trigger = e.trigger;
+                if (typeof e.effect === 'string' && e.effect) ev.effect = e.effect;
+                return ev;
+            })
+            .filter((e): e is ScreenHandoffEvent => e !== null);
+        if (events.length > 0) out.events = events;
+    }
+    const dataDependencies = stringArray(h.dataDependencies);
+    if (dataDependencies) out.dataDependencies = dataDependencies;
+    const apiDependencies = stringArray(h.apiDependencies);
+    if (apiDependencies) out.apiDependencies = apiDependencies;
+    const accessibilityNotes = stringArray(h.accessibilityNotes);
+    if (accessibilityNotes) out.accessibilityNotes = accessibilityNotes;
+    const responsiveNotes = stringArray(h.responsiveNotes);
+    if (responsiveNotes) out.responsiveNotes = responsiveNotes;
+    return Object.keys(out).length > 0 ? out : undefined;
 }
 
 function legacyNavigationToExits(raw: unknown): ExitPath[] | undefined {
@@ -237,8 +324,18 @@ export function screenInventoryToMarkdown(inv: ScreenInventoryContent): string {
             if (screen.states?.length) {
                 lines.push('**States:**');
                 for (const st of screen.states) {
+                    const bits: string[] = [];
+                    if (st.type) bits.push(st.type);
+                    if (st.required) bits.push('required');
+                    if (st.needsMockup) bits.push('needs mockup');
+                    const tag = bits.length ? ` [${bits.join(', ')}]` : '';
                     const trig = st.trigger ? ` _(trigger: ${st.trigger})_` : '';
-                    lines.push(`- ${st.name}: ${st.description}${trig}`);
+                    lines.push(`- ${st.name}${tag}: ${st.description}${trig}`);
+                    if (st.systemBehavior) lines.push(`  - System: ${st.systemBehavior}`);
+                    if (st.recoveryPath) lines.push(`  - Recovery: ${st.recoveryPath}`);
+                    for (const c of st.acceptanceCriteria ?? []) {
+                        lines.push(`  - Accept: ${c}`);
+                    }
                 }
             }
             if (screen.entryPoints?.length) {
@@ -256,9 +353,43 @@ export function screenInventoryToMarkdown(inv: ScreenInventoryContent): string {
             if (screen.outputData?.length) {
                 lines.push(`**Output data:** ${screen.outputData.join(', ')}`);
             }
-            if (screen.risks?.length) {
+            if (screen.riskDetails?.length) {
+                lines.push('**Risks / edge cases:**');
+                for (const r of screen.riskDetails) {
+                    const sev = r.severity ? ` _(severity: ${r.severity})_` : '';
+                    lines.push(`- ${r.description}${sev}`);
+                    if (r.proposedHandling) lines.push(`  - Handling: ${r.proposedHandling}`);
+                }
+            } else if (screen.risks?.length) {
                 lines.push('**Risks / edge cases:**');
                 for (const r of screen.risks) lines.push(`- ${r}`);
+            }
+            if (screen.acceptanceCriteria?.length) {
+                lines.push('**Acceptance criteria:**');
+                for (const c of screen.acceptanceCriteria) lines.push(`- ${c}`);
+            }
+            if (screen.handoff) {
+                const h = screen.handoff;
+                lines.push('**Developer handoff:**');
+                if (h.route) {
+                    const params = h.routeParams?.length ? ` (params: ${h.routeParams.join(', ')})` : '';
+                    lines.push(`- Route: ${h.route}${params}`);
+                }
+                if (h.primaryComponents?.length) lines.push(`- Components: ${h.primaryComponents.join(', ')}`);
+                if (h.stateVariables?.length) lines.push(`- State: ${h.stateVariables.join(', ')}`);
+                if (h.events?.length) {
+                    lines.push(`- Events: ${h.events.map(e => e.name).join(', ')}`);
+                }
+                if (h.dataDependencies?.length) lines.push(`- Data dependencies: ${h.dataDependencies.join(', ')}`);
+                if (h.apiDependencies?.length) lines.push(`- API dependencies: ${h.apiDependencies.join(', ')}`);
+                if (h.accessibilityNotes?.length) {
+                    lines.push('- Accessibility:');
+                    for (const a of h.accessibilityNotes) lines.push(`  - ${a}`);
+                }
+                if (h.responsiveNotes?.length) {
+                    lines.push('- Responsive:');
+                    for (const rNote of h.responsiveNotes) lines.push(`  - ${rNote}`);
+                }
             }
             if (screen.featureRefs?.length) {
                 lines.push(`**Feature refs:** ${screen.featureRefs.join(', ')}`);

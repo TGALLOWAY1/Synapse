@@ -1,16 +1,29 @@
 // Canonical screen list for the Experience workspace. Read-only: every row is
 // derived from the screen_inventory artifact via the pure join layer
-// (src/lib/screenExperience.ts) — nothing here writes to the store. Rows show
-// what the other experience artifacts say about each screen (flow-step count,
-// mockup coverage) and click through to the Screen Detail view.
+// (src/lib/screenExperience.ts) plus the derived readiness layer
+// (src/lib/screenReadiness.ts) — nothing here writes to the store. Rows show
+// what the other experience artifacts say about each screen (flow refs,
+// mockup coverage), the derived/user-set review status, and click through to
+// the Screen Detail view. The Screen Coverage & Readiness panel at the top
+// replaces the old mockup-only coverage card.
 
-import { AppWindow, ChevronRight, Image as ImageIcon, Workflow } from 'lucide-react';
-import { useState } from 'react';
+import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Layers, Workflow } from 'lucide-react';
+import { useMemo, useState } from 'react';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
+import {
+    SCREEN_LIST_FILTERS, screenMatchesFilter,
+    type ScreenCoverageSummary, type ScreenListFilter, type ScreenReadiness,
+} from '../../lib/screenReadiness';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
+import { ScreenCoveragePanel } from './ScreenCoveragePanel';
+import { ReadinessBadge } from './ReadinessBadge';
 
 interface Props {
     index: ScreenExperienceIndex;
+    /** Per-screen readiness keyed by canonical id (src/lib/screenReadiness). */
+    readiness: ReadonlyMap<string, ScreenReadiness>;
+    /** Artifact-level coverage rollup for the top panel. */
+    coverage: ScreenCoverageSummary;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -21,8 +34,21 @@ interface Props {
     onGenerateMissingMockups?: () => void;
 }
 
-export function ScreenListView({ index, onSelectScreen, onGenerateMissingMockups }: Props) {
-    const [showAllCoverage, setShowAllCoverage] = useState(false);
+export function ScreenListView({
+    index, readiness, coverage, onSelectScreen, onGenerateMissingMockups,
+}: Props) {
+    const [filter, setFilter] = useState<ScreenListFilter>('all');
+
+    // Per-filter match counts so empty filters are obvious before clicking.
+    const filterCounts = useMemo(() => {
+        const counts = new Map<ScreenListFilter, number>();
+        for (const { id } of SCREEN_LIST_FILTERS) {
+            counts.set(id, index.items.filter(item =>
+                screenMatchesFilter(item, readiness.get(item.id), id)).length);
+        }
+        return counts;
+    }, [index, readiness]);
+
     if (index.items.length === 0) {
         return (
             <div className="max-w-xl mx-auto bg-white rounded-xl border border-dashed border-neutral-300 p-10 text-center">
@@ -37,78 +63,61 @@ export function ScreenListView({ index, onSelectScreen, onGenerateMissingMockups
         );
     }
 
-    const { summary, unmockedScreens } = index.mockupCoverage;
-    const shownUnmocked = showAllCoverage ? unmockedScreens : unmockedScreens.slice(0, 3);
-    const uncoveredLabel = summary.notMockedYetScreens === 1 ? '1 supporting screen available to generate' : `${summary.notMockedYetScreens} supporting screens available to generate`;
+    const filteredSections = index.sections
+        .map(section => ({
+            ...section,
+            items: section.items.filter(item =>
+                screenMatchesFilter(item, readiness.get(item.id), filter)),
+        }))
+        .filter(section => section.items.length > 0);
 
     return (
-        <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-8">
-            <div className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
-                <div className="flex items-start gap-3">
-                    <div className="mt-0.5 h-8 w-8 shrink-0 rounded-lg bg-indigo-50 flex items-center justify-center">
-                        <ImageIcon size={16} className="text-indigo-600" />
-                    </div>
-                    <div className="min-w-0 flex-1">
-                        <h3 className="text-sm font-semibold text-neutral-900">Mockup Coverage</h3>
-                        <p className="mt-1 text-xs leading-relaxed text-neutral-600">
-                            <span className="font-medium text-neutral-800">Mockups prioritize the most important screens.</span>{' '}
-                            We created mockups for the core user-facing screens. Some supporting screens from the Screens artifact don’t have mockups yet, but they can be generated anytime.
-                        </p>
-                        <div className="mt-3 grid grid-cols-1 sm:grid-cols-2 gap-2 text-xs">
-                            <div className="rounded-lg bg-neutral-50 border border-neutral-200 px-3 py-2">
-                                <span className="font-semibold text-neutral-900">{summary.mockedScreens} of {summary.totalScreens}</span> screens have mockups
-                            </div>
-                            <div className="rounded-lg bg-indigo-50 border border-indigo-100 px-3 py-2 text-indigo-800">
-                                <span className="font-semibold">{summary.notMockedYetScreens}</span> {summary.notMockedYetScreens === 1 ? 'supporting screen' : 'supporting screens'} available to generate
-                            </div>
-                        </div>
-                        {summary.notMockedYetScreens > 0 && onGenerateMissingMockups && (
-                            <div className="mt-3 flex flex-wrap gap-2">
-                                <button type="button" onClick={onGenerateMissingMockups} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition">
-                                    <ImageIcon size={12} /> {summary.notMockedYetScreens === 1 ? 'Generate mockup' : 'Generate remaining mockups'}
-                                </button>
-                                <button type="button" onClick={onGenerateMissingMockups} className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition">
-                                    Choose screens to mock up
-                                </button>
-                            </div>
-                        )}
-                    </div>
-                </div>
-                {summary.notMockedYetScreens > 0 && (
-                    <div className="mt-4 border-t border-neutral-100 pt-3">
-                        <div className="text-xs font-semibold text-neutral-700 mb-2">Not mocked yet</div>
-                        <ul className="space-y-2">
-                            {shownUnmocked.map(item => (
-                                <li key={item.screenId} className="rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-2 text-xs">
-                                    <div className="flex items-start justify-between gap-2">
-                                        <div className="min-w-0">
-                                            <p className="font-medium text-neutral-900">Not mocked yet — {item.screenName}</p>
-                                            <p className="mt-0.5 text-neutral-600">This supporting screen is defined in the Screens artifact but wasn’t included in the initial mockup set.</p>
-                                        </div>
-                                        {onGenerateMissingMockups && (
-                                            <button type="button" onClick={onGenerateMissingMockups} className="shrink-0 text-indigo-700 hover:text-indigo-900 font-medium">Generate mockup</button>
-                                        )}
-                                    </div>
-                                </li>
-                            ))}
-                        </ul>
-                        {unmockedScreens.length > 3 && (
-                            <button type="button" onClick={() => setShowAllCoverage(v => !v)} className="mt-2 text-xs font-medium text-indigo-700 hover:text-indigo-900">
-                                {showAllCoverage ? 'Hide' : `Show all ${unmockedScreens.length}`}
-                            </button>
-                        )}
-                        <p className="sr-only">{uncoveredLabel}</p>
-                    </div>
-                )}
+        <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-6">
+            <ScreenCoveragePanel
+                summary={coverage}
+                onGenerateMissingMockups={onGenerateMissingMockups}
+            />
+
+            <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter screens">
+                {SCREEN_LIST_FILTERS.map(f => {
+                    const active = f.id === filter;
+                    const count = filterCounts.get(f.id) ?? 0;
+                    return (
+                        <button
+                            key={f.id}
+                            type="button"
+                            aria-pressed={active}
+                            onClick={() => setFilter(f.id)}
+                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition ${
+                                active
+                                    ? 'bg-indigo-600 text-white'
+                                    : 'bg-white text-neutral-600 ring-1 ring-neutral-200 hover:ring-indigo-300 hover:text-indigo-700'
+                            }`}
+                        >
+                            {f.label}
+                            {f.id !== 'all' && (
+                                <span className={`tabular-nums ${active ? 'text-indigo-200' : 'text-neutral-400'}`}>
+                                    {count}
+                                </span>
+                            )}
+                        </button>
+                    );
+                })}
             </div>
-            {/* Slug collisions and other reference problems surface in the
-                ReferenceWarningsPanel rendered above this list (with repair
-                and dismiss actions), not as a separate banner here. */}
-            {index.sections.map((section, sectionIdx) => (
-                <section key={sectionIdx}>
+
+            {filteredSections.length === 0 && (
+                <div className="bg-white rounded-xl border border-dashed border-neutral-300 p-8 text-center">
+                    <Layers size={18} className="text-neutral-300 mx-auto mb-2" />
+                    <p className="text-sm text-neutral-600">
+                        No screens match this filter.
+                    </p>
+                </div>
+            )}
+
+            {filteredSections.map((section, sectionIdx) => (
+                <section key={section.title + sectionIdx}>
                     <header className="mb-3">
                         <h3 className="text-base font-semibold text-neutral-800">
-                            <span className="text-neutral-400 font-normal mr-2">{sectionIdx + 1}.</span>
                             {section.title}
                         </h3>
                         {section.description && (
@@ -116,12 +125,17 @@ export function ScreenListView({ index, onSelectScreen, onGenerateMissingMockups
                         )}
                         <div className="mt-1 text-[11px] uppercase tracking-wide text-neutral-400">
                             {section.items.length} {section.items.length === 1 ? 'screen' : 'screens'}
+                            {filter !== 'all' && ' matching'}
                         </div>
                     </header>
                     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
                         {section.items.map(item => (
                             <li key={item.id}>
-                                <ScreenRow item={item} onSelect={() => onSelectScreen(item.id)} />
+                                <ScreenRow
+                                    item={item}
+                                    readiness={readiness.get(item.id)}
+                                    onSelect={() => onSelectScreen(item.id)}
+                                />
                             </li>
                         ))}
                     </ul>
@@ -131,18 +145,27 @@ export function ScreenListView({ index, onSelectScreen, onGenerateMissingMockups
     );
 }
 
-function ScreenRow({ item, onSelect }: { item: ScreenExperienceItem; onSelect: () => void }) {
+function ScreenRow({
+    item, readiness, onSelect,
+}: {
+    item: ScreenExperienceItem;
+    readiness?: ScreenReadiness;
+    onSelect: () => void;
+}) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
     const flowCount = item.relatedFlows.length;
     const entryCount = screen.entryPoints?.length ?? 0;
     const exitCount = screen.exitPaths?.length ?? 0;
+    const stateCount = screen.states?.length ?? 0;
+    const riskCount = screen.risks?.length ?? 0;
+    const featureRefs = screen.featureRefs ?? [];
 
     return (
         <button
             type="button"
             onClick={onSelect}
-            className="w-full text-left bg-white rounded-lg border border-neutral-200 p-4 hover:border-indigo-300 hover:shadow-sm transition group"
+            className="w-full h-full text-left bg-white rounded-lg border border-neutral-200 p-4 hover:border-indigo-300 hover:shadow-sm transition group flex flex-col"
         >
             <div className="flex items-start justify-between gap-2">
                 <h4 className="font-semibold text-neutral-800 text-sm leading-tight group-hover:text-indigo-700 transition-colors">
@@ -171,20 +194,55 @@ function ScreenRow({ item, onSelect }: { item: ScreenExperienceItem; onSelect: (
                 </p>
             )}
 
-            <div className="mt-3 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
-                <span className="inline-flex items-center gap-1" title="User-flow steps referencing this screen">
-                    <Workflow size={11} className={flowCount > 0 ? 'text-indigo-500' : 'text-neutral-300'} />
-                    {flowCount > 0
-                        ? `${flowCount} flow ${flowCount === 1 ? 'step' : 'steps'}`
-                        : 'No flow refs'}
+            <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
+                {readiness && <ReadinessBadge readiness={readiness} />}
+                {featureRefs.length > 0 ? (
+                    <span
+                        className="text-[10px] text-violet-700 bg-violet-50 ring-1 ring-violet-200 px-1.5 py-0.5 rounded-full"
+                        title={`Linked PRD features: ${featureRefs.join(', ')}`}
+                    >
+                        Covers {featureRefs.length} {featureRefs.length === 1 ? 'feature' : 'features'}
+                    </span>
+                ) : (
+                    <span
+                        className="text-[10px] text-neutral-400 bg-neutral-50 ring-1 ring-neutral-200 px-1.5 py-0.5 rounded-full"
+                        title="No linked PRD features found — review recommended"
+                    >
+                        No PRD links
+                    </span>
+                )}
+                {riskCount > 0 && (
+                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full">
+                        <AlertTriangle size={9} aria-hidden />
+                        {riskCount} {riskCount === 1 ? 'risk' : 'risks'} to review
+                    </span>
+                )}
+            </div>
+
+            <div className="mt-auto pt-3 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
+                <span
+                    className="inline-flex items-center gap-1"
+                    title="States documented in the spec (empty / loading / error variants)"
+                >
+                    <Layers size={11} className={stateCount > 0 ? 'text-sky-500' : 'text-neutral-300'} />
+                    {stateCount > 0 ? `${stateCount} ${stateCount === 1 ? 'state' : 'states'}` : 'No states'}
                 </span>
                 <span className="inline-flex items-center gap-1" title="Mockup coverage">
                     <ImageIcon size={11} className={item.mockupScreen ? 'text-emerald-500' : 'text-neutral-300'} />
                     {item.mockupScreen ? 'Mockup' : 'No mockup'}
                 </span>
+                <span
+                    className="inline-flex items-center gap-1"
+                    title="User-flow steps referencing this screen"
+                >
+                    <Workflow size={11} className={flowCount > 0 ? 'text-indigo-500' : 'text-neutral-300'} />
+                    {flowCount > 0
+                        ? `${flowCount} flow ${flowCount === 1 ? 'step' : 'steps'}`
+                        : 'No flow refs'}
+                </span>
                 {(entryCount > 0 || exitCount > 0) && (
-                    <span title="Entry / exit paths">
-                        {entryCount} in · {exitCount} out
+                    <span title="Ways users arrive at this screen (incoming) and leave it (outgoing)">
+                        {entryCount} incoming · {exitCount} outgoing
                     </span>
                 )}
                 <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />

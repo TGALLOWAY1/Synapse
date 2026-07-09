@@ -508,3 +508,36 @@ describe('groupFlowRefsByFlow', () => {
         expect(groupFlowRefsByFlow([])).toEqual([]);
     });
 });
+
+describe('readScreenEdits — Phase 2 overlay fields', () => {
+    it('round-trips mockupVariantStatus and drops invalid values', () => {
+        const edits = readScreenEdits({
+            screenEdits: {
+                'scr-a': {
+                    mockupVariantStatus: {
+                        'default': 'accepted',
+                        'state:empty': 'not_needed',
+                        'state:bad': 'approved-ish',
+                    },
+                },
+            },
+        });
+        expect(edits['scr-a'].mockupVariantStatus).toEqual({
+            'default': 'accepted',
+            'state:empty': 'not_needed',
+        });
+    });
+
+    it('preserves unknown overlay fields verbatim (forward compatibility)', () => {
+        const edits = readScreenEdits({
+            screenEdits: {
+                'scr-a': {
+                    notes: 'keep me',
+                    futureField: { anything: true },
+                },
+            },
+        });
+        expect(edits['scr-a'].notes).toBe('keep me');
+        expect((edits['scr-a'] as Record<string, unknown>).futureField).toEqual({ anything: true });
+    });
+});
