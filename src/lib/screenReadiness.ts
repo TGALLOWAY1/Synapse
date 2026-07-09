@@ -82,9 +82,22 @@ const REVIEW_TRIGGER_GAPS: ReadonlySet<ScreenGapKind> = new Set([
     'missing_traceability',
     'invalid_traceability',
     'missing_mockup_p0',
-    'missing_state_variants',
     'states_without_behavior',
     'decision_missing_branches',
+]);
+
+/**
+ * Gaps that describe OPTIONAL design enrichment (additional mockup variants for
+ * states / viewports) rather than implementation-critical work. Synapse
+ * deliberately generates one primary implementation-quality mockup per screen
+ * and offers the extra variants on demand — so a missing variant is expanded
+ * coverage a user CAN generate, never a failure. These gaps are still surfaced
+ * for discovery (they stay in ScreenReadiness.gaps) but must NEVER reduce a
+ * screen's readiness status: a screen with every required asset is
+ * implementation-ready even when its optional variants are ungenerated.
+ */
+const OPTIONAL_ENHANCEMENT_GAPS: ReadonlySet<ScreenGapKind> = new Set([
+    'missing_state_variants',
 ]);
 
 export interface ScreenReadiness {
@@ -265,9 +278,15 @@ function reasonsFromGaps(gaps: ScreenGap[]): string[] {
  */
 export function deriveScreenReadiness(input: ReadinessInput): ScreenReadiness {
     const gaps = detectScreenGaps(input);
+    // Optional design-enrichment gaps (extra mockup variants) are additive
+    // documentation — they must never reduce readiness. Score status off the
+    // implementation-critical gaps only, while still returning the full gap
+    // list (incl. optional ones) so the detail view can surface them as
+    // opportunities.
+    const scoringGaps = gaps.filter(g => !OPTIONAL_ENHANCEMENT_GAPS.has(g.kind));
     if (input.userStatus) {
         const masked = (input.userStatus === 'accepted' || input.userStatus === 'implementation_ready')
-            && gaps.some(g => REVIEW_TRIGGER_GAPS.has(g.kind));
+            && scoringGaps.some(g => REVIEW_TRIGGER_GAPS.has(g.kind));
         const allGaps = masked
             ? [...gaps, {
                 kind: 'accepted_with_warnings' as const,
@@ -281,13 +300,13 @@ export function deriveScreenReadiness(input: ReadinessInput): ScreenReadiness {
             gaps: allGaps,
         };
     }
-    if (gaps.length === 0) {
+    if (scoringGaps.length === 0) {
         return { status: 'implementation_ready', source: 'derived', reasons: [], gaps };
     }
-    const status: ScreenReviewStatus = gaps.some(g => REVIEW_TRIGGER_GAPS.has(g.kind))
+    const status: ScreenReviewStatus = scoringGaps.some(g => REVIEW_TRIGGER_GAPS.has(g.kind))
         ? 'needs_review'
         : 'draft';
-    return { status, source: 'derived', reasons: reasonsFromGaps(gaps), gaps };
+    return { status, source: 'derived', reasons: reasonsFromGaps(scoringGaps), gaps };
 }
 
 /** Readiness for every screen in the index, keyed by canonical screen id.

@@ -259,24 +259,29 @@ export function deriveScreenReviewIssues(signals: ScreenReviewSignals): ScreenRe
             recommendedAction: 'Generate or upload a mockup for this screen.',
         });
     }
+    // Additional mockup variants (mobile / responsive / per-state layouts) are
+    // OPTIONAL design enrichment, generated on demand — never implementation-
+    // critical. They surface as INFO so they stay discoverable without ever
+    // reducing a screen's system readiness (a missing variant must not make an
+    // otherwise-complete screen read as "needs review").
     if (signals.mobileMockupMissing) {
         issues.push({
             id: 'mockup_mobile_missing',
-            severity: 'review',
+            severity: 'info',
             category: 'mobile',
-            title: 'Mobile mockup recommended',
-            description: 'A mobile variant is recommended for this screen but has not been generated.',
-            recommendedAction: 'Generate a mobile variant, or mark it not needed if the screen is desktop-only.',
+            title: 'Mobile variant available on demand',
+            description: 'A mobile variant can be generated for this screen — an optional enhancement, not required to build.',
+            recommendedAction: 'Generate a mobile variant from the screen’s Mockups tab if you want one.',
         });
     }
     if (gapKinds.has('missing_state_variants')) {
         issues.push({
             id: 'mockup_state_variants_missing',
-            severity: 'review',
+            severity: 'info',
             category: 'mockups',
-            title: 'Recommended state mockups missing',
+            title: 'Additional state mockups available',
             description: gapMessage('missing_state_variants')
-                ?? 'Some recommended state mockup variants have not been generated.',
+                ?? 'Extra state mockup variants can be generated on demand — optional design coverage, not required to build.',
         });
     }
     if ((signals.freshnessStale ?? 0) > 0) {

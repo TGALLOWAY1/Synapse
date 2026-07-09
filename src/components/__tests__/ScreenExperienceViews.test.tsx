@@ -113,6 +113,32 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         expect(getByText(/Sharing/)).toBeTruthy();
     });
 
+    it('frames mockup variants as optional Expanded Design Coverage, not a deficiency', () => {
+        const { index, readiness, coverage } = buildFixtures();
+        const { getByText, queryByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                coverage={coverage}
+                variantCoverage={{
+                    recommendedGenerated: 7, recommendedTotal: 17,
+                    additionalGenerated: 6, additionalTotal: 17,
+                    p0WithMobile: 0, p0Total: 2,
+                    legacyUnknownMockups: 0, manifestBackedGenerated: 0,
+                    freshness: { total: 0, current: 0, review: 0, unknown: 0 },
+                }}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // Required work sits under a positive "Ready for Development" header.
+        expect(getByText('Ready for Development')).toBeTruthy();
+        // Variants are reframed as optional, opportunity-oriented coverage.
+        expect(getByText('Expanded Design Coverage')).toBeTruthy();
+        expect(getByText(/available on demand/)).toBeTruthy();
+        // The old mandatory-sounding "N / M recommended" ratio is gone.
+        expect(queryByText(/17 recommended/)).toBeNull();
+    });
+
     it('filters screens (Has risks shows only the risky screen)', () => {
         const { index, readiness, coverage } = buildFixtures();
         const { getByText, queryByText } = render(

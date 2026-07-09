@@ -566,7 +566,7 @@ describe('buildMockupVariantRows', () => {
         expect(byId.get('state:empty-history')!.status).toBe('missing');
     });
 
-    it('feeds readiness: missing recommended variants → needs_review; not_needed resolves it', () => {
+    it('missing recommended variants are optional — surfaced as a gap but never downgrade readiness', () => {
         const flows = parseFlows(`### Flow: Submit
 **Goal:** Submit
 **Steps:**
@@ -574,7 +574,10 @@ describe('buildMockupVariantRows', () => {
 `);
         const open = buildReadinessIndex(buildScreenIndex(inventory, flows, payload), FEATURES);
         const r1 = open.get('scr-submission')!;
-        expect(r1.status).toBe('needs_review');
+        // Additional mockup variants are optional design enrichment: the screen
+        // is implementation-ready even though its state variants are ungenerated.
+        expect(r1.status).toBe('implementation_ready');
+        // The gap is still surfaced for discovery, it just doesn't score.
         expect(r1.gaps.map(g => g.kind)).toContain('missing_state_variants');
 
         const resolved = buildReadinessIndex(buildScreenIndex(inventory, flows, payload, {

@@ -483,6 +483,16 @@ export interface MockupVariantCoverageSummary {
     recommendedGenerated: number;
     /** Recommended variants across all screens. */
     recommendedTotal: number;
+    /** ADDITIONAL (non-primary) variants generated/accepted — i.e. excluding
+     * each screen's primary Default mockup (which is the required implementation
+     * asset, counted under primary mockup coverage). These are the optional
+     * "expanded design coverage" enhancements (mobile / responsive / per-state
+     * layouts). */
+    additionalGenerated: number;
+    /** ADDITIONAL (non-primary) recommended variants across all screens. The
+     * pool a user can expand into on demand; `additionalTotal - additionalGenerated`
+     * are available to generate. */
+    additionalTotal: number;
     /** P0 screens whose Mobile default is generated/accepted. */
     p0WithMobile: number;
     /** Total P0 screens. */
@@ -514,6 +524,8 @@ export function buildMockupVariantCoverageSummary(
     if (index.items.length === 0) return null;
     let recommendedGenerated = 0;
     let recommendedTotal = 0;
+    let additionalGenerated = 0;
+    let additionalTotal = 0;
     let p0WithMobile = 0;
     let p0Total = 0;
     let legacyUnknownMockups = 0;
@@ -538,8 +550,15 @@ export function buildMockupVariantCoverageSummary(
             // A not_needed variant is deliberately skipped — drop it from the
             // denominator so a resolved gap never keeps the panel warning.
             if (v.required && v.status !== 'not_needed') {
+                const generated = isGeneratedOrAccepted(v.status);
                 recommendedTotal += 1;
-                if (isGeneratedOrAccepted(v.status)) recommendedGenerated += 1;
+                if (generated) recommendedGenerated += 1;
+                // Everything except the primary Default row is optional expanded
+                // coverage (the Default row is the required implementation asset).
+                if (v.id !== DEFAULT_VARIANT_ID) {
+                    additionalTotal += 1;
+                    if (generated) additionalGenerated += 1;
+                }
             }
             // "Handled" = generated, accepted, or explicitly not needed, so a
             // deliberately-skipped mobile default doesn't read as a gap.
@@ -560,6 +579,8 @@ export function buildMockupVariantCoverageSummary(
     return {
         recommendedGenerated,
         recommendedTotal,
+        additionalGenerated,
+        additionalTotal,
         p0WithMobile,
         p0Total,
         legacyUnknownMockups,

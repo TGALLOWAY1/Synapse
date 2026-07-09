@@ -64,11 +64,14 @@ describe('deriveScreenReviewIssues', () => {
         expect(issues.find(i => i.id === 'mockup_missing_p0')?.severity).toBe('blocking');
     });
 
-    it('a missing mobile mockup is a review warning, not a blocker', () => {
+    it('a missing mobile mockup is optional info — never reduces readiness', () => {
         const issues = deriveScreenReviewIssues(cleanSignals({ mobileMockupMissing: true }));
         const mobile = issues.find(i => i.id === 'mockup_mobile_missing');
-        expect(mobile?.severity).toBe('review');
-        expect(issues.some(i => i.severity === 'blocking')).toBe(false);
+        // Additional mockup variants (mobile / responsive) are optional design
+        // enrichment — they surface as info and must not push the screen to
+        // blocking OR review-recommended.
+        expect(mobile?.severity).toBe('info');
+        expect(issues.some(i => i.severity === 'blocking' || i.severity === 'review')).toBe(false);
     });
 
     it('a stale mockup creates a review issue', () => {
