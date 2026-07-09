@@ -1811,6 +1811,55 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     with an info note, never a crash. **No downstream artifact is mutated and no
     new export/finalization flow was added** — the Handoff tab + copy action is
     the decision surface (a full trace-aware export is a Phase 5C follow-up).
+- **Phase 5C — trace-aware Screens handoff export + finalization preflight
+  (`src/lib/screenHandoffExport.ts`, pure, unit-tested).** Layers ON TOP of the
+  Phase 5A/5B handoffs + Phase 4B preflight (never changing them) to turn the
+  trace-backed handoff into a practical, exportable implementation *package* —
+  the Phase 5C follow-up the 5B note deferred. All **derived, never persisted**;
+  it MUTATES no artifact and does NOT rewrite Synapse's global export system.
+  `buildScreensHandoffExportPackage(input)` composes the already-derived pieces
+  (per-screen `ScreenImplementationHandoff`s incl. their Phase 5B trace bridges,
+  the Phase 4A review models, and the Phase 4B `ScreensPreflightModel` already
+  folded with the handoff contribution) into a **schema-versioned**
+  (`schemaVersion: 1`) `ScreensHandoffExportPackage`: `summary` (screen/P0/
+  accepted/impl-ready/blocked/review counts + trace-confidence buckets + mockup
+  generated/missing/stale/unknown counts), `preflight` (blocking/review/info/
+  next-actions, verbatim from Phase 4B), per-screen projections
+  (route/components/state/events/data deps — trace-tagged when upgraded to
+  `data_model_trace` — acceptance/QA/build-tasks, mockup **references only**,
+  trace matches + warnings, issues by severity), and a `manifest` (PRD / Screens
+  / Data Model / Implementation Plan / Design System version ids + present
+  artifacts + honesty `caveats`). **Export status** (`deriveScreensExportStatus`
+  → `ready` | `review_recommended` | `not_ready`) is the **more conservative
+  fold** of the Phase 4B preflight status and the Phase 5A/5B handoff-rollup
+  status (mapping the rollup's `blocked` → `not_ready`) — so it can never
+  contradict the preflight the user already sees, and an **absent Data Model /
+  Implementation Plan artifact is a manifest caveat, never an automatic
+  `not_ready`** (the Phase 5B rule holds: only a PRESENT-but-unmatched artifact
+  is review-worthy). **Honesty rules stand:** correlation is label/token-based,
+  not proof; **NO binary mockup image data is embedded** — only labels/freshness/
+  coverage references travel (both renderers assert this); legacy unknown mockup
+  freshness is a caveat, never a blocker; `SCREENS_HANDOFF_EXPORT_CAVEATS` (the
+  standing honesty caveats) is always included so UI + markdown + JSON read the
+  same. `renderScreensHandoffExportMarkdown` (copy/paste-ready — summary →
+  preflight → manifest → per-screen sections incl. Data Model Support / Related
+  Implementation Plan Items) and `renderScreensHandoffExportJson`
+  (`JSON.stringify(pkg, null, 2)`) are the two export formats;
+  `screensHandoffExportFilename` builds the download name. **UI:**
+  `ScreensHandoffExportPanel` (`src/components/experience/`) — a local,
+  collapsible panel rendered by `ScreenListView` directly below
+  `ScreenPreflightPanel`: an export-readiness header + status banner (calm,
+  **non-blocking** even when `not_ready` — it still exports, mirroring the
+  Phase 4B "decision surface, never a gate" rule), summary stat tiles, Copy /
+  Download for Markdown and JSON (clipboard → textarea fallback, Phase 5A
+  pattern), and a "What's included & caveats" disclosure. `ArtifactWorkspace`
+  supplies the memoized `exportManifest` (version ids + artifact presence) and
+  `projectName`; the panel stamps `exportedAt` (via `new Date()`) at build time
+  so the pure builder stays deterministic. Everything stays **advisory** —
+  nothing gates rendering or generation; demo/keyless projects export the same
+  (no key needed). **No server-side export storage, no persisted export state**
+  (an optional "last exported" overlay was deliberately skipped — the package
+  itself is enough and a stale exported-status is worse than none).
 - **Phase 2 — source-grounded screen contracts.** New screen_inventory
   generations emit an explicit contract per screen (all fields optional &
   back-compat on `ScreenItem`/`ScreenState` in `src/types`): structured

@@ -489,6 +489,24 @@ export function ArtifactWorkspace({
         [screenIndex, screenReviewModels],
     );
 
+    // Phase 5C: manifest source ids + artifact presence for the Screens handoff
+    // export bundle. Memoized so the export panel's package derivation stays
+    // stable across renders. Presence is tracked separately from the version id
+    // so an absent artifact is a caveat, never a defect (Phase 5B rule).
+    const projectName = getProject(projectId)?.name;
+    const exportManifest = useMemo(() => ({
+        prdVersionId: spineVersionId,
+        screensArtifactVersionId: invPreferred?.id,
+        dataModelArtifactVersionId: dataModelPreferred?.id,
+        implementationPlanArtifactVersionId: implPlanPreferred?.id,
+        designSystemVersionId,
+        dataModelPresent: Boolean(dataModelArtifact),
+        implementationPlanPresent: Boolean(implPlanArtifact),
+    }), [
+        spineVersionId, invPreferred?.id, dataModelPreferred?.id, implPlanPreferred?.id,
+        designSystemVersionId, dataModelArtifact, implPlanArtifact,
+    ]);
+
     // Validation issues minus the user's persisted dismissals.
     const visibleScreenIssues = useMemo(() => {
         const dismissed = readDismissedScreenIssues(invPreferred?.metadata);
@@ -1048,6 +1066,8 @@ export function ArtifactWorkspace({
                         features={structuredPRD.features}
                         traceDataModel={traceDataModel}
                         tracePlan={tracePlan}
+                        projectName={projectName}
+                        exportManifest={exportManifest}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
