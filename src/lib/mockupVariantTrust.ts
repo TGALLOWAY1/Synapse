@@ -241,7 +241,7 @@ const REASON = {
     current: 'Matches the current screen spec, design system, and PRD context.',
 } as const;
 
-const unknownFreshness = (reason = REASON.noMetadata): MockupVariantFreshness => ({
+const unknownFreshness = (reason: string = REASON.noMetadata): MockupVariantFreshness => ({
     status: 'unknown',
     reasons: [reason],
     severity: 'info',

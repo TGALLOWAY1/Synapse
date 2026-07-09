@@ -1380,6 +1380,23 @@ export interface MockupCoverageManifest {
 // never overwrites another (e.g. Mobile · Default vs Desktop · Default). This
 // is intentionally independent of the legacy single-image MockupImageRecord
 // path, which keeps rendering the "Desktop · Default" variant untouched.
+// Phase 3C: a preserved prior render of a variant, kept when the variant is
+// regenerated so the previous image + its coverage/source metadata stay
+// viewable. Local-only (lives in the same dedicated IndexedDB store); never
+// destroyed by a later regeneration (history is append-only, capped).
+export type MockupVariantImageHistoryEntry = {
+    dataUrl: string;
+    quality: MockupImageQuality;
+    prompt?: string;
+    coverageManifest?: MockupCoverageManifest;
+    /** Phase 3C source signature captured when this render was generated
+     * (absent for pre-3C records). Untyped here to avoid a lib→types import
+     * cycle; the shape is MockupVariantSourceSignature (mockupVariantTrust.ts). */
+    sourceSignature?: unknown;
+    generatedAt: number;
+    reason?: 'regenerated' | 'replaced';
+};
+
 export type MockupVariantImageRecord = {
     key: string;              // `${versionId}:${screenId}:${variantId}:${quality}`
     projectId: string;
@@ -1393,6 +1410,21 @@ export type MockupVariantImageRecord = {
     quality: MockupImageQuality;
     prompt: string;           // prompt sent to gpt-image-2 (for traceability)
     coverageManifest?: MockupCoverageManifest;
+    // --- Phase 3C trust metadata (all optional / back-compat) ---
+    /** Deterministic snapshot of the screen/design/PRD inputs at generation
+     * time; drives freshness comparison. Untyped here to avoid a lib→types
+     * import cycle — the shape is MockupVariantSourceSignature. */
+    sourceSignature?: unknown;
+    /** Version context this variant was generated from (provenance line). */
+    generatedFrom?: {
+        prdVersionId?: string;
+        screenVersionId?: string;
+        designSystemVersionId?: string;
+    };
+    /** Previous successful renders of this variant, newest-first. Preserved on
+     * regeneration so earlier images stay viewable. Failed regenerations never
+     * append here. */
+    history?: MockupVariantImageHistoryEntry[];
     generatedAt: number;
 };
 

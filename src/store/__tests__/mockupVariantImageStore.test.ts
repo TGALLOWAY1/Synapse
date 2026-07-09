@@ -21,10 +21,11 @@ vi.mock('../../lib/mockupVariantImageStore', () => {
 });
 
 let shouldFail = false;
+let currentB64 = 'BASE64DATA';
 vi.mock('../../lib/openaiClient', () => ({
     callOpenAIImage: async () => {
         if (shouldFail) throw new Error('boom');
-        return 'BASE64DATA';
+        return currentB64;
     },
     hasOpenAIKey: () => true,
 }));
@@ -62,6 +63,7 @@ const genArgs = (request: MockupVariantGenerationRequest) => ({
 describe('mockupVariantImageStore.generate', () => {
     beforeEach(() => {
         shouldFail = false;
+        currentB64 = 'BASE64DATA';
         useMockupVariantImageStore.setState({ images: {}, inFlight: {}, errors: {} });
     });
 
@@ -106,5 +108,94 @@ describe('mockupVariantImageStore.generate', () => {
         // Mobile variant is absent and its scope carries an error.
         expect(state.getBestRecord('v1', 'scr-home', 'mobile:default')).toBeUndefined();
         expect(state.errors['v1:scr-home:mobile:default']).toBe('boom');
+    });
+
+    it('stores the source signature + provenance with a generated variant', async () => {
+        const req = makeRequest();
+        const sourceSignature = {
+            screenId: 'scr-home', viewport: 'mobile' as const, stateName: 'Default',
+            variantId: 'mobile:default', screenContractHash: 'abc', createdAt: '2026-01-01T00:00:00.000Z',
+        };
+        await useMockupVariantImageStore.getState().generate({
+            ...genArgs(req),
+            sourceSignature,
+            generatedFrom: { prdVersionId: 'prd-1', screenVersionId: 'inv-1', designSystemVersionId: 'ds-1' },
+        });
+        const rec = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'mobile:default');
+        expect((rec?.sourceSignature as { screenContractHash?: string })?.screenContractHash).toBe('abc');
+        expect(rec?.generatedFrom?.prdVersionId).toBe('prd-1');
+    });
+
+    it('regenerating a variant preserves the previous successful record in history', async () => {
+        const store = useMockupVariantImageStore.getState();
+        const req = makeRequest();
+        // Distinguish the two renders by the returned base64.
+        currentB64 = 'FIRST';
+        await store.generate(genArgs(req));
+        currentB64 = 'SECOND';
+        await useMockupVariantImageStore.getState().generate(genArgs(req));
+
+        const rec = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'mobile:default');
+        expect(rec?.dataUrl).toBe('data:image/png;base64,SECOND');
+        expect(rec?.history).toHaveLength(1);
+        expect(rec?.history?.[0].dataUrl).toBe('data:image/png;base64,FIRST');
+        expect(rec?.history?.[0].reason).toBe('regenerated');
+    });
+
+    it('failed regeneration preserves the current successful record and adds no history entry', async () => {
+        const store = useMockupVariantImageStore.getState();
+        const req = makeRequest();
+        currentB64 = 'GOOD';
+        await store.generate(genArgs(req));
+        // Now a regeneration that fails.
+        shouldFail = true;
+        await useMockupVariantImageStore.getState().generate(genArgs(req));
+
+        const rec = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'mobile:default');
+        // The original good render survives untouched, with no bogus history.
+        expect(rec?.dataUrl).toBe('data:image/png;base64,GOOD');
+        expect(rec?.history ?? []).toHaveLength(0);
+        expect(useMockupVariantImageStore.getState().errors['v1:scr-home:mobile:default']).toBe('boom');
+    });
+
+    it('history is grouped by variant key (regen of one variant does not touch another)', async () => {
+        const store = useMockupVariantImageStore.getState();
+        currentB64 = 'A1';
+        await store.generate(genArgs(makeRequest({ variantId: 'desktop:default', viewport: 'desktop' })));
+        currentB64 = 'B1';
+        await useMockupVariantImageStore.getState()
+            .generate(genArgs(makeRequest({ variantId: 'mobile:default', viewport: 'mobile' })));
+        // Regenerate only the desktop variant.
+        currentB64 = 'A2';
+        await useMockupVariantImageStore.getState()
+            .generate(genArgs(makeRequest({ variantId: 'desktop:default', viewport: 'desktop' })));
+
+        const desktop = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'desktop:default');
+        const mobile = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'mobile:default');
+        expect(desktop?.history).toHaveLength(1);
+        expect(desktop?.history?.[0].dataUrl).toBe('data:image/png;base64,A1');
+        // The mobile variant is untouched — no history.
+        expect(mobile?.history ?? []).toHaveLength(0);
+    });
+
+    it('putSidecar stores a metadata-only default record without generating', async () => {
+        const store = useMockupVariantImageStore.getState();
+        await store.putSidecar({
+            key: 'v1:scr-home:default:low',
+            projectId: 'p1', artifactId: 'a1', versionId: 'v1',
+            screenId: 'scr-home', variantId: 'default', viewport: 'desktop',
+            stateName: 'Default', dataUrl: '', quality: 'low', prompt: '',
+            coverageManifest: {
+                variant: { viewport: 'desktop', stateName: 'Default' },
+                overallStatus: 'aligned', estimated: true,
+                uiRegions: [], states: [], userActions: [], acceptanceCriteria: [], warnings: [],
+            },
+            sourceSignature: { screenId: 'scr-home', viewport: 'desktop', stateName: 'Default',
+                variantId: 'default', screenContractHash: 'zzz', createdAt: '2026-01-01T00:00:00.000Z' },
+            generatedAt: 1,
+        });
+        const rec = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'default');
+        expect(rec?.coverageManifest?.overallStatus).toBe('aligned');
+        expect((rec?.sourceSignature as { screenContractHash?: string })?.screenContractHash).toBe('zzz');
     });
 });
