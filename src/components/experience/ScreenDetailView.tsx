@@ -18,8 +18,9 @@ import {
     RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
-    Feature, GenerationStatus, MockupPayload,
+    DataModelContent, Feature, GenerationStatus, MockupPayload,
     MockupSettings, ScreenPriority, ScreenReviewChecklist, ScreenReviewMeta,
+    StructuredImplementationPlan,
 } from '../../types';
 import {
     groupFlowRefsByFlow,
@@ -99,6 +100,12 @@ interface Props {
     onRetryMockup?: () => void;
     /** Canonical feature catalog for StepCard feature chips + the drawer. */
     features?: Feature[];
+    /** Phase 5B: resolved Data Model content for the handoff trace bridge
+     * (null when no data model artifact exists). */
+    traceDataModel?: DataModelContent | null;
+    /** Phase 5B: resolved Implementation Plan content for the trace bridge
+     * (null when no plan artifact exists). */
+    tracePlan?: StructuredImplementationPlan | null;
     /**
      * Persists a metadata edit overlay for this screen (null clears it back
      * to the generated content). Absent → the detail view stays read-only.
@@ -122,7 +129,7 @@ export function ScreenDetailView({
     item, readiness, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
-    features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
+    features, traceDataModel, tracePlan, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -191,8 +198,9 @@ export function ScreenDetailView({
         });
         return buildScreenImplementationHandoff({
             item, reviewModel, variants, downstream: downstreamImpact, features,
+            dataModel: traceDataModel, implementationPlan: tracePlan,
         });
-    }, [item, reviewModel, downstreamImpact, features, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, generatedVariants]);
+    }, [item, reviewModel, downstreamImpact, features, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, generatedVariants, traceDataModel, tracePlan]);
     const handoffTone = handoff.readiness.status === 'ready'
         ? 'good' as const
         : handoff.readiness.status === 'blocked' ? 'block' as const : 'warn' as const;

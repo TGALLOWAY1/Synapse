@@ -37,6 +37,7 @@ import {
     type ScreenMetadataEdit,
 } from '../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
+import { resolveDataModelForTrace, resolvePlanForTrace } from '../lib/screenArtifactTraceBridge';
 import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../lib/screenReviewWorkflow';
 import { buildMockupVariantCoverageSummary, type GeneratedVariantMap } from '../lib/mockupVariants';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../lib/mockupVariantTrust';
@@ -347,6 +348,23 @@ export function ArtifactWorkspace({
     const flowsPreferred = flowsArtifact ? getPreferredVersion(projectId, flowsArtifact.id) : undefined;
     const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
     const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
+
+    // Phase 5B: Data Model + Implementation Plan content for the screen → artifact
+    // trace bridge (read-only correlation on the Handoff tab). Resolved to their
+    // structured/legacy shapes; a missing artifact resolves to null (never an
+    // error). These are already-loaded artifacts — nothing extra is fetched.
+    const dataModelArtifact = coreArtifacts.find(a => a.subtype === 'data_model');
+    const dataModelPreferred = dataModelArtifact ? getPreferredVersion(projectId, dataModelArtifact.id) : undefined;
+    const implPlanArtifact = coreArtifacts.find(a => a.subtype === 'implementation_plan');
+    const implPlanPreferred = implPlanArtifact ? getPreferredVersion(projectId, implPlanArtifact.id) : undefined;
+    const traceDataModel = useMemo(
+        () => resolveDataModelForTrace(dataModelPreferred?.content),
+        [dataModelPreferred],
+    );
+    const tracePlan = useMemo(
+        () => resolvePlanForTrace(implPlanPreferred?.content),
+        [implPlanPreferred],
+    );
 
     // Effective mockup payload: stored screens + the version's user-added
     // extraScreens overlay (metadata — keeps the version id, so existing
@@ -920,6 +938,8 @@ export function ArtifactWorkspace({
                         mockupStatus={slotStatusFor('mockup')}
                         onRetryMockup={() => handleRetrySlot('mockup')}
                         features={structuredPRD.features}
+                        traceDataModel={traceDataModel}
+                        tracePlan={tracePlan}
                         onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
                         onAddToMockups={
                             mockupDetailContext && !detailItem.mockupScreen
@@ -1026,6 +1046,8 @@ export function ArtifactWorkspace({
                         mobileRelevant={mobileRelevant}
                         trustContext={trustContext}
                         features={structuredPRD.features}
+                        traceDataModel={traceDataModel}
+                        tracePlan={tracePlan}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={

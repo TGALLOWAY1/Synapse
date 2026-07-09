@@ -9,7 +9,7 @@
 
 import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Layers, Workflow } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { Feature, MockupPlatform } from '../../types';
+import type { DataModelContent, Feature, MockupPlatform, StructuredImplementationPlan } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     SCREEN_LIST_FILTERS, screenMatchesFilter,
@@ -64,6 +64,10 @@ interface Props {
     trustContext?: VariantTrustContext;
     /** Canonical PRD features — enables handoff/traceability derivation (Phase 5A). */
     features?: readonly Feature[];
+    /** Phase 5B: resolved Data Model content for handoff trace correlation. */
+    traceDataModel?: DataModelContent | null;
+    /** Phase 5B: resolved Implementation Plan content for handoff trace correlation. */
+    tracePlan?: StructuredImplementationPlan | null;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -77,7 +81,8 @@ interface Props {
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
-    generatedVariantsByScreen, trustContext, features, onSelectScreen, onGenerateMissingMockups,
+    generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan,
+    onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
@@ -105,10 +110,11 @@ export function ScreenListView({
             map.set(item.id, buildScreenImplementationHandoff({
                 item, reviewModel: model, variants,
                 downstream: downstreamByScreen.get(item.id), features,
+                dataModel: traceDataModel, implementationPlan: tracePlan,
             }));
         }
         return map;
-    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features]);
+    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan]);
 
     const p0Ids = useMemo(
         () => new Set(index.items.filter(i => i.screen.priority === 'P0' || i.screen.priority === 'core').map(i => i.id)),
