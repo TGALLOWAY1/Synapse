@@ -162,8 +162,9 @@ export interface BuildVariantOptions {
     /** Generation platform of the current mockup set (mockup settings). */
     platform?: MockupPlatform;
     /** True when the project is mobile-relevant (mobile-first / responsive) —
-     * enables a recommended Mobile default on P1 / supporting screens. P0
-     * always recommends mobile regardless. */
+     * the sole gate for recommending a Mobile default variant (on every screen,
+     * P0 included). A web/desktop project (false) never recommends Mobile
+     * coverage, so mobile gaps don't surface for platforms with no mobile UI. */
     mobileRelevant?: boolean;
     /** Phase 3B: manifest-backed generated variants for THIS screen, keyed by
      * variant id. A non-default variant present here renders as 'generated'
@@ -222,10 +223,13 @@ export function buildScreenMockupVariants(
 
     // 2. Secondary-viewport Default recommendation.
     //    - Desktop is the baseline default for P0/P1 screens.
-    //    - Mobile default is recommended for P0 always, P1/supporting when the
-    //      project is mobile-relevant.
+    //    - Mobile default is recommended ONLY when the project is
+    //      mobile-relevant (mobile-first / responsive). A web/desktop project
+    //      never wants a Mobile variant — not even for its P0 screens — so it
+    //      must not surface "mobile coverage" gaps for platforms that ship no
+    //      mobile UI.
     const wantDesktopDefault = priority === 'P0' || priority === 'P1';
-    const wantMobileDefault = priority === 'P0' || mobileRelevant;
+    const wantMobileDefault = mobileRelevant;
     if (primary !== 'desktop' && wantDesktopDefault) {
         seeds.push({
             viewport: 'desktop',
@@ -384,8 +388,11 @@ function recommendationReason(screen: ScreenItem, seed: VariantSeed): string {
     const priority = normalizeScreenPriority(screen.priority);
     if (seed.stateType === 'default') {
         if (seed.viewport === 'mobile') {
+            // Mobile is only ever recommended for mobile-relevant projects, so
+            // the reason is the project's mobile relevance regardless of the
+            // screen's priority (a P0 screen just makes it more prominent).
             return priority === 'P0'
-                ? 'Recommended for P0 screen mobile coverage.'
+                ? 'Recommended because this P0 screen ships on a mobile-relevant project.'
                 : 'Recommended because the project appears mobile-relevant.';
         }
         return 'Recommended baseline coverage for a primary screen.';
@@ -519,7 +526,14 @@ export function buildMockupVariantCoverageSummary(
         const generatedVariants = generatedVariantsByScreen?.(item.id);
         const variants = buildScreenMockupVariants(item, { ...variantOptions, generatedVariants });
         const isP0 = normalizeScreenPriority(item.screen.priority) === 'P0';
-        if (isP0) p0Total += 1;
+        // Only P0 screens that actually recommend a Mobile default count toward
+        // the "Mobile coverage (P0)" rollup — a web/desktop project recommends
+        // no Mobile variant, so p0Total stays 0 and the panel hides that row
+        // instead of warning about mobile coverage the project will never ship.
+        const recommendsMobileDefault = variants.some(
+            v => v.viewport === 'mobile' && v.stateType === 'default',
+        );
+        if (isP0 && recommendsMobileDefault) p0Total += 1;
         for (const v of variants) {
             // A not_needed variant is deliberately skipped — drop it from the
             // denominator so a resolved gap never keeps the panel warning.

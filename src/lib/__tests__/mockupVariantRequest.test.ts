@@ -40,7 +40,9 @@ function variantsFor(screen: ScreenItem) {
     const index = buildScreenIndex(
         { sections: [{ title: 'Main', screens: [screen] }] }, [], null,
     );
-    return { item: index.items[0], variants: buildScreenMockupVariants(index.items[0]) };
+    // mobileRelevant so the Mobile · Default variant is recommended (these
+    // tests exercise mobile-variant request/prompt/manifest building).
+    return { item: index.items[0], variants: buildScreenMockupVariants(index.items[0], { mobileRelevant: true }) };
 }
 
 describe('buildVariantGenerationRequest', () => {

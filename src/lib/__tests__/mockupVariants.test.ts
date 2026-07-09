@@ -102,14 +102,23 @@ describe('buildScreenMockupVariants', () => {
         expect(dflt.source).toBe('derived_missing');
     });
 
-    it('recommends a Mobile · Default for P0 screens', () => {
+    it('recommends a Mobile · Default for P0 screens on a mobile-relevant project', () => {
         const index = buildScreenIndex(makeInventory([p0Screen]), [], null);
-        const variants = buildScreenMockupVariants(index.items[0]);
+        const variants = buildScreenMockupVariants(index.items[0], { mobileRelevant: true });
         const mobile = variants.find(v => v.id === 'mobile:default');
         expect(mobile).toBeDefined();
         expect(mobile!.viewport).toBe('mobile');
         expect(mobile!.required).toBe(true);
         expect(mobile!.status).toBe('missing');
+    });
+
+    it('does NOT recommend a Mobile default for a P0 screen on a web/desktop project', () => {
+        // Regression: a web/desktop project (mobileRelevant false) must never
+        // surface a Mobile variant — not even for its P0 screens — so it does
+        // not warn about mobile coverage it will never ship.
+        const index = buildScreenIndex(makeInventory([p0Screen]), [], null);
+        const variants = buildScreenMockupVariants(index.items[0]);
+        expect(variants.find(v => v.viewport === 'mobile')).toBeUndefined();
     });
 
     it('does NOT recommend Mobile default for a supporting screen unless mobile-relevant', () => {
@@ -148,7 +157,7 @@ describe('buildScreenMockupVariants', () => {
         const index = buildScreenIndex(makeInventory([p0Screen]), [], null, {
             'scr-home': { mockupVariantStatus: { 'mobile:default': 'accepted', 'state:loading': 'not_needed' } },
         });
-        const variants = buildScreenMockupVariants(index.items[0]);
+        const variants = buildScreenMockupVariants(index.items[0], { mobileRelevant: true });
         expect(variants.find(v => v.id === 'mobile:default')!.status).toBe('accepted');
         expect(variants.find(v => v.id === 'mobile:default')!.userSet).toBe(true);
         expect(variants.find(v => v.id === 'state:loading')!.status).toBe('not_needed');
@@ -188,7 +197,7 @@ describe('summarizeScreenVariants', () => {
             [],
             makeMockupPayload([{ id: 'm1', name: 'Home Dashboard', sourceScreenId: 'scr-home' }]),
         );
-        const summary = summarizeScreenVariants(buildScreenMockupVariants(index.items[0]));
+        const summary = summarizeScreenVariants(buildScreenMockupVariants(index.items[0], { mobileRelevant: true }));
         // recommended: desktop default (generated) + mobile default + Empty History + Loading = 4
         expect(summary.recommended).toBe(4);
         expect(summary.generated).toBe(1);
@@ -247,12 +256,25 @@ describe('buildMockupVariantCoverageSummary', () => {
             [],
             makeMockupPayload([{ id: 'm1', name: 'Home Dashboard', sourceScreenId: 'scr-home' }]),
         );
-        const rollup = buildMockupVariantCoverageSummary(index)!;
+        const rollup = buildMockupVariantCoverageSummary(index, { mobileRelevant: true })!;
         expect(rollup.p0Total).toBe(1);
         expect(rollup.p0WithMobile).toBe(0); // no mobile mockup for the P0 screen
         expect(rollup.legacyUnknownMockups).toBe(1);
         expect(rollup.recommendedGenerated).toBe(1);
         expect(rollup.recommendedTotal).toBeGreaterThan(1);
+    });
+
+    it('does not track P0 mobile coverage for a web/desktop project', () => {
+        // Regression: no Mobile variant is recommended for a non-mobile project,
+        // so p0Total is 0 and the "Mobile coverage (P0)" panel row stays hidden.
+        const index = buildScreenIndex(
+            makeInventory([p0Screen, supportingScreen]),
+            [],
+            makeMockupPayload([{ id: 'm1', name: 'Home Dashboard', sourceScreenId: 'scr-home' }]),
+        );
+        const rollup = buildMockupVariantCoverageSummary(index)!;
+        expect(rollup.p0Total).toBe(0);
+        expect(rollup.p0WithMobile).toBe(0);
     });
 
     it('returns null for an empty index', () => {
@@ -268,6 +290,7 @@ describe('buildMockupVariantCoverageSummary', () => {
         );
         // The Mobile · Default variant is generated with an "aligned" manifest.
         const rollup = buildMockupVariantCoverageSummary(index, {
+            mobileRelevant: true,
             generatedVariantsByScreen: (id) =>
                 id === 'scr-home' ? { 'mobile:default': { coverage: 'aligned' } } : undefined,
         })!;
@@ -286,6 +309,7 @@ describe('buildScreenMockupVariants with generatedVariants (Phase 3B)', () => {
     it('flips a missing non-default variant to generated with manifest coverage', () => {
         const index = buildScreenIndex(makeInventory([p0Screen]), [], null);
         const variants = buildScreenMockupVariants(index.items[0], {
+            mobileRelevant: true,
             generatedVariants: { 'mobile:default': { coverage: 'aligned' } },
         });
         const mobile = variants.find(v => v.id === 'mobile:default')!;
@@ -318,7 +342,7 @@ describe('buildScreenMockupVariants with generatedVariants (Phase 3B)', () => {
                 },
             },
         });
-        const rollup = buildMockupVariantCoverageSummary(index)!;
+        const rollup = buildMockupVariantCoverageSummary(index, { mobileRelevant: true })!;
         // Only desktop default counts toward the denominator now.
         expect(rollup.recommendedTotal).toBe(1);
         expect(rollup.recommendedGenerated).toBe(0);
