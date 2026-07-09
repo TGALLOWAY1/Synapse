@@ -5,9 +5,10 @@ import type { FeatureRef, FlowIssue, ParsedStep } from './types';
 import { ISSUE_KIND_META } from './issueMeta';
 import { inlineWithFeatures } from './inlineWithFeatures';
 import { inlineMd } from './markdown';
+import { prettyScreenTitle } from './journeyNode';
 
-/** Strip surrounding markdown code backticks from a short label (e.g. a
- * screen name like `` `Import Dashboard` `` → "Import Dashboard"). */
+/** Strip surrounding markdown code backticks from a short label (e.g. an API
+ * ref like `` `POST /v1/import` `` → "POST /v1/import"). */
 function stripBackticks(text: string): string {
     return text.replace(/^`+|`+$/g, '').trim();
 }
@@ -60,7 +61,7 @@ export function StepCard({
                 {hasStructured ? (
                     step.title ? (
                         <h4 className="min-w-0 flex-1 text-sm font-semibold text-neutral-900 leading-snug">
-                            {inlineMd(stripBackticks(step.title))}
+                            {inlineMd(prettyScreenTitle(step.title))}
                         </h4>
                     ) : (
                         <h4 className="min-w-0 flex-1 text-sm font-semibold text-neutral-400 leading-snug">

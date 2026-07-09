@@ -265,6 +265,8 @@ For each flow, use this exact format:
 
 You may also include any of these optional sections when relevant, using the same bold-label format: **Entry Points:** (where the flow can be started from), **Assumptions:**, and **Open Questions:**. Keep step lines in the exact "[Screen Name] — User action → System response" form so each step parses into screen, action, and response.
 
+In the "[Screen Name]" bracket, always write the screen's human-readable display name exactly as it appears in the screen inventory / PRD (e.g. "[Infographic Library]"). Never put a screen seed id or slug there (e.g. NOT "[scr-infographic-library]") — the flow steps are joined to screens by that display name, so a seed id detaches the step from its screen.
+
 Cover at minimum: first-time user onboarding, the core value workflow, and one administrative/settings flow.
 
 Begin your response directly with the first section heading. Do NOT include any preamble, introduction, or conversational text (e.g. "Of course", "Here are", "As a UX expert")."
