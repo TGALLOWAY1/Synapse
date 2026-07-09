@@ -1524,13 +1524,62 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Selector-stability rule). Slug collisions keep **all** screens as items
   (unique ids), resolve `bySlug` to the first, and are surfaced via
   `index.collisions` (warning banner in the list).
+- **Screen Detail is a lightweight product-DESIGN review surface, not an
+  implementation dashboard (design-review simplification).** The Screen Detail
+  view answers ONE question — "does this screen accurately represent the intended
+  user experience?" — so everything implementation-leaning is either progressively
+  disclosed or moved to the Implementation Plan artifact. The load-bearing rules:
+  - **One review action: Confirm Screen** (`ScreenConfirmPanel`). It replaces the
+    old three-action panel (Request changes / Accept / Mark ready to build). It is
+    a plain toggle: **Needs review → [Confirm screen]**, and once confirmed
+    **Screen confirmed · Confirmed from PRD Version N → [Edit again]**. Confirming
+    maps to the `accepted` `reviewStatus` (preserving the data model + the sign-off
+    signature); **editing a confirmed screen automatically returns it to Needs
+    Review** (both `Edit again` and saving the edit form). `implementation_ready`
+    is no longer settable from Screens (an implementation concern) but legacy
+    screens carrying it still render as confirmed. The pure `screenReviewWorkflow`
+    lib (statuses, issues, freshness, artifact gate) is UNCHANGED — only the UI
+    collapsed to one action.
+  - **Review Notes (`ScreenReviewNotes`)** — the calm, collapsed, action-oriented
+    replacement for the old "Readiness Issues" panel AND the standalone "Risks &
+    Edge Cases" section. Collapsed behind a one-line banner ("N items may benefit
+    from review"); expanded, every row has an obvious next action — a generic note
+    → Edit / Go to Flow / Go to Mockups + "Mark addressed" (dismiss); a risk → a
+    "How should this be handled?" resolution box → Mark resolved. Dismissed issue
+    ids and risk resolutions persist on NEW additive `ScreenReviewMeta` fields
+    `dismissedIssues?: string[]` / `riskResolutions?: Record<string,string>` (the
+    resolutions are structured product-owner input downstream artifacts can
+    consume). A generated `proposedHandling` pre-fills the box but still needs
+    owner confirmation.
+  - **Developer Handoff moved OUT of Screens into the Implementation Plan
+    artifact.** The Handoff tab (`ScreenHandoffView`) and the Overview's "Developer
+    Handoff" section are removed; `ScreenDetailTab` is now `overview | flow |
+    mockups` only (no `?screenTab=handoff`). All handoff GENERATION libs are
+    preserved and untouched (`screenImplementationHandoff.ts`,
+    `screenHandoffExport.ts`, `screenArtifactTraceBridge.ts`) and still power the
+    list-level rollups in `ScreenCoveragePanel` / card details — only the per-screen
+    handoff UI left Screens. Surfacing it inside the Implementation Plan renderer is
+    a deferred follow-up.
+  - **"Freshness" → "PRD sync" language.** The Mockups tab presents variant
+    freshness in user terms (`In sync with PRD` / `May need regeneration` /
+    `Needs regeneration` / `PRD sync unknown`) via a local `PRD_SYNC_LABELS` map in
+    `MockupVariantsPanel`; the pure `mockupVariantTrust` `FRESHNESS_LABELS`
+    constant is unchanged (still used by the non-UI export/handoff libs).
+  - **Overview order (mobile-first):** Purpose + User goal → Primary mockup (the
+    screen itself, inline near the top) → Review Notes → Acceptance checklist (a
+    concise checklist; the full generated explanation sits behind a "Show generated
+    details" disclosure) → PRD features (collapsed) → Screen details (collapsed:
+    navigation, core UI regions, data, states). The noisy provenance badges
+    ("Derived / Estimated / Mapped at generation / For your information") are gone.
+    `ScreenDownstreamImpactSection` is no longer shown in Screen Detail (its data
+    still feeds the list/coverage/preflight surfaces).
 - **Views** — `src/components/experience/`: `ScreenListView` (a **flow-first**
   list — screens are the primary focus, implementation/traceability/readiness
   data is kept but visually secondary), `ScreenDetailView` +
   `ScreenDetailTabs` (per-screen **Overview / Flow / Mockups** tabs). They
   reuse existing pieces rather than duplicating them: Overview = the
-  structured `ScreenOverviewPanel` (screen contract — see the readiness
-  layer below; the legacy `ScreenCard` survives in the standalone
+  simplified `ScreenOverviewPanel` (see the design-review simplification above;
+  the legacy `ScreenCard` survives in the standalone
   `ScreenInventoryRenderer` fallback) + the upload gallery; Flow =
   `FlowJourney`/`StepCard`/`FeatureDetailDrawer` with the current screen's
   steps highlighted (`highlightedStepIndices`) plus a per-flow "This screen
@@ -1698,7 +1747,9 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   the variant grid), pure tests use the low-level fn with explicit signals.
   **Supporting review record** rides a NEW additive overlay field
   `ScreenMetadataEdit.review` (`ScreenReviewMeta` in `src/types`: checklist, note,
-  override reason, sign-off `signature`, transition timestamps) — status stays in
+  override reason, sign-off `signature`, transition timestamps, plus the Review
+  Notes fields `dismissedIssues?: string[]` / `riskResolutions?: Record<string,
+  string>` added by the design-review simplification) — status stays in
   `reviewStatus`, so all existing wiring is untouched; `readScreenEdits` parses it
   defensively and preserves unknown keys. **Review freshness (re-review after
   acceptance):** `buildScreenReviewSignature` captures `computeScreenReviewHash`
@@ -1712,10 +1763,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   models up — **P0 screens are the gate**: ready iff every P0 screen is
   user-signed-off (accepted/implementation_ready) AND no P0 screen carries
   blocking issues. It is a **readiness signal, NOT a hard lock** — nothing gates
-  rendering or generation. UI: `ScreenReviewPanel` (Screen Detail header — status
-  line, Accept / Request changes / Mark ready-to-build actions with an inline
-  override-reason capture when blockers exist, readiness-issue list, review
-  checklist, a calm "review may be outdated" banner + Re-review), review status +
+  rendering or generation. UI (**since the design-review simplification above,
+  the Screen Detail surface for this lib is `ScreenConfirmPanel` (single Confirm)
+  + `ScreenReviewNotes`, NOT the retired `ScreenReviewPanel`**): the confirm
+  toggle + the collapsed action-oriented Review Notes, review status +
   issue counts in each `ScreenListView` card's "Show details" disclosure, and a
   "Review readiness" rollup + gate
   callout in `ScreenCoveragePanel`. Persistence flows through the existing
@@ -1755,9 +1806,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   caveats — e.g. the Phase 3D variant-image cross-device-sync gap).
   `analyzeScreensDownstream(index, reviewModels, artifactReview)` is the single
   entry point the workspace calls. **UI:** `ScreenDownstreamImpactSection`
-  (Screen Detail, below the review panel — impacted-artifact list, or a calm
-  "No downstream impact detected" / "cannot be fully confirmed for this older
-  review" empty state), a compact downstream note in each `ScreenListView`
+  (the component still exists and renders the impacted-artifact list / calm
+  empty states, but per the design-review simplification it is **no longer shown
+  in Screen Detail** — downstream-impact data now surfaces only via the list +
+  coverage + preflight surfaces), a compact downstream note in each `ScreenListView`
   card's "Show details" disclosure (only when a blocking/review impact exists —
   info-only shows nothing), a
   **Downstream readiness** section in `ScreenCoveragePanel`, and a collapsible
@@ -1808,11 +1860,12 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
   structural `PreflightContribution` param on `buildScreensPreflight` /
   `analyzeScreensDownstream` (screenDownstreamImpact **never imports** the handoff
-  module — that would cycle; the caller passes the contribution in). **UI:** a
-  Screen Detail **Handoff tab** (`ScreenHandoffView` + a `handoff` value on
-  `ScreenDetailTab`, URL-addressable via `?screenTab=handoff`) with a
-  readiness-colored tab dot, compact sections, and a Copy-handoff action
-  (clipboard → textarea fallback); a **handoff readiness** row in each
+  module — that would cycle; the caller passes the contribution in). **UI (per
+  the design-review simplification above, the per-screen Handoff tab
+  (`ScreenHandoffView`) and its `?screenTab=handoff` route were REMOVED from
+  Screens and the developer handoff moved to the Implementation Plan artifact —
+  the lib below is fully preserved and now surfaces only via the list-level
+  rollups):** a **handoff readiness** row in each
   `ScreenListView` card's "Show details" disclosure; **Handoff ready / Handoff
   blocked** Advanced-drawer filters
   (`SCREEN_LIST_FILTERS` + `ScreenFilterReview.handoffReadiness`); and an
@@ -1875,10 +1928,12 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `buildHandoffPreflightContribution`. `buildScreensHandoffRollup` gained a
     `ScreensTraceRollup` (strong/estimated/missing counts + P0 plan/data-model
     gaps; null when no screen carried a bridge).
-  - **UI.** `ScreenHandoffView` renders a **Trace confidence** summary, **Data
-    Model support** matches (entity + confidence + fields + reason, or a calm
-    "No linked Data Model entities found" empty state), a **Related implementation
-    plan items** section, per-dependency trace tags, and trace notes.
+  - **UI.** The per-screen `ScreenHandoffView` (which rendered the **Trace
+    confidence** summary, **Data Model support** matches, **Related implementation
+    plan items**, per-dependency trace tags, and trace notes) was **removed from
+    Screens with the rest of the developer handoff** (design-review
+    simplification); the trace-bridge lib is preserved for the deferred
+    Implementation Plan surfacing.
     each `ScreenListView` card's "Show details" disclosure surfaces a trace
     concern (only on a real concern — "No plan match" / "Trace needs review",
     never on a strong trace);
