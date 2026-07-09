@@ -1524,11 +1524,9 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Selector-stability rule). Slug collisions keep **all** screens as items
   (unique ids), resolve `bySlug` to the first, and are surfaced via
   `index.collisions` (warning banner in the list).
-- **Views** — `src/components/experience/`: `ScreenListView` (sectioned,
-  filterable list of all inventory screens topped by the **Screen Coverage &
-  Readiness** panel — `ScreenCoveragePanel`; per-card readiness badge,
-  linked-feature/risk chips, state/mockup/flow metadata and
-  "N incoming · N outgoing" navigation labels), `ScreenDetailView` +
+- **Views** — `src/components/experience/`: `ScreenListView` (a **flow-first**
+  list — screens are the primary focus, implementation/traceability/readiness
+  data is kept but visually secondary), `ScreenDetailView` +
   `ScreenDetailTabs` (per-screen **Overview / Flow / Mockups** tabs). They
   reuse existing pieces rather than duplicating them: Overview = the
   structured `ScreenOverviewPanel` (screen contract — see the readiness
@@ -1566,6 +1564,35 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `src/components/renderers/screenPriority.ts`
   (own module — the react-refresh/only-export-components rule forbids constant
   exports from component files).
+- **Flow-first list IA (`ScreenListView` + `src/lib/screenFlowView.ts`, pure,
+  unit-tested).** The Screens list leads with the product experience — what
+  screens exist, how they connect, and which flow they belong to — and keeps
+  every implementation/traceability/readiness/review signal reachable but
+  visually secondary. `screenFlowView.ts` is the pure presentation layer:
+  `deriveScreenConnections(item)` reads a screen's own contract for connection
+  **names, not counts** (outgoing = `exitPaths[].target`, incoming =
+  `entryPoints`, plus joined `relatedFlows` titles); `buildScreenGroups(index,
+  mode)` groups screens `'flow'` (primary-flow assignment — the flow where a
+  screen appears earliest — with a trailing "Other screens" bucket for
+  flow-less screens, screens ordered by step within a flow), `'section'`, or
+  `'priority'`; `hasFlowGrouping`/`flowFilterOptions` drive the defaults. The
+  view replaces the old **14 filter chips** with one compact control row
+  (search + Priority/Flow/Status/Sort/Group selects + an **Advanced** drawer
+  holding the long-tail filters — has_blockers / review_recommended /
+  outdated_review / downstream_review / handoff_ready / handoff_blocked /
+  missing_mockups / has_risks, still resolved through `screenMatchesFilter` so
+  the filter semantics are unchanged). Each card shows **one prominent badge
+  (priority)** + title + purpose + a mini flow strip ("Next → …" from
+  `deriveScreenConnections`, else "Part of <flow>") + a single muted readiness
+  badge; **all other metadata** (review, traceability, handoff, mockup
+  coverage, states, risks, downstream impact) moves behind a per-card **"Show
+  details"** disclosure. Color is reserved for priority + genuine warnings
+  (blockers/risks/stale/blocked). The **Screen Coverage & Readiness**,
+  implementation-preflight, and handoff-export panels are collapsed by default
+  under a single "Project readiness & metadata" section (kept mounted, hidden
+  via CSS) so the screens stay the focus. This is presentation-only over the
+  existing join/readiness/review/handoff/downstream layers — no schema, prompt,
+  pipeline, or persistence change.
 - **Readiness & coverage layer (`src/lib/screenReadiness.ts`, pure,
   unit-tested — no store/LLM/persistence).** Computed at read time over the
   join layer: per-screen **gap detection** (`detectScreenGaps`: missing
@@ -1676,7 +1703,8 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   line, Accept / Request changes / Mark ready-to-build actions with an inline
   override-reason capture when blockers exist, readiness-issue list, review
   checklist, a calm "review may be outdated" banner + Re-review), review status +
-  issue counts on `ScreenListView` cards, and a "Review readiness" rollup + gate
+  issue counts in each `ScreenListView` card's "Show details" disclosure, and a
+  "Review readiness" rollup + gate
   callout in `ScreenCoveragePanel`. Persistence flows through the existing
   `handleSaveScreenEdit` → `updateArtifactVersionMetadata` overlay path
   (timestamps/signatures stamped in `ScreenDetailView`, not the pure module).
@@ -1716,13 +1744,16 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   entry point the workspace calls. **UI:** `ScreenDownstreamImpactSection`
   (Screen Detail, below the review panel — impacted-artifact list, or a calm
   "No downstream impact detected" / "cannot be fully confirmed for this older
-  review" empty state), a compact `DownstreamChip` on `ScreenListView` cards
-  (only when a blocking/review impact exists — info-only shows nothing), a
+  review" empty state), a compact downstream note in each `ScreenListView`
+  card's "Show details" disclosure (only when a blocking/review impact exists —
+  info-only shows nothing), a
   **Downstream readiness** section in `ScreenCoveragePanel`, and a collapsible
-  **`ScreenPreflightPanel`** ("Implementation preflight") above the screen list.
-  Two new list filters — **Outdated review** (`reviewFreshness === 'outdated'`)
+  **`ScreenPreflightPanel`** ("Implementation preflight") in the collapsed
+  project-metadata section. Two list filters — **Outdated review**
+  (`reviewFreshness === 'outdated'`)
   and **Downstream review** (`downstreamReviewNeeded`) — extend
-  `SCREEN_LIST_FILTERS` / `ScreenFilterReview` (the caller supplies the new
+  `SCREEN_LIST_FILTERS` / `ScreenFilterReview` (surfaced in the Advanced filter
+  drawer) (the caller supplies the new
   signals; `screenReadiness.ts` must NOT import `screenDownstreamImpact` — that
   would cycle). **No export/finalization hook was added**: there is no
   Screens-specific export/share/finalize action today (the PRD Mark-as-Final /
@@ -1768,8 +1799,9 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   Screen Detail **Handoff tab** (`ScreenHandoffView` + a `handoff` value on
   `ScreenDetailTab`, URL-addressable via `?screenTab=handoff`) with a
   readiness-colored tab dot, compact sections, and a Copy-handoff action
-  (clipboard → textarea fallback); a compact **handoff readiness chip** on
-  `ScreenListView` cards; **Handoff ready / Handoff blocked** list filters
+  (clipboard → textarea fallback); a **handoff readiness** row in each
+  `ScreenListView` card's "Show details" disclosure; **Handoff ready / Handoff
+  blocked** Advanced-drawer filters
   (`SCREEN_LIST_FILTERS` + `ScreenFilterReview.handoffReadiness`); and an
   **Implementation handoff** rollup section in `ScreenCoveragePanel`. Everything
   stays **advisory** — nothing gates rendering or generation, and legacy/sparse
@@ -1834,10 +1866,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     Model support** matches (entity + confidence + fields + reason, or a calm
     "No linked Data Model entities found" empty state), a **Related implementation
     plan items** section, per-dependency trace tags, and trace notes.
-    `ScreenListView` cards carry a compact `TraceChip` (only on a real concern —
-    "No plan match" / "Trace needs review", never on a strong trace);
+    each `ScreenListView` card's "Show details" disclosure surfaces a trace
+    concern (only on a real concern — "No plan match" / "Trace needs review",
+    never on a strong trace);
     `ScreenCoveragePanel`'s handoff section shows the trace rollup. **No new list
-    filters** were added (the filter bar is already crowded — chips + preflight
+    filters** were added (the details disclosure + preflight
     carry the signal). Everything stays **advisory**; nothing gates rendering or
     generation, and screens with no downstream artifacts degrade to `missing`
     with an info note, never a crash. **No downstream artifact is mutated and no
@@ -1879,8 +1912,9 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   (`JSON.stringify(pkg, null, 2)`) are the two export formats;
   `screensHandoffExportFilename` builds the download name. **UI:**
   `ScreensHandoffExportPanel` (`src/components/experience/`) — a local,
-  collapsible panel rendered by `ScreenListView` directly below
-  `ScreenPreflightPanel`: an export-readiness header + status banner (calm,
+  collapsible panel rendered by `ScreenListView` inside the collapsed
+  project-metadata section, below `ScreenPreflightPanel`: an export-readiness
+  header + status banner (calm,
   **non-blocking** even when `not_ready` — it still exports, mirroring the
   Phase 4B "decision surface, never a gate" rule), summary stat tiles, Copy /
   Download for Markdown and JSON (clipboard → textarea fallback, Phase 5A
