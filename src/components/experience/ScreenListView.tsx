@@ -33,8 +33,10 @@ import {
 } from '../../lib/mockupVariants';
 import type { VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
+import type { ScreensHandoffExportManifestInput } from '../../lib/screenHandoffExport';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ScreenPreflightPanel } from './ScreenPreflightPanel';
+import { ScreensHandoffExportPanel } from './ScreensHandoffExportPanel';
 import { ReadinessBadge } from './ReadinessBadge';
 
 const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
@@ -68,6 +70,10 @@ interface Props {
     traceDataModel?: DataModelContent | null;
     /** Phase 5B: resolved Implementation Plan content for handoff trace correlation. */
     tracePlan?: StructuredImplementationPlan | null;
+    /** Phase 5C: project name for the export package title / filename. */
+    projectName?: string;
+    /** Phase 5C: manifest source ids + artifact presence for the export bundle. */
+    exportManifest?: ScreensHandoffExportManifestInput;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -82,6 +88,7 @@ export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
     generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan,
+    projectName, exportManifest,
     onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
@@ -193,6 +200,18 @@ export function ScreenListView({
 
             <ScreenPreflightPanel preflight={preflight} />
 
+            {/* Phase 5C: trace-aware implementation-handoff export surface. */}
+            <ScreensHandoffExportPanel
+                input={{
+                    projectName,
+                    handoffs: [...handoffByScreen.values()],
+                    reviewModels,
+                    preflight,
+                    handoffRollup,
+                    p0Ids,
+                    manifest: exportManifest,
+                }}
+            />
 
             <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter screens">
                 {SCREEN_LIST_FILTERS.map(f => {

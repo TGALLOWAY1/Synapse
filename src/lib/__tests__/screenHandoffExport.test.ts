@@ -269,7 +269,7 @@ describe('buildScreensHandoffExportPackage', () => {
             screens: [{
                 item: item(screen()),
                 model: reviewModel({ userStatus: 'implementation_ready' }),
-                variants: [variant({ freshness: { status: 'unknown', reasons: [] } })],
+                variants: [variant({ freshness: { status: 'unknown', reasons: [], severity: 'info', estimated: true } })],
             }],
             dataModel: DATA_MODEL,
             plan: PLAN,
@@ -310,7 +310,7 @@ describe('buildScreensHandoffExportPackage', () => {
     });
 
     it('15. does not throw on legacy / incomplete screens', () => {
-        const bare: ScreenItem = { name: 'Legacy', priority: 'P2' };
+        const bare: ScreenItem = { name: 'Legacy', priority: 'P2', purpose: '' };
         expect(() => buildPackage({
             screens: [{ item: item(bare, 'legacy'), model: reviewModel({ userStatus: undefined, freshness: 'unknown' }), variants: [] }],
         })).not.toThrow();

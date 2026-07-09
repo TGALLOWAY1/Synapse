@@ -382,7 +382,7 @@ function buildManifest(
             kind: 'data_model',
             versionId: m.dataModelArtifactVersionId,
             title: 'Data Model',
-            traceConfidence: summarizeRollupTrace(input.handoffRollup, 'data_model'),
+            traceConfidence: summarizeRollupTrace(input.handoffRollup),
         });
     }
     if (m.implementationPlanPresent) {
@@ -390,7 +390,7 @@ function buildManifest(
             kind: 'implementation_plan',
             versionId: m.implementationPlanArtifactVersionId,
             title: 'Implementation Plan',
-            traceConfidence: summarizeRollupTrace(input.handoffRollup, 'implementation_plan'),
+            traceConfidence: summarizeRollupTrace(input.handoffRollup),
         });
     }
     if (m.designSystemVersionId) {
@@ -420,10 +420,7 @@ function buildManifest(
 }
 
 /** Summarize the rollup's overall trace confidence for a manifest artifact. */
-function summarizeRollupTrace(
-    rollup: ScreensHandoffRollup,
-    _kind: 'data_model' | 'implementation_plan',
-): string | undefined {
+function summarizeRollupTrace(rollup: ScreensHandoffRollup): string | undefined {
     const t = rollup.trace;
     if (!t || t.traced === 0) return undefined;
     if (t.strong === t.traced) return 'Strong across all traced screens';
