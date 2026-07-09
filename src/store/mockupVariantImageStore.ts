@@ -112,7 +112,14 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
         const designTokens = selectPreferredDesignTokens(useProjectStore.getState(), projectId);
         const prompt = buildVariantImagePrompt(request, designTokens);
         const manifest = buildVariantCoverageManifest(request);
-        const size = pickImageSize(request.viewport === 'mobile' ? 'mobile' : platform);
+        // Size follows the variant's own viewport (a desktop variant stays
+        // landscape even if the mockup set's platform is mobile, and vice versa);
+        // 'tablet' falls back to the responsive/square crop via the platform.
+        const sizePlatform: MockupPlatform =
+            request.viewport === 'mobile' ? 'mobile'
+            : request.viewport === 'desktop' ? 'desktop'
+            : platform;
+        const size = pickImageSize(sizePlatform);
 
         try {
             const b64 = await callOpenAIImage(prompt, { quality, size, signal: abort.signal });
