@@ -93,6 +93,20 @@ describe('stepScreenSlug', () => {
         // false-match a screen literally slugged "screen".
         expect(stepScreenSlug({ title: '``' })).toBeNull();
     });
+
+    it('normalizes a canonical spine screen seed id to the screen slug', () => {
+        // The user_flows model sometimes echoes the `scr-<slug>` seed id from
+        // the canonical PRD spine instead of the human name; it must still
+        // resolve to the same screen slug as the plain name.
+        expect(stepScreenSlug({ title: 'scr-infographic-library' })).toBe('infographic-library');
+        expect(stepScreenSlug({ title: '`scr-side-by-side-editor`' })).toBe('side-by-side-editor');
+        expect(stepScreenSlug({ title: 'Infographic Library' })).toBe('infographic-library');
+    });
+
+    it('does not strip a real name that merely starts with "scr"', () => {
+        // No `-`/`_` separator after `scr`, so this is a genuine name, not a seed id.
+        expect(stepScreenSlug({ title: 'Scribble Pad' })).toBe('scribble-pad');
+    });
 });
 
 describe('buildScreenIndex', () => {
@@ -127,6 +141,25 @@ describe('buildScreenIndex', () => {
             'landing-page', 'sign-in', 'sign-in-confirmation',
         ]);
         expect(index.sections[0].flowSummary).toBe('Landing Page → Sign In → Dashboard');
+    });
+
+    it('joins a flow step that references a screen by its spine seed id', () => {
+        // A flow whose steps carry the `scr-<slug>` seed id (the drift this
+        // fix targets) must still attach to its screen and NOT surface an
+        // "unmatched flow step" reference warning.
+        const seedIdFlow = `### Flow: Onboarding
+**Goal:** Land on the dashboard.
+**Preconditions:** None.
+**Steps:**
+1. [scr-landing-page] — User taps Get started → System routes to sign-in
+2. [scr-dashboard] — User lands → System loads workspace
+**Success Outcome:** Dashboard reached.`;
+        const flows = parseFlows(seedIdFlow);
+        const index = buildScreenIndex(INVENTORY, flows, null);
+
+        expect(index.bySlug.get('landing-page')?.relatedFlows).toHaveLength(1);
+        expect(index.bySlug.get('dashboard')?.relatedFlows).toHaveLength(1);
+        expect(index.issues.filter(i => i.kind === 'unmatched_flow_step')).toEqual([]);
     });
 
     it('does not cross-match screens with similar names', () => {

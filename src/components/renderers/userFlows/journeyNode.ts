@@ -1,5 +1,45 @@
 import type { FlowJourneyNode, FlowJourneyNodeKind, ParsedStep } from './types';
 
+/**
+ * The canonical PRD spine stamps every screen with a deterministic seed id of
+ * the form `scr-<slug>` (see src/lib/canonicalPrdSpine.ts). The model that
+ * writes the user_flows artifact sometimes echoes that seed id into a step's
+ * `[Screen Name]` bracket instead of the human-readable name — e.g. it writes
+ * `[scr-infographic-library]` for the screen named "Infographic Library". Left
+ * as-is this detaches the step from its screen: the join key slugs to
+ * `scr-infographic-library` while the screen's slug is `infographic-library`,
+ * so the Screens view warns "No user flow references this screen" and the flow
+ * renders the raw id. These helpers canonicalize that reference so existing
+ * (already-final) artifacts join and read correctly at render time. Only the
+ * `scr-` screen-seed prefix is handled — `ent-`/other prefixes are unrelated
+ * to screen references, and the `scr-` requires a `-`/`_` separator so a real
+ * name like "Scribble Pad" (slug `scribble-pad`) is never touched. */
+const SCREEN_SEED_PREFIX_RE = /^scr[-_]/i;
+const SCREEN_SEED_ID_RE = /^scr[-_][a-z0-9]+(?:[-_][a-z0-9]+)*$/i;
+
+/** True when a flow-step title is a bare screen seed id (`scr-…`) the model
+ * echoed instead of a real screen name. */
+export function looksLikeScreenSeedId(title: string): boolean {
+    return SCREEN_SEED_ID_RE.test(title.trim());
+}
+
+/** Strip the `scr-`/`scr_` screen-seed prefix from an already-slugified value
+ * so a `scr-infographic-library` step reference matches the `infographic-library`
+ * screen slug. A non-seed slug is returned unchanged. */
+export function stripScreenSeedPrefix(slug: string): string {
+    return slug.replace(SCREEN_SEED_PREFIX_RE, '') || slug;
+}
+
+/** Human label for a flow-step screen title: a seed id like
+ * `scr-infographic-library` becomes "Infographic Library"; a real name is
+ * returned unchanged (only surrounding backticks trimmed). */
+export function prettyScreenTitle(title: string): string {
+    const trimmed = title.replace(/^`+|`+$/g, '').trim();
+    if (!looksLikeScreenSeedId(trimmed)) return trimmed;
+    const words = trimmed.replace(SCREEN_SEED_PREFIX_RE, '').replace(/[-_]+/g, ' ').trim();
+    return words ? words.replace(/\b\w/g, c => c.toUpperCase()) : trimmed;
+}
+
 const STATE_HINTS = /\b(state|loading|importing|saving|syncing|fetching|processing|computing|pending|in[-\s]?progress|generating)\b/i;
 const ACTION_HINTS = /\b(save|submit|click|tap|send|post|create|delete|remove|export|import|share|invite|publish|copy|paste|drag|drop|upload|download|trigger|run)\b/i;
 const SCREEN_HINTS = /\b(screen|page|view|dashboard|panel|modal|drawer|sheet|inbox|library|settings|home|landing|profile)\b/i;
@@ -110,7 +150,7 @@ export function buildJourneyGroups(
         } else {
             groups.push({
                 screenSlug: key,
-                screenLabel: (step.title?.trim() || node.label).replace(BACKTICKS, '').trim(),
+                screenLabel: prettyScreenTitle(step.title?.trim() || node.label),
                 nodes: [node],
                 firstStepIndex: step.index,
                 lastStepIndex: step.index,

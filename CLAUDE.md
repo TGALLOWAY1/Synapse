@@ -1502,6 +1502,21 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   match by `sourceScreenId` first, then slugified `MockupScreen.name` (legacy
   fallback). Flow steps are markdown and only know names, so they match by
   exact slug of the parsed `[Screen Name]` step title (`stepScreenSlug`).
+  **`stepScreenSlug` canonicalizes the `scr-` screen-seed prefix**
+  (`stripScreenSeedPrefix` in `journeyNode.ts`) so a step whose bracket carries
+  the canonical spine seed id (`[scr-infographic-library]` — a form the
+  user_flows model sometimes emits instead of the human name, since the spine
+  prompt tells it to "reuse screen seed ids") still joins to the
+  `infographic-library` screen at read time (fixing already-final artifacts
+  without regeneration). Because it is the single shared key for the
+  flow→screen join, journey grouping, AND flow-node navigation, normalizing it
+  there keeps all three consistent. The display mirrors this:
+  `prettyScreenTitle` (also `journeyNode.ts`) renders a seed-id step title as
+  its human name ("Infographic Library") in the flow renderer. The user_flows
+  prompt was also tightened to write the human display name in the bracket, so
+  new generations avoid the drift at the source. Only the `scr-` prefix (with a
+  `-`/`_` separator) is stripped, so a real name like "Scribble Pad" is never
+  touched.
   Screen selection/navigation uses the **id**; per-screen images stay keyed by
   the slug of the *stored* (generated) name, so both survive display renames.
   Missing artifacts degrade gracefully; a missing inventory returns the

@@ -30,7 +30,7 @@ import type {
     ParsedFlow,
     ParsedStep,
 } from '../components/renderers/userFlows/types';
-import { inferNodeKind } from '../components/renderers/userFlows/journeyNode';
+import { inferNodeKind, stripScreenSeedPrefix } from '../components/renderers/userFlows/journeyNode';
 
 /**
  * User edit overlay for one screen, keyed by the canonical screen id and
@@ -391,11 +391,18 @@ const stripBackticks = (text: string): string => text.replace(/^`+|`+$/g, '').tr
  * no usable title. Guarding the empty title matters because
  * `slugifyScreenName('')` falls back to the literal `'screen'`, which could
  * otherwise false-match a real screen that slugs to the same value.
+ *
+ * The `scr-` screen-seed prefix is stripped (`stripScreenSeedPrefix`) so a step
+ * whose bracket carries the canonical spine seed id (`[scr-infographic-library]`
+ * — a form the user_flows model sometimes emits instead of the human name)
+ * still joins to the `infographic-library` screen. Because this is the single
+ * shared key for the flow→screen join, journey grouping, AND flow-node
+ * navigation, normalizing it here keeps all three consistent.
  */
 export function stepScreenSlug(step: Pick<ParsedStep, 'title'>): string | null {
     const title = step.title ? stripBackticks(step.title) : '';
     if (!title) return null;
-    return slugifyScreenName(title);
+    return stripScreenSeedPrefix(slugifyScreenName(title));
 }
 
 /**
