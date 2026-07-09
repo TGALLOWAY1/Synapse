@@ -22,13 +22,18 @@
 // language stays calm and practical ("Review recommended", "Derived route —
 // confirm before building"), never punitive ("Invalid", "Broken").
 
-import type { Feature, ScreenItem } from '../types';
+import type { DataModelContent, Feature, ScreenItem, StructuredImplementationPlan } from '../types';
 import type { ScreenExperienceItem } from './screenExperience';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import {
     buildScreenTraceability, resolveAcceptanceCriteria,
     type ScreenReviewStatus,
 } from './screenReadiness';
+import {
+    buildScreenArtifactTraceBridge,
+    type ScreenArtifactTraceBridge, type ScreenImplementationPlanMatch,
+    type ScreenTraceContext, type TraceConfidence,
+} from './screenArtifactTraceBridge';
 import {
     formatVariantLabel, type DerivedMockupVariant, type MockupVariantCoverage,
 } from './mockupVariants';
@@ -94,6 +99,12 @@ export interface HandoffDataDependency {
     type: HandoffDataType;
     direction?: HandoffDataDirection;
     source: HandoffDataSource;
+    /** Phase 5B: confidence of a Data Model trace, when one was found. */
+    confidence?: TraceConfidence;
+    /** Phase 5B: the Data Model entity this dependency was matched to. */
+    matchedEntity?: string;
+    /** Phase 5B: the specific entity field this dependency was matched to. */
+    matchedField?: string;
 }
 
 export interface HandoffMockupReference {
@@ -163,6 +174,15 @@ export interface ScreenImplementationHandoff {
     qaChecklist: HandoffQaItem[];
     buildTasks: HandoffBuildTask[];
     trace: HandoffTrace;
+    /**
+     * Phase 5B: read-only correlation of this screen with the Data Model and
+     * Implementation Plan artifacts. Present only when trace inputs were
+     * provided (the workspace always provides them; legacy/test callers that
+     * omit them leave this undefined, preserving Phase 5A behavior).
+     */
+    traceBridge?: ScreenArtifactTraceBridge;
+    /** Phase 5B: Implementation Plan tasks that appear to build this screen. */
+    implementationPlanReferences?: ScreenImplementationPlanMatch[];
 }
 
 // --- Small helpers -----------------------------------------------------------
@@ -667,6 +687,17 @@ export interface HandoffReadinessSignals {
     handoffThin: boolean;
     /** A blocking downstream implementation impact exists (Phase 4B). */
     downstreamBlocking: boolean;
+    /**
+     * Phase 5B trace signals (all optional — only set when the corresponding
+     * artifact was provided AND present, so a missing/unloaded artifact never
+     * nags). A present-but-unmatched artifact is review-worthy, never blocking.
+     */
+    /** Data Model exists and carries data reqs but no entity matched. */
+    dataModelTraceMissing?: boolean;
+    /** Implementation Plan exists but no task matched an accepted P0 screen. */
+    planBridgeMissing?: boolean;
+    /** Overall trace confidence is weak/estimated for a critical P0 screen. */
+    traceConfidenceWeakForP0?: boolean;
 }
 
 const signedOff = (status: ScreenReviewStatus | undefined): boolean =>
@@ -727,6 +758,15 @@ export function deriveHandoffReadiness(signals: HandoffReadinessSignals): Screen
     if (signals.dataDependenciesMissing) {
         reasons.push('No linked data model entities found — review data dependencies before implementation.');
     }
+    if (signals.dataModelTraceMissing) {
+        reasons.push('This screen has data dependencies but no matched Data Model entities — review before implementation.');
+    }
+    if (signals.planBridgeMissing) {
+        reasons.push('No Implementation Plan tasks appear to build this screen — review plan coverage after accepting it.');
+    }
+    if (signals.traceConfidenceWeakForP0) {
+        reasons.push('Downstream trace to the Data Model / Implementation Plan is estimated — confirm before building.');
+    }
     if (signals.handoffThin) {
         reasons.push('Developer handoff detail (route, components, events) is thin.');
     }
@@ -754,6 +794,15 @@ export interface ScreenHandoffInput {
     variants: readonly DerivedMockupVariant[];
     downstream?: ScreenDownstreamImpact;
     features?: readonly Feature[];
+    /**
+     * Phase 5B trace inputs — the already-loaded Data Model and Implementation
+     * Plan content. `undefined` (omitted) → no trace bridge is computed (Phase
+     * 5A behavior, for legacy/test callers). `null` → the artifact genuinely
+     * does not exist yet (an info note, never a review nag). Content → the
+     * bridge correlates against it. The workspace always passes both.
+     */
+    dataModel?: DataModelContent | null;
+    implementationPlan?: StructuredImplementationPlan | null;
 }
 
 /** Build the full implementation handoff for one joined screen. Derives every
@@ -774,6 +823,32 @@ export function buildScreenImplementationHandoff(input: ScreenHandoffInput): Scr
     const dataDependencies = deriveHandoffDataDependencies(screen);
     const mockupReferences = deriveHandoffMockupReferences(variants);
     const { criteria: acceptanceCriteria } = resolveAcceptanceCriteria(screen);
+
+    // Phase 5B: read-only trace bridge — correlate this screen with the Data
+    // Model and Implementation Plan artifacts, then upgrade the estimated data
+    // dependencies with real matches. Computed only when trace inputs were
+    // provided (see ScreenHandoffInput); undefined inputs preserve Phase 5A.
+    const traceProvided = input.dataModel !== undefined || input.implementationPlan !== undefined;
+    let traceBridge: ScreenArtifactTraceBridge | undefined;
+    let implementationPlanReferences: ScreenImplementationPlanMatch[] | undefined;
+    if (traceProvided) {
+        const traceContext: ScreenTraceContext = {
+            screenId: item.id,
+            screenTitle: screen.name || item.id,
+            isP0: isP0(screen),
+            featureRefs: screen.featureRefs ?? [],
+            route: route.path,
+            routeExplicit: route.confidence === 'explicit',
+            components: components.map(c => c.name),
+            dataLabels: dataDependencies.map(d => d.label),
+            hasDataRequirements: dataDependencies.length > 0,
+        };
+        traceBridge = buildScreenArtifactTraceBridge(
+            traceContext, input.dataModel ?? null, input.implementationPlan ?? null,
+        );
+        implementationPlanReferences = traceBridge.implementationPlan.matches;
+        upgradeDataDependencies(dataDependencies, traceBridge);
+    }
 
     const mobileMissing = variants.some(
         v => v.viewport === 'mobile' && v.stateType === 'default' && v.status === 'missing',
@@ -821,6 +896,23 @@ export function buildScreenImplementationHandoff(input: ScreenHandoffInput): Scr
     const downstreamBlocking = downstream?.summary.hasBlockingImpact ?? false;
     const handoffThin = !route.path && components.length === 0 && events.length === 0;
 
+    // Phase 5B readiness signals — only fire when the artifact was PRESENT and
+    // produced no/weak match (a missing/unloaded artifact never nags).
+    const signedOffP0 = isP0(screen) && signedOff(reviewModel.userStatus);
+    const dataModelTraceMissing = Boolean(
+        input.dataModel && traceBridge && traceBridge.dataModel.confidence === 'missing'
+        && dataDependencies.length > 0,
+    );
+    const planBridgeMissing = Boolean(
+        input.implementationPlan && traceBridge && traceBridge.implementationPlan.confidence === 'missing'
+        && signedOffP0,
+    );
+    const traceConfidenceWeakForP0 = Boolean(
+        isP0(screen) && traceBridge
+        && traceBridge.overall.confidence !== 'missing'
+        && (traceBridge.overall.confidence === 'weak' || traceBridge.overall.confidence === 'estimated'),
+    );
+
     const readiness = deriveHandoffReadiness({
         isP0: isP0(screen),
         isPrimary: isPrimary(screen),
@@ -836,6 +928,9 @@ export function buildScreenImplementationHandoff(input: ScreenHandoffInput): Scr
         dataDependenciesMissing: dataDependencies.length === 0,
         handoffThin,
         downstreamBlocking,
+        dataModelTraceMissing,
+        planBridgeMissing,
+        traceConfidenceWeakForP0,
     });
 
     return {
@@ -859,8 +954,56 @@ export function buildScreenImplementationHandoff(input: ScreenHandoffInput): Scr
             estimated: true,
             warnings: traceWarnings,
         },
+        traceBridge,
+        implementationPlanReferences,
     };
 }
+
+/**
+ * Phase 5B: overlay Data Model trace matches onto the estimated data
+ * dependencies, upgrading `source` → 'data_model_trace' and stamping the matched
+ * entity/field + confidence. Mutates the passed array in place (it is freshly
+ * derived). Never fabricates a match — a dependency with no matched entity/field
+ * keeps its original estimated source.
+ */
+function upgradeDataDependencies(
+    deps: HandoffDataDependency[],
+    bridge: ScreenArtifactTraceBridge,
+): void {
+    for (const dep of deps) {
+        const depLabel = normalizeTraceLabel(dep.label);
+        let best: { entity: string; field?: string; confidence: TraceConfidence } | undefined;
+        for (const m of bridge.dataModel.matches) {
+            // Field-level match first (more specific).
+            const field = m.fields?.find(f => normalizeTraceLabel(f.name) === depLabel
+                || normalizeTraceLabel(`${m.entityName} ${f.name}`) === depLabel);
+            if (field) {
+                if (!best || CONFIDENCE_RANK_LOCAL[field.confidence] > CONFIDENCE_RANK_LOCAL[best.confidence]) {
+                    best = { entity: m.entityName, field: field.name, confidence: field.confidence };
+                }
+                continue;
+            }
+            if (normalizeTraceLabel(m.entityName) === depLabel
+                || singularTrace(normalizeTraceLabel(m.entityName)) === singularTrace(depLabel)) {
+                if (!best || CONFIDENCE_RANK_LOCAL[m.confidence] > CONFIDENCE_RANK_LOCAL[best.confidence]) {
+                    best = { entity: m.entityName, confidence: m.confidence };
+                }
+            }
+        }
+        if (best) {
+            dep.source = 'data_model_trace';
+            dep.matchedEntity = best.entity;
+            dep.matchedField = best.field;
+            dep.confidence = best.confidence;
+        }
+    }
+}
+
+const CONFIDENCE_RANK_LOCAL: Record<TraceConfidence, number> = {
+    missing: 0, estimated: 1, weak: 2, strong: 3, explicit: 4,
+};
+const normalizeTraceLabel = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
+const singularTrace = (s: string): string => (s.length > 3 && s.endsWith('s') ? s.slice(0, -1) : s);
 
 // --- Artifact-level rollup ----------------------------------------------------
 
@@ -959,6 +1102,17 @@ export function buildHandoffPreflightContribution(
         if (h.route.confidence !== 'explicit' && isScreenP0) {
             info.push(`${h.screenTitle} uses a derived route — confirm before building.`);
         }
+        // Phase 5B: fold in the trace bridge's own review guidance for P0 screens.
+        const bridge = h.traceBridge;
+        if (bridge && isScreenP0) {
+            if (bridge.dataModel.confidence === 'missing' && bridge.dataModel.matches.length === 0
+                && bridge.dataModel.warnings.some(w => /No linked Data Model entities/.test(w))) {
+                review.push(`${h.screenTitle} has data dependencies but no matched Data Model entities.`);
+            }
+            if (bridge.implementationPlan.confidence === 'missing') {
+                review.push(`${h.screenTitle} has no related Implementation Plan tasks.`);
+            }
+        }
     }
 
     // Prioritized next steps (capped to 5, deduped).
@@ -973,13 +1127,18 @@ export function buildHandoffPreflightContribution(
             push(`Review the handoff for ${h.screenTitle} before building.`);
         }
     }
+    // Phase 5B trace-driven next steps for P0 screens.
+    for (const h of handoffs) {
+        if (!p0Ids.has(h.screenId) || !h.traceBridge) continue;
+        for (const a of h.traceBridge.overall.recommendedActions) push(a);
+    }
     if (handoffs.some(h => p0Ids.has(h.screenId)) && blocking.length === 0) {
         push('Copy the handoff for each P0 screen once its package is ready.');
     }
 
     return {
         blocking: blocking.slice(0, 6),
-        review: review.slice(0, 6),
+        review: review.slice(0, 8),
         info: info.slice(0, 4),
         recommendedNextActions: recommendedNextActions.slice(0, 5),
     };
@@ -1104,12 +1263,60 @@ export function renderHandoffMarkdown(handoff: ScreenImplementationHandoff): str
     }
     lines.push('');
 
+    // Phase 5B: downstream trace sections (only when a bridge was computed).
+    const bridge = handoff.traceBridge;
+    if (bridge) {
+        lines.push('## Trace Confidence');
+        lines.push(`- Data Model: ${TRACE_CONFIDENCE_MD[bridge.dataModel.confidence]}`);
+        lines.push(`- Implementation Plan: ${TRACE_CONFIDENCE_MD[bridge.implementationPlan.confidence]}`);
+        lines.push(`- Overall: ${TRACE_CONFIDENCE_MD[bridge.overall.confidence]}`);
+        lines.push('');
+
+        lines.push('## Data Model Support');
+        if (bridge.dataModel.matches.length > 0) {
+            for (const m of bridge.dataModel.matches) {
+                lines.push(`- ${m.entityName} — ${TRACE_CONFIDENCE_MD[m.confidence]}`);
+                if (m.fields && m.fields.length > 0) {
+                    lines.push(`  - Fields: ${m.fields.map(f => f.name).join(', ')}`);
+                }
+                lines.push(`  - Reason: ${m.reason}`);
+            }
+        } else {
+            lines.push('No linked Data Model entities found. Review recommended before implementation.');
+        }
+        lines.push('');
+
+        lines.push('## Related Implementation Plan Items');
+        if (bridge.implementationPlan.matches.length > 0) {
+            for (const m of bridge.implementationPlan.matches) {
+                const where = m.milestoneName ? ` (${m.milestoneName})` : '';
+                lines.push(`- ${m.title}${where} — ${TRACE_CONFIDENCE_MD[m.confidence]}`);
+                lines.push(`  - Reason: ${m.reason}`);
+            }
+        } else {
+            lines.push('No related Implementation Plan tasks found. Review the Implementation Plan after accepting this screen.');
+        }
+        lines.push('');
+    }
+
     // Trace
     lines.push('## Trace / Confidence');
     lines.push(`- PRD features: ${handoff.trace.prdFeatures.length > 0 ? handoff.trace.prdFeatures.join(', ') : 'none linked'}`);
     lines.push(`- User flows: ${handoff.trace.userFlows.length > 0 ? handoff.trace.userFlows.join(', ') : 'none'}`);
     for (const w of handoff.trace.warnings) lines.push(`- ${w}`);
+    if (bridge) {
+        for (const w of bridge.overall.warnings) lines.push(`- ${w}`);
+    }
     lines.push('- All fields are estimated from the generated spec — confirm before building.');
 
     return lines.join('\n');
 }
+
+/** Confidence labels for the markdown export (matches the UI labels). */
+const TRACE_CONFIDENCE_MD: Record<TraceConfidence, string> = {
+    explicit: 'Explicit trace',
+    strong: 'Strong match',
+    weak: 'Weak match',
+    estimated: 'Estimated',
+    missing: 'Missing',
+};
