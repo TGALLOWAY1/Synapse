@@ -981,10 +981,12 @@ export function ArtifactWorkspace({
             }
 
             // Artifact-level controls for the two source artifacts that no
-            // longer have their own sidebar rows: Screen Inventory version
-            // history / staleness, and Mockup version history / regenerate
-            // (incl. the design-system drift prompt). Without these here the
-            // consolidation would orphan restore + regenerate flows.
+            // longer have their own sidebar rows (Screen Inventory version
+            // history / staleness, Mockup version history / regenerate, incl.
+            // the design-system drift prompt) have moved OUT of a global toolbar
+            // and into each screen card's "Show details" (progressive
+            // disclosure) — passed to ScreenListView as `artifactControls` so
+            // the list surfaces the screens themselves immediately.
             const mockupDesignRef = mockupPreferred?.sourceRefs.find(
                 r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
             );
@@ -993,56 +995,32 @@ export function ArtifactWorkspace({
                 && !!currentDesignForScreens?.tokensHash
                 && currentDesignForScreens.tokensHash !== mockupDesignRef.anchorInfo;
 
+            const invStaleness = invArtifact ? getArtifactStaleness(projectId, invArtifact.id) : undefined;
+            const invSpineRef = invPreferred?.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
+            const invPrdLabel = resolveSpineLabel(invSpineRef);
+            const invChangeSummary = invStaleness && invStaleness !== 'current' && invSpineRef
+                ? spineChangeFor(invSpineRef) : null;
+            const screensArtifactControls = {
+                prdVersionLabel: invPrdLabel,
+                staleness: invStaleness,
+                stalenessDetail: invChangeSummary
+                    ? `PRD changes since ${invPrdLabel ?? 'this was generated'}: ${invChangeSummary.headline}`
+                    : undefined,
+                lastMockupGeneratedAt: mockupPreferred?.createdAt,
+                mockupDesignDrift: screensDesignDrift,
+                onMarkUpToDate: invArtifact && latestSpineId
+                    ? () => markArtifactCurrentForSpine(projectId, invArtifact.id, latestSpineId)
+                    : undefined,
+                onOpenVersionHistory: invArtifact ? () => setVersionHistoryArtifactId(invArtifact.id) : undefined,
+                onOpenMockupHistory: mockupArtifact ? () => setVersionHistoryArtifactId(mockupArtifact.id) : undefined,
+                onRegenerateMockup: mockupPreferred
+                    ? () => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })
+                    : undefined,
+            };
+
             // Stale screen id (e.g. inventory regenerated) falls back to the list.
             return (
                 <div className="space-y-4">
-                    {(invPreferred || mockupPreferred) && (
-                        <div className="max-w-3xl xl:max-w-5xl mx-auto flex items-center justify-between gap-2 flex-wrap">
-                            <div className="flex items-center gap-2 flex-wrap">
-                                {invArtifact && invPreferred && renderVersionControls(invArtifact.id, invPreferred)}
-                            </div>
-                            {mockupArtifact && mockupPreferred && (
-                                <div className="flex items-center gap-2 flex-wrap">
-                                    <button
-                                        type="button"
-                                        onClick={() => setVersionHistoryArtifactId(mockupArtifact.id)}
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                                    >
-                                        <History size={12} /> Mockup history
-                                    </button>
-                                    <button
-                                        type="button"
-                                        onClick={() => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })}
-                                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                                    >
-                                        <RefreshCcw size={12} /> Regenerate Mockup
-                                    </button>
-                                </div>
-                            )}
-                        </div>
-                    )}
-                    {screensDesignDrift && mockupPreferred && (
-                        <div className="max-w-3xl xl:max-w-5xl mx-auto flex items-start justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 p-3">
-                            <div className="flex items-start gap-2 min-w-0">
-                                <AlertTriangle size={16} className="mt-0.5 shrink-0 text-amber-600" />
-                                <div className="min-w-0">
-                                    <p className="text-sm font-medium text-amber-900">
-                                        Design system changed since these mockups were generated
-                                    </p>
-                                    <p className="text-xs text-amber-700 mt-0.5">
-                                        Regenerate the mockups to apply the new visual direction.
-                                    </p>
-                                </div>
-                            </div>
-                            <button
-                                type="button"
-                                onClick={() => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-md transition shrink-0"
-                            >
-                                <RefreshCcw size={12} /> Regenerate Mockup
-                            </button>
-                        </div>
-                    )}
                     {visibleScreenIssues.length > 0 && (
                         <div className="max-w-3xl xl:max-w-5xl mx-auto">
                             <ReferenceWarningsPanel
@@ -1068,6 +1046,7 @@ export function ArtifactWorkspace({
                         tracePlan={tracePlan}
                         projectName={projectName}
                         exportManifest={exportManifest}
+                        artifactControls={screensArtifactControls}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
