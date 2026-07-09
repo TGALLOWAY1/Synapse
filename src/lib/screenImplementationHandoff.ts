@@ -1007,6 +1007,23 @@ const singularTrace = (s: string): string => (s.length > 3 && s.endsWith('s') ? 
 
 // --- Artifact-level rollup ----------------------------------------------------
 
+/** Phase 5B: artifact-level rollup of the downstream trace confidence across
+ * screens (only counts screens whose handoff carried a trace bridge). */
+export interface ScreensTraceRollup {
+    /** Screens with a computed trace bridge. */
+    traced: number;
+    /** Overall confidence explicit/strong. */
+    strong: number;
+    /** Overall confidence weak/estimated. */
+    estimated: number;
+    /** Overall confidence missing (both traces missing). */
+    missing: number;
+    /** P0 screens whose Implementation Plan trace is missing. */
+    p0PlanMissing: number;
+    /** P0 screens whose Data Model trace is missing but carry data deps. */
+    p0DataModelMissing: number;
+}
+
 export interface ScreensHandoffRollup {
     total: number;
     ready: number;
@@ -1018,6 +1035,8 @@ export interface ScreensHandoffRollup {
     /** Overall verdict: ready only when every P0 screen's handoff is ready. */
     status: ScreenImplementationReadiness;
     message: string;
+    /** Phase 5B trace rollup (null when no screen carried a trace bridge). */
+    trace: ScreensTraceRollup | null;
 }
 
 export function buildScreensHandoffRollup(
@@ -1041,6 +1060,28 @@ export function buildScreensHandoffRollup(
             if (h.readiness.status === 'blocked') p0Blocked += 1;
         }
     }
+
+    // Phase 5B trace rollup — only over screens that carried a trace bridge.
+    let traced = 0, strong = 0, estimated = 0, missing = 0, p0PlanMissing = 0, p0DataModelMissing = 0;
+    for (const h of handoffs) {
+        const bridge = h.traceBridge;
+        if (!bridge) continue;
+        traced += 1;
+        const oc = bridge.overall.confidence;
+        if (oc === 'explicit' || oc === 'strong') strong += 1;
+        else if (oc === 'weak' || oc === 'estimated') estimated += 1;
+        else missing += 1;
+        if (p0Ids.has(h.screenId)) {
+            if (bridge.implementationPlan.confidence === 'missing') p0PlanMissing += 1;
+            if (bridge.dataModel.confidence === 'missing'
+                && bridge.dataModel.warnings.some(w => /No linked Data Model entities/.test(w))) {
+                p0DataModelMissing += 1;
+            }
+        }
+    }
+    const trace: ScreensTraceRollup | null = traced > 0
+        ? { traced, strong, estimated, missing, p0PlanMissing, p0DataModelMissing }
+        : null;
 
     let status: ScreenImplementationReadiness;
     if (p0Blocked > 0 || (p0Total > 0 && p0Ready < p0Total && blocked > 0)) status = 'blocked';
@@ -1066,6 +1107,7 @@ export function buildScreensHandoffRollup(
         p0Total,
         status,
         message,
+        trace,
     };
 }
 

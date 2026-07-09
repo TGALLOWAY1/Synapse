@@ -300,6 +300,26 @@ function HandoffReadinessSection({ rollup }: { rollup: ScreensHandoffRollup }) {
                     <p className="text-[11px] text-neutral-600 mt-0.5">{rollup.message}</p>
                 </div>
             </div>
+            {rollup.trace && rollup.trace.traced > 0 && (
+                <div className="mt-2">
+                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-neutral-600">
+                        <span className="text-neutral-400 uppercase tracking-wide text-[10px]">Handoff trace</span>
+                        {rollup.trace.strong > 0 && <span className="text-emerald-700">{rollup.trace.strong} strong</span>}
+                        {rollup.trace.estimated > 0 && <span className="text-amber-700">{rollup.trace.estimated} estimated</span>}
+                        {rollup.trace.missing > 0 && <span className="text-neutral-500">{rollup.trace.missing} missing</span>}
+                    </div>
+                    {(rollup.trace.p0PlanMissing > 0 || rollup.trace.p0DataModelMissing > 0) && (
+                        <p className="mt-1 text-[11px] text-amber-700">
+                            {rollup.trace.p0PlanMissing > 0 && (
+                                `${rollup.trace.p0PlanMissing} P0 ${rollup.trace.p0PlanMissing === 1 ? 'screen lacks' : 'screens lack'} an Implementation Plan match. `
+                            )}
+                            {rollup.trace.p0DataModelMissing > 0 && (
+                                `${rollup.trace.p0DataModelMissing} P0 ${rollup.trace.p0DataModelMissing === 1 ? 'screen has' : 'screens have'} data dependencies with no Data Model match.`
+                            )}
+                        </p>
+                    )}
+                </div>
+            )}
         </div>
     );
 }

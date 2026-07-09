@@ -462,4 +462,23 @@ describe('Phase 5B trace-backed handoff', () => {
         expect(h.traceBridge).toBeUndefined();
         expect(h.implementationPlanReferences).toBeUndefined();
     });
+
+    it('rollup exposes a trace summary when handoffs carry a bridge', () => {
+        const traced = buildScreenImplementationHandoff(handoffInput({
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            variants: [variant({ freshness: { status: 'current', reasons: [], severity: 'info', estimated: true } })],
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: TRACE_PLAN,
+        }));
+        const rollup = buildScreensHandoffRollup([traced], new Set(['scr-landing']));
+        expect(rollup.trace).not.toBeNull();
+        expect(rollup.trace?.traced).toBe(1);
+        expect(rollup.trace?.strong).toBe(1);
+    });
+
+    it('rollup trace is null when no handoff carried a bridge', () => {
+        const h = buildScreenImplementationHandoff(handoffInput());
+        const rollup = buildScreensHandoffRollup([h], new Set(['scr-landing']));
+        expect(rollup.trace).toBeNull();
+    });
 });

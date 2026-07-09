@@ -395,6 +395,7 @@ function ScreenRow({
                 )}
                 {downstreamImpact && <DownstreamChip impact={downstreamImpact} />}
                 {handoff && <HandoffChip status={handoff.readiness.status} />}
+                {handoff?.traceBridge && <TraceChip bridge={handoff.traceBridge} />}
             </div>
 
             {reviewModel && (
@@ -518,6 +519,25 @@ function HandoffChip({ status }: { status: ScreenImplementationHandoff['readines
     return (
         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${meta.tone}`} title={meta.title}>
             {meta.label}
+        </span>
+    );
+}
+
+/** Compact downstream-trace chip (Phase 5B) — shown only when a trace concern
+ * exists (no plan match, or an estimated/missing overall trace), to avoid
+ * cluttering cards whose trace is already strong. */
+function TraceChip({ bridge }: { bridge: NonNullable<ScreenImplementationHandoff['traceBridge']> }) {
+    const planMissing = bridge.implementationPlan.confidence === 'missing';
+    const overall = bridge.overall.confidence;
+    const weak = overall === 'weak' || overall === 'estimated' || overall === 'missing';
+    if (!planMissing && !weak) return null; // strong trace → no chip
+    const label = planMissing ? 'No plan match' : 'Trace needs review';
+    return (
+        <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full ring-1 text-amber-700 bg-amber-50 ring-amber-200"
+            title="Downstream trace to the Data Model / Implementation Plan is estimated or missing — confirm before building"
+        >
+            {label}
         </span>
     );
 }
