@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import type { Feature, ScreenItem } from '../../types';
+import type { DataModelContent, Feature, ScreenItem, StructuredImplementationPlan } from '../../types';
 import type { ScreenExperienceItem } from '../screenExperience';
 import type { ScreenReviewModel, SystemReadinessStatus, ScreenReviewFreshnessStatus } from '../screenReviewWorkflow';
 import type { DerivedMockupVariant } from '../mockupVariants';
@@ -357,5 +357,142 @@ describe('buildHandoffPreflightContribution', () => {
         const contrib = buildHandoffPreflightContribution([blocked], new Set(['scr-dash']));
         expect(contrib.blocking.length).toBeGreaterThan(0);
         expect(contrib.recommendedNextActions.some(a => /Dashboard/.test(a))).toBe(true);
+    });
+});
+
+// --- Phase 5B: trace-backed handoff ------------------------------------------
+
+const TRACE_DATA_MODEL: DataModelContent = {
+    entities: [
+        {
+            name: 'Evaluation',
+            description: 'A submitted evaluation',
+            fields: [
+                { name: 'id', type: 'string', required: true, description: '' },
+                { name: 'status', type: 'string', required: true, description: '' },
+                { name: 'score', type: 'number', required: false, description: '' },
+            ],
+            relationships: [],
+            featureRefs: ['F1'],
+        },
+    ],
+};
+
+const TRACE_PLAN: StructuredImplementationPlan = {
+    milestones: [
+        {
+            id: 'm1',
+            name: 'Foundation',
+            linkedArtifacts: { screens: ['Landing & Role Selection'] },
+            tasks: [
+                { id: 't1', title: 'Build Landing route and Hero banner', description: 'Wire / route.', status: 'todo' },
+            ],
+        },
+    ],
+} as unknown as StructuredImplementationPlan;
+
+describe('Phase 5B trace-backed handoff', () => {
+    it('11. upgrades a data dependency source to data_model_trace when matched', () => {
+        const h = buildScreenImplementationHandoff(handoffInput({
+            item: item(screen({
+                featureRefs: ['F1: Role selection'],
+                outputData: [],
+                handoff: { dataDependencies: ['Evaluation'] },
+            })),
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: TRACE_PLAN,
+        }));
+        const dep = h.dataDependencies.find(d => d.label === 'Evaluation');
+        expect(dep?.source).toBe('data_model_trace');
+        expect(dep?.matchedEntity).toBe('Evaluation');
+        expect(dep?.confidence).toBe('explicit');
+        expect(h.traceBridge?.dataModel.confidence).toBe('explicit');
+    });
+
+    it('exposes Implementation Plan references for a matched screen', () => {
+        const h = buildScreenImplementationHandoff(handoffInput({
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: TRACE_PLAN,
+        }));
+        expect((h.implementationPlanReferences?.length ?? 0)).toBeGreaterThan(0);
+    });
+
+    it('12. missing Data Model trace stays review-recommended, never blocked', () => {
+        const h = buildScreenImplementationHandoff(handoffInput({
+            item: item(screen({
+                featureRefs: [],
+                outputData: [],
+                handoff: { dataDependencies: ['UnrelatedThing'] },
+            })),
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            variants: [variant({ freshness: { status: 'current', reasons: [], severity: 'info', estimated: true } })],
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: TRACE_PLAN,
+        }));
+        // A missing data-model trace never escalates past review_recommended.
+        expect(h.readiness.status).not.toBe('blocked');
+    });
+
+    it('15. markdown export includes Data Model and Implementation Plan sections', () => {
+        const h = buildScreenImplementationHandoff(handoffInput({
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: TRACE_PLAN,
+        }));
+        const md = renderHandoffMarkdown(h);
+        expect(md).toContain('## Trace Confidence');
+        expect(md).toContain('## Data Model Support');
+        expect(md).toContain('## Related Implementation Plan Items');
+    });
+
+    it('13. a P0 screen with no plan match appears in the preflight review', () => {
+        const h = buildScreenImplementationHandoff(handoffInput({
+            item: item(screen({ name: 'Landing & Role Selection', featureRefs: [], handoff: undefined, outputData: [] })),
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: { milestones: [{ id: 'm', name: 'M', tasks: [
+                { id: 't', title: 'Unrelated backend work', description: 'Nothing relevant.', status: 'todo' },
+            ] }] } as unknown as StructuredImplementationPlan,
+        }));
+        const contrib = buildHandoffPreflightContribution([h], new Set(['scr-landing']));
+        expect(contrib.review.some(r => /no related Implementation Plan tasks/i.test(r))).toBe(true);
+    });
+
+    it('16. omitting trace inputs preserves Phase 5A behavior (no bridge)', () => {
+        const h = buildScreenImplementationHandoff(handoffInput());
+        expect(h.traceBridge).toBeUndefined();
+        expect(h.implementationPlanReferences).toBeUndefined();
+    });
+
+    it('rollup exposes a trace summary when handoffs carry a bridge', () => {
+        const traced = buildScreenImplementationHandoff(handoffInput({
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            variants: [variant({ freshness: { status: 'current', reasons: [], severity: 'info', estimated: true } })],
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: TRACE_PLAN,
+        }));
+        const rollup = buildScreensHandoffRollup([traced], new Set(['scr-landing']));
+        expect(rollup.trace).not.toBeNull();
+        expect(rollup.trace?.traced).toBe(1);
+        expect(rollup.trace?.strong).toBe(1);
+    });
+
+    it('rollup trace is null when no handoff carried a bridge', () => {
+        const h = buildScreenImplementationHandoff(handoffInput());
+        const rollup = buildScreensHandoffRollup([h], new Set(['scr-landing']));
+        expect(rollup.trace).toBeNull();
+    });
+
+    it('an ABSENT plan (null) is never flagged as an unmatched-task defect', () => {
+        // Data model present, plan genuinely absent — must not nag "no related
+        // Implementation Plan tasks" nor count it as a P0 plan gap.
+        const h = buildScreenImplementationHandoff(handoffInput({
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            dataModel: TRACE_DATA_MODEL,
+            implementationPlan: null,
+        }));
+        const contrib = buildHandoffPreflightContribution([h], new Set(['scr-landing']));
+        expect(contrib.review.some(r => /Implementation Plan tasks/i.test(r))).toBe(false);
+        const rollup = buildScreensHandoffRollup([h], new Set(['scr-landing']));
+        expect(rollup.trace?.p0PlanMissing).toBe(0);
     });
 });

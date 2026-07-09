@@ -251,6 +251,8 @@ function renderContractDetail(
         onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
         withMockupContext?: boolean;
         trustContext?: import('../../lib/mockupVariantTrust').VariantTrustContext;
+        traceDataModel?: import('../../types').DataModelContent | null;
+        tracePlan?: import('../../types').StructuredImplementationPlan | null;
     } = {},
 ) {
     const index = buildScreenIndex(contractInventory, [], contractPayload, opts.edits);
@@ -266,6 +268,8 @@ function renderContractDetail(
             onNavigateToScreen={() => {}}
             availableScreenSlugs={index.availableSlugs}
             features={FEATURES}
+            traceDataModel={opts.traceDataModel}
+            tracePlan={opts.tracePlan}
             mobileRelevant
             onSaveScreenEdit={opts.onSaveScreenEdit}
             mockupContext={opts.withMockupContext === false ? undefined : {
@@ -806,5 +810,117 @@ describe('Phase 5A handoff tab', () => {
         );
         // The blocked P0 handoff surfaces in the implementation preflight.
         expect(getByText(/Home Dashboard handoff is blocked/)).toBeTruthy();
+    });
+});
+
+// --- Phase 5B: trace bridge on the Handoff tab -------------------------------
+
+const TRACE_DATA_MODEL: import('../../types').DataModelContent = {
+    entities: [
+        {
+            name: 'Submission',
+            description: 'A submitted project',
+            fields: [
+                { name: 'id', type: 'string', required: true, description: '' },
+                { name: 'status', type: 'string', required: true, description: '' },
+            ],
+            relationships: [],
+            featureRefs: ['F1'],
+        },
+    ],
+};
+
+const TRACE_PLAN: import('../../types').StructuredImplementationPlan = {
+    milestones: [
+        {
+            id: 'm1',
+            name: 'Foundation',
+            linkedArtifacts: { screens: ['Submission Wizard'] },
+            tasks: [
+                { id: 't1', title: 'Build the /submission route and SubmissionWizard', description: 'Wire it.', status: 'todo' },
+            ],
+        },
+    ],
+} as unknown as import('../../types').StructuredImplementationPlan;
+
+describe('Phase 5B handoff trace bridge', () => {
+    it('17-18. renders the trace confidence summary + Data Model support match', () => {
+        const { getByText, getAllByText } = renderContractDetail('handoff', {
+            onSaveScreenEdit: vi.fn(),
+            traceDataModel: TRACE_DATA_MODEL,
+            tracePlan: TRACE_PLAN,
+        });
+        expect(getByText('Trace confidence')).toBeTruthy();
+        expect(getByText('Data Model support')).toBeTruthy();
+        // The Submission entity matches by shared PRD feature F1.
+        expect(getAllByText('Submission').length).toBeGreaterThan(0);
+        expect(getAllByText('Explicit trace').length).toBeGreaterThan(0);
+    });
+
+    it('19. renders the missing Data Model state when nothing matches', () => {
+        const { getByText } = renderContractDetail('handoff', {
+            onSaveScreenEdit: vi.fn(),
+            traceDataModel: { entities: [
+                { name: 'ZebraOnly', description: '', fields: [], relationships: [] },
+            ] },
+            tracePlan: null,
+        });
+        expect(getByText(/No linked Data Model entities found/)).toBeTruthy();
+    });
+
+    it('20. renders related Implementation Plan items when matched', () => {
+        const { getByText } = renderContractDetail('handoff', {
+            onSaveScreenEdit: vi.fn(),
+            traceDataModel: TRACE_DATA_MODEL,
+            tracePlan: TRACE_PLAN,
+        });
+        expect(getByText('Related implementation plan items')).toBeTruthy();
+        expect(getByText(/Build the \/submission route/)).toBeTruthy();
+    });
+
+    it('21. renders the missing Implementation Plan state', () => {
+        const { getByText } = renderContractDetail('handoff', {
+            onSaveScreenEdit: vi.fn(),
+            traceDataModel: TRACE_DATA_MODEL,
+            tracePlan: { milestones: [{ id: 'm', name: 'M', tasks: [
+                { id: 't', title: 'Unrelated work', description: 'nothing', status: 'todo' },
+            ] }] } as unknown as import('../../types').StructuredImplementationPlan,
+        });
+        expect(getByText(/No related Implementation Plan tasks found/)).toBeTruthy();
+    });
+
+    it('22. Copy handoff includes the trace sections', async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.defineProperty(navigator, 'clipboard', { value: { writeText }, configurable: true });
+        const { getByText } = renderContractDetail('handoff', {
+            onSaveScreenEdit: vi.fn(),
+            traceDataModel: TRACE_DATA_MODEL,
+            tracePlan: TRACE_PLAN,
+        });
+        fireEvent.click(getByText('Copy handoff'));
+        await Promise.resolve();
+        const md = writeText.mock.calls[0][0] as string;
+        expect(md).toContain('## Trace Confidence');
+        expect(md).toContain('## Data Model Support');
+        expect(md).toContain('## Related Implementation Plan Items');
+    });
+
+    it('23. the coverage panel shows the handoff trace rollup', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                features={FEATURES}
+                traceDataModel={TRACE_DATA_MODEL}
+                tracePlan={null}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // Trace rollup row renders once trace bridges exist.
+        expect(getByText('Handoff trace')).toBeTruthy();
     });
 });

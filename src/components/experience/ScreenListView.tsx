@@ -9,7 +9,7 @@
 
 import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Layers, Workflow } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { Feature, MockupPlatform } from '../../types';
+import type { DataModelContent, Feature, MockupPlatform, StructuredImplementationPlan } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     SCREEN_LIST_FILTERS, screenMatchesFilter,
@@ -64,6 +64,10 @@ interface Props {
     trustContext?: VariantTrustContext;
     /** Canonical PRD features — enables handoff/traceability derivation (Phase 5A). */
     features?: readonly Feature[];
+    /** Phase 5B: resolved Data Model content for handoff trace correlation. */
+    traceDataModel?: DataModelContent | null;
+    /** Phase 5B: resolved Implementation Plan content for handoff trace correlation. */
+    tracePlan?: StructuredImplementationPlan | null;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -77,7 +81,8 @@ interface Props {
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
-    generatedVariantsByScreen, trustContext, features, onSelectScreen, onGenerateMissingMockups,
+    generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan,
+    onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
@@ -105,10 +110,11 @@ export function ScreenListView({
             map.set(item.id, buildScreenImplementationHandoff({
                 item, reviewModel: model, variants,
                 downstream: downstreamByScreen.get(item.id), features,
+                dataModel: traceDataModel, implementationPlan: tracePlan,
             }));
         }
         return map;
-    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features]);
+    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan]);
 
     const p0Ids = useMemo(
         () => new Set(index.items.filter(i => i.screen.priority === 'P0' || i.screen.priority === 'core').map(i => i.id)),
@@ -389,6 +395,7 @@ function ScreenRow({
                 )}
                 {downstreamImpact && <DownstreamChip impact={downstreamImpact} />}
                 {handoff && <HandoffChip status={handoff.readiness.status} />}
+                {handoff?.traceBridge && <TraceChip bridge={handoff.traceBridge} />}
             </div>
 
             {reviewModel && (
@@ -512,6 +519,25 @@ function HandoffChip({ status }: { status: ScreenImplementationHandoff['readines
     return (
         <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${meta.tone}`} title={meta.title}>
             {meta.label}
+        </span>
+    );
+}
+
+/** Compact downstream-trace chip (Phase 5B) — shown only when a trace concern
+ * exists (no plan match, or an estimated/missing overall trace), to avoid
+ * cluttering cards whose trace is already strong. */
+function TraceChip({ bridge }: { bridge: NonNullable<ScreenImplementationHandoff['traceBridge']> }) {
+    const planMissing = bridge.implementationPlan.confidence === 'missing';
+    const overall = bridge.overall.confidence;
+    const weak = overall === 'weak' || overall === 'estimated' || overall === 'missing';
+    if (!planMissing && !weak) return null; // strong trace → no chip
+    const label = planMissing ? 'No plan match' : 'Trace needs review';
+    return (
+        <span
+            className="text-[10px] px-1.5 py-0.5 rounded-full ring-1 text-amber-700 bg-amber-50 ring-amber-200"
+            title="Downstream trace to the Data Model / Implementation Plan is estimated or missing — confirm before building"
+        >
+            {label}
         </span>
     );
 }

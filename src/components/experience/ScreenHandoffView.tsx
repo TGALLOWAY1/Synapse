@@ -16,6 +16,10 @@ import type {
     ScreenImplementationHandoff, ScreenImplementationReadiness,
 } from '../../lib/screenImplementationHandoff';
 import { IMPLEMENTATION_READINESS_LABELS, renderHandoffMarkdown } from '../../lib/screenImplementationHandoff';
+import type {
+    ScreenArtifactTraceBridge, TraceConfidence,
+} from '../../lib/screenArtifactTraceBridge';
+import { TRACE_CONFIDENCE_LABELS } from '../../lib/screenArtifactTraceBridge';
 import { copyToClipboard } from '../../lib/utils/copyToClipboard';
 
 interface Props {
@@ -126,6 +130,11 @@ export function ScreenHandoffView({ handoff }: Props) {
                 </div>
             )}
 
+            {/* Phase 5B: downstream trace summary + support sections. */}
+            {handoff.traceBridge && <TraceConfidenceSummary bridge={handoff.traceBridge} />}
+            {handoff.traceBridge && <DataModelSupportSection bridge={handoff.traceBridge} />}
+            {handoff.traceBridge && <ImplementationPlanBridgeSection bridge={handoff.traceBridge} />}
+
             {/* Route */}
             <Section title="Route" icon={<RouteIcon size={13} className="text-neutral-400" />}>
                 {handoff.route.path ? (
@@ -203,6 +212,15 @@ export function ScreenHandoffView({ handoff }: Props) {
                                 {d.direction && (
                                     <span className="text-[10px] text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded-full">
                                         {d.direction.replace('_', '/')}
+                                    </span>
+                                )}
+                                {d.source === 'data_model_trace' && d.matchedEntity && (
+                                    <span
+                                        className="text-[10px] text-emerald-700 bg-emerald-50 px-1.5 py-0.5 rounded-full"
+                                        title={`Traced to the "${d.matchedEntity}" Data Model entity${d.matchedField ? ` (field ${d.matchedField})` : ''}`}
+                                    >
+                                        {d.matchedEntity}{d.matchedField ? `.${d.matchedField}` : ''}
+                                        {d.confidence ? ` · ${d.confidence}` : ''}
                                     </span>
                                 )}
                             </li>
@@ -317,12 +335,127 @@ export function ScreenHandoffView({ handoff }: Props) {
                     {handoff.trace.warnings.map((w, i) => (
                         <p key={i} className="text-amber-700">{w}</p>
                     ))}
+                    {handoff.traceBridge && handoff.traceBridge.overall.warnings.length > 0 && (
+                        <div className="pt-1">
+                            <p className="text-[10px] uppercase tracking-wide text-neutral-400">Trace notes</p>
+                            {handoff.traceBridge.overall.warnings.map((w, i) => (
+                                <p key={i} className="text-[11px] text-amber-700">{w}</p>
+                            ))}
+                        </div>
+                    )}
                     <p className="text-[11px] text-neutral-400">
                         Every field here is estimated from the generated spec — confirm before building.
                     </p>
                 </div>
             </Section>
         </div>
+    );
+}
+
+// --- Phase 5B: downstream trace sections -------------------------------------
+
+const TRACE_TONES: Record<TraceConfidence, string> = {
+    explicit: 'text-emerald-700 bg-emerald-50 ring-emerald-200',
+    strong: 'text-emerald-700 bg-emerald-50 ring-emerald-200',
+    weak: 'text-amber-700 bg-amber-50 ring-amber-200',
+    estimated: 'text-amber-700 bg-amber-50 ring-amber-200',
+    missing: 'text-neutral-500 bg-neutral-100 ring-neutral-200',
+};
+
+function TraceBadge({ confidence }: { confidence: TraceConfidence }) {
+    return (
+        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${TRACE_TONES[confidence]}`}>
+            {TRACE_CONFIDENCE_LABELS[confidence]}
+        </span>
+    );
+}
+
+/** Compact three-line summary of the screen's downstream trace confidence. */
+function TraceConfidenceSummary({ bridge }: { bridge: ScreenArtifactTraceBridge }) {
+    const rows: Array<[string, TraceConfidence]> = [
+        ['Data Model', bridge.dataModel.confidence],
+        ['Implementation Plan', bridge.implementationPlan.confidence],
+        ['Overall', bridge.overall.confidence],
+    ];
+    return (
+        <Section title="Trace confidence">
+            <div className="space-y-1.5">
+                {rows.map(([label, confidence]) => (
+                    <div key={label} className="flex items-center justify-between gap-2">
+                        <span className="text-xs text-neutral-600">{label}</span>
+                        <TraceBadge confidence={confidence} />
+                    </div>
+                ))}
+            </div>
+            <p className="text-[11px] text-neutral-400 mt-2">
+                Correlated from the generated artifacts, not a visual or semantic proof — confirm before building.
+            </p>
+        </Section>
+    );
+}
+
+/** The Data Model entities/fields that appear to back this screen. */
+function DataModelSupportSection({ bridge }: { bridge: ScreenArtifactTraceBridge }) {
+    const { matches } = bridge.dataModel;
+    return (
+        <Section title="Data Model support">
+            {matches.length > 0 ? (
+                <ul className="space-y-2 text-xs text-neutral-700">
+                    {matches.map(m => (
+                        <li key={m.entityName}>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-neutral-800">{m.entityName}</span>
+                                <TraceBadge confidence={m.confidence} />
+                            </div>
+                            <p className="text-[11px] text-neutral-500 mt-0.5">{m.reason}</p>
+                            {m.fields && m.fields.length > 0 && (
+                                <p className="text-[11px] text-neutral-600 mt-0.5">
+                                    <span className="text-neutral-400">Fields: </span>
+                                    {m.fields.map(f => f.name).join(', ')}
+                                </p>
+                            )}
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <p className="text-xs text-amber-700">
+                    No linked Data Model entities found.
+                    {' '}Review recommended before implementation if this screen stores or reads project data.
+                </p>
+            )}
+        </Section>
+    );
+}
+
+/** The Implementation Plan tasks that appear to build this screen. */
+function ImplementationPlanBridgeSection({ bridge }: { bridge: ScreenArtifactTraceBridge }) {
+    const { matches } = bridge.implementationPlan;
+    return (
+        <Section title="Related implementation plan items">
+            {matches.length > 0 ? (
+                <ul className="space-y-2 text-xs text-neutral-700">
+                    {matches.map((m, i) => (
+                        <li key={`${m.taskId ?? m.title}-${i}`}>
+                            <div className="flex items-center gap-2 flex-wrap">
+                                <span className="font-medium text-neutral-800">{m.title}</span>
+                                <TraceBadge confidence={m.confidence} />
+                                {m.milestoneName && (
+                                    <span className="text-[10px] text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded-full">
+                                        {m.milestoneName}
+                                    </span>
+                                )}
+                            </div>
+                            <p className="text-[11px] text-neutral-500 mt-0.5">{m.reason}</p>
+                        </li>
+                    ))}
+                </ul>
+            ) : (
+                <p className="text-xs text-neutral-500">
+                    No related Implementation Plan tasks found.
+                    {' '}Use the build task checklist below, or review the Implementation Plan after accepting this screen.
+                </p>
+            )}
+        </Section>
     );
 }
 
