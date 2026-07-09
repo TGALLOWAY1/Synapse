@@ -70,8 +70,12 @@ export function ScreenReviewNotes({
     onDismissIssue, onResolveRisk, onNavigate, onEdit, readOnly,
 }: Props) {
     // Risk-category issues are rendered as first-class risk rows below, so drop
-    // the summary issue to avoid saying the same thing twice.
-    const noteIssues = issues.filter(i => i.category !== 'risks');
+    // the summary issue to avoid saying the same thing twice. Handoff-category
+    // issues are dropped entirely: developer handoff moved to the Implementation
+    // Plan artifact, so a "thin handoff" note is not resolvable from Screens and
+    // would only route to a dead-end editor. (The lib still emits it for the
+    // list-level handoff rollups; it just isn't a Screens review note.)
+    const noteIssues = issues.filter(i => i.category !== 'risks' && i.category !== 'handoff');
     const visibleIssues = noteIssues.filter(i => !dismissed.has(i.id));
     const addressedCount = noteIssues.length - visibleIssues.length;
 

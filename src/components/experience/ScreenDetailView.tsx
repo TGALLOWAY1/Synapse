@@ -195,8 +195,12 @@ export function ScreenDetailView({
     const handleEditAgain = useCallback(() => {
         persistReview({ status: 'needs_review', reviewPatch: { requestedChangesAt: new Date().toISOString() } });
     }, [persistReview]);
+    // Re-confirm refreshes the sign-off signature against the current spec but
+    // does NOT change the existing status — so a legacy `implementation_ready`
+    // screen keeps that status (and its rollups/filters) instead of being
+    // silently downgraded to `accepted`.
     const handleReconfirm = useCallback(() => {
-        persistReview({ status: 'accepted', captureSignature: true });
+        persistReview({ captureSignature: true });
     }, [persistReview]);
 
     // Review-notes actions. Dismissed issue ids + risk resolutions ride the

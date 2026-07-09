@@ -116,6 +116,21 @@ function parseReviewMeta(raw: unknown): ScreenReviewMeta | undefined {
             meta.signature = sig;
         }
     }
+    // Review-note fields (design-review simplification): dismissed issue ids +
+    // per-risk resolutions. Whitelisted like the rest so they survive the
+    // screenIndex rebuild / reload — dropping them would make "Mark addressed" /
+    // "Mark resolved" not stick.
+    if (Array.isArray(r.dismissedIssues)) {
+        const ids = r.dismissedIssues.filter((x): x is string => typeof x === 'string' && x.length > 0);
+        if (ids.length > 0) meta.dismissedIssues = ids;
+    }
+    if (r.riskResolutions && typeof r.riskResolutions === 'object' && !Array.isArray(r.riskResolutions)) {
+        const map: Record<string, string> = {};
+        for (const [k, v] of Object.entries(r.riskResolutions as Record<string, unknown>)) {
+            if (typeof v === 'string' && v.trim()) map[k] = v;
+        }
+        if (Object.keys(map).length > 0) meta.riskResolutions = map;
+    }
     for (const key of ['updatedAt', 'acceptedAt', 'requestedChangesAt', 'implementationReadyAt'] as const) {
         if (typeof r[key] === 'string' && r[key]) meta[key] = r[key] as string;
     }

@@ -573,4 +573,23 @@ describe('readScreenEdits — Phase 2 overlay fields', () => {
         expect(edits['scr-a'].notes).toBe('keep me');
         expect((edits['scr-a'] as Record<string, unknown>).futureField).toEqual({ anything: true });
     });
+
+    it('round-trips review-note fields (dismissedIssues / riskResolutions)', () => {
+        const edits = readScreenEdits({
+            screenEdits: {
+                'scr-a': {
+                    review: {
+                        dismissedIssues: ['flow_missing', 42, ''],
+                        riskResolutions: { 'localstorage-parse-fail': 'retry then fall back', empty: '  ' },
+                    },
+                },
+            },
+        });
+        // Invalid ids / blank resolutions are dropped; valid ones survive the
+        // screenIndex rebuild + reload so "Mark addressed"/"Mark resolved" stick.
+        expect(edits['scr-a'].review?.dismissedIssues).toEqual(['flow_missing']);
+        expect(edits['scr-a'].review?.riskResolutions).toEqual({
+            'localstorage-parse-fail': 'retry then fall back',
+        });
+    });
 });
