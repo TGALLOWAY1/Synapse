@@ -247,6 +247,7 @@ function renderContractDetail(
         edits?: Parameters<typeof buildScreenIndex>[3];
         onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
         withMockupContext?: boolean;
+        trustContext?: import('../../lib/mockupVariantTrust').VariantTrustContext;
     } = {},
 ) {
     const index = buildScreenIndex(contractInventory, [], contractPayload, opts.edits);
@@ -271,6 +272,7 @@ function renderContractDetail(
                 settings: { platform: 'desktop', fidelity: 'mid', scope: 'multi_screen' },
                 versionNumber: 2,
                 prdVersionLabel: 'Version 3',
+                trustContext: opts.trustContext,
             }}
         />,
     );
@@ -379,5 +381,106 @@ describe('missing variant acceptance (review-feedback regression)', () => {
         expect(onSave).toHaveBeenCalledTimes(1);
         const [, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
         expect(edit.mockupVariantStatus).toEqual({ 'state:empty-history': 'accepted' });
+    });
+});
+
+// --- Phase 3C: variant freshness / staleness / history / local-only ----------
+
+import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
+import { buildVariantSourceSignature } from '../../lib/mockupVariantTrust';
+import type { MockupVariantImageRecord } from '../../types';
+
+const TRUST = {
+    prdVersionId: 'prd-1',
+    screenVersionId: 'inv-1',
+    designSystemVersionId: 'ds-1',
+    designSystemHash: 'dshash1',
+};
+
+/** Seed a per-variant image record into the store (jsdom has no IndexedDB, so
+ * loadForVersion is a no-op and the seeded cache persists). */
+function seedVariant(record: Partial<MockupVariantImageRecord> & { variantId: string }) {
+    const full: MockupVariantImageRecord = {
+        key: `v1:scr-submission:${record.variantId}:low`,
+        projectId: 'p1', artifactId: 'a1', versionId: 'v1', screenId: 'scr-submission',
+        viewport: 'desktop', stateName: 'Empty history', dataUrl: 'data:image/png;base64,ZZZ',
+        quality: 'low', prompt: '', generatedAt: 1, ...record,
+    };
+    useMockupVariantImageStore.setState({ images: { [full.key]: full } });
+}
+
+describe('Phase 3C variant freshness & history UI', () => {
+    beforeEach(() => {
+        useMockupVariantImageStore.setState({ images: {}, inFlight: {}, errors: {} });
+    });
+
+    it('shows the local-only storage note in the Mockups tab', () => {
+        const { getByText } = renderContractDetail('mockups');
+        expect(getByText(/saved on this device for now/)).toBeTruthy();
+    });
+
+    it('a legacy default with no source metadata reads Freshness unknown', () => {
+        const { getAllByText, getByText } = renderContractDetail('mockups', { trustContext: TRUST });
+        // Default variant is generated via the legacy join but carries no
+        // signature → unknown, never falsely stale.
+        expect(getAllByText('Freshness unknown').length).toBeGreaterThan(0);
+        expect(getByText(/Source comparison unavailable for this older mockup/)).toBeTruthy();
+    });
+
+    it('renders a Stale badge + reason when the stored contract hash differs', () => {
+        seedVariant({
+            variantId: 'state:empty-history',
+            coverageManifest: {
+                variant: { viewport: 'desktop', stateName: 'Empty history' },
+                overallStatus: 'aligned', estimated: true,
+                uiRegions: [], states: [], userActions: [], acceptanceCriteria: [], warnings: [],
+            },
+            sourceSignature: {
+                screenId: 'scr-submission', viewport: 'desktop', stateName: 'Empty history',
+                variantId: 'state:empty-history', screenContractHash: 'DEFINITELY_DIFFERENT',
+                createdAt: '2026-01-01T00:00:00.000Z',
+            },
+            generatedFrom: { prdVersionId: 'prd-1', screenVersionId: 'inv-1', designSystemVersionId: 'ds-1' },
+        });
+        const { getByText, getAllByText } = renderContractDetail('mockups', { trustContext: TRUST });
+        fireEvent.click(getByText('Desktop · Empty history'));
+        expect(getAllByText('Stale').length).toBeGreaterThan(0);
+        expect(getAllByText(/Screen spec changed after this mockup was generated/).length).toBeGreaterThan(0);
+    });
+
+    it('renders a Current badge when the stored signature matches the current one', () => {
+        // Compute the signature the component will compute for this variant.
+        const sig = buildVariantSourceSignature(
+            { screen: contractScreen, viewport: 'desktop', stateName: 'Empty history',
+              stateType: 'empty', variantId: 'state:empty-history' },
+            TRUST,
+            '2026-01-01T00:00:00.000Z',
+        );
+        seedVariant({
+            variantId: 'state:empty-history',
+            sourceSignature: sig,
+            generatedFrom: { prdVersionId: 'prd-1', screenVersionId: 'inv-1', designSystemVersionId: 'ds-1' },
+        });
+        const { getByText, getAllByText } = renderContractDetail('mockups', { trustContext: TRUST });
+        fireEvent.click(getByText('Desktop · Empty history'));
+        expect(getAllByText('Current').length).toBeGreaterThan(0);
+    });
+
+    it('renders the variant history section when history exists', () => {
+        seedVariant({
+            variantId: 'state:empty-history',
+            history: [{
+                dataUrl: 'data:image/png;base64,OLD',
+                quality: 'low',
+                generatedAt: 1,
+                reason: 'regenerated',
+            }],
+        });
+        const { getByText } = renderContractDetail('mockups', { trustContext: TRUST });
+        fireEvent.click(getByText('Desktop · Empty history'));
+        const historyToggle = getByText(/Variant history \(1 previous\)/);
+        expect(historyToggle).toBeTruthy();
+        fireEvent.click(historyToggle);
+        expect(getByText('Previous render 1')).toBeTruthy();
     });
 });
