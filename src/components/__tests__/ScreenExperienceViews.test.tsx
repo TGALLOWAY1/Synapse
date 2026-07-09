@@ -590,3 +590,130 @@ describe('Phase 3C variant freshness & history UI', () => {
         expect(getByText('Previous render 1')).toBeTruthy();
     });
 });
+
+// --- Phase 4B: downstream impact + Screens preflight -------------------------
+
+import { ScreenDownstreamImpactSection } from '../experience/ScreenDownstreamImpactSection';
+import { ScreenPreflightPanel } from '../experience/ScreenPreflightPanel';
+import { buildScreenDownstreamImpact, buildScreensPreflight } from '../../lib/screenDownstreamImpact';
+import type { ScreenArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
+
+/** Fixtures where the P0 dashboard is Accepted but its stored review signature
+ * no longer matches — i.e. it changed after sign-off (freshness 'outdated'). */
+function buildDownstreamFixtures() {
+    const flows = parseFlows(FLOWS_MD);
+    const edits: Record<string, ScreenMetadataEdit> = {
+        'scr-home': {
+            reviewStatus: 'accepted',
+            review: { signature: { screenContractHash: 'stale-hash-that-will-not-match' } },
+        },
+    };
+    const index = buildScreenIndex(inventory, flows, payload, edits);
+    const readiness = buildReadinessIndex(index, FEATURES);
+    const coverage = buildScreenCoverageSummary(index, readiness, flows, FEATURES);
+    const reviewModels = buildScreenReviewIndex(index, { features: FEATURES });
+    const artifactReview = summarizeArtifactReviewReadiness(index, reviewModels);
+    return { index, readiness, coverage, reviewModels, artifactReview };
+}
+
+describe('Phase 4B downstream impact section', () => {
+    it('11. shows the impacted artifacts when an accepted screen is outdated', () => {
+        const impact = buildScreenDownstreamImpact({
+            screenId: 's', title: 'Dashboard', isP0: true,
+            userStatus: 'accepted', reviewFreshness: 'outdated',
+            blockingCount: 0, blockingTitles: [],
+            mockupFreshnessStale: false, mockupFreshnessUnknown: false, hasDataRequirements: true,
+        });
+        const { getByText, getAllByText } = render(<ScreenDownstreamImpactSection impact={impact} />);
+        expect(getAllByText('Downstream impact').length).toBeGreaterThan(0);
+        expect(getByText('Mockups')).toBeTruthy();
+        expect(getByText('Implementation Plan')).toBeTruthy();
+    });
+
+    it('12. shows a calm no-impact empty state', () => {
+        const impact = buildScreenDownstreamImpact({
+            screenId: 's', title: 'Settings', isP0: false,
+            userStatus: 'draft', reviewFreshness: 'current',
+            blockingCount: 0, blockingTitles: [],
+            mockupFreshnessStale: false, mockupFreshnessUnknown: false, hasDataRequirements: false,
+        });
+        const { getByText } = render(<ScreenDownstreamImpactSection impact={impact} />);
+        expect(getByText('No downstream impact detected for this screen.')).toBeTruthy();
+    });
+});
+
+describe('Phase 4B list card + coverage panel', () => {
+    it('13. a card shows a downstream review chip only when relevant', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildDownstreamFixtures();
+        const { getByText, queryAllByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // The accepted-but-outdated P0 dashboard surfaces a downstream chip…
+        expect(queryAllByText(/Downstream review/).length).toBeGreaterThan(0);
+        // …but the header still renders normally.
+        expect(getByText('Screen Coverage & Readiness')).toBeTruthy();
+    });
+
+    it('14. the coverage panel shows the downstream readiness section', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildDownstreamFixtures();
+        const { getByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                onSelectScreen={() => {}}
+            />,
+        );
+        expect(getByText('Downstream readiness')).toBeTruthy();
+    });
+});
+
+describe('Phase 4B preflight panel', () => {
+    function readyGate(overrides: Partial<ScreenArtifactReviewReadiness> = {}): ScreenArtifactReviewReadiness {
+        return {
+            ready: true, totalScreens: 1, accepted: 1, implementationReady: 0, needsReview: 0, draft: 0,
+            blockers: 0, reviewItems: 0,
+            p0: { total: 1, signedOff: 1, withBlockers: 0, notSignedOff: [] },
+            reasons: [], message: 'Ready', ...overrides,
+        };
+    }
+
+    it('15. shows blockers, review items, and recommended next steps', () => {
+        const preflight = buildScreensPreflight(
+            [{
+                screenId: 'p0', title: 'Dashboard', isP0: true,
+                userStatus: undefined, reviewFreshness: 'current',
+                blockingCount: 1, blockingTitles: ['No acceptance criteria'],
+                mockupFreshnessStale: true, mockupFreshnessUnknown: false, hasDataRequirements: false,
+            }],
+            readyGate({ ready: false, p0: { total: 1, signedOff: 0, withBlockers: 1, notSignedOff: [{ id: 'p0', name: 'Dashboard' }] } }),
+        );
+        const { getByText } = render(<ScreenPreflightPanel preflight={preflight} />);
+        expect(getByText('Implementation preflight')).toBeTruthy();
+        expect(getByText('Blocking')).toBeTruthy();
+        expect(getByText('Recommended next steps')).toBeTruthy();
+    });
+
+    it('16. renders a ready state when no blockers remain', () => {
+        const preflight = buildScreensPreflight(
+            [{
+                screenId: 'p0', title: 'Dashboard', isP0: true,
+                userStatus: 'accepted', reviewFreshness: 'current',
+                blockingCount: 0, blockingTitles: [],
+                mockupFreshnessStale: false, mockupFreshnessUnknown: false, hasDataRequirements: false,
+            }],
+            readyGate(),
+        );
+        const { getByText } = render(<ScreenPreflightPanel preflight={preflight} />);
+        expect(getByText('Ready for implementation planning')).toBeTruthy();
+    });
+});

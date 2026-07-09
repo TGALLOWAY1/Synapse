@@ -20,12 +20,17 @@ import {
     type ScreenArtifactReviewReadiness, type ScreenReviewModel,
 } from '../../lib/screenReviewWorkflow';
 import {
+    analyzeScreensDownstream,
+    type ScreenDownstreamImpact,
+} from '../../lib/screenDownstreamImpact';
+import {
     buildScreenMockupVariants, summarizeScreenVariants,
     type GeneratedVariantMap, type MockupVariantCoverageSummary,
 } from '../../lib/mockupVariants';
 import type { VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
+import { ScreenPreflightPanel } from './ScreenPreflightPanel';
 import { ReadinessBadge } from './ReadinessBadge';
 
 const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
@@ -70,13 +75,27 @@ export function ScreenListView({
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
+    // Phase 4B: downstream impact analysis — per-screen impacts (row chips +
+    // filters), the artifact-level rollup, and the implementation preflight.
+    // Derived once from the review models; pure & memoized, never persisted.
+    const downstream = useMemo(
+        () => analyzeScreensDownstream(index, reviewModels, artifactReview),
+        [index, reviewModels, artifactReview],
+    );
+    const downstreamByScreen = downstream.impactsByScreen;
+
     const filterReviewFor = (item: ScreenExperienceItem): ScreenFilterReview | undefined => {
         const model = reviewModels.get(item.id);
         if (!model) return undefined;
+        const impact = downstreamByScreen.get(item.id);
         return {
             userStatus: model.userStatus,
             blockingCount: model.blockingCount,
             reviewCount: model.reviewCount,
+            reviewFreshness: model.freshness,
+            downstreamReviewNeeded: impact
+                ? impact.summary.hasBlockingImpact || impact.summary.reviewCount > 0
+                : false,
         };
     };
 
@@ -89,7 +108,7 @@ export function ScreenListView({
         }
         return counts;
     // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [index, readiness, reviewModels]);
+    }, [index, readiness, reviewModels, downstreamByScreen]);
 
     if (index.items.length === 0) {
         return (
@@ -119,8 +138,12 @@ export function ScreenListView({
                 summary={coverage}
                 variantCoverage={variantCoverage}
                 artifactReview={artifactReview}
+                downstreamRollup={downstream.rollup}
                 onGenerateMissingMockups={onGenerateMissingMockups}
             />
+
+            <ScreenPreflightPanel preflight={downstream.preflight} />
+
 
             <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter screens">
                 {SCREEN_LIST_FILTERS.map(f => {
@@ -179,6 +202,7 @@ export function ScreenListView({
                                     item={item}
                                     readiness={readiness.get(item.id)}
                                     reviewModel={reviewModels.get(item.id)}
+                                    downstreamImpact={downstreamByScreen.get(item.id)}
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
@@ -201,11 +225,12 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
 };
 
 function ScreenRow({
-    item, readiness, reviewModel, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
+    item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
 }: {
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
     reviewModel?: ScreenReviewModel;
+    downstreamImpact?: ScreenDownstreamImpact;
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
@@ -317,6 +342,7 @@ function ScreenRow({
                         Review may be outdated
                     </span>
                 )}
+                {downstreamImpact && <DownstreamChip impact={downstreamImpact} />}
             </div>
 
             {reviewModel && (
@@ -375,5 +401,41 @@ function ScreenRow({
                 <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
             </div>
         </button>
+    );
+}
+
+const DOWNSTREAM_LABELS: Record<string, string> = {
+    mockups: 'Mockups',
+    data_model: 'Data Model',
+    implementation_plan: 'Implementation Plan',
+    prompt_pack: 'Developer Prompts',
+    user_flows: 'User Flows',
+    design_system: 'Design System',
+    export: 'Export',
+};
+
+/** Compact downstream-impact chip — shown only when a change/blocker actually
+ * impacts a downstream artifact (info-only impacts show no chip, to avoid
+ * cluttering every legacy card). */
+function DownstreamChip({ impact }: { impact: ScreenDownstreamImpact }) {
+    const actionable = impact.impactedArtifacts.filter(a => a.severity !== 'info');
+    if (actionable.length === 0) return null;
+    const blocking = impact.summary.hasBlockingImpact;
+    const names = actionable.slice(0, 2).map(a => DOWNSTREAM_LABELS[a.kind] ?? a.kind);
+    const label = blocking
+        ? 'Implementation not ready'
+        : `Downstream review: ${names.join(', ')}${actionable.length > names.length ? '…' : ''}`;
+    const tone = blocking
+        ? 'text-red-700 bg-red-50 ring-red-200'
+        : 'text-amber-700 bg-amber-50 ring-amber-200';
+    return (
+        <span
+            className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${tone}`}
+            title={blocking
+                ? 'This screen has blocking readiness issues — downstream implementation is affected'
+                : 'This screen changed or needs review — the named downstream artifacts may be worth re-checking'}
+        >
+            {label}
+        </span>
     );
 }
