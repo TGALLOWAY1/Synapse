@@ -342,6 +342,11 @@ function buildVariant(
     const hasImage = legacyGenerated || Boolean(variantImage);
     if (hasImage && trustContext) {
         const storedSig = (variantImage ?? defaultSidecar)?.sourceSignature;
+        // The legacy default's image comes from buildScreenImagePrompt, which
+        // requests only the mockup screen's UI elements — so its contract hash
+        // must be built from those legacy inputs, not the full variant request
+        // (which would invent user-action / acceptance-criteria coverage).
+        const isLegacyDefault = seed.generatedSlot;
         const current = buildVariantSourceSignature(
             {
                 screen: item.screen,
@@ -349,6 +354,8 @@ function buildVariant(
                 stateName: seed.stateName,
                 stateType: seed.stateType,
                 variantId: seed.overlayKey,
+                legacyDefault: isLegacyDefault,
+                legacyUIRegions: isLegacyDefault ? item.mockupScreen?.coreUIElements : undefined,
             },
             trustContext,
             storedSig?.createdAt ?? '',

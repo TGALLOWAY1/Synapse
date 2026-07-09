@@ -128,6 +128,17 @@ export interface VariantContractInput {
     stateName: string;
     stateType?: string;
     variantId: string;
+    /** True for the legacy DEFAULT variant, whose image is produced by the
+     * legacy `buildScreenImagePrompt` path — which requests ONLY the mockup
+     * screen's UI elements, never the inventory screen's user actions /
+     * acceptance criteria / risks. In this mode the contract hash (and any
+     * sidecar manifest) is built from those actual legacy inputs so it never
+     * over-claims coverage or over-flags freshness on fields the render never
+     * used. */
+    legacyDefault?: boolean;
+    /** The UI regions the legacy default prompt actually requested (the mockup
+     * screen's `coreUIElements`). Used only when `legacyDefault` is set. */
+    legacyUIRegions?: string[];
 }
 
 /** Find the documented screen state a non-default variant renders (by slug). */
@@ -146,6 +157,25 @@ function matchState(screen: ScreenItem, input: VariantContractInput): ScreenStat
  */
 export function computeScreenContractHash(input: VariantContractInput): string {
     const { screen } = input;
+
+    // Legacy default: hash only what the legacy prompt actually requested — the
+    // mockup screen's UI regions plus screen identity fields. Omits user actions
+    // / acceptance criteria / risks / per-state detail the legacy render never
+    // consumed, so it can't over-flag freshness on unused fields.
+    if (input.legacyDefault) {
+        const contract = {
+            legacyDefault: true,
+            name: screen.name ?? '',
+            purpose: screen.purpose ?? '',
+            userIntent: screen.userIntent ?? '',
+            priority: normalizePriority(screen.priority),
+            viewport: input.viewport,
+            stateName: input.stateName,
+            coreUIRegions: clean(input.legacyUIRegions ?? []),
+        };
+        return stableHash(contract);
+    }
+
     const state = matchState(screen, input);
     const coreUIRegions = clean([
         ...(screen.coreUIElements ?? []),

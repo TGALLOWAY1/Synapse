@@ -36,9 +36,7 @@ import {
     type MockupVariantFreshnessStatus, type MockupVariantSourceSignature,
 } from '../../lib/mockupVariantTrust';
 import { buildMockupSpecCoverage } from '../../lib/screenReadiness';
-import {
-    buildVariantCoverageManifest, buildVariantGenerationRequest, type VariantRequestContext,
-} from '../../lib/mockupVariantRequest';
+import { buildVariantGenerationRequest, type VariantRequestContext } from '../../lib/mockupVariantRequest';
 import { buildVariantImageKey } from '../../lib/mockupVariantImageStore';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import type { ScreenExperienceItem } from '../../lib/screenExperience';
@@ -106,6 +104,37 @@ interface Props {
  * marks the default "accepted" (which flips status off 'generated'). */
 const holdsGeneratedImage = (v: DerivedMockupVariant, hasMockup: boolean): boolean =>
     v.id === 'default' && hasMockup;
+
+/**
+ * Build the default variant's coverage manifest from the ACTUAL legacy prompt
+ * inputs — the mockup screen's `coreUIElements` (what `buildScreenImagePrompt`
+ * requests). User actions and acceptance criteria are deliberately left empty:
+ * the legacy default prompt never requests them, so claiming them "covered"
+ * would over-state coverage. Honest and legacy-faithful.
+ */
+function buildDefaultSidecarManifest(
+    uiElements: string[] | undefined,
+    viewport: MockupViewport,
+): MockupCoverageManifest {
+    const uiRegions: MockupCoverageItem[] = (uiElements ?? []).map(label => ({
+        label,
+        status: 'covered' as const,
+        evidence: 'Requested in the default mockup generation prompt.',
+    }));
+    const warnings = uiRegions.length === 0
+        ? ['No UI elements were recorded for this mockup — coverage is inferred from the screen purpose only.']
+        : [];
+    return {
+        variant: { viewport, stateName: 'Default' },
+        overallStatus: uiRegions.length > 0 ? 'aligned' : 'unknown',
+        estimated: true,
+        uiRegions,
+        states: [{ label: 'Default', status: 'covered', evidence: 'The default mockup renders this screen.' }],
+        userActions: [],
+        acceptanceCriteria: [],
+        warnings,
+    };
+}
 
 export function MockupVariantsPanel({
     item, variants, summary, mockupContext, onSetVariantStatus,
@@ -262,7 +291,11 @@ function VariantDetail({
             mockupContext.payload.summary, mockupContext.settings.fidelity, item.mockupScreen],
     );
 
-    // Phase 3C: source signature to capture with a new render (freshness).
+    // Phase 3C: source signature to capture with a new render (freshness). The
+    // default variant renders via the legacy prompt (buildScreenImagePrompt),
+    // which requests only the mockup screen's UI elements — so its signature is
+    // built in `legacyDefault` mode from those inputs, never the full variant
+    // request (which would invent user-action / acceptance-criteria coverage).
     const trustContext = mockupContext.trustContext;
     const variantSourceSignature = useMemo<MockupVariantSourceSignature | undefined>(
         () => (trustContext
@@ -273,12 +306,15 @@ function VariantDetail({
                     stateName: variant.stateName,
                     stateType: variant.stateType,
                     variantId: variant.id,
+                    legacyDefault: !isVariantPath,
+                    legacyUIRegions: !isVariantPath ? item.mockupScreen?.coreUIElements : undefined,
                 },
                 trustContext,
                 new Date().toISOString(),
             )
             : undefined),
-        [trustContext, item.screen, variant.viewport, variant.stateName, variant.stateType, variant.id],
+        [trustContext, isVariantPath, item.screen, item.mockupScreen,
+            variant.viewport, variant.stateName, variant.stateType, variant.id],
     );
     const generatedFrom = useMemo(
         () => (trustContext
@@ -305,12 +341,6 @@ function VariantDetail({
     // fires on new generation, so old defaults stay coverage-unknown.
     const handleDefaultGenerated = useCallback((record: MockupImageRecord) => {
         if (isVariantPath || !variantSourceSignature) return;
-        const request = buildVariantGenerationRequest(item.screen, item.id, variant, {
-            projectName: mockupContext.payload.title,
-            productSummary: mockupContext.payload.summary,
-            fidelity: mockupContext.settings.fidelity,
-            siblingMockup: item.mockupScreen,
-        });
         const sidecar: MockupVariantImageRecord = {
             key: buildVariantImageKey(mockupContext.versionId, item.id, 'default', record.quality),
             projectId: mockupContext.projectId,
@@ -324,13 +354,17 @@ function VariantDetail({
             dataUrl: '',
             quality: record.quality,
             prompt: '',
-            coverageManifest: buildVariantCoverageManifest(request),
+            // Manifest reflects ONLY what the legacy default prompt requested (the
+            // mockup screen's UI elements) — never the inventory screen's user
+            // actions / acceptance criteria, which the legacy render never used.
+            coverageManifest: buildDefaultSidecarManifest(item.mockupScreen?.coreUIElements, variant.viewport),
             sourceSignature: { ...variantSourceSignature, createdAt: new Date().toISOString() },
             generatedFrom,
             generatedAt: Date.now(),
         };
         void putSidecar(sidecar);
-    }, [isVariantPath, variantSourceSignature, generatedFrom, item, variant, mockupContext, putSidecar]);
+    }, [isVariantPath, variantSourceSignature, generatedFrom, item.mockupScreen, item.id,
+        variant.viewport, mockupContext, putSidecar]);
 
     return (
         <div className="bg-white rounded-xl border border-neutral-200 p-4 space-y-3">

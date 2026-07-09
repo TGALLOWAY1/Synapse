@@ -78,6 +78,27 @@ describe('computeScreenContractHash', () => {
         expect(before).not.toBe(after);
     });
 
+    it('legacy-default mode ignores user actions / acceptance criteria the legacy prompt never used', () => {
+        const input = (screen: ScreenItem): VariantContractInput => ({
+            screen, viewport: 'desktop', stateName: 'Default', stateType: 'default',
+            variantId: 'default', legacyDefault: true, legacyUIRegions: ['Feed', 'Header'],
+        });
+        const before = computeScreenContractHash(input(baseScreen()));
+        // Changing acceptance criteria / exit paths must NOT move the legacy
+        // default hash — the legacy prompt never requested those fields.
+        const after = computeScreenContractHash(input(baseScreen({
+            acceptanceCriteria: ['Totally different criteria'],
+            exitPaths: [{ label: 'A brand new action', target: 'Elsewhere' }],
+        })));
+        expect(before).toBe(after);
+        // But changing the legacy UI regions DOES move it.
+        const changedUI = computeScreenContractHash({
+            screen: baseScreen(), viewport: 'desktop', stateName: 'Default', stateType: 'default',
+            variantId: 'default', legacyDefault: true, legacyUIRegions: ['Feed', 'New Panel'],
+        });
+        expect(changedUI).not.toBe(before);
+    });
+
     it('does not change for unrelated UI-only metadata', () => {
         // notes / reviewStatus / mockupVariantStatus live on the overlay, never
         // on the ScreenItem the hash reads — so cosmetic fields can't move it.
