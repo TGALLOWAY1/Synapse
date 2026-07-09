@@ -35,6 +35,11 @@ import type {
 import { slugifyScreenName } from './screenInventoryImageStore';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from './screenExperience';
 import { buildMockupSpecCoverage, type MockupVariantRowStatus } from './screenReadiness';
+import {
+    buildVariantSourceSignature, compareVariantFreshness, summarizeVariantFreshness,
+    type MockupVariantFreshness, type MockupVariantSourceSignature,
+    type VariantFreshnessRollup, type VariantTrustContext,
+} from './mockupVariantTrust';
 
 export type MockupViewport = 'desktop' | 'mobile' | 'tablet';
 
@@ -72,6 +77,10 @@ export interface DerivedMockupVariant {
     coverageEstimated: boolean;
     /** Short human notes explaining status / recommendation / coverage. */
     notes: string[];
+    /** Phase 3C: staleness of a generated variant vs. the current screen /
+     * design-system / PRD context. Absent for missing / not-generated variants.
+     * Legacy generated variants with no stored signature resolve to `unknown`. */
+    freshness?: MockupVariantFreshness;
 }
 
 export const VIEWPORT_LABELS: Record<MockupViewport, string> = {
@@ -140,6 +149,10 @@ function isImportantState(name: string, type?: ScreenStateType): boolean {
 export interface GeneratedVariantInfo {
     /** Coverage from the stored manifest's overallStatus. */
     coverage: MockupVariantCoverage;
+    /** Phase 3C: the source signature stored with this generated variant, used
+     * to derive freshness against the current context. Absent for pre-3C
+     * records → freshness resolves to `unknown`. */
+    sourceSignature?: MockupVariantSourceSignature;
 }
 
 /** Per-screen map of variantId -> generation info (from the variant image store). */
@@ -156,8 +169,14 @@ export interface BuildVariantOptions {
      * variant id. A non-default variant present here renders as 'generated'
      * with its manifest coverage. Absent → the Phase 3A derived-missing model.
      * The default variant's generation state still comes from the legacy
-     * mockup join (item.mockupScreen), never this map. */
+     * mockup join (item.mockupScreen), never this map. A `default` entry here
+     * is the Phase 3C coverage sidecar — it supplies the default variant's
+     * coverage + source signature WITHOUT changing its generation state. */
     generatedVariants?: GeneratedVariantMap;
+    /** Phase 3C: the CURRENT screen/design/PRD context, used to compute each
+     * generated variant's freshness. Absent → generated variants carry no
+     * freshness (the caller isn't wired for staleness yet). */
+    trustContext?: VariantTrustContext;
 }
 
 interface VariantSeed {
@@ -259,7 +278,7 @@ export function buildScreenMockupVariants(
     }
 
     const generatedVariants = options.generatedVariants ?? {};
-    return seeds.map(seed => buildVariant(item, seed, overlay, generatedVariants));
+    return seeds.map(seed => buildVariant(item, seed, overlay, generatedVariants, options.trustContext));
 }
 
 function buildVariant(
@@ -267,14 +286,19 @@ function buildVariant(
     seed: VariantSeed,
     overlay: Record<string, 'accepted' | 'not_needed'>,
     generatedVariants: GeneratedVariantMap,
+    trustContext?: VariantTrustContext,
 ): DerivedMockupVariant {
     const override: 'accepted' | 'not_needed' | undefined = overlay[seed.overlayKey];
     // The legacy default variant is generated iff the screen joins a mockup.
     const legacyGenerated = seed.generatedSlot && Boolean(item.mockupScreen);
     // A non-default variant is generated iff the per-variant image store has a
-    // record for it (Phase 3B). The default slot never reads this map — its
-    // image lives in the legacy store.
+    // record for it (Phase 3B). The default slot never reads this map for its
+    // generation state — its image lives in the legacy store.
     const variantImage = !seed.generatedSlot ? generatedVariants[seed.overlayKey] : undefined;
+    // Phase 3C: a coverage sidecar for the default variant (metadata only) —
+    // supplies the default's coverage + source signature without altering that
+    // it renders via the legacy path.
+    const defaultSidecar = seed.generatedSlot ? generatedVariants[seed.overlayKey] : undefined;
     const generated = legacyGenerated || Boolean(variantImage);
     const status: MockupVariantStatus = override ?? (generated ? 'generated' : 'missing');
     const source: MockupVariantSource = variantImage
@@ -286,6 +310,10 @@ function buildVariant(
     if (variantImage) {
         // Manifest-backed coverage captured during this variant's generation.
         coverageStatus = variantImage.coverage;
+        notes.push('Coverage manifest captured during generation — a self-report of the generation spec, not a visual inspection of the image.');
+    } else if (legacyGenerated && defaultSidecar) {
+        // The legacy default carries a Phase 3C sidecar manifest.
+        coverageStatus = defaultSidecar.coverage;
         notes.push('Coverage manifest captured during generation — a self-report of the generation spec, not a visual inspection of the image.');
     } else if (legacyGenerated) {
         const rows = buildMockupSpecCoverage(item.baseScreen, item.mockupScreen?.coreUIElements);
@@ -306,6 +334,35 @@ function buildVariant(
         notes.push(recommendationReason(item.screen, seed));
     }
 
+    // Phase 3C: freshness — only for variants that hold a real generated image
+    // (legacy default, sidecar default, or a per-variant image). A stored source
+    // signature (from the variant image / sidecar) is compared against a freshly
+    // computed one; no signature → `unknown` (never falsely stale).
+    let freshness: MockupVariantFreshness | undefined;
+    const hasImage = legacyGenerated || Boolean(variantImage);
+    if (hasImage && trustContext) {
+        const storedSig = (variantImage ?? defaultSidecar)?.sourceSignature;
+        // The legacy default's image comes from buildScreenImagePrompt, which
+        // requests only the mockup screen's UI elements — so its contract hash
+        // must be built from those legacy inputs, not the full variant request
+        // (which would invent user-action / acceptance-criteria coverage).
+        const isLegacyDefault = seed.generatedSlot;
+        const current = buildVariantSourceSignature(
+            {
+                screen: item.screen,
+                viewport: seed.viewport,
+                stateName: seed.stateName,
+                stateType: seed.stateType,
+                variantId: seed.overlayKey,
+                legacyDefault: isLegacyDefault,
+                legacyUIRegions: isLegacyDefault ? item.mockupScreen?.coreUIElements : undefined,
+            },
+            trustContext,
+            storedSig?.createdAt ?? '',
+        );
+        freshness = compareVariantFreshness(storedSig, current);
+    }
+
     return {
         id: seed.overlayKey,
         screenId: item.id,
@@ -319,6 +376,7 @@ function buildVariant(
         coverageStatus,
         coverageEstimated: true,
         notes,
+        freshness,
     };
 }
 
@@ -427,6 +485,9 @@ export interface MockupVariantCoverageSummary {
     /** Phase 3B: generated variants backed by a captured coverage manifest —
      * counted separately from legacy "unknown" coverage. */
     manifestBackedGenerated: number;
+    /** Phase 3C: freshness rollup across all generated variants (current /
+     * review / unknown). Only populated when trustContext is supplied. */
+    freshness: VariantFreshnessRollup;
 }
 
 /** Options for the artifact-level rollup. Extends BuildVariantOptions with a
@@ -450,6 +511,7 @@ export function buildMockupVariantCoverageSummary(
     let p0Total = 0;
     let legacyUnknownMockups = 0;
     let manifestBackedGenerated = 0;
+    const freshnessVerdicts: MockupVariantFreshness[] = [];
 
     const { generatedVariantsByScreen, ...variantOptions } = options;
 
@@ -477,6 +539,7 @@ export function buildMockupVariantCoverageSummary(
             if (v.source === 'variant' && isGeneratedOrAccepted(v.status)) {
                 manifestBackedGenerated += 1;
             }
+            if (v.freshness) freshnessVerdicts.push(v.freshness);
         }
     }
 
@@ -487,6 +550,7 @@ export function buildMockupVariantCoverageSummary(
         p0Total,
         legacyUnknownMockups,
         manifestBackedGenerated,
+        freshness: summarizeVariantFreshness(freshnessVerdicts),
     };
 }
 

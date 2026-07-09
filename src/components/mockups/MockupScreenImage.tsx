@@ -28,6 +28,10 @@ interface Props {
     screen: MockupScreen;
     payload: MockupPayload;
     settings: MockupSettings;
+    /** Phase 3C: fired after a successful render so a caller (the variant panel)
+     * can capture a default-variant coverage sidecar. Optional — other callers
+     * of this component pass nothing and behave exactly as before. */
+    onGenerated?: (record: MockupImageRecord) => void;
 }
 
 const QUALITY_RANK: Record<MockupImageQuality, number> = { low: 0, medium: 1, high: 2 };
@@ -46,7 +50,7 @@ const pickInitialQuality = (records: MockupImageRecord[]): MockupImageQuality | 
     ).quality;
 };
 
-export function MockupScreenImage({ projectId, artifactId, versionId, screen, payload, settings }: Props) {
+export function MockupScreenImage({ projectId, artifactId, versionId, screen, payload, settings, onGenerated }: Props) {
     const scope = buildScreenScopeKey(versionId, screen.id);
     // Subscribe to the whole image map; filtered records are derived below.
     // The previous implementation subscribed only to a single keyed entry,
@@ -152,7 +156,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
             if (!ok) return;
         }
         clearError(versionId, screen.id);
-        void generate({ projectId, artifactId, versionId, screen, payload, settings, quality });
+        void generate({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated });
     };
 
     if (inFlight) {

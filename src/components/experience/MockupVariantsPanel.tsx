@@ -13,12 +13,14 @@
 // is shown. Status is tracked from generated metadata + the user's overlay,
 // never from inspecting pixels, and the copy says so.
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
-    CheckCircle2, Info, Layers, Monitor, ShieldQuestion, Smartphone, Tablet,
+    CheckCircle2, Clock, History as HistoryIcon, Info, Layers, Monitor, ShieldQuestion,
+    Smartphone, Tablet,
 } from 'lucide-react';
 import type {
-    MockupCoverageItem, MockupCoverageItemStatus, MockupCoverageManifest, MockupPlatform,
+    MockupCoverageItem, MockupCoverageItemStatus, MockupCoverageManifest, MockupImageRecord,
+    MockupPlatform, MockupVariantImageRecord,
 } from '../../types';
 import {
     COVERAGE_STATUS_LABELS,
@@ -29,8 +31,13 @@ import {
     type MockupViewport,
     type ScreenMockupVariantSummary,
 } from '../../lib/mockupVariants';
+import {
+    FRESHNESS_LABELS, buildVariantSourceSignature,
+    type MockupVariantFreshnessStatus, type MockupVariantSourceSignature,
+} from '../../lib/mockupVariantTrust';
 import { buildMockupSpecCoverage } from '../../lib/screenReadiness';
 import { buildVariantGenerationRequest, type VariantRequestContext } from '../../lib/mockupVariantRequest';
+import { buildVariantImageKey } from '../../lib/mockupVariantImageStore';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import type { ScreenExperienceItem } from '../../lib/screenExperience';
 import { MockupScreenImage } from '../mockups/MockupScreenImage';
@@ -63,6 +70,25 @@ const PLATFORM_LABELS: Record<MockupPlatform, string> = {
     responsive: 'Responsive',
 };
 
+const FRESHNESS_PILL: Record<MockupVariantFreshnessStatus, string> = {
+    current: 'text-emerald-700 bg-emerald-50 ring-emerald-200',
+    possibly_stale: 'text-amber-700 bg-amber-50 ring-amber-200',
+    stale: 'text-amber-800 bg-amber-100 ring-amber-300',
+    unknown: 'text-neutral-500 bg-neutral-100 ring-neutral-200',
+};
+
+/** Compact freshness badge for a generated variant (nothing shown for a
+ * variant that holds no generated image). */
+function FreshnessBadge({ status }: { status: MockupVariantFreshnessStatus }) {
+    const Icon = status === 'current' ? CheckCircle2 : status === 'unknown' ? ShieldQuestion : Clock;
+    return (
+        <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${FRESHNESS_PILL[status]}`}>
+            <Icon size={10} aria-hidden />
+            {FRESHNESS_LABELS[status]}
+        </span>
+    );
+}
+
 interface Props {
     item: ScreenExperienceItem;
     variants: DerivedMockupVariant[];
@@ -78,6 +104,37 @@ interface Props {
  * marks the default "accepted" (which flips status off 'generated'). */
 const holdsGeneratedImage = (v: DerivedMockupVariant, hasMockup: boolean): boolean =>
     v.id === 'default' && hasMockup;
+
+/**
+ * Build the default variant's coverage manifest from the ACTUAL legacy prompt
+ * inputs — the mockup screen's `coreUIElements` (what `buildScreenImagePrompt`
+ * requests). User actions and acceptance criteria are deliberately left empty:
+ * the legacy default prompt never requests them, so claiming them "covered"
+ * would over-state coverage. Honest and legacy-faithful.
+ */
+function buildDefaultSidecarManifest(
+    uiElements: string[] | undefined,
+    viewport: MockupViewport,
+): MockupCoverageManifest {
+    const uiRegions: MockupCoverageItem[] = (uiElements ?? []).map(label => ({
+        label,
+        status: 'covered' as const,
+        evidence: 'Requested in the default mockup generation prompt.',
+    }));
+    const warnings = uiRegions.length === 0
+        ? ['No UI elements were recorded for this mockup — coverage is inferred from the screen purpose only.']
+        : [];
+    return {
+        variant: { viewport, stateName: 'Default' },
+        overallStatus: uiRegions.length > 0 ? 'aligned' : 'unknown',
+        estimated: true,
+        uiRegions,
+        states: [{ label: 'Default', status: 'covered', evidence: 'The default mockup renders this screen.' }],
+        userActions: [],
+        acceptanceCriteria: [],
+        warnings,
+    };
+}
 
 export function MockupVariantsPanel({
     item, variants, summary, mockupContext, onSetVariantStatus,
@@ -108,6 +165,11 @@ export function MockupVariantsPanel({
                     Generated product screen previews mapped to this screen&rsquo;s states and viewports.
                 </p>
                 <p className="mt-1.5 text-[11px] text-neutral-500">{summaryParts.join(' · ')}</p>
+                <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-neutral-400">
+                    <Info size={10} className="shrink-0" aria-hidden />
+                    Generated variant images are saved on this device for now — they may not appear on
+                    another browser until snapshot/sync support is added.
+                </p>
             </div>
 
             {/* Variant gallery — pills, selectable */}
@@ -178,6 +240,9 @@ function VariantCard({
                         Coverage: {COVERAGE_STATUS_LABELS[variant.coverageStatus].toLowerCase()}
                     </span>
                 )}
+                {variant.freshness && (variant.status === 'generated' || variant.status === 'accepted') && (
+                    <FreshnessBadge status={variant.freshness.status} />
+                )}
                 {variant.status === 'missing' && (
                     <span className="text-neutral-400">Not generated yet</span>
                 )}
@@ -226,10 +291,80 @@ function VariantDetail({
             mockupContext.payload.summary, mockupContext.settings.fidelity, item.mockupScreen],
     );
 
-    // Manifest-backed coverage for this variant (from the per-variant image store).
-    const variantRecord = useMockupVariantImageStore(
-        s => (isVariantPath ? s.getBestRecord(mockupContext.versionId, item.id, variant.id) : undefined),
+    // Phase 3C: source signature to capture with a new render (freshness). The
+    // default variant renders via the legacy prompt (buildScreenImagePrompt),
+    // which requests only the mockup screen's UI elements — so its signature is
+    // built in `legacyDefault` mode from those inputs, never the full variant
+    // request (which would invent user-action / acceptance-criteria coverage).
+    const trustContext = mockupContext.trustContext;
+    const variantSourceSignature = useMemo<MockupVariantSourceSignature | undefined>(
+        () => (trustContext
+            ? buildVariantSourceSignature(
+                {
+                    screen: item.screen,
+                    viewport: variant.viewport,
+                    stateName: variant.stateName,
+                    stateType: variant.stateType,
+                    variantId: variant.id,
+                    legacyDefault: !isVariantPath,
+                    legacyUIRegions: !isVariantPath ? item.mockupScreen?.coreUIElements : undefined,
+                },
+                trustContext,
+                new Date().toISOString(),
+            )
+            : undefined),
+        [trustContext, isVariantPath, item.screen, item.mockupScreen,
+            variant.viewport, variant.stateName, variant.stateType, variant.id],
     );
+    const generatedFrom = useMemo(
+        () => (trustContext
+            ? {
+                prdVersionId: trustContext.prdVersionId,
+                screenVersionId: trustContext.screenVersionId,
+                designSystemVersionId: trustContext.designSystemVersionId,
+            }
+            : undefined),
+        [trustContext],
+    );
+
+    // Manifest-backed coverage + stored metadata for this variant (from the
+    // per-variant image store). Fetched for EVERY variant — for the default it
+    // returns the Phase 3C coverage sidecar when one exists.
+    const variantRecord = useMockupVariantImageStore(
+        s => s.getBestRecord(mockupContext.versionId, item.id, variant.id),
+    );
+    const putSidecar = useMockupVariantImageStore(s => s.putSidecar);
+
+    // Phase 3C: when the DEFAULT variant is (re)generated through the legacy
+    // MockupScreenImage path, capture a coverage/source sidecar keyed
+    // `versionId:screenId:default:quality` WITHOUT moving the legacy image. Only
+    // fires on new generation, so old defaults stay coverage-unknown.
+    const handleDefaultGenerated = useCallback((record: MockupImageRecord) => {
+        if (isVariantPath || !variantSourceSignature) return;
+        const sidecar: MockupVariantImageRecord = {
+            key: buildVariantImageKey(mockupContext.versionId, item.id, 'default', record.quality),
+            projectId: mockupContext.projectId,
+            artifactId: mockupContext.artifactId,
+            versionId: mockupContext.versionId,
+            screenId: item.id,
+            variantId: 'default',
+            viewport: variant.viewport,
+            stateName: 'Default',
+            // Sidecar carries no owned image — the legacy store still renders it.
+            dataUrl: '',
+            quality: record.quality,
+            prompt: '',
+            // Manifest reflects ONLY what the legacy default prompt requested (the
+            // mockup screen's UI elements) — never the inventory screen's user
+            // actions / acceptance criteria, which the legacy render never used.
+            coverageManifest: buildDefaultSidecarManifest(item.mockupScreen?.coreUIElements, variant.viewport),
+            sourceSignature: { ...variantSourceSignature, createdAt: new Date().toISOString() },
+            generatedFrom,
+            generatedAt: Date.now(),
+        };
+        void putSidecar(sidecar);
+    }, [isVariantPath, variantSourceSignature, generatedFrom, item.mockupScreen, item.id,
+        variant.viewport, mockupContext, putSidecar]);
 
     return (
         <div className="bg-white rounded-xl border border-neutral-200 p-4 space-y-3">
@@ -243,8 +378,19 @@ function VariantDetail({
                         {variant.status === 'generated' && variant.source === 'variant' && ' · Source: generated variant'}
                     </p>
                 </div>
-                <VariantActions variant={variant} onSetVariantStatus={onSetVariantStatus} />
+                <div className="flex items-center gap-1.5 shrink-0">
+                    {variant.freshness && (variant.status === 'generated' || variant.status === 'accepted') && (
+                        <FreshnessBadge status={variant.freshness.status} />
+                    )}
+                    <VariantActions variant={variant} onSetVariantStatus={onSetVariantStatus} />
+                </div>
             </div>
+
+            {/* Freshness explanation — calm, specific, never blocking. */}
+            {variant.freshness && (variant.status === 'generated' || variant.status === 'accepted')
+                && variant.freshness.status !== 'current' && (
+                <FreshnessExplanation status={variant.freshness.status} reasons={variant.freshness.reasons} />
+            )}
 
             {/* Preview */}
             {primaryGenerated ? (
@@ -257,6 +403,7 @@ function VariantDetail({
                             screen={item.mockupScreen!}
                             payload={mockupContext.payload}
                             settings={mockupContext.settings}
+                            onGenerated={handleDefaultGenerated}
                         />
                     </div>
                     {metaParts.length > 0 && (
@@ -271,6 +418,8 @@ function VariantDetail({
                     platform={mockupContext.settings.platform}
                     variant={variant}
                     request={variantRequest}
+                    sourceSignature={variantSourceSignature}
+                    generatedFrom={generatedFrom}
                 />
             ) : (
                 <div className="rounded-lg border border-neutral-200 bg-neutral-50/60 p-4 text-center">
@@ -290,6 +439,44 @@ function VariantDetail({
                 <SpecCoverageSection show={primaryGenerated} specCoverage={specCoverage} />
             )}
 
+            {/* Source comparison — why review is (or isn't) recommended. Only
+                meaningful when a stored signature exists for this render. */}
+            {variantRecord?.sourceSignature != null && trustContext && (
+                <SourceComparison
+                    stored={variantRecord.sourceSignature as MockupVariantSourceSignature}
+                    generatedFrom={variantRecord.generatedFrom}
+                    current={trustContext}
+                    reasons={variant.freshness?.status && variant.freshness.status !== 'current'
+                        ? variant.freshness.reasons : []}
+                />
+            )}
+            {/* An older generated image with no source metadata. */}
+            {(variant.source === 'legacy' || variant.source === 'variant')
+                && variantRecord?.sourceSignature == null && (
+                <p className="text-[11px] text-neutral-400">
+                    Source comparison unavailable for this older mockup — it was generated before Synapse
+                    captured source metadata.
+                </p>
+            )}
+
+            {/* Variant history — preserved prior renders (local-only). */}
+            {variantRecord?.history && variantRecord.history.length > 0 && (
+                <VariantHistory
+                    current={variantRecord}
+                    history={variantRecord.history}
+                />
+            )}
+
+            {/* Storage clarity — per-variant images are local to this device
+                (the legacy default image itself still syncs, so its note is
+                omitted; only the genuinely local-only variant images carry it). */}
+            {variant.source === 'variant' && (
+                <p className="text-[11px] text-neutral-400 flex items-center gap-1">
+                    <Info size={10} className="shrink-0" aria-hidden />
+                    Storage: Local browser cache — saved on this device until snapshot/sync support is added.
+                </p>
+            )}
+
             {/* Notes */}
             {variant.notes.length > 0 && variant.status !== 'missing' && (
                 <ul className="space-y-1">
@@ -300,6 +487,157 @@ function VariantDetail({
                         </li>
                     ))}
                 </ul>
+            )}
+        </div>
+    );
+}
+
+/** Calm, specific explanation of why a variant may be stale (or unconfirmed). */
+function FreshnessExplanation({
+    status, reasons,
+}: {
+    status: MockupVariantFreshnessStatus;
+    reasons: string[];
+}) {
+    const tone = status === 'unknown'
+        ? 'border-neutral-200 bg-neutral-50 text-neutral-600'
+        : 'border-amber-200 bg-amber-50 text-amber-800';
+    const Icon = status === 'unknown' ? ShieldQuestion : Clock;
+    return (
+        <div className={`rounded-lg border p-3 text-[11px] ${tone}`}>
+            <div className="flex items-center gap-1.5 font-medium">
+                <Icon size={12} aria-hidden />
+                {FRESHNESS_LABELS[status]}
+            </div>
+            {reasons.length > 0 && (
+                <ul className="mt-1 space-y-0.5 list-disc list-inside">
+                    {reasons.map((r, i) => <li key={i}>{r}</li>)}
+                </ul>
+            )}
+        </div>
+    );
+}
+
+/** Compact metadata comparison — generated-from vs current (spec/design/PRD).
+ * Metadata only; never a visual diff. */
+function SourceComparison({
+    stored, generatedFrom, current, reasons,
+}: {
+    stored: MockupVariantSourceSignature;
+    generatedFrom?: { prdVersionId?: string; screenVersionId?: string; designSystemVersionId?: string };
+    current: {
+        prdVersionId?: string; screenVersionId?: string;
+        designSystemVersionId?: string; designSystemHash?: string;
+    };
+    reasons: string[];
+}) {
+    const rows: Array<{ label: string; changed: boolean; note?: string }> = [];
+    // Screen spec — compare the contract hash when both sides have one.
+    const screenChanged = Boolean(stored.screenContractHash);
+    rows.push({
+        label: 'Screen spec',
+        changed: reasons.some(r => /screen spec/i.test(r)),
+        note: reasons.some(r => /screen spec/i.test(r)) ? 'changed' : screenChanged ? 'unchanged' : 'unknown',
+    });
+    const dsFrom = generatedFrom?.designSystemVersionId ?? stored.designSystemVersionId;
+    rows.push({
+        label: 'Design system',
+        changed: reasons.some(r => /design system/i.test(r)),
+        note: dsFrom && current.designSystemVersionId
+            ? (dsFrom === current.designSystemVersionId ? 'unchanged' : 'changed')
+            : 'unknown',
+    });
+    const prdFrom = generatedFrom?.prdVersionId ?? stored.prdVersionId;
+    rows.push({
+        label: 'PRD context',
+        changed: reasons.some(r => /PRD/i.test(r)),
+        note: prdFrom && current.prdVersionId
+            ? (prdFrom === current.prdVersionId ? 'unchanged' : 'changed')
+            : 'unknown',
+    });
+
+    return (
+        <div className="rounded-lg border border-neutral-200 p-3">
+            <div className="flex items-center gap-1.5 mb-2">
+                <Layers size={12} className="text-neutral-400" aria-hidden />
+                <h5 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                    Source comparison
+                </h5>
+            </div>
+            <ul className="space-y-1 text-xs">
+                {rows.map(row => (
+                    <li key={row.label} className="flex items-center justify-between gap-2">
+                        <span className="text-neutral-700">{row.label}</span>
+                        <span className={row.changed
+                            ? 'text-amber-700 font-medium'
+                            : row.note === 'unknown' ? 'text-neutral-400' : 'text-emerald-700'}>
+                            {row.note === 'unknown' ? 'Not comparable' : row.changed ? 'Changed' : 'Unchanged'}
+                        </span>
+                    </li>
+                ))}
+            </ul>
+            {reasons.length > 0 && (
+                <div className="mt-2 text-[11px] text-neutral-500">
+                    <div className="font-medium text-neutral-600">Why review is recommended</div>
+                    <ul className="mt-0.5 space-y-0.5 list-disc list-inside">
+                        {reasons.map((r, i) => <li key={i}>{r}</li>)}
+                    </ul>
+                </div>
+            )}
+            <p className="text-[11px] text-neutral-400 mt-2">
+                Compared from stored generation metadata, not the rendered image.
+            </p>
+        </div>
+    );
+}
+
+/** Minimal, local-only history of prior renders for one variant. */
+function VariantHistory({
+    current, history,
+}: {
+    current: { dataUrl: string; coverageManifest?: MockupCoverageManifest; generatedAt: number };
+    history: NonNullable<MockupVariantImageRecord['history']>;
+}) {
+    const [open, setOpen] = useState(false);
+    return (
+        <div className="rounded-lg border border-neutral-200 p-3">
+            <button
+                type="button"
+                onClick={() => setOpen(o => !o)}
+                className="flex items-center gap-1.5 text-[11px] font-semibold uppercase tracking-wide text-neutral-500 hover:text-neutral-700"
+            >
+                <HistoryIcon size={12} aria-hidden />
+                Variant history ({history.length} previous)
+            </button>
+            {open && (
+                <div className="mt-2 space-y-2">
+                    <div className="text-[11px] text-neutral-500">
+                        Current — coverage {current.coverageManifest
+                            ? COVERAGE_STATUS_LABELS[current.coverageManifest.overallStatus].toLowerCase()
+                            : 'unknown'}
+                    </div>
+                    {history.map((entry, i) => (
+                        <div key={i} className="flex items-center gap-2 rounded border border-neutral-100 p-1.5">
+                            <img
+                                src={entry.dataUrl}
+                                alt={`Previous render ${i + 1}`}
+                                className="h-12 w-12 rounded object-cover border border-neutral-200 bg-neutral-50"
+                            />
+                            <div className="min-w-0 text-[11px] text-neutral-500">
+                                <div className="text-neutral-700">Previous render {i + 1}</div>
+                                <div>
+                                    Coverage {entry.coverageManifest
+                                        ? COVERAGE_STATUS_LABELS[entry.coverageManifest.overallStatus].toLowerCase()
+                                        : 'unknown'}
+                                    {entry.reason ? ` · ${entry.reason}` : ''}
+                                </div>
+                            </div>
+                        </div>
+                    ))}
+                    <p className="text-[11px] text-neutral-400">
+                        Previous renders are kept on this device only.
+                    </p>
+                </div>
             )}
         </div>
     );

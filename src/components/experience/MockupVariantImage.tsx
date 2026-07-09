@@ -12,11 +12,12 @@ import { useEffect } from 'react';
 import {
     AlertTriangle, ImageOff, Loader2, RefreshCw, Settings as SettingsIcon, Sparkles, X,
 } from 'lucide-react';
-import type { MockupImageQuality, MockupPlatform } from '../../types';
+import type { MockupImageQuality, MockupPlatform, MockupVariantImageRecord } from '../../types';
 import { hasOpenAIKey } from '../../lib/openaiClient';
 import { getMockupImageMode } from '../../lib/artifactModelSettings';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import type { MockupVariantGenerationRequest } from '../../lib/mockupVariantRequest';
+import type { MockupVariantSourceSignature } from '../../lib/mockupVariantTrust';
 import { formatVariantLabel, type DerivedMockupVariant } from '../../lib/mockupVariants';
 
 interface Props {
@@ -26,6 +27,10 @@ interface Props {
     platform: MockupPlatform;
     variant: DerivedMockupVariant;
     request: MockupVariantGenerationRequest;
+    /** Phase 3C: source signature to store with this render (freshness). The
+     * createdAt is re-stamped at generation time. */
+    sourceSignature?: MockupVariantSourceSignature;
+    generatedFrom?: MockupVariantImageRecord['generatedFrom'];
 }
 
 const DEMO_KEYLESS_MESSAGE =
@@ -35,6 +40,7 @@ const UPLOAD_MODE_MESSAGE =
 
 export function MockupVariantImage({
     projectId, artifactId, versionId, platform, variant, request,
+    sourceSignature, generatedFrom,
 }: Props) {
     const scope = `${versionId}:${request.screenId}:${request.variantId}`;
     const record = useMockupVariantImageStore(s => s.getBestRecord(versionId, request.screenId, request.variantId));
@@ -60,7 +66,15 @@ export function MockupVariantImage({
     const handleGenerate = (quality: MockupImageQuality) => {
         if (!canGenerate) return;
         clearError(versionId, request.screenId, request.variantId);
-        void generate({ projectId, artifactId, versionId, platform, request, quality });
+        // Re-stamp createdAt so the stored signature's timestamp reflects the
+        // actual generation moment (the hash itself is unchanged).
+        const signature = sourceSignature
+            ? { ...sourceSignature, createdAt: new Date().toISOString() }
+            : undefined;
+        void generate({
+            projectId, artifactId, versionId, platform, request, quality,
+            sourceSignature: signature, generatedFrom,
+        });
     };
 
     const label = formatVariantLabel(variant);

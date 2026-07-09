@@ -13,8 +13,9 @@
 
 import { create } from 'zustand';
 import type {
-    MockupImageQuality, MockupVariantImageRecord,
+    MockupImageQuality, MockupVariantImageRecord, MockupVariantImageHistoryEntry,
 } from '../types';
+import type { MockupVariantSourceSignature } from '../lib/mockupVariantTrust';
 import { callOpenAIImage } from '../lib/openaiClient';
 import { pickImageSize } from '../lib/services/mockupImageService';
 import {
@@ -65,13 +66,44 @@ interface VariantImageStoreState {
         platform: MockupPlatform;
         request: MockupVariantGenerationRequest;
         quality: MockupImageQuality;
+        /** Phase 3C: source signature to store with this render (freshness). */
+        sourceSignature?: MockupVariantSourceSignature;
+        /** Phase 3C: version provenance for this render. */
+        generatedFrom?: MockupVariantImageRecord['generatedFrom'];
     }) => Promise<void>;
+
+    /** Write a metadata-only sidecar record (no owned image) for a variant —
+     * used to attach a coverage manifest + source signature to the legacy
+     * default variant without moving its image into this store. */
+    putSidecar: (record: MockupVariantImageRecord) => Promise<void>;
 
     cancel: (versionId: string, screenId: string, variantId: string) => void;
     clearError: (versionId: string, screenId: string, variantId: string) => void;
 }
 
 const QUALITY_RANK: Record<MockupImageQuality, number> = { low: 0, medium: 1, high: 2 };
+
+/** Max preserved prior renders kept per variant (local-only). */
+const HISTORY_CAP = 6;
+
+/** Build the history list for a regenerated variant: the previous successful
+ * record becomes the newest history entry, ahead of its own prior history,
+ * capped. Returns undefined when there is no prior record (first generation). */
+const buildRegenHistory = (
+    previous: MockupVariantImageRecord | undefined,
+): MockupVariantImageHistoryEntry[] | undefined => {
+    if (!previous) return undefined;
+    const entry: MockupVariantImageHistoryEntry = {
+        dataUrl: previous.dataUrl,
+        quality: previous.quality,
+        prompt: previous.prompt,
+        coverageManifest: previous.coverageManifest,
+        sourceSignature: previous.sourceSignature,
+        generatedAt: previous.generatedAt,
+        reason: 'regenerated',
+    };
+    return [entry, ...(previous.history ?? [])].slice(0, HISTORY_CAP);
+};
 
 export const useMockupVariantImageStore = create<VariantImageStoreState>((set, get) => ({
     images: {},
@@ -99,7 +131,15 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
         return best;
     },
 
-    generate: async ({ projectId, artifactId, versionId, platform, request, quality }) => {
+    putSidecar: async (record) => {
+        await idbPutVariantImage(record);
+        set((state) => ({ images: { ...state.images, [record.key]: record } }));
+    },
+
+    generate: async ({
+        projectId, artifactId, versionId, platform, request, quality,
+        sourceSignature, generatedFrom,
+    }) => {
         const scope = variantScope(versionId, request.screenId, request.variantId);
         if (get().inFlight[scope]) return; // one generation per variant at a time
 
@@ -121,9 +161,17 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
             : platform;
         const size = pickImageSize(sizePlatform);
 
+        // Capture the prior successful render (same key first, else best quality
+        // for this variant) BEFORE the network call so a successful regeneration
+        // can preserve it in history. A failed regen never reaches the write path
+        // below, so the existing record is untouched.
+        const key = buildVariantImageKey(versionId, request.screenId, request.variantId, quality);
+        const previous = get().images[key]
+            ?? get().getBestRecord(versionId, request.screenId, request.variantId);
+
         try {
             const b64 = await callOpenAIImage(prompt, { quality, size, signal: abort.signal });
-            const key = buildVariantImageKey(versionId, request.screenId, request.variantId, quality);
+            const history = buildRegenHistory(previous);
             const record: MockupVariantImageRecord = {
                 key,
                 projectId,
@@ -137,6 +185,9 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
                 quality,
                 prompt,
                 coverageManifest: manifest,
+                sourceSignature,
+                generatedFrom,
+                ...(history ? { history } : {}),
                 generatedAt: Date.now(),
             };
             await idbPutVariantImage(record);
