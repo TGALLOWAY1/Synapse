@@ -95,10 +95,12 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
     if (totalScreens === 0) return null;
 
     // Clean-ready screens: implementation-ready and NOT a user override that
-    // still carries derived warnings. When every screen is clean-ready the core
-    // implementation assets are complete (mockup variants never factor in).
+    // still carries derived warnings. Every screen being clean-ready is
+    // necessary for the all-clear, but not sufficient — see `coreComplete`
+    // below, which also requires no genuine artifact-level risk (mockup
+    // variants never factor in either way).
     const readyClean = Math.max(0, ready - readyWithWarnings);
-    const coreComplete = readyClean === totalScreens;
+    const readyComplete = readyClean === totalScreens;
 
     // --- Required (implementation-critical) checklist -----------------------
     // Only genuine implementation risk (missing PRD coverage, a P0 without its
@@ -159,8 +161,18 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
     required.push({
         key: 'ready', label: 'Ready for implementation',
         value: `${readyClean} / ${totalScreens} screens`,
-        tone: coreComplete ? 'good' : 'todo',
+        tone: readyComplete ? 'good' : 'todo',
     });
+
+    // The green "all-clear" is shown only when every screen is clean-ready AND
+    // no genuine artifact-level implementation risk remains — an amber required
+    // row (uncovered PRD features, a P0 without its primary mockup, open risks)
+    // or a must-have feature owned only by a low-priority screen. Otherwise the
+    // celebratory headline would contradict the risk rows / uncovered-feature
+    // disclosure rendered directly below it.
+    const hasImplementationRisk = required.some(r => r.tone === 'risk')
+        || (prdFeatures?.mustWithoutPrimaryScreen.length ?? 0) > 0;
+    const coreComplete = readyComplete && !hasImplementationRisk;
 
     const headline = coreComplete
         ? 'Implementation coverage is complete. Every screen has its required assets — optional design documentation can be generated whenever you like.'
@@ -264,6 +276,30 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
                         <ExpandedCoverageSection variant={variantCoverage} />
                     )}
 
+                    {/* Freshness / legacy signals for EXISTING generated mockups
+                        (primary or variant). Rendered independently of the
+                        variants section so they still surface for desktop /
+                        simple projects that have only primary mockups
+                        (additionalTotal === 0, no Expanded section). Neutral —
+                        an out-of-date or metadata-less mockup is a nudge, not an
+                        implementation blocker. */}
+                    {variantCoverage && (variantCoverage.freshness.review > 0 || variantCoverage.legacyUnknownMockups > 0) && (
+                        <div className="mt-3 space-y-1">
+                            {variantCoverage.freshness.review > 0 && (
+                                <p className="text-[11px] text-neutral-500">
+                                    {variantCoverage.freshness.review} generated {variantCoverage.freshness.review === 1 ? 'mockup' : 'mockups'}
+                                    {' '}may be worth refreshing after recent spec, design-system, or PRD changes.
+                                </p>
+                            )}
+                            {variantCoverage.legacyUnknownMockups > 0 && (
+                                <p className="text-[11px] text-neutral-400">
+                                    {variantCoverage.legacyUnknownMockups} older {variantCoverage.legacyUnknownMockups === 1 ? 'mockup' : 'mockups'}
+                                    {' '}predate coverage metadata — visually useful, but their spec coverage is unconfirmed.
+                                </p>
+                            )}
+                        </div>
+                    )}
+
                     {coreComplete && (
                         <p className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-emerald-700">
                             <CheckCircle2 size={12} /> Core assets complete — statuses are estimates, so give screens a final review before building.
@@ -337,18 +373,6 @@ function ExpandedCoverageSection({ variant }: { variant: MockupVariantCoverageSu
                             {variant.p0WithMobile} / {variant.p0Total} · optional
                         </span>
                     </div>
-                )}
-                {variant.freshness.review > 0 && (
-                    <p className="text-[11px] text-neutral-500">
-                        {variant.freshness.review} generated {variant.freshness.review === 1 ? 'variant' : 'variants'}
-                        {' '}may be worth refreshing after recent spec changes.
-                    </p>
-                )}
-                {variant.legacyUnknownMockups > 0 && (
-                    <p className="text-[11px] text-neutral-400">
-                        {variant.legacyUnknownMockups} older {variant.legacyUnknownMockups === 1 ? 'mockup' : 'mockups'}
-                        {' '}predate coverage metadata.
-                    </p>
                 )}
             </div>
 
