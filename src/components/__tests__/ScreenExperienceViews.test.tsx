@@ -195,9 +195,9 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         expect(getByText(/predate coverage metadata/)).toBeTruthy();
     });
 
-    it('filters screens (Has risks shows only the risky screen)', () => {
+    it('exposes only the Flow and Status filters — no search / priority / sort / group / advanced', () => {
         const { index, readiness, coverage } = buildFixtures();
-        const { getByText, queryByText } = render(
+        const { getByLabelText, queryByLabelText, queryByText, queryByPlaceholderText } = render(
             <ScreenListView
                 index={index}
                 readiness={readiness}
@@ -205,11 +205,15 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        // "Has risks" now lives in the Advanced filter drawer, not a top-level chip.
-        fireEvent.click(getByText('Advanced'));
-        fireEvent.click(getByText('Has risks'));
-        expect(getByText('Home Dashboard')).toBeTruthy();
-        expect(queryByText('Bare Legacy Screen')).toBeNull();
+        // Retained.
+        expect(getByLabelText('Flow')).toBeTruthy();
+        expect(getByLabelText('Status')).toBeTruthy();
+        // Removed.
+        expect(queryByPlaceholderText(/Search screens/)).toBeNull();
+        expect(queryByLabelText('Priority')).toBeNull();
+        expect(queryByLabelText('Sort')).toBeNull();
+        expect(queryByLabelText('Group')).toBeNull();
+        expect(queryByText('Advanced')).toBeNull();
     });
 
     it('renders an empty-filter state instead of nothing', () => {
@@ -528,25 +532,38 @@ describe('Phase 4A Screens list + coverage panel', () => {
         expect(getAllByText('Not reviewed').length).toBeGreaterThan(0);
     });
 
-    it('the Has blockers filter shows only screens with blocking issues', () => {
+    it('relocates the artifact metadata/history/actions into each card\'s Show details', () => {
         const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
-        const { getByText, queryByText } = render(
+        const onOpenVersionHistory = vi.fn();
+        const onOpenMockupHistory = vi.fn();
+        const onRegenerateMockup = vi.fn();
+        const { getAllByText } = render(
             <ScreenListView
                 index={index}
                 readiness={readiness}
                 reviewModels={reviewModels}
                 artifactReview={artifactReview}
                 coverage={coverage}
+                artifactControls={{
+                    prdVersionLabel: 'Version 3',
+                    staleness: 'current',
+                    lastMockupGeneratedAt: 1_700_000_000_000,
+                    onOpenVersionHistory,
+                    onOpenMockupHistory,
+                    onRegenerateMockup,
+                }}
                 onSelectScreen={() => {}}
             />,
         );
-        // "Has blockers" is now an Advanced filter.
-        fireEvent.click(getByText('Advanced'));
-        fireEvent.click(getByText('Has blockers'));
-        // The bare legacy screen (no purpose / acceptance) has blockers; the
-        // full P0 dashboard does not.
-        expect(getByText('Bare Legacy Screen')).toBeTruthy();
-        expect(queryByText('Home Dashboard')).toBeNull();
+        // Expand every card's details, then confirm the relocated controls appear.
+        getAllByText('Show details').forEach(btn => fireEvent.click(btn));
+        expect(getAllByText(/Generated from PRD Version 3/).length).toBeGreaterThan(0);
+        const versionHistory = getAllByText('Version history');
+        expect(versionHistory.length).toBeGreaterThan(0);
+        fireEvent.click(versionHistory[0]);
+        expect(onOpenVersionHistory).toHaveBeenCalled();
+        fireEvent.click(getAllByText('Regenerate mockup')[0]);
+        expect(onRegenerateMockup).toHaveBeenCalled();
     });
 
     it('the coverage panel shows the review-readiness rollup + gate', () => {

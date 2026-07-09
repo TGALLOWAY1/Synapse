@@ -13,15 +13,15 @@
 // 14-chip filter explosion.
 
 import {
-    AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Image as ImageIcon,
-    Layers, Search, SlidersHorizontal, Workflow, X,
+    AlertTriangle, ArrowRight, ChevronDown, ChevronRight, History, Image as ImageIcon,
+    Layers, RefreshCcw, ShieldCheck, Workflow,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { DataModelContent, Feature, MockupPlatform, StructuredImplementationPlan } from '../../types';
+import type { DataModelContent, Feature, MockupPlatform, StalenessState, StructuredImplementationPlan } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     screenMatchesFilter,
-    type ScreenCoverageSummary, type ScreenFilterReview, type ScreenListFilter, type ScreenReadiness,
+    type ScreenCoverageSummary, type ScreenFilterReview, type ScreenReadiness,
 } from '../../lib/screenReadiness';
 import {
     REVIEW_STATUS_LABELS, SYSTEM_READINESS_LABELS,
@@ -50,8 +50,38 @@ import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ScreenPreflightPanel } from './ScreenPreflightPanel';
 import { ScreensHandoffExportPanel } from './ScreensHandoffExportPanel';
 import { ReadinessBadge } from './ReadinessBadge';
+import { StalenessBadge } from '../StalenessBadge';
 
 const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
+
+/**
+ * Artifact-level metadata / history / actions relocated out of the old global
+ * toolbar (which sat above the screen list). These now live inside each screen
+ * card's "Show details" disclosure so the list surfaces the screens
+ * immediately. The underlying scope is unchanged — version history is the
+ * screen_inventory artifact's, mockup history/regeneration is the mockup
+ * artifact's — so a single set of handlers is shared across cards.
+ */
+export interface ScreenArtifactControls {
+    /** "Version N" label of the PRD the screen inventory was generated from. */
+    prdVersionLabel?: string;
+    /** Screen-inventory staleness against the current PRD. */
+    staleness?: StalenessState;
+    /** "What changed" tooltip detail for the staleness badge. */
+    stalenessDetail?: string;
+    /** Timestamp (ms) the current mockup version was generated, if any. */
+    lastMockupGeneratedAt?: number;
+    /** True when the mockups predate the current design system (drift). */
+    mockupDesignDrift?: boolean;
+    /** Confirm the inventory is still valid for the current PRD (no regen). */
+    onMarkUpToDate?: () => void;
+    /** Open the screen-inventory version history. */
+    onOpenVersionHistory?: () => void;
+    /** Open the mockup version history. */
+    onOpenMockupHistory?: () => void;
+    /** Open the mockup regeneration confirmation. */
+    onRegenerateMockup?: () => void;
+}
 
 interface Props {
     index: ScreenExperienceIndex;
@@ -86,6 +116,9 @@ interface Props {
     projectName?: string;
     /** Phase 5C: manifest source ids + artifact presence for the export bundle. */
     exportManifest?: ScreensHandoffExportManifestInput;
+    /** Artifact-level metadata / history / actions, relocated into each card's
+     * "Show details" from the old global toolbar. */
+    artifactControls?: ScreenArtifactControls;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -96,43 +129,21 @@ interface Props {
     onGenerateMissingMockups?: () => void;
 }
 
-type PriorityFilter = 'all' | 'P0' | 'P1' | 'P2' | 'P3';
 type StatusFilter = 'all' | 'draft' | 'needs_review' | 'accepted' | 'ready';
-type SortMode = 'group' | 'priority' | 'name' | 'readiness';
-
-/** Advanced (power-user) filters — the long tail that used to be top-level chips. */
-const ADVANCED_FILTERS: Array<{ id: ScreenListFilter; label: string }> = [
-    { id: 'has_blockers', label: 'Has blockers' },
-    { id: 'review_recommended', label: 'Review recommended' },
-    { id: 'outdated_review', label: 'Outdated review' },
-    { id: 'downstream_review', label: 'Downstream review' },
-    { id: 'handoff_ready', label: 'Handoff ready' },
-    { id: 'handoff_blocked', label: 'Handoff blocked' },
-    { id: 'missing_mockups', label: 'Missing mockups' },
-    { id: 'has_risks', label: 'Has risks' },
-];
-
-const READINESS_RANK: Record<ScreenReadiness['status'], number> = {
-    implementation_ready: 0, accepted: 1, needs_review: 2, draft: 3,
-};
-const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
 
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
     generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan,
-    projectName, exportManifest,
+    projectName, exportManifest, artifactControls,
     onSelectScreen, onGenerateMissingMockups,
 }: Props) {
-    const flowsAvailable = useMemo(() => hasFlowGrouping(index), [index]);
-    const [search, setSearch] = useState('');
-    const [priority, setPriority] = useState<PriorityFilter>('all');
+    // Screens are always grouped by flow when flows exist (else by section) —
+    // browsing by flow is the primary way through a (deliberately small)
+    // project, so this is no longer a user-facing control.
+    const group: ScreenGroupMode = useMemo(() => (hasFlowGrouping(index) ? 'flow' : 'section'), [index]);
     const [flow, setFlow] = useState<string>('all');
     const [status, setStatus] = useState<StatusFilter>('all');
-    const [sort, setSort] = useState<SortMode>('group');
-    const [group, setGroup] = useState<ScreenGroupMode>(flowsAvailable ? 'flow' : 'section');
-    const [advanced, setAdvanced] = useState<ReadonlySet<ScreenListFilter>>(() => new Set());
-    const [advancedOpen, setAdvancedOpen] = useState(false);
     const [metadataOpen, setMetadataOpen] = useState(false);
 
     // Phase 4B: downstream impact analysis — per-screen impacts (detail chips +
@@ -193,63 +204,28 @@ export function ScreenListView({
 
     const flowOptions = useMemo(() => flowFilterOptions(index), [index]);
 
-    // Combined predicate over the compact controls: search ∧ priority ∧ flow ∧
-    // status ∧ every active advanced filter.
+    // Combined predicate over the two retained controls: flow ∧ status.
     const matches = (item: ScreenExperienceItem): boolean => {
-        if (search.trim()) {
-            const needle = search.trim().toLowerCase();
-            const haystack = `${item.screen.name} ${item.screen.purpose ?? ''} ${item.relatedFlows.map(r => r.flow.title).join(' ')}`.toLowerCase();
-            if (!haystack.includes(needle)) return false;
-        }
-        if (priority !== 'all' && stylablePriority(item.screen.priority) !== priority) return false;
         if (flow !== 'all' && !item.relatedFlows.some(r => r.flow.title === flow)) return false;
-        const review = filterReviewFor(item);
-        const rd = readiness.get(item.id);
-        if (status !== 'all' && !screenMatchesFilter(item, rd, status, review)) return false;
-        for (const adv of advanced) {
-            if (!screenMatchesFilter(item, rd, adv, review)) return false;
+        if (status !== 'all') {
+            const review = filterReviewFor(item);
+            const rd = readiness.get(item.id);
+            if (!screenMatchesFilter(item, rd, status, review)) return false;
         }
         return true;
-    };
-
-    const sortItems = (items: readonly ScreenExperienceItem[]): ScreenExperienceItem[] => {
-        if (sort === 'group') return [...items];
-        const copy = [...items];
-        copy.sort((a, b) => {
-            if (sort === 'name') return a.screen.name.localeCompare(b.screen.name);
-            if (sort === 'priority') {
-                return (PRIORITY_RANK[stylablePriority(a.screen.priority)] ?? 9)
-                    - (PRIORITY_RANK[stylablePriority(b.screen.priority)] ?? 9);
-            }
-            // readiness
-            const ra = readiness.get(a.id)?.status ?? 'draft';
-            const rb = readiness.get(b.id)?.status ?? 'draft';
-            return READINESS_RANK[ra] - READINESS_RANK[rb];
-        });
-        return copy;
     };
 
     const groups = useMemo(() => buildScreenGroups(index, group), [index, group]);
 
     const filteredGroups = groups
-        .map(g => ({ ...g, items: sortItems(g.items.filter(matches)) }))
+        .map(g => ({ ...g, items: g.items.filter(matches) }))
         .filter(g => g.items.length > 0);
 
     const totalMatches = filteredGroups.reduce((sum, g) => sum + g.items.length, 0);
-    const advancedCount = advanced.size;
-    const anyFilterActive = Boolean(search.trim()) || priority !== 'all' || flow !== 'all'
-        || status !== 'all' || advancedCount > 0;
+    const anyFilterActive = flow !== 'all' || status !== 'all';
 
-    const toggleAdvanced = (id: ScreenListFilter) => {
-        setAdvanced(prev => {
-            const next = new Set(prev);
-            if (next.has(id)) next.delete(id); else next.add(id);
-            return next;
-        });
-    };
     const clearFilters = () => {
-        setSearch(''); setPriority('all'); setFlow('all'); setStatus('all');
-        setAdvanced(new Set());
+        setFlow('all'); setStatus('all');
     };
 
     if (index.items.length === 0) {
@@ -268,106 +244,34 @@ export function ScreenListView({
 
     return (
         <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-5">
-            {/* Compact control row — replaces the old 14-chip filter explosion. */}
-            <div className="bg-white rounded-xl border border-neutral-200 p-3 space-y-3 sticky top-0 z-10">
-                <div className="flex flex-wrap items-center gap-2">
-                    <label className="relative flex-1 min-w-[10rem]">
-                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" aria-hidden />
-                        <input
-                            type="search"
-                            value={search}
-                            onChange={e => setSearch(e.target.value)}
-                            placeholder="Search screens…"
-                            aria-label="Search screens"
-                            className="w-full pl-8 pr-2 py-1.5 text-sm rounded-lg border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
-                        />
-                    </label>
-                    <SelectControl label="Priority" value={priority} onChange={v => setPriority(v as PriorityFilter)}
-                        options={[
-                            { value: 'all', label: 'All priorities' },
-                            { value: 'P0', label: 'P0' }, { value: 'P1', label: 'P1' },
-                            { value: 'P2', label: 'P2' }, { value: 'P3', label: 'P3' },
-                        ]} />
-                    <SelectControl label="Flow" value={flow} onChange={setFlow}
-                        options={[
-                            { value: 'all', label: 'All flows' },
-                            ...flowOptions.map(f => ({ value: f, label: f })),
-                        ]} />
-                    <SelectControl label="Status" value={status} onChange={v => setStatus(v as StatusFilter)}
-                        options={[
-                            { value: 'all', label: 'Any status' },
-                            { value: 'draft', label: 'Draft' },
-                            { value: 'needs_review', label: 'Needs review' },
-                            { value: 'accepted', label: 'Accepted' },
-                            { value: 'ready', label: 'Ready' },
-                        ]} />
-                    <SelectControl label="Sort" value={sort} onChange={v => setSort(v as SortMode)}
-                        options={[
-                            { value: 'group', label: 'Flow order' },
-                            { value: 'priority', label: 'Priority' },
-                            { value: 'name', label: 'Name' },
-                            { value: 'readiness', label: 'Readiness' },
-                        ]} />
-                    <SelectControl label="Group" value={group} onChange={v => setGroup(v as ScreenGroupMode)}
-                        options={[
-                            ...(flowsAvailable ? [{ value: 'flow', label: 'By flow' }] : []),
-                            { value: 'section', label: 'By section' },
-                            { value: 'priority', label: 'By priority' },
-                        ]} />
+            {/* Minimal control row — Flow + Status only. Everything else moved
+                into each screen's "Show details". */}
+            <div className="flex flex-wrap items-center gap-2">
+                <SelectControl label="Flow" value={flow} onChange={setFlow}
+                    options={[
+                        { value: 'all', label: 'All flows' },
+                        ...flowOptions.map(f => ({ value: f, label: f })),
+                    ]} />
+                <SelectControl label="Status" value={status} onChange={v => setStatus(v as StatusFilter)}
+                    options={[
+                        { value: 'all', label: 'Any status' },
+                        { value: 'draft', label: 'Draft' },
+                        { value: 'needs_review', label: 'Needs review' },
+                        { value: 'accepted', label: 'Accepted' },
+                        { value: 'ready', label: 'Ready' },
+                    ]} />
+                {anyFilterActive && (
                     <button
                         type="button"
-                        onClick={() => setAdvancedOpen(o => !o)}
-                        aria-expanded={advancedOpen}
-                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
-                            advancedCount > 0
-                                ? 'border-indigo-300 text-indigo-700 bg-indigo-50'
-                                : 'border-neutral-200 text-neutral-600 hover:border-indigo-300 hover:text-indigo-700'
-                        }`}
+                        onClick={clearFilters}
+                        className="text-[11px] text-indigo-600 hover:text-indigo-800"
                     >
-                        <SlidersHorizontal size={13} aria-hidden />
-                        Advanced
-                        {advancedCount > 0 && (
-                            <span className="tabular-nums bg-indigo-600 text-white rounded-full px-1.5">{advancedCount}</span>
-                        )}
+                        Clear
                     </button>
-                </div>
-
-                {advancedOpen && (
-                    <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-100 pt-2.5">
-                        <span className="text-[11px] uppercase tracking-wide text-neutral-400 mr-1">Advanced filters</span>
-                        {ADVANCED_FILTERS.map(f => {
-                            const active = advanced.has(f.id);
-                            return (
-                                <button
-                                    key={f.id}
-                                    type="button"
-                                    aria-pressed={active}
-                                    onClick={() => toggleAdvanced(f.id)}
-                                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${
-                                        active
-                                            ? 'bg-indigo-600 text-white'
-                                            : 'bg-white text-neutral-600 ring-1 ring-neutral-200 hover:ring-indigo-300 hover:text-indigo-700'
-                                    }`}
-                                >
-                                    {f.label}
-                                </button>
-                            );
-                        })}
-                    </div>
                 )}
-
-                <div className="flex items-center gap-2 text-[11px] text-neutral-400">
-                    <span className="tabular-nums">{totalMatches} of {index.items.length} screens</span>
-                    {anyFilterActive && (
-                        <button
-                            type="button"
-                            onClick={clearFilters}
-                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800"
-                        >
-                            <X size={11} aria-hidden /> Clear filters
-                        </button>
-                    )}
-                </div>
+                <span className="ml-auto text-[11px] text-neutral-400 tabular-nums">
+                    {totalMatches} of {index.items.length} screens
+                </span>
             </div>
 
             {filteredGroups.length === 0 && (
@@ -397,7 +301,7 @@ export function ScreenListView({
                         {section.items.map((item, i) => (
                             <li key={item.id}>
                                 <ScreenCard
-                                    ordinal={sort === 'group' && group === 'flow' && section.id !== '__other__' ? i + 1 : undefined}
+                                    ordinal={group === 'flow' && section.id !== '__other__' ? i + 1 : undefined}
                                     item={item}
                                     readiness={readiness.get(item.id)}
                                     reviewModel={reviewModels.get(item.id)}
@@ -407,6 +311,7 @@ export function ScreenListView({
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
                                     trustContext={trustContext}
+                                    artifactControls={artifactControls}
                                     onSelect={() => onSelectScreen(item.id)}
                                 />
                             </li>
@@ -522,7 +427,7 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
 };
 
 function ScreenCard({
-    ordinal, item, readiness, reviewModel, downstreamImpact, handoff, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
+    ordinal, item, readiness, reviewModel, downstreamImpact, handoff, mockupPlatform, mobileRelevant, generatedVariants, trustContext, artifactControls, onSelect,
 }: {
     ordinal?: number;
     item: ScreenExperienceItem;
@@ -534,6 +439,7 @@ function ScreenCard({
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
     trustContext?: VariantTrustContext;
+    artifactControls?: ScreenArtifactControls;
     onSelect: () => void;
 }) {
     const [detailsOpen, setDetailsOpen] = useState(false);
@@ -618,6 +524,7 @@ function ScreenCard({
                         downstreamImpact={downstreamImpact}
                         handoff={handoff}
                         variantSummary={variantSummary}
+                        artifactControls={artifactControls}
                     />
                 )}
             </div>
@@ -673,7 +580,7 @@ const DOWNSTREAM_LABELS: Record<string, string> = {
 /** Secondary metadata, revealed on demand. Neutral typography with warning
  * color reserved for genuine issues (blockers, risks, stale/blocked states). */
 function CardDetails({
-    item, connections, reviewModel, downstreamImpact, handoff, variantSummary,
+    item, connections, reviewModel, downstreamImpact, handoff, variantSummary, artifactControls,
 }: {
     item: ScreenExperienceItem;
     connections: ReturnType<typeof deriveScreenConnections>;
@@ -681,6 +588,7 @@ function CardDetails({
     downstreamImpact?: ScreenDownstreamImpact;
     handoff?: ScreenImplementationHandoff;
     variantSummary: ReturnType<typeof summarizeScreenVariants>;
+    artifactControls?: ScreenArtifactControls;
 }) {
     const { screen } = item;
     const featureRefs = screen.featureRefs ?? [];
@@ -781,8 +689,107 @@ function CardDetails({
                     </span>
                 </DetailRow>
             )}
+
+            {/* Metadata / History / Actions — relocated from the old global
+                toolbar. Version history is the screen-inventory artifact's,
+                mockup history/regeneration the mockup artifact's. */}
+            {artifactControls && <ArtifactControlsBlock controls={artifactControls} />}
         </dl>
     );
+}
+
+/** The screen-inventory + mockup metadata, history, and actions moved out of the
+ * global toolbar and into each card's "Show details" (progressive disclosure). */
+function ArtifactControlsBlock({ controls }: { controls: ScreenArtifactControls }) {
+    const {
+        prdVersionLabel, staleness, stalenessDetail, lastMockupGeneratedAt, mockupDesignDrift,
+        onMarkUpToDate, onOpenVersionHistory, onOpenMockupHistory, onRegenerateMockup,
+    } = controls;
+    const isStale = !!staleness && staleness !== 'current';
+    const hasMetadata = !!prdVersionLabel || isStale || lastMockupGeneratedAt !== undefined;
+    const hasHistory = !!onOpenVersionHistory || !!onOpenMockupHistory;
+    const hasActions = (isStale && !!onMarkUpToDate) || !!onRegenerateMockup;
+    if (!hasMetadata && !hasHistory && !hasActions) return null;
+
+    return (
+        <>
+            {hasMetadata && (
+                <DetailRow label="Metadata">
+                    {prdVersionLabel && (
+                        <span className="inline-flex items-center gap-1.5">
+                            Generated from PRD {prdVersionLabel}
+                            {isStale && <StalenessBadge staleness={staleness} detail={stalenessDetail} />}
+                        </span>
+                    )}
+                    {lastMockupGeneratedAt !== undefined && (
+                        <span className="block text-neutral-400 mt-0.5">
+                            Last mockup generated {formatTimestamp(lastMockupGeneratedAt)}
+                        </span>
+                    )}
+                    {mockupDesignDrift && (
+                        <span className="block text-amber-600 mt-0.5">
+                            Design system changed since these mockups were generated.
+                        </span>
+                    )}
+                </DetailRow>
+            )}
+            {(hasHistory || hasActions) && (
+                <DetailRow label="Actions">
+                    <div className="flex flex-wrap items-center gap-1.5">
+                        {onOpenVersionHistory && (
+                            <ControlButton icon={History} label="Version history" onClick={onOpenVersionHistory} />
+                        )}
+                        {onOpenMockupHistory && (
+                            <ControlButton icon={History} label="Mockup history" onClick={onOpenMockupHistory} />
+                        )}
+                        {onRegenerateMockup && (
+                            <ControlButton icon={RefreshCcw} label="Regenerate mockup" onClick={onRegenerateMockup} />
+                        )}
+                        {isStale && onMarkUpToDate && (
+                            <ControlButton
+                                icon={ShieldCheck}
+                                label="Mark up to date"
+                                onClick={onMarkUpToDate}
+                                tone="emerald"
+                            />
+                        )}
+                    </div>
+                </DetailRow>
+            )}
+        </>
+    );
+}
+
+function ControlButton({
+    icon: Icon, label, onClick, tone = 'neutral',
+}: {
+    icon: typeof History;
+    label: string;
+    onClick: () => void;
+    tone?: 'neutral' | 'emerald';
+}) {
+    const cls = tone === 'emerald'
+        ? 'bg-emerald-50 border-emerald-200 text-emerald-700 hover:bg-emerald-100'
+        : 'bg-neutral-100 border-neutral-200 text-neutral-700 hover:bg-neutral-200';
+    return (
+        <button
+            type="button"
+            onClick={onClick}
+            className={`inline-flex items-center gap-1 px-2 py-1 rounded-md border text-[11px] font-medium transition ${cls}`}
+        >
+            <Icon size={11} aria-hidden /> {label}
+        </button>
+    );
+}
+
+function formatTimestamp(ts: number): string {
+    try {
+        return new Date(ts).toLocaleString(undefined, {
+            month: 'short', day: 'numeric', year: 'numeric', hour: 'numeric', minute: '2-digit',
+        });
+    } catch {
+        return '—';
+    }
 }
 
 const HANDOFF_STATUS_LABELS: Record<ScreenImplementationHandoff['readiness']['status'], string> = {

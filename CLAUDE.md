@@ -1576,17 +1576,30 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   screen appears earliest — with a trailing "Other screens" bucket for
   flow-less screens, screens ordered by step within a flow), `'section'`, or
   `'priority'`; `hasFlowGrouping`/`flowFilterOptions` drive the defaults. The
-  view replaces the old **14 filter chips** with one compact control row
-  (search + Priority/Flow/Status/Sort/Group selects + an **Advanced** drawer
-  holding the long-tail filters — has_blockers / review_recommended /
-  outdated_review / downstream_review / handoff_ready / handoff_blocked /
-  missing_mockups / has_risks, still resolved through `screenMatchesFilter` so
-  the filter semantics are unchanged). Each card shows **one prominent badge
+  header is deliberately **minimal — only two controls, `Flow` and `Status`
+  selects** (a UX-simplification pass: search, Priority/Sort/Group selects, and
+  the Advanced drawer were all removed to surface the screens immediately and
+  cut mobile clutter). Grouping is no longer user-configurable — screens are
+  **always grouped by flow** when flows exist (`section` otherwise). The
+  long-tail filter *ids* (`has_blockers` / `review_recommended` /
+  `outdated_review` / `downstream_review` / `handoff_ready` / `handoff_blocked`
+  / `missing_mockups` / `has_risks`) still exist in `screenMatchesFilter` (they
+  drive the detail disclosures + preflight) but are **no longer exposed as UI
+  controls**. Each card shows **one prominent badge
   (priority)** + title + purpose + a mini flow strip ("Next → …" from
   `deriveScreenConnections`, else "Part of <flow>") + a single muted readiness
   badge; **all other metadata** (review, traceability, handoff, mockup
   coverage, states, risks, downstream impact) moves behind a per-card **"Show
-  details"** disclosure. Color is reserved for priority + genuine warnings
+  details"** disclosure. The **old global metadata/action toolbar** that sat
+  above the list (Generated-from-PRD chip, screen-inventory Version history +
+  staleness / Mark-up-to-date, Mockup history, Regenerate Mockup, and the
+  design-drift banner) is **removed**; those artifact-level controls are passed
+  to `ScreenListView` as an `artifactControls` prop (`ScreenArtifactControls`)
+  and **relocated into each card's "Show details"** (a Metadata row + an Actions
+  row). Their underlying scope is unchanged (version history is the
+  screen_inventory artifact's, mockup history/regeneration the mockup
+  artifact's — one shared handler set), so there is no data-model / versioning /
+  mockup-pipeline change. Color is reserved for priority + genuine warnings
   (blockers/risks/stale/blocked). The **Screen Coverage & Readiness**,
   implementation-preflight, and handoff-export panels are collapsed by default
   under a single "Project readiness & metadata" section (kept mounted, hidden
