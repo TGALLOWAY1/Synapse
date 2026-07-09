@@ -1746,6 +1746,61 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   artifact is not mutated or coupled; a trace-backed plan bridge is deferred to
   Phase 5B) and no Screens-specific export/finalization hook was added (the local
   Handoff tab + copy action is the decision surface, mirroring Phase 4B).
+- **Phase 5B — trace-backed Data Model + Implementation Plan bridge
+  (`src/lib/screenArtifactTraceBridge.ts`, pure, unit-tested).** Layers ON TOP
+  of the Phase 5A handoff (never changing it) to make the handoff trustworthy: a
+  **READ-ONLY correlation** between a screen and the already-loaded **Data Model**
+  and **Implementation Plan** artifacts. It never mutates, fetches, or regenerates
+  a downstream artifact. `buildScreenArtifactTraceBridge(ctx, dataModel, plan)`
+  produces a `ScreenArtifactTraceBridge`: per-entity **Data Model matches**
+  (`ScreenDataModelMatch` — evidence order: shared PRD **feature ref** →
+  `explicit`; a data-dependency/component **naming the entity** → `strong`;
+  **field-name** overlap → strong/weak field matches; bare **token overlap** →
+  `weak`; else dropped) and per-task **Implementation Plan matches**
+  (`ScreenImplementationPlanMatch` — milestone **explicitly links the screen** or
+  a task links a shared **feature id** → `explicit`; **route path** / exact
+  **component name** / exact **screen title** in a task → `strong`; component/title
+  **token overlap** → `weak`), each with a `TraceConfidence`
+  (`explicit`/`strong`/`weak`/`estimated`/`missing`) and a plain-language reason.
+  `overall.confidence` is the **weaker of the two present traces** (a chain is
+  only as strong as its weakest link). **Honesty rules stand:** a token overlap is
+  `weak`, never "confirmed"; a **missing artifact** (`null`) is an info note, never
+  a review nag; a **present-but-unmatched** artifact is review-worthy, never a
+  hard blocker. Content resolvers `resolveDataModelForTrace` / `resolvePlanForTrace`
+  (pure) accept the structured JSON shapes AND legacy markdown (mapping parsed
+  entities / milestone deliverables into the typed shape) so legacy artifacts
+  still correlate by name/route/title.
+  - **Handoff integration** (`screenImplementationHandoff.ts`).
+    `buildScreenImplementationHandoff` gained optional `dataModel` /
+    `implementationPlan` inputs — **`undefined` (omitted) → no bridge (Phase 5A
+    behavior, for legacy/test callers); `null` → artifact absent (info, no nag);
+    content → correlate.** The workspace always passes both (resolved off the
+    `data_model` / `implementation_plan` preferred versions). When present, the
+    bridge **upgrades** each estimated `HandoffDataDependency` in place
+    (`source: 'data_model_trace'` + `matchedEntity`/`matchedField`/`confidence` —
+    never fabricates a match), exposes `implementationPlanReferences` and the full
+    `traceBridge`, adds trace-review **readiness** signals
+    (`dataModelTraceMissing` / `planBridgeMissing` (accepted P0 only) /
+    `traceConfidenceWeakForP0` — all **review-recommended, never blocking**; they
+    fire only when the relevant artifact was PRESENT), extends
+    `renderHandoffMarkdown` with `## Trace Confidence` / `## Data Model Support` /
+    `## Related Implementation Plan Items`, and folds trace guidance into
+    `buildHandoffPreflightContribution`. `buildScreensHandoffRollup` gained a
+    `ScreensTraceRollup` (strong/estimated/missing counts + P0 plan/data-model
+    gaps; null when no screen carried a bridge).
+  - **UI.** `ScreenHandoffView` renders a **Trace confidence** summary, **Data
+    Model support** matches (entity + confidence + fields + reason, or a calm
+    "No linked Data Model entities found" empty state), a **Related implementation
+    plan items** section, per-dependency trace tags, and trace notes.
+    `ScreenListView` cards carry a compact `TraceChip` (only on a real concern —
+    "No plan match" / "Trace needs review", never on a strong trace);
+    `ScreenCoveragePanel`'s handoff section shows the trace rollup. **No new list
+    filters** were added (the filter bar is already crowded — chips + preflight
+    carry the signal). Everything stays **advisory**; nothing gates rendering or
+    generation, and screens with no downstream artifacts degrade to `missing`
+    with an info note, never a crash. **No downstream artifact is mutated and no
+    new export/finalization flow was added** — the Handoff tab + copy action is
+    the decision surface (a full trace-aware export is a Phase 5C follow-up).
 - **Phase 2 — source-grounded screen contracts.** New screen_inventory
   generations emit an explicit contract per screen (all fields optional &
   back-compat on `ScreenItem`/`ScreenState` in `src/types`): structured
