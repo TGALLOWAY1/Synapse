@@ -13,8 +13,12 @@ import type { MockupPlatform } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     SCREEN_LIST_FILTERS, screenMatchesFilter,
-    type ScreenCoverageSummary, type ScreenListFilter, type ScreenReadiness,
+    type ScreenCoverageSummary, type ScreenFilterReview, type ScreenListFilter, type ScreenReadiness,
 } from '../../lib/screenReadiness';
+import {
+    REVIEW_STATUS_LABELS, SYSTEM_READINESS_LABELS,
+    type ScreenArtifactReviewReadiness, type ScreenReviewModel,
+} from '../../lib/screenReviewWorkflow';
 import {
     buildScreenMockupVariants, summarizeScreenVariants,
     type GeneratedVariantMap, type MockupVariantCoverageSummary,
@@ -24,10 +28,17 @@ import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ReadinessBadge } from './ReadinessBadge';
 
+const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
+
 interface Props {
     index: ScreenExperienceIndex;
     /** Per-screen readiness keyed by canonical id (src/lib/screenReadiness). */
     readiness: ReadonlyMap<string, ScreenReadiness>;
+    /** Per-screen review model keyed by canonical id (Phase 4A). Absent → cards
+     * fall back to readiness-only, filters treat everything as unreviewed. */
+    reviewModels?: ReadonlyMap<string, ScreenReviewModel>;
+    /** Artifact-level review readiness gate for the coverage panel (Phase 4A). */
+    artifactReview?: ScreenArtifactReviewReadiness;
     /** Artifact-level coverage rollup for the top panel. */
     coverage: ScreenCoverageSummary;
     /** Artifact-level mockup-variant rollup for the coverage panel (Phase 3A). */
@@ -53,20 +64,32 @@ interface Props {
 }
 
 export function ScreenListView({
-    index, readiness, coverage, variantCoverage, mockupPlatform, mobileRelevant,
+    index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
+    variantCoverage, mockupPlatform, mobileRelevant,
     generatedVariantsByScreen, trustContext, onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
+
+    const filterReviewFor = (item: ScreenExperienceItem): ScreenFilterReview | undefined => {
+        const model = reviewModels.get(item.id);
+        if (!model) return undefined;
+        return {
+            userStatus: model.userStatus,
+            blockingCount: model.blockingCount,
+            reviewCount: model.reviewCount,
+        };
+    };
 
     // Per-filter match counts so empty filters are obvious before clicking.
     const filterCounts = useMemo(() => {
         const counts = new Map<ScreenListFilter, number>();
         for (const { id } of SCREEN_LIST_FILTERS) {
             counts.set(id, index.items.filter(item =>
-                screenMatchesFilter(item, readiness.get(item.id), id)).length);
+                screenMatchesFilter(item, readiness.get(item.id), id, filterReviewFor(item))).length);
         }
         return counts;
-    }, [index, readiness]);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [index, readiness, reviewModels]);
 
     if (index.items.length === 0) {
         return (
@@ -86,7 +109,7 @@ export function ScreenListView({
         .map(section => ({
             ...section,
             items: section.items.filter(item =>
-                screenMatchesFilter(item, readiness.get(item.id), filter)),
+                screenMatchesFilter(item, readiness.get(item.id), filter, filterReviewFor(item))),
         }))
         .filter(section => section.items.length > 0);
 
@@ -95,6 +118,7 @@ export function ScreenListView({
             <ScreenCoveragePanel
                 summary={coverage}
                 variantCoverage={variantCoverage}
+                artifactReview={artifactReview}
                 onGenerateMissingMockups={onGenerateMissingMockups}
             />
 
@@ -154,6 +178,7 @@ export function ScreenListView({
                                 <ScreenRow
                                     item={item}
                                     readiness={readiness.get(item.id)}
+                                    reviewModel={reviewModels.get(item.id)}
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
@@ -169,11 +194,18 @@ export function ScreenListView({
     );
 }
 
+const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string> = {
+    ready: 'text-emerald-600',
+    needs_review: 'text-amber-600',
+    blocked: 'text-red-600',
+};
+
 function ScreenRow({
-    item, readiness, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
+    item, readiness, reviewModel, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
 }: {
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
+    reviewModel?: ScreenReviewModel;
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
@@ -277,7 +309,37 @@ function ScreenRow({
                         Coverage: unknown
                     </span>
                 )}
+                {reviewModel?.freshness === 'outdated' && (
+                    <span
+                        className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full"
+                        title="This screen changed after it was reviewed — re-review recommended"
+                    >
+                        Review may be outdated
+                    </span>
+                )}
             </div>
+
+            {reviewModel && (
+                <div className="mt-2 flex items-center gap-2 flex-wrap text-[11px]">
+                    <span className="text-neutral-400 uppercase tracking-wide text-[10px]">Review</span>
+                    <span className="font-medium text-neutral-700">
+                        {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
+                    </span>
+                    <span className="text-neutral-300" aria-hidden>·</span>
+                    <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>
+                        {reviewModel.blockingCount > 0
+                            ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
+                            : reviewModel.reviewCount > 0
+                                ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
+                                : SYSTEM_READINESS_LABELS[reviewModel.systemReadiness]}
+                    </span>
+                    {reviewModel.blockingCount > 0 && reviewModel.reviewCount > 0 && (
+                        <span className="text-amber-600">
+                            + {reviewModel.reviewCount} review {reviewModel.reviewCount === 1 ? 'item' : 'items'}
+                        </span>
+                    )}
+                </div>
+            )}
 
             <div className="mt-auto pt-3 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
                 <span

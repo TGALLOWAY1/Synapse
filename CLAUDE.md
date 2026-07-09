@@ -1572,8 +1572,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   only; route/accessibility have no data source and render "Not specified"),
   `buildMockupSpecCoverage` (token-overlap spec-to-spec comparison — present
   as "in the mockup spec", NEVER as visual detection of the image), and the
-  list filters (`SCREEN_LIST_FILTERS`/`screenMatchesFilter`: All / P0 /
-  Needs review / Missing mockups / Has risks / Ready). **Honesty rule:
+  list filters (`SCREEN_LIST_FILTERS`/`screenMatchesFilter`: All / P0 / Draft /
+  Needs review / Accepted / Ready / Has blockers / Review recommended /
+  Missing mockups / Has risks — `screenMatchesFilter` takes an optional
+  `ScreenFilterReview` so the review-status/blocker filters key off the Phase 4A
+  review model). **Honesty rule:
   everything derived is an estimate — keep the "estimated"/"derived" labels
   and "Not specified"/"Review recommended" fallbacks; never fabricate risk
   severity, mockup variants, routes, or per-state mockup coverage, and never
@@ -1584,6 +1587,58 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   rollup** (`buildMessage` uses `ready − readyWithWarnings`; `ScreenCoveragePanel`
   gates its green all-clear on `readyWithWarnings === 0`) so a human override
   can never make the artifact-level summary read clean while warnings remain.
+- **Phase 4A — screen review & approval workflow (`src/lib/screenReviewWorkflow.ts`,
+  pure, unit-tested).** Turns the Screens artifact from a reference surface into a
+  review workflow, layered ON TOP of the readiness/variant/trust layers (never
+  changing them). It deliberately keeps **two distinct concepts** — do not
+  collapse them: **(1) USER review status** — the human sign-off, persisted in the
+  existing `ScreenMetadataEdit.reviewStatus` overlay
+  (draft/needs_review/accepted/implementation_ready); and **(2) SYSTEM readiness**
+  (`SystemReadinessStatus`: ready / needs_review / blocked) — Synapse's derived
+  estimate from the issue set, never overridden by the buttons. A screen can be
+  user-Accepted while system readiness says "review recommended", or user-Draft
+  while the system says "ready to accept". `deriveScreenReviewIssues` reuses
+  `detectScreenGaps` + `resolveAcceptanceCriteria`/`resolveScreenHandoff` +
+  precomputed mockup/freshness signals to produce **`ScreenReviewIssue`s**
+  (severity `blocking` | `review` | `info`, categorized) with a `recommendedAction`.
+  Blocking = missing purpose, missing traceability/navigation on a **primary**
+  (P0/P1) screen, P0 without a default mockup, a required state with no behavior,
+  no derivable acceptance criteria, an unresolved high-severity risk on a P0
+  screen. Review = missing mobile mockup, stale mockups, unresolved risks,
+  decisions without branch outcomes, thin handoff, missing state variants, stale
+  PRD refs. Info = freshness/coverage unknown (legacy metadata — NEVER a
+  blocker), no flow refs. `buildScreenReviewModel`/`buildScreenReviewModelForItem`/
+  `buildScreenReviewIndex` assemble the per-screen `ScreenReviewModel` (status +
+  systemReadiness + issues + counts + `acceptedOverWarnings` + freshness +
+  checklist progress); the views use the `-ForItem`/`-Index` wrappers (which build
+  the variant grid), pure tests use the low-level fn with explicit signals.
+  **Supporting review record** rides a NEW additive overlay field
+  `ScreenMetadataEdit.review` (`ScreenReviewMeta` in `src/types`: checklist, note,
+  override reason, sign-off `signature`, transition timestamps) — status stays in
+  `reviewStatus`, so all existing wiring is untouched; `readScreenEdits` parses it
+  defensively and preserves unknown keys. **Review freshness (re-review after
+  acceptance):** `buildScreenReviewSignature` captures `computeScreenReviewHash`
+  (a self-contained FNV-1a hash of the substantive spec — purpose/intent/priority/
+  states/nav/UI/risks/criteria/traceability/handoff, **excluding the display-only
+  `name` rename and overlay-only fields** so a pure rename never trips it) at
+  accept/implementation-ready; `compareReviewFreshness` → `current` | `outdated` |
+  `unknown` (**no stored signature = `unknown`, legacy records NEVER falsely
+  outdated**, mirroring mockup freshness). **Artifact-level readiness gate:**
+  `buildScreenArtifactReviewReadiness`/`summarizeArtifactReviewReadiness` roll the
+  models up — **P0 screens are the gate**: ready iff every P0 screen is
+  user-signed-off (accepted/implementation_ready) AND no P0 screen carries
+  blocking issues. It is a **readiness signal, NOT a hard lock** — nothing gates
+  rendering or generation. UI: `ScreenReviewPanel` (Screen Detail header — status
+  line, Accept / Request changes / Mark ready-to-build actions with an inline
+  override-reason capture when blockers exist, readiness-issue list, review
+  checklist, a calm "review may be outdated" banner + Re-review), review status +
+  issue counts on `ScreenListView` cards, and a "Review readiness" rollup + gate
+  callout in `ScreenCoveragePanel`. Persistence flows through the existing
+  `handleSaveScreenEdit` → `updateArtifactVersionMetadata` overlay path
+  (timestamps/signatures stamped in `ScreenDetailView`, not the pure module).
+  Language stays calm ("Review recommended", never "Invalid"). **Not yet done
+  (Phase 4B):** cross-artifact downstream invalidation when an accepted screen
+  changes (today only a note), and a dedicated export/finalization preflight.
 - **Phase 2 — source-grounded screen contracts.** New screen_inventory
   generations emit an explicit contract per screen (all fields optional &
   back-compat on `ScreenItem`/`ScreenState` in `src/types`): structured

@@ -3,6 +3,7 @@ import { render, fireEvent } from '@testing-library/react';
 import type { Feature, MockupPayload, ScreenInventoryContent, ScreenItem } from '../../types';
 import { buildScreenIndex, type ScreenMetadataEdit } from '../../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../../lib/screenReadiness';
+import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
 import { parseFlows } from '../renderers/userFlows/parseFlow';
 import { ScreenListView } from '../experience/ScreenListView';
 import { ScreenDetailView } from '../experience/ScreenDetailView';
@@ -173,9 +174,11 @@ describe('ScreenDetailView tabs', () => {
     });
 
     it('Overview survives a legacy screen with no optional fields', () => {
-        const { getByText } = renderDetail('bare-legacy-screen', 'overview');
+        const { getByText, getAllByText } = renderDetail('bare-legacy-screen', 'overview');
         expect(getByText(/No linked PRD features found/)).toBeTruthy();
-        expect(getByText(/No UI states documented/)).toBeTruthy();
+        // "No UI states documented" now appears in both the Overview section and
+        // the Phase 4A review-issue list — assert it's present rather than unique.
+        expect(getAllByText(/No UI states documented/).length).toBeGreaterThan(0);
         expect(getByText(/Not enough detail/)).toBeTruthy();
     });
 
@@ -369,6 +372,106 @@ describe('Phase 2 contract rendering', () => {
         expect(getAllByText('Ready to build').length).toBeGreaterThan(0);
         // The derived warnings are still surfaced in the handoff footer.
         expect(getByText(/Before building:/)).toBeTruthy();
+    });
+});
+
+// --- Phase 4A: review & approval workflow ------------------------------------
+
+describe('Phase 4A review workflow UI', () => {
+    it('Screen Detail renders the review header, status, and actions', () => {
+        const { getByText } = renderContractDetail('overview', { onSaveScreenEdit: vi.fn() });
+        expect(getByText('User review')).toBeTruthy();
+        expect(getByText('System readiness')).toBeTruthy();
+        expect(getByText('Accept screen')).toBeTruthy();
+        expect(getByText('Mark ready to build')).toBeTruthy();
+    });
+
+    it('accepting a clean screen persists the accepted status + a sign-off signature', () => {
+        const onSave = vi.fn();
+        const { getByText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
+        fireEvent.click(getByText('Accept screen'));
+        expect(onSave).toHaveBeenCalledTimes(1);
+        const [id, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
+        expect(id).toBe('scr-submission');
+        expect(edit.reviewStatus).toBe('accepted');
+        const review = edit.review as Record<string, unknown>;
+        expect(review.acceptedAt).toBeTruthy();
+        expect((review.signature as Record<string, unknown>).screenContractHash).toBeTruthy();
+    });
+
+    it('the review checklist persists a ticked item into the overlay', () => {
+        const onSave = vi.fn();
+        const { getByText, getByLabelText } = renderContractDetail('overview', { onSaveScreenEdit: onSave });
+        fireEvent.click(getByText('Review checklist'));
+        fireEvent.click(getByLabelText('Purpose matches the PRD'));
+        expect(onSave).toHaveBeenCalledTimes(1);
+        const [, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
+        const review = edit.review as Record<string, unknown>;
+        expect((review.checklist as Record<string, unknown>).purposeMatchesPrd).toBe(true);
+    });
+});
+
+function buildReviewFixtures() {
+    const flows = parseFlows(FLOWS_MD);
+    const index = buildScreenIndex(inventory, flows, payload);
+    const readiness = buildReadinessIndex(index, FEATURES);
+    const coverage = buildScreenCoverageSummary(index, readiness, flows, FEATURES);
+    const reviewModels = buildScreenReviewIndex(index, { features: FEATURES });
+    const artifactReview = summarizeArtifactReviewReadiness(index, reviewModels);
+    return { index, readiness, coverage, reviewModels, artifactReview };
+}
+
+describe('Phase 4A Screens list + coverage panel', () => {
+    it('cards show the review status and issue counts', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getAllByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                onSelectScreen={() => {}}
+            />,
+        );
+        // Both screens are unreviewed → each card shows the review status line.
+        expect(getAllByText('Not reviewed').length).toBeGreaterThan(0);
+    });
+
+    it('the Has blockers filter shows only screens with blocking issues', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getByText, queryByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                onSelectScreen={() => {}}
+            />,
+        );
+        fireEvent.click(getByText('Has blockers'));
+        // The bare legacy screen (no purpose / acceptance) has blockers; the
+        // full P0 dashboard does not.
+        expect(getByText('Bare Legacy Screen')).toBeTruthy();
+        expect(queryByText('Home Dashboard')).toBeNull();
+    });
+
+    it('the coverage panel shows the review-readiness rollup + gate', () => {
+        const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
+        const { getByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                reviewModels={reviewModels}
+                artifactReview={artifactReview}
+                coverage={coverage}
+                onSelectScreen={() => {}}
+            />,
+        );
+        expect(getByText('Review readiness')).toBeTruthy();
+        // No P0 screen is accepted yet → not ready for implementation planning.
+        expect(getByText('Not ready for implementation planning yet')).toBeTruthy();
     });
 });
 
