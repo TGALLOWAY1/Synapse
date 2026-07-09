@@ -174,9 +174,16 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
         || (prdFeatures?.mustWithoutPrimaryScreen.length ?? 0) > 0;
     const coreComplete = readyComplete && !hasImplementationRisk;
 
+    // When every screen is clean-ready but an artifact-level risk remains
+    // (uncovered PRD feature, a must-have owned only by a low-priority screen),
+    // the per-screen `message` still reads "All N screens pass…" — an all-clear
+    // that would sit directly above the amber disclosure. Use a dedicated
+    // risk-aware headline for that case instead of reusing that message.
     const headline = coreComplete
         ? 'Implementation coverage is complete. Every screen has its required assets — optional design documentation can be generated whenever you like.'
-        : message;
+        : readyComplete
+            ? 'Every screen passes its readiness checks, but some required coverage still needs review before implementation — see the flagged items below.'
+            : message;
 
     const missingMockups = summary.mockups.total - summary.mockups.covered;
     const hasExpanded = Boolean(variantCoverage && variantCoverage.additionalTotal > 0);

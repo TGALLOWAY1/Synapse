@@ -154,12 +154,18 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
             mockups: { covered: 2, total: 2 },
             openRisks: 0,
             ready: 2, readyWithWarnings: 0, needsReview: 0,
-            message: 'Review the uncovered PRD feature before implementation.',
+            // Per-screen readiness sentence reads all-clear — it must NOT be
+            // used as the headline while an artifact-level risk remains.
+            message: 'All 2 screens pass the derived readiness checks. Review them once more before implementation.',
         };
         const { queryByText, getByText } = render(
             <ScreenListView index={index} readiness={readiness} coverage={coverage} onSelectScreen={() => {}} />,
         );
+        // Neither the green all-clear nor the celebratory per-screen message.
         expect(queryByText(/Implementation coverage is complete/)).toBeNull();
+        expect(queryByText(/All 2 screens pass the derived readiness checks/)).toBeNull();
+        // A dedicated risk-aware headline is shown instead.
+        expect(getByText(/some required coverage still needs review/)).toBeTruthy();
         expect(getByText(/1 PRD feature not linked to any screen/)).toBeTruthy();
     });
 
