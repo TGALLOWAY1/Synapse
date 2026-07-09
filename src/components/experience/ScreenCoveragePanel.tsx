@@ -12,6 +12,16 @@ import {
 } from 'lucide-react';
 import type { ScreenCoverageSummary } from '../../lib/screenReadiness';
 import type { MockupVariantCoverageSummary } from '../../lib/mockupVariants';
+import type { VariantFreshnessRollup } from '../../lib/mockupVariantTrust';
+
+/** "8 current · 2 review · 3 unknown" (omits zero segments). */
+function freshnessLabel(f: VariantFreshnessRollup): string {
+    const parts: string[] = [];
+    if (f.current > 0) parts.push(`${f.current} current`);
+    if (f.review > 0) parts.push(`${f.review} review`);
+    if (f.unknown > 0) parts.push(`${f.unknown} unknown`);
+    return parts.length ? parts.join(' · ') : 'None generated';
+}
 
 interface Props {
     summary: ScreenCoverageSummary;
@@ -129,6 +139,14 @@ export function ScreenCoveragePanel({ summary, variantCoverage, onGenerateMissin
                                     value={`${variantCoverage.p0WithMobile} / ${variantCoverage.p0Total} P0 screens`}
                                     hint="P0 screens whose Mobile default variant is generated, accepted, or marked not needed"
                                     tone={variantCoverage.p0WithMobile < variantCoverage.p0Total ? 'warn' : 'good'}
+                                />
+                            )}
+                            {variantCoverage && variantCoverage.freshness.total > 0 && (
+                                <MetricRow
+                                    label="Mockup freshness"
+                                    value={freshnessLabel(variantCoverage.freshness)}
+                                    hint="Generated mockup variants compared to the current screen spec, design system, and PRD — from stored generation metadata, never a visual check. Unknown = an older mockup with no source metadata."
+                                    tone={variantCoverage.freshness.review > 0 ? 'warn' : 'good'}
                                 />
                             )}
                             {variantCoverage && variantCoverage.legacyUnknownMockups > 0 && (

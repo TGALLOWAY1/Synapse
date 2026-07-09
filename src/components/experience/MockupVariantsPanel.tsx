@@ -136,6 +136,11 @@ export function MockupVariantsPanel({
                     Generated product screen previews mapped to this screen&rsquo;s states and viewports.
                 </p>
                 <p className="mt-1.5 text-[11px] text-neutral-500">{summaryParts.join(' · ')}</p>
+                <p className="mt-1 inline-flex items-center gap-1 text-[11px] text-neutral-400">
+                    <Info size={10} className="shrink-0" aria-hidden />
+                    Generated variant images are saved on this device for now — they may not appear on
+                    another browser until snapshot/sync support is added.
+                </p>
             </div>
 
             {/* Variant gallery — pills, selectable */}

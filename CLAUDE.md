@@ -1660,8 +1660,52 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     (`hasOpenAIKey`) + `gpt_image` image mode — demo / keyless users see a
     disabled action with a clear explanation, never a silent failure. The
     per-variant store is **independent of snapshots & cross-device sync** (a
-    documented Phase 3C gap, mirroring the screen-inventory-image sync gap) — do
+    documented Phase 3D gap, mirroring the screen-inventory-image sync gap) — do
     not entangle it with `snapshotClient` / `imageRefsStore`.
+  - **Phase 3C variant trust — freshness, history, default sidecar
+    (`src/lib/mockupVariantTrust.ts`, pure).** A generated variant is captured
+    with a **`MockupVariantSourceSignature`** — a deterministic snapshot of the
+    inputs that materially affect its image: a **screen-contract hash**
+    (`computeScreenContractHash`, keyed off the SAME screen-spec fields
+    `buildVariantGenerationRequest` uses — viewport + state + core UI regions +
+    user actions + acceptance criteria + risks; **excludes** overlay-only UI
+    metadata like notes/reviewStatus/variant marks so cosmetic edits never trip a
+    false stale warning) plus the **design-system tokens hash** and the
+    **PRD/spine + screen-inventory + design-system version ids** at generation
+    time. `buildVariantSourceSignature` (used at BOTH storage and comparison so
+    they can't drift) is stored on `MockupVariantImageRecord.sourceSignature` +
+    `generatedFrom`. `compareVariantFreshness(stored, current)` →
+    **`current` | `possibly_stale` | `stale` | `unknown`**: contract-hash or
+    design/PRD **hash** mismatch → `stale`; version-id changed but no hash to
+    confirm → `possibly_stale`; **no stored signature → `unknown` (legacy /
+    pre-3C records are NEVER falsely stale)**. Freshness is threaded into the
+    derived model (`DerivedMockupVariant.freshness`) via a
+    **`VariantTrustContext`** (current versions/hash) passed from
+    `ArtifactWorkspace` → Screen views; a rollup
+    (`summarizeVariantFreshness` → `MockupVariantCoverageSummary.freshness`
+    `{current, review, unknown}`) feeds the coverage panel. UI: freshness badges
+    + a calm explanation + a metadata-only **Source comparison** section (never a
+    visual diff) in `MockupVariantsPanel`; a compact "Freshness: N to review"
+    chip on screen cards.
+    **Variant history:** the store's `generate` preserves the previous
+    successful record as the newest **`history`** entry on regeneration (capped,
+    newest-first); a **failed regeneration never appends history and never erases
+    the current record**. Shown in a collapsible, local-only history section
+    (view-only — no restore).
+    **Default coverage sidecar:** the default variant KEEPS the legacy
+    `MockupScreenImage` image path; on a NEW default (re)generation the panel
+    captures a metadata-only sidecar record (`variantId: 'default'`, empty
+    `dataUrl`, coverage manifest + source signature) keyed
+    `versionId:screenId:default:quality` via `putSidecar` — wired through an
+    optional `onGenerated` callback on the legacy image store/component (other
+    callers unaffected). **Old defaults with no sidecar stay coverage-unknown; no
+    fabricated coverage, and the legacy default image is never moved into the
+    variant store.**
+    **Local-only clarity:** the Mockups tab and per-variant detail state that
+    generated variant images are saved on this device only until snapshot/sync
+    lands. **Snapshot/sync of variant images remains a documented gap →
+    Phase 3D: Portable variant image snapshots / cross-device sync.** Do not
+    entangle the variant store with `snapshotClient` / `imageRefsStore`.
   `parseDecisionBranches` (arrow-form +
   if/otherwise) powers both the branch-aware Flow-tab rendering
   (`DecisionBranches`) and the `decision_missing_branches` gap — an
