@@ -9,11 +9,16 @@
 
 import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Layers, Workflow } from 'lucide-react';
 import { useMemo, useState } from 'react';
+import type { MockupPlatform } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     SCREEN_LIST_FILTERS, screenMatchesFilter,
     type ScreenCoverageSummary, type ScreenListFilter, type ScreenReadiness,
 } from '../../lib/screenReadiness';
+import {
+    buildScreenMockupVariants, summarizeScreenVariants,
+    type MockupVariantCoverageSummary,
+} from '../../lib/mockupVariants';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ReadinessBadge } from './ReadinessBadge';
@@ -24,6 +29,13 @@ interface Props {
     readiness: ReadonlyMap<string, ScreenReadiness>;
     /** Artifact-level coverage rollup for the top panel. */
     coverage: ScreenCoverageSummary;
+    /** Artifact-level mockup-variant rollup for the coverage panel (Phase 3A). */
+    variantCoverage?: MockupVariantCoverageSummary | null;
+    /** Generation platform of the mockup set — drives per-screen variant
+     * derivation (viewport). */
+    mockupPlatform?: MockupPlatform;
+    /** True when the project is mobile-relevant (mobile-first / responsive). */
+    mobileRelevant?: boolean;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -35,7 +47,8 @@ interface Props {
 }
 
 export function ScreenListView({
-    index, readiness, coverage, onSelectScreen, onGenerateMissingMockups,
+    index, readiness, coverage, variantCoverage, mockupPlatform, mobileRelevant,
+    onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
@@ -75,6 +88,7 @@ export function ScreenListView({
         <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-6">
             <ScreenCoveragePanel
                 summary={coverage}
+                variantCoverage={variantCoverage}
                 onGenerateMissingMockups={onGenerateMissingMockups}
             />
 
@@ -134,6 +148,8 @@ export function ScreenListView({
                                 <ScreenRow
                                     item={item}
                                     readiness={readiness.get(item.id)}
+                                    mockupPlatform={mockupPlatform}
+                                    mobileRelevant={mobileRelevant}
                                     onSelect={() => onSelectScreen(item.id)}
                                 />
                             </li>
@@ -146,10 +162,12 @@ export function ScreenListView({
 }
 
 function ScreenRow({
-    item, readiness, onSelect,
+    item, readiness, mockupPlatform, mobileRelevant, onSelect,
 }: {
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
+    mockupPlatform?: MockupPlatform;
+    mobileRelevant?: boolean;
     onSelect: () => void;
 }) {
     const { screen } = item;
@@ -160,6 +178,9 @@ function ScreenRow({
     const stateCount = screen.states?.length ?? 0;
     const riskCount = screen.risks?.length ?? 0;
     const featureRefs = screen.featureRefs ?? [];
+    const variantSummary = summarizeScreenVariants(
+        buildScreenMockupVariants(item, { platform: mockupPlatform, mobileRelevant }),
+    );
 
     return (
         <button
@@ -217,6 +238,22 @@ function ScreenRow({
                         {riskCount} {riskCount === 1 ? 'risk' : 'risks'} to review
                     </span>
                 )}
+                {variantSummary.mobileMissing && (
+                    <span
+                        className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full"
+                        title="No mobile mockup variant yet"
+                    >
+                        Mobile: missing
+                    </span>
+                )}
+                {variantSummary.coverageUnknown && (
+                    <span
+                        className="text-[10px] text-neutral-500 bg-neutral-50 ring-1 ring-neutral-200 px-1.5 py-0.5 rounded-full"
+                        title="This mockup was generated before coverage metadata was captured"
+                    >
+                        Coverage: unknown
+                    </span>
+                )}
             </div>
 
             <div className="mt-auto pt-3 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
@@ -227,9 +264,14 @@ function ScreenRow({
                     <Layers size={11} className={stateCount > 0 ? 'text-sky-500' : 'text-neutral-300'} />
                     {stateCount > 0 ? `${stateCount} ${stateCount === 1 ? 'state' : 'states'}` : 'No states'}
                 </span>
-                <span className="inline-flex items-center gap-1" title="Mockup coverage">
-                    <ImageIcon size={11} className={item.mockupScreen ? 'text-emerald-500' : 'text-neutral-300'} />
-                    {item.mockupScreen ? 'Mockup' : 'No mockup'}
+                <span
+                    className="inline-flex items-center gap-1"
+                    title="Mockup variant coverage — generated vs. recommended (viewport × state), tracked from mockup metadata"
+                >
+                    <ImageIcon size={11} className={variantSummary.hasMockup ? 'text-emerald-500' : 'text-neutral-300'} />
+                    {variantSummary.hasMockup
+                        ? `Mockups: ${variantSummary.label}`
+                        : 'No mockup'}
                 </span>
                 <span
                     className="inline-flex items-center gap-1"

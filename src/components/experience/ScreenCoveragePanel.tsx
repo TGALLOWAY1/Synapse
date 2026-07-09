@@ -11,9 +11,13 @@ import {
     AlertTriangle, CheckCircle2, ChevronDown, ChevronUp, Gauge, Image as ImageIcon,
 } from 'lucide-react';
 import type { ScreenCoverageSummary } from '../../lib/screenReadiness';
+import type { MockupVariantCoverageSummary } from '../../lib/mockupVariants';
 
 interface Props {
     summary: ScreenCoverageSummary;
+    /** Artifact-level mockup-variant rollup (Phase 3A). Absent/null → the
+     * variant rows are hidden (e.g. no screens). */
+    variantCoverage?: MockupVariantCoverageSummary | null;
     /** Opens the confirmed "Generate remaining mockups" flow (absent → no
      * mockup artifact yet; the action row is hidden). */
     onGenerateMissingMockups?: () => void;
@@ -40,7 +44,7 @@ function MetricRow({
     );
 }
 
-export function ScreenCoveragePanel({ summary, onGenerateMissingMockups }: Props) {
+export function ScreenCoveragePanel({ summary, variantCoverage, onGenerateMissingMockups }: Props) {
     const [showUncovered, setShowUncovered] = useState(false);
     const {
         totalScreens, prdFeatures, stateVariants, flows, p0, states, mockups, openRisks,
@@ -111,6 +115,30 @@ export function ScreenCoveragePanel({ summary, onGenerateMissingMockups }: Props
                                 value={`${mockups.covered} / ${mockups.total} screens`}
                                 tone={missingMockups > 0 ? 'neutral' : 'good'}
                             />
+                            {variantCoverage && variantCoverage.recommendedTotal > 0 && (
+                                <MetricRow
+                                    label="Mockup variants"
+                                    value={`${variantCoverage.recommendedGenerated} / ${variantCoverage.recommendedTotal} recommended`}
+                                    hint="Recommended viewport × state variants generated or accepted across all screens — tracked from mockup metadata and your marks, never from inspecting images"
+                                    tone={variantCoverage.recommendedGenerated < variantCoverage.recommendedTotal ? 'warn' : 'good'}
+                                />
+                            )}
+                            {variantCoverage && variantCoverage.p0Total > 0 && (
+                                <MetricRow
+                                    label="Mobile coverage (P0)"
+                                    value={`${variantCoverage.p0WithMobile} / ${variantCoverage.p0Total} P0 screens`}
+                                    hint="P0 screens with a generated or accepted Mobile default variant"
+                                    tone={variantCoverage.p0WithMobile < variantCoverage.p0Total ? 'warn' : 'good'}
+                                />
+                            )}
+                            {variantCoverage && variantCoverage.legacyUnknownMockups > 0 && (
+                                <MetricRow
+                                    label="Legacy mockups (coverage unknown)"
+                                    value={`${variantCoverage.legacyUnknownMockups}`}
+                                    hint="Mockups generated before coverage metadata was captured — visually useful, but Synapse can't confirm which spec items they represent"
+                                    tone="neutral"
+                                />
+                            )}
                             {stateVariants && (
                                 <MetricRow
                                     label="Recommended state variants"

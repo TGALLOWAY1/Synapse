@@ -18,7 +18,7 @@ import {
     RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
-    Feature, GenerationStatus, MockupFidelity, MockupPayload, MockupPlatform,
+    Feature, GenerationStatus, MockupPayload,
     MockupSettings, ScreenPriority,
 } from '../../types';
 import {
@@ -28,10 +28,15 @@ import {
     type ScreenMetadataEdit,
 } from '../../lib/screenExperience';
 import {
-    buildMockupSpecCoverage, buildMockupVariantRows, parseDecisionBranches,
+    parseDecisionBranches,
     REVIEW_STATUS_LABELS,
-    type MockupVariantRow, type ScreenReadiness, type ScreenReviewStatus,
+    type ScreenReadiness, type ScreenReviewStatus,
 } from '../../lib/screenReadiness';
+import {
+    buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
+    VARIANT_STATUS_LABELS,
+} from '../../lib/mockupVariants';
+import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenOverviewPanel } from './ScreenOverviewPanel';
 import { ReadinessBadge } from './ReadinessBadge';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
@@ -41,7 +46,6 @@ import { FlowJourney } from '../renderers/userFlows/FlowJourney';
 import { StepCard } from '../renderers/userFlows/StepCard';
 import { FeatureDetailDrawer } from '../renderers/userFlows/FeatureDetailDrawer';
 import type { FeatureRef, FlowIssue } from '../renderers/userFlows/types';
-import { MockupScreenImage } from '../mockups/MockupScreenImage';
 import { ScreenDetailTabs, type ScreenDetailTab } from './ScreenDetailTabs';
 
 /** Everything the Mockups tab needs to render the reused mockup components. */
@@ -71,6 +75,9 @@ interface Props {
     screenImageContext?: ScreenImageGalleryContext;
     /** Mockups tab context — absent when no parseable mockup artifact exists. */
     mockupContext?: ScreenDetailMockupContext;
+    /** True when the project is mobile-relevant (mobile-first / responsive) —
+     * enables recommended Mobile variants on P1/supporting screens. */
+    mobileRelevant?: boolean;
     /** Mockup generation slot status, for honest Mockups-tab empty states. */
     mockupStatus?: GenerationStatus;
     onRetryMockup?: () => void;
@@ -98,7 +105,7 @@ interface Props {
 export function ScreenDetailView({
     item, readiness, activeTab, onTabChange, onBack,
     onNavigateToScreen, availableScreenSlugs,
-    screenImageContext, mockupContext, mockupStatus, onRetryMockup,
+    screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
     features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
 }: Props) {
     const { screen } = item;
@@ -246,6 +253,7 @@ export function ScreenDetailView({
                 <MockupsTab
                     item={item}
                     mockupContext={mockupContext}
+                    mobileRelevant={mobileRelevant}
                     mockupStatus={mockupStatus}
                     onRetryMockup={onRetryMockup}
                     onAddToMockups={onAddToMockups}
@@ -586,24 +594,13 @@ function DecisionBranches({ decision }: { decision: string }) {
 
 // --- Mockups tab ------------------------------------------------------------
 
-const PLATFORM_LABELS: Record<MockupPlatform, string> = {
-    mobile: 'Mobile',
-    desktop: 'Desktop',
-    responsive: 'Responsive',
-};
-
-const FIDELITY_LABELS: Record<MockupFidelity, string> = {
-    low: 'Low fidelity',
-    mid: 'Mid fidelity',
-    high: 'High fidelity',
-};
-
 function MockupsTab({
-    item, mockupContext, mockupStatus, onRetryMockup, onAddToMockups,
+    item, mockupContext, mobileRelevant, mockupStatus, onRetryMockup, onAddToMockups,
     unmatchedMockups, onLinkMockup, onSaveScreenEdit,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
+    mobileRelevant?: boolean;
     mockupStatus?: GenerationStatus;
     onRetryMockup?: () => void;
     onAddToMockups?: () => void;
@@ -612,6 +609,13 @@ function MockupsTab({
     onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
 }) {
     const [linkTarget, setLinkTarget] = useState('');
+
+    // Derived viewport × state variant grid (see src/lib/mockupVariants.ts).
+    const variants = buildScreenMockupVariants(item, {
+        platform: mockupContext?.settings.platform,
+        mobileRelevant,
+    });
+    const variantSummary = summarizeScreenVariants(variants);
 
     // Persist a per-variant status into the screen's edit overlay (null
     // clears the override back to the tracked/derived status). Merges into
@@ -630,65 +634,14 @@ function MockupsTab({
         : undefined;
 
     if (mockupContext && item.mockupScreen) {
-        const specCoverage = buildMockupSpecCoverage(
-            item.baseScreen,
-            item.mockupScreen.coreUIElements,
-        );
-        const variantRows = buildMockupVariantRows(item, mockupContext.settings.platform);
-        const metaParts = [
-            'Generated product screen preview',
-            PLATFORM_LABELS[mockupContext.settings.platform],
-            FIDELITY_LABELS[mockupContext.settings.fidelity],
-        ];
-        if (mockupContext.prdVersionLabel) metaParts.push(`Generated from PRD ${mockupContext.prdVersionLabel}`);
-        if (mockupContext.versionNumber) metaParts.push(`Mockup v${mockupContext.versionNumber}`);
         return (
-            <div className="space-y-3">
-                <p className="text-[11px] text-neutral-500">
-                    {metaParts.join(' · ')}
-                </p>
-                <div className="bg-white rounded-xl border border-neutral-200 overflow-hidden">
-                    <MockupScreenImage
-                        projectId={mockupContext.projectId}
-                        artifactId={mockupContext.artifactId}
-                        versionId={mockupContext.versionId}
-                        screen={item.mockupScreen}
-                        payload={mockupContext.payload}
-                        settings={mockupContext.settings}
-                    />
-                </div>
-
-                <MockupVariantsCard
-                    rows={variantRows}
-                    prdVersionLabel={mockupContext.prdVersionLabel}
-                    mockupVersionNumber={mockupContext.versionNumber}
-                    onSetVariantStatus={setVariantStatus}
-                />
-
-                {specCoverage.length > 0 && (
-                    <div className="bg-white rounded-lg border border-neutral-200 p-4">
-                        <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 mb-2">
-                            Spec coverage in mockup
-                        </h4>
-                        <ul className="space-y-1 text-xs">
-                            {specCoverage.map((row, i) => (
-                                <li key={i} className="flex items-center justify-between gap-2">
-                                    <span className="text-neutral-700">{row.element}</span>
-                                    {row.status === 'in_spec' ? (
-                                        <span className="text-emerald-700 font-medium">In mockup spec</span>
-                                    ) : (
-                                        <span className="text-amber-700">Not in mockup spec</span>
-                                    )}
-                                </li>
-                            ))}
-                        </ul>
-                        <p className="text-[11px] text-neutral-400 mt-2">
-                            Compared against the mockup&rsquo;s generation spec, not the rendered image —
-                            treat &ldquo;Not in mockup spec&rdquo; as a prompt to double-check the visual.
-                        </p>
-                    </div>
-                )}
-            </div>
+            <MockupVariantsPanel
+                item={item}
+                variants={variants}
+                summary={variantSummary}
+                mockupContext={mockupContext}
+                onSetVariantStatus={setVariantStatus}
+            />
         );
     }
 
@@ -723,6 +676,7 @@ function MockupsTab({
     }
 
     return (
+        <div className="space-y-3">
         <div className="bg-white rounded-xl border border-dashed border-neutral-300 p-8 text-center">
             <ImageIcon size={20} className="text-neutral-300 mx-auto mb-2" />
             <p className="text-sm font-medium text-neutral-700">
@@ -772,134 +726,40 @@ function MockupsTab({
                 </div>
             )}
         </div>
-    );
-}
 
-// --- Mockup variants card -----------------------------------------------------
-
-const VARIANT_STATUS_META: Record<MockupVariantRow['status'], { label: string; className: string }> = {
-    generated: { label: 'Generated', className: 'text-emerald-700 bg-emerald-50 ring-emerald-200' },
-    missing: { label: 'Missing', className: 'text-amber-700 bg-amber-50 ring-amber-200' },
-    accepted: { label: 'Accepted', className: 'text-sky-700 bg-sky-50 ring-sky-200' },
-    not_needed: { label: 'Not needed', className: 'text-neutral-500 bg-neutral-100 ring-neutral-200' },
-};
-
-/**
- * Per-state / per-platform mockup variant tracking. Status comes from
- * generated mockup METADATA (the spec-to-spec join) plus the user's overlay —
- * never from inspecting the rendered image, and the copy says so. Per-variant
- * image generation isn't wired yet, so the only actions offered are the two
- * that really work: mark a variant accepted, or mark a recommended variant
- * not needed (both persist to the screen's edit overlay).
- */
-function MockupVariantsCard({
-    rows, prdVersionLabel, mockupVersionNumber, onSetVariantStatus,
-}: {
-    rows: MockupVariantRow[];
-    prdVersionLabel?: string;
-    mockupVersionNumber?: number;
-    onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
-}) {
-    if (rows.length === 0) return null;
-    const missingRequired = rows.filter(r => r.required && r.status === 'missing').length;
-    const generatedFrom = [
-        prdVersionLabel ? `PRD ${prdVersionLabel}` : null,
-        mockupVersionNumber ? `mockup v${mockupVersionNumber}` : null,
-    ].filter(Boolean).join(' · ');
-    return (
-        <div className="bg-white rounded-lg border border-neutral-200 p-4">
-            <header className="flex items-center justify-between gap-2 flex-wrap mb-2">
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                    Mockup variants
-                </h4>
-                <span className="text-[9px] uppercase tracking-wide text-indigo-500 bg-indigo-50 ring-1 ring-indigo-100 px-1.5 py-0.5 rounded">
-                    Tracked from generated mockup metadata
-                </span>
-            </header>
-            <ul className="divide-y divide-neutral-100">
-                {rows.map(row => {
-                    const meta = VARIANT_STATUS_META[row.status];
-                    return (
-                        <li key={row.id} className="py-2 flex items-center justify-between gap-3 text-xs">
-                            <div className="min-w-0">
-                                <div className="flex items-center gap-1.5 flex-wrap">
-                                    <span className="font-medium text-neutral-800">{row.label}</span>
-                                    {row.platform && (
-                                        <span className="text-[10px] text-neutral-500 bg-neutral-100 px-1.5 py-px rounded">
-                                            {PLATFORM_LABELS[row.platform]}
-                                        </span>
-                                    )}
-                                    {row.stateType && row.stateType !== 'default' && (
-                                        <span className="text-[9px] uppercase tracking-wide text-sky-700 bg-sky-50 ring-1 ring-sky-100 px-1.5 py-px rounded">
-                                            {row.stateType}
-                                        </span>
-                                    )}
-                                    {row.required && row.id !== 'default' && (
-                                        <span className="text-[9px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-100 px-1.5 py-px rounded">
-                                            Recommended
-                                        </span>
-                                    )}
-                                </div>
-                                {row.status === 'generated' && generatedFrom && (
-                                    <div className="text-[10px] text-neutral-400 mt-0.5">
-                                        Generated from {generatedFrom}
-                                    </div>
-                                )}
-                            </div>
-                            <div className="flex items-center gap-1.5 shrink-0">
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${meta.className}`}>
-                                    {meta.label}
-                                </span>
-                                {onSetVariantStatus && (
-                                    row.userSet ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onSetVariantStatus(row.id, null)}
-                                            className="text-[10px] text-neutral-500 hover:text-neutral-700 underline decoration-dotted"
-                                        >
-                                            Undo
-                                        </button>
-                                    ) : row.status === 'generated' ? (
-                                        <button
-                                            type="button"
-                                            onClick={() => onSetVariantStatus(row.id, 'accepted')}
-                                            className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
-                                        >
-                                            Mark accepted
-                                        </button>
-                                    ) : row.status === 'missing' ? (
-                                        <>
-                                            <button
-                                                type="button"
-                                                onClick={() => onSetVariantStatus(row.id, 'accepted')}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
-                                                title="Confirm this variant is covered — e.g. you uploaded or verified it outside the generated set"
-                                            >
-                                                Mark accepted
-                                            </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => onSetVariantStatus(row.id, 'not_needed')}
-                                                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
-                                                title="Skip this recommended variant — it stops counting as a readiness gap"
-                                            >
-                                                Not needed
-                                            </button>
-                                        </>
-                                    ) : null
-                                )}
-                            </div>
+        {/* Recommended variants discovery — even without a mockup, show what
+            this screen probably wants so missing viewports/states are visible. */}
+        {variantSummary.recommended > 0 && (
+            <div className="bg-white rounded-lg border border-neutral-200 p-4">
+                <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
+                        Recommended variants
+                    </h4>
+                    <span className="text-[10px] text-neutral-400">
+                        {variantSummary.generated} of {variantSummary.recommended} generated
+                    </span>
+                </div>
+                <ul className="space-y-1 text-xs">
+                    {variants.filter(v => v.required).map(v => (
+                        <li key={v.id} className="flex items-center justify-between gap-2">
+                            <span className="text-neutral-700">{formatVariantLabel(v)}</span>
+                            <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${
+                                v.status === 'missing'
+                                    ? 'text-amber-700 bg-amber-50 ring-amber-200'
+                                    : 'text-emerald-700 bg-emerald-50 ring-emerald-200'
+                            }`}>
+                                {VARIANT_STATUS_LABELS[v.status]}
+                            </span>
                         </li>
-                    );
-                })}
-            </ul>
-            <p className="text-[11px] text-neutral-400 mt-2">
-                {missingRequired > 0
-                    ? `${missingRequired} recommended ${missingRequired === 1 ? 'variant has' : 'variants have'} no mockup yet. `
-                    : ''}
-                Per-variant generation isn&rsquo;t wired yet — regenerate the full mockup from the
-                artifact actions, or upload a variant image and mark it accepted here.
-            </p>
+                    ))}
+                </ul>
+                <p className="text-[11px] text-neutral-400 mt-2">
+                    Derived from this screen&rsquo;s priority and documented states — tracked from
+                    generated metadata, never from inspecting images. Single-variant generation lands
+                    in Phase 3B.
+                </p>
+            </div>
+        )}
         </div>
     );
 }

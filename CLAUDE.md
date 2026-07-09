@@ -1514,14 +1514,19 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   steps highlighted (`highlightedStepIndices`) plus a per-flow "This screen
   appears in" context block (repeated appearances labeled "— Step N
   (appearance i of k)"; decision steps flag unspecified branch outcomes);
-  Mockups = `MockupScreenImage` (which internally routes to the manual
-  upload sheet) plus a metadata line (platform · fidelity · generated-from
-  PRD version · mockup version, threaded via `ScreenDetailMockupContext`), the
-  **Mockup variants card** (`MockupVariantsCard` — per-state/per-platform
-  variant rows from `buildMockupVariantRows`, replacing the old
-  states-represented panel; see the Phase 2 bullet below), and a
-  `buildMockupSpecCoverage` spec-mapping
-  panel. Shared priority-chip styles live in
+  Mockups = the **Phase 3A `MockupVariantsPanel`**
+  (`src/components/experience/MockupVariantsPanel.tsx`): a viewport × state
+  **variant gallery** driven by `buildScreenMockupVariants`
+  (`src/lib/mockupVariants.ts`, pure), with a derived summary row
+  ("N of M recommended variants generated · K missing · coverage unknown for
+  legacy mockup"), selectable variant cards (generated vs. missing, visually
+  distinct), and a **selected-variant detail panel**. The primary generated
+  Default variant renders the existing `MockupScreenImage` (its
+  generate/upload/regenerate actions are untouched); missing variants are
+  honest placeholders (NO per-variant generation in Phase 3A — no dead
+  "Generate variant" button); a `buildMockupSpecCoverage` panel shows spec
+  coverage or an honest "Coverage unknown" for legacy mockups. See the
+  "Mockup variants (Phase 3A)" bullet below. Shared priority-chip styles live in
   `src/components/renderers/screenPriority.ts`
   (own module — the react-refresh/only-export-components rule forbids constant
   exports from component files).
@@ -1593,23 +1598,43 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   rendering through the Phase 1 derived layer — never require contract
   fields.
 - **Per-state mockup variant tracking is metadata-based, never visual.**
-  `buildMockupVariantRows(item, platform?)` derives one row for the default
-  view (status `generated` iff the screen joins a mockup screen) plus one per
-  documented non-default state (`required` iff `state.needsMockup`); a
-  default-`type` state folds into the default row. Rows carry a
-  deterministic id (`default` / `state:<slug>`), the overlay key for the
-  user-set **`mockupVariantStatus`** map (`'accepted' | 'not_needed'`) on
-  `ScreenMetadataEdit`. Per-variant image generation is NOT wired — the
-  Mockups-tab `MockupVariantsCard` offers only the real actions (mark
-  accepted / not needed / undo) and says "tracked from generated mockup
+  Two layers build on the same `mockupVariantStatus` overlay keys and must stay
+  compatible:
+  - **Readiness layer** — `buildMockupVariantRows(item, platform?)`
+    (`screenReadiness.ts`) derives one row for the default view (status
+    `generated` iff the screen joins a mockup screen) plus one per documented
+    non-default state (`required` iff `state.needsMockup`); a default-`type`
+    state folds into the default row. Rows carry a deterministic id
+    (`default` / `state:<slug>`) — the overlay key for the user-set
+    **`mockupVariantStatus`** map (`'accepted' | 'not_needed'`) on
+    `ScreenMetadataEdit`. A missing **state** row (never the default row —
+    that's `missing_mockup_p0`'s job, and counting it would downgrade legacy
+    mockup-less P2/P3 screens) left `missing` while `required` is the
+    `missing_state_variants` readiness gap; `accepted`/`not_needed` resolve it.
+    This layer alone drives review status.
+  - **Phase 3A discovery layer (`src/lib/mockupVariants.ts`, pure,
+    unit-tested)** — `buildScreenMockupVariants(item, {platform, mobileRelevant})`
+    adds a **viewport dimension** (desktop / mobile / tablet) on top of states,
+    for the Mockups-tab gallery + screen-card summary + coverage-panel rollup.
+    A legacy single-image mockup normalizes to **`Desktop · Default`**
+    (`source: 'legacy'`, `coverageStatus: 'unknown'` — no per-variant coverage
+    metadata was ever captured). Recommendations are DERIVED estimates:
+    `Desktop · Default` for every primary screen, `Mobile · Default` for P0
+    (and P1/supporting when `mobileRelevant`), and important documented states.
+    **Overlay-key compatibility**: the primary-viewport Default reuses `default`
+    and primary-viewport states reuse `state:<slug>` (shared with the readiness
+    layer); only the secondary-viewport default introduces `${viewport}:default`.
+    `summarizeScreenVariants` (per-screen card) and
+    `buildMockupVariantCoverageSummary` (artifact rollup: recommended
+    generated/total, P0 mobile coverage, legacy-unknown count) drive the UI.
+    This layer is **display/discovery only — it never changes review status.**
+  Per-variant image generation is NOT wired (Phase 3B) — the Mockups-tab
+  `MockupVariantsPanel` offers only the real actions (mark accepted / not
+  needed / undo) and says coverage is "tracked from generated mockup
   metadata"; never add a dead "generate variant" button or wording that
-  implies Synapse inspected the rendered image. A missing row offers BOTH
-  "Mark accepted" (the user verified/uploaded the variant externally) and
-  "Not needed". A **state** row (never the default row — that's
-  `missing_mockup_p0`'s job, and counting it would downgrade legacy
-  mockup-less P2/P3 screens) left `missing` while `required` is the
-  `missing_state_variants` readiness gap; `accepted`/`not_needed` resolve it
-  deliberately. `parseDecisionBranches` (arrow-form +
+  implies Synapse inspected the rendered image, and never claim visual
+  alignment / show "covered" without structured metadata (legacy → "unknown").
+  `parseDecisionBranches` (arrow-form +
   if/otherwise) powers both the branch-aware Flow-tab rendering
   (`DecisionBranches`) and the `decision_missing_branches` gap — an
   unparseable decision renders the raw text with an honest "branch outcomes

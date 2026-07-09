@@ -299,24 +299,34 @@ describe('Phase 2 contract rendering', () => {
         expect(getAllByText('Empty state appears when no evaluations exist').length).toBeGreaterThan(0);
     });
 
-    it('Mockups tab lists variant rows from metadata with honest statuses', () => {
+    it('Mockups tab presents a viewport × state variant gallery with honest statuses', () => {
         const { getByText, getAllByText } = renderContractDetail('mockups');
-        expect(getByText('Mockup variants')).toBeTruthy();
-        expect(getByText('Tracked from generated mockup metadata')).toBeTruthy();
-        expect(getByText('Default view')).toBeTruthy();
-        expect(getByText('Generated')).toBeTruthy();
-        expect(getAllByText(/Generated from/).length).toBeGreaterThan(0);
-        expect(getByText(/PRD Version 3 · mockup v2/)).toBeTruthy();
-        expect(getByText('Empty history')).toBeTruthy();
-        expect(getAllByText('Missing').length).toBe(2);
-        // Only real actions are offered; per-variant generation is not claimed.
-        expect(getByText(/Per-variant generation isn’t wired yet/)).toBeTruthy();
+        // Header + derived summary.
+        expect(getByText(/recommended .*variants.* generated/)).toBeTruthy();
+        // Variant cards (viewport × state). The default is generated; mobile /
+        // states are recommended-but-missing.
+        expect(getAllByText('Desktop · Default').length).toBeGreaterThan(0);
+        expect(getByText('Mobile · Default')).toBeTruthy();
+        expect(getByText('Desktop · Empty history')).toBeTruthy();
+        expect(getByText('Desktop · Upload error')).toBeTruthy();
+        // Legacy mockup with no coverage metadata → unknown, never fabricated.
+        expect(getByText('Coverage unknown')).toBeTruthy();
+        expect(getByText(/Generated from PRD Version 3/)).toBeTruthy();
+        // Missing variants are visually distinct (Missing pills + "Not generated yet").
+        expect(getAllByText('Missing').length).toBe(3);
+        expect(getAllByText('Not generated yet').length).toBe(3);
+        // Selecting a missing variant explains generation isn't in this phase —
+        // and offers no dead "Generate variant" button.
+        fireEvent.click(getByText('Mobile · Default'));
+        expect(getByText(/Per-variant generation lands in Phase 3B/)).toBeTruthy();
     });
 
     it('marking a variant not needed persists through the edit overlay', () => {
         const onSave = vi.fn();
-        const { getAllByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
-        fireEvent.click(getAllByText('Not needed')[0]);
+        const { getByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
+        // Select the missing Empty-history variant, then mark it not needed.
+        fireEvent.click(getByText('Desktop · Empty history'));
+        fireEvent.click(getByText('Not needed'));
         expect(onSave).toHaveBeenCalledTimes(1);
         const [id, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
         expect(id).toBe('scr-submission');
@@ -358,11 +368,10 @@ describe('Phase 2 contract rendering', () => {
 describe('missing variant acceptance (review-feedback regression)', () => {
     it('a missing variant row can be marked accepted (e.g. verified via upload), not just not-needed', () => {
         const onSave = vi.fn();
-        const { getAllByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
-        // Row order: default (generated) → Empty history (missing) → Upload
-        // error (missing); the first "Mark accepted" after the default row's
-        // belongs to the missing Empty history row.
-        fireEvent.click(getAllByText('Mark accepted')[1]);
+        const { getByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
+        // Select the missing Empty-history variant, then mark it accepted.
+        fireEvent.click(getByText('Desktop · Empty history'));
+        fireEvent.click(getByText('Mark accepted'));
         expect(onSave).toHaveBeenCalledTimes(1);
         const [, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
         expect(edit.mockupVariantStatus).toEqual({ 'state:empty-history': 'accepted' });
