@@ -1628,8 +1628,16 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     A legacy single-image mockup normalizes to **`Desktop · Default`**
     (`source: 'legacy'`, `coverageStatus: 'unknown'` — no per-variant coverage
     metadata was ever captured). Recommendations are DERIVED estimates:
-    `Desktop · Default` for every primary screen, `Mobile · Default` for P0
-    (and P1/supporting when `mobileRelevant`), and important documented states.
+    `Desktop · Default` for every primary screen, `Mobile · Default` **only
+    when the project is `mobileRelevant`** (mobile-first / responsive — then on
+    every screen, P0 included), and important documented states. **A web/desktop
+    project (`mobileRelevant` false) recommends NO Mobile variant — not even for
+    its P0 screens** — so it never surfaces "mobile coverage" gaps for a
+    platform that ships no mobile UI; `buildMockupVariantCoverageSummary` counts
+    a P0 screen toward `p0Total` only when a Mobile default is actually
+    recommended, so the "Mobile coverage (P0)" panel row stays hidden for
+    non-mobile projects. Do **not** re-gate the Mobile recommendation on
+    priority alone.
     **Overlay-key compatibility**: the primary-viewport Default reuses `default`
     and primary-viewport states reuse `state:<slug>` (shared with the readiness
     layer); only the secondary-viewport default introduces `${viewport}:default`.

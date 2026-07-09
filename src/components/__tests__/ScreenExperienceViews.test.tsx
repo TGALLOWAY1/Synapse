@@ -263,6 +263,7 @@ function renderContractDetail(
             onNavigateToScreen={() => {}}
             availableScreenSlugs={index.availableSlugs}
             features={FEATURES}
+            mobileRelevant
             onSaveScreenEdit={opts.onSaveScreenEdit}
             mockupContext={opts.withMockupContext === false ? undefined : {
                 projectId: 'p1',
