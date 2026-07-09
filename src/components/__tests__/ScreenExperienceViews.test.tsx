@@ -315,10 +315,14 @@ describe('Phase 2 contract rendering', () => {
         // Missing variants are visually distinct (Missing pills + "Not generated yet").
         expect(getAllByText('Missing').length).toBe(3);
         expect(getAllByText('Not generated yet').length).toBe(3);
-        // Selecting a missing variant explains generation isn't in this phase —
-        // and offers no dead "Generate variant" button.
+        // Selecting a missing variant offers a Phase 3B "Generate variant"
+        // action — disabled here because the test env has no OpenAI key — with
+        // a clear, non-alarming explanation rather than a silent failure.
         fireEvent.click(getByText('Mobile · Default'));
-        expect(getByText(/Per-variant generation lands in Phase 3B/)).toBeTruthy();
+        const generateBtn = getByText('Generate variant').closest('button');
+        expect(generateBtn).toBeTruthy();
+        expect(generateBtn?.disabled).toBe(true);
+        expect(getAllByText(/requires your own OpenAI API key/).length).toBeGreaterThan(0);
     });
 
     it('marking a variant not needed persists through the edit overlay', () => {

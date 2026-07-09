@@ -37,7 +37,8 @@ import {
     type ScreenMetadataEdit,
 } from '../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
-import { buildMockupVariantCoverageSummary } from '../lib/mockupVariants';
+import { buildMockupVariantCoverageSummary, type GeneratedVariantMap } from '../lib/mockupVariants';
+import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
 import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
 import { parseScreenInventory } from '../lib/screenInventoryNormalize';
 import { parseFlows } from './renderers/userFlows/parseFlow';
@@ -401,9 +402,37 @@ export function ArtifactWorkspace({
     const mockupPlatform = mockupPreferred ? extractMockupSettings(mockupPreferred).platform : undefined;
     const mobileRelevant = projectPlatform === 'app'
         || mockupPlatform === 'mobile' || mockupPlatform === 'responsive';
+
+    // Phase 3B: manifest-backed generated variants across all screens (from the
+    // per-variant image store), keyed by screenId → variantId → coverage. Loaded
+    // lazily; feeds both the artifact-level rollup and the per-screen cards so
+    // they reflect real generated variants, not just derived recommendations.
+    const mockupVersionId = mockupPreferred?.id;
+    const loadVariantImagesForVersion = useMockupVariantImageStore(s => s.loadForVersion);
+    const variantImagesMap = useMockupVariantImageStore(s => s.images);
+    useEffect(() => {
+        if (mockupVersionId) void loadVariantImagesForVersion(mockupVersionId);
+    }, [mockupVersionId, loadVariantImagesForVersion]);
+    const generatedVariantsByScreen = useMemo(() => {
+        const map = new Map<string, GeneratedVariantMap>();
+        if (!mockupVersionId) return map;
+        for (const key of Object.keys(variantImagesMap)) {
+            const r = variantImagesMap[key];
+            if (r.versionId !== mockupVersionId) continue;
+            const existing = map.get(r.screenId) ?? {};
+            existing[r.variantId] = { coverage: r.coverageManifest?.overallStatus ?? 'unknown' };
+            map.set(r.screenId, existing);
+        }
+        return map;
+    }, [variantImagesMap, mockupVersionId]);
+
     const variantCoverage = useMemo(
-        () => buildMockupVariantCoverageSummary(screenIndex, { platform: mockupPlatform, mobileRelevant }),
-        [screenIndex, mockupPlatform, mobileRelevant],
+        () => buildMockupVariantCoverageSummary(screenIndex, {
+            platform: mockupPlatform,
+            mobileRelevant,
+            generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
+        }),
+        [screenIndex, mockupPlatform, mobileRelevant, generatedVariantsByScreen],
     );
 
     // Validation issues minus the user's persisted dismissals.
@@ -954,6 +983,7 @@ export function ArtifactWorkspace({
                         variantCoverage={variantCoverage}
                         mockupPlatform={mockupPlatform}
                         mobileRelevant={mobileRelevant}
+                        generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
                             mockupDetailContext

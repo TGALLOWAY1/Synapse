@@ -17,7 +17,7 @@ import {
 } from '../../lib/screenReadiness';
 import {
     buildScreenMockupVariants, summarizeScreenVariants,
-    type MockupVariantCoverageSummary,
+    type GeneratedVariantMap, type MockupVariantCoverageSummary,
 } from '../../lib/mockupVariants';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import { ScreenCoveragePanel } from './ScreenCoveragePanel';
@@ -36,6 +36,9 @@ interface Props {
     mockupPlatform?: MockupPlatform;
     /** True when the project is mobile-relevant (mobile-first / responsive). */
     mobileRelevant?: boolean;
+    /** Phase 3B: resolves a screen's manifest-backed generated variants so the
+     * card reflects real generation (e.g. "Mobile: generated"). */
+    generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
     /** Opens the Screen Detail view — keyed by the stable canonical id. */
     onSelectScreen: (screenId: string) => void;
     /**
@@ -48,7 +51,7 @@ interface Props {
 
 export function ScreenListView({
     index, readiness, coverage, variantCoverage, mockupPlatform, mobileRelevant,
-    onSelectScreen, onGenerateMissingMockups,
+    generatedVariantsByScreen, onSelectScreen, onGenerateMissingMockups,
 }: Props) {
     const [filter, setFilter] = useState<ScreenListFilter>('all');
 
@@ -150,6 +153,7 @@ export function ScreenListView({
                                     readiness={readiness.get(item.id)}
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
+                                    generatedVariants={generatedVariantsByScreen?.(item.id)}
                                     onSelect={() => onSelectScreen(item.id)}
                                 />
                             </li>
@@ -162,12 +166,13 @@ export function ScreenListView({
 }
 
 function ScreenRow({
-    item, readiness, mockupPlatform, mobileRelevant, onSelect,
+    item, readiness, mockupPlatform, mobileRelevant, generatedVariants, onSelect,
 }: {
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
+    generatedVariants?: GeneratedVariantMap;
     onSelect: () => void;
 }) {
     const { screen } = item;
@@ -179,7 +184,7 @@ function ScreenRow({
     const riskCount = screen.risks?.length ?? 0;
     const featureRefs = screen.featureRefs ?? [];
     const variantSummary = summarizeScreenVariants(
-        buildScreenMockupVariants(item, { platform: mockupPlatform, mobileRelevant }),
+        buildScreenMockupVariants(item, { platform: mockupPlatform, mobileRelevant, generatedVariants }),
     );
 
     return (
