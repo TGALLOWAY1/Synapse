@@ -95,6 +95,10 @@ interface ImageStoreState {
         payload: MockupPayload;
         settings: MockupSettings;
         quality: MockupImageQuality;
+        /** Phase 3C: fired after a successful render is stored, so a caller can
+         * capture a coverage sidecar for the default variant without changing
+         * this legacy image path. Best-effort — thrown callbacks are swallowed. */
+        onGenerated?: (record: MockupImageRecord) => void;
     }) => Promise<void>;
 
     /** Cancel an in-flight generation. */
@@ -157,7 +161,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         return out;
     },
 
-    generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality }) => {
+    generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated }) => {
         const scope = screenScope(versionId, screen.id);
         if (get().inFlight[scope]) return; // already generating something for this screen
 
@@ -198,6 +202,9 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             // signed out). Image generation writes IndexedDB directly and never
             // touches the project store, so the bundle-push path wouldn't see it.
             notifyMockupImageGenerated(projectId, versionId);
+            // Phase 3C: let a caller capture a default-variant coverage sidecar.
+            // Best-effort — a callback failure must never break generation.
+            try { onGenerated?.(record); } catch { /* ignore */ }
         } catch (err) {
             const aborted = (err as { name?: string })?.name === 'AbortError' || abort.signal.aborted;
             const message = aborted

@@ -13,14 +13,14 @@
 // is shown. Status is tracked from generated metadata + the user's overlay,
 // never from inspecting pixels, and the copy says so.
 
-import { useMemo, useState } from 'react';
+import { useCallback, useMemo, useState } from 'react';
 import {
     CheckCircle2, Clock, History as HistoryIcon, Info, Layers, Monitor, ShieldQuestion,
     Smartphone, Tablet,
 } from 'lucide-react';
 import type {
-    MockupCoverageItem, MockupCoverageItemStatus, MockupCoverageManifest, MockupPlatform,
-    MockupVariantImageRecord,
+    MockupCoverageItem, MockupCoverageItemStatus, MockupCoverageManifest, MockupImageRecord,
+    MockupPlatform, MockupVariantImageRecord,
 } from '../../types';
 import {
     COVERAGE_STATUS_LABELS,
@@ -36,7 +36,10 @@ import {
     type MockupVariantFreshnessStatus, type MockupVariantSourceSignature,
 } from '../../lib/mockupVariantTrust';
 import { buildMockupSpecCoverage } from '../../lib/screenReadiness';
-import { buildVariantGenerationRequest, type VariantRequestContext } from '../../lib/mockupVariantRequest';
+import {
+    buildVariantCoverageManifest, buildVariantGenerationRequest, type VariantRequestContext,
+} from '../../lib/mockupVariantRequest';
+import { buildVariantImageKey } from '../../lib/mockupVariantImageStore';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
 import type { ScreenExperienceItem } from '../../lib/screenExperience';
 import { MockupScreenImage } from '../mockups/MockupScreenImage';
@@ -272,13 +275,16 @@ function VariantDetail({
             : undefined),
         [trustContext, item.screen, variant.viewport, variant.stateName, variant.stateType, variant.id],
     );
-    const generatedFrom = trustContext
-        ? {
-            prdVersionId: trustContext.prdVersionId,
-            screenVersionId: trustContext.screenVersionId,
-            designSystemVersionId: trustContext.designSystemVersionId,
-        }
-        : undefined;
+    const generatedFrom = useMemo(
+        () => (trustContext
+            ? {
+                prdVersionId: trustContext.prdVersionId,
+                screenVersionId: trustContext.screenVersionId,
+                designSystemVersionId: trustContext.designSystemVersionId,
+            }
+            : undefined),
+        [trustContext],
+    );
 
     // Manifest-backed coverage + stored metadata for this variant (from the
     // per-variant image store). Fetched for EVERY variant — for the default it
@@ -286,6 +292,40 @@ function VariantDetail({
     const variantRecord = useMockupVariantImageStore(
         s => s.getBestRecord(mockupContext.versionId, item.id, variant.id),
     );
+    const putSidecar = useMockupVariantImageStore(s => s.putSidecar);
+
+    // Phase 3C: when the DEFAULT variant is (re)generated through the legacy
+    // MockupScreenImage path, capture a coverage/source sidecar keyed
+    // `versionId:screenId:default:quality` WITHOUT moving the legacy image. Only
+    // fires on new generation, so old defaults stay coverage-unknown.
+    const handleDefaultGenerated = useCallback((record: MockupImageRecord) => {
+        if (isVariantPath || !variantSourceSignature) return;
+        const request = buildVariantGenerationRequest(item.screen, item.id, variant, {
+            projectName: mockupContext.payload.title,
+            productSummary: mockupContext.payload.summary,
+            fidelity: mockupContext.settings.fidelity,
+            siblingMockup: item.mockupScreen,
+        });
+        const sidecar: MockupVariantImageRecord = {
+            key: buildVariantImageKey(mockupContext.versionId, item.id, 'default', record.quality),
+            projectId: mockupContext.projectId,
+            artifactId: mockupContext.artifactId,
+            versionId: mockupContext.versionId,
+            screenId: item.id,
+            variantId: 'default',
+            viewport: variant.viewport,
+            stateName: 'Default',
+            // Sidecar carries no owned image — the legacy store still renders it.
+            dataUrl: '',
+            quality: record.quality,
+            prompt: '',
+            coverageManifest: buildVariantCoverageManifest(request),
+            sourceSignature: { ...variantSourceSignature, createdAt: new Date().toISOString() },
+            generatedFrom,
+            generatedAt: Date.now(),
+        };
+        void putSidecar(sidecar);
+    }, [isVariantPath, variantSourceSignature, generatedFrom, item, variant, mockupContext, putSidecar]);
 
     return (
         <div className="bg-white rounded-xl border border-neutral-200 p-4 space-y-3">
@@ -324,6 +364,7 @@ function VariantDetail({
                             screen={item.mockupScreen!}
                             payload={mockupContext.payload}
                             settings={mockupContext.settings}
+                            onGenerated={handleDefaultGenerated}
                         />
                     </div>
                     {metaParts.length > 0 && (
@@ -387,8 +428,10 @@ function VariantDetail({
                 />
             )}
 
-            {/* Storage clarity — variant images are local to this device. */}
-            {(variant.source === 'variant' || variantRecord) && (
+            {/* Storage clarity — per-variant images are local to this device
+                (the legacy default image itself still syncs, so its note is
+                omitted; only the genuinely local-only variant images carry it). */}
+            {variant.source === 'variant' && (
                 <p className="text-[11px] text-neutral-400 flex items-center gap-1">
                     <Info size={10} className="shrink-0" aria-hidden />
                     Storage: Local browser cache — saved on this device until snapshot/sync support is added.
