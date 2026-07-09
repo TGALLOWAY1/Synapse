@@ -30,6 +30,7 @@ import {
     isImplementationSummaryEmpty,
 } from '../derive/implementationSummary';
 import { sanitizeRolePermissions } from '../prdRolesSanitizer';
+import { stripLeadingListNumber } from '../utils/stripLeadingListNumber';
 
 const tierTag = (tier?: string): string => {
     if (!tier) return '';
@@ -220,7 +221,7 @@ const renderArchFlows = (flows: ArchFlow[]): string[] => {
     const lines: string[] = [];
     flows.forEach(f => {
         lines.push(`### ${f.name}`);
-        f.steps.forEach((step, idx) => lines.push(`${idx + 1}. ${step}`));
+        f.steps.forEach((step, idx) => lines.push(`${idx + 1}. ${stripLeadingListNumber(step)}`));
         lines.push('');
     });
     return lines;
