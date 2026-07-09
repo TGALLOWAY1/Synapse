@@ -1698,6 +1698,54 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   panel is the Phase 4B decision surface — a safer choice than hooking into an
   unrelated flow. Everything stays **advisory** — nothing gates rendering or
   generation, and legacy artifacts (no review data) show no impact/blocker.
+- **Phase 5A — implementation handoff packages + build-task bridge
+  (`src/lib/screenImplementationHandoff.ts`, pure, unit-tested).** Layers ON TOP
+  of the Phase 4A review + Phase 4B downstream layers (never changing them) to
+  turn an accepted screen into a **developer-ready build contract**. All
+  **derived, never persisted**. `buildScreenImplementationHandoff({item,
+  reviewModel, variants, downstream?, features?})` produces a
+  `ScreenImplementationHandoff`: **route** (explicit generated `handoff.route` →
+  small keyword map → slugified title, tagged `explicit`/`derived`/`missing`),
+  **components** (handoff `primaryComponents` → core UI regions → mockup UI
+  elements → title, PascalCased), **state** (handoff `stateVariables` +
+  per-non-default-state status vars), **events** (handoff `events` + exit-path +
+  flow user-action handlers, `on…`-named), **data dependencies** (handoff
+  data/api deps + `outputData`, keyword-classified entity/api/storage/…, with a
+  "No linked data model entities found" review warning when empty — **there is no
+  real Data Model trace; everything is estimated, never claimed as verified**),
+  **mockup references** (variants holding a real image / accepted, with Phase 3C
+  freshness + coverage), **acceptance criteria** (`resolveAcceptanceCriteria`),
+  a **QA checklist** (rendering/interaction/state/data/accessibility/responsive/
+  error_handling/acceptance, restated from the spec), and a small **build-task
+  list** (route/component/state/data/mockup/qa/accessibility, each with a
+  `priority` and a `source`). Individual derivers (`deriveHandoffRoute`/
+  `…Components`/`…State`/`…Events`/`…DataDependencies`/`…QaChecklist`/
+  `…BuildTasks`/`…Readiness`) are exported for pure testing. **Readiness**
+  (`deriveHandoffReadiness` → `ready` | `review_recommended` | `blocked`):
+  blocked on the clear cases (system-readiness blockers, unsigned/outdated/
+  downstream-blocking P0, no acceptance criteria, no route/component guidance on
+  a primary screen); review-recommended is the honest common state (accepted
+  with review items, stale/unknown mockups, missing mobile, missing data trace,
+  thin handoff); ready requires sign-off + no blockers + minimal guidance.
+  `buildScreensHandoffRollup(handoffs, p0Ids)` rolls up ready/review/blocked
+  **gated on P0**; `renderHandoffMarkdown` is the copy-to-clipboard export;
+  `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
+  structural `PreflightContribution` param on `buildScreensPreflight` /
+  `analyzeScreensDownstream` (screenDownstreamImpact **never imports** the handoff
+  module — that would cycle; the caller passes the contribution in). **UI:** a
+  Screen Detail **Handoff tab** (`ScreenHandoffView` + a `handoff` value on
+  `ScreenDetailTab`, URL-addressable via `?screenTab=handoff`) with a
+  readiness-colored tab dot, compact sections, and a Copy-handoff action
+  (clipboard → textarea fallback); a compact **handoff readiness chip** on
+  `ScreenListView` cards; **Handoff ready / Handoff blocked** list filters
+  (`SCREEN_LIST_FILTERS` + `ScreenFilterReview.handoffReadiness`); and an
+  **Implementation handoff** rollup section in `ScreenCoveragePanel`. Everything
+  stays **advisory** — nothing gates rendering or generation, and legacy/sparse
+  screens degrade to "Not specified" / review warnings, never crash. **No
+  Implementation Plan bridge was added in Phase 5A** (deliberately — the plan
+  artifact is not mutated or coupled; a trace-backed plan bridge is deferred to
+  Phase 5B) and no Screens-specific export/finalization hook was added (the local
+  Handoff tab + copy action is the decision surface, mirroring Phase 4B).
 - **Phase 2 — source-grounded screen contracts.** New screen_inventory
   generations emit an explicit contract per screen (all fields optional &
   back-compat on `ScreenItem`/`ScreenState` in `src/types`): structured
