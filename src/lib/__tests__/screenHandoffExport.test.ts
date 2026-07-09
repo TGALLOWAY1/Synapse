@@ -251,6 +251,23 @@ describe('buildScreensHandoffExportPackage', () => {
         expect(reviewText).toContain('data model');
     });
 
+    it('7b. manifest trace confidence is per-artifact, not the overall rollup', () => {
+        // Data Model fails to match (F9 / Widget vs. "Unrelated") but the plan
+        // matches the screen by name → the Data Model entry must NOT inherit the
+        // plan's strong confidence.
+        const scr = screen({ featureRefs: ['F9'], handoff: { route: '/', dataDependencies: ['Widget'] } });
+        const pkg = buildPackage({
+            screens: [{ item: item(scr), model: reviewModel({ userStatus: 'accepted' }) }],
+            dataModel: UNRELATED_DATA_MODEL,
+            plan: PLAN,
+            manifest: { dataModelPresent: true, implementationPlanPresent: true },
+        });
+        const dm = pkg.manifest.includedArtifacts.find(a => a.kind === 'data_model');
+        const plan = pkg.manifest.includedArtifacts.find(a => a.kind === 'implementation_plan');
+        expect(dm?.traceConfidence).toBe('No matches across traced screens');
+        expect(plan?.traceConfidence).not.toBe('No matches across traced screens');
+    });
+
     it('8. is not_ready when an accepted P0 screen is outdated', () => {
         const pkg = buildPackage({
             screens: [{
@@ -262,6 +279,9 @@ describe('buildScreensHandoffExportPackage', () => {
             manifest: { dataModelPresent: true, implementationPlanPresent: true },
         });
         expect(pkg.status).toBe('not_ready');
+        // The per-screen stale-review signal must survive into the export (a
+        // review-freshness label, not the mockup-freshness map which lacks it).
+        expect(pkg.screens[0].reviewFreshness).toBe('Changed after sign-off');
     });
 
     it('9. treats legacy unknown mockup freshness as a caveat, not a blocker', () => {

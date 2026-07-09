@@ -219,10 +219,21 @@ const HANDOFF_READINESS_LABELS: Record<string, string> = {
     blocked: 'Blocked',
 };
 
+/** Mockup-variant freshness labels (MockupVariantFreshnessStatus). */
 const FRESHNESS_LABELS: Record<string, string> = {
     current: 'Current',
     possibly_stale: 'Possibly out of date',
     stale: 'Out of date',
+    unknown: 'Unknown',
+};
+
+/** Screen REVIEW freshness labels (ScreenReviewFreshnessStatus: current /
+ * outdated / unknown) — a distinct axis from mockup freshness. Kept separate so
+ * an `outdated` signed-off screen keeps its stale-review signal in the export
+ * (the mockup map has no `outdated` key). */
+const REVIEW_FRESHNESS_LABELS: Record<string, string> = {
+    current: 'Current',
+    outdated: 'Changed after sign-off',
     unknown: 'Unknown',
 };
 
@@ -273,7 +284,7 @@ function projectScreen(
         reviewStatus: reviewModel?.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : undefined,
         systemReadiness: reviewModel ? SYSTEM_READINESS_LABELS[reviewModel.systemReadiness] : undefined,
         handoffReadiness: HANDOFF_READINESS_LABELS[handoff.readiness.status],
-        reviewFreshness: reviewModel ? FRESHNESS_LABELS[reviewModel.freshness] : undefined,
+        reviewFreshness: reviewModel ? REVIEW_FRESHNESS_LABELS[reviewModel.freshness] : undefined,
         route: handoff.route.path,
         components: handoff.components.map(c => c.name),
         state: handoff.state.map(s => s.name),
@@ -382,7 +393,7 @@ function buildManifest(
             kind: 'data_model',
             versionId: m.dataModelArtifactVersionId,
             title: 'Data Model',
-            traceConfidence: summarizeRollupTrace(input.handoffRollup),
+            traceConfidence: summarizeArtifactTrace(input.handoffs, 'dataModel'),
         });
     }
     if (m.implementationPlanPresent) {
@@ -390,7 +401,7 @@ function buildManifest(
             kind: 'implementation_plan',
             versionId: m.implementationPlanArtifactVersionId,
             title: 'Implementation Plan',
-            traceConfidence: summarizeRollupTrace(input.handoffRollup),
+            traceConfidence: summarizeArtifactTrace(input.handoffs, 'implementationPlan'),
         });
     }
     if (m.designSystemVersionId) {
@@ -419,13 +430,30 @@ function buildManifest(
     };
 }
 
-/** Summarize the rollup's overall trace confidence for a manifest artifact. */
-function summarizeRollupTrace(rollup: ScreensHandoffRollup): string | undefined {
-    const t = rollup.trace;
-    if (!t || t.traced === 0) return undefined;
-    if (t.strong === t.traced) return 'Strong across all traced screens';
-    if (t.missing === t.traced) return 'No matches across traced screens';
-    return `${t.strong} strong · ${t.estimated} estimated · ${t.missing} missing (of ${t.traced} traced)`;
+/** Summarize the trace confidence for ONE downstream artifact (Data Model or
+ * Implementation Plan) across the traced screens. Reads each screen bridge's
+ * artifact-specific confidence — NOT `bridge.overall.confidence` — so a manifest
+ * entry can never claim "Strong" for an artifact whose every trace is missing
+ * just because the other artifact matched. Returns undefined when no screen
+ * carried a trace bridge. */
+function summarizeArtifactTrace(
+    handoffs: readonly ScreenImplementationHandoff[],
+    kind: 'dataModel' | 'implementationPlan',
+): string | undefined {
+    let traced = 0, strong = 0, estimated = 0, missing = 0;
+    for (const h of handoffs) {
+        const bridge = h.traceBridge;
+        if (!bridge) continue;
+        traced += 1;
+        const c = kind === 'dataModel' ? bridge.dataModel.confidence : bridge.implementationPlan.confidence;
+        if (c === 'explicit' || c === 'strong') strong += 1;
+        else if (c === 'weak' || c === 'estimated') estimated += 1;
+        else missing += 1;
+    }
+    if (traced === 0) return undefined;
+    if (strong === traced) return 'Strong across all traced screens';
+    if (missing === traced) return 'No matches across traced screens';
+    return `${strong} strong · ${estimated} estimated · ${missing} missing (of ${traced} traced)`;
 }
 
 // --- Status ------------------------------------------------------------------
