@@ -104,8 +104,8 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         expect(getByText('Screen Coverage & Readiness')).toBeTruthy();
         expect(getByText('PRD features linked')).toBeTruthy();
         expect(getAllByText('1 / 2').length).toBeGreaterThan(0);
-        // Clearer navigation label replaces "2 in · 2 out".
-        expect(getByText(/incoming · .*outgoing/)).toBeTruthy();
+        // Flow-first: the card visualizes the next screen by name, not counts.
+        expect(getByText('Item Detail')).toBeTruthy();
         // Both screens have review-worthy gaps → needs-review badges present.
         expect(getAllByText('Needs review').length).toBeGreaterThan(0);
         // Uncovered-feature disclosure names the missing feature.
@@ -149,6 +149,8 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
                 onSelectScreen={() => {}}
             />,
         );
+        // "Has risks" now lives in the Advanced filter drawer, not a top-level chip.
+        fireEvent.click(getByText('Advanced'));
         fireEvent.click(getByText('Has risks'));
         expect(getByText('Home Dashboard')).toBeTruthy();
         expect(queryByText('Bare Legacy Screen')).toBeNull();
@@ -156,7 +158,7 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
 
     it('renders an empty-filter state instead of nothing', () => {
         const { index, readiness, coverage } = buildFixtures();
-        const { getByText } = render(
+        const { getByText, getByLabelText } = render(
             <ScreenListView
                 index={index}
                 readiness={readiness}
@@ -164,7 +166,8 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        fireEvent.click(getByText('Ready'));
+        // Status is now a compact select rather than a filter chip.
+        fireEvent.change(getByLabelText('Status'), { target: { value: 'ready' } });
         expect(getByText('No screens match this filter.')).toBeTruthy();
     });
 });
@@ -464,7 +467,8 @@ describe('Phase 4A Screens list + coverage panel', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        // Both screens are unreviewed → each card shows the review status line.
+        // Review status is now secondary metadata behind each card's "Details".
+        getAllByText('Show details').forEach(btn => fireEvent.click(btn));
         expect(getAllByText('Not reviewed').length).toBeGreaterThan(0);
     });
 
@@ -480,6 +484,8 @@ describe('Phase 4A Screens list + coverage panel', () => {
                 onSelectScreen={() => {}}
             />,
         );
+        // "Has blockers" is now an Advanced filter.
+        fireEvent.click(getByText('Advanced'));
         fireEvent.click(getByText('Has blockers'));
         // The bare legacy screen (no purpose / acceptance) has blockers; the
         // full P0 dashboard does not.
@@ -675,7 +681,7 @@ describe('Phase 4B downstream impact section', () => {
 describe('Phase 4B list card + coverage panel', () => {
     it('13. a card shows a downstream review chip only when relevant', () => {
         const { index, readiness, coverage, reviewModels, artifactReview } = buildDownstreamFixtures();
-        const { getByText, queryAllByText } = render(
+        const { getByText, queryAllByText, getAllByText } = render(
             <ScreenListView
                 index={index}
                 readiness={readiness}
@@ -685,9 +691,11 @@ describe('Phase 4B list card + coverage panel', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        // The accepted-but-outdated P0 dashboard surfaces a downstream chip…
+        // The accepted-but-outdated P0 dashboard surfaces a downstream note in
+        // its (now secondary) Details section…
+        getAllByText('Show details').forEach(btn => fireEvent.click(btn));
         expect(queryAllByText(/Downstream review/).length).toBeGreaterThan(0);
-        // …but the header still renders normally.
+        // …but the coverage panel still renders normally.
         expect(getByText('Screen Coverage & Readiness')).toBeTruthy();
     });
 
@@ -800,8 +808,10 @@ describe('Phase 5A handoff tab', () => {
                 onSelectScreen={() => {}}
             />,
         );
+        // Handoff readiness is now secondary metadata behind each card's Details.
+        getAllByText('Show details').forEach(btn => fireEvent.click(btn));
         // The unsigned P0 Home Dashboard has a blocked handoff.
-        expect(getAllByText('Handoff blocked').length).toBeGreaterThan(0);
+        expect(getAllByText('Blocked').length).toBeGreaterThan(0);
     });
 
     it('23. the coverage panel shows the handoff rollup', () => {

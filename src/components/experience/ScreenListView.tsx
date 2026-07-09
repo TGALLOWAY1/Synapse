@@ -1,18 +1,26 @@
-// Canonical screen list for the Experience workspace. Read-only: every row is
-// derived from the screen_inventory artifact via the pure join layer
-// (src/lib/screenExperience.ts) plus the derived readiness layer
-// (src/lib/screenReadiness.ts) — nothing here writes to the store. Rows show
-// what the other experience artifacts say about each screen (flow refs,
-// mockup coverage), the derived/user-set review status, and click through to
-// the Screen Detail view. The Screen Coverage & Readiness panel at the top
-// replaces the old mockup-only coverage card.
+// Canonical screen list for the Experience workspace — redesigned "flow-first".
+//
+// Read-only: every row is derived from the screen_inventory artifact via the
+// pure join layer (src/lib/screenExperience.ts), the flow-view helpers
+// (src/lib/screenFlowView.ts), and the derived readiness / review / handoff /
+// downstream layers. Nothing here writes to the store.
+//
+// The information architecture leads with the product experience — what screens
+// exist, how they connect, and which flow they belong to — and keeps
+// implementation, traceability, readiness, and review data available but
+// visually secondary (a per-card "Details" disclosure + a collapsed
+// project-metadata section). A single compact control row replaces the old
+// 14-chip filter explosion.
 
-import { AlertTriangle, AppWindow, ChevronRight, Image as ImageIcon, Layers, Workflow } from 'lucide-react';
+import {
+    AlertTriangle, ArrowRight, ChevronDown, ChevronRight, Image as ImageIcon,
+    Layers, Search, SlidersHorizontal, Workflow, X,
+} from 'lucide-react';
 import { useMemo, useState } from 'react';
 import type { DataModelContent, Feature, MockupPlatform, StructuredImplementationPlan } from '../../types';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
-    SCREEN_LIST_FILTERS, screenMatchesFilter,
+    screenMatchesFilter,
     type ScreenCoverageSummary, type ScreenFilterReview, type ScreenListFilter, type ScreenReadiness,
 } from '../../lib/screenReadiness';
 import {
@@ -31,6 +39,10 @@ import {
     buildScreenMockupVariants, summarizeScreenVariants,
     type GeneratedVariantMap, type MockupVariantCoverageSummary,
 } from '../../lib/mockupVariants';
+import {
+    buildScreenGroups, deriveScreenConnections, flowFilterOptions, hasFlowGrouping,
+    type ScreenGroupMode,
+} from '../../lib/screenFlowView';
 import type { VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { PRIORITY_STYLES, stylablePriority } from '../renderers/screenPriority';
 import type { ScreensHandoffExportManifestInput } from '../../lib/screenHandoffExport';
@@ -84,6 +96,27 @@ interface Props {
     onGenerateMissingMockups?: () => void;
 }
 
+type PriorityFilter = 'all' | 'P0' | 'P1' | 'P2' | 'P3';
+type StatusFilter = 'all' | 'draft' | 'needs_review' | 'accepted' | 'ready';
+type SortMode = 'group' | 'priority' | 'name' | 'readiness';
+
+/** Advanced (power-user) filters — the long tail that used to be top-level chips. */
+const ADVANCED_FILTERS: Array<{ id: ScreenListFilter; label: string }> = [
+    { id: 'has_blockers', label: 'Has blockers' },
+    { id: 'review_recommended', label: 'Review recommended' },
+    { id: 'outdated_review', label: 'Outdated review' },
+    { id: 'downstream_review', label: 'Downstream review' },
+    { id: 'handoff_ready', label: 'Handoff ready' },
+    { id: 'handoff_blocked', label: 'Handoff blocked' },
+    { id: 'missing_mockups', label: 'Missing mockups' },
+    { id: 'has_risks', label: 'Has risks' },
+];
+
+const READINESS_RANK: Record<ScreenReadiness['status'], number> = {
+    implementation_ready: 0, accepted: 1, needs_review: 2, draft: 3,
+};
+const PRIORITY_RANK: Record<string, number> = { P0: 0, P1: 1, P2: 2, P3: 3 };
+
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
@@ -91,20 +124,26 @@ export function ScreenListView({
     projectName, exportManifest,
     onSelectScreen, onGenerateMissingMockups,
 }: Props) {
-    const [filter, setFilter] = useState<ScreenListFilter>('all');
+    const flowsAvailable = useMemo(() => hasFlowGrouping(index), [index]);
+    const [search, setSearch] = useState('');
+    const [priority, setPriority] = useState<PriorityFilter>('all');
+    const [flow, setFlow] = useState<string>('all');
+    const [status, setStatus] = useState<StatusFilter>('all');
+    const [sort, setSort] = useState<SortMode>('group');
+    const [group, setGroup] = useState<ScreenGroupMode>(flowsAvailable ? 'flow' : 'section');
+    const [advanced, setAdvanced] = useState<ReadonlySet<ScreenListFilter>>(() => new Set());
+    const [advancedOpen, setAdvancedOpen] = useState(false);
+    const [metadataOpen, setMetadataOpen] = useState(false);
 
-    // Phase 4B: downstream impact analysis — per-screen impacts (row chips +
+    // Phase 4B: downstream impact analysis — per-screen impacts (detail chips +
     // filters), the artifact-level rollup, and the implementation preflight.
-    // Derived once from the review models; pure & memoized, never persisted.
     const downstream = useMemo(
         () => analyzeScreensDownstream(index, reviewModels, artifactReview),
         [index, reviewModels, artifactReview],
     );
     const downstreamByScreen = downstream.impactsByScreen;
 
-    // Phase 5A: per-screen implementation handoff packages (route/components/
-    // state/events/data/mockups/QA/build tasks + readiness). Derived from the
-    // review model + variant grid + downstream impact — pure & memoized.
+    // Phase 5A: per-screen implementation handoff packages.
     const handoffByScreen = useMemo(() => {
         const map = new Map<string, ScreenImplementationHandoff>();
         for (const item of index.items) {
@@ -131,8 +170,6 @@ export function ScreenListView({
         () => buildScreensHandoffRollup([...handoffByScreen.values()], p0Ids),
         [handoffByScreen, p0Ids],
     );
-    // Fold handoff issues into the Phase 4B preflight (handoff contributions are
-    // structural — screenDownstreamImpact never imports the handoff module).
     const preflight = useMemo(() => {
         const contribution = buildHandoffPreflightContribution([...handoffByScreen.values()], p0Ids);
         return buildScreensPreflight(downstream.inputs, artifactReview, contribution);
@@ -154,22 +191,72 @@ export function ScreenListView({
         };
     };
 
-    // Per-filter match counts so empty filters are obvious before clicking.
-    const filterCounts = useMemo(() => {
-        const counts = new Map<ScreenListFilter, number>();
-        for (const { id } of SCREEN_LIST_FILTERS) {
-            counts.set(id, index.items.filter(item =>
-                screenMatchesFilter(item, readiness.get(item.id), id, filterReviewFor(item))).length);
+    const flowOptions = useMemo(() => flowFilterOptions(index), [index]);
+
+    // Combined predicate over the compact controls: search ∧ priority ∧ flow ∧
+    // status ∧ every active advanced filter.
+    const matches = (item: ScreenExperienceItem): boolean => {
+        if (search.trim()) {
+            const needle = search.trim().toLowerCase();
+            const haystack = `${item.screen.name} ${item.screen.purpose ?? ''} ${item.relatedFlows.map(r => r.flow.title).join(' ')}`.toLowerCase();
+            if (!haystack.includes(needle)) return false;
         }
-        return counts;
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-    }, [index, readiness, reviewModels, downstreamByScreen, handoffByScreen]);
+        if (priority !== 'all' && stylablePriority(item.screen.priority) !== priority) return false;
+        if (flow !== 'all' && !item.relatedFlows.some(r => r.flow.title === flow)) return false;
+        const review = filterReviewFor(item);
+        const rd = readiness.get(item.id);
+        if (status !== 'all' && !screenMatchesFilter(item, rd, status, review)) return false;
+        for (const adv of advanced) {
+            if (!screenMatchesFilter(item, rd, adv, review)) return false;
+        }
+        return true;
+    };
+
+    const sortItems = (items: readonly ScreenExperienceItem[]): ScreenExperienceItem[] => {
+        if (sort === 'group') return [...items];
+        const copy = [...items];
+        copy.sort((a, b) => {
+            if (sort === 'name') return a.screen.name.localeCompare(b.screen.name);
+            if (sort === 'priority') {
+                return (PRIORITY_RANK[stylablePriority(a.screen.priority)] ?? 9)
+                    - (PRIORITY_RANK[stylablePriority(b.screen.priority)] ?? 9);
+            }
+            // readiness
+            const ra = readiness.get(a.id)?.status ?? 'draft';
+            const rb = readiness.get(b.id)?.status ?? 'draft';
+            return READINESS_RANK[ra] - READINESS_RANK[rb];
+        });
+        return copy;
+    };
+
+    const groups = useMemo(() => buildScreenGroups(index, group), [index, group]);
+
+    const filteredGroups = groups
+        .map(g => ({ ...g, items: sortItems(g.items.filter(matches)) }))
+        .filter(g => g.items.length > 0);
+
+    const totalMatches = filteredGroups.reduce((sum, g) => sum + g.items.length, 0);
+    const advancedCount = advanced.size;
+    const anyFilterActive = Boolean(search.trim()) || priority !== 'all' || flow !== 'all'
+        || status !== 'all' || advancedCount > 0;
+
+    const toggleAdvanced = (id: ScreenListFilter) => {
+        setAdvanced(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id); else next.add(id);
+            return next;
+        });
+    };
+    const clearFilters = () => {
+        setSearch(''); setPriority('all'); setFlow('all'); setStatus('all');
+        setAdvanced(new Set());
+    };
 
     if (index.items.length === 0) {
         return (
             <div className="max-w-xl mx-auto bg-white rounded-xl border border-dashed border-neutral-300 p-10 text-center">
                 <div className="w-12 h-12 rounded-full bg-indigo-50 flex items-center justify-center mx-auto mb-3">
-                    <AppWindow size={20} className="text-indigo-500" />
+                    <Layers size={20} className="text-indigo-500" />
                 </div>
                 <h3 className="text-sm font-semibold text-neutral-800">No screens yet</h3>
                 <p className="text-xs text-neutral-500 mt-1">
@@ -179,68 +266,111 @@ export function ScreenListView({
         );
     }
 
-    const filteredSections = index.sections
-        .map(section => ({
-            ...section,
-            items: section.items.filter(item =>
-                screenMatchesFilter(item, readiness.get(item.id), filter, filterReviewFor(item))),
-        }))
-        .filter(section => section.items.length > 0);
-
     return (
-        <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-6">
-            <ScreenCoveragePanel
-                summary={coverage}
-                variantCoverage={variantCoverage}
-                artifactReview={artifactReview}
-                downstreamRollup={downstream.rollup}
-                handoffRollup={handoffRollup}
-                onGenerateMissingMockups={onGenerateMissingMockups}
-            />
+        <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-5">
+            {/* Compact control row — replaces the old 14-chip filter explosion. */}
+            <div className="bg-white rounded-xl border border-neutral-200 p-3 space-y-3 sticky top-0 z-10">
+                <div className="flex flex-wrap items-center gap-2">
+                    <label className="relative flex-1 min-w-[10rem]">
+                        <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400" aria-hidden />
+                        <input
+                            type="search"
+                            value={search}
+                            onChange={e => setSearch(e.target.value)}
+                            placeholder="Search screens…"
+                            aria-label="Search screens"
+                            className="w-full pl-8 pr-2 py-1.5 text-sm rounded-lg border border-neutral-200 focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
+                        />
+                    </label>
+                    <SelectControl label="Priority" value={priority} onChange={v => setPriority(v as PriorityFilter)}
+                        options={[
+                            { value: 'all', label: 'All priorities' },
+                            { value: 'P0', label: 'P0' }, { value: 'P1', label: 'P1' },
+                            { value: 'P2', label: 'P2' }, { value: 'P3', label: 'P3' },
+                        ]} />
+                    <SelectControl label="Flow" value={flow} onChange={setFlow}
+                        options={[
+                            { value: 'all', label: 'All flows' },
+                            ...flowOptions.map(f => ({ value: f, label: f })),
+                        ]} />
+                    <SelectControl label="Status" value={status} onChange={v => setStatus(v as StatusFilter)}
+                        options={[
+                            { value: 'all', label: 'Any status' },
+                            { value: 'draft', label: 'Draft' },
+                            { value: 'needs_review', label: 'Needs review' },
+                            { value: 'accepted', label: 'Accepted' },
+                            { value: 'ready', label: 'Ready' },
+                        ]} />
+                    <SelectControl label="Sort" value={sort} onChange={v => setSort(v as SortMode)}
+                        options={[
+                            { value: 'group', label: 'Flow order' },
+                            { value: 'priority', label: 'Priority' },
+                            { value: 'name', label: 'Name' },
+                            { value: 'readiness', label: 'Readiness' },
+                        ]} />
+                    <SelectControl label="Group" value={group} onChange={v => setGroup(v as ScreenGroupMode)}
+                        options={[
+                            ...(flowsAvailable ? [{ value: 'flow', label: 'By flow' }] : []),
+                            { value: 'section', label: 'By section' },
+                            { value: 'priority', label: 'By priority' },
+                        ]} />
+                    <button
+                        type="button"
+                        onClick={() => setAdvancedOpen(o => !o)}
+                        aria-expanded={advancedOpen}
+                        className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 rounded-lg text-xs font-medium border transition ${
+                            advancedCount > 0
+                                ? 'border-indigo-300 text-indigo-700 bg-indigo-50'
+                                : 'border-neutral-200 text-neutral-600 hover:border-indigo-300 hover:text-indigo-700'
+                        }`}
+                    >
+                        <SlidersHorizontal size={13} aria-hidden />
+                        Advanced
+                        {advancedCount > 0 && (
+                            <span className="tabular-nums bg-indigo-600 text-white rounded-full px-1.5">{advancedCount}</span>
+                        )}
+                    </button>
+                </div>
 
-            <ScreenPreflightPanel preflight={preflight} />
+                {advancedOpen && (
+                    <div className="flex flex-wrap items-center gap-1.5 border-t border-neutral-100 pt-2.5">
+                        <span className="text-[11px] uppercase tracking-wide text-neutral-400 mr-1">Advanced filters</span>
+                        {ADVANCED_FILTERS.map(f => {
+                            const active = advanced.has(f.id);
+                            return (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    aria-pressed={active}
+                                    onClick={() => toggleAdvanced(f.id)}
+                                    className={`px-2.5 py-1 rounded-full text-xs font-medium transition ${
+                                        active
+                                            ? 'bg-indigo-600 text-white'
+                                            : 'bg-white text-neutral-600 ring-1 ring-neutral-200 hover:ring-indigo-300 hover:text-indigo-700'
+                                    }`}
+                                >
+                                    {f.label}
+                                </button>
+                            );
+                        })}
+                    </div>
+                )}
 
-            {/* Phase 5C: trace-aware implementation-handoff export surface. */}
-            <ScreensHandoffExportPanel
-                input={{
-                    projectName,
-                    handoffs: [...handoffByScreen.values()],
-                    reviewModels,
-                    preflight,
-                    handoffRollup,
-                    p0Ids,
-                    manifest: exportManifest,
-                }}
-            />
-
-            <div className="flex items-center gap-1.5 flex-wrap" role="group" aria-label="Filter screens">
-                {SCREEN_LIST_FILTERS.map(f => {
-                    const active = f.id === filter;
-                    const count = filterCounts.get(f.id) ?? 0;
-                    return (
+                <div className="flex items-center gap-2 text-[11px] text-neutral-400">
+                    <span className="tabular-nums">{totalMatches} of {index.items.length} screens</span>
+                    {anyFilterActive && (
                         <button
-                            key={f.id}
                             type="button"
-                            aria-pressed={active}
-                            onClick={() => setFilter(f.id)}
-                            className={`inline-flex items-center gap-1 px-2.5 py-1 rounded-full text-xs font-medium transition ${
-                                active
-                                    ? 'bg-indigo-600 text-white'
-                                    : 'bg-white text-neutral-600 ring-1 ring-neutral-200 hover:ring-indigo-300 hover:text-indigo-700'
-                            }`}
+                            onClick={clearFilters}
+                            className="inline-flex items-center gap-1 text-indigo-600 hover:text-indigo-800"
                         >
-                            {f.label}
-                            {f.id !== 'all' && (
-                                <span className={`tabular-nums ${active ? 'text-indigo-200' : 'text-neutral-400'}`}>
-                                    {count}
-                                </span>
-                            )}
+                            <X size={11} aria-hidden /> Clear filters
                         </button>
-                    );
-                })}
+                    )}
+                </div>
             </div>
 
-            {filteredSections.length === 0 && (
+            {filteredGroups.length === 0 && (
                 <div className="bg-white rounded-xl border border-dashed border-neutral-300 p-8 text-center">
                     <Layers size={18} className="text-neutral-300 mx-auto mb-2" />
                     <p className="text-sm text-neutral-600">
@@ -249,24 +379,25 @@ export function ScreenListView({
                 </div>
             )}
 
-            {filteredSections.map((section, sectionIdx) => (
-                <section key={section.title + sectionIdx}>
-                    <header className="mb-3">
-                        <h3 className="text-base font-semibold text-neutral-800">
-                            {section.title}
-                        </h3>
-                        {section.description && (
-                            <p className="text-xs text-neutral-500 mt-1">{section.description}</p>
+            {filteredGroups.map((section) => (
+                <section key={section.id}>
+                    <header className="mb-2.5 flex items-baseline gap-2">
+                        {group === 'flow' && section.id !== '__other__' && (
+                            <Workflow size={15} className="text-indigo-400 shrink-0 self-center" aria-hidden />
                         )}
-                        <div className="mt-1 text-[11px] uppercase tracking-wide text-neutral-400">
-                            {section.items.length} {section.items.length === 1 ? 'screen' : 'screens'}
-                            {filter !== 'all' && ' matching'}
-                        </div>
+                        <h3 className="text-base font-semibold text-neutral-800">{section.title}</h3>
+                        <span className="text-[11px] text-neutral-400">
+                            {section.items.length}{filteredGroups.length !== groups.length || totalMatches !== index.items.length ? ' matching' : ''}
+                        </span>
+                        {section.subtitle && group !== 'flow' && (
+                            <span className="text-xs text-neutral-400 truncate">· {section.subtitle}</span>
+                        )}
                     </header>
                     <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
-                        {section.items.map(item => (
+                        {section.items.map((item, i) => (
                             <li key={item.id}>
-                                <ScreenRow
+                                <ScreenCard
+                                    ordinal={sort === 'group' && group === 'flow' && section.id !== '__other__' ? i + 1 : undefined}
                                     item={item}
                                     readiness={readiness.get(item.id)}
                                     reviewModel={reviewModels.get(item.id)}
@@ -283,9 +414,106 @@ export function ScreenListView({
                     </ul>
                 </section>
             ))}
+
+            {/* Secondary: project readiness & metadata — collapsed by default so
+                the screens themselves stay the primary focus. Kept mounted. */}
+            <CollapsibleSection
+                title="Project readiness & metadata"
+                subtitle="Coverage, review readiness, implementation preflight & export"
+                open={metadataOpen}
+                onToggle={() => setMetadataOpen(o => !o)}
+            >
+                <div className="space-y-4">
+                    <ScreenCoveragePanel
+                        summary={coverage}
+                        variantCoverage={variantCoverage}
+                        artifactReview={artifactReview}
+                        downstreamRollup={downstream.rollup}
+                        handoffRollup={handoffRollup}
+                        onGenerateMissingMockups={onGenerateMissingMockups}
+                    />
+                    <ScreenPreflightPanel preflight={preflight} />
+                    <ScreensHandoffExportPanel
+                        input={{
+                            projectName,
+                            handoffs: [...handoffByScreen.values()],
+                            reviewModels,
+                            preflight,
+                            handoffRollup,
+                            p0Ids,
+                            manifest: exportManifest,
+                        }}
+                    />
+                </div>
+            </CollapsibleSection>
         </div>
     );
 }
+
+// --- Compact select control ---------------------------------------------------
+
+function SelectControl({
+    label, value, onChange, options,
+}: {
+    label: string;
+    value: string;
+    onChange: (value: string) => void;
+    options: Array<{ value: string; label: string }>;
+}) {
+    return (
+        <label className="inline-flex items-center gap-1 text-xs text-neutral-500">
+            <span className="sr-only">{label}</span>
+            <select
+                value={value}
+                onChange={e => onChange(e.target.value)}
+                aria-label={label}
+                className="py-1.5 pl-2 pr-6 rounded-lg border border-neutral-200 text-neutral-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
+            >
+                {options.map(o => (
+                    <option key={o.value} value={o.value}>{label}: {o.label}</option>
+                ))}
+            </select>
+        </label>
+    );
+}
+
+// --- Collapsible metadata section --------------------------------------------
+
+function CollapsibleSection({
+    title, subtitle, open, onToggle, children,
+}: {
+    title: string;
+    subtitle?: string;
+    open: boolean;
+    onToggle: () => void;
+    children: React.ReactNode;
+}) {
+    return (
+        <section className="bg-white rounded-xl border border-neutral-200">
+            <button
+                type="button"
+                onClick={onToggle}
+                aria-expanded={open}
+                className="w-full flex items-center gap-3 px-4 py-3 text-left"
+            >
+                <ChevronDown
+                    size={16}
+                    className={`text-neutral-400 transition-transform ${open ? '' : '-rotate-90'}`}
+                    aria-hidden
+                />
+                <span className="flex-1 min-w-0">
+                    <span className="block text-sm font-semibold text-neutral-800">{title}</span>
+                    {subtitle && <span className="block text-xs text-neutral-400 truncate">{subtitle}</span>}
+                </span>
+            </button>
+            {/* Kept mounted (hidden, not unmounted) so panel state survives a
+                collapse and derived content is always present. */}
+            <div className={open ? 'px-4 pb-4' : 'hidden'}>{children}</div>
+        </section>
+    );
+}
+
+// --- Screen card -------------------------------------------------------------
 
 const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string> = {
     ready: 'text-emerald-600',
@@ -293,9 +521,10 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
     blocked: 'text-red-600',
 };
 
-function ScreenRow({
-    item, readiness, reviewModel, downstreamImpact, handoff, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
+function ScreenCard({
+    ordinal, item, readiness, reviewModel, downstreamImpact, handoff, mockupPlatform, mobileRelevant, generatedVariants, trustContext, onSelect,
 }: {
+    ordinal?: number;
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
     reviewModel?: ScreenReviewModel;
@@ -307,172 +536,127 @@ function ScreenRow({
     trustContext?: VariantTrustContext;
     onSelect: () => void;
 }) {
+    const [detailsOpen, setDetailsOpen] = useState(false);
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
-    const flowCount = item.relatedFlows.length;
-    const entryCount = screen.entryPoints?.length ?? 0;
-    const exitCount = screen.exitPaths?.length ?? 0;
-    const stateCount = screen.states?.length ?? 0;
-    const riskCount = screen.risks?.length ?? 0;
-    const featureRefs = screen.featureRefs ?? [];
+    const connections = deriveScreenConnections(item);
     const variants = buildScreenMockupVariants(item, {
         platform: mockupPlatform, mobileRelevant, generatedVariants, trustContext,
     });
     const variantSummary = summarizeScreenVariants(variants);
-    // Compact freshness signal — count generated variants worth a review.
-    const freshReview = variants.filter(
-        v => v.freshness && (v.freshness.status === 'stale' || v.freshness.status === 'possibly_stale'),
-    ).length;
 
+    // A single, muted status indicator (readiness) is the only secondary signal
+    // shown by default — the badge already distinguishes derived vs. user-set.
+    // Everything else lives behind "Details".
     return (
-        <button
-            type="button"
-            onClick={onSelect}
-            className="w-full h-full text-left bg-white rounded-lg border border-neutral-200 p-4 hover:border-indigo-300 hover:shadow-sm transition group flex flex-col"
-        >
-            <div className="flex items-start justify-between gap-2">
-                <h4 className="font-semibold text-neutral-800 text-sm leading-tight group-hover:text-indigo-700 transition-colors">
-                    {screen.name}
-                </h4>
-                <div className="flex items-center gap-1.5 shrink-0">
-                    {item.isEdited && (
-                        <span className="text-[10px] uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-200 px-1.5 py-0.5 rounded">
-                            Edited
+        <div className="h-full bg-white rounded-lg border border-neutral-200 hover:border-indigo-300 hover:shadow-sm transition flex flex-col">
+            <button
+                type="button"
+                onClick={onSelect}
+                className="w-full text-left p-4 flex flex-col gap-2.5 group flex-1"
+            >
+                <div className="flex items-start gap-2.5">
+                    {ordinal !== undefined && (
+                        <span className="shrink-0 mt-0.5 w-5 h-5 rounded-full bg-neutral-100 text-neutral-500 text-[11px] font-semibold flex items-center justify-center tabular-nums">
+                            {ordinal}
                         </span>
                     )}
-                    {screen.type && screen.type !== 'screen' && (
-                        <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
-                            {screen.type}
+                    <div className="flex-1 min-w-0">
+                        <h4 className="font-semibold text-neutral-800 text-sm leading-tight group-hover:text-indigo-700 transition-colors">
+                            {screen.name}
+                        </h4>
+                    </div>
+                    <div className="flex items-center gap-1.5 shrink-0">
+                        {item.isEdited && (
+                            <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
+                                Edited
+                            </span>
+                        )}
+                        <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_STYLES[priority]}`}>
+                            {priority}
                         </span>
-                    )}
-                    <span className={`text-xs px-2 py-0.5 rounded-full font-medium ${PRIORITY_STYLES[priority]}`}>
-                        {priority}
-                    </span>
+                    </div>
                 </div>
-            </div>
 
-            {screen.purpose && (
-                <p className="text-xs leading-relaxed text-neutral-600 mt-2 line-clamp-2">
-                    {screen.purpose}
-                </p>
-            )}
+                {screen.purpose && (
+                    <p className="text-xs leading-relaxed text-neutral-600 line-clamp-2">
+                        {screen.purpose}
+                    </p>
+                )}
 
-            <div className="mt-2.5 flex items-center gap-1.5 flex-wrap">
-                {readiness && <ReadinessBadge readiness={readiness} />}
-                {featureRefs.length > 0 ? (
-                    <span
-                        className="text-[10px] text-violet-700 bg-violet-50 ring-1 ring-violet-200 px-1.5 py-0.5 rounded-full"
-                        title={`Linked PRD features: ${featureRefs.join(', ')}`}
-                    >
-                        Covers {featureRefs.length} {featureRefs.length === 1 ? 'feature' : 'features'}
-                    </span>
-                ) : (
-                    <span
-                        className="text-[10px] text-neutral-400 bg-neutral-50 ring-1 ring-neutral-200 px-1.5 py-0.5 rounded-full"
-                        title="No linked PRD features found — review recommended"
-                    >
-                        No PRD links
-                    </span>
-                )}
-                {riskCount > 0 && (
-                    <span className="inline-flex items-center gap-1 text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full">
-                        <AlertTriangle size={9} aria-hidden />
-                        {riskCount} {riskCount === 1 ? 'risk' : 'risks'} to review
-                    </span>
-                )}
-                {variantSummary.mobileMissing && (
-                    <span
-                        className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full"
-                        title="No mobile mockup variant yet"
-                    >
-                        Mobile: missing
-                    </span>
-                )}
-                {freshReview > 0 && (
-                    <span
-                        className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full"
-                        title="One or more generated mockup variants may be stale — the screen spec, design system, or PRD changed after generation"
-                    >
-                        Freshness: {freshReview} to review
-                    </span>
-                )}
-                {variantSummary.coverageUnknown && (
-                    <span
-                        className="text-[10px] text-neutral-500 bg-neutral-50 ring-1 ring-neutral-200 px-1.5 py-0.5 rounded-full"
-                        title="This mockup was generated before coverage metadata was captured"
-                    >
-                        Coverage: unknown
-                    </span>
-                )}
-                {reviewModel?.freshness === 'outdated' && (
-                    <span
-                        className="text-[10px] text-amber-700 bg-amber-50 ring-1 ring-amber-200 px-1.5 py-0.5 rounded-full"
-                        title="This screen changed after it was reviewed — re-review recommended"
-                    >
-                        Review may be outdated
-                    </span>
-                )}
-                {downstreamImpact && <DownstreamChip impact={downstreamImpact} />}
-                {handoff && <HandoffChip status={handoff.readiness.status} />}
-                {handoff?.traceBridge && <TraceChip bridge={handoff.traceBridge} />}
-            </div>
+                {/* Flow connection — the hero. Names, not counts. */}
+                <FlowStrip name={screen.name} connections={connections} />
 
-            {reviewModel && (
-                <div className="mt-2 flex items-center gap-2 flex-wrap text-[11px]">
-                    <span className="text-neutral-400 uppercase tracking-wide text-[10px]">Review</span>
-                    <span className="font-medium text-neutral-700">
-                        {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
+                {/* One-line, low-color footer: mockup availability + readiness. */}
+                <div className="mt-auto pt-2 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
+                    <span className="inline-flex items-center gap-1" title="Mockup availability for this screen">
+                        <ImageIcon size={12} className={variantSummary.hasMockup ? 'text-emerald-500' : 'text-neutral-300'} />
+                        {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup'}
                     </span>
-                    <span className="text-neutral-300" aria-hidden>·</span>
-                    <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>
-                        {reviewModel.blockingCount > 0
-                            ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
-                            : reviewModel.reviewCount > 0
-                                ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
-                                : SYSTEM_READINESS_LABELS[reviewModel.systemReadiness]}
-                    </span>
-                    {reviewModel.blockingCount > 0 && reviewModel.reviewCount > 0 && (
-                        <span className="text-amber-600">
-                            + {reviewModel.reviewCount} review {reviewModel.reviewCount === 1 ? 'item' : 'items'}
-                        </span>
-                    )}
+                    {readiness && <ReadinessBadge readiness={readiness} />}
+                    <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
                 </div>
-            )}
+            </button>
 
-            <div className="mt-auto pt-3 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
-                <span
-                    className="inline-flex items-center gap-1"
-                    title="States documented in the spec (empty / loading / error variants)"
+            {/* Progressive disclosure — implementation / traceability / review /
+                risk / handoff / downstream, none of it competing by default. */}
+            <div className="px-4 pb-3">
+                <button
+                    type="button"
+                    onClick={() => setDetailsOpen(o => !o)}
+                    aria-expanded={detailsOpen}
+                    className="inline-flex items-center gap-1 text-[11px] font-medium text-neutral-500 hover:text-indigo-600 transition"
                 >
-                    <Layers size={11} className={stateCount > 0 ? 'text-sky-500' : 'text-neutral-300'} />
-                    {stateCount > 0 ? `${stateCount} ${stateCount === 1 ? 'state' : 'states'}` : 'No states'}
-                </span>
-                <span
-                    className="inline-flex items-center gap-1"
-                    title="Mockup variant coverage — generated vs. recommended (viewport × state), tracked from mockup metadata"
-                >
-                    <ImageIcon size={11} className={variantSummary.hasMockup ? 'text-emerald-500' : 'text-neutral-300'} />
-                    {variantSummary.hasMockup
-                        ? `Mockups: ${variantSummary.label}`
-                        : 'No mockup'}
-                </span>
-                <span
-                    className="inline-flex items-center gap-1"
-                    title="User-flow steps referencing this screen"
-                >
-                    <Workflow size={11} className={flowCount > 0 ? 'text-indigo-500' : 'text-neutral-300'} />
-                    {flowCount > 0
-                        ? `${flowCount} flow ${flowCount === 1 ? 'step' : 'steps'}`
-                        : 'No flow refs'}
-                </span>
-                {(entryCount > 0 || exitCount > 0) && (
-                    <span title="Ways users arrive at this screen (incoming) and leave it (outgoing)">
-                        {entryCount} incoming · {exitCount} outgoing
-                    </span>
+                    <ChevronDown size={12} className={`transition-transform ${detailsOpen ? '' : '-rotate-90'}`} aria-hidden />
+                    {detailsOpen ? 'Hide details' : 'Show details'}
+                </button>
+                {detailsOpen && (
+                    <CardDetails
+                        item={item}
+                        connections={connections}
+                        reviewModel={reviewModel}
+                        downstreamImpact={downstreamImpact}
+                        handoff={handoff}
+                        variantSummary={variantSummary}
+                    />
                 )}
-                <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
             </div>
-        </button>
+        </div>
+    );
+}
+
+/** The mini flow visualization: This screen → next screens (by exit-path
+ * target). Falls back to the flow it belongs to when there are no exit paths. */
+function FlowStrip({ name, connections }: { name: string; connections: ReturnType<typeof deriveScreenConnections> }) {
+    if (connections.outgoing.length > 0) {
+        return (
+            <div className="flex items-center gap-1.5 flex-wrap text-[11px]" title={`${name} leads to ${connections.outgoing.join(', ')}`}>
+                <span className="text-[10px] uppercase tracking-wide text-neutral-400">Next</span>
+                {connections.outgoing.slice(0, 3).map((target, i) => (
+                    <span key={i} className="inline-flex items-center gap-1 text-neutral-600">
+                        <ArrowRight size={11} className="text-neutral-300" aria-hidden />
+                        <span className="max-w-[8rem] truncate">{target}</span>
+                    </span>
+                ))}
+                {connections.outgoing.length > 3 && (
+                    <span className="text-neutral-400">+{connections.outgoing.length - 3}</span>
+                )}
+            </div>
+        );
+    }
+    if (connections.flowTitles.length > 0) {
+        return (
+            <div className="flex items-center gap-1.5 text-[11px] text-neutral-500">
+                <Workflow size={11} className="text-indigo-300" aria-hidden />
+                <span className="text-neutral-400">Part of</span>
+                <span className="font-medium text-neutral-600 truncate" title={connections.flowTitles.join(', ')}>
+                    {connections.flowTitles.join(', ')}
+                </span>
+            </div>
+        );
+    }
+    return (
+        <div className="text-[11px] text-neutral-400">Not yet connected to a flow</div>
     );
 }
 
@@ -486,77 +670,132 @@ const DOWNSTREAM_LABELS: Record<string, string> = {
     export: 'Export',
 };
 
-/** Compact downstream-impact chip — shown only when a change/blocker actually
- * impacts a downstream artifact (info-only impacts show no chip, to avoid
- * cluttering every legacy card). */
-function DownstreamChip({ impact }: { impact: ScreenDownstreamImpact }) {
-    const actionable = impact.impactedArtifacts.filter(a => a.severity !== 'info');
-    if (actionable.length === 0) return null;
-    const blocking = impact.summary.hasBlockingImpact;
-    const names = actionable.slice(0, 2).map(a => DOWNSTREAM_LABELS[a.kind] ?? a.kind);
-    const label = blocking
-        ? 'Implementation not ready'
-        : `Downstream review: ${names.join(', ')}${actionable.length > names.length ? '…' : ''}`;
-    const tone = blocking
-        ? 'text-red-700 bg-red-50 ring-red-200'
-        : 'text-amber-700 bg-amber-50 ring-amber-200';
+/** Secondary metadata, revealed on demand. Neutral typography with warning
+ * color reserved for genuine issues (blockers, risks, stale/blocked states). */
+function CardDetails({
+    item, connections, reviewModel, downstreamImpact, handoff, variantSummary,
+}: {
+    item: ScreenExperienceItem;
+    connections: ReturnType<typeof deriveScreenConnections>;
+    reviewModel?: ScreenReviewModel;
+    downstreamImpact?: ScreenDownstreamImpact;
+    handoff?: ScreenImplementationHandoff;
+    variantSummary: ReturnType<typeof summarizeScreenVariants>;
+}) {
+    const { screen } = item;
+    const featureRefs = screen.featureRefs ?? [];
+    const riskCount = screen.risks?.length ?? 0;
+    const stateCount = screen.states?.length ?? 0;
+    const downstreamActionable = downstreamImpact?.impactedArtifacts.filter(a => a.severity !== 'info') ?? [];
+
     return (
-        <span
-            className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${tone}`}
-            title={blocking
-                ? 'This screen has blocking readiness issues — downstream implementation is affected'
-                : 'This screen changed or needs review — the named downstream artifacts may be worth re-checking'}
-        >
-            {label}
-        </span>
+        <dl className="mt-2.5 pt-2.5 border-t border-neutral-100 space-y-2 text-[11px]">
+            {/* Connections */}
+            {(connections.incoming.length > 0 || connections.outgoing.length > 0) && (
+                <DetailRow label="Connected to">
+                    {connections.outgoing.length > 0 ? connections.outgoing.join(', ') : '—'}
+                    {connections.incoming.length > 0 && (
+                        <span className="block text-neutral-400 mt-0.5">
+                            Reached from: {connections.incoming.join(', ')}
+                        </span>
+                    )}
+                </DetailRow>
+            )}
+
+            {/* Review */}
+            {reviewModel && (
+                <DetailRow label="Review">
+                    <span className="text-neutral-700">
+                        {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
+                    </span>
+                    <span className="text-neutral-300 mx-1" aria-hidden>·</span>
+                    <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>
+                        {reviewModel.blockingCount > 0
+                            ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
+                            : reviewModel.reviewCount > 0
+                                ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
+                                : SYSTEM_READINESS_LABELS[reviewModel.systemReadiness]}
+                    </span>
+                    {reviewModel.freshness === 'outdated' && (
+                        <span className="block text-amber-600 mt-0.5">Review may be outdated — the screen changed after sign-off.</span>
+                    )}
+                </DetailRow>
+            )}
+
+            {/* Traceability */}
+            <DetailRow label="Traceability">
+                {featureRefs.length > 0
+                    ? `Covers ${featureRefs.length} PRD ${featureRefs.length === 1 ? 'feature' : 'features'}: ${featureRefs.join(', ')}`
+                    : <span className="text-neutral-400">No linked PRD features — review recommended</span>}
+            </DetailRow>
+
+            {/* Implementation / handoff */}
+            {handoff && (
+                <DetailRow label="Handoff">
+                    <span className={
+                        handoff.readiness.status === 'blocked' ? 'text-red-600'
+                            : handoff.readiness.status === 'review_recommended' ? 'text-amber-600'
+                                : 'text-emerald-600'
+                    }>
+                        {HANDOFF_STATUS_LABELS[handoff.readiness.status]}
+                    </span>
+                    {handoff.traceBridge && (handoff.traceBridge.implementationPlan.confidence === 'missing'
+                        || ['weak', 'estimated', 'missing'].includes(handoff.traceBridge.overall.confidence)) && (
+                        <span className="block text-amber-600 mt-0.5">
+                            Downstream trace estimated or missing — confirm before building.
+                        </span>
+                    )}
+                </DetailRow>
+            )}
+
+            {/* Mockup coverage detail */}
+            <DetailRow label="Mockups">
+                {variantSummary.hasMockup ? variantSummary.label : 'Not generated yet'}
+                {variantSummary.coverageUnknown && (
+                    <span className="block text-neutral-400 mt-0.5">Coverage unknown — generated before coverage metadata was captured.</span>
+                )}
+            </DetailRow>
+
+            {/* States */}
+            <DetailRow label="States">
+                {stateCount > 0 ? `${stateCount} documented` : <span className="text-neutral-400">None documented</span>}
+            </DetailRow>
+
+            {/* Risks */}
+            {riskCount > 0 && (
+                <DetailRow label="Risks">
+                    <span className="inline-flex items-center gap-1 text-amber-700">
+                        <AlertTriangle size={10} aria-hidden />
+                        {riskCount} to review
+                    </span>
+                </DetailRow>
+            )}
+
+            {/* Downstream impact */}
+            {downstreamActionable.length > 0 && (
+                <DetailRow label="Downstream">
+                    <span className={downstreamImpact?.summary.hasBlockingImpact ? 'text-red-600' : 'text-amber-600'}>
+                        {downstreamImpact?.summary.hasBlockingImpact
+                            ? 'Implementation not ready'
+                            : `Downstream review: ${downstreamActionable.slice(0, 2).map(a => DOWNSTREAM_LABELS[a.kind] ?? a.kind).join(', ')}`}
+                    </span>
+                </DetailRow>
+            )}
+        </dl>
     );
 }
 
-const HANDOFF_CHIP_META: Record<ScreenImplementationHandoff['readiness']['status'], {
-    label: string; tone: string; title: string;
-}> = {
-    ready: {
-        label: 'Handoff ready',
-        tone: 'text-emerald-700 bg-emerald-50 ring-emerald-200',
-        title: 'This screen has an accepted spec and a build-ready handoff package',
-    },
-    review_recommended: {
-        label: 'Handoff needs review',
-        tone: 'text-amber-700 bg-amber-50 ring-amber-200',
-        title: 'The handoff package is usable but has review items — confirm before building',
-    },
-    blocked: {
-        label: 'Handoff blocked',
-        tone: 'text-red-700 bg-red-50 ring-red-200',
-        title: 'Resolve the blockers before using this screen as a build source',
-    },
+const HANDOFF_STATUS_LABELS: Record<ScreenImplementationHandoff['readiness']['status'], string> = {
+    ready: 'Ready',
+    review_recommended: 'Needs review',
+    blocked: 'Blocked',
 };
 
-/** Compact implementation-handoff readiness chip (Phase 5A). */
-function HandoffChip({ status }: { status: ScreenImplementationHandoff['readiness']['status'] }) {
-    const meta = HANDOFF_CHIP_META[status];
+function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
     return (
-        <span className={`text-[10px] px-1.5 py-0.5 rounded-full ring-1 ${meta.tone}`} title={meta.title}>
-            {meta.label}
-        </span>
-    );
-}
-
-/** Compact downstream-trace chip (Phase 5B) — shown only when a trace concern
- * exists (no plan match, or an estimated/missing overall trace), to avoid
- * cluttering cards whose trace is already strong. */
-function TraceChip({ bridge }: { bridge: NonNullable<ScreenImplementationHandoff['traceBridge']> }) {
-    const planMissing = bridge.implementationPlan.confidence === 'missing';
-    const overall = bridge.overall.confidence;
-    const weak = overall === 'weak' || overall === 'estimated' || overall === 'missing';
-    if (!planMissing && !weak) return null; // strong trace → no chip
-    const label = planMissing ? 'No plan match' : 'Trace needs review';
-    return (
-        <span
-            className="text-[10px] px-1.5 py-0.5 rounded-full ring-1 text-amber-700 bg-amber-50 ring-amber-200"
-            title="Downstream trace to the Data Model / Implementation Plan is estimated or missing — confirm before building"
-        >
-            {label}
-        </span>
+        <div className="flex gap-2">
+            <dt className="w-20 shrink-0 text-neutral-400 uppercase tracking-wide text-[10px] pt-0.5">{label}</dt>
+            <dd className="flex-1 min-w-0 text-neutral-600">{children}</dd>
+        </div>
     );
 }
