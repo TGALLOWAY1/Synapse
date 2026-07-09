@@ -178,6 +178,20 @@ describe('mockupVariantImageStore.generate', () => {
         expect(mobile?.history ?? []).toHaveLength(0);
     });
 
+    it('mergeRecords hydrates the reactive cache from restored records (snapshot restore)', () => {
+        const store = useMockupVariantImageStore.getState();
+        const record: MockupVariantImageRecord = {
+            key: 'v1:scr-home:mobile:default:low',
+            projectId: 'p1', artifactId: 'a1', versionId: 'v1',
+            screenId: 'scr-home', variantId: 'mobile:default', viewport: 'mobile',
+            stateName: 'Default', dataUrl: 'data:image/png;base64,RESTORED',
+            quality: 'low', prompt: '', generatedAt: 5,
+        };
+        store.mergeRecords([record]);
+        const rec = useMockupVariantImageStore.getState().getBestRecord('v1', 'scr-home', 'mobile:default');
+        expect(rec?.dataUrl).toBe('data:image/png;base64,RESTORED');
+    });
+
     it('putSidecar stores a metadata-only default record without generating', async () => {
         const store = useMockupVariantImageStore.getState();
         await store.putSidecar({

@@ -77,6 +77,11 @@ interface VariantImageStoreState {
      * default variant without moving its image into this store. */
     putSidecar: (record: MockupVariantImageRecord) => Promise<void>;
 
+    /** Merge already-persisted records (e.g. from a snapshot restore that wrote
+     * them to IndexedDB) into the reactive cache so open views update without a
+     * reload. IndexedDB is the source of truth; this only refreshes the cache. */
+    mergeRecords: (records: MockupVariantImageRecord[]) => void;
+
     cancel: (versionId: string, screenId: string, variantId: string) => void;
     clearError: (versionId: string, screenId: string, variantId: string) => void;
 }
@@ -134,6 +139,15 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
     putSidecar: async (record) => {
         await idbPutVariantImage(record);
         set((state) => ({ images: { ...state.images, [record.key]: record } }));
+    },
+
+    mergeRecords: (records) => {
+        if (records.length === 0) return;
+        set((state) => {
+            const next = { ...state.images };
+            for (const r of records) next[r.key] = r;
+            return { images: next };
+        });
     },
 
     generate: async ({
