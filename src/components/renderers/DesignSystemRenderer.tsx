@@ -1,9 +1,7 @@
 import { useMemo } from 'react';
-import { useShallow } from 'zustand/react/shallow';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import rehypeRaw from 'rehype-raw';
-import { AlertTriangle, CheckCircle2 } from 'lucide-react';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
 import { getDesignSystemPresetLabel } from '../../lib/designSystemPresets';
@@ -22,7 +20,9 @@ import { useIsMobile } from '../../lib/useIsMobile';
 //   3. Spacing + Radius (proportional bars)
 //   4. Component Tokens (recipe cards)
 //   5. Usage Rules (verbatim from tokens.rules)
-//   6. Downstream Usage Status (mockup / HTML mockup / component_inventory)
+//
+// Downstream artifact usage is surfaced by the dedicated Dependency Graph
+// artifact, not here.
 //
 // Legacy markdown rendering preserved unchanged for back-compat.
 
@@ -71,7 +71,6 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
             { id: 'ds-spacing', label: 'Spacing & Radius', countLabel: plural(spacingCount, 'token') },
             { id: 'ds-components', label: 'Components', countLabel: plural(Object.keys(tokens.components).length, 'component') },
             { id: 'ds-rules', label: 'Rules', countLabel: plural(tokens.rules.length, 'rule') },
-            { id: 'ds-downstream', label: 'Downstream Effects' },
         ];
     }, [tokens]);
 
@@ -110,10 +109,6 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
 
             <Section id="ds-rules" title="Usage Rules">
                 <UsageRules tokens={tokens} />
-            </Section>
-
-            <Section id="ds-downstream" title="Downstream Usage">
-                <DownstreamUsage projectId={projectId} />
             </Section>
         </div>
     );
@@ -458,94 +453,6 @@ function UsageRules({ tokens }: { tokens: DesignTokens }) {
                 </li>
             ))}
         </ul>
-    );
-}
-
-// ─── Downstream Usage Status ─────────────────────────────────────────────
-
-interface DownstreamSummary {
-    mockupCount: number;
-    componentInventoryExists: boolean;
-}
-
-function useDownstreamSummary(projectId: string | undefined): DownstreamSummary | null {
-    // useShallow is required: Zustand v5's useSyncExternalStore-based subscription
-    // calls getSnapshot multiple times per render and compares with Object.is —
-    // returning a fresh `{ mockupCount, componentInventoryExists }` object on each
-    // call triggers React error #185 ("Maximum update depth exceeded").
-    return useProjectStore(useShallow(state => {
-        if (!projectId) return null;
-        const artifacts = state.artifacts[projectId] ?? [];
-        const mockupCount = artifacts.filter(a => a.type === 'mockup' && a.status !== 'archived').length;
-        const componentInventoryExists = artifacts.some(
-            a => a.type === 'core_artifact' && a.subtype === 'component_inventory' && a.status !== 'archived',
-        );
-        return { mockupCount, componentInventoryExists };
-    }));
-}
-
-function DownstreamUsage({ projectId }: { projectId?: string }) {
-    const summary = useDownstreamSummary(projectId);
-
-    if (!summary) {
-        return (
-            <p className="text-sm text-neutral-500 italic">
-                Downstream usage is detected automatically when a project context is available.
-            </p>
-        );
-    }
-
-    const consumers: Array<{ label: string; present: boolean; description: string }> = [
-        {
-            label: 'Mockups',
-            present: summary.mockupCount > 0,
-            description: summary.mockupCount > 0
-                ? `${summary.mockupCount} mockup artifact${summary.mockupCount === 1 ? '' : 's'} pull design tokens at generation time.`
-                : 'No mockup artifact has been generated yet — design tokens will be applied to the next generation.',
-        },
-        {
-            label: 'Component inventory',
-            present: summary.componentInventoryExists,
-            description: summary.componentInventoryExists
-                ? 'A component inventory exists; future iterations can map components to design tokens.'
-                : 'No component inventory generated yet.',
-        },
-    ];
-
-    const noConsumers = !consumers.some(c => c.present);
-
-    return (
-        <div className="space-y-3">
-            {noConsumers && (
-                <div className="flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 p-3 text-sm text-amber-800">
-                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                    <div>
-                        <p className="font-medium">No downstream artifact is using this design system yet.</p>
-                        <p className="text-xs text-amber-700 mt-0.5">
-                            Generate a mockup to see the design tokens injected as CSS variables and prompt context.
-                        </p>
-                    </div>
-                </div>
-            )}
-            <ul className="space-y-1.5">
-                {consumers.map(c => (
-                    <li
-                        key={c.label}
-                        className="flex items-start gap-2 rounded-md border border-neutral-200 bg-white p-3 text-sm"
-                    >
-                        {c.present ? (
-                            <CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" />
-                        ) : (
-                            <span className="mt-0.5 shrink-0 w-4 h-4 rounded-full border border-neutral-300" />
-                        )}
-                        <div>
-                            <p className="text-neutral-900 font-medium">{c.label}</p>
-                            <p className="text-xs text-neutral-500 mt-0.5">{c.description}</p>
-                        </div>
-                    </li>
-                ))}
-            </ul>
-        </div>
     );
 }
 
