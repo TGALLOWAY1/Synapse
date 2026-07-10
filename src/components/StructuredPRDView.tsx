@@ -19,6 +19,9 @@ import {
     serializeActions,
 } from '../lib/groundingFields';
 import { ImplementationSummarySection } from './prd/ImplementationSummarySection';
+import { ReviewConfirmSection } from './prd/ReviewConfirmSection';
+import { DecisionLogSection } from './prd/DecisionLogSection';
+import { splitAssumptions, deriveDecisionLog } from '../lib/derive/prdDecisions';
 import {
     ExecutiveSummarySection,
     ProductThesisSection,
@@ -34,7 +37,6 @@ import {
     RisksDetailedSection,
     MvpScopeSection,
     MetricsSection,
-    AssumptionsSection,
     HandoffAppendixSection,
 } from './prd/PremiumSections';
 
@@ -278,6 +280,78 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         savePRD(updated, `Edited feature: ${updatedFeature.name || 'Untitled'}`);
     };
 
+    // ── Review & Confirm / Decision Log ────────────────────────────────
+    // Confirmations are PRD edits like any other: they append a new spine
+    // version (never overwrite) with a descriptive edit summary, so every
+    // decision is undoable through version history too.
+    const truncate = (s: string, max = 60) =>
+        s.length > max ? `${s.slice(0, max - 1).trim()}…` : s;
+
+    const patchAssumption = (
+        assumptionId: string,
+        patch: Partial<NonNullable<StructuredPRD['assumptions']>[number]>,
+        editSummary: string,
+    ) => {
+        const updated = {
+            ...structuredPRD,
+            assumptions: (structuredPRD.assumptions ?? []).map(a =>
+                a.id === assumptionId ? { ...a, ...patch } : a,
+            ),
+        };
+        savePRD(updated, editSummary);
+    };
+
+    const handleConfirmAssumption = (assumptionId: string) => {
+        const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
+        if (!a) return;
+        patchAssumption(
+            assumptionId,
+            { decision: 'confirmed', decisionNote: undefined, decidedAt: Date.now() },
+            `Confirmed assumption: ${truncate(a.statement)}`,
+        );
+    };
+
+    const handleRejectAssumption = (assumptionId: string, note: string) => {
+        const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
+        if (!a) return;
+        patchAssumption(
+            assumptionId,
+            { decision: 'rejected', decisionNote: note || undefined, decidedAt: Date.now() },
+            `Marked assumption incorrect: ${truncate(a.statement)}`,
+        );
+    };
+
+    const handleUndoAssumption = (assumptionId: string) => {
+        const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
+        if (!a) return;
+        patchAssumption(
+            assumptionId,
+            { decision: undefined, decisionNote: undefined, decidedAt: undefined },
+            `Reopened assumption: ${truncate(a.statement)}`,
+        );
+    };
+
+    const handleToggleFeatureConfirm = (feature: Feature) => {
+        const confirmed = !feature.confirmed;
+        const updated = {
+            ...structuredPRD,
+            features: structuredPRD.features.map(f =>
+                f.id === feature.id
+                    ? { ...f, confirmed: confirmed || undefined, confirmedAt: confirmed ? Date.now() : undefined }
+                    : f,
+            ),
+        };
+        savePRD(
+            updated,
+            confirmed
+                ? `Confirmed feature: ${feature.name || 'Untitled'}`
+                : `Reopened feature: ${feature.name || 'Untitled'}`,
+        );
+    };
+
+    const { unresolved: unresolvedAssumptions } = splitAssumptions(structuredPRD.assumptions);
+    const decisionLog = deriveDecisionLog(structuredPRD);
+
     const handleAddFeature = () => {
         const newFeature: Feature = {
             id: uuidv4(),
@@ -497,13 +571,24 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                         No primary actions captured. These become the primary CTAs across generated mockups.
                     </div>
                 ) : (
-                    <ul className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg space-y-1">
-                        {items.map((action, i) => (
-                            <li key={`${action.verb}-${action.target}-${i}`} className="text-sm text-neutral-700">
-                                <span className="font-semibold text-neutral-900">{action.verb}</span> {action.target}
-                            </li>
-                        ))}
-                    </ul>
+                    // Compact chip row — these ground mockup CTAs, so they stay in
+                    // the PRD, but as a scannable reference rather than a heavy list.
+                    <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
+                        <p className="text-[11px] text-neutral-500 mb-2">
+                            The primary calls-to-action generated mockups are grounded on.
+                        </p>
+                        <div className="flex flex-wrap gap-1.5">
+                            {items.map((action, i) => (
+                                <span
+                                    key={`${action.verb}-${action.target}-${i}`}
+                                    className="inline-flex items-baseline gap-1 rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
+                                >
+                                    <span className="font-semibold text-neutral-900">{action.verb}</span>
+                                    {action.target}
+                                </span>
+                            ))}
+                        </div>
+                    </div>
                 )}
             </div>
         );
@@ -557,6 +642,26 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     the entire document. Hidden if the PRD has no actionable signal. */}
                 <ImplementationSummarySection prd={structuredPRD} />
 
+                {/* Review & Confirm — the actionable home for assumptions / open
+                    decisions (highest confidence first). Confirmed/corrected items
+                    move to the Decision Log below; both hide when empty. */}
+                <ReviewConfirmSection
+                    assumptions={unresolvedAssumptions}
+                    onConfirm={handleConfirmAssumption}
+                    onReject={handleRejectAssumption}
+                    readOnly={readOnly}
+                />
+
+                <DecisionLogSection
+                    entries={decisionLog}
+                    onUndoAssumption={handleUndoAssumption}
+                    onUndoFeature={(featureId) => {
+                        const f = structuredPRD.features.find(x => x.id === featureId);
+                        if (f) handleToggleFeatureConfirm(f);
+                    }}
+                    readOnly={readOnly}
+                />
+
                 {/* Section order is a logical reading flow (mirrors
                     prdMarkdownRenderer): Product Overview → Target Users → MVP
                     Scope → Features → UX → Metrics → Risks → Technical
@@ -583,15 +688,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
 
                 {/* MVP Scope — what ships first, before the full feature detail */}
                 {structuredPRD.mvpScope && (structuredPRD.mvpScope.mvp.length || structuredPRD.mvpScope.v1.length || structuredPRD.mvpScope.later.length) ? (
-                    <MvpScopeSection scope={structuredPRD.mvpScope} />
+                    <MvpScopeSection scope={structuredPRD.mvpScope} features={structuredPRD.features} />
                 ) : null}
 
-                {/* Core Features */}
-                {structuredPRD.featureSystems && structuredPRD.featureSystems.length > 0 && (
-                    <FeatureSystemsSection systems={structuredPRD.featureSystems} />
-                )}
-
-                {/* Features */}
+                {/* Core Features — concrete features first, system grouping after */}
                 <div className="mb-8" id="prd-features">
                     <div className="flex items-center justify-between mb-4 border-b border-neutral-200 pb-2">
                         <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Detailed Features</h3>
@@ -611,6 +711,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                                 <FeatureCard
                                     feature={feature}
                                     onUpdate={handleFeatureUpdate}
+                                    onToggleConfirm={handleToggleFeatureConfirm}
                                     readOnly={readOnly}
                                 />
                                 {!readOnly && (
@@ -631,6 +732,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                         ))}
                     </div>
                 </div>
+
+                {structuredPRD.featureSystems && structuredPRD.featureSystems.length > 0 && (
+                    <FeatureSystemsSection systems={structuredPRD.featureSystems} />
+                )}
 
                 {/* User Experience: UX Architecture → Core User Loops */}
                 {structuredPRD.uxPages && structuredPRD.uxPages.length > 0 && (
@@ -670,13 +775,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     <StateMachinesSection machines={structuredPRD.stateMachines} />
                 )}
 
-                {/* Appendix / Reference Material */}
+                {/* Appendix / Reference Material. Assumptions no longer render
+                    here — they live in Review & Confirm / Decision Log above. */}
                 {renderDomainEntities()}
                 {renderPrimaryActions()}
-
-                {structuredPRD.assumptions && structuredPRD.assumptions.length > 0 && (
-                    <AssumptionsSection assumptions={structuredPRD.assumptions} />
-                )}
 
                 <HandoffAppendixSection />
             </div>

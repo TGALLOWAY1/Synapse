@@ -17,23 +17,19 @@ export type SummaryRisk = {
     impact: string;
 };
 
-export type SummaryDecision = {
-    id: string;
-    statement: string;
-};
-
+// Note: the old "Defer" bucket and "Open Decisions" list were removed from
+// this summary — deferred work lives in MVP Scope ("Later") and the feature
+// tier tags, and open decisions moved to the actionable "Review & Confirm"
+// section (src/lib/derive/prdDecisions.ts).
 export type ImplementationSummary = {
     buildFirst: SummaryFeature[];
     buildNext: SummaryFeature[];
-    defer: SummaryFeature[];
     highestRisks: SummaryRisk[];
-    openDecisions: SummaryDecision[];
 };
 
 const HIGH_IMPACT_KEYWORDS = /(outage|loss|critical|blocker|catastroph|exposed|leak|breach)/i;
 const MAX_FEATURES_PER_BUCKET = 5;
 const MAX_RISKS = 4;
-const MAX_DECISIONS = 4;
 
 function isMvp(feature: Feature): boolean {
     if (feature.tier === 'mvp') return true;
@@ -44,12 +40,6 @@ function isMvp(feature: Feature): boolean {
 function isV1(feature: Feature): boolean {
     if (feature.tier === 'v1') return true;
     if (!feature.tier && feature.priority === 'should') return true;
-    return false;
-}
-
-function isLater(feature: Feature): boolean {
-    if (feature.tier === 'later') return true;
-    if (!feature.tier && feature.priority === 'could') return true;
     return false;
 }
 
@@ -80,21 +70,18 @@ function buildReason(f: Feature): string {
 function pickFeatures(features: Feature[]): {
     buildFirst: Feature[];
     buildNext: Feature[];
-    defer: Feature[];
 } {
     const tagged = features.some(f => f.tier || f.priority);
     if (!tagged) {
         // Legacy PRDs without any prioritization. Use declaration order
-        // as a rough proxy: first 4 → first, next 4 → next, rest → defer.
+        // as a rough proxy: first 4 → first, next 4 → next.
         return {
             buildFirst: features.slice(0, 4),
             buildNext: features.slice(4, 8),
-            defer: features.slice(8),
         };
     }
     const buildFirst = features.filter(isMvp);
     const buildNext = features.filter(f => !isMvp(f) && isV1(f));
-    const defer = features.filter(f => !isMvp(f) && !isV1(f) && isLater(f));
 
     // Within each bucket sort by the numeric portion of the feature id so the
     // user sees f1, f2, f3… in their natural order rather than a complexity
@@ -105,7 +92,6 @@ function pickFeatures(features: Feature[]): {
     return {
         buildFirst: sortById(buildFirst),
         buildNext: sortById(buildNext),
-        defer: sortById(defer),
     };
 }
 
@@ -136,25 +122,13 @@ function pickHighestRisks(prd: StructuredPRD): SummaryRisk[] {
     return fallback.map(r => ({ risk: r, likelihood: 'unknown', impact: '' }));
 }
 
-function pickOpenDecisions(prd: StructuredPRD): SummaryDecision[] {
-    const assumptions = prd.assumptions || [];
-    const lowConfidence = assumptions.filter(a => a.confidence === 'low');
-    const source = lowConfidence.length > 0 ? lowConfidence : assumptions.slice(0, MAX_DECISIONS);
-    return source.slice(0, MAX_DECISIONS).map(a => ({
-        id: a.id,
-        statement: a.statement,
-    }));
-}
-
 export function deriveImplementationSummary(prd: StructuredPRD): ImplementationSummary {
     const features = prd.features || [];
-    const { buildFirst, buildNext, defer } = pickFeatures(features);
+    const { buildFirst, buildNext } = pickFeatures(features);
     return {
         buildFirst: buildFirst.slice(0, MAX_FEATURES_PER_BUCKET).map(f => summaryFeatureFor(f, true)),
         buildNext: buildNext.slice(0, MAX_FEATURES_PER_BUCKET).map(f => summaryFeatureFor(f, false)),
-        defer: defer.slice(0, MAX_FEATURES_PER_BUCKET).map(f => summaryFeatureFor(f, false)),
         highestRisks: pickHighestRisks(prd),
-        openDecisions: pickOpenDecisions(prd),
     };
 }
 
@@ -162,8 +136,6 @@ export function isImplementationSummaryEmpty(s: ImplementationSummary): boolean 
     return (
         s.buildFirst.length === 0 &&
         s.buildNext.length === 0 &&
-        s.defer.length === 0 &&
-        s.highestRisks.length === 0 &&
-        s.openDecisions.length === 0
+        s.highestRisks.length === 0
     );
 }

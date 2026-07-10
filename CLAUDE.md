@@ -524,6 +524,31 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     The legacy multi-pass scoring + revision passes were removed — old projects
     in localStorage retain their saved `qualityScores`, but no new generation
     writes them.
+    - **PRD Review & Confirm + Decision Log (2026-07 mobile cleanup pass).**
+      Assumptions no longer render as a passive trailing "Assumptions" section
+      (or as the Implementation Summary's "Open Decisions" list — both are
+      gone, as are the summary's "Defer" bucket, the Success Metrics
+      Instrumentation column, and the "Derived from features and assumptions"
+      subtitle). Instead the PRD carries two mirrored sections near the top:
+      **Review & Confirm** (unresolved assumptions, sorted by confidence
+      highest-first, each with Confirm / "Not right"+correction actions) and
+      **Decision Log** (confirmed user choices only — decided assumptions +
+      confirmed features — never unresolved items). State lives ON the
+      `StructuredPRD` itself via all-optional fields (`Assumption.decision` /
+      `decisionNote` / `decidedAt`; `Feature.confirmed` / `confirmedAt` —
+      legacy PRDs simply read as "all unresolved"); every confirm/reject/undo
+      is a normal PRD edit through `editSpineStructuredPRD` (appends a
+      version, descriptive editSummary, undoable via version history). All
+      derivations (`sortAssumptionsByConfidence`, `splitAssumptions`,
+      `deriveDecisionLog`, `resolveScopeFeature` — the MVP-scope-string →
+      feature matcher — and `isDisplayableFeatureId`) are pure/read-side in
+      `src/lib/derive/prdDecisions.ts`; do NOT persist a separate
+      decision-log structure. Feature ids render everywhere through the
+      shared `FeatureIdBadge` (`src/components/prd/FeatureIdBadge.tsx`),
+      which mirrors the User Flows `FeatureReferenceChip` fuchsia look and
+      hides uuid-shaped ids; feature confirmation uses the same green-check
+      language as the Screens `ScreenConfirmPanel`. Within Core Features the
+      order is **Detailed Features before Feature Systems** (both renderers).
     - **User project name → `productName`.** The name the user types when
       creating a project is threaded into generation as an optional
       `projectName` (call site `runPrdGeneration`/`ProjectWorkspace.handleRegenerate`

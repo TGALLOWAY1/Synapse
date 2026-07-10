@@ -36,7 +36,6 @@ describe('deriveImplementationSummary — feature bucketing', () => {
         const s = deriveImplementationSummary(prd);
         expect(s.buildFirst.map(f => f.id)).toEqual(['f1']);
         expect(s.buildNext.map(f => f.id)).toEqual(['f2']);
-        expect(s.defer.map(f => f.id)).toEqual(['f3']);
     });
 
     it('falls back to priority when tier is missing', () => {
@@ -50,7 +49,6 @@ describe('deriveImplementationSummary — feature bucketing', () => {
         const s = deriveImplementationSummary(prd);
         expect(s.buildFirst.map(f => f.id)).toEqual(['f1']);
         expect(s.buildNext.map(f => f.id)).toEqual(['f2']);
-        expect(s.defer.map(f => f.id)).toEqual(['f3']);
     });
 
     it('legacy untagged PRDs split features by declaration order', () => {
@@ -62,7 +60,15 @@ describe('deriveImplementationSummary — feature bucketing', () => {
         const s = deriveImplementationSummary(prd);
         expect(s.buildFirst).toHaveLength(4);
         expect(s.buildNext).toHaveLength(4);
-        expect(s.defer).toHaveLength(2);
+    });
+
+    it('exposes no defer bucket (removed from the summary)', () => {
+        const prd = basePRD({
+            features: [baseFeature({ id: 'f1', name: 'F1', tier: 'later' })],
+        });
+        const s = deriveImplementationSummary(prd);
+        expect('defer' in s).toBe(false);
+        expect('openDecisions' in s).toBe(false);
     });
 
     it('orders buckets by feature id so f1, f2, f3… stay in natural order', () => {
@@ -116,20 +122,6 @@ describe('deriveImplementationSummary — risks', () => {
         const prd = basePRD({ risks: ['Timezone bugs', 'Latency spikes'] });
         const s = deriveImplementationSummary(prd);
         expect(s.highestRisks.map(r => r.risk)).toEqual(['Timezone bugs', 'Latency spikes']);
-    });
-});
-
-describe('deriveImplementationSummary — open decisions', () => {
-    it('prefers low-confidence assumptions', () => {
-        const prd = basePRD({
-            assumptions: [
-                { id: 'a1', statement: 'high', confidence: 'high' },
-                { id: 'a2', statement: 'low', confidence: 'low' },
-                { id: 'a3', statement: 'med', confidence: 'med' },
-            ],
-        });
-        const s = deriveImplementationSummary(prd);
-        expect(s.openDecisions.map(d => d.id)).toEqual(['a2']);
     });
 });
 

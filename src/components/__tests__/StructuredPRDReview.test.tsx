@@ -1,0 +1,237 @@
+import { describe, it, expect, beforeEach, vi } from 'vitest';
+import { render, screen, fireEvent, within } from '@testing-library/react';
+import { useProjectStore } from '../../store/projectStore';
+import { StructuredPRDView } from '../StructuredPRDView';
+import { ReviewConfirmSection } from '../prd/ReviewConfirmSection';
+import { DecisionLogSection } from '../prd/DecisionLogSection';
+import { deriveDecisionLog, splitAssumptions } from '../../lib/derive/prdDecisions';
+import type { SpineVersion, StructuredPRD } from '../../types';
+
+// mark.js walks real DOM ranges — irrelevant to these tests and flaky in
+// jsdom, so stub it out.
+vi.mock('mark.js', () => ({
+    default: class {
+        mark() {}
+        unmark() {}
+    },
+}));
+
+const PROJECT_ID = 'p1';
+const SPINE_ID = 'spine1';
+
+const prd: StructuredPRD = {
+    vision: 'v',
+    targetUsers: ['Solo builders'],
+    coreProblem: 'p',
+    architecture: 'a',
+    risks: [],
+    features: [
+        { id: 'f1', name: 'Quick Capture', description: 'd', userValue: 'v', complexity: 'low', tier: 'mvp' },
+        { id: 'f2', name: 'Weekly Review', description: 'd', userValue: 'v', complexity: 'low', tier: 'v1' },
+    ],
+    featureSystems: [
+        { id: 's1', name: 'Capture System', purpose: 'sp', featureIds: ['f1'] },
+    ],
+    successMetrics: [{ name: 'Activation', target: '40%', instrumentation: 'legacy event name' }],
+    assumptions: [
+        { id: 'a1', statement: 'Users are mobile-first', confidence: 'low' },
+        { id: 'a2', statement: 'Weekly cadence works', confidence: 'high' },
+    ],
+};
+
+function seedStore() {
+    const spine: Partial<SpineVersion> = {
+        id: SPINE_ID,
+        projectId: PROJECT_ID,
+        promptText: 'idea',
+        responseText: 'md',
+        structuredPRD: prd,
+        isLatest: true,
+        isFinal: false,
+        createdAt: 1,
+    };
+    useProjectStore.setState({
+        projects: {},
+        spineVersions: { [PROJECT_ID]: [spine as SpineVersion] },
+        historyEvents: {},
+        branches: {},
+        artifacts: {},
+        artifactVersions: {},
+        feedbackItems: {},
+    });
+}
+
+beforeEach(() => {
+    seedStore();
+    vi.stubGlobal(
+        'matchMedia',
+        vi.fn().mockImplementation((query: string) => ({
+            matches: false,
+            media: query,
+            addEventListener: vi.fn(),
+            removeEventListener: vi.fn(),
+            addListener: vi.fn(),
+            removeListener: vi.fn(),
+            dispatchEvent: vi.fn(),
+        })),
+    );
+});
+
+const latestSpine = () => {
+    const versions = useProjectStore.getState().spineVersions[PROJECT_ID];
+    return versions[versions.length - 1];
+};
+
+function renderView(readOnly = false) {
+    return render(
+        <StructuredPRDView
+            projectId={PROJECT_ID}
+            spineId={SPINE_ID}
+            structuredPRD={prd}
+            readOnly={readOnly}
+        />,
+    );
+}
+
+describe('StructuredPRDView — section cleanup & ordering', () => {
+    it('renders Detailed Features before Feature Systems', () => {
+        const { container } = renderView();
+        const html = container.innerHTML;
+        const features = html.indexOf('Detailed Features');
+        const systems = html.indexOf('Feature Systems');
+        expect(features).toBeGreaterThan(-1);
+        expect(systems).toBeGreaterThan(-1);
+        expect(features).toBeLessThan(systems);
+    });
+
+    it('does not render a Defer bucket or the derived-from clutter line', () => {
+        renderView();
+        expect(screen.getByText('Implementation Summary')).toBeInTheDocument();
+        expect(screen.queryByText('Defer')).toBeNull();
+        expect(screen.queryByText(/derived from features and assumptions/i)).toBeNull();
+    });
+
+    it('omits Instrumentation from Success Metrics', () => {
+        renderView();
+        expect(screen.getByText('Success Metrics')).toBeInTheDocument();
+        expect(screen.queryByText(/instrumentation/i)).toBeNull();
+        expect(screen.queryByText('legacy event name')).toBeNull();
+    });
+
+    it('replaces the passive Assumptions section with Review & Confirm', () => {
+        renderView();
+        expect(screen.queryByText('Assumptions')).toBeNull();
+        expect(screen.getByText('Review & Confirm')).toBeInTheDocument();
+    });
+
+    it('presents MVP scope items resolved to features with id badges', () => {
+        render(
+            <StructuredPRDView
+                projectId={PROJECT_ID}
+                spineId={SPINE_ID}
+                structuredPRD={{ ...prd, mvpScope: { mvp: ['F1: Quick Capture'], v1: ['Weekly Review polish'], later: ['Integrations'] } }}
+                readOnly
+            />,
+        );
+        const mvpSection = document.getElementById('prd-mvp-scope')!;
+        expect(within(mvpSection).getAllByText('f1').length).toBeGreaterThan(0);
+        expect(within(mvpSection).getByText('Quick Capture')).toBeInTheDocument();
+        // "Later" stays a quiet secondary list — never a "Defer" section.
+        expect(within(mvpSection).getByText('Later')).toBeInTheDocument();
+        expect(within(mvpSection).queryByText(/defer/i)).toBeNull();
+    });
+});
+
+describe('StructuredPRDView — assumption review flow', () => {
+    it('orders unresolved assumptions by confidence (highest first)', () => {
+        renderView();
+        const section = document.getElementById('prd-review-confirm')!;
+        const items = within(section).getAllByRole('listitem');
+        expect(items[0].textContent).toContain('Weekly cadence works');
+        expect(items[1].textContent).toContain('Users are mobile-first');
+    });
+
+    it('confirming an assumption appends a new spine version with the decision', () => {
+        renderView();
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm assumption: Weekly cadence works' }));
+        const spine = latestSpine();
+        expect(spine.id).not.toBe(SPINE_ID);
+        const decided = spine.structuredPRD?.assumptions?.find(a => a.id === 'a2');
+        expect(decided?.decision).toBe('confirmed');
+        expect(decided?.decidedAt).toBeTypeOf('number');
+        expect(spine.provenance?.editSummary).toContain('Confirmed assumption');
+    });
+
+    it('rejecting an assumption records the correction note', () => {
+        renderView();
+        fireEvent.click(screen.getByRole('button', { name: 'Mark assumption incorrect: Users are mobile-first' }));
+        fireEvent.change(screen.getByPlaceholderText(/What's actually true/), {
+            target: { value: 'Desktop-first actually' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Mark incorrect' }));
+        const decided = latestSpine().structuredPRD?.assumptions?.find(a => a.id === 'a1');
+        expect(decided?.decision).toBe('rejected');
+        expect(decided?.decisionNote).toBe('Desktop-first actually');
+    });
+
+    it('confirming a feature appends a version with confirmed set', () => {
+        renderView();
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm feature Quick Capture' }));
+        const spine = latestSpine();
+        const f = spine.structuredPRD?.features.find(x => x.id === 'f1');
+        expect(f?.confirmed).toBe(true);
+        expect(spine.provenance?.editSummary).toBe('Confirmed feature: Quick Capture');
+    });
+
+    it('hides confirm/reject actions in read-only mode', () => {
+        renderView(true);
+        expect(screen.queryByRole('button', { name: /Confirm assumption/ })).toBeNull();
+        expect(screen.queryByRole('button', { name: /Confirm feature/ })).toBeNull();
+    });
+});
+
+describe('ReviewConfirmSection / DecisionLogSection units', () => {
+    it('ReviewConfirmSection renders nothing when all assumptions are decided', () => {
+        const { container } = render(
+            <ReviewConfirmSection assumptions={[]} onConfirm={() => {}} onReject={() => {}} readOnly={false} />,
+        );
+        expect(container.innerHTML).toBe('');
+    });
+
+    it('DecisionLogSection renders confirmed and rejected entries distinctly', () => {
+        const entries = deriveDecisionLog({
+            ...prd,
+            assumptions: [
+                { id: 'a1', statement: 'Solo users only', confidence: 'med', decision: 'rejected', decisionNote: 'Teams too', decidedAt: 1 },
+                { id: 'a2', statement: 'Weekly cadence works', confidence: 'high', decision: 'confirmed', decidedAt: 2 },
+            ],
+            features: [{ ...prd.features[0], confirmed: true, confirmedAt: 3 }],
+        });
+        const onUndoAssumption = vi.fn();
+        render(
+            <DecisionLogSection
+                entries={entries}
+                onUndoAssumption={onUndoAssumption}
+                onUndoFeature={() => {}}
+                readOnly={false}
+            />,
+        );
+        expect(screen.getByText('Decision Log')).toBeInTheDocument();
+        expect(screen.getByText('Marked incorrect')).toBeInTheDocument();
+        expect(screen.getByText('Confirmed')).toBeInTheDocument();
+        expect(screen.getByText('Feature confirmed')).toBeInTheDocument();
+        expect(screen.getByText(/Teams too/)).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Undo decision: Solo users only' }));
+        expect(onUndoAssumption).toHaveBeenCalledWith('a1');
+    });
+
+    it('splitAssumptions keeps unresolved and decided visually separable inputs', () => {
+        const { unresolved, decided } = splitAssumptions([
+            { id: 'a1', statement: 's1', confidence: 'low' },
+            { id: 'a2', statement: 's2', confidence: 'high', decision: 'confirmed' },
+        ]);
+        expect(unresolved.map(a => a.id)).toEqual(['a1']);
+        expect(decided.map(a => a.id)).toEqual(['a2']);
+    });
+});
