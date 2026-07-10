@@ -1,13 +1,12 @@
 import type {
     Jtbd, Principle, UserLoop, UXPage, FeatureSystem, PrdDataModel,
     StateMachine, RolePermission, ArchFlow, RiskDetailed,
-    SuccessMetric, ProductThesis, Feature,
+    SuccessMetric, ProductThesis,
 } from '../../types';
 import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
 import { sanitizeRolePermissions } from '../../lib/prdRolesSanitizer';
 import { stripLeadingListNumber } from '../../lib/utils/stripLeadingListNumber';
 import { isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
-import { isDeferredFeature } from '../../lib/derive/implementationSummary';
 import { FeatureIdBadge } from './FeatureIdBadge';
 
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
@@ -225,10 +224,17 @@ export function UxArchitectureSection({ pages }: { pages: UXPage[] }) {
     );
 }
 
-export function FeatureSystemsSection({ systems, features = [] }: { systems: FeatureSystem[]; features?: Feature[] }) {
-    // PRD sections must not refer to features outside the MVP/V1 phases —
-    // deferred features surface only in the Decision Log.
-    const deferredIds = new Set(features.filter(isDeferredFeature).map(f => f.id.toLowerCase()));
+export function FeatureSystemsSection({
+    systems,
+    deferredFeatureIds,
+}: {
+    systems: FeatureSystem[];
+    /** Scope-aware deferred set (deriveDeferredFeatureIds) — PRD sections must
+     * not refer to features outside the MVP/V1 phases; deferred features
+     * surface only in the Decision Log. */
+    deferredFeatureIds?: ReadonlySet<string>;
+}) {
+    const deferredIds = new Set([...(deferredFeatureIds ?? [])].map(id => id.toLowerCase()));
     return (
         <Section title="Feature Systems" id="prd-feature-systems">
             <div className="grid sm:grid-cols-2 gap-3">

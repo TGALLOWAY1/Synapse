@@ -29,20 +29,31 @@ function FeatureCard({
         green: 'bg-green-50/60 border-green-200',
         blue: 'bg-blue-50/60 border-blue-200',
     }[accent];
-    return (
-        <a
-            href={`#${featureDetailAnchorId(feature.id)}`}
-            onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(feature.id); } : undefined}
-            className={`block rounded-md border ${accentClasses} px-3 py-2 hover:shadow-sm transition`}
-            title={`Jump to ${feature.name} details`}
-        >
+    const body = (
+        <>
             <div className="flex items-baseline gap-2">
-                <FeatureIdBadge id={feature.id} />
+                {feature.id && <FeatureIdBadge id={feature.id} />}
                 <span className="text-sm font-semibold text-neutral-900 truncate">{feature.name}</span>
             </div>
             {feature.reason && (
                 <p className="text-[11px] text-neutral-600 mt-0.5 line-clamp-2">{feature.reason}</p>
             )}
+        </>
+    );
+    // A free-form scope entry with no backing feature has no detail card to
+    // link to — render it as a plain card.
+    if (!feature.id) {
+        return <div className={`rounded-md border ${accentClasses} px-3 py-2`}>{body}</div>;
+    }
+    const featureId = feature.id;
+    return (
+        <a
+            href={`#${featureDetailAnchorId(featureId)}`}
+            onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(featureId); } : undefined}
+            className={`block rounded-md border ${accentClasses} px-3 py-2 hover:shadow-sm transition`}
+            title={`Jump to ${feature.name} details`}
+        >
+            {body}
         </a>
     );
 }
@@ -80,7 +91,7 @@ function FeatureBucket({
             ) : (
                 <div className="space-y-1.5">
                     {features.map(f => (
-                        <FeatureCard key={f.id} feature={f} accent={accent} onNavigate={onNavigate} />
+                        <FeatureCard key={f.id ?? f.name} feature={f} accent={accent} onNavigate={onNavigate} />
                     ))}
                 </div>
             )}

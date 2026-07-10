@@ -541,10 +541,13 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       is a normal PRD edit through `editSpineStructuredPRD` (appends a
       version, descriptive editSummary, undoable via version history). All
       derivations (`sortAssumptionsByConfidence`, `splitAssumptions`,
-      `deriveDecisionLog`, `resolveScopeFeature` — the MVP-scope-string →
-      feature matcher — and `isDisplayableFeatureId`) are pure/read-side in
-      `src/lib/derive/prdDecisions.ts`; do NOT persist a separate
-      decision-log structure. Feature ids render everywhere through the
+      `deriveDecisionLog`, and `isDisplayableFeatureId`) are pure/read-side in
+      `src/lib/derive/prdDecisions.ts`, which re-exports `resolveScopeFeature`
+      — the MVP-scope-string → feature matcher, now defined in
+      `src/lib/derive/scopeFeatureMatch.ts` (extracted so
+      `implementationSummary.ts` can use it too without an import cycle) — for
+      back-compat; do NOT persist a separate decision-log structure. Feature
+      ids render everywhere through the
       shared `FeatureIdBadge` (`src/components/prd/FeatureIdBadge.tsx`),
       which mirrors the User Flows `FeatureReferenceChip` fuchsia look and
       hides uuid-shaped ids; feature confirmation uses the same green-check
@@ -557,24 +560,37 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       `renderPremiumMarkdown`); the scope *rationale* (`mvpScope.rationale`)
       now renders as the Decision callout at the top of
       `ImplementationSummarySection`, and the summary buckets are **uncapped**
-      (every tagged MVP/V1 feature appears; legacy untagged PRDs keep the
-      declaration-order 4+4 heuristic). Bucket cards show the feature
+      (every tagged MVP/V1 feature appears). `deriveImplementationSummary`
+      (`src/lib/derive/implementationSummary.ts`) buckets by feature
+      `tier`/`priority` when present; when a PRD has **no** tier/priority tags
+      but DOES have `mvpScope.mvp`/`v1` entries, those explicit free-form scope
+      strings drive the buckets instead (resolved to features via
+      `resolveScopeFeature` where possible; an unresolved entry still renders
+      as a plain scope card with no id badge — `SummaryFeature.id` is
+      optional). Only when BOTH signals are absent does it fall back to the
+      declaration-order 4+4 heuristic. Bucket cards show the feature
       **description** as supporting text (falling back to userValue) — never
       the raw complexity rating prefix ("low · "). Do not reintroduce a
       separate MVP Scope feature list.
       **Deferred scope renders ONLY in the Decision Log** — PRD sections must
-      never present features outside the MVP/V1 phases. `deriveDecisionLog`
-      appends derived `verdict: 'deferred'` entries for features tagged
-      `tier: 'later'` and for `mvpScope.later` items (resolved via
-      `resolveScopeFeature` and deduped against deferred features; deferred
-      entries carry no undo — they are scope records, not user decisions).
-      Deferred features are excluded from Detailed Features and from Feature
-      Systems' feature-id chips (both renderers filter on `isDeferredFeature`).
-      **Detailed Features groups by tier** (`splitFeaturesByTier` in
-      `src/lib/derive/implementationSummary.ts`): MVP + untiered features
-      visible by default (hand-added features have no tier and must stay
-      visible), V1 features behind a collapsed disclosure, deferred features
-      linked out to the Decision Log. Each detail card is anchored
+      never present features outside the MVP/V1 phases. `deriveDeferredFeatureIds(prd)`
+      is the single scope-aware source of truth for "deferred": features
+      tagged `tier: 'later'`, PLUS any untagged feature an `mvpScope.later`
+      item resolves to (an explicit `mvp`/`v1` tier tag always wins over a
+      later item naming that feature — a data conflict logs the later item as
+      a raw `kind: 'scope'` entry instead of hiding the tagged feature).
+      `deriveDecisionLog` appends derived `verdict: 'deferred'` entries from
+      this set (deferred entries carry no undo — they are scope records, not
+      user decisions), and every other consumer (`splitFeaturesByTier`, Feature
+      Systems' chip filter, the summary buckets) takes the same set so a
+      feature can never read as both deferred and in scope. Do not derive
+      "deferred" locally from `tier === 'later'` alone in a new call site —
+      use `deriveDeferredFeatureIds`.
+      **Detailed Features groups by tier** (`splitFeaturesByTier(features,
+      deferredIds)` in `src/lib/derive/implementationSummary.ts`): MVP +
+      untiered features visible by default (hand-added features have no tier
+      and must stay visible), V1 features behind a collapsed disclosure,
+      deferred features linked out to the Decision Log. Each detail card is anchored
       (`featureDetailAnchorId` → `prd-feature-<id>`): Implementation Summary
       cards deep-link to it (`StructuredPRDView.handleNavigateToFeature`
       auto-expands the V1 group when the target lives inside it) and each

@@ -172,6 +172,30 @@ describe('deriveDecisionLog', () => {
         expect(deferred[1]).toMatchObject({ kind: 'scope', statement: 'Team workspaces someday', label: '' });
     });
 
+    it('defers an UNTAGGED feature named by mvpScope.later (feature entry, not raw scope)', () => {
+        const prd = basePRD({
+            features: [feature({ id: 'f9', name: 'Anki Export' })], // no tier
+            mvpScope: { mvp: [], v1: [], later: ['Anki Export (f9): CSV utility'] },
+        });
+        const log = deriveDecisionLog(prd);
+        expect(log).toHaveLength(1);
+        expect(log[0]).toMatchObject({ id: 'f9', kind: 'feature', verdict: 'deferred' });
+    });
+
+    it('logs a later item naming an explicitly mvp-tagged feature as a raw scope record (tier wins)', () => {
+        const prd = basePRD({
+            features: [feature({ id: 'f1', name: 'Quick Capture', tier: 'mvp' })],
+            mvpScope: { mvp: [], v1: [], later: ['Advanced Quick Capture filters'] },
+        });
+        const log = deriveDecisionLog(prd);
+        expect(log).toHaveLength(1);
+        expect(log[0]).toMatchObject({
+            kind: 'scope',
+            verdict: 'deferred',
+            statement: 'Advanced Quick Capture filters',
+        });
+    });
+
     it('places deferred entries after dated user decisions', () => {
         const prd = basePRD({
             assumptions: [assumption({ id: 'a1', decision: 'confirmed', decidedAt: 10 })],

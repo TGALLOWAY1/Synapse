@@ -85,6 +85,29 @@ describe('renderPremiumMarkdown mobile-cleanup pass', () => {
         expect(md).toContain('- **Deferred** (f2): Weekly Review');
     });
 
+    it('excludes an untagged feature deferred via mvpScope.later from Detailed Features', () => {
+        const md = renderPremiumMarkdown({
+            ...richPrd,
+            features: [
+                ...richPrd.features,
+                { id: 'f9', name: 'Anki Export', description: 'CSV utility', userValue: 'v', complexity: 'low' }, // no tier
+            ],
+            mvpScope: { mvp: [], v1: [], later: ['Anki Export (f9)'] },
+        });
+        expect(md).not.toContain('### Anki Export');
+        expect(md).toContain('- **Deferred** (f9): Anki Export — CSV utility');
+    });
+
+    it('preserves explicit mvpScope entries with no matching tagged feature in the summary', () => {
+        const md = renderPremiumMarkdown({
+            ...richPrd,
+            mvpScope: { mvp: ['Basic auth and onboarding'], v1: [], later: [] },
+        });
+        const summaryStart = md.indexOf('## Implementation Summary');
+        const summaryEnd = md.indexOf('\n## ', summaryStart + 1);
+        expect(md.slice(summaryStart, summaryEnd)).toContain('Basic auth and onboarding');
+    });
+
     it('never references deferred features from Feature Systems', () => {
         const md = renderPremiumMarkdown({
             ...richPrd,

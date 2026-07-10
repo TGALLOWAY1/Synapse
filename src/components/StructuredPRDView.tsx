@@ -23,6 +23,7 @@ import { ReviewConfirmSection } from './prd/ReviewConfirmSection';
 import { DecisionLogSection } from './prd/DecisionLogSection';
 import { splitAssumptions, deriveDecisionLog } from '../lib/derive/prdDecisions';
 import {
+    deriveDeferredFeatureIds,
     deriveImplementationSummary,
     featureDetailAnchorId,
     isImplementationSummaryEmpty,
@@ -361,9 +362,13 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
     // MVP (and unclassified) features render by default; V1 features sit
     // behind a collapsed disclosure; deferred (tier 'later') features are
     // NOT rendered here — they appear only as Decision Log entries above.
+    const deferredFeatureIds = useMemo(
+        () => deriveDeferredFeatureIds(structuredPRD),
+        [structuredPRD],
+    );
     const featureGroups = useMemo(
-        () => splitFeaturesByTier(structuredPRD.features),
-        [structuredPRD.features],
+        () => splitFeaturesByTier(structuredPRD.features, deferredFeatureIds),
+        [structuredPRD.features, deferredFeatureIds],
     );
     const [showV1Features, setShowV1Features] = useState(false);
     const pendingScrollRef = useRef<string | null>(null);
@@ -823,7 +828,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                 </div>
 
                 {structuredPRD.featureSystems && structuredPRD.featureSystems.length > 0 && (
-                    <FeatureSystemsSection systems={structuredPRD.featureSystems} features={structuredPRD.features} />
+                    <FeatureSystemsSection systems={structuredPRD.featureSystems} deferredFeatureIds={deferredFeatureIds} />
                 )}
 
                 {/* User Experience: UX Architecture → Core User Loops */}

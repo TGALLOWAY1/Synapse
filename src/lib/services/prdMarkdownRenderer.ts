@@ -26,6 +26,7 @@ import type {
 } from '../../types';
 import { coerceToBulletList } from '../textCleanup';
 import {
+    deriveDeferredFeatureIds,
     deriveImplementationSummary,
     isImplementationSummaryEmpty,
     splitFeaturesByTier,
@@ -289,16 +290,18 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         if (summary.buildFirst.length > 0) {
             lines.push('### Build First');
             summary.buildFirst.forEach((f, i) => {
+                const id = f.id ? `**${f.id}** ` : '';
                 const reason = f.reason ? ` — ${f.reason}` : '';
-                lines.push(`${i + 1}. **${f.id}** ${f.name}${reason}`);
+                lines.push(`${i + 1}. ${id}${f.name}${reason}`);
             });
             lines.push('');
         }
         if (summary.buildNext.length > 0) {
             lines.push('### Build Next');
             summary.buildNext.forEach(f => {
+                const id = f.id ? `**${f.id}** ` : '';
                 const reason = f.reason ? ` — ${f.reason}` : '';
-                lines.push(`- **${f.id}** ${f.name}${reason}`);
+                lines.push(`- ${id}${f.name}${reason}`);
             });
             lines.push('');
         }
@@ -406,7 +409,7 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
     // unclassified) features render first, V1 features after (collapsed in
     // the app); deferred features are excluded — they appear only as
     // Deferred entries in the Decision Log above.
-    const featureGroups = splitFeaturesByTier(prd.features);
+    const featureGroups = splitFeaturesByTier(prd.features, deriveDeferredFeatureIds(prd));
     lines.push('## Detailed Features');
     featureGroups.mvp.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
     featureGroups.v1.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
