@@ -29,6 +29,7 @@ import {
     deriveImplementationSummary,
     isImplementationSummaryEmpty,
 } from '../derive/implementationSummary';
+import { splitAssumptions, deriveDecisionLog } from '../derive/prdDecisions';
 import { sanitizeRolePermissions } from '../prdRolesSanitizer';
 import { stripLeadingListNumber } from '../utils/stripLeadingListNumber';
 
@@ -237,12 +238,15 @@ const renderRisksDetailed = (risks: RiskDetailed[]): string[] => {
     return lines;
 };
 
+// Instrumentation was dropped from this table: new generations no longer
+// produce it (analytics detail belongs to downstream artifacts) so the column
+// rendered blank. Mirrors MetricsSection in PremiumSections.tsx.
 const renderMetrics = (metrics: SuccessMetric[]): string[] => {
     const lines: string[] = [];
-    lines.push('| Metric | Target | Instrumentation |');
-    lines.push('|---|---|---|');
+    lines.push('| Metric | Target |');
+    lines.push('|---|---|');
     metrics.forEach(m => {
-        lines.push(`| ${escapeCell(m.name)} | ${escapeCell(m.target || '—')} | ${escapeCell(m.instrumentation || '—')} |`);
+        lines.push(`| ${escapeCell(m.name)} | ${escapeCell(m.target || '—')} |`);
     });
     return lines;
 };
@@ -288,11 +292,6 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
             summary.buildNext.forEach(f => lines.push(`- **${f.id}** ${f.name}`));
             lines.push('');
         }
-        if (summary.defer.length > 0) {
-            lines.push('### Defer');
-            summary.defer.forEach(f => lines.push(`- **${f.id}** ${f.name}`));
-            lines.push('');
-        }
         if (summary.highestRisks.length > 0) {
             lines.push('### Highest Risks');
             summary.highestRisks.forEach(r => {
@@ -302,11 +301,32 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
             });
             lines.push('');
         }
-        if (summary.openDecisions.length > 0) {
-            lines.push('### Open Decisions');
-            summary.openDecisions.forEach(d => lines.push(`- **${d.id}** ${d.statement}`));
-            lines.push('');
-        }
+    }
+
+    // ── Review & Confirm / Decision Log — mirrors ReviewConfirmSection and
+    // DecisionLogSection in the structured view. Unresolved assumptions
+    // surface as items awaiting user confirmation (highest confidence first);
+    // decided ones read as a running log of confirmed user choices.
+    const { unresolved: unresolvedAssumptions } = splitAssumptions(prd.assumptions);
+    const decisionLog = deriveDecisionLog(prd);
+    if (unresolvedAssumptions.length > 0) {
+        lines.push('## Review & Confirm');
+        lines.push('Assumptions made while drafting this PRD that still need user confirmation or correction:');
+        unresolvedAssumptions.forEach(a => {
+            lines.push(`- **${a.confidence} confidence** — ${a.statement}`);
+        });
+        lines.push('');
+    }
+    if (decisionLog.length > 0) {
+        lines.push('## Decision Log');
+        decisionLog.forEach(e => {
+            const verdict = e.kind === 'feature'
+                ? 'Feature confirmed'
+                : e.verdict === 'confirmed' ? 'Confirmed' : 'Marked incorrect';
+            const note = e.note ? ` — Correction: ${e.note}` : '';
+            lines.push(`- **${verdict}** (${e.label}): ${e.statement}${note}`);
+        });
+        lines.push('');
     }
 
     // ── Section order is a logical reading flow (see StructuredPRDView, which
@@ -381,13 +401,18 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         }
         if (prd.mvpScope.later?.length) {
             lines.push('');
-            lines.push('**Later — defer:**');
+            lines.push('**Later:**');
             prd.mvpScope.later.forEach(i => lines.push(`- \`[Later]\` ${i}`));
         }
         lines.push('');
     }
 
     // ── Core Features ───────────────────────────────────────────────────
+    // Detailed Features first — the concrete features — then the Feature
+    // Systems grouping (mirrors StructuredPRDView's order).
+    lines.push('## Detailed Features');
+    prd.features.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
+
     // Feature Systems
     if (prd.featureSystems?.length) {
         lines.push('## Feature Systems');
@@ -405,10 +430,6 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
             lines.push('');
         });
     }
-
-    // Detailed Features
-    lines.push('## Detailed Features');
-    prd.features.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
 
     // ── User Experience ─────────────────────────────────────────────────
     // UX Architecture
@@ -504,14 +525,8 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // Assumptions & Open Questions — last so they're easy to find
-    if (prd.assumptions?.length) {
-        lines.push('## Assumptions');
-        prd.assumptions.forEach(a => {
-            lines.push(`> [!ASSUMPTION] **${a.confidence} confidence** — ${a.statement}`);
-            lines.push('');
-        });
-    }
+    // (Assumptions no longer render as a trailing section — they surface in
+    // the Review & Confirm / Decision Log blocks near the top.)
 
     // Static handoff appendix — always rendered (legacy PRDs included).
     // Wording must stay bullet-for-bullet identical to HandoffAppendixSection
