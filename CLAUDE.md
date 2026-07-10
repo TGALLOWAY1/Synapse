@@ -2573,11 +2573,18 @@ component). It is driven directly by the live `prdSectionStatus` store slice
 - **`ProgressTimeline.tsx`** / `TimelineStep.tsx` / `ConcurrentGroup.tsx` —
   presentation. Status icons (completed/in-progress/queued/failed/pending — the
   amber `queued` ring is distinct from the plain `pending` ring), an
-  always-visible (truncating) model chip, a "Retried ×N" badge, and
+  always-visible model chip, a "Retried ×N" badge, and
   explicitly-labeled times (`Actual:`/`Est. ~`/`Elapsed:`). A 1s ticker injects
   live `Elapsed:` from `startedAt` (re-stamped on each `generating` transition,
-  so retries show fresh elapsed). Responsive rules (`min-w-0`, truncation, no
-  `whitespace-nowrap` on the model chip) keep narrow screens from overlapping.
+  so retries show fresh elapsed). **`StepBody` puts only the step title + timing
+  block on the header row and renders the description, `Waits on:` note, and
+  model chip full-width *below* it — so on a narrow phone the detail text and
+  model names use the whole card instead of being squeezed into a thin column
+  beside the timing block (the old single-row layout truncated model names to
+  "Gemini 3.1…" and wrapped descriptions into 2–3-word lines with an empty right
+  gutter). `ConcurrentGroup` also trims its nested indentation at `sm:` (dashed
+  padding, branch connector width, child gaps) to reclaim mobile width. Do not
+  move the description/model chip back beside the timing block.**
   Mobile collapses per-step detail behind chevrons and shows a `View full
   history >` link (navigates to the History stage); desktop shows
   description/model/status/est/actual/retry and concurrent groups without

@@ -1180,7 +1180,7 @@ export function ProjectWorkspace() {
                                 />
 
                                 {activeSpine ? (
-                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
+                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-4 sm:p-6 md:p-10 mb-8">
                                         {/* PRD generation progress timeline (initial gen, regen, or a
                                             settled run with a failed section awaiting retry). */}
                                         {(isGenerating || showProgressTimeline) && (
@@ -1341,7 +1341,7 @@ export function ProjectWorkspace() {
                                         )}
                                     </div>
                                 ) : (
-                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-6 md:p-10 mb-8">
+                                    <div className="bg-white rounded-2xl shadow-sm border border-neutral-200/80 p-4 sm:p-6 md:p-10 mb-8">
                                         <ProgressTimeline
                                             steps={timelineSteps}
                                             messages={prdProgress?.messages}
