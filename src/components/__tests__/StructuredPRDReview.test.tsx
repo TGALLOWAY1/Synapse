@@ -124,21 +124,73 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
         expect(screen.getByText('Review & Confirm')).toBeInTheDocument();
     });
 
-    it('presents MVP scope items resolved to features with id badges', () => {
+    it('renders no MVP Scope section — the Implementation Summary is the single scope surface', () => {
         render(
             <StructuredPRDView
                 projectId={PROJECT_ID}
                 spineId={SPINE_ID}
-                structuredPRD={{ ...prd, mvpScope: { mvp: ['F1: Quick Capture'], v1: ['Weekly Review polish'], later: ['Integrations'] } }}
+                structuredPRD={{
+                    ...prd,
+                    mvpScope: {
+                        mvp: ['F1: Quick Capture'],
+                        v1: ['Weekly Review polish'],
+                        later: ['Integrations'],
+                        rationale: 'Capture loop first.',
+                    },
+                }}
                 readOnly
             />,
         );
-        const mvpSection = document.getElementById('prd-mvp-scope')!;
-        expect(within(mvpSection).getAllByText('f1').length).toBeGreaterThan(0);
-        expect(within(mvpSection).getByText('Quick Capture')).toBeInTheDocument();
-        // "Later" stays a quiet secondary list — never a "Defer" section.
-        expect(within(mvpSection).getByText('Later')).toBeInTheDocument();
-        expect(within(mvpSection).queryByText(/defer/i)).toBeNull();
+        expect(document.getElementById('prd-mvp-scope')).toBeNull();
+        expect(screen.queryByText('MVP Scope')).toBeNull();
+        // The scope rationale surfaces in the Implementation Summary…
+        const summary = document.getElementById('prd-implementation-summary')!;
+        expect(within(summary).getByText(/Capture loop first/)).toBeInTheDocument();
+        // …and "Later" items surface as Deferred entries in the Decision Log.
+        const log = document.getElementById('prd-decision-log')!;
+        expect(within(log).getByText('Integrations')).toBeInTheDocument();
+        expect(within(log).getByText('Deferred')).toBeInTheDocument();
+    });
+
+    it('collapses V1 features by default and expands them on toggle', () => {
+        renderView();
+        // f1 (mvp) visible; f2 (v1) hidden behind the disclosure.
+        expect(screen.getByRole('heading', { level: 4, name: 'Quick Capture' })).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { level: 4, name: 'Weekly Review' })).toBeNull();
+        fireEvent.click(screen.getByRole('button', { name: /V1 — soon after launch/ }));
+        expect(screen.getByRole('heading', { level: 4, name: 'Weekly Review' })).toBeInTheDocument();
+    });
+
+    it('excludes deferred features from Detailed Features and points at the Decision Log', () => {
+        render(
+            <StructuredPRDView
+                projectId={PROJECT_ID}
+                spineId={SPINE_ID}
+                structuredPRD={{
+                    ...prd,
+                    features: [
+                        ...prd.features,
+                        { id: 'f10', name: 'Anki Export', description: 'CSV export', userValue: 'v', complexity: 'low', tier: 'later' },
+                    ],
+                }}
+                readOnly
+            />,
+        );
+        expect(screen.queryByRole('heading', { level: 4, name: 'Anki Export' })).toBeNull();
+        expect(screen.getByText(/deferred feature is recorded in the/)).toBeInTheDocument();
+        const log = document.getElementById('prd-decision-log')!;
+        expect(within(log).getByText('Anki Export')).toBeInTheDocument();
+    });
+
+    it('summary cards deep-link to feature detail anchors with a back affordance', () => {
+        renderView();
+        const summary = document.getElementById('prd-implementation-summary')!;
+        const link = within(summary).getByTitle('Jump to Quick Capture details');
+        expect(link.getAttribute('href')).toBe('#prd-feature-f1');
+        expect(document.getElementById('prd-feature-f1')).not.toBeNull();
+        expect(
+            screen.getByRole('button', { name: 'Back to Implementation Summary from Quick Capture' }),
+        ).toBeInTheDocument();
     });
 });
 

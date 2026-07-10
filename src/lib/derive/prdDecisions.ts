@@ -4,6 +4,7 @@
 // no decision fields) render safely as "all unresolved".
 
 import type { Assumption, Feature, StructuredPRD } from '../../types';
+import { isDeferredFeature } from './implementationSummary';
 
 const CONFIDENCE_RANK: Record<string, number> = { high: 0, med: 1, low: 2 };
 
@@ -40,10 +41,10 @@ export function splitAssumptions(assumptions: Assumption[] | undefined): Assumpt
 }
 
 export type DecisionLogEntry = {
-    /** Stable id of the source item (assumption id / feature id). */
+    /** Stable id of the source item (assumption id / feature id / scope item). */
     id: string;
-    kind: 'assumption' | 'feature';
-    verdict: 'confirmed' | 'rejected';
+    kind: 'assumption' | 'feature' | 'scope';
+    verdict: 'confirmed' | 'rejected' | 'deferred';
     /** Short reference label shown as a badge (assumption id or feature id). */
     label: string;
     statement: string;
@@ -52,10 +53,13 @@ export type DecisionLogEntry = {
 };
 
 /**
- * Derive the Decision Log — confirmed user choices only, never unresolved
- * assumptions. Sources: assumptions the user confirmed/rejected and features
- * the user confirmed. Ordered chronologically by decision time (undated
- * entries last, in document order) so the log reads as a running record.
+ * Derive the Decision Log — decided items only, never unresolved assumptions.
+ * Sources: assumptions the user confirmed/rejected, features the user
+ * confirmed, and DEFERRED scope (features tagged 'later' plus `mvpScope.later`
+ * items). The Decision Log is the ONLY place deferred work is presented — no
+ * other PRD section may refer to features outside the MVP/V1 phases. User
+ * decisions are ordered chronologically (undated last, in document order);
+ * deferred entries carry no timestamp so they read as a trailing record.
  */
 export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
     const entries: DecisionLogEntry[] = [];
@@ -73,7 +77,8 @@ export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
         });
     });
 
-    (prd.features ?? []).forEach(f => {
+    const features = prd.features ?? [];
+    features.forEach(f => {
         if (!f.confirmed) return;
         entries.push({
             id: f.id,
@@ -83,6 +88,47 @@ export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
             statement: f.name,
             decidedAt: f.confirmedAt,
         });
+    });
+
+    // Deferred scope — the record of what was consciously pushed out of the
+    // MVP/V1 phases. Features tagged 'later' first…
+    const deferredIds = new Set<string>();
+    features.filter(isDeferredFeature).forEach(f => {
+        deferredIds.add(f.id);
+        entries.push({
+            id: f.id,
+            kind: 'feature',
+            verdict: 'deferred',
+            label: f.id,
+            statement: f.name,
+            note: f.description || undefined,
+        });
+    });
+
+    // …then mvpScope "Later" items, resolved to features where possible and
+    // deduped against features already logged as deferred above.
+    (prd.mvpScope?.later ?? []).forEach((item, i) => {
+        const match = resolveScopeFeature(item, features);
+        if (match.feature) {
+            if (deferredIds.has(match.feature.id)) return;
+            deferredIds.add(match.feature.id);
+            entries.push({
+                id: match.feature.id,
+                kind: 'feature',
+                verdict: 'deferred',
+                label: match.feature.id,
+                statement: match.feature.name,
+                note: match.secondary,
+            });
+        } else {
+            entries.push({
+                id: `scope-later-${i}`,
+                kind: 'scope',
+                verdict: 'deferred',
+                label: '',
+                statement: item,
+            });
+        }
     });
 
     return entries
@@ -165,6 +211,10 @@ export function resolveScopeFeature(item: string, features: Feature[]): ScopeFea
         secondary = secondary.replace(nameMatchRegExp(feature.name), '');
     }
     secondary = secondary
+        // An id matched inside brackets ("Name (F1): …") leaves an empty
+        // "()" / "[]" behind once the token is stripped — remove it, or the
+        // supporting copy renders as "(): Upload pipeline…".
+        .replace(/\(\s*\)|\[\s*\]/g, '')
         .replace(/^[\s:–—-]+/, '')
         .replace(/[\s:–—-]+$/, '')
         .trim();

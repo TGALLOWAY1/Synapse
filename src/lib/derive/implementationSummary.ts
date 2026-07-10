@@ -18,8 +18,8 @@ export type SummaryRisk = {
 };
 
 // Note: the old "Defer" bucket and "Open Decisions" list were removed from
-// this summary — deferred work lives in MVP Scope ("Later") and the feature
-// tier tags, and open decisions moved to the actionable "Review & Confirm"
+// this summary — deferred work lives in the Decision Log (as "Deferred"
+// entries), and open decisions moved to the actionable "Review & Confirm"
 // section (src/lib/derive/prdDecisions.ts).
 export type ImplementationSummary = {
     buildFirst: SummaryFeature[];
@@ -27,20 +27,57 @@ export type ImplementationSummary = {
     highestRisks: SummaryRisk[];
 };
 
-const HIGH_IMPACT_KEYWORDS = /(outage|loss|critical|blocker|catastroph|exposed|leak|breach)/i;
-const MAX_FEATURES_PER_BUCKET = 5;
-const MAX_RISKS = 4;
+/** DOM id of a feature's detail card in the PRD view — the Implementation
+ * Summary cards deep-link to it and the detail cards link back. */
+export const featureDetailAnchorId = (featureId: string) => `prd-feature-${featureId}`;
 
-function isMvp(feature: Feature): boolean {
+const HIGH_IMPACT_KEYWORDS = /(outage|loss|critical|blocker|catastroph|exposed|leak|breach)/i;
+const MAX_RISKS = 4;
+const MAX_REASON_LENGTH = 110;
+
+export function isMvpFeature(feature: Feature): boolean {
     if (feature.tier === 'mvp') return true;
     if (!feature.tier && feature.priority === 'must') return true;
     return false;
 }
 
-function isV1(feature: Feature): boolean {
+export function isV1Feature(feature: Feature): boolean {
     if (feature.tier === 'v1') return true;
     if (!feature.tier && feature.priority === 'should') return true;
     return false;
+}
+
+/** Deferred = explicitly tagged 'later'. Untagged features are never treated
+ * as deferred (hand-added features carry no tier and must stay visible). */
+export function isDeferredFeature(feature: Feature): boolean {
+    return feature.tier === 'later';
+}
+
+export type FeatureTierSplit = {
+    /** MVP features PLUS untiered features that match no other bucket —
+     * anything not explicitly pushed out of the initial build stays visible. */
+    mvp: Feature[];
+    v1: Feature[];
+    /** Explicitly deferred (tier 'later') — surfaced only in the Decision Log. */
+    deferred: Feature[];
+};
+
+/**
+ * Split features into the display groups used by the Detailed Features
+ * section: visible MVP (plus unclassified), collapsed V1, and deferred
+ * (rendered only as Decision Log entries — PRD sections must not present
+ * features outside the MVP/V1 phases).
+ */
+export function splitFeaturesByTier(features: Feature[]): FeatureTierSplit {
+    const mvp: Feature[] = [];
+    const v1: Feature[] = [];
+    const deferred: Feature[] = [];
+    features.forEach(f => {
+        if (isDeferredFeature(f)) deferred.push(f);
+        else if (isV1Feature(f)) v1.push(f);
+        else mvp.push(f);
+    });
+    return { mvp, v1, deferred };
 }
 
 function featureIdSortKey(id: string): number {
@@ -48,23 +85,19 @@ function featureIdSortKey(id: string): number {
     return match ? parseInt(match[0], 10) : Number.MAX_SAFE_INTEGER;
 }
 
-function summaryFeatureFor(f: Feature, withReason: boolean): SummaryFeature {
-    const reason = withReason
-        ? buildReason(f)
-        : undefined;
-    return { id: f.id, name: f.name, reason };
+function summaryFeatureFor(f: Feature): SummaryFeature {
+    return { id: f.id, name: f.name, reason: buildReason(f) };
 }
 
-function buildReason(f: Feature): string {
-    const parts: string[] = [];
-    if (f.complexity) parts.push(f.complexity);
-    if (f.userValue) {
-        const trimmed = f.userValue.length > 80
-            ? `${f.userValue.slice(0, 78).trim()}…`
-            : f.userValue;
-        parts.push(trimmed);
-    }
-    return parts.join(' · ');
+// A short "what this feature is" line — the feature description (falling back
+// to user value). Deliberately NOT prefixed with the complexity rating: an
+// unexplained "low · " / "high · " read as noise in the summary cards.
+function buildReason(f: Feature): string | undefined {
+    const text = (f.description || f.userValue || '').trim();
+    if (!text) return undefined;
+    return text.length > MAX_REASON_LENGTH
+        ? `${text.slice(0, MAX_REASON_LENGTH - 2).trim()}…`
+        : text;
 }
 
 function pickFeatures(features: Feature[]): {
@@ -80,8 +113,8 @@ function pickFeatures(features: Feature[]): {
             buildNext: features.slice(4, 8),
         };
     }
-    const buildFirst = features.filter(isMvp);
-    const buildNext = features.filter(f => !isMvp(f) && isV1(f));
+    const buildFirst = features.filter(isMvpFeature);
+    const buildNext = features.filter(f => !isMvpFeature(f) && isV1Feature(f));
 
     // Within each bucket sort by the numeric portion of the feature id so the
     // user sees f1, f2, f3… in their natural order rather than a complexity
@@ -122,12 +155,15 @@ function pickHighestRisks(prd: StructuredPRD): SummaryRisk[] {
     return fallback.map(r => ({ risk: r, likelihood: 'unknown', impact: '' }));
 }
 
+// The summary is THE section presenting MVP/V1 scope (the old MVP Scope
+// feature lists were folded into it), so the buckets are deliberately
+// uncapped — every tagged MVP/V1 feature must appear.
 export function deriveImplementationSummary(prd: StructuredPRD): ImplementationSummary {
     const features = prd.features || [];
     const { buildFirst, buildNext } = pickFeatures(features);
     return {
-        buildFirst: buildFirst.slice(0, MAX_FEATURES_PER_BUCKET).map(f => summaryFeatureFor(f, true)),
-        buildNext: buildNext.slice(0, MAX_FEATURES_PER_BUCKET).map(f => summaryFeatureFor(f, false)),
+        buildFirst: buildFirst.map(summaryFeatureFor),
+        buildNext: buildNext.map(summaryFeatureFor),
         highestRisks: pickHighestRisks(prd),
     };
 }

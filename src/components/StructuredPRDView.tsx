@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2 } from 'lucide-react';
+import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
@@ -23,6 +23,12 @@ import { ReviewConfirmSection } from './prd/ReviewConfirmSection';
 import { DecisionLogSection } from './prd/DecisionLogSection';
 import { splitAssumptions, deriveDecisionLog } from '../lib/derive/prdDecisions';
 import {
+    deriveImplementationSummary,
+    featureDetailAnchorId,
+    isImplementationSummaryEmpty,
+    splitFeaturesByTier,
+} from '../lib/derive/implementationSummary';
+import {
     ExecutiveSummarySection,
     ProductThesisSection,
     JtbdSection,
@@ -35,7 +41,6 @@ import {
     RolesSection,
     ArchFlowsSection,
     RisksDetailedSection,
-    MvpScopeSection,
     MetricsSection,
     HandoffAppendixSection,
 } from './prd/PremiumSections';
@@ -352,6 +357,48 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
     const { unresolved: unresolvedAssumptions } = splitAssumptions(structuredPRD.assumptions);
     const decisionLog = deriveDecisionLog(structuredPRD);
 
+    // ── Detailed Features grouping & summary ↔ detail navigation ───────
+    // MVP (and unclassified) features render by default; V1 features sit
+    // behind a collapsed disclosure; deferred (tier 'later') features are
+    // NOT rendered here — they appear only as Decision Log entries above.
+    const featureGroups = useMemo(
+        () => splitFeaturesByTier(structuredPRD.features),
+        [structuredPRD.features],
+    );
+    const [showV1Features, setShowV1Features] = useState(false);
+    const pendingScrollRef = useRef<string | null>(null);
+
+    const summaryPresent = useMemo(
+        () =>
+            !isImplementationSummaryEmpty(deriveImplementationSummary(structuredPRD))
+            || !!structuredPRD.mvpScope?.rationale,
+        [structuredPRD],
+    );
+
+    const scrollToAnchor = (elementId: string) => {
+        document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    // Jump from an Implementation Summary card to the feature's detail card,
+    // expanding the collapsed V1 group first when the target lives inside it.
+    const handleNavigateToFeature = (featureId: string) => {
+        const elementId = featureDetailAnchorId(featureId);
+        if (!showV1Features && featureGroups.v1.some(f => f.id === featureId)) {
+            pendingScrollRef.current = elementId;
+            setShowV1Features(true);
+            return;
+        }
+        scrollToAnchor(elementId);
+    };
+
+    // Scroll to a just-expanded V1 feature once it is actually in the DOM.
+    useEffect(() => {
+        if (!pendingScrollRef.current) return;
+        const elementId = pendingScrollRef.current;
+        pendingScrollRef.current = null;
+        document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    }, [showV1Features]);
+
     const handleAddFeature = () => {
         const newFeature: Feature = {
             id: uuidv4(),
@@ -594,6 +641,34 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         );
     };
 
+    // One feature detail card. Anchored so the Implementation Summary cards
+    // can deep-link to it, with a back affordance returning to the summary.
+    const renderFeatureCard = (feature: Feature) => (
+        <div key={feature.id} id={featureDetailAnchorId(feature.id)} className="relative group/feature scroll-mt-24">
+            <FeatureCard
+                feature={feature}
+                onUpdate={handleFeatureUpdate}
+                onToggleConfirm={handleToggleFeatureConfirm}
+                onBackToSummary={summaryPresent ? () => scrollToAnchor('prd-implementation-summary') : undefined}
+                readOnly={readOnly}
+            />
+            {!readOnly && (
+                <button
+                    onClick={() => {
+                        if (window.confirm(`Delete feature "${feature.name}"?`)) {
+                            handleDeleteFeature(feature.id);
+                        }
+                    }}
+                    className="absolute -right-2 -top-2 p-1 bg-white border border-neutral-200 rounded-full text-neutral-300 hover:text-red-500 opacity-0 group-hover/feature:opacity-100 transition shadow-sm"
+                    title="Delete feature"
+                    aria-label="Delete feature"
+                >
+                    <Trash2 size={12} />
+                </button>
+            )}
+        </div>
+    );
+
     const renderGroundingBackfill = () => {
         if (readOnly || !groundingMissing) return null;
         return (
@@ -639,8 +714,13 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
 
                 {/* Implementation summary — synthesized from existing fields so a
                     reader can answer "what should I build first?" without scrolling
-                    the entire document. Hidden if the PRD has no actionable signal. */}
-                <ImplementationSummarySection prd={structuredPRD} />
+                    the entire document. THE section presenting MVP/V1 scope (the old
+                    MVP Scope lists duplicated it); its cards jump to the feature
+                    detail cards below. Hidden if the PRD has no actionable signal. */}
+                <ImplementationSummarySection
+                    prd={structuredPRD}
+                    onNavigateToFeature={handleNavigateToFeature}
+                />
 
                 {/* Review & Confirm — the actionable home for assumptions / open
                     decisions (highest confidence first). Confirmed/corrected items
@@ -663,10 +743,12 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                 />
 
                 {/* Section order is a logical reading flow (mirrors
-                    prdMarkdownRenderer): Product Overview → Target Users → MVP
-                    Scope → Features → UX → Metrics → Risks → Technical
-                    Architecture → Data Model → State Machines → reference →
-                    Where the Detail Lives (static handoff appendix). */}
+                    prdMarkdownRenderer): Product Overview → Target Users →
+                    Features → UX → Metrics → Risks → Technical Architecture →
+                    Data Model → State Machines → reference → Where the Detail
+                    Lives (static handoff appendix). MVP/V1 scope lives in the
+                    Implementation Summary at the top; deferred scope in the
+                    Decision Log. */}
 
                 {/* Product Overview: Vision → Problem → Thesis → Principles */}
                 {renderTextSection('Vision', 'vision', structuredPRD.vision)}
@@ -686,12 +768,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                     ? <JtbdSection jtbd={structuredPRD.jtbd} />
                     : renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
 
-                {/* MVP Scope — what ships first, before the full feature detail */}
-                {structuredPRD.mvpScope && (structuredPRD.mvpScope.mvp.length || structuredPRD.mvpScope.v1.length || structuredPRD.mvpScope.later.length) ? (
-                    <MvpScopeSection scope={structuredPRD.mvpScope} features={structuredPRD.features} />
-                ) : null}
-
-                {/* Core Features — concrete features first, system grouping after */}
+                {/* Core Features — concrete features first, system grouping after.
+                    MVP (and unclassified) features show by default; V1 features are
+                    collapsed; deferred features render only in the Decision Log. */}
                 <div className="mb-8" id="prd-features">
                     <div className="flex items-center justify-between mb-4 border-b border-neutral-200 pb-2">
                         <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Detailed Features</h3>
@@ -706,35 +785,45 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
                         )}
                     </div>
                     <div className="space-y-3">
-                        {structuredPRD.features.map(feature => (
-                            <div key={feature.id} className="relative group/feature">
-                                <FeatureCard
-                                    feature={feature}
-                                    onUpdate={handleFeatureUpdate}
-                                    onToggleConfirm={handleToggleFeatureConfirm}
-                                    readOnly={readOnly}
-                                />
-                                {!readOnly && (
-                                    <button
-                                        onClick={() => {
-                                            if (window.confirm(`Delete feature "${feature.name}"?`)) {
-                                                handleDeleteFeature(feature.id);
-                                            }
-                                        }}
-                                        className="absolute -right-2 -top-2 p-1 bg-white border border-neutral-200 rounded-full text-neutral-300 hover:text-red-500 opacity-0 group-hover/feature:opacity-100 transition shadow-sm"
-                                        title="Delete feature"
-                                        aria-label="Delete feature"
-                                    >
-                                        <Trash2 size={12} />
-                                    </button>
-                                )}
-                            </div>
-                        ))}
+                        {featureGroups.mvp.map(feature => renderFeatureCard(feature))}
                     </div>
+                    {featureGroups.v1.length > 0 && (
+                        <div className="mt-4">
+                            <button
+                                type="button"
+                                onClick={() => setShowV1Features(v => !v)}
+                                aria-expanded={showV1Features}
+                                className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700 hover:text-blue-900 transition"
+                            >
+                                {showV1Features ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
+                                V1 — soon after launch
+                                <span className="font-normal normal-case tracking-normal text-neutral-400">
+                                    {featureGroups.v1.length} feature{featureGroups.v1.length === 1 ? '' : 's'} · {showV1Features ? 'hide' : 'show'}
+                                </span>
+                            </button>
+                            {showV1Features && (
+                                <div className="space-y-3 mt-3">
+                                    {featureGroups.v1.map(feature => renderFeatureCard(feature))}
+                                </div>
+                            )}
+                        </div>
+                    )}
+                    {featureGroups.deferred.length > 0 && (
+                        <p className="mt-4 text-xs text-neutral-500">
+                            {featureGroups.deferred.length} deferred feature{featureGroups.deferred.length === 1 ? ' is' : 's are'} recorded in the{' '}
+                            <a
+                                href="#prd-decision-log"
+                                onClick={(e) => { e.preventDefault(); scrollToAnchor('prd-decision-log'); }}
+                                className="text-indigo-600 hover:text-indigo-800 underline"
+                            >
+                                Decision Log
+                            </a>.
+                        </p>
+                    )}
                 </div>
 
                 {structuredPRD.featureSystems && structuredPRD.featureSystems.length > 0 && (
-                    <FeatureSystemsSection systems={structuredPRD.featureSystems} />
+                    <FeatureSystemsSection systems={structuredPRD.featureSystems} features={structuredPRD.features} />
                 )}
 
                 {/* User Experience: UX Architecture → Core User Loops */}

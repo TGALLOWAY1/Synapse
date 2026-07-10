@@ -1,12 +1,13 @@
 import type {
     Jtbd, Principle, UserLoop, UXPage, FeatureSystem, PrdDataModel,
-    StateMachine, RolePermission, ArchFlow, RiskDetailed, MvpScope,
+    StateMachine, RolePermission, ArchFlow, RiskDetailed,
     SuccessMetric, ProductThesis, Feature,
 } from '../../types';
 import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
 import { sanitizeRolePermissions } from '../../lib/prdRolesSanitizer';
 import { stripLeadingListNumber } from '../../lib/utils/stripLeadingListNumber';
-import { resolveScopeFeature, isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
+import { isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
+import { isDeferredFeature } from '../../lib/derive/implementationSummary';
 import { FeatureIdBadge } from './FeatureIdBadge';
 
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
@@ -224,18 +225,23 @@ export function UxArchitectureSection({ pages }: { pages: UXPage[] }) {
     );
 }
 
-export function FeatureSystemsSection({ systems }: { systems: FeatureSystem[] }) {
+export function FeatureSystemsSection({ systems, features = [] }: { systems: FeatureSystem[]; features?: Feature[] }) {
+    // PRD sections must not refer to features outside the MVP/V1 phases —
+    // deferred features surface only in the Decision Log.
+    const deferredIds = new Set(features.filter(isDeferredFeature).map(f => f.id.toLowerCase()));
     return (
         <Section title="Feature Systems" id="prd-feature-systems">
             <div className="grid sm:grid-cols-2 gap-3">
-                {systems.map((s) => (
+                {systems.map((s) => {
+                    const visibleIds = (s.featureIds ?? []).filter(id => !deferredIds.has(id.toLowerCase()));
+                    return (
                     <div key={s.id} className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
                         <p className="text-sm font-bold text-neutral-900">{s.name}</p>
                         <p className="text-xs text-neutral-600 mt-1 leading-relaxed">{s.purpose}</p>
-                        {s.featureIds?.length ? (
+                        {visibleIds.length ? (
                             <div className="flex items-center gap-1.5 flex-wrap mt-2">
                                 <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Features:</span>
-                                {s.featureIds.map(id =>
+                                {visibleIds.map(id =>
                                     isDisplayableFeatureId(id)
                                         ? <FeatureIdBadge key={id} id={id} />
                                         : <span key={id} className="text-[11px] font-mono text-neutral-500">{id}</span>,
@@ -249,7 +255,8 @@ export function FeatureSystemsSection({ systems }: { systems: FeatureSystem[] })
                             <p className="text-xs text-neutral-700 mt-1"><span className="font-semibold">MVP vs later:</span> {s.mvpVsLater}</p>
                         )}
                     </div>
-                ))}
+                    );
+                })}
             </div>
         </Section>
     );
@@ -502,59 +509,10 @@ export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
     );
 }
 
-// One MVP/V1 scope entry, presented explicitly as a feature when it can be
-// resolved to one (id badge + bold name, supporting text secondary). Falls
-// back to the raw string so legacy scope items always render.
-function ScopeFeatureItem({ item, features }: { item: string; features: Feature[] }) {
-    const { feature, secondary } = resolveScopeFeature(item, features);
-    if (!feature) {
-        return <li className="text-sm text-neutral-800">{item}</li>;
-    }
-    return (
-        <li className="text-sm">
-            <div className="flex items-baseline gap-2 flex-wrap">
-                <FeatureIdBadge id={feature.id} />
-                <span className="font-bold text-neutral-900">{feature.name}</span>
-            </div>
-            {secondary && <p className="text-xs text-neutral-600 mt-0.5">{secondary}</p>}
-        </li>
-    );
-}
-
-export function MvpScopeSection({ scope, features = [] }: { scope: MvpScope; features?: Feature[] }) {
-    return (
-        <Section title="MVP Scope" id="prd-mvp-scope">
-            {scope.rationale && (
-                <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-                    <span className="text-[10px] uppercase font-bold tracking-wider mr-2 px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900">Decision</span>
-                    {scope.rationale}
-                </div>
-            )}
-            <div className="grid sm:grid-cols-2 gap-3">
-                <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
-                    <p className="text-xs font-bold uppercase tracking-wider text-green-800 mb-2">MVP — ship first</p>
-                    <ul className="space-y-2">
-                        {scope.mvp.map((i, k) => <ScopeFeatureItem key={k} item={i} features={features} />)}
-                    </ul>
-                </div>
-                <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
-                    <p className="text-xs font-bold uppercase tracking-wider text-blue-800 mb-2">V1 — soon after launch</p>
-                    <ul className="space-y-2">
-                        {scope.v1.map((i, k) => <ScopeFeatureItem key={k} item={i} features={features} />)}
-                    </ul>
-                </div>
-            </div>
-            {scope.later?.length ? (
-                <div className="mt-3 p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1.5">Later</p>
-                    <ul className="list-disc pl-4 space-y-0.5 text-xs text-neutral-600">
-                        {scope.later.map((i, k) => <li key={k}>{i}</li>)}
-                    </ul>
-                </div>
-            ) : null}
-        </Section>
-    );
-}
+// (The old MvpScopeSection was removed: it duplicated the Implementation
+// Summary's Build First / Build Next buckets. The scope rationale now renders
+// as the Decision callout in ImplementationSummarySection and "Later" items
+// surface as Deferred entries in the Decision Log.)
 
 // Instrumentation was dropped from this table: new generations no longer
 // produce it (analytics detail belongs to downstream artifacts) so the column

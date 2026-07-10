@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { Pencil, Check, X, Circle } from 'lucide-react';
+import { Pencil, Check, X, Circle, ArrowUp } from 'lucide-react';
 import type { Feature } from '../types';
 import { MvpTag } from './prd/PremiumSections';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
@@ -9,10 +9,12 @@ interface FeatureCardProps {
     onUpdate: (updated: Feature) => void;
     /** Toggle the reviewed/confirmed state. Absent → no confirm affordance. */
     onToggleConfirm?: (feature: Feature) => void;
+    /** Scroll back to the Implementation Summary. Absent → no back affordance. */
+    onBackToSummary?: () => void;
     readOnly: boolean;
 }
 
-export function FeatureCard({ feature, onUpdate, onToggleConfirm, readOnly }: FeatureCardProps) {
+export function FeatureCard({ feature, onUpdate, onToggleConfirm, onBackToSummary, readOnly }: FeatureCardProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(feature.name);
     const [editDescription, setEditDescription] = useState(feature.description);
@@ -81,6 +83,17 @@ export function FeatureCard({ feature, onUpdate, onToggleConfirm, readOnly }: Fe
                     <MvpTag tier={feature.tier} />
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
+                    {onBackToSummary && (
+                        <button
+                            onClick={onBackToSummary}
+                            className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-neutral-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
+                            title="Back to Implementation Summary"
+                            aria-label={`Back to Implementation Summary from ${feature.name}`}
+                        >
+                            <ArrowUp size={12} />
+                            Summary
+                        </button>
+                    )}
                     {!readOnly && (
                         <button
                             onClick={() => setIsEditing(true)}

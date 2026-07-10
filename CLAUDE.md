@@ -532,8 +532,9 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       subtitle). Instead the PRD carries two mirrored sections near the top:
       **Review & Confirm** (unresolved assumptions, sorted by confidence
       highest-first, each with Confirm / "Not right"+correction actions) and
-      **Decision Log** (confirmed user choices only — decided assumptions +
-      confirmed features — never unresolved items). State lives ON the
+      **Decision Log** (decided items — decided assumptions + confirmed
+      features + derived **Deferred** entries, never unresolved items). State
+      lives ON the
       `StructuredPRD` itself via all-optional fields (`Assumption.decision` /
       `decisionNote` / `decidedAt`; `Feature.confirmed` / `confirmedAt` —
       legacy PRDs simply read as "all unresolved"); every confirm/reject/undo
@@ -549,6 +550,36 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       hides uuid-shaped ids; feature confirmation uses the same green-check
       language as the Screens `ScreenConfirmPanel`. Within Core Features the
       order is **Detailed Features before Feature Systems** (both renderers).
+    - **Scope presentation (2026-07 demo formatting pass): the Implementation
+      Summary is the SINGLE MVP/V1 scope surface.** The old `MVP Scope`
+      section duplicated the summary's Build First / Build Next buckets and
+      was removed from BOTH renderers (`StructuredPRDView` +
+      `renderPremiumMarkdown`); the scope *rationale* (`mvpScope.rationale`)
+      now renders as the Decision callout at the top of
+      `ImplementationSummarySection`, and the summary buckets are **uncapped**
+      (every tagged MVP/V1 feature appears; legacy untagged PRDs keep the
+      declaration-order 4+4 heuristic). Bucket cards show the feature
+      **description** as supporting text (falling back to userValue) — never
+      the raw complexity rating prefix ("low · "). Do not reintroduce a
+      separate MVP Scope feature list.
+      **Deferred scope renders ONLY in the Decision Log** — PRD sections must
+      never present features outside the MVP/V1 phases. `deriveDecisionLog`
+      appends derived `verdict: 'deferred'` entries for features tagged
+      `tier: 'later'` and for `mvpScope.later` items (resolved via
+      `resolveScopeFeature` and deduped against deferred features; deferred
+      entries carry no undo — they are scope records, not user decisions).
+      Deferred features are excluded from Detailed Features and from Feature
+      Systems' feature-id chips (both renderers filter on `isDeferredFeature`).
+      **Detailed Features groups by tier** (`splitFeaturesByTier` in
+      `src/lib/derive/implementationSummary.ts`): MVP + untiered features
+      visible by default (hand-added features have no tier and must stay
+      visible), V1 features behind a collapsed disclosure, deferred features
+      linked out to the Decision Log. Each detail card is anchored
+      (`featureDetailAnchorId` → `prd-feature-<id>`): Implementation Summary
+      cards deep-link to it (`StructuredPRDView.handleNavigateToFeature`
+      auto-expands the V1 group when the target lives inside it) and each
+      `FeatureCard` shows a "Summary" back affordance (`onBackToSummary`)
+      returning to `#prd-implementation-summary`.
     - **User project name → `productName`.** The name the user types when
       creating a project is threaded into generation as an optional
       `projectName` (call site `runPrdGeneration`/`ProjectWorkspace.handleRegenerate`

@@ -2,6 +2,7 @@ import { ArrowRight, ListChecks } from 'lucide-react';
 import type { StructuredPRD } from '../../types';
 import {
     deriveImplementationSummary,
+    featureDetailAnchorId,
     isImplementationSummaryEmpty,
     type SummaryFeature,
 } from '../../lib/derive/implementationSummary';
@@ -9,20 +10,31 @@ import { FeatureIdBadge } from './FeatureIdBadge';
 
 // Synthesized "what to build first / next" view. Pure derivation — no LLM
 // call. Renders at the top of the PRD so a reader can answer "what would I do
-// Monday morning?" without scrolling 30 pages. Deferred work and open
-// decisions deliberately do NOT live here: deferred scope stays in MVP Scope
-// ("Later") and open decisions moved to the actionable Review & Confirm
-// section.
+// Monday morning?" without scrolling 30 pages. This is THE section presenting
+// MVP/V1 scope (the old MVP Scope feature lists duplicated it and were folded
+// in — the scope rationale renders here as the Decision callout). Deferred
+// work and open decisions deliberately do NOT live here: deferred scope lives
+// in the Decision Log and open decisions in Review & Confirm.
 
-function FeatureCard({ feature, accent }: { feature: SummaryFeature; accent: 'green' | 'blue' }) {
+function FeatureCard({
+    feature,
+    accent,
+    onNavigate,
+}: {
+    feature: SummaryFeature;
+    accent: 'green' | 'blue';
+    onNavigate?: (featureId: string) => void;
+}) {
     const accentClasses = {
         green: 'bg-green-50/60 border-green-200',
         blue: 'bg-blue-50/60 border-blue-200',
     }[accent];
     return (
         <a
-            href={`#prd-features`}
+            href={`#${featureDetailAnchorId(feature.id)}`}
+            onClick={onNavigate ? (e) => { e.preventDefault(); onNavigate(feature.id); } : undefined}
             className={`block rounded-md border ${accentClasses} px-3 py-2 hover:shadow-sm transition`}
+            title={`Jump to ${feature.name} details`}
         >
             <div className="flex items-baseline gap-2">
                 <FeatureIdBadge id={feature.id} />
@@ -41,12 +53,14 @@ function FeatureBucket({
     accent,
     features,
     emptyHint,
+    onNavigate,
 }: {
     title: string;
     icon: typeof ListChecks;
     accent: 'green' | 'blue';
     features: SummaryFeature[];
     emptyHint: string;
+    onNavigate?: (featureId: string) => void;
 }) {
     const headerClasses = {
         green: 'text-green-700',
@@ -66,7 +80,7 @@ function FeatureBucket({
             ) : (
                 <div className="space-y-1.5">
                     {features.map(f => (
-                        <FeatureCard key={f.id} feature={f} accent={accent} />
+                        <FeatureCard key={f.id} feature={f} accent={accent} onNavigate={onNavigate} />
                     ))}
                 </div>
             )}
@@ -74,9 +88,17 @@ function FeatureBucket({
     );
 }
 
-export function ImplementationSummarySection({ prd }: { prd: StructuredPRD }) {
+export function ImplementationSummarySection({
+    prd,
+    onNavigateToFeature,
+}: {
+    prd: StructuredPRD;
+    /** Jump to a feature's detail card (expands the collapsed V1 group when needed). */
+    onNavigateToFeature?: (featureId: string) => void;
+}) {
     const summary = deriveImplementationSummary(prd);
-    if (isImplementationSummaryEmpty(summary)) return null;
+    const rationale = prd.mvpScope?.rationale;
+    if (isImplementationSummaryEmpty(summary) && !rationale) return null;
 
     return (
         <div id="prd-implementation-summary" className="mb-8 scroll-mt-24">
@@ -86,24 +108,35 @@ export function ImplementationSummarySection({ prd }: { prd: StructuredPRD }) {
                 </h3>
             </div>
 
-            <div className="bg-gradient-to-br from-indigo-50/40 to-white border border-indigo-100 rounded-xl p-4">
-                <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-                    <FeatureBucket
-                        title="Build First"
-                        icon={ListChecks}
-                        accent="green"
-                        features={summary.buildFirst}
-                        emptyHint="No MVP features tagged."
-                    />
-                    <FeatureBucket
-                        title="Build Next"
-                        icon={ArrowRight}
-                        accent="blue"
-                        features={summary.buildNext}
-                        emptyHint="No V1 features tagged."
-                    />
+            {rationale && (
+                <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                    <span className="text-[10px] uppercase font-bold tracking-wider mr-2 px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900">Decision</span>
+                    {rationale}
                 </div>
-            </div>
+            )}
+
+            {!isImplementationSummaryEmpty(summary) && (
+                <div className="bg-gradient-to-br from-indigo-50/40 to-white border border-indigo-100 rounded-xl p-4">
+                    <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                        <FeatureBucket
+                            title="Build First"
+                            icon={ListChecks}
+                            accent="green"
+                            features={summary.buildFirst}
+                            emptyHint="No MVP features tagged."
+                            onNavigate={onNavigateToFeature}
+                        />
+                        <FeatureBucket
+                            title="Build Next"
+                            icon={ArrowRight}
+                            accent="blue"
+                            features={summary.buildNext}
+                            emptyHint="No V1 features tagged."
+                            onNavigate={onNavigateToFeature}
+                        />
+                    </div>
+                </div>
+            )}
         </div>
     );
 }
