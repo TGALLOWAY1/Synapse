@@ -1,4 +1,4 @@
-import type { ReactNode } from 'react';
+import type { ReactElement, ReactNode } from 'react';
 import {
     Boxes, Cable, Cog, Fingerprint, KeyRound, ShieldCheck, Sparkles, User,
 } from 'lucide-react';
@@ -27,39 +27,76 @@ export function CategoryBadge({ category, size = 'sm' }: { category: EntityCateg
     );
 }
 
+/** Max attribute chips shown on a collapsed mobile card before "+N more". */
+const MAX_COLLAPSED_CHIPS = 3;
+
 /**
- * Compact attribute badges for an entity: visibility, mutability, PII, indexed.
- * These sit alongside the category chip and stay readable at any width.
+ * Compact attribute badges for an entity, in priority order:
+ * Contains PII → visibility → mutability → indexed → (No PII, lowest).
+ *
+ * Returns a fragment of pills so the caller's flex row controls spacing (and can
+ * prepend a category chip in ungrouped mode). When `collapsed` (a mobile card
+ * that isn't expanded), the lowest-value "No PII" chip is dropped entirely and
+ * the list is capped with a "+N more" affordance — expanding the card reveals
+ * the full set. Desktop / expanded cards always show every chip.
  */
-export function EntityAttributeBadges({ node }: { node: DataModelNode }) {
-    return (
-        <span className="inline-flex flex-wrap items-center gap-1">
-            {node.userFacing !== undefined && (
-                <Pill className={node.userFacing
-                    ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
-                    : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'}>
-                    {node.userFacing ? 'User-facing' : 'System'}
-                </Pill>
-            )}
-            {node.mutability && (
-                <Pill className={mutabilityClass(node.mutability)}>{node.mutability}</Pill>
-            )}
-            {node.hasPII ? (
-                <Pill className="bg-rose-50 text-rose-700 ring-1 ring-rose-200">
-                    <Fingerprint size={10} className="shrink-0" /> Contains PII
-                </Pill>
-            ) : (
-                <Pill className="bg-neutral-50 text-neutral-500 ring-1 ring-neutral-200">
-                    <ShieldCheck size={10} className="shrink-0" /> No PII
-                </Pill>
-            )}
-            {node.indexed && (
-                <Pill className="bg-slate-50 text-slate-600 ring-1 ring-slate-200">
-                    <KeyRound size={10} className="shrink-0" /> Indexed
-                </Pill>
-            )}
-        </span>
-    );
+export function EntityAttributeBadges({ node, collapsed = false }: { node: DataModelNode; collapsed?: boolean }) {
+    const chips: ReactElement[] = [];
+
+    // Priority 1 — PII. "Contains PII" is trust/safety-relevant and always leads.
+    if (node.hasPII) {
+        chips.push(
+            <Pill key="pii" className="bg-rose-50 text-rose-700 ring-1 ring-rose-200">
+                <Fingerprint size={10} className="shrink-0" /> Contains PII
+            </Pill>,
+        );
+    }
+    // Priority 2 — visibility.
+    if (node.userFacing !== undefined) {
+        chips.push(
+            <Pill key="visibility" className={node.userFacing
+                ? 'bg-emerald-50 text-emerald-700 ring-1 ring-emerald-200'
+                : 'bg-slate-100 text-slate-600 ring-1 ring-slate-200'}>
+                {node.userFacing ? 'User-facing' : 'System'}
+            </Pill>,
+        );
+    }
+    // Priority 3 — mutability.
+    if (node.mutability) {
+        chips.push(<Pill key="mutability" className={mutabilityClass(node.mutability)}>{node.mutability}</Pill>);
+    }
+    // Priority 4 — indexed.
+    if (node.indexed) {
+        chips.push(
+            <Pill key="indexed" className="bg-slate-50 text-slate-600 ring-1 ring-slate-200">
+                <KeyRound size={10} className="shrink-0" /> Indexed
+            </Pill>,
+        );
+    }
+    // Lowest priority — "No PII". Reassuring but not urgent, so it is shown only on
+    // expanded/desktop cards and dropped (not counted) on collapsed mobile cards.
+    if (!node.hasPII && !collapsed) {
+        chips.push(
+            <Pill key="no-pii" className="bg-neutral-50 text-neutral-500 ring-1 ring-neutral-200">
+                <ShieldCheck size={10} className="shrink-0" /> No PII
+            </Pill>,
+        );
+    }
+
+    if (collapsed && chips.length > MAX_COLLAPSED_CHIPS) {
+        const visible = chips.slice(0, MAX_COLLAPSED_CHIPS - 1);
+        const hiddenCount = chips.length - visible.length;
+        return (
+            <>
+                {visible}
+                <span className="inline-flex items-center text-[10px] font-medium px-1.5 py-0.5 rounded-full bg-neutral-100 text-neutral-500 ring-1 ring-neutral-200">
+                    +{hiddenCount} more
+                </span>
+            </>
+        );
+    }
+
+    return <>{chips}</>;
 }
 
 function mutabilityClass(mutability: string): string {

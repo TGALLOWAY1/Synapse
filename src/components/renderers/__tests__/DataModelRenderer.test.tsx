@@ -1,4 +1,4 @@
-import { describe, it, expect, beforeAll, vi } from 'vitest';
+import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { render, fireEvent, within } from '@testing-library/react';
 import { DataModelRenderer } from '../DataModelRenderer';
 import type { DataModelContent } from '../../../types';
@@ -7,6 +7,20 @@ import type { DataModelContent } from '../../../types';
 beforeAll(() => {
     Element.prototype.scrollIntoView = vi.fn();
 });
+
+/** Stub `window.matchMedia` so `useIsMobile()` reports the given viewport. */
+function stubViewport(isMobile: boolean) {
+    vi.stubGlobal('matchMedia', (query: string) => ({
+        matches: isMobile,
+        media: query,
+        onchange: null,
+        addEventListener: vi.fn(),
+        removeEventListener: vi.fn(),
+        addListener: vi.fn(),
+        removeListener: vi.fn(),
+        dispatchEvent: vi.fn(),
+    }));
+}
 
 const twoEntityModel: DataModelContent = {
     entities: [
@@ -185,5 +199,137 @@ describe('DataModelRenderer — inspector rows + categories', () => {
         };
         const { getByRole } = renderModel(model);
         expect(getByRole('button', { name: /Group by category/i })).toBeInTheDocument();
+    });
+});
+
+// A mixed-category model that groups by default (>= 4 entities, >= 2 categories).
+const groupedModel: DataModelContent = {
+    entities: [
+        {
+            name: 'KnowledgeNode',
+            description: 'A structured, hierarchical concept.',
+            userFacing: true,
+            mutability: 'mutable',
+            fields: [
+                { name: 'id', type: 'UUID', required: true, description: 'pk' },
+                { name: 'title', type: 'String', required: true, description: 'Concept title' },
+            ],
+            relationships: [{ type: 'has_many', target: 'Flashcard' }],
+            indexes: ['idx_title on (title)'],
+        },
+        {
+            name: 'Flashcard',
+            description: 'An active recall study card.',
+            userFacing: true,
+            mutability: 'mutable',
+            fields: [{ name: 'id', type: 'UUID', required: true, description: 'pk' }],
+            relationships: [{ type: 'belongs_to', target: 'KnowledgeNode' }],
+        },
+        {
+            // mostly_immutable + user-facing → Generated Outputs; carries PII.
+            name: 'InfographicSource',
+            description: 'Represents the uploaded visual asset.',
+            userFacing: true,
+            mutability: 'mostly_immutable',
+            fields: [{ name: 'id', type: 'UUID', required: true, description: 'pk' }],
+            relationships: [],
+            privacyRules: ['uploaded_image must be access-controlled'],
+            indexes: ['idx_source on (id)'],
+        },
+        {
+            name: 'AuditLog',
+            description: 'System event log.',
+            userFacing: false,
+            fields: [{ name: 'id', type: 'UUID', required: true, description: 'pk' }],
+            relationships: [],
+        },
+    ],
+    apiEndpoints: [],
+};
+
+/** The Entities list section (excludes the ER diagram, which also shows category badges). */
+function entitiesSection(getByRole: ReturnType<typeof renderModel>['getByRole']): HTMLElement {
+    const section = getByRole('button', { name: /Group by category/i }).closest('section');
+    if (!section) throw new Error('entities section not found');
+    return section as HTMLElement;
+}
+
+describe('DataModelRenderer — grouped category headers (no redundant label)', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('shows each category name once — in the group header, not repeated as plain text', () => {
+        const result = renderModel(groupedModel);
+        const section = entitiesSection(result.getByRole);
+        // Grouped by default: the header pill is the only "Core Product Data" in
+        // the list — the old duplicate plain-text label is gone and cards omit it.
+        expect(within(section).getAllByText('Core Product Data')).toHaveLength(1);
+    });
+
+    it('does not repeat the category chip inside entity cards in grouped mode', () => {
+        const { container } = renderModel(groupedModel);
+        const card = container.querySelector('#data-model-entity-knowledgenode') as HTMLElement;
+        expect(card).toBeTruthy();
+        expect(within(card).queryByText('Core Product Data')).toBeNull();
+    });
+
+    it('restores the per-card category chip when grouping is turned off', () => {
+        const result = renderModel(groupedModel);
+        fireEvent.click(result.getByRole('button', { name: /Group by category/i }));
+
+        const section = entitiesSection(result.getByRole);
+        // Ungrouped: no group header, so each of the two Core entities shows its
+        // own chip to preserve context.
+        expect(within(section).getAllByText('Core Product Data')).toHaveLength(2);
+
+        const card = result.container.querySelector('#data-model-entity-knowledgenode') as HTMLElement;
+        expect(within(card).getByText('Core Product Data')).toBeInTheDocument();
+    });
+});
+
+describe('DataModelRenderer — mobile entity-card chip density', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('caps chips on a collapsed mobile card and keeps Contains PII visible', () => {
+        stubViewport(true);
+        const { container } = renderModel(groupedModel);
+        const card = container.querySelector('#data-model-entity-infographicsource') as HTMLElement;
+        expect(card).toBeTruthy();
+
+        // PII stays prominent; lower-priority chips collapse into "+N more".
+        expect(within(card).getByText('Contains PII')).toBeInTheDocument();
+        expect(within(card).getByText('+2 more')).toBeInTheDocument();
+        expect(within(card).queryByText('mostly immutable')).toBeNull();
+        // The "Indexed" attribute chip is hidden (the lowercase "indexes" count
+        // label is a different string and unaffected).
+        expect(within(card).queryByText('Indexed')).toBeNull();
+    });
+
+    it('drops the low-value "No PII" chip on a collapsed mobile card', () => {
+        stubViewport(true);
+        const { container } = renderModel(groupedModel);
+        // KnowledgeNode: User-facing + mutable + Indexed = 3 chips, No PII dropped.
+        const card = container.querySelector('#data-model-entity-knowledgenode') as HTMLElement;
+        expect(within(card).queryByText('No PII')).toBeNull();
+        expect(within(card).queryByText('+1 more')).toBeNull();
+        expect(within(card).getByText('User-facing')).toBeInTheDocument();
+        expect(within(card).getByText('Indexed')).toBeInTheDocument();
+    });
+
+    it('shows every chip on desktop (no "+N more" truncation)', () => {
+        stubViewport(false);
+        const { container } = renderModel(groupedModel);
+        const card = container.querySelector('#data-model-entity-infographicsource') as HTMLElement;
+        expect(within(card).getByText('Contains PII')).toBeInTheDocument();
+        expect(within(card).getByText('mostly immutable')).toBeInTheDocument();
+        expect(within(card).getByText('Indexed')).toBeInTheDocument();
+        expect(within(card).queryByText(/\+\d+ more/)).toBeNull();
+    });
+
+    it('aligns the entity title so long names truncate without pushing the chevron', () => {
+        const { container } = renderModel(groupedModel);
+        const title = within(container.querySelector('#data-model-entity-knowledgenode') as HTMLElement)
+            .getByText('KnowledgeNode');
+        expect(title.className).toContain('truncate');
+        expect(title.className).toContain('min-w-0');
     });
 });
