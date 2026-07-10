@@ -1,8 +1,17 @@
 // Screens-artifact UX audit capture.
-// Captures full-page screenshots of the live production demo project's Screens
+// Captures full-page screenshots of a deployment's demo project Screens
 // experience (list, detail tabs, flows, mockups, review states) on desktop and
 // mobile. Based on scripts/capture-demo-screenshots.mjs (fetch-relay egress
 // workaround for proxied sandboxes).
+//
+// Run with:  node scripts/capture-screens-audit.mjs                 (prod URL)
+//            node scripts/capture-screens-audit.mjs --base-url=https://<preview>.vercel.app
+//            DEMO_BASE_URL=https://<preview>.vercel.app node scripts/capture-screens-audit.mjs
+//
+// Target a PREVIEW deployment when validating a phase branch — capturing prod
+// would silently diff against the unchanged live app. The target must serve
+// the `/api/snapshots?demo=1` route with a pinned demo snapshot (any Vercel
+// deployment of this repo does).
 
 import { fileURLToPath } from 'node:url';
 import { dirname, join } from 'node:path';
@@ -10,7 +19,12 @@ import { existsSync, readdirSync, mkdirSync, writeFileSync } from 'node:fs';
 import { chromium } from 'playwright';
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
-const BASE_URL = 'https://synapse-prd.vercel.app';
+const baseUrlArg = process.argv.slice(2).find((a) => a.startsWith('--base-url='));
+const BASE_URL = (
+    (baseUrlArg && baseUrlArg.slice('--base-url='.length)) ||
+    process.env.DEMO_BASE_URL ||
+    'https://synapse-prd.vercel.app'
+).replace(/\/$/, '');
 const outDir = join(__dirname, '..', 'screenshots-screens-audit');
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy;
 
@@ -280,6 +294,24 @@ async function captureViewport(browser, vp, relayFetch, screenPlan) {
                 state: `Screen Detail › Overview — "${pick.name}" (${pick.why})`,
                 interaction: `Clicked the "${pick.name}" card`,
             });
+            // S-31 baseline: expanded Review notes (risk-resolution UI) on the
+            // first pick, so re-runs reproduce the full documented shot set.
+            if (pick.prefix === '30') {
+                const reviewNotes = page.getByRole('button', { name: /Review notes/i }).first();
+                if (await reviewNotes.isVisible().catch(() => false)) {
+                    await reviewNotes.click();
+                    await page.waitForTimeout(600);
+                    await shoot(page, `31-detail-overview-expanded-${V}.png`, {
+                        viewport: V, group: 'review-risk',
+                        state: `Screen Detail › Overview with Review notes expanded — "${pick.name}"`,
+                        interaction: 'Clicked the Review notes disclosure header',
+                    });
+                    await reviewNotes.click();
+                    await page.waitForTimeout(300);
+                } else {
+                    console.log('  Review notes disclosure not found — skipping 31-* capture');
+                }
+            }
             for (const tab of ['Flow', 'Mockups']) {
                 try {
                     await clickTab(page, tab);
