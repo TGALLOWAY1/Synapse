@@ -1,11 +1,13 @@
 import type {
     Jtbd, Principle, UserLoop, UXPage, FeatureSystem, PrdDataModel,
     StateMachine, RolePermission, ArchFlow, RiskDetailed, MvpScope,
-    SuccessMetric, Assumption, ProductThesis,
+    SuccessMetric, ProductThesis, Feature,
 } from '../../types';
 import { coerceToBulletList, looksDegenerate } from '../../lib/textCleanup';
 import { sanitizeRolePermissions } from '../../lib/prdRolesSanitizer';
 import { stripLeadingListNumber } from '../../lib/utils/stripLeadingListNumber';
+import { resolveScopeFeature, isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
+import { FeatureIdBadge } from './FeatureIdBadge';
 
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
 // for visual consistency.
@@ -231,9 +233,14 @@ export function FeatureSystemsSection({ systems }: { systems: FeatureSystem[] })
                         <p className="text-sm font-bold text-neutral-900">{s.name}</p>
                         <p className="text-xs text-neutral-600 mt-1 leading-relaxed">{s.purpose}</p>
                         {s.featureIds?.length ? (
-                            <p className="text-[11px] text-neutral-500 mt-2">
-                                <span className="font-semibold uppercase tracking-wider">Features:</span> {s.featureIds.join(', ')}
-                            </p>
+                            <div className="flex items-center gap-1.5 flex-wrap mt-2">
+                                <span className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">Features:</span>
+                                {s.featureIds.map(id =>
+                                    isDisplayableFeatureId(id)
+                                        ? <FeatureIdBadge key={id} id={id} />
+                                        : <span key={id} className="text-[11px] font-mono text-neutral-500">{id}</span>,
+                                )}
+                            </div>
                         ) : null}
                         {s.endToEndBehavior && (
                             <p className="text-xs text-neutral-700 mt-2"><span className="font-semibold">End-to-end:</span> {s.endToEndBehavior}</p>
@@ -495,7 +502,26 @@ export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
     );
 }
 
-export function MvpScopeSection({ scope }: { scope: MvpScope }) {
+// One MVP/V1 scope entry, presented explicitly as a feature when it can be
+// resolved to one (id badge + bold name, supporting text secondary). Falls
+// back to the raw string so legacy scope items always render.
+function ScopeFeatureItem({ item, features }: { item: string; features: Feature[] }) {
+    const { feature, secondary } = resolveScopeFeature(item, features);
+    if (!feature) {
+        return <li className="text-sm text-neutral-800">{item}</li>;
+    }
+    return (
+        <li className="text-sm">
+            <div className="flex items-baseline gap-2 flex-wrap">
+                <FeatureIdBadge id={feature.id} />
+                <span className="font-bold text-neutral-900">{feature.name}</span>
+            </div>
+            {secondary && <p className="text-xs text-neutral-600 mt-0.5">{secondary}</p>}
+        </li>
+    );
+}
+
+export function MvpScopeSection({ scope, features = [] }: { scope: MvpScope; features?: Feature[] }) {
     return (
         <Section title="MVP Scope" id="prd-mvp-scope">
             {scope.rationale && (
@@ -504,30 +530,35 @@ export function MvpScopeSection({ scope }: { scope: MvpScope }) {
                     {scope.rationale}
                 </div>
             )}
-            <div className="grid sm:grid-cols-3 gap-3">
+            <div className="grid sm:grid-cols-2 gap-3">
                 <div className="p-3 bg-green-50 border border-green-200 rounded-lg">
                     <p className="text-xs font-bold uppercase tracking-wider text-green-800 mb-2">MVP — ship first</p>
-                    <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-800">
-                        {scope.mvp.map((i, k) => <li key={k}>{i}</li>)}
+                    <ul className="space-y-2">
+                        {scope.mvp.map((i, k) => <ScopeFeatureItem key={k} item={i} features={features} />)}
                     </ul>
                 </div>
                 <div className="p-3 bg-blue-50 border border-blue-200 rounded-lg">
                     <p className="text-xs font-bold uppercase tracking-wider text-blue-800 mb-2">V1 — soon after launch</p>
-                    <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-800">
-                        {scope.v1.map((i, k) => <li key={k}>{i}</li>)}
-                    </ul>
-                </div>
-                <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-700 mb-2">Later — defer</p>
-                    <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
-                        {scope.later.map((i, k) => <li key={k}>{i}</li>)}
+                    <ul className="space-y-2">
+                        {scope.v1.map((i, k) => <ScopeFeatureItem key={k} item={i} features={features} />)}
                     </ul>
                 </div>
             </div>
+            {scope.later?.length ? (
+                <div className="mt-3 p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
+                    <p className="text-xs font-bold uppercase tracking-wider text-neutral-500 mb-1.5">Later</p>
+                    <ul className="list-disc pl-4 space-y-0.5 text-xs text-neutral-600">
+                        {scope.later.map((i, k) => <li key={k}>{i}</li>)}
+                    </ul>
+                </div>
+            ) : null}
         </Section>
     );
 }
 
+// Instrumentation was dropped from this table: new generations no longer
+// produce it (analytics detail belongs to downstream artifacts) so the column
+// rendered blank and eroded trust. Legacy values simply aren't shown.
 export function MetricsSection({ metrics }: { metrics: SuccessMetric[] }) {
     return (
         <Section title="Success Metrics" id="prd-metrics">
@@ -537,7 +568,6 @@ export function MetricsSection({ metrics }: { metrics: SuccessMetric[] }) {
                         <tr>
                             <th className="px-3 py-2 text-left">Metric</th>
                             <th className="px-3 py-2 text-left">Target</th>
-                            <th className="px-3 py-2 text-left">Instrumentation</th>
                         </tr>
                     </thead>
                     <tbody className="divide-y divide-neutral-100">
@@ -545,34 +575,11 @@ export function MetricsSection({ metrics }: { metrics: SuccessMetric[] }) {
                             <tr key={i}>
                                 <td className="px-3 py-2 font-semibold text-neutral-800">{m.name}</td>
                                 <td className="px-3 py-2 text-neutral-700">{m.target || '—'}</td>
-                                <td className="px-3 py-2 text-neutral-700">{m.instrumentation || '—'}</td>
                             </tr>
                         ))}
                     </tbody>
                 </table>
             </div>
-        </Section>
-    );
-}
-
-const confidenceTone = (c: 'low' | 'med' | 'high') =>
-    c === 'high' ? 'bg-emerald-100 text-emerald-800' :
-    c === 'med' ? 'bg-amber-100 text-amber-800' :
-    'bg-neutral-100 text-neutral-700';
-
-export function AssumptionsSection({ assumptions }: { assumptions: Assumption[] }) {
-    return (
-        <Section title="Assumptions" id="prd-assumptions">
-            <ul className="space-y-2">
-                {assumptions.map(a => (
-                    <li key={a.id} className="rounded-lg border border-amber-200 bg-amber-50 px-4 py-2 text-sm text-amber-900">
-                        <span className={`inline-block text-[10px] font-bold uppercase tracking-wider mr-2 px-1.5 py-0.5 rounded ${confidenceTone(a.confidence)}`}>
-                            {a.confidence} confidence
-                        </span>
-                        {a.statement}
-                    </li>
-                ))}
-            </ul>
         </Section>
     );
 }

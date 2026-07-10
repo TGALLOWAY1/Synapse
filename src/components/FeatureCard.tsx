@@ -1,15 +1,18 @@
 import { useState } from 'react';
-import { Pencil, Check, X } from 'lucide-react';
+import { Pencil, Check, X, Circle } from 'lucide-react';
 import type { Feature } from '../types';
 import { MvpTag } from './prd/PremiumSections';
+import { FeatureIdBadge } from './prd/FeatureIdBadge';
 
 interface FeatureCardProps {
     feature: Feature;
     onUpdate: (updated: Feature) => void;
+    /** Toggle the reviewed/confirmed state. Absent → no confirm affordance. */
+    onToggleConfirm?: (feature: Feature) => void;
     readOnly: boolean;
 }
 
-export function FeatureCard({ feature, onUpdate, readOnly }: FeatureCardProps) {
+export function FeatureCard({ feature, onUpdate, onToggleConfirm, readOnly }: FeatureCardProps) {
     const [isEditing, setIsEditing] = useState(false);
     const [editName, setEditName] = useState(feature.name);
     const [editDescription, setEditDescription] = useState(feature.description);
@@ -67,23 +70,44 @@ export function FeatureCard({ feature, onUpdate, readOnly }: FeatureCardProps) {
         );
     }
 
+    const confirmed = !!feature.confirmed;
+
     return (
-        <div className="group p-4 bg-white border border-neutral-200 rounded-lg hover:border-neutral-300 transition">
+        <div className={`group p-4 bg-white border rounded-lg transition ${confirmed ? 'border-emerald-200' : 'border-neutral-200 hover:border-neutral-300'}`}>
             <div className="flex items-start justify-between mb-2 gap-2">
                 <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <h4 className="font-semibold text-neutral-800">{feature.name}</h4>
+                    <FeatureIdBadge id={feature.id} />
+                    <h4 className="font-bold text-neutral-900">{feature.name}</h4>
                     <MvpTag tier={feature.tier} />
                 </div>
-                {!readOnly && (
-                    <button
-                        onClick={() => setIsEditing(true)}
-                        className="p-1 text-neutral-300 hover:text-neutral-500 opacity-0 group-hover:opacity-100 transition shrink-0"
-                        title="Edit feature"
-                        aria-label="Edit feature"
-                    >
-                        <Pencil size={14} />
-                    </button>
-                )}
+                <div className="flex items-center gap-1 shrink-0">
+                    {!readOnly && (
+                        <button
+                            onClick={() => setIsEditing(true)}
+                            className="p-1 text-neutral-300 hover:text-neutral-500 opacity-0 group-hover:opacity-100 transition"
+                            title="Edit feature"
+                            aria-label="Edit feature"
+                        >
+                            <Pencil size={14} />
+                        </button>
+                    )}
+                    {/* Compact inline confirm — same green-check language as
+                        Confirm Screen. Confirmed features feed the Decision Log. */}
+                    {onToggleConfirm && (readOnly ? confirmed : true) && (
+                        <button
+                            onClick={() => !readOnly && onToggleConfirm(feature)}
+                            disabled={readOnly}
+                            className={confirmed
+                                ? 'inline-flex items-center justify-center h-6 w-6 rounded-full bg-emerald-100 text-emerald-700 transition'
+                                : 'inline-flex items-center justify-center h-6 w-6 rounded-full text-neutral-300 hover:text-emerald-600 hover:bg-emerald-50 transition'}
+                            title={confirmed ? 'Confirmed — tap to reopen' : 'Confirm feature'}
+                            aria-label={confirmed ? `Reopen feature ${feature.name}` : `Confirm feature ${feature.name}`}
+                            aria-pressed={confirmed}
+                        >
+                            {confirmed ? <Check size={14} /> : <Circle size={14} />}
+                        </button>
+                    )}
+                </div>
             </div>
             <p className="text-sm text-neutral-600 mb-2">{feature.description}</p>
             <p className="text-xs text-neutral-500 mb-2">
