@@ -158,6 +158,18 @@ describe('resolveScopeFeature', () => {
         expect(m.feature?.id).toBe('f12');
     });
 
+    it('never matches a short feature name inside an unrelated word', () => {
+        const withAi = [...features, feature({ id: 'f9', name: 'AI' })];
+        // "Daily digest" contains "ai" as a substring of "Daily" — a token
+        // match must NOT resolve it to the "AI" feature.
+        const m = resolveScopeFeature('Daily digest emails', withAi);
+        expect(m.feature).toBeUndefined();
+        // …while a real whole-token reference still resolves.
+        const hit = resolveScopeFeature('AI smart replies', withAi);
+        expect(hit.feature?.id).toBe('f9');
+        expect(hit.secondary).toBe('smart replies');
+    });
+
     it('returns no match for plain prose items (renders raw string)', () => {
         expect(resolveScopeFeature('Basic auth and onboarding', features).feature).toBeUndefined();
     });

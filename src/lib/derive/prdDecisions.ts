@@ -113,6 +113,13 @@ export type ScopeFeatureMatch = {
 
 const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
+// Whole-token match for a feature name inside a scope item. A bare substring
+// test would resolve unrelated words (feature "AI" matching inside "Daily")
+// and then strip mid-word text from the secondary copy — scope entries are
+// often free prose, so the name must sit on its own token boundaries.
+const nameMatchRegExp = (name: string) =>
+    new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'i');
+
 /**
  * Resolve an MVP-scope string ("F1: Quick capture — one-tap logging") to its
  * PRD feature so the MVP/V1 lists can present items as features (id badge +
@@ -140,13 +147,12 @@ export function resolveScopeFeature(item: string, features: Feature[]): ScopeFea
     }
 
     if (!feature) {
-        const lower = text.toLowerCase();
         const named = features
-            .filter(f => f.name && lower.includes(f.name.toLowerCase()))
+            .filter(f => f.name && nameMatchRegExp(f.name).test(text))
             .sort((a, b) => b.name.length - a.name.length)[0];
         if (named) {
             feature = named;
-            consumed = new RegExp(escapeRegExp(named.name), 'i');
+            consumed = nameMatchRegExp(named.name);
         }
     }
 
@@ -156,7 +162,7 @@ export function resolveScopeFeature(item: string, features: Feature[]): ScopeFea
     // Strip the feature name too when the item was matched by id but also
     // repeats the name ("F1: Quick capture — …").
     if (feature.name) {
-        secondary = secondary.replace(new RegExp(escapeRegExp(feature.name), 'i'), '');
+        secondary = secondary.replace(nameMatchRegExp(feature.name), '');
     }
     secondary = secondary
         .replace(/^[\s:–—-]+/, '')
