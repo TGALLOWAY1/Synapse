@@ -50,7 +50,7 @@ describe('UserFlowsRenderer', () => {
         expect(screen.queryByText(/debug \/ qa/i)).toBeNull();
     });
 
-    it('renders the structured flow header with category and metadata chips', () => {
+    it('renders the structured flow header with category, without the old metadata chips or "Related:" summary', () => {
         const { container } = render(
             <UserFlowsRenderer content={SAMPLE_MARKDOWN} features={FEATURES} />,
         );
@@ -58,8 +58,13 @@ describe('UserFlowsRenderer', () => {
         // Category appears once as the sidebar group header and once as a
         // chip on the selected flow card; either is fine.
         expect(container.textContent).toMatch(/Core Experience/);
-        // The metadata chip shows step count.
-        expect(container.textContent).toMatch(/4 steps/i);
+        // The header metadata pills (step count, alt paths, risk) and the
+        // "Related: … features" summary line were removed — that information now
+        // lives in the Flow journey / Alternate paths / Related artifacts
+        // sections and the flow rail. The "Related:" prefix was unique to the
+        // removed main-card summary (the rail shows a bare "N features"), so its
+        // absence confirms the header metadata row is gone.
+        expect(screen.queryByText(/^Related:/i)).toBeNull();
     });
 
     it('does not surface a misleading "errors" label in the flow list', () => {

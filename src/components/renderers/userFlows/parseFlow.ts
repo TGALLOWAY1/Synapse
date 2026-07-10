@@ -5,6 +5,7 @@ import { categorize } from './categorize';
 
 type RawSection = {
     goal?: string;
+    relatedFeatures?: string;
     preconditions?: string;
     entryPoints?: string;
     stepsBlock?: string;
@@ -18,6 +19,11 @@ type RawSection = {
 
 const SECTION_LABELS: Array<[keyof RawSection, RegExp]> = [
     ['goal', /^\*\*Goal:\*\*\s*/i],
+    // The generation prompt emits `**Related Features:**` right after the goal
+    // (see coreArtifactService). We split it into its own section so it never
+    // bleeds into the goal prose — its feature ids are surfaced as structured
+    // chips in the Related Artifacts panel instead.
+    ['relatedFeatures', /^\*\*Related\s*Features?:\*\*\s*/i],
     ['preconditions', /^\*\*Preconditions:\*\*\s*/i],
     ['entryPoints', /^\*\*Entry\s*Points?:\*\*\s*/i],
     ['stepsBlock', /^\*\*Steps:\*\*\s*/i],
@@ -592,15 +598,19 @@ export function parseFlows(markdown: string): ParsedFlow[] {
         const issues = buildIssues({ errorPaths, edgeCases: r.edgeCases, steps });
         const featureRefs = aggregateFeatureRefs(
             steps,
-            [r.goal, r.preconditions, r.entryPoints, r.successOutcome, r.edgeCases, r.assumptions, r.openQuestions],
+            [r.goal, r.relatedFeatures, r.preconditions, r.entryPoints, r.successOutcome, r.edgeCases, r.assumptions, r.openQuestions],
             titleExtractedRefs,
         );
         const risk = inferRisk(issues);
+        // The related-features line used to live inside the goal; keep it in the
+        // categorization haystack so a split doesn't silently reclassify a flow.
+        const categoryText = [r.goal, r.relatedFeatures].filter(Boolean).join(' ');
         return {
             title: cleanTitle || r.rawTitle,
             rawTitle: r.rawTitle,
-            category: categorize(cleanTitle || r.rawTitle, r.goal),
+            category: categorize(cleanTitle || r.rawTitle, categoryText),
             goal: r.goal,
+            relatedFeatures: r.relatedFeatures,
             preconditions: r.preconditions,
             successOutcome: r.successOutcome,
             edgeCases: r.edgeCases,

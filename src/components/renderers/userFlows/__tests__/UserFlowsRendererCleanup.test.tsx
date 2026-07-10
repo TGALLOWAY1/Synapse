@@ -50,6 +50,32 @@ const ENTITIES: DomainEntity[] = [
     { name: 'Recipe', description: 'A saved recipe record' },
 ];
 
+const FLOW_WITH_RELATED_FEATURES = `### Flow: Document ingestion (Core Experience)
+**Goal:** Upload a static educational infographic to be digitized by the AI pipelines.
+**Related Features:** [f1] High-Resolution Image Ingestion, [f2] Spatial OCR Extraction
+**Steps:**
+1. [Document Library] — User uploads a file → System stores it
+**Success Outcome:** The document is uploaded and structured.`;
+
+const RELATED_FEATURE_CATALOG: Feature[] = [
+    {
+        id: 'f1',
+        name: 'High-Resolution Image Ingestion',
+        description: 'Ingest high-resolution source images.',
+        userValue: 'Keeps the source sharp.',
+        complexity: 'medium',
+        priority: 'must',
+    },
+    {
+        id: 'f2',
+        name: 'Spatial OCR Extraction',
+        description: 'Extract text while preserving coordinates.',
+        userValue: 'Preserves layout.',
+        complexity: 'high',
+        priority: 'must',
+    },
+];
+
 /** Expand every journey step-detail toggle (rows + single-card toggles). */
 function expandAllJourneySteps() {
     screen.getAllByRole('button')
@@ -58,7 +84,7 @@ function expandAllJourneySteps() {
 }
 
 describe('UserFlowsRenderer — desktop cleanup', () => {
-    it('shows a compact relationship summary instead of a repeated feature chip row', () => {
+    it('drops the flow-header metadata chips and "Related:" summary (that info lives in the sections below)', () => {
         render(
             <UserFlowsRenderer
                 content={SINGLE_FLOW}
@@ -67,9 +93,32 @@ describe('UserFlowsRenderer — desktop cleanup', () => {
                 domainEntities={ENTITIES}
             />,
         );
-        // The header carries a compact "Related: … features …" summary line
-        // (distinct from the collapsible "Related artifacts" panel below).
-        expect(screen.getByText(/Related: 1 feature/i)).toBeInTheDocument();
+        // The old compact "Related: … features" header summary is gone — those
+        // features surface only in the collapsible Related artifacts panel. The
+        // "Related:" prefix was unique to that main-card summary (the flow rail
+        // shows a bare "N features"), so its absence proves the header row of
+        // metadata chips + summary was removed. Step counts / risk dots
+        // deliberately remain in the flow rail and Journey header.
+        expect(screen.queryByText(/^Related:/i)).toBeNull();
+    });
+
+    it('strips the "Related Features:" line out of the goal and surfaces those features in Related artifacts', () => {
+        render(
+            <UserFlowsRenderer
+                content={FLOW_WITH_RELATED_FEATURES}
+                features={RELATED_FEATURE_CATALOG}
+            />,
+        );
+        // The goal prose renders, but the bold "Related Features:" label and its
+        // inline feature chips are no longer part of the goal block.
+        expect(screen.getByText(/Upload a static educational infographic/i)).toBeInTheDocument();
+        expect(screen.queryByText(/Related Features:/i)).toBeNull();
+        expect(screen.queryAllByTestId('feature-ref-f1')).toHaveLength(0);
+        // Expanding the Related artifacts panel reveals them as structured chips —
+        // proving the feature refs still aggregate out of the split-off line.
+        fireEvent.click(screen.getByRole('button', { name: /Related artifacts/i }));
+        expect(screen.getAllByTestId('feature-ref-f1').length).toBeGreaterThan(0);
+        expect(screen.getAllByTestId('feature-ref-f2').length).toBeGreaterThan(0);
     });
 
     it('keeps Related Artifacts collapsed by default and reveals it on toggle', () => {

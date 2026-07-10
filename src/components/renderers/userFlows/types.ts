@@ -83,6 +83,12 @@ export type ParsedFlow = {
     rawTitle: string;
     category: FlowCategory;
     goal?: string;
+    /**
+     * Raw `**Related Features:**` line, split out of the goal so it renders as
+     * structured chips in the Related Artifacts panel rather than as inline
+     * goal prose. Retained for feature-ref aggregation and artifact matching.
+     */
+    relatedFeatures?: string;
     preconditions?: string;
     successOutcome?: string;
     edgeCases?: string;
