@@ -176,6 +176,20 @@ add it to `collectProjectBundle`/`collectScreenImages`/`collectVariantImages`, t
 restore writers, and `namespaceSnapshotForRestore`, or it silently won't travel
 in snapshots.
 
+- **Demo hydration is route-owned.** The public demo route
+  (`/p/<DEMO_PROJECT_ID>` in `App.tsx`'s `ProjectRoute`) wraps
+  `ProjectWorkspace` in `DemoRouteGate` (`src/components/DemoRouteGate.tsx`),
+  which runs `loadDemoProject()` — via the Strict-Mode-deduped single-flight
+  wrapper `src/lib/demoRouteHydration.ts` — and mounts the workspace only
+  after hydration reports the demo available (a loading state while restoring;
+  an explicit error state with Retry / Return home on failure — never a silent
+  redirect or the generic missing-project bounce). The gate waits for the auth
+  session to settle first, because `applyProjectUser`'s namespace wipe would
+  discard a demo restored mid-transition. The Login/Home demo buttons only
+  NAVIGATE to the route — do **not** re-add `loadDemoProject()` calls to
+  button handlers (that was the old, second initialization path that left
+  direct links / bookmarks / refreshes / cleared-storage reloads broken). All
+  cache/freshness policy stays inside `loadDemoProject()` (next bullet).
 - **Demo cache freshness — never short-circuit on a `DEMO_PROJECT_ID` cache hit
   alone.** Each restored demo project stores its source snapshot id in the
   optional `Project.demoSourceSnapshotId` (so it travels with the per-user

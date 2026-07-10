@@ -5,6 +5,7 @@ import { Loader2 } from 'lucide-react';
 import { HomePage } from './components/HomePage';
 import { LoginPage } from './components/LoginPage';
 import { ProjectWorkspace } from './components/ProjectWorkspace';
+import { DemoRouteGate } from './components/DemoRouteGate';
 import { DEMO_PROJECT_ID } from './data/demoProject';
 import { TourPage } from './components/tour/TourPage';
 import { MetricsPage } from './components/metrics/MetricsPage';
@@ -85,11 +86,20 @@ function RequireAuth({ children }: { children: ReactElement }) {
  * Project route guard. The read-only demo project is public so recruiters can
  * explore Synapse without an account or any paid API keys; every other project
  * requires authentication (and the server enforces per-user ownership).
+ *
+ * The demo route owns demo hydration: `DemoRouteGate` restores the pinned
+ * public snapshot (when needed) before mounting the workspace, so a direct /
+ * bookmarked / refreshed demo URL works in a clean browser without going
+ * through the Login/Home demo buttons. Exported for route-level tests.
  */
-function ProjectRoute() {
+export function ProjectRoute() {
   const { projectId } = useParams();
   if (projectId === DEMO_PROJECT_ID) {
-    return <ProjectWorkspace />;
+    return (
+      <DemoRouteGate>
+        <ProjectWorkspace />
+      </DemoRouteGate>
+    );
   }
   return (
     <RequireAuth>

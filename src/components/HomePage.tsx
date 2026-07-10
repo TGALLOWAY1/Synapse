@@ -66,12 +66,11 @@ const EXAMPLE_PROMPTS = [
 ];
 
 export function HomePage() {
-    const { createProject, initPreflightSession, loadDemoProject } = useProjectStore();
+    const { createProject, initPreflightSession } = useProjectStore();
     const navigate = useNavigate();
     const user = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
 
-    const [isLoadingDemo, setIsLoadingDemo] = useState(false);
     const [isSigningOut, setIsSigningOut] = useState(false);
 
     // Offer to import projects created on this browser before the user signed
@@ -157,30 +156,11 @@ export function HomePage() {
         }
     };
 
-    const handleOpenDemo = async () => {
-        if (isLoadingDemo) return;
-        setIsLoadingDemo(true);
-        try {
-            const { available } = await loadDemoProject();
-            if (!available) {
-                useToastStore.getState().addToast({
-                    type: 'warning',
-                    title: 'Demo not available yet',
-                    message: 'No demo snapshot has been pinned. The Synapse owner can pin one from the Cloud Snapshots panel.',
-                });
-                return;
-            }
-            navigate(`/p/${DEMO_PROJECT_ID}`);
-        } catch (err) {
-            console.error('[handleOpenDemo] failed', err);
-            useToastStore.getState().addToast({
-                type: 'warning',
-                title: 'Could not load demo',
-                message: err instanceof Error ? err.message : 'Unknown error',
-            });
-        } finally {
-            setIsLoadingDemo(false);
-        }
+    // Demo hydration is route-owned (`DemoRouteGate` on /p/<DEMO_PROJECT_ID>),
+    // so this button only navigates — direct links, bookmarks, refreshes, and
+    // button entry all share the same route-level loading path.
+    const handleOpenDemo = () => {
+        navigate(`/p/${DEMO_PROJECT_ID}`);
     };
 
     const [projectName, setProjectName] = useState('');
@@ -418,12 +398,11 @@ export function HomePage() {
                         <button
                             type="button"
                             onClick={handleOpenDemo}
-                            disabled={isLoadingDemo}
-                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-300 bg-indigo-50 text-sm text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 transition disabled:opacity-60 disabled:cursor-wait"
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-full border border-indigo-300 bg-indigo-50 text-sm text-indigo-700 hover:border-indigo-400 hover:bg-indigo-100 cursor-pointer transition"
                             title="Open the prepopulated demo project — no API key required"
                         >
-                            {isLoadingDemo ? <Loader2 size={14} className="animate-spin" /> : <FolderOpen size={14} />}
-                            <span>{isLoadingDemo ? 'Loading demo…' : 'View demo project'}</span>
+                            <FolderOpen size={14} />
+                            <span>View demo project</span>
                         </button>
                     </div>
 
