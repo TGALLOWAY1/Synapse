@@ -1382,7 +1382,10 @@ export function ArtifactWorkspace({
                         generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
                         versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
                         prdVersionLabel={
-                            subtype === 'data_model' || subtype === 'implementation_plan'
+                            // Data Model shows provenance once at the page level
+                            // (the version-controls strip above), so only the plan
+                            // consumes this in-content label.
+                            subtype === 'implementation_plan'
                                 ? resolveSpineLabel(preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId)
                                 : undefined
                         }

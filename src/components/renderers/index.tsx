@@ -63,7 +63,8 @@ interface DispatchProps {
     generatedAt?: number;
     /** Only consumed by `prompt_pack`; current artifact version number. */
     versionNumber?: number;
-    /** Consumed by `data_model` and `implementation_plan`: source PRD version label. */
+    /** Consumed by `implementation_plan`: source PRD version label. (Data Model
+     * shows provenance at the page level, so it doesn't take this.) */
     prdVersionLabel?: string;
     /** Consumed by `data_model` and `implementation_plan`: freshness state. */
     staleness?: StalenessState;
@@ -123,7 +124,9 @@ export function ArtifactContentRenderer({
         return <ScreenInventoryRenderer content={content} imageContext={screenImageContext} />;
     }
     if (subtype === 'data_model') {
-        return <DataModelRenderer content={content} prdVersionLabel={prdVersionLabel} staleness={staleness} />;
+        // PRD provenance (`prdVersionLabel`) is shown once at the page level, not
+        // repeated inside the Data Model summary card — so it isn't passed here.
+        return <DataModelRenderer content={content} staleness={staleness} />;
     }
     if (subtype === 'component_inventory' && isJsonString(content)) {
         return <ComponentInventoryRenderer content={content} />;

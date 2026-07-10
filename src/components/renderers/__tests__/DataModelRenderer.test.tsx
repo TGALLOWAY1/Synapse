@@ -36,30 +36,60 @@ const twoEntityModel: DataModelContent = {
     apiEndpoints: [],
 };
 
-function renderModel(content: DataModelContent, props: Partial<{ prdVersionLabel: string; staleness: 'current' | 'possibly_outdated' | 'outdated' }> = {}) {
+function renderModel(content: DataModelContent, props: Partial<{ staleness: 'current' | 'possibly_outdated' | 'outdated' }> = {}) {
     return render(<DataModelRenderer content={JSON.stringify(content)} {...props} />);
 }
 
+const modelWithApi: DataModelContent = {
+    entities: twoEntityModel.entities,
+    apiEndpoints: [
+        { method: 'GET', path: '/users', description: 'List users', entity: 'User' },
+        { method: 'POST', path: '/users', description: 'Create user', entity: 'User' },
+        { method: 'GET', path: '/orders', description: 'List orders', entity: 'Order' },
+        { method: 'POST', path: '/orders', description: 'Create order', entity: 'Order' },
+        { method: 'DELETE', path: '/orders/:id', description: 'Delete order', entity: 'Order' },
+    ],
+};
+
 describe('DataModelRenderer — overview header', () => {
-    it('renders a Data Model overview with entity/relationship counts', () => {
+    it('renders the database icon and title on a single header row', () => {
         const { getByLabelText } = renderModel(twoEntityModel);
         const overview = getByLabelText('Data model overview');
-        expect(overview).toHaveTextContent('Data Model');
-        expect(overview).toHaveTextContent('Entities');
-        // Singular label when there is exactly one deduped relationship.
-        expect(overview).toHaveTextContent('Relationship');
-        // 2 entities stat tile value.
-        expect(within(overview).getByText('2')).toBeInTheDocument();
+        // Title renders as an <h2> heading next to the icon.
+        expect(within(overview).getByRole('heading', { name: 'Data Model' })).toBeInTheDocument();
     });
 
-    it('shows optional PRD provenance and staleness when provided', () => {
-        const { getByLabelText } = renderModel(twoEntityModel, {
-            prdVersionLabel: 'Version 3',
-            staleness: 'possibly_outdated',
-        });
+    it('does not repeat PRD provenance or a count subtitle inside the card', () => {
+        // Provenance ("From PRD Version N") lives at the page level, not the card.
+        const { getByLabelText } = renderModel(modelWithApi, { staleness: 'current' });
         const overview = getByLabelText('Data model overview');
-        expect(overview).toHaveTextContent('From PRD Version 3');
-        expect(overview).toHaveTextContent('May be outdated');
+        expect(overview).not.toHaveTextContent('From PRD');
+        // The old "6 entities · 5 API endpoints" subtitle is gone — the entity
+        // count now only appears as a metric tile value, not a subtitle string.
+        expect(within(overview).queryByText(/\d+ entities/)).toBeNull();
+        expect(within(overview).queryByText(/API endpoints/)).toBeNull(); // lowercase subtitle form
+    });
+
+    it('keeps the freshness ("Current") pill when staleness is provided', () => {
+        const { getByLabelText } = renderModel(twoEntityModel, { staleness: 'current' });
+        const overview = getByLabelText('Data model overview');
+        expect(overview).toHaveTextContent('Current');
+    });
+
+    it('renders six metric cards, including a real API-endpoint count', () => {
+        const { getByLabelText } = renderModel(modelWithApi);
+        const overview = getByLabelText('Data model overview');
+        const metrics = within(overview).getByRole('list', { name: 'Data model metrics' });
+        expect(within(metrics).getAllByRole('listitem')).toHaveLength(6);
+        // API Endpoints is a first-class tile driven by the artifact's real count.
+        expect(within(metrics).getByText('API Endpoints')).toBeInTheDocument();
+        expect(within(metrics).getByText('5')).toBeInTheDocument();
+        // The other five metric labels are all present too.
+        expect(within(metrics).getByText('Entities')).toBeInTheDocument();
+        expect(within(metrics).getByText('Relationship')).toBeInTheDocument();
+        expect(within(metrics).getByText('Constraints')).toBeInTheDocument();
+        expect(within(metrics).getByText('Indexes')).toBeInTheDocument();
+        expect(within(metrics).getByText('Entities with PII')).toBeInTheDocument();
     });
 });
 

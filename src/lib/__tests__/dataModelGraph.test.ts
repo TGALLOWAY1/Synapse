@@ -13,7 +13,9 @@ import {
     isStructuredFieldType,
     normalizeMutability,
     parseRelationshipCallout,
+    placeEdgeLabels,
     slugifyEntity,
+    type Rect,
 } from '../dataModelGraph';
 
 // A realistic model exercised end-to-end through the converter + parser so the
@@ -298,5 +300,80 @@ describe('helpers', () => {
     it('normalizes mutability for display', () => {
         expect(normalizeMutability('mostly_immutable')).toBe('mostly immutable');
         expect(normalizeMutability(undefined)).toBeUndefined();
+    });
+});
+
+describe('placeEdgeLabels — collision-aware relationship-label placement', () => {
+    // A label placement's box, given its resolved centre + size.
+    const boxOf = (p: { x: number; y: number }, w: number, h: number): Rect => ({
+        x: p.x - w / 2, y: p.y - h / 2, w, h,
+    });
+    const overlaps = (a: Rect, b: Rect): boolean =>
+        a.x < b.x + b.w && a.x + a.w > b.x && a.y < b.y + b.h && a.y + a.h > b.y;
+
+    it('leaves a non-colliding label on its natural edge-midpoint anchor', () => {
+        const [p] = placeEdgeLabels(
+            [{ id: 'e', cx: 300, cy: 300, w: 60, h: 30 }],
+            [{ x: 0, y: 0, w: 100, h: 60 }],
+            { width: 600, height: 600 },
+        );
+        expect(p.moved).toBe(false);
+        expect(p.x).toBe(300);
+        expect(p.y).toBe(300);
+    });
+
+    it('moves a label off any entity card it would overlap', () => {
+        const card: Rect = { x: 0, y: 0, w: 200, h: 140 };
+        const [p] = placeEdgeLabels(
+            [{ id: 'e', cx: 100, cy: 70, w: 60, h: 30 }], // anchor inside the card
+            [card],
+            { width: 600, height: 600 },
+        );
+        expect(p.moved).toBe(true);
+        expect(overlaps(boxOf(p, 60, 30), card)).toBe(false);
+    });
+
+    it('clears the same-row (horizontal-edge) label off both connected cards', () => {
+        // Two cards side-by-side with a 40px gap and a reserved label lane above
+        // and below (mirrors EntityGraph geometry). The natural anchor sits on the
+        // cards' shared vertical centre — the configuration that used to overlap.
+        const w = 70, h = 34;
+        const a: Rect = { x: 0, y: 92, w: 224, h: 140 };
+        const b: Rect = { x: 264, y: 92, w: 224, h: 140 };
+        const [p] = placeEdgeLabels(
+            [{ id: 'e', cx: 244, cy: 162, w, h }],
+            [a, b],
+            { width: 488, height: 324 },
+        );
+        expect(p.moved).toBe(true);
+        expect(overlaps(boxOf(p, w, h), a)).toBe(false);
+        expect(overlaps(boxOf(p, w, h), b)).toBe(false);
+    });
+
+    it('does not stack two labels sharing the same anchor', () => {
+        const w = 60, h = 30;
+        const [pa, pb] = placeEdgeLabels(
+            [
+                { id: 'a', cx: 100, cy: 100, w, h },
+                { id: 'b', cx: 100, cy: 100, w, h },
+            ],
+            [],
+            { width: 600, height: 600 },
+        );
+        expect(overlaps(boxOf(pa, w, h), boxOf(pb, w, h))).toBe(false);
+    });
+
+    it('keeps every label fully inside the canvas', () => {
+        const w = 60, h = 30;
+        const [p] = placeEdgeLabels(
+            [{ id: 'e', cx: 4, cy: 4, w, h }], // anchor pinned to the top-left corner
+            [],
+            { width: 600, height: 600 },
+        );
+        const box = boxOf(p, w, h);
+        expect(box.x).toBeGreaterThanOrEqual(0);
+        expect(box.y).toBeGreaterThanOrEqual(0);
+        expect(box.x + box.w).toBeLessThanOrEqual(600);
+        expect(box.y + box.h).toBeLessThanOrEqual(600);
     });
 });

@@ -491,6 +491,134 @@ export function computeDataModelLayout(graph: DataModelGraph): DataModelLayout {
 }
 
 // ---------------------------------------------------------------------------
+// Edge-label placement (collision-aware — pure, so it's unit-testable)
+// ---------------------------------------------------------------------------
+
+/** Axis-aligned rectangle in canvas space (top-left origin). */
+export interface Rect { x: number; y: number; w: number; h: number }
+
+/** A relationship-label's natural anchor (its edge midpoint) + estimated size. */
+export interface EdgeLabelInput {
+    id: string;
+    /** Natural center x (edge midpoint). */
+    cx: number;
+    /** Natural center y (edge midpoint). */
+    cy: number;
+    w: number;
+    h: number;
+}
+
+export interface EdgeLabelPlacement {
+    id: string;
+    /** Resolved center x. */
+    x: number;
+    /** Resolved center y. */
+    y: number;
+    /** True when nudged off its natural anchor to avoid a collision. */
+    moved: boolean;
+}
+
+export interface PlaceEdgeLabelsOptions {
+    /** Minimum clear gap kept between a label and any card. */
+    margin?: number;
+    /** Search step (px) and how many rings out to look before giving up. */
+    step?: number;
+    maxRings?: number;
+}
+
+function rectsOverlap(a: Rect, b: Rect, margin: number): boolean {
+    return (
+        a.x - margin < b.x + b.w &&
+        a.x + a.w + margin > b.x &&
+        a.y - margin < b.y + b.h &&
+        a.y + a.h + margin > b.y
+    );
+}
+
+function clamp(v: number, lo: number, hi: number): number {
+    if (hi < lo) return lo;
+    return v < lo ? lo : v > hi ? hi : v;
+}
+
+/**
+ * Collision-aware placement for relationship-edge labels so the pills never
+ * overlap entity cards (the "graph looks broken" bug on narrow screens).
+ *
+ * Each label starts on its edge midpoint. Between-row edges already sit in the
+ * clear vertical gap between layout rows, so their labels don't move. Same-row
+ * (horizontal) edges — the overlap-prone case, where the label lands on the
+ * cards' vertical centre inside a gap far narrower than the label — get lifted
+ * into an adjacent clear lane. The search is deterministic (fixed direction
+ * ring, vertical moves preferred so labels drop into row gaps), every candidate
+ * is clamped inside the canvas, and already-placed labels are treated as soft
+ * obstacles so two labels don't stack either. Pure: no DOM, no measurement.
+ */
+export function placeEdgeLabels(
+    labels: EdgeLabelInput[],
+    cards: Rect[],
+    canvas: { width: number; height: number },
+    options: PlaceEdgeLabelsOptions = {},
+): EdgeLabelPlacement[] {
+    const margin = options.margin ?? 6;
+    const step = options.step ?? 14;
+    const maxRings = options.maxRings ?? 12;
+
+    const boxAt = (cx: number, cy: number, w: number, h: number): Rect => ({
+        x: cx - w / 2, y: cy - h / 2, w, h,
+    });
+    // Keep the whole label box on-canvas by clamping its centre.
+    const clampCenter = (cx: number, cy: number, w: number, h: number) => ({
+        x: clamp(cx, w / 2, canvas.width - w / 2),
+        y: clamp(cy, h / 2, canvas.height - h / 2),
+    });
+
+    const placed: Rect[] = [];
+    const isClear = (box: Rect): boolean =>
+        !cards.some(c => rectsOverlap(box, c, margin)) &&
+        // Labels crowd each other less than they crowd cards — lighter margin.
+        !placed.some(p => rectsOverlap(box, p, margin / 2));
+
+    // Vertical moves first (drop into row gaps), then horizontal, then diagonals.
+    const directions: Array<[number, number]> = [
+        [0, -1], [0, 1], [-1, 0], [1, 0], [-1, -1], [1, -1], [-1, 1], [1, 1],
+    ];
+
+    const result: EdgeLabelPlacement[] = [];
+    for (const label of labels) {
+        const natural = clampCenter(label.cx, label.cy, label.w, label.h);
+        let chosen = natural;
+
+        if (!isClear(boxAt(natural.x, natural.y, label.w, label.h))) {
+            let found: { x: number; y: number } | null = null;
+            for (let ring = 1; ring <= maxRings && !found; ring++) {
+                for (const [dx, dy] of directions) {
+                    const c = clampCenter(
+                        label.cx + dx * step * ring,
+                        label.cy + dy * step * ring,
+                        label.w, label.h,
+                    );
+                    if (isClear(boxAt(c.x, c.y, label.w, label.h))) {
+                        found = c;
+                        break;
+                    }
+                }
+            }
+            // Best effort: if nothing is fully clear, keep the clamped anchor.
+            if (found) chosen = found;
+        }
+
+        placed.push(boxAt(chosen.x, chosen.y, label.w, label.h));
+        result.push({
+            id: label.id,
+            x: chosen.x,
+            y: chosen.y,
+            moved: chosen.x !== label.cx || chosen.y !== label.cy,
+        });
+    }
+    return result;
+}
+
+// ---------------------------------------------------------------------------
 // Summary
 // ---------------------------------------------------------------------------
 
