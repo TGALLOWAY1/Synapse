@@ -118,14 +118,17 @@ export function ScreenOverviewPanel({
             {/* Review notes — collapsed, action-oriented. */}
             {reviewNotes}
 
-            {/* Acceptance checklist — concise; full generated text behind disclosure. */}
-            <Card title="Acceptance checklist" icon={<CheckCircle2 size={12} className="text-emerald-600" aria-hidden />}>
+            {/* Acceptance criteria — concise; full generated text behind disclosure.
+                Neutral bullets, NOT green checks: these are derived/generated
+                statements the user has not verified, so pass/verified iconography
+                would overstate them. */}
+            <Card title="Acceptance criteria" icon={<CheckCircle2 size={12} className="text-neutral-400" aria-hidden />}>
                 {criteria.criteria.length > 0 ? (
                     <>
                         <ul className="space-y-1.5">
                             {criteria.criteria.map((c, i) => (
                                 <li key={i} className="flex gap-2 items-start text-xs text-neutral-700">
-                                    <CheckCircle2 size={13} className="text-emerald-500 mt-0.5 shrink-0" aria-hidden />
+                                    <span className="mt-1.5 h-1.5 w-1.5 rounded-full bg-neutral-300 shrink-0" aria-hidden />
                                     <span>{c}</span>
                                 </li>
                             ))}

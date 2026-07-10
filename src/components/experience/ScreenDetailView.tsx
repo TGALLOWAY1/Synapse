@@ -726,7 +726,6 @@ function MockupsTab({
             <MockupVariantsPanel
                 item={item}
                 variants={variants}
-                summary={variantSummary}
                 mockupContext={mockupContext}
                 onSetVariantStatus={setVariantStatus}
             />
@@ -815,28 +814,27 @@ function MockupsTab({
                 )}
             </div>
 
-            {/* Recommended variants discovery — even without a mockup, show what
-                this screen probably wants so missing viewports/states are visible. */}
+            {/* Suggested variants discovery — even without a mockup, show what
+                this screen could document. Neutral framing: an ungenerated
+                variant is an on-demand option, never a deficit (audit H1). */}
             {variantSummary.recommended > 0 && (
                 <div className="bg-white rounded-lg border border-neutral-200 p-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
                         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                            Recommended variants
+                            Suggested variants
                         </h4>
-                        <span className="text-[10px] text-neutral-400">
-                            {variantSummary.generated} of {variantSummary.recommended} generated
-                        </span>
+                        <span className="text-[10px] text-neutral-400">Optional</span>
                     </div>
                     <ul className="space-y-1 text-xs">
                         {variants.filter(v => v.required).map(v => (
                             <li key={v.id} className="flex items-center justify-between gap-2">
                                 <span className="text-neutral-700">{formatVariantLabel(v)}</span>
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${
                                     v.status === 'missing'
-                                        ? 'text-amber-700 bg-amber-50 ring-amber-200'
+                                        ? 'text-neutral-500 bg-neutral-50 ring-neutral-200'
                                         : 'text-emerald-700 bg-emerald-50 ring-emerald-200'
                                 }`}>
-                                    {VARIANT_STATUS_LABELS[v.status]}
+                                    {v.status === 'missing' ? 'Available on demand' : VARIANT_STATUS_LABELS[v.status]}
                                 </span>
                             </li>
                         ))}

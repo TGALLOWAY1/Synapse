@@ -250,10 +250,10 @@ describe('ScreenDetailView tabs', () => {
         );
     }
 
-    it('Overview leads with the screen (Purpose, Acceptance checklist) and hides detail/handoff', () => {
+    it('Overview leads with the screen (Purpose, Acceptance criteria) and hides detail/handoff', () => {
         const { getByText, queryByText } = renderDetail('scr-home', 'overview');
         expect(getByText('Purpose')).toBeTruthy();
-        expect(getByText('Acceptance checklist')).toBeTruthy();
+        expect(getByText('Acceptance criteria')).toBeTruthy();
         // PRD features + screen detail are progressively disclosed, not top-level.
         expect(getByText('PRD features')).toBeTruthy();
         expect(getByText('Screen details')).toBeTruthy();
@@ -372,8 +372,9 @@ function renderContractDetail(
 describe('Phase 2 contract rendering', () => {
     it('Overview leads with the acceptance checklist; handoff detail is gone', () => {
         const { getByText, queryByText, getAllByText } = renderContractDetail('overview');
-        // Acceptance criteria are a concise checklist (screen-level + per-state).
-        expect(getByText('Acceptance checklist')).toBeTruthy();
+        // Acceptance criteria are a concise list (screen-level + per-state) —
+        // neutral bullets, not pass-checks (they are unverified derived text).
+        expect(getByText('Acceptance criteria')).toBeTruthy();
         expect(getByText('User can submit end to end')).toBeTruthy();
         expect(getAllByText('Empty state appears when no evaluations exist').length).toBeGreaterThan(0);
         // Developer-handoff fields (route/components/events) no longer appear here.
@@ -387,10 +388,12 @@ describe('Phase 2 contract rendering', () => {
 
     it('Mockups tab presents a viewport × state variant gallery with honest statuses', () => {
         const { getByText, getAllByText } = renderContractDetail('mockups');
-        // Header + derived summary.
-        expect(getByText(/recommended .*variants.* generated/)).toBeTruthy();
+        // Header + derived summary — optional variants framed as on-demand
+        // options, never a "missing" deficit (audit H1).
+        expect(getByText(/optional variants available on demand/)).toBeTruthy();
+        expect(getByText(/Optional variants — generate on demand/)).toBeTruthy();
         // Variant cards (viewport × state). The default is generated; mobile /
-        // states are recommended-but-missing.
+        // states are optional and not generated.
         expect(getAllByText('Desktop · Default').length).toBeGreaterThan(0);
         expect(getByText('Mobile · Default')).toBeTruthy();
         expect(getByText('Desktop · Empty history')).toBeTruthy();
@@ -398,9 +401,9 @@ describe('Phase 2 contract rendering', () => {
         // Legacy mockup with no coverage metadata → unknown, never fabricated.
         expect(getByText('Coverage unknown')).toBeTruthy();
         expect(getByText(/Generated from PRD Version 3/)).toBeTruthy();
-        // Missing variants are visually distinct (Missing pills + "Not generated yet").
-        expect(getAllByText('Missing').length).toBe(3);
-        expect(getAllByText('Not generated yet').length).toBe(3);
+        // Non-generated variants read as available options, in neutral tone.
+        expect(getAllByText('Not generated').length).toBe(3);
+        expect(getAllByText('Available on demand').length).toBe(3);
         // Selecting a missing variant offers a Phase 3B "Generate variant"
         // action — disabled here because the test env has no OpenAI key — with
         // a clear, non-alarming explanation rather than a silent failure.
@@ -613,16 +616,16 @@ describe('Phase 4A Screens list + coverage panel', () => {
     });
 });
 
-describe('missing variant acceptance (review-feedback regression)', () => {
-    it('a missing variant row can be marked accepted (e.g. verified via upload), not just not-needed', () => {
+describe('variant actions (one acceptance concept)', () => {
+    it('a non-generated variant offers only "Not needed" — per-variant Mark accepted was removed (Confirm Screen is the one acceptance; audit M5)', () => {
         const onSave = vi.fn();
-        const { getByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
-        // Select the missing Empty-history variant, then mark it accepted.
+        const { getByText, queryByText } = renderContractDetail('mockups', { onSaveScreenEdit: onSave });
         fireEvent.click(getByText('Desktop · Empty history'));
-        fireEvent.click(getByText('Mark accepted'));
+        expect(queryByText('Mark accepted')).toBeNull();
+        fireEvent.click(getByText('Not needed'));
         expect(onSave).toHaveBeenCalledTimes(1);
         const [, edit] = onSave.mock.calls[0] as [string, Record<string, unknown>];
-        expect(edit.mockupVariantStatus).toEqual({ 'state:empty-history': 'accepted' });
+        expect(edit.mockupVariantStatus).toEqual({ 'state:empty-history': 'not_needed' });
     });
 });
 
@@ -656,10 +659,13 @@ describe('Phase 3C variant freshness & history UI', () => {
         useMockupVariantImageStore.setState({ images: {}, inFlight: {}, errors: {} });
     });
 
-    it('shows the snapshot-inclusion storage note in the Mockups tab', () => {
-        const { getByText } = renderContractDetail('mockups');
-        // Phase 3D: variant images now travel in project snapshots, so the copy
-        // states they can be restored on another device (no longer "local-only").
+    it('keeps the storage note out of the primary view, behind a disclosure on a generated variant', () => {
+        // Audit M6: persistence trivia no longer sits in the tab header. It is
+        // reachable from a generated variant's detail via a small disclosure.
+        seedVariant({ variantId: 'state:empty-history' });
+        const { getByText } = renderContractDetail('mockups', { trustContext: TRUST });
+        fireEvent.click(getByText('Desktop · Empty history'));
+        expect(getByText('Where is this image stored?')).toBeTruthy();
         expect(getByText(/included in project snapshots/)).toBeTruthy();
     });
 
@@ -801,7 +807,9 @@ describe('Phase 4B list card + coverage panel', () => {
         expect(getByText('Screen Coverage & Readiness')).toBeTruthy();
     });
 
-    it('14. the coverage panel shows the downstream readiness section', () => {
+    it('14. the coverage panel shows the downstream section only when something changed', () => {
+        // The accepted-but-outdated P0 makes downstream impact actionable →
+        // the section renders (as "Downstream impact", not a verdict banner).
         const { index, readiness, coverage, reviewModels, artifactReview } = buildDownstreamFixtures();
         const { getByText } = render(
             <ScreenListView
@@ -813,7 +821,9 @@ describe('Phase 4B list card + coverage panel', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        expect(getByText('Downstream readiness')).toBeTruthy();
+        expect(getByText('Downstream impact')).toBeTruthy();
+        // The old always-on green verdict is gone (audit C1) — no
+        // "Ready for implementation planning" banner from this section.
     });
 });
 
@@ -865,9 +875,12 @@ describe('Phase 4B preflight panel', () => {
 // details, so those remain covered here.
 
 describe('Phase 5A handoff rollup (list)', () => {
-    it('22. a screen card shows a handoff readiness chip', () => {
+    it('22. card details carry no handoff verdict — screens stay design-review scoped', () => {
+        // Audit H2: the per-card amber "HANDOFF Needs review" row dragged
+        // implementation verdicts back into Screens. Handoff readiness now
+        // surfaces only in the metadata-section rollup + export.
         const { index, readiness, coverage, reviewModels, artifactReview } = buildReviewFixtures();
-        const { getAllByText } = render(
+        const { getAllByText, queryAllByText } = render(
             <ScreenListView
                 index={index}
                 readiness={readiness}
@@ -878,10 +891,10 @@ describe('Phase 5A handoff rollup (list)', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        // Handoff readiness is now secondary metadata behind each card's Details.
         getAllByText('Show details').forEach(btn => fireEvent.click(btn));
-        // The unsigned P0 Home Dashboard has a blocked handoff.
-        expect(getAllByText('Blocked').length).toBeGreaterThan(0);
+        expect(queryAllByText('Handoff').length).toBe(0);
+        // PRD feature refs resolve to names, never raw ids.
+        expect(queryAllByText(/Covers \d+ PRD feature/).length).toBe(0);
     });
 
     it('23. the coverage panel shows the handoff rollup', () => {
@@ -898,7 +911,9 @@ describe('Phase 5A handoff rollup (list)', () => {
             />,
         );
         expect(getByText('Implementation handoff')).toBeTruthy();
-        expect(getByText('Implementation handoff not ready')).toBeTruthy();
+        // Blocked screens are the one amber case; the rollup is a single quiet
+        // line, not a verdict banner (audit H2).
+        expect(getByText(/blocked for handoff/)).toBeTruthy();
     });
 
     it('24. the preflight includes handoff blocking items', () => {
@@ -955,7 +970,8 @@ describe('Phase 5B handoff trace bridge (list rollup)', () => {
                 onSelectScreen={() => {}}
             />,
         );
-        // Trace rollup row renders once trace bridges exist.
-        expect(getByText('Handoff trace')).toBeTruthy();
+        // The jargon "Handoff trace" strip is gone; only genuine P0 gaps
+        // would surface (none here — the data model matches).
+        expect(getByText('Implementation handoff')).toBeTruthy();
     });
 });

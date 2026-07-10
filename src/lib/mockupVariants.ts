@@ -591,9 +591,11 @@ export function buildMockupVariantCoverageSummary(
 
 // --- Variant status presentation ------------------------------------------------
 
+// 'missing' reads as "Not generated" — an on-demand option, never a failure
+// state (optional variants must not look like incomplete work; audit H1).
 export const VARIANT_STATUS_LABELS: Record<MockupVariantStatus, string> = {
     generated: 'Generated',
-    missing: 'Missing',
+    missing: 'Not generated',
     accepted: 'Accepted',
     not_needed: 'Not needed',
 };

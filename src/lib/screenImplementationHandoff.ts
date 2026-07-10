@@ -677,9 +677,13 @@ export interface HandoffReadinessSignals {
     hasAcceptanceCriteria: boolean;
     /** At least a route OR a component can be offered for this screen. */
     hasRouteOrComponentGuidance: boolean;
-    /** Any generated mockup reads stale / possibly-stale / unknown. */
+    /** Any generated mockup reads stale / possibly-stale. UNKNOWN freshness
+     * (legacy metadata) is deliberately NOT a concern here — the honesty rule
+     * "unknown is info, never review-worthy" applies to handoff readiness too;
+     * on legacy projects it made every accepted screen read "needs review". */
     mockupFreshnessConcern: boolean;
-    /** A recommended Mobile default variant is missing. */
+    /** A recommended Mobile default variant is missing. Optional-variant
+     * documentation — surfaces in the QA checklist, never in readiness. */
     mobileMissing: boolean;
     /** No data dependencies could be derived at all (missing trace). */
     dataDependenciesMissing: boolean;
@@ -750,11 +754,11 @@ export function deriveHandoffReadiness(signals: HandoffReadinessSignals): Screen
         reasons.push('This supporting screen is not signed off yet.');
     }
     if (signals.mockupFreshnessConcern) {
-        reasons.push('One or more mockups may be out of date or unverified.');
+        reasons.push('One or more mockups may be out of date.');
     }
-    if (signals.mobileMissing) {
-        reasons.push('A recommended mobile mockup is missing.');
-    }
+    // NOTE: mobileMissing is deliberately not a review reason — extra viewport
+    // variants are optional, generated on demand, and must never downgrade a
+    // screen's handoff readiness (they still appear in the QA checklist).
     if (signals.dataDependenciesMissing) {
         reasons.push('No linked data model entities found — review data dependencies before implementation.');
     }
@@ -854,17 +858,23 @@ export function buildScreenImplementationHandoff(input: ScreenHandoffInput): Scr
         v => v.viewport === 'mobile' && v.stateType === 'default' && v.status === 'missing',
     );
     const hasMockup = variants.some(v => v.source === 'legacy' || v.source === 'variant');
-    const mockupFreshnessConcern = variants.some(
-        v => v.freshness && (v.freshness.status === 'stale' || v.freshness.status === 'possibly_stale'
-            || v.freshness.status === 'unknown'),
+    // Readiness concern = a KNOWN drift (stale / possibly stale). Unknown
+    // freshness (legacy metadata) still prompts the QA double-check below but
+    // never downgrades readiness.
+    const mockupFreshnessStale = variants.some(
+        v => v.freshness && (v.freshness.status === 'stale' || v.freshness.status === 'possibly_stale'),
     );
+    const mockupFreshnessUnknown = variants.some(v => v.freshness?.status === 'unknown');
+    const mockupFreshnessConcern = mockupFreshnessStale;
     const hasStateVariants = variants.some(v => v.stateType !== 'default');
 
     const qaChecklist = deriveHandoffQaChecklist(screen, {
         acceptanceCriteria,
         mobileMissing,
         hasMockup,
-        mockupFreshnessConcern,
+        // The QA "double-check the mockup" item fires for unknown too — a
+        // useful nudge there, unlike in readiness.
+        mockupFreshnessConcern: mockupFreshnessStale || mockupFreshnessUnknown,
     });
 
     const buildTasks = deriveHandoffBuildTasks(screen, {

@@ -399,106 +399,74 @@ function ExpandedCoverageSection({ variant }: { variant: MockupVariantCoverageSu
     );
 }
 
-/** Phase 5A: the artifact-level implementation-handoff readiness rollup — how
- * many screens have build-ready handoff packages, gated on P0. Advisory only. */
-const HANDOFF_STATUS_META: Record<ScreensHandoffRollup['status'], { label: string; tone: 'good' | 'warn' }> = {
-    ready: { label: 'Implementation handoff ready', tone: 'good' },
-    review_recommended: { label: 'Implementation handoff needs review', tone: 'warn' },
-    blocked: { label: 'Implementation handoff not ready', tone: 'warn' },
-};
-
+/**
+ * Phase 5A rollup, demoted to one quiet line (audit H2/C1): implementation
+ * handoff is an Implementation-Plan concern, so inside Screens it must never
+ * issue a verdict banner that competes with — or contradicts — the review
+ * gate above. Amber is reserved for genuinely blocked screens; everything
+ * else reads as neutral information. Details live in the export panel below.
+ */
 function HandoffReadinessSection({ rollup }: { rollup: ScreensHandoffRollup }) {
-    const meta = HANDOFF_STATUS_META[rollup.status];
-    const good = meta.tone === 'good';
     return (
         <div className="mt-4 pt-4 border-t border-neutral-100">
-            <div className="flex items-center gap-1.5 mb-2">
+            <div className="flex items-center gap-1.5 mb-1">
                 <ClipboardCheck size={13} className="text-neutral-400" aria-hidden />
                 <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Implementation handoff</h4>
             </div>
-            <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600 mb-2">
-                <span className="text-emerald-700">{rollup.ready} ready</span>
-                <span className="text-amber-700">{rollup.reviewRecommended} review recommended</span>
-                {rollup.blocked > 0 && (
-                    <span className="text-red-700">{rollup.blocked} blocked</span>
-                )}
-            </div>
-            <div className={`rounded-lg border p-3 flex items-start gap-2 ${
-                good ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
-            }`}>
-                {good
-                    ? <CheckCircle2 size={15} className="text-emerald-600 mt-0.5 shrink-0" aria-hidden />
-                    : <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" aria-hidden />}
-                <div className="min-w-0">
-                    <p className={`text-xs font-medium ${good ? 'text-emerald-800' : 'text-amber-800'}`}>{meta.label}</p>
-                    <p className="text-[11px] text-neutral-600 mt-0.5">{rollup.message}</p>
-                </div>
-            </div>
-            {rollup.trace && rollup.trace.traced > 0 && (
-                <div className="mt-2">
-                    <div className="flex flex-wrap gap-x-3 gap-y-1 text-[11px] text-neutral-600">
-                        <span className="text-neutral-400 uppercase tracking-wide text-[10px]">Handoff trace</span>
-                        {rollup.trace.strong > 0 && <span className="text-emerald-700">{rollup.trace.strong} strong</span>}
-                        {rollup.trace.estimated > 0 && <span className="text-amber-700">{rollup.trace.estimated} estimated</span>}
-                        {rollup.trace.missing > 0 && <span className="text-neutral-500">{rollup.trace.missing} missing</span>}
-                    </div>
-                    {(rollup.trace.p0PlanMissing > 0 || rollup.trace.p0DataModelMissing > 0) && (
-                        <p className="mt-1 text-[11px] text-amber-700">
-                            {rollup.trace.p0PlanMissing > 0 && (
-                                `${rollup.trace.p0PlanMissing} P0 ${rollup.trace.p0PlanMissing === 1 ? 'screen lacks' : 'screens lack'} an Implementation Plan match. `
-                            )}
-                            {rollup.trace.p0DataModelMissing > 0 && (
-                                `${rollup.trace.p0DataModelMissing} P0 ${rollup.trace.p0DataModelMissing === 1 ? 'screen has' : 'screens have'} data dependencies with no Data Model match.`
-                            )}
-                        </p>
+            {rollup.blocked > 0 ? (
+                <p className="text-[11px] text-amber-700">
+                    {rollup.blocked} {rollup.blocked === 1 ? 'screen is' : 'screens are'} blocked for handoff —
+                    resolve the blocking review items before packaging.
+                </p>
+            ) : (
+                <p className="text-[11px] text-neutral-500">
+                    {rollup.ready} of {rollup.total} screens ready to package
+                    {rollup.reviewRecommended > 0
+                        ? ` · ${rollup.reviewRecommended} with advisory review notes`
+                        : ''} — see the export panel below.
+                </p>
+            )}
+            {rollup.trace && (rollup.trace.p0PlanMissing > 0 || rollup.trace.p0DataModelMissing > 0) && (
+                <p className="mt-1 text-[11px] text-amber-700">
+                    {rollup.trace.p0PlanMissing > 0 && (
+                        `${rollup.trace.p0PlanMissing} P0 ${rollup.trace.p0PlanMissing === 1 ? 'screen lacks' : 'screens lack'} an Implementation Plan match. `
                     )}
-                </div>
+                    {rollup.trace.p0DataModelMissing > 0 && (
+                        `${rollup.trace.p0DataModelMissing} P0 ${rollup.trace.p0DataModelMissing === 1 ? 'screen has' : 'screens have'} data dependencies with no Data Model match.`
+                    )}
+                </p>
             )}
         </div>
     );
 }
 
-/** Phase 4B: the artifact-level downstream-readiness verdict (how changes to
- * accepted screens ripple into mockups / data model / implementation plan).
- * Advisory only — never a hard lock. */
-const DOWNSTREAM_STATUS_META: Record<ScreensDownstreamImpactRollup['overallStatus'], {
-    label: string; tone: 'good' | 'warn';
-}> = {
-    ready: { label: 'Ready for implementation planning', tone: 'good' },
-    review_recommended: { label: 'Review recommended', tone: 'warn' },
-    not_ready: { label: 'Not ready for implementation planning', tone: 'warn' },
-};
-
+/**
+ * Phase 4B rollup, demoted (audit C1/H2): when nothing changed downstream it
+ * renders NOTHING — the old always-on green "Ready for implementation
+ * planning" banner duplicated (and could contradict) the review gate above.
+ * It only speaks when a change/blocker actually ripples downstream.
+ */
 function DownstreamReadinessSection({ rollup }: { rollup: ScreensDownstreamImpactRollup }) {
-    const meta = DOWNSTREAM_STATUS_META[rollup.overallStatus];
-    const good = meta.tone === 'good';
+    if (rollup.overallStatus === 'ready') return null;
     return (
         <div className="mt-4 pt-4 border-t border-neutral-100">
             <div className="flex items-center gap-1.5 mb-2">
                 <Gauge size={13} className="text-neutral-400" aria-hidden />
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Downstream readiness</h4>
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Downstream impact</h4>
             </div>
-            <div className={`rounded-lg border p-3 flex items-start gap-2 ${
-                good ? 'border-emerald-200 bg-emerald-50/60' : 'border-amber-200 bg-amber-50/60'
-            }`}>
-                {good
-                    ? <CheckCircle2 size={15} className="text-emerald-600 mt-0.5 shrink-0" aria-hidden />
-                    : <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" aria-hidden />}
+            <div className="rounded-lg border border-amber-200 bg-amber-50/60 p-3 flex items-start gap-2">
+                <AlertTriangle size={15} className="text-amber-600 mt-0.5 shrink-0" aria-hidden />
                 <div className="min-w-0">
-                    <p className={`text-xs font-medium ${good ? 'text-emerald-800' : 'text-amber-800'}`}>
-                        {meta.label}
+                    <p className="text-xs font-medium text-amber-800">
+                        {rollup.overallStatus === 'not_ready'
+                            ? 'Screen changes affect downstream artifacts'
+                            : 'Review recommended before regenerating downstream artifacts'}
                     </p>
-                    {rollup.overallStatus === 'ready' ? (
-                        <p className="text-[11px] text-neutral-600 mt-0.5">
-                            All P0 screens are signed off, current, and free of blocking downstream impacts.
-                        </p>
-                    ) : (
-                        <p className="text-[11px] text-neutral-600 mt-0.5">
-                            {rollup.totalImpactedScreens === 1
-                                ? '1 screen may affect downstream artifacts (mockups, data model, implementation plan).'
-                                : `${rollup.totalImpactedScreens} screens may affect downstream artifacts (mockups, data model, implementation plan).`}
-                        </p>
-                    )}
+                    <p className="text-[11px] text-neutral-600 mt-0.5">
+                        {rollup.totalImpactedScreens === 1
+                            ? '1 screen may affect downstream artifacts (mockups, data model, implementation plan).'
+                            : `${rollup.totalImpactedScreens} screens may affect downstream artifacts (mockups, data model, implementation plan).`}
+                    </p>
                     {rollup.recommendedNextActions.length > 0 && (
                         <ul className="mt-1.5 space-y-0.5 text-[11px] text-neutral-600">
                             {rollup.recommendedNextActions.slice(0, 3).map((a, i) => (
