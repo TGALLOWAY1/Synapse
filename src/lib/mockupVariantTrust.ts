@@ -266,7 +266,7 @@ const REASON = {
     designSystemMaybe: 'Design system may have changed — this mockup predates the current version.',
     prd: 'PRD changed after this mockup was generated.',
     prdMaybe: 'PRD context changed — this mockup predates the current PRD version.',
-    noMetadata: 'This older mockup does not include source metadata, so freshness cannot be confirmed.',
+    noMetadata: 'This mockup was generated before Synapse tracked PRD versions, so its sync state cannot be confirmed automatically.',
     partial: 'Some source metadata is unavailable, so freshness cannot be fully confirmed.',
     current: 'Matches the current screen spec, design system, and PRD context.',
 } as const;

@@ -252,13 +252,16 @@ export function ScreenListView({
                         { value: 'all', label: 'All flows' },
                         ...flowOptions.map(f => ({ value: f, label: f })),
                     ]} />
+                {/* One vocabulary: Draft / Needs review / Confirmed. The old
+                    'Ready' option filtered on the legacy implementation_ready
+                    status the UI no longer sets (its filter id survives in the
+                    lib for compatibility). */}
                 <SelectControl label="Status" value={status} onChange={v => setStatus(v as StatusFilter)}
                     options={[
                         { value: 'all', label: 'Any status' },
                         { value: 'draft', label: 'Draft' },
                         { value: 'needs_review', label: 'Needs review' },
-                        { value: 'accepted', label: 'Accepted' },
-                        { value: 'ready', label: 'Ready' },
+                        { value: 'accepted', label: 'Confirmed' },
                     ]} />
                 {anyFilterActive && (
                     <button

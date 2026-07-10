@@ -208,7 +208,7 @@ const REVIEW_STATUS_LABELS: Record<string, string> = {
 };
 
 const SYSTEM_READINESS_LABELS: Record<string, string> = {
-    ready: 'Ready to accept',
+    ready: 'Ready to confirm',
     needs_review: 'Review recommended',
     blocked: 'Blocking issues',
 };

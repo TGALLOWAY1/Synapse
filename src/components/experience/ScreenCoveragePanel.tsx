@@ -494,8 +494,7 @@ function ReviewReadinessSection({ review }: { review: ScreenArtifactReviewReadin
             </div>
             <div className="flex flex-wrap gap-x-4 gap-y-1 text-xs text-neutral-600">
                 <span>{review.totalScreens} {review.totalScreens === 1 ? 'screen' : 'screens'} total</span>
-                <span className="text-sky-700">{review.accepted} accepted</span>
-                <span className="text-emerald-700">{review.implementationReady} ready to build</span>
+                <span className="text-sky-700">{review.accepted + review.implementationReady} confirmed</span>
                 <span className="text-amber-700">{review.needsReview + review.draft} need review</span>
                 {review.blockers > 0 && (
                     <span className="text-red-700">{review.blockers} {review.blockers === 1 ? 'blocker' : 'blockers'}</span>

@@ -39,11 +39,14 @@ export type ScreenReviewStatus =
     | 'accepted'
     | 'implementation_ready';
 
+// One review vocabulary across Screens (audit 4.2): a signed-off screen is
+// "Confirmed" — including the legacy implementation_ready status, which the
+// Screens UI no longer sets but must keep rendering.
 export const REVIEW_STATUS_LABELS: Record<ScreenReviewStatus, string> = {
     draft: 'Draft',
     needs_review: 'Needs review',
-    accepted: 'Accepted',
-    implementation_ready: 'Ready to build',
+    accepted: 'Confirmed',
+    implementation_ready: 'Confirmed',
 };
 
 export const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([

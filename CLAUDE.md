@@ -1562,7 +1562,9 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     a deferred follow-up.
   - **"Freshness" → "PRD sync" language.** The Mockups tab presents variant
     freshness in user terms (`In sync with PRD` / `May need regeneration` /
-    `Needs regeneration` / `PRD sync unknown`) via a local `PRD_SYNC_LABELS` map in
+    `Needs regeneration` / `Generated before version tracking` — the unknown
+    state is plain provenance, never "sync unknown"/"freshness" jargon) via a
+    local `PRD_SYNC_LABELS` map in
     `MockupVariantsPanel`; the pure `mockupVariantTrust` `FRESHNESS_LABELS`
     constant is unchanged (still used by the non-UI export/handoff libs).
   - **Overview order (mobile-first):** Purpose + User goal → Primary mockup (the
@@ -1594,9 +1596,16 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   **pure presentation over the same parsed `user_flows` steps** — no schema,
   prompt, or persistence change, so it fixes legacy/demo flows without
   regeneration. The header navigates to the screen (slug-gated, unchanged),
-  sub-rows scroll to their step card, and single-step screens collapse to one
+  and single-step screens collapse to one
   row (keep `buildJourneyGroups` keyed on the same slug navigation uses, or a
-  group header could point at the wrong screen);
+  group header could point at the wrong screen). **The journey is the SINGLE
+  rendering of a flow's steps** (2026-07 audit): `FlowJourney` takes an
+  optional `renderStepDetail(stepIndex)` and sub-rows (plus a "Step detail"
+  toggle on single-step cards) **expand in place** to a `StepCard` in
+  `embedded` mode — both `UserFlowsRenderer` (whose duplicate "Step-by-step
+  flow" card list was removed) and the Screen Detail Flow tab (whose
+  per-screen StepCard dump was removed; it links out via `onOpenUserFlows`)
+  pass it. Without the prop, rows keep the legacy scroll-to-card behavior;
   Mockups = the **Phase 3A `MockupVariantsPanel`**
   (`src/components/experience/MockupVariantsPanel.tsx`): a viewport × state
   **variant gallery** driven by `buildScreenMockupVariants`
@@ -1644,8 +1653,12 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   staleness / Mark-up-to-date, Mockup history, Regenerate Mockup, and the
   design-drift banner) is **removed**; those artifact-level controls are passed
   to `ScreenListView` as an `artifactControls` prop (`ScreenArtifactControls`)
-  and **relocated into each card's "Show details"** (a Metadata row + an Actions
-  row). Their underlying scope is unchanged (version history is the
+  and rendered **once, as an "Artifact metadata & actions" block inside the
+  collapsed "Project readiness & metadata" section** (the 2026-07 Screens UX
+  audit moved them out of each card's "Show details" — repeating artifact-wide
+  actions per card implied a per-screen scope they never had; the per-card
+  details keep only a quiet per-screen Source/provenance row). Their underlying
+  scope is unchanged (version history is the
   screen_inventory artifact's, mockup history/regeneration the mockup
   artifact's — one shared handler set), so there is no data-model / versioning /
   mockup-pipeline change. Color is reserved for priority + genuine warnings
@@ -1690,8 +1703,16 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   legacy specs), flow
   representation (requires the FULL parsed flows list, since the index only
   records matched flows), P0/mockup/state counts, open risks (riskDetails
-  with a `proposedHandling` don't count), ready count,
-  and one deterministic readiness sentence. Also here:
+  with a `proposedHandling` don't count), a **confirmed count** (`ready` counts
+  user sign-off — `accepted` OR `implementation_ready` — plus derived
+  implementation_ready; counting only the legacy `implementation_ready` status
+  read "0 of N ready" on fully confirmed projects, the 2026-07 audit's worst
+  trust failure),
+  and one deterministic readiness sentence. **Review vocabulary is
+  Draft / Needs review / Confirmed** (`REVIEW_STATUS_LABELS` maps both
+  `accepted` and the legacy `implementation_ready` to "Confirmed"; the status
+  filter no longer exposes a separate "Ready" option, though the
+  `screenMatchesFilter` ids survive). Also here:
   `buildScreenTraceability` (featureRefs resolved against PRD `features`;
   **confidence `explicit` (every ref resolves) / `estimated` / `missing`** +
   `invalidRefIds` — "explicit" is still a generation-time claim, label it
@@ -1812,7 +1833,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   coverage + preflight surfaces), a compact downstream note in each `ScreenListView`
   card's "Show details" disclosure (only when a blocking/review impact exists —
   info-only shows nothing), a
-  **Downstream readiness** section in `ScreenCoveragePanel`, and a collapsible
+  **Downstream impact** section in `ScreenCoveragePanel` (which, per the
+  2026-07 audit, renders NOTHING when `overallStatus === 'ready'` — the old
+  always-on green "Ready for implementation planning" banner duplicated and
+  could contradict the Phase 4A review gate above it), and a collapsible
   **`ScreenPreflightPanel`** ("Implementation preflight") in the collapsed
   project-metadata section. Two list filters — **Outdated review**
   (`reviewFreshness === 'outdated'`)
@@ -1853,8 +1877,13 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   blocked on the clear cases (system-readiness blockers, unsigned/outdated/
   downstream-blocking P0, no acceptance criteria, no route/component guidance on
   a primary screen); review-recommended is the honest common state (accepted
-  with review items, stale/unknown mockups, missing mobile, missing data trace,
-  thin handoff); ready requires sign-off + no blockers + minimal guidance.
+  with review items, stale mockups, missing data trace, thin handoff); ready
+  requires sign-off + no blockers + minimal guidance. **UNKNOWN mockup
+  freshness (legacy metadata) and a missing optional mobile variant are
+  deliberately NOT review reasons** (2026-07 audit): unknown is info and
+  variants are optional everywhere else, and counting them made every accepted
+  screen on a legacy project read "review recommended" — both still surface in
+  the QA checklist only.
   `buildScreensHandoffRollup(handoffs, p0Ids)` rolls up ready/review/blocked
   **gated on P0**; `renderHandoffMarkdown` is the copy-to-clipboard export;
   `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
@@ -1869,7 +1898,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   `ScreenListView` card's "Show details" disclosure; **Handoff ready / Handoff
   blocked** Advanced-drawer filters
   (`SCREEN_LIST_FILTERS` + `ScreenFilterReview.handoffReadiness`); and an
-  **Implementation handoff** rollup section in `ScreenCoveragePanel`. Everything
+  **Implementation handoff** rollup section in `ScreenCoveragePanel` — since
+  the 2026-07 audit a single quiet line ("N of M screens ready to package",
+  amber only when screens are genuinely `blocked`; no verdict banner, no
+  "Handoff trace" strip, and no per-card HANDOFF row — the review gate is the
+  one verdict inside Screens). Everything
   stays **advisory** — nothing gates rendering or generation, and legacy/sparse
   screens degrade to "Not specified" / review warnings, never crash. **No
   Implementation Plan bridge was added in Phase 5A** (deliberately — the plan
@@ -2060,6 +2093,13 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     "expanded coverage" pool the panel shows separately from required primary
     mockups — P0 mobile coverage, legacy-unknown count) drive the UI.
     This layer is **display/discovery only — it never changes review status.**
+    In `MockupVariantsPanel` the gallery leads with the primary Default and
+    groups the rest under **"Optional variants — generate on demand"**; a
+    non-generated variant reads neutral "Not generated / Available on demand",
+    never an amber "Missing", and the per-variant **"Mark accepted" action was
+    removed** (Confirm Screen is the one acceptance; the `mockupVariantStatus`
+    overlay's `accepted` value still renders for legacy data, and "Not needed"
+    + Undo remain).
     The **Screen Coverage & Readiness panel (`ScreenCoveragePanel`) presents
     these variants as optional, NOT a checklist**: a green "Ready for
     Development" section lists the required implementation assets (PRD links,

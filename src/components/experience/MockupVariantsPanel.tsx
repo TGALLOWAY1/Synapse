@@ -85,7 +85,9 @@ const PRD_SYNC_LABELS: Record<MockupVariantFreshnessStatus, string> = {
     current: 'In sync with PRD',
     possibly_stale: 'May need regeneration',
     stale: 'Needs regeneration',
-    unknown: 'PRD sync unknown',
+    // Plain provenance, not jargon: an older mockup simply predates version
+    // tracking — nothing is wrong with it (audit H3/4.1).
+    unknown: 'Generated before version tracking',
 };
 
 /** Compact PRD-sync badge for a generated variant (nothing shown for a

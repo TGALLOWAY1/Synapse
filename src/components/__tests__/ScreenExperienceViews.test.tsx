@@ -669,11 +669,12 @@ describe('Phase 3C variant freshness & history UI', () => {
         expect(getByText(/included in project snapshots/)).toBeTruthy();
     });
 
-    it('a legacy default with no source metadata reads PRD sync unknown', () => {
+    it('a legacy default with no source metadata reads as pre-version-tracking, never falsely stale', () => {
         const { getAllByText, getByText } = renderContractDetail('mockups', { trustContext: TRUST });
         // Default variant is generated via the legacy join but carries no
-        // signature → unknown, never falsely stale.
-        expect(getAllByText('PRD sync unknown').length).toBeGreaterThan(0);
+        // signature → plain provenance language, not "sync unknown" jargon
+        // (audit H3/4.1), and never falsely stale.
+        expect(getAllByText('Generated before version tracking').length).toBeGreaterThan(0);
         expect(getByText(/Source comparison unavailable for this older mockup/)).toBeTruthy();
     });
 
