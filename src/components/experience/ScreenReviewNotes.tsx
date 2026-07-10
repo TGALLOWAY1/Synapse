@@ -103,9 +103,13 @@ export function ScreenReviewNotes({
                 onClick={() => setOpen(o => !o)}
                 className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-neutral-50 transition"
             >
-                <span className="flex items-center gap-2 min-w-0">
-                    <MessageSquare size={14} className="text-neutral-400 shrink-0" aria-hidden />
-                    <span className="text-sm font-medium text-neutral-800">Review notes</span>
+                {/* Stacks left-aligned on narrow screens instead of wrapping into
+                    a centered jumble; one row on sm+. */}
+                <span className="flex flex-col items-start gap-0.5 min-w-0 text-left sm:flex-row sm:items-center sm:gap-2">
+                    <span className="flex items-center gap-2">
+                        <MessageSquare size={14} className="text-neutral-400 shrink-0" aria-hidden />
+                        <span className="text-sm font-medium text-neutral-800">Review notes</span>
+                    </span>
                     {itemCount > 0 ? (
                         <span className="text-[11px] text-neutral-500">
                             {itemCount} {itemCount === 1 ? 'item' : 'items'} may benefit from review

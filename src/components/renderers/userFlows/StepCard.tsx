@@ -6,6 +6,7 @@ import { ISSUE_KIND_META } from './issueMeta';
 import { inlineWithFeatures } from './inlineWithFeatures';
 import { inlineMd } from './markdown';
 import { prettyScreenTitle } from './journeyNode';
+import { parseDecisionBranches } from '../../../lib/screenReadiness';
 
 /** Strip surrounding markdown code backticks from a short label (e.g. an API
  * ref like `` `POST /v1/import` `` → "POST /v1/import"). */
@@ -172,7 +173,7 @@ export function StepCard({
                                     >
                                         {meta.shortLabel}
                                     </span>
-                                    <span className="min-w-0 flex-1">{renderText(issue.text)}</span>
+                                    <span className="min-w-0 flex-1"><BranchText text={issue.text} renderText={renderText} /></span>
                                 </li>
                             );
                         })}
@@ -180,5 +181,24 @@ export function StepCard({
                 </div>
             )}
         </article>
+    );
+}
+
+/** Renders a branch/exception as styled "If condition → outcome" rows when the
+ * text parses into branches; falls back to the raw text (still feature-chipped)
+ * when it doesn't, rather than inventing structure. */
+function BranchText({ text, renderText }: { text: string; renderText: (t: string) => ReactNode }) {
+    const branches = parseDecisionBranches(text);
+    if (branches.length === 0) return <>{renderText(text)}</>;
+    return (
+        <span className="block space-y-0.5">
+            {branches.map((b, i) => (
+                <span key={i} className="block">
+                    <span className="text-neutral-600">If {b.condition}</span>
+                    <span className="text-neutral-300 mx-1" aria-hidden>→</span>
+                    <span className="text-neutral-900">{b.outcome}</span>
+                </span>
+            ))}
+        </span>
     );
 }

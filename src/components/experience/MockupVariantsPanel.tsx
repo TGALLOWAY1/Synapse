@@ -762,18 +762,20 @@ function SpecCoverageSection({
                     <ul className="space-y-1 text-xs">
                         {specCoverage.map((row, i) => (
                             <li key={i} className="flex items-center justify-between gap-2">
-                                <span className="text-neutral-700">{row.element}</span>
+                                <span className="text-neutral-700 min-w-0">{row.element}</span>
+                                {/* nowrap — these used to wrap mid-phrase ("In mockup / spec")
+                                    on narrow screens. */}
                                 {row.status === 'in_spec' ? (
-                                    <span className="text-emerald-700 font-medium">In mockup spec</span>
+                                    <span className="text-emerald-700 font-medium whitespace-nowrap shrink-0">In spec</span>
                                 ) : (
-                                    <span className="text-amber-700">Not in mockup spec</span>
+                                    <span className="text-amber-700 whitespace-nowrap shrink-0">Not in spec</span>
                                 )}
                             </li>
                         ))}
                     </ul>
                     <p className="text-[11px] text-neutral-400 mt-2">
                         Compared against the mockup&rsquo;s generation spec, not the rendered image —
-                        treat &ldquo;Not in mockup spec&rdquo; as a prompt to double-check the visual.
+                        treat &ldquo;Not in spec&rdquo; as a prompt to double-check the visual.
                     </p>
                 </>
             )}

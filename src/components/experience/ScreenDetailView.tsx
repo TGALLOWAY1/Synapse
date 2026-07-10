@@ -53,6 +53,7 @@ import { MockupScreenImage } from '../mockups/MockupScreenImage';
 import { FlowJourney } from '../renderers/userFlows/FlowJourney';
 import { StepCard } from '../renderers/userFlows/StepCard';
 import { FeatureDetailDrawer } from '../renderers/userFlows/FeatureDetailDrawer';
+import { inlineWithFeatures } from '../renderers/userFlows/inlineWithFeatures';
 import type { FeatureRef, FlowIssue } from '../renderers/userFlows/types';
 import { ScreenDetailTabs, type ScreenDetailTab } from './ScreenDetailTabs';
 
@@ -559,7 +560,9 @@ function FlowTab({
                             </span>
                         </header>
                         {group.flow.goal && (
-                            <p className="text-xs text-neutral-500 mb-3">{group.flow.goal}</p>
+                            <p className="text-xs text-neutral-500 mb-3">
+                                {inlineWithFeatures(group.flow.goal, { featuresById, onSelectFeature })}
+                            </p>
                         )}
                         <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2.5 mb-3">
                             <div className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600 mb-1.5">

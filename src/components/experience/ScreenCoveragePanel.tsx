@@ -159,9 +159,10 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
         hint: 'Risk notes in the spec with no recorded handling yet — review them per screen',
     });
     required.push({
-        key: 'ready', label: 'Ready for implementation',
+        key: 'ready', label: 'Screens confirmed',
         value: `${readyClean} / ${totalScreens} screens`,
         tone: readyComplete ? 'good' : 'todo',
+        hint: 'Screens you have signed off with Confirm Screen (excluding any confirmed over open warnings)',
     });
 
     // The green "all-clear" is shown only when every screen is clean-ready AND
@@ -180,9 +181,9 @@ export function ScreenCoveragePanel({ summary, variantCoverage, artifactReview, 
     // that would sit directly above the amber disclosure. Use a dedicated
     // risk-aware headline for that case instead of reusing that message.
     const headline = coreComplete
-        ? 'Implementation coverage is complete. Every screen has its required assets — optional design documentation can be generated whenever you like.'
+        ? 'Implementation coverage is complete. Every screen is confirmed and has its required assets — optional design documentation can be generated whenever you like.'
         : readyComplete
-            ? 'Every screen passes its readiness checks, but some required coverage still needs review before implementation — see the flagged items below.'
+            ? 'Every screen is confirmed, but some required coverage still needs review before implementation — see the flagged items below.'
             : message;
 
     const missingMockups = summary.mockups.total - summary.mockups.covered;

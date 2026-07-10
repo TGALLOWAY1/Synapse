@@ -610,25 +610,38 @@ function CardDetails({
                 </DetailRow>
             )}
 
-            {/* Review */}
-            {reviewModel && (
-                <DetailRow label="Review">
-                    <span className="text-neutral-700">
-                        {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
-                    </span>
-                    <span className="text-neutral-300 mx-1" aria-hidden>·</span>
-                    <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>
-                        {reviewModel.blockingCount > 0
-                            ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
-                            : reviewModel.reviewCount > 0
-                                ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
-                                : SYSTEM_READINESS_LABELS[reviewModel.systemReadiness]}
-                    </span>
-                    {reviewModel.freshness === 'outdated' && (
-                        <span className="block text-amber-600 mt-0.5">Review may be outdated — the screen changed after sign-off.</span>
-                    )}
-                </DetailRow>
-            )}
+            {/* Review — the system hint renders only when it tells the user
+                something their own status doesn't: open blockers/review items,
+                or "ready to confirm" on a not-yet-confirmed screen. On a
+                confirmed, issue-free screen a suggestion like "Ready to
+                accept" is stale noise. */}
+            {reviewModel && (() => {
+                const confirmed = reviewModel.userStatus === 'accepted'
+                    || reviewModel.userStatus === 'implementation_ready';
+                const hint = reviewModel.blockingCount > 0
+                    ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
+                    : reviewModel.reviewCount > 0
+                        ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
+                        : !confirmed && reviewModel.systemReadiness === 'ready'
+                            ? SYSTEM_READINESS_LABELS.ready
+                            : null;
+                return (
+                    <DetailRow label="Review">
+                        <span className="text-neutral-700">
+                            {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
+                        </span>
+                        {hint && (
+                            <>
+                                <span className="text-neutral-300 mx-1" aria-hidden>·</span>
+                                <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>{hint}</span>
+                            </>
+                        )}
+                        {reviewModel.freshness === 'outdated' && (
+                            <span className="block text-amber-600 mt-0.5">Review may be outdated — the screen changed after sign-off.</span>
+                        )}
+                    </DetailRow>
+                );
+            })()}
 
             {/* Traceability */}
             <DetailRow label="Traceability">
