@@ -15,8 +15,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    AlertTriangle, ArrowLeft, GitBranch, Image as ImageIcon, Link2, Loader2, Pencil,
-    RefreshCcw, RotateCcw, Workflow,
+    AlertTriangle, ArrowLeft, ArrowRight as ArrowRightIcon, GitBranch, Image as ImageIcon,
+    Link2, Loader2, Pencil, RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
     Feature, GenerationStatus, MockupPayload, MockupSettings, ScreenPriority,
@@ -112,6 +112,9 @@ interface Props {
     unmatchedMockups?: Array<{ id: string; name: string }>;
     /** Persists a screenLinks repair binding the chosen mockup to this screen. */
     onLinkMockup?: (mockupScreenId: string) => void;
+    /** Opens the User Flows artifact (the flow document lives there — the Flow
+     * tab only shows this screen's slice of it). */
+    onOpenUserFlows?: () => void;
 }
 
 export function ScreenDetailView({
@@ -119,6 +122,7 @@ export function ScreenDetailView({
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
     features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
+    onOpenUserFlows,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -312,27 +316,6 @@ export function ScreenDetailView({
 
             {activeTab === 'overview' && (
                 <div className="space-y-3">
-                    {onSaveScreenEdit && !editing && (
-                        <div className="flex items-center justify-end gap-2">
-                            {item.isEdited && (
-                                <button
-                                    type="button"
-                                    onClick={() => onSaveScreenEdit(item.id, null)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 rounded-md transition"
-                                    title="Discard your edits and show the generated content"
-                                >
-                                    <RotateCcw size={12} /> Reset to generated
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => setEditing(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                            >
-                                <Pencil size={12} /> Edit details
-                            </button>
-                        </div>
-                    )}
                     {onSaveScreenEdit && editing ? (
                         <ScreenEditForm
                             item={item}
@@ -351,6 +334,27 @@ export function ScreenDetailView({
                             imageStorageName={item.baseScreen.name}
                             primaryMockup={primaryMockup}
                             reviewNotes={reviewNotes}
+                            headerActions={onSaveScreenEdit ? (
+                                <>
+                                    {item.isEdited && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSaveScreenEdit(item.id, null)}
+                                            className="inline-flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-700 transition"
+                                            title="Discard your edits and show the generated content"
+                                        >
+                                            <RotateCcw size={11} /> Reset
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditing(true)}
+                                        className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 transition"
+                                    >
+                                        <Pencil size={11} /> Edit details
+                                    </button>
+                                </>
+                            ) : undefined}
                         />
                     )}
                     {item.edit?.notes && !editing && (
@@ -369,6 +373,7 @@ export function ScreenDetailView({
                     onNavigateToScreen={onNavigateToScreen}
                     availableScreenSlugs={availableScreenSlugs}
                     features={features}
+                    onOpenUserFlows={onOpenUserFlows}
                 />
             )}
 
@@ -488,13 +493,14 @@ function ScreenEditForm({
 // --- Flow tab ---------------------------------------------------------------
 
 function FlowTab({
-    item, flowGroups, onNavigateToScreen, availableScreenSlugs, features,
+    item, flowGroups, onNavigateToScreen, availableScreenSlugs, features, onOpenUserFlows,
 }: {
     item: ScreenExperienceItem;
     flowGroups: ScreenFlowGroup[];
     onNavigateToScreen: (slug: string) => void;
     availableScreenSlugs: ReadonlySet<string>;
     features?: Feature[];
+    onOpenUserFlows?: () => void;
 }) {
     const featuresById = useMemo(() => {
         if (!features) return undefined;
@@ -612,6 +618,11 @@ function FlowTab({
                                 </p>
                             )}
                         </div>
+                        {/* The journey (with this screen's steps highlighted) is
+                            the one rendering of the flow here — rows expand in
+                            place for full step detail. The old per-screen
+                            StepCard dump repeated the same steps a third time
+                            on this tab (audit H5). */}
                         <FlowJourney
                             flowIndex={group.flowIndex}
                             steps={group.flow.steps}
@@ -619,17 +630,31 @@ function FlowTab({
                             highlightedStepIndices={highlighted}
                             onNavigateToScreen={onNavigateToScreen}
                             availableScreenSlugs={availableScreenSlugs}
+                            renderStepDetail={(stepIndex) => {
+                                const step = group.flow.steps[stepIndex];
+                                if (!step) return null;
+                                return (
+                                    <StepCard
+                                        embedded
+                                        flowIndex={group.flowIndex}
+                                        step={step}
+                                        inlineIssues={inlineByStep.get(stepIndex) ?? []}
+                                        featuresById={featuresById}
+                                        onSelectFeature={onSelectFeature}
+                                    />
+                                );
+                            }}
                         />
-                        {group.steps.map(({ step, stepIndex }) => (
-                            <StepCard
-                                key={stepIndex}
-                                flowIndex={group.flowIndex}
-                                step={step}
-                                inlineIssues={inlineByStep.get(stepIndex) ?? []}
-                                featuresById={featuresById}
-                                onSelectFeature={onSelectFeature}
-                            />
-                        ))}
+                        {onOpenUserFlows && (
+                            <button
+                                type="button"
+                                onClick={onOpenUserFlows}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 transition"
+                            >
+                                Open this flow in User Flows
+                                <ArrowRightIcon size={12} aria-hidden />
+                            </button>
+                        )}
                     </section>
                 );
             })}

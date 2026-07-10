@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useState, type ReactNode } from 'react';
 import {
     AppWindow, ChevronRight, Cog, GitBranch, Layers, MousePointerClick,
     Sparkles, Workflow,
@@ -25,6 +25,13 @@ interface Props {
     /** Step indices to visually emphasize (the current screen in a Screen
      * Detail "Flow" tab). */
     highlightedStepIndices?: ReadonlySet<number>;
+    /**
+     * When provided, the journey is the SINGLE rendering of the flow's steps:
+     * step rows expand in place to show their full detail (user/system/UI,
+     * decisions, branches) instead of scrolling to a duplicate step-card list
+     * below (audit H5). Omitted → legacy scroll-to-card behavior.
+     */
+    renderStepDetail?: (stepIndex: number) => ReactNode;
 }
 
 const KIND_ICON: Record<FlowJourneyNodeKind, typeof AppWindow> = {
@@ -79,8 +86,15 @@ function Legend() {
 export function FlowJourney({
     flowIndex, steps, issuesByStep,
     onNavigateToScreen, availableScreenSlugs, highlightedStepIndices,
+    renderStepDetail,
 }: Props) {
     const [legendOpen, setLegendOpen] = useState(false);
+    const [expandedSteps, setExpandedSteps] = useState<ReadonlySet<number>>(new Set());
+    const toggleStep = (stepIndex: number) => setExpandedSteps(prev => {
+        const next = new Set(prev);
+        if (next.has(stepIndex)) next.delete(stepIndex); else next.add(stepIndex);
+        return next;
+    });
     if (steps.length === 0) return null;
     const groups = buildJourneyGroups(steps, stepScreenSlug);
     const screenStyle = nodeKindStyle('screen');
@@ -133,44 +147,69 @@ export function FlowJourney({
                         const node = group.nodes[0];
                         const highlighted = isHighlighted(node);
                         const alt = issuesByStep.get(node.stepIndex) ?? 0;
+                        const stepExpanded = expandedSteps.has(node.stepIndex);
                         return (
-                            <button
+                            <div
                                 key={group.firstStepIndex}
-                                type="button"
-                                onClick={() => openGroup(group)}
-                                aria-current={highlighted ? 'true' : undefined}
-                                className={`group w-full text-left rounded-xl border ${screenStyle.border} ${screenStyle.bg} hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition ${
+                                className={`rounded-xl border ${screenStyle.border} ${screenStyle.bg} transition ${
                                     highlighted ? 'ring-2 ring-offset-1 ring-indigo-500' : ''
                                 }`}
                             >
-                                <div className="flex items-center gap-2.5 px-3 py-2.5">
-                                    <span className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded ${screenStyle.badgeBg} ${screenStyle.badgeText}`}>
-                                        <AppWindow size={13} />
-                                    </span>
-                                    <span className="min-w-0 flex-1">
-                                        <span className={`flex items-center gap-2`}>
-                                            <span className={`min-w-0 truncate text-[13px] font-semibold leading-snug ${screenStyle.text}`} title={group.screenLabel}>
-                                                {group.screenLabel}
+                                <button
+                                    type="button"
+                                    onClick={() => openGroup(group)}
+                                    aria-current={highlighted ? 'true' : undefined}
+                                    className="group w-full text-left rounded-xl hover:ring-2 hover:ring-offset-1 hover:ring-indigo-300 transition"
+                                >
+                                    <div className="flex items-center gap-2.5 px-3 py-2.5">
+                                        <span className={`shrink-0 inline-flex items-center justify-center w-6 h-6 rounded ${screenStyle.badgeBg} ${screenStyle.badgeText}`}>
+                                            <AppWindow size={13} />
+                                        </span>
+                                        <span className="min-w-0 flex-1">
+                                            <span className={`flex items-center gap-2`}>
+                                                <span className={`min-w-0 truncate text-[13px] font-semibold leading-snug ${screenStyle.text}`} title={group.screenLabel}>
+                                                    {group.screenLabel}
+                                                </span>
+                                                <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-neutral-400 tabular-nums">
+                                                    {rangeLabel(group)}
+                                                </span>
                                             </span>
-                                            <span className="shrink-0 text-[9px] font-semibold uppercase tracking-wider text-neutral-400 tabular-nums">
-                                                {rangeLabel(group)}
+                                            <span className="mt-1 flex items-center gap-2 flex-wrap">
+                                                {node.action && (
+                                                    <span className="text-[12px] text-neutral-600 leading-snug">{node.action}</span>
+                                                )}
+                                                <NodeBadge kind={node.kind} />
+                                                <AltBadge count={alt} />
                                             </span>
                                         </span>
-                                        <span className="mt-1 flex items-center gap-2 flex-wrap">
-                                            {node.action && (
-                                                <span className="text-[12px] text-neutral-600 leading-snug">{node.action}</span>
-                                            )}
-                                            <NodeBadge kind={node.kind} />
-                                            <AltBadge count={alt} />
-                                        </span>
-                                    </span>
-                                    <ChevronRight
-                                        size={14}
-                                        className="shrink-0 text-neutral-300 group-hover:text-indigo-400 transition-colors"
-                                        aria-hidden="true"
-                                    />
-                                </div>
-                            </button>
+                                        <ChevronRight
+                                            size={14}
+                                            className="shrink-0 text-neutral-300 group-hover:text-indigo-400 transition-colors"
+                                            aria-hidden="true"
+                                        />
+                                    </div>
+                                </button>
+                                {renderStepDetail && (
+                                    <div className="px-3 pb-2">
+                                        <button
+                                            type="button"
+                                            onClick={() => toggleStep(node.stepIndex)}
+                                            aria-expanded={stepExpanded}
+                                            className="inline-flex items-center gap-1 text-[10px] font-medium text-neutral-400 hover:text-neutral-600 transition-colors"
+                                        >
+                                            <ChevronRight
+                                                size={11}
+                                                className={`transition-transform ${stepExpanded ? 'rotate-90' : ''}`}
+                                                aria-hidden="true"
+                                            />
+                                            Step detail
+                                        </button>
+                                        {stepExpanded && (
+                                            <div className="mt-1">{renderStepDetail(node.stepIndex)}</div>
+                                        )}
+                                    </div>
+                                )}
+                            </div>
                         );
                     }
 
@@ -211,12 +250,16 @@ export function FlowJourney({
                                     const alt = issuesByStep.get(node.stepIndex) ?? 0;
                                     const Icon = KIND_ICON[node.kind];
                                     const style = nodeKindStyle(node.kind);
+                                    const stepExpanded = expandedSteps.has(node.stepIndex);
                                     return (
                                         <li key={node.stepIndex}>
                                             <button
                                                 type="button"
-                                                onClick={() => scrollToStep(node.stepIndex)}
+                                                onClick={() => (renderStepDetail
+                                                    ? toggleStep(node.stepIndex)
+                                                    : scrollToStep(node.stepIndex))}
                                                 aria-current={highlighted ? 'true' : undefined}
+                                                aria-expanded={renderStepDetail ? stepExpanded : undefined}
                                                 className={`group w-full text-left flex items-center gap-2.5 px-3 py-2 hover:bg-neutral-50 transition ${
                                                     highlighted ? 'bg-indigo-50/60' : ''
                                                 }`}
@@ -238,10 +281,17 @@ export function FlowJourney({
                                                 </span>
                                                 <ChevronRight
                                                     size={13}
-                                                    className="shrink-0 text-neutral-300 group-hover:text-indigo-400 transition-colors"
+                                                    className={`shrink-0 text-neutral-300 group-hover:text-indigo-400 transition-all ${
+                                                        renderStepDetail && stepExpanded ? 'rotate-90' : ''
+                                                    }`}
                                                     aria-hidden="true"
                                                 />
                                             </button>
+                                            {renderStepDetail && stepExpanded && (
+                                                <div className="px-3 pb-3 bg-neutral-50/40">
+                                                    {renderStepDetail(node.stepIndex)}
+                                                </div>
+                                            )}
                                         </li>
                                     );
                                 })}

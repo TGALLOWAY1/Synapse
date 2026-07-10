@@ -36,19 +36,25 @@ interface Props {
     primaryMockup?: ReactNode;
     /** The Review Notes control (stateful — owned by ScreenDetailView). */
     reviewNotes?: ReactNode;
+    /** Edit / reset controls, anchored into the Purpose card header instead of
+     * floating unattached above it (audit M8). */
+    headerActions?: ReactNode;
 }
 
 const NotSpecified = ({ children = 'Not specified' }: { children?: ReactNode }) => (
     <span className="text-neutral-400 italic">{children}</span>
 );
 
-/** A titled card. */
-function Card({ title, icon, children }: { title: string; icon?: ReactNode; children: ReactNode }) {
+/** A titled card, with optional right-aligned header actions. */
+function Card({ title, icon, actions, children }: {
+    title: string; icon?: ReactNode; actions?: ReactNode; children: ReactNode;
+}) {
     return (
         <section className="bg-white rounded-lg border border-neutral-200 p-4">
             <header className="flex items-center gap-1.5 mb-2.5">
                 {icon}
-                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{title}</h4>
+                <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 flex-1 min-w-0">{title}</h4>
+                {actions && <div className="flex items-center gap-2 shrink-0">{actions}</div>}
             </header>
             {children}
         </section>
@@ -84,7 +90,7 @@ function Collapsible({
 }
 
 export function ScreenOverviewPanel({
-    item, features, imageContext, imageStorageName, primaryMockup, reviewNotes,
+    item, features, imageContext, imageStorageName, primaryMockup, reviewNotes, headerActions,
 }: Props) {
     const { screen } = item;
     const traceability = useMemo(() => buildScreenTraceability(item, features), [item, features]);
@@ -100,7 +106,7 @@ export function ScreenOverviewPanel({
     return (
         <div className="space-y-3">
             {/* Purpose + user goal — the first meaningful content. */}
-            <Card title="Purpose">
+            <Card title="Purpose" actions={headerActions}>
                 {screen.purpose
                     ? <p className="text-sm leading-relaxed text-neutral-700">{screen.purpose}</p>
                     : <p className="text-xs"><NotSpecified>No purpose recorded yet.</NotSpecified></p>}
@@ -266,10 +272,13 @@ export function ScreenOverviewPanel({
                 </div>
             </Collapsible>
 
+            {/* Titled — this used to be an unlabeled card whose only visible
+                content was orphaned "Copy image prompt / Upload image" actions
+                (audit M8). */}
             {imageContext && (
-                <div className="bg-white rounded-lg border border-neutral-200 p-4">
+                <Card title="Your reference images">
                     <ScreenImageGallery screen={screen} context={imageContext} storageName={imageStorageName} />
-                </div>
+                </Card>
             )}
         </div>
     );

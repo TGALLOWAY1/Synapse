@@ -77,10 +77,15 @@ describe('UserFlowsRenderer', () => {
         render(<UserFlowsRenderer content={SAMPLE_MARKDOWN} features={FEATURES} />);
         // [f1] is in the goal line — should be a button (chip).
         expect(screen.queryAllByTestId('feature-ref-f1').length).toBeGreaterThan(0);
-        expect(screen.queryAllByTestId('feature-ref-f3').length).toBeGreaterThan(0);
         // [f9] is referenced in goal too, even though the catalog has no entry —
         // we still want a chip rendered (graceful fallback).
         expect(screen.queryAllByTestId('feature-ref-f9').length).toBeGreaterThan(0);
+        // [f3] lives in step 3's text — step detail now renders inside the
+        // journey row's expansion (the duplicate step-card list is gone).
+        screen.getAllByRole('button')
+            .filter(b => b.getAttribute('aria-expanded') === 'false')
+            .forEach(b => fireEvent.click(b));
+        expect(screen.queryAllByTestId('feature-ref-f3').length).toBeGreaterThan(0);
     });
 
     it('opens the feature drawer when a chip is clicked', () => {

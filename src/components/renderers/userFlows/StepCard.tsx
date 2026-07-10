@@ -21,6 +21,9 @@ interface Props {
     inlineIssues: FlowIssue[];
     featuresById?: Map<string, Feature>;
     onSelectFeature: (refToken: FeatureRef) => void;
+    /** Rendered inside an expanded journey row: the row already shows the
+     * step number + title, so the header and card chrome are dropped. */
+    embedded?: boolean;
 }
 
 function FieldRow({
@@ -38,7 +41,7 @@ function FieldRow({
 }
 
 export function StepCard({
-    flowIndex, step, inlineIssues, featuresById, onSelectFeature,
+    flowIndex, step, inlineIssues, featuresById, onSelectFeature, embedded,
 }: Props) {
     const hasStructured = Boolean(
         step.title || step.userAction || step.systemBehavior || step.uiFeedback
@@ -51,11 +54,14 @@ export function StepCard({
     return (
         <article
             id={`flow-${flowIndex}-step-${step.index}`}
-            className="bg-white rounded-xl border border-neutral-200 p-4 mb-3 scroll-mt-24"
+            className={embedded
+                ? 'pt-1 scroll-mt-24'
+                : 'bg-white rounded-xl border border-neutral-200 p-4 mb-3 scroll-mt-24'}
         >
             {/* Number badge inline with the step name, so it reads like
-                "1. Daily Review Dashboard" instead of a floated left column. */}
-            <div className="flex items-center gap-2.5">
+                "1. Daily Review Dashboard" instead of a floated left column.
+                Hidden when embedded — the journey row above provides both. */}
+            <div className={embedded ? 'hidden' : 'flex items-center gap-2.5'}>
                 <span className="shrink-0 inline-flex items-center justify-center w-6 h-6 rounded-full bg-indigo-100 text-indigo-700 text-xs font-bold">
                     {step.index + 1}
                 </span>
@@ -76,9 +82,17 @@ export function StepCard({
                 )}
             </div>
 
+            {/* Embedded fallback: an unstructured step only carries rawText,
+                which normally renders in the (hidden-when-embedded) header. */}
+            {embedded && !hasStructured && (
+                <div className="text-sm text-neutral-800 leading-snug">
+                    {renderText(step.rawText)}
+                </div>
+            )}
+
             {/* Body runs flush to the card edge — no left gutter. */}
             {hasStructured && (step.userAction || step.systemBehavior || step.uiFeedback) && (
-                <dl className="mt-3 space-y-2.5 text-sm">
+                <dl className={embedded ? 'space-y-2.5 text-sm' : 'mt-3 space-y-2.5 text-sm'}>
                     {step.userAction && (
                         <FieldRow label="User" tone="indigo">
                             {renderText(step.userAction)}

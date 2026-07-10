@@ -974,6 +974,10 @@ export function ArtifactWorkspace({
                                 ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
                                 : undefined
                         }
+                        onOpenUserFlows={() => {
+                            setScreenParams(null);
+                            setSelected('user_flows');
+                        }}
                     />
                 );
             }

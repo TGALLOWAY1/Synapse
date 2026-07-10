@@ -297,7 +297,12 @@ export function ScreenListView({
                             <span className="text-xs text-neutral-400 truncate">· {section.subtitle}</span>
                         )}
                     </header>
-                    <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {/* A single-card group renders full width — a lone half-width
+                        card beside permanent whitespace read as a layout bug
+                        (audit M9). */}
+                    <ul className={section.items.length === 1
+                        ? 'grid grid-cols-1 gap-3'
+                        : 'grid grid-cols-1 lg:grid-cols-2 gap-3'}>
                         {section.items.map((item, i) => (
                             <li key={item.id}>
                                 <ScreenCard
@@ -487,11 +492,8 @@ function ScreenCard({
                         </h4>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                        {item.isEdited && (
-                            <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
-                                Edited
-                            </span>
-                        )}
+                        {/* Priority is the one prominent badge; the EDITED chip
+                            moved into "Show details" (audit L1). */}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_STYLES[priority]}`}>
                             {priority}
                         </span>
@@ -508,12 +510,15 @@ function ScreenCard({
                 <FlowStrip name={screen.name} connections={connections} />
 
                 {/* One-line, low-color footer: mockup availability + readiness. */}
+                {/* One status badge (readiness) + one muted info line (mockup
+                    availability) — not two competing positive-signal styles
+                    (audit L3). */}
                 <div className="mt-auto pt-2 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
-                    <span className="inline-flex items-center gap-1" title="Mockup availability for this screen">
-                        <ImageIcon size={12} className={variantSummary.hasMockup ? 'text-emerald-500' : 'text-neutral-300'} />
-                        {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup'}
-                    </span>
                     {readiness && <ReadinessBadge readiness={readiness} />}
+                    <span className="inline-flex items-center gap-1 text-neutral-400" title="Mockup availability for this screen">
+                        <ImageIcon size={12} className="text-neutral-300" aria-hidden />
+                        {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup yet'}
+                    </span>
                     <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
                 </div>
             </button>
@@ -718,10 +723,16 @@ function CardDetails({
                 </DetailRow>
             )}
 
-            {/* Provenance — one quiet line. */}
-            {prdVersionLabel && (
+            {/* Provenance — one quiet line (also notes user edits, whose chip
+                left the card face). */}
+            {(prdVersionLabel || item.isEdited) && (
                 <DetailRow label="Source">
-                    Generated from PRD {prdVersionLabel}
+                    {prdVersionLabel ? `Generated from PRD ${prdVersionLabel}` : 'Generated'}
+                    {item.isEdited && (
+                        <span className="block text-neutral-400 mt-0.5">
+                            Edited — this screen carries your manual changes.
+                        </span>
+                    )}
                 </DetailRow>
             )}
         </dl>

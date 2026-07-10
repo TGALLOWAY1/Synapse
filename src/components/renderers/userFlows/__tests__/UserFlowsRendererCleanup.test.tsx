@@ -50,6 +50,13 @@ const ENTITIES: DomainEntity[] = [
     { name: 'Recipe', description: 'A saved recipe record' },
 ];
 
+/** Expand every journey step-detail toggle (rows + single-card toggles). */
+function expandAllJourneySteps() {
+    screen.getAllByRole('button')
+        .filter(b => b.getAttribute('aria-expanded') === 'false')
+        .forEach(b => fireEvent.click(b));
+}
+
 describe('UserFlowsRenderer — desktop cleanup', () => {
     it('shows a compact relationship summary instead of a repeated feature chip row', () => {
         render(
@@ -83,8 +90,11 @@ describe('UserFlowsRenderer — desktop cleanup', () => {
         expect(screen.getByText(/Data entities/i)).toBeInTheDocument();
     });
 
-    it('renders step feature references as a quiet inline "Uses:" list, not large chips', () => {
+    it('renders step feature references as a quiet inline "Uses:" list once the step is expanded', () => {
         render(<UserFlowsRenderer content={SINGLE_FLOW} features={FEATURES} />);
+        // Step detail now lives INSIDE journey rows (the duplicate step-card
+        // list is gone — audit H5); expand every step's detail first.
+        expandAllJourneySteps();
         // The inline label is present…
         expect(screen.getAllByText(/^Uses$/i).length).toBeGreaterThan(0);
         // …and the feature name is a plain clickable button, not the old
@@ -93,26 +103,31 @@ describe('UserFlowsRenderer — desktop cleanup', () => {
         expect(usesButtons.length).toBeGreaterThan(0);
     });
 
-    it('switches flows from the collapsed desktop rail', () => {
+    it('does not render a duplicate step-by-step section below the journey', () => {
+        render(<UserFlowsRenderer content={SINGLE_FLOW} features={FEATURES} />);
+        expect(screen.queryByText(/Step-by-step flow/i)).toBeNull();
+    });
+
+    it('switches flows from the expanded-by-default desktop rail', () => {
         render(<UserFlowsRenderer content={TWO_FLOWS} features={FEATURES} />);
         // Flow 1 is selected initially — its goal is visible.
         expect(screen.getByText(/Reach the dashboard\./i)).toBeInTheDocument();
         expect(screen.queryByText(/Import a recipe\./i)).toBeNull();
-        // The collapsed rail exposes a labelled switcher button for flow 2.
-        const flow2 = screen.getByRole('button', { name: /Flow 2:/i });
-        fireEvent.click(flow2);
+        // The rail now defaults to the NAMED flow list (audit L4) — switch by title.
+        const nav = screen.getByRole('complementary', { name: /Flow navigation/i });
+        fireEvent.click(within(nav).getByText(/Recipe ingestion/));
         // The header now shows flow 2's goal, not flow 1's.
         expect(screen.getByText(/Import a recipe\./i)).toBeInTheDocument();
         expect(screen.queryByText(/Reach the dashboard\./i)).toBeNull();
     });
 
-    it('expands the desktop rail to the full grouped list', () => {
+    it('collapses the desktop rail to the numbered strip on demand', () => {
         render(<UserFlowsRenderer content={TWO_FLOWS} features={FEATURES} />);
-        const expand = screen.getByRole('button', { name: /Expand flow list/i });
-        fireEvent.click(expand);
-        // Expanded rail surfaces the category group header + full titles.
+        // Expanded (named) by default…
         const nav = screen.getByRole('complementary', { name: /Flow navigation/i });
-        expect(within(nav).getByText(/User Flows/)).toBeInTheDocument();
         expect(within(nav).getByText(/Onboarding/)).toBeInTheDocument();
+        // …and collapsible back to the numbered strip.
+        fireEvent.click(screen.getByRole('button', { name: /Collapse flow list/i }));
+        expect(within(nav).getByRole('button', { name: /Flow 2:/i })).toBeInTheDocument();
     });
 });
