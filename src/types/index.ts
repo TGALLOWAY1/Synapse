@@ -67,6 +67,10 @@ export type Feature = {
     uiAcceptanceCriteria?: string[];  // UI behavior expectations
     analyticsEvents?: string[];       // events that should fire
     tier?: 'mvp' | 'v1' | 'later';    // release tier
+    // --- User review (optional; legacy PRDs lack these). A confirmed
+    // feature appears in the derived Decision Log. ---
+    confirmed?: boolean;
+    confirmedAt?: number;             // epoch ms
 };
 
 export type StructuredPRD = {
@@ -245,10 +249,18 @@ export type SuccessMetric = {
     instrumentation?: string;
 };
 
+// User verdict on an assumption / open decision. Recorded via the PRD's
+// "Review & Confirm" section; decided items feed the derived Decision Log.
+export type AssumptionDecision = 'confirmed' | 'rejected';
+
 export type Assumption = {
     id: string;
     statement: string;
     confidence: 'low' | 'med' | 'high';
+    // --- User review (all optional; legacy PRDs lack them) ---
+    decision?: AssumptionDecision;
+    decisionNote?: string;            // user clarification / correction
+    decidedAt?: number;               // epoch ms
 };
 
 export type ImplementationPlanPhase = {
