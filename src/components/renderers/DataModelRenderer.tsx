@@ -14,7 +14,6 @@ import {
     entityAnchorId,
     resolveEntityId,
     slugifyEntity,
-    ENTITY_CATEGORY_LABEL,
     ENTITY_CATEGORY_ORDER,
     type DataModelNode,
 } from '../../lib/dataModelGraph';
@@ -275,9 +274,6 @@ function DataModelBody({ parsed, prdVersionLabel, staleness }: BodyProps) {
                                     {showHeader && (
                                         <div className="flex items-center gap-2 pt-2 pb-1.5">
                                             <CategoryBadge category={node.category} />
-                                            <span className="text-[11px] text-neutral-400">
-                                                {ENTITY_CATEGORY_LABEL[node.category]}
-                                            </span>
                                             <span className="flex-1 h-px bg-neutral-100" />
                                         </div>
                                     )}
@@ -288,6 +284,8 @@ function DataModelBody({ parsed, prdVersionLabel, staleness }: BodyProps) {
                                         onToggle={() => toggleEntity(node.id)}
                                         resolveTargetId={resolveTargetId}
                                         onNavigateToEntity={focusEntity}
+                                        showCategory={!grouped}
+                                        isMobile={isMobile}
                                     />
                                 </div>
                             );

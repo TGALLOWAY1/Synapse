@@ -17,6 +17,13 @@ interface Props {
     /** Resolve a relationship target name to a known node id (for linking). */
     resolveTargetId: (targetName: string) => string | undefined;
     onNavigateToEntity: (nodeId: string) => void;
+    /**
+     * Show the per-card category chip. False in grouped mode, where the category
+     * is already shown once in the surrounding group header (avoids repetition).
+     */
+    showCategory: boolean;
+    /** Mobile viewport — drives collapsed-card chip density. */
+    isMobile: boolean;
 }
 
 function CountChip({ icon: Icon, count, label, tone = 'neutral' }: {
@@ -99,7 +106,9 @@ function FieldTable({ group, indexed }: { group: ParsedFieldGroup; indexed: Set<
  * inspector-style rows for relationships / constraints / privacy / indexes,
  * plus the example record.
  */
-export function EntityCard({ entity, node, expanded, onToggle, resolveTargetId, onNavigateToEntity }: Props) {
+export function EntityCard({
+    entity, node, expanded, onToggle, resolveTargetId, onNavigateToEntity, showCategory, isMobile,
+}: Props) {
     const indexed = useMemo(() => indexedFieldNames(entity), [entity]);
 
     const relationships = entity.callouts.filter(c => c.kind === 'RELATIONSHIP');
@@ -114,37 +123,38 @@ export function EntityCard({ entity, node, expanded, onToggle, resolveTargetId, 
                 type="button"
                 onClick={onToggle}
                 aria-expanded={expanded}
-                className="w-full text-left px-4 py-3 flex items-start gap-3 hover:bg-neutral-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset"
+                className="w-full text-left px-4 py-3 hover:bg-neutral-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset"
             >
-                <div className="mt-0.5 p-1.5 rounded-lg bg-neutral-100 text-neutral-500 shrink-0">
-                    <Database size={15} />
+                {/* Title row — icon, name, and chevron sit on one center-aligned line. */}
+                <div className="flex items-center gap-3">
+                    <div className="p-1.5 rounded-lg bg-neutral-100 text-neutral-500 shrink-0">
+                        <Database size={15} />
+                    </div>
+                    <h4 className="min-w-0 flex-1 text-sm font-semibold text-neutral-900 truncate">{entity.name}</h4>
+                    <ChevronDown
+                        size={18}
+                        className={`shrink-0 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                        aria-hidden="true"
+                    />
                 </div>
-                <div className="min-w-0 flex-1">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <h4 className="text-sm font-semibold text-neutral-900">{entity.name}</h4>
-                        <CategoryBadge category={node.category} size="xs" />
-                    </div>
-                    {entity.description && (
-                        <p className={`text-xs text-neutral-500 mt-0.5 ${expanded ? '' : 'line-clamp-1'}`}>
-                            {entity.description}
-                        </p>
-                    )}
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                        <EntityAttributeBadges node={node} />
-                    </div>
-                    <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                        <CountChip icon={ListTree} count={node.fieldCount} label="fields" />
-                        <CountChip icon={GitBranch} count={node.relationshipCount} label="relationships" />
-                        <CountChip icon={SlidersHorizontal} count={node.constraintCount} label="constraints" />
-                        <CountChip icon={ShieldAlert} count={node.privacyCount} label="privacy" tone="rose" />
-                        <CountChip icon={KeyRound} count={node.indexCount} label="indexes" />
-                    </div>
+
+                {/* Detail — description, attribute chips, and counts, full-width below. */}
+                {entity.description && (
+                    <p className={`mt-2 text-xs text-neutral-500 ${expanded ? '' : 'line-clamp-1'}`}>
+                        {entity.description}
+                    </p>
+                )}
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    {showCategory && <CategoryBadge category={node.category} size="xs" />}
+                    <EntityAttributeBadges node={node} collapsed={isMobile && !expanded} />
                 </div>
-                <ChevronDown
-                    size={18}
-                    className={`shrink-0 mt-1 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
-                    aria-hidden="true"
-                />
+                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                    <CountChip icon={ListTree} count={node.fieldCount} label="fields" />
+                    <CountChip icon={GitBranch} count={node.relationshipCount} label="relationships" />
+                    <CountChip icon={SlidersHorizontal} count={node.constraintCount} label="constraints" />
+                    <CountChip icon={ShieldAlert} count={node.privacyCount} label="privacy" tone="rose" />
+                    <CountChip icon={KeyRound} count={node.indexCount} label="indexes" />
+                </div>
             </button>
 
             {expanded && (
