@@ -33,7 +33,7 @@ export function ConcurrentGroup({
                 {!isLast && <span className="w-px flex-1 bg-neutral-200 mt-1" />}
             </div>
             <div className={`${isLast ? 'pb-0' : 'pb-5'} flex-1 min-w-0`}>
-                <div className="rounded-xl border border-dashed border-indigo-300 bg-indigo-50/30 p-3">
+                <div className="rounded-xl border border-dashed border-indigo-300 bg-indigo-50/30 p-2.5 sm:p-3">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-700 mb-2">
                         <Info size={13} className="shrink-0" />
                         Running concurrently
@@ -42,15 +42,15 @@ export function ConcurrentGroup({
                         {children.map((child, i) => {
                             const isLastChild = i === children.length - 1;
                             return (
-                                <div key={child.id} className="flex gap-2">
-                                    <div className="relative w-5 shrink-0">
+                                <div key={child.id} className="flex gap-1.5 sm:gap-2">
+                                    <div className="relative w-3.5 sm:w-5 shrink-0">
                                         <span
                                             className={`absolute left-0 top-0 w-px bg-indigo-200 ${isLastChild ? 'h-3' : 'h-full'}`}
                                         />
-                                        <span className="absolute left-0 top-3 w-4 h-px bg-indigo-200" />
+                                        <span className="absolute left-0 top-3 w-3 sm:w-4 h-px bg-indigo-200" />
                                     </div>
                                     <div className={`${isLastChild ? '' : 'pb-3'} flex-1 min-w-0`}>
-                                        <div className="flex gap-2">
+                                        <div className="flex gap-1.5 sm:gap-2">
                                             <div className="pt-0.5">
                                                 <StatusIcon status={child.status} size="sm" />
                                             </div>

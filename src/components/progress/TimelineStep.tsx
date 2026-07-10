@@ -115,32 +115,24 @@ export function StepBody({
 
     return (
         <div className="flex-1 min-w-0">
+            {/* Header row: title/number on the left, timing + toggle on the right.
+                Only the title shares this row with the timing block — the
+                description, dependency note, and model chip render full-width
+                below so they use the whole card and never get squeezed into a
+                narrow left column beside the timing text. */}
             <div className="flex items-start justify-between gap-3">
-                <div className="min-w-0">
-                    <div className="flex items-center gap-2 flex-wrap">
-                        <span className="text-sm font-semibold text-neutral-800">
-                            <span className="text-neutral-400 font-medium mr-1.5">{step.label}.</span>
-                            {step.title}
+                <div className="flex items-center gap-2 flex-wrap min-w-0 flex-1">
+                    <span className="text-sm font-semibold text-neutral-800">
+                        <span className="text-neutral-400 font-medium mr-1.5">{step.label}.</span>
+                        {step.title}
+                    </span>
+                    {step.retryCount != null && step.retryCount > 0 && (
+                        <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold px-1.5 py-0.5">
+                            Retried ×{step.retryCount}
                         </span>
-                        {step.retryCount != null && step.retryCount > 0 && (
-                            <span className="inline-flex items-center rounded-full bg-amber-100 text-amber-700 text-[10px] font-semibold px-1.5 py-0.5">
-                                Retried ×{step.retryCount}
-                            </span>
-                        )}
-                    </div>
-                    {showDetails && step.description && (
-                        <p className="text-xs text-neutral-500 mt-0.5">{step.description}</p>
                     )}
-                    {(step.status === 'pending' || step.status === 'queued') && step.dependsOn && step.dependsOn.length > 0 && (
-                        <p className="text-xs text-neutral-400 mt-0.5 break-words">
-                            {step.status === 'queued' ? 'Ready — waiting for a slot' : `Waits on: ${step.dependsOn.join(', ')}`}
-                        </p>
-                    )}
-                    <div className="mt-1.5 min-w-0">
-                        <ModelChip model={step.modelName} />
-                    </div>
                 </div>
-                <div className="flex items-start gap-1.5">
+                <div className="flex items-start gap-1.5 shrink-0">
                     <TimeBlock step={step} />
                     {canToggle && (
                         <button
@@ -153,6 +145,18 @@ export function StepBody({
                         </button>
                     )}
                 </div>
+            </div>
+
+            {showDetails && step.description && (
+                <p className="text-xs text-neutral-500 mt-1">{step.description}</p>
+            )}
+            {(step.status === 'pending' || step.status === 'queued') && step.dependsOn && step.dependsOn.length > 0 && (
+                <p className="text-xs text-neutral-400 mt-1 break-words">
+                    {step.status === 'queued' ? 'Ready — waiting for a slot' : `Waits on: ${step.dependsOn.join(', ')}`}
+                </p>
+            )}
+            <div className="mt-1.5">
+                <ModelChip model={step.modelName} />
             </div>
 
             {step.status === 'failed' && (
