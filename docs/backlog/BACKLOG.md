@@ -337,8 +337,10 @@ useful to surface directly right now.
 - [ ] **If fully removing:** also prune the renderer wiring
   (`ComponentInventoryRenderer` + `src/components/renderers/componentInventory/`),
   the schema (`componentInventorySchema`), the parser (`componentInventoryParse.ts`),
-  model routing (`artifactModelSettings.ts`), the Design System renderer's
-  "Downstream Usage Status" reference, and the README / tour mentions.
+  model routing (`artifactModelSettings.ts`), and the README / tour mentions.
+  (The Design System renderer's old "Downstream Usage Status" section — which
+  referenced `component_inventory` — has already been removed; that surface is
+  now covered by the Dependency Graph artifact.)
 - [ ] **If re-exposing:** remove `'component_inventory'` from
   `HIDDEN_ARTIFACT_SUBTYPES` (it already sits in `ARTIFACT_GROUPS`, so the row,
   readiness gate, and auto-resume all come back automatically) and re-add the

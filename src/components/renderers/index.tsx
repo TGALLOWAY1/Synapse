@@ -25,10 +25,9 @@ interface DispatchProps {
      */
     metadata?: Record<string, unknown>;
     /**
-     * Project id, used by the design_system renderer to query downstream
-     * mockup / component_inventory artifacts for the "Downstream Usage"
-     * indicator. Optional — renderers fall back to a content-only view
-     * when absent.
+     * Project id, used by the design_system renderer to look up the project's
+     * selected design-direction preset for the design-direction note. Optional —
+     * renderers fall back to a content-only view when absent.
      */
     projectId?: string;
     /** Consumed by `prompt_pack` and `user_flows` for canonical feature ID resolution. */
