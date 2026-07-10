@@ -42,6 +42,25 @@ describe('parseFlows', () => {
         expect(flow.issues.length).toBeGreaterThanOrEqual(2);
     });
 
+    it('splits the `**Related Features:**` line out of the goal but keeps its refs aggregated', () => {
+        const md = `### Flow: Document ingestion
+**Goal:** Upload a static educational infographic to be digitized by the AI pipelines.
+**Related Features:** [f1] High-Resolution Image Ingestion, [f8] Document Embedding Pipeline
+**Steps:**
+1. [Document Library] — User uploads a file → System stores it`;
+        const flow = parseFlows(md)[0];
+        // The goal no longer contains the related-features metadata line…
+        expect(flow.goal).toMatch(/Upload a static educational infographic/);
+        expect(flow.goal).not.toMatch(/Related Features/i);
+        expect(flow.goal).not.toMatch(/\[f1\]/);
+        // …it's captured on its own field…
+        expect(flow.relatedFeatures).toMatch(/High-Resolution Image Ingestion/);
+        // …and its feature refs still aggregate onto the flow (so the Related
+        // Artifacts panel keeps listing them even though no step mentions f8).
+        const ids = flow.featureRefs.map(r => r.id);
+        expect(ids).toEqual(expect.arrayContaining(['f1', 'f8']));
+    });
+
     it('links errors to steps by explicit `Step N` reference', () => {
         const md = `### Flow: Photo upload
 **Steps:**

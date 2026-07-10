@@ -142,10 +142,8 @@ export function UserFlowsRenderer({
                 <FlowSummaryCard
                     flow={flow}
                     index={safeIndex}
-                    timeToValue={ttvByFlow[safeIndex]}
                     featuresById={featuresById}
                     onSelectFeature={onSelectFeature}
-                    related={related}
                 />
 
                 {/* The journey is the SINGLE rendering of the flow's steps —

@@ -16,6 +16,7 @@ function flowTextCorpus(flow: ParsedFlow): string {
     const parts: string[] = [
         flow.title,
         flow.goal ?? '',
+        flow.relatedFeatures ?? '',
         flow.preconditions ?? '',
         flow.successOutcome ?? '',
         flow.edgeCases ?? '',
