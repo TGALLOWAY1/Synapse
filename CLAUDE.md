@@ -2644,6 +2644,22 @@ three drive modes, in priority order:
    so the indicator doesn't yank to the wrong stage.
 3. **Timer-driven** (fallback) — labels rotate on `minDuration` timers.
 
+**The `waiting` prop overrides all three drive modes and is REQUIRED for a
+`queued` (not-yet-started) slot.** A queued artifact slot has an empty
+`progressLog`, so without `waiting` it falls into the timer-driven fallback and
+**fabricates progress** — rotating stage labels and marching the bar on a timer
+while no work is happening (the "Queued — will start as a slot frees up"
+subtitle beside a moving progress bar and a late stage label like "Documenting
+decision points…"). When `waiting` is true the component renders an honest
+not-started state: the rotation timer is disabled, `barWidthPct` is 0, every
+stage dot is inert (`activeDotIndex === -1`, a preview of the pipeline with none
+active/complete), the title dot doesn't pulse, and no work-stage label is shown
+(only the `subtitle`). Both queued renders in `ArtifactWorkspace` (the Screens
+row and the generic artifact/mockup slot) pass `waiting={status === 'queued'}`;
+any new queued-slot progress render must do the same. Do NOT drive
+`GenerationProgress` with stages for a slot that hasn't started without
+`waiting`. Regression: `src/components/__tests__/GenerationProgressWaiting.test.tsx`.
+
 When supplying `history`, the stage label strings in
 `generationStages.ts` must be a substring-prefix match for the strings
 emitted via `onProgress` for the indicator to track. Don't include

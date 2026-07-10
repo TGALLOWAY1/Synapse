@@ -879,6 +879,7 @@ export function ArtifactWorkspace({
                             variant="systematic"
                             title={screensStatus === 'queued' ? 'Queued: Screens' : 'Generating Screen Inventory'}
                             subtitle={screensStatus === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
+                            waiting={screensStatus === 'queued'}
                             history={job?.slots.screen_inventory?.progressLog ?? []}
                         />
                     </div>
@@ -1082,6 +1083,7 @@ export function ArtifactWorkspace({
                         variant={activeSelection === 'mockup' ? 'creative' : 'systematic'}
                         title={title}
                         subtitle={status === 'queued' ? 'Queued — will start as a generation slot frees up' : undefined}
+                        waiting={status === 'queued'}
                         history={job?.slots[activeSelection]?.progressLog ?? []}
                     />
                 </div>

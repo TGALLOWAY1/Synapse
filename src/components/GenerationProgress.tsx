@@ -53,6 +53,16 @@ interface GenerationProgressProps {
      * Falls back to the section id itself when omitted.
      */
     sectionTitles?: Record<string, string>;
+    /**
+     * The operation is queued but has NOT started (no work is happening yet).
+     * When true, the component renders an honest waiting state: the
+     * timer-driven stage rotation is disabled, the progress bar stays at 0,
+     * the stage dots render inert (a preview of the pipeline, none active),
+     * and no fabricated "current stage" label is shown. Without this, an
+     * un-started slot would fake progress — cycling stage labels and filling
+     * the bar on a timer while the underlying work sits in the queue.
+     */
+    waiting?: boolean;
 }
 
 const VISIBLE_HISTORY_CAP = 8;
@@ -115,6 +125,7 @@ export function GenerationProgress({
     history,
     sectionStatus,
     sectionTitles,
+    waiting = false,
 }: GenerationProgressProps) {
     const [currentIndex, setCurrentIndex] = useState(0);
     const [isFading, setIsFading] = useState(false);
@@ -137,6 +148,11 @@ export function GenerationProgress({
     }, [hasActiveSection]);
 
     useEffect(() => {
+        // A queued/not-started operation must never fake progress — there is
+        // no work happening, so rotating stage labels and filling the bar on a
+        // timer would be fiction (the "Queued — will start…" subtitle beside a
+        // marching progress bar is exactly the contradiction this guards).
+        if (waiting) return;
         // Skip the rotation timer entirely when the parent supplies real
         // progress data — either an explicit `progress` value or a `history`
         // event stream. Letting the timer run alongside real progress
@@ -164,7 +180,7 @@ export function GenerationProgress({
             clearTimeout(id);
             if (timerRef.current) clearTimeout(timerRef.current);
         };
-    }, [currentIndex, stages, isStateDriven, hasHistory]);
+    }, [currentIndex, stages, isStateDriven, hasHistory, waiting]);
 
     if (stages.length === 0 && !hasHistory) return null;
 
@@ -205,14 +221,16 @@ export function GenerationProgress({
             lastMatchedStage = stageIndexFromMessage(dedupedHistory[i]);
         }
     }
-    const activeDotIndex = isStateDriven
-        ? Math.min(
-              stages.length - 1,
-              Math.floor((clampedProgress / 100) * stages.length),
-          )
-        : hasHistory
-            ? (lastMatchedStage !== null ? lastMatchedStage : 0)
-            : currentIndex;
+    const activeDotIndex = waiting
+        ? -1 // queued: no stage is active — render every dot inert
+        : isStateDriven
+            ? Math.min(
+                  stages.length - 1,
+                  Math.floor((clampedProgress / 100) * stages.length),
+              )
+            : hasHistory
+                ? (lastMatchedStage !== null ? lastMatchedStage : 0)
+                : currentIndex;
 
     const currentLabel = isStateDriven
         ? (statusLabel ?? stages[activeDotIndex]?.label ?? stages[stages.length - 1]?.label)
@@ -220,16 +238,20 @@ export function GenerationProgress({
             ? (historyLatest ?? stages[activeDotIndex]?.label ?? stages[stages.length - 1]?.label)
             : (stages[currentIndex]?.label ?? stages[stages.length - 1]?.label);
 
-    const barWidthPct = isStateDriven
-        ? clampedProgress
-        : hasHistory
-            ? Math.min(((activeDotIndex + 1) / Math.max(stages.length, 1)) * 100, 95)
-            : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
+    const barWidthPct = waiting
+        ? 0 // queued: nothing has run, so the bar reflects zero real progress
+        : isStateDriven
+            ? clampedProgress
+            : hasHistory
+                ? Math.min(((activeDotIndex + 1) / Math.max(stages.length, 1)) * 100, 95)
+                : Math.min(((currentIndex + 1) / stages.length) * 100, 95);
 
     if (inline) {
-        const inlineLabel = hasHistory && dedupedHistory.length > 0
-            ? `${currentLabel} — ${dedupedHistory[dedupedHistory.length - 1]}`
-            : currentLabel;
+        const inlineLabel = waiting
+            ? 'Waiting to start…'
+            : hasHistory && dedupedHistory.length > 0
+                ? `${currentLabel} — ${dedupedHistory[dedupedHistory.length - 1]}`
+                : currentLabel;
         return (
             <div className="flex items-center gap-3">
                 <span className="relative flex h-2 w-2">
@@ -259,7 +281,11 @@ export function GenerationProgress({
                 {title && (
                     <div className="flex items-center gap-2.5 mb-2">
                         <span className="relative flex h-2 w-2">
-                            <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dotColor} opacity-75`} />
+                            {/* No pulse while queued — a ping animation reads as
+                                active work, which a not-yet-started slot isn't. */}
+                            {!waiting && (
+                                <span className={`animate-ping absolute inline-flex h-full w-full rounded-full ${style.dotColor} opacity-75`} />
+                            )}
                             <span className={`relative inline-flex rounded-full h-2 w-2 ${style.dotColor}`} />
                         </span>
                         <span className={`text-sm font-semibold ${style.accent}`}>{title}</span>
@@ -298,6 +324,11 @@ export function GenerationProgress({
                                 })}
                             </ul>
                         </>
+                    ) : waiting ? (
+                        // Queued: the subtitle already says "will start as a slot
+                        // frees up". Show no work-stage label — the inert stage
+                        // dots below preview the pipeline that hasn't run yet.
+                        null
                     ) : (
                         <p
                             className={`text-sm text-neutral-600 transition-opacity duration-300 ${isFading ? 'opacity-0' : 'opacity-100'}`}
