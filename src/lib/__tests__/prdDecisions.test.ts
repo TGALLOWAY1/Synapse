@@ -132,6 +132,77 @@ describe('deriveDecisionLog', () => {
         });
         expect(deriveDecisionLog(prd).map(e => e.id)).toEqual(['a2', 'a1']);
     });
+
+    it('records deferred (tier later) features as Deferred entries', () => {
+        const prd = basePRD({
+            features: [
+                feature({ id: 'f1', tier: 'mvp' }),
+                feature({ id: 'f10', name: 'Anki CSV Export', description: 'Export flashcards to CSV', tier: 'later' }),
+            ],
+        });
+        const log = deriveDecisionLog(prd);
+        expect(log).toHaveLength(1);
+        expect(log[0]).toMatchObject({
+            id: 'f10',
+            kind: 'feature',
+            verdict: 'deferred',
+            statement: 'Anki CSV Export',
+            note: 'Export flashcards to CSV',
+        });
+    });
+
+    it('records mvpScope.later items as Deferred, resolving and deduping against deferred features', () => {
+        const prd = basePRD({
+            features: [
+                feature({ id: 'f10', name: 'Anki CSV Export', tier: 'later' }),
+            ],
+            mvpScope: {
+                mvp: [],
+                v1: [],
+                later: [
+                    'Anki CSV Export (f10): Utility to export flashcards', // dupes the f10 feature
+                    'Team workspaces someday', // plain prose
+                ],
+            },
+        });
+        const log = deriveDecisionLog(prd);
+        const deferred = log.filter(e => e.verdict === 'deferred');
+        expect(deferred).toHaveLength(2); // f10 logged once, prose item kept
+        expect(deferred[0].id).toBe('f10');
+        expect(deferred[1]).toMatchObject({ kind: 'scope', statement: 'Team workspaces someday', label: '' });
+    });
+
+    it('defers an UNTAGGED feature named by mvpScope.later (feature entry, not raw scope)', () => {
+        const prd = basePRD({
+            features: [feature({ id: 'f9', name: 'Anki Export' })], // no tier
+            mvpScope: { mvp: [], v1: [], later: ['Anki Export (f9): CSV utility'] },
+        });
+        const log = deriveDecisionLog(prd);
+        expect(log).toHaveLength(1);
+        expect(log[0]).toMatchObject({ id: 'f9', kind: 'feature', verdict: 'deferred' });
+    });
+
+    it('logs a later item naming an explicitly mvp-tagged feature as a raw scope record (tier wins)', () => {
+        const prd = basePRD({
+            features: [feature({ id: 'f1', name: 'Quick Capture', tier: 'mvp' })],
+            mvpScope: { mvp: [], v1: [], later: ['Advanced Quick Capture filters'] },
+        });
+        const log = deriveDecisionLog(prd);
+        expect(log).toHaveLength(1);
+        expect(log[0]).toMatchObject({
+            kind: 'scope',
+            verdict: 'deferred',
+            statement: 'Advanced Quick Capture filters',
+        });
+    });
+
+    it('places deferred entries after dated user decisions', () => {
+        const prd = basePRD({
+            assumptions: [assumption({ id: 'a1', decision: 'confirmed', decidedAt: 10 })],
+            features: [feature({ id: 'f3', tier: 'later' })],
+        });
+        expect(deriveDecisionLog(prd).map(e => e.id)).toEqual(['a1', 'f3']);
+    });
 });
 
 describe('resolveScopeFeature', () => {
@@ -182,6 +253,13 @@ describe('resolveScopeFeature', () => {
         const m = resolveScopeFeature('F2: Weekly Review', features);
         expect(m.feature?.id).toBe('f2');
         expect(m.secondary).toBeUndefined();
+    });
+
+    it('strips the empty parens left behind by a bracketed id ("Name (F1): …")', () => {
+        const m = resolveScopeFeature('Quick Capture (F1): one-tap logging', features);
+        expect(m.feature?.id).toBe('f1');
+        // Must not render as "(): one-tap logging".
+        expect(m.secondary).toBe('one-tap logging');
     });
 });
 

@@ -3,7 +3,14 @@
 // read time from the StructuredPRD so legacy PRDs (whose assumptions carry
 // no decision fields) render safely as "all unresolved".
 
-import type { Assumption, Feature, StructuredPRD } from '../../types';
+import type { Assumption, StructuredPRD } from '../../types';
+import { deriveDeferredFeatureIds } from './implementationSummary';
+import { resolveScopeFeature } from './scopeFeatureMatch';
+
+// Back-compat re-export — resolveScopeFeature moved to scopeFeatureMatch.ts
+// (implementationSummary needs it too, and importing it from here would cycle).
+export { resolveScopeFeature } from './scopeFeatureMatch';
+export type { ScopeFeatureMatch } from './scopeFeatureMatch';
 
 const CONFIDENCE_RANK: Record<string, number> = { high: 0, med: 1, low: 2 };
 
@@ -40,10 +47,10 @@ export function splitAssumptions(assumptions: Assumption[] | undefined): Assumpt
 }
 
 export type DecisionLogEntry = {
-    /** Stable id of the source item (assumption id / feature id). */
+    /** Stable id of the source item (assumption id / feature id / scope item). */
     id: string;
-    kind: 'assumption' | 'feature';
-    verdict: 'confirmed' | 'rejected';
+    kind: 'assumption' | 'feature' | 'scope';
+    verdict: 'confirmed' | 'rejected' | 'deferred';
     /** Short reference label shown as a badge (assumption id or feature id). */
     label: string;
     statement: string;
@@ -52,10 +59,13 @@ export type DecisionLogEntry = {
 };
 
 /**
- * Derive the Decision Log — confirmed user choices only, never unresolved
- * assumptions. Sources: assumptions the user confirmed/rejected and features
- * the user confirmed. Ordered chronologically by decision time (undated
- * entries last, in document order) so the log reads as a running record.
+ * Derive the Decision Log — decided items only, never unresolved assumptions.
+ * Sources: assumptions the user confirmed/rejected, features the user
+ * confirmed, and DEFERRED scope (features tagged 'later' plus `mvpScope.later`
+ * items). The Decision Log is the ONLY place deferred work is presented — no
+ * other PRD section may refer to features outside the MVP/V1 phases. User
+ * decisions are ordered chronologically (undated last, in document order);
+ * deferred entries carry no timestamp so they read as a trailing record.
  */
 export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
     const entries: DecisionLogEntry[] = [];
@@ -73,7 +83,8 @@ export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
         });
     });
 
-    (prd.features ?? []).forEach(f => {
+    const features = prd.features ?? [];
+    features.forEach(f => {
         if (!f.confirmed) return;
         entries.push({
             id: f.id,
@@ -82,6 +93,38 @@ export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
             label: f.id,
             statement: f.name,
             decidedAt: f.confirmedAt,
+        });
+    });
+
+    // Deferred scope — the record of what was consciously pushed out of the
+    // MVP/V1 phases. The deferred set (deriveDeferredFeatureIds) is the same
+    // one the renderers use to EXCLUDE these features from every other PRD
+    // section, so a feature can never read as both deferred and in scope.
+    const deferredIds = deriveDeferredFeatureIds(prd);
+    features.forEach(f => {
+        if (!deferredIds.has(f.id)) return;
+        entries.push({
+            id: f.id,
+            kind: 'feature',
+            verdict: 'deferred',
+            label: f.id,
+            statement: f.name,
+            note: f.description || undefined,
+        });
+    });
+
+    // mvpScope "Later" items that did NOT resolve into the deferred set —
+    // plain prose, or a data conflict where the item names a feature whose
+    // explicit mvp/v1 tier tag wins. Logged as raw scope records.
+    (prd.mvpScope?.later ?? []).forEach((item, i) => {
+        const match = resolveScopeFeature(item, features);
+        if (match.feature && deferredIds.has(match.feature.id)) return; // logged above
+        entries.push({
+            id: `scope-later-${i}`,
+            kind: 'scope',
+            verdict: 'deferred',
+            label: '',
+            statement: item,
         });
     });
 
@@ -104,70 +147,4 @@ export function isDisplayableFeatureId(id: string | undefined): boolean {
     return !!id && /^[a-zA-Z]{1,3}-?\d{1,3}$/.test(id.trim());
 }
 
-export type ScopeFeatureMatch = {
-    /** The PRD feature the scope item refers to, when one can be resolved. */
-    feature?: Feature;
-    /** Supporting text left over once the id/name reference is stripped. */
-    secondary?: string;
-};
-
-const escapeRegExp = (s: string) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
-
-// Whole-token match for a feature name inside a scope item. A bare substring
-// test would resolve unrelated words (feature "AI" matching inside "Daily")
-// and then strip mid-word text from the secondary copy — scope entries are
-// often free prose, so the name must sit on its own token boundaries.
-const nameMatchRegExp = (name: string) =>
-    new RegExp(`(?<![A-Za-z0-9])${escapeRegExp(name)}(?![A-Za-z0-9])`, 'i');
-
-/**
- * Resolve an MVP-scope string ("F1: Quick capture — one-tap logging") to its
- * PRD feature so the MVP/V1 lists can present items as features (id badge +
- * bold name) instead of plain prose. Conservative, read-side only:
- * 1. an explicit id token (`f1`, `F-1`, `[f1]`) wins;
- * 2. else the longest feature name contained in the item;
- * 3. no match → undefined (the caller renders the raw string unchanged).
- * The leftover text (minus the matched id/name and separators) is returned
- * as `secondary` supporting copy.
- */
-export function resolveScopeFeature(item: string, features: Feature[]): ScopeFeatureMatch {
-    const text = item.trim();
-    if (!text || features.length === 0) return {};
-
-    const byId = new Map<string, Feature>();
-    features.forEach(f => byId.set(f.id.toLowerCase().replace(/-/g, ''), f));
-
-    let feature: Feature | undefined;
-    let consumed: RegExp | undefined;
-
-    const idToken = text.match(/\[?\b([a-zA-Z]-?\d+)\b\]?/);
-    if (idToken) {
-        feature = byId.get(idToken[1].toLowerCase().replace(/-/g, ''));
-        if (feature) consumed = new RegExp(`\\[?${escapeRegExp(idToken[1])}\\]?`, 'i');
-    }
-
-    if (!feature) {
-        const named = features
-            .filter(f => f.name && nameMatchRegExp(f.name).test(text))
-            .sort((a, b) => b.name.length - a.name.length)[0];
-        if (named) {
-            feature = named;
-            consumed = nameMatchRegExp(named.name);
-        }
-    }
-
-    if (!feature) return {};
-
-    let secondary = consumed ? text.replace(consumed, '') : text;
-    // Strip the feature name too when the item was matched by id but also
-    // repeats the name ("F1: Quick capture — …").
-    if (feature.name) {
-        secondary = secondary.replace(nameMatchRegExp(feature.name), '');
-    }
-    secondary = secondary
-        .replace(/^[\s:–—-]+/, '')
-        .replace(/[\s:–—-]+$/, '')
-        .trim();
-
-    return { feature, secondary: secondary || undefined };
-}
+// (resolveScopeFeature lives in scopeFeatureMatch.ts — re-exported above.)

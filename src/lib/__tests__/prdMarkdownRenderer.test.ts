@@ -55,6 +55,70 @@ describe('renderPremiumMarkdown mobile-cleanup pass', () => {
         expect(md).not.toContain('### Open Decisions');
     });
 
+    it('renders no MVP Scope section — the Implementation Summary is the scope surface', () => {
+        const md = renderPremiumMarkdown({
+            ...richPrd,
+            mvpScope: {
+                mvp: ['Quick Capture (f1): one-tap logging'],
+                v1: [],
+                later: ['Integrations someday'],
+                rationale: 'Focus on the capture loop first.',
+            },
+        });
+        expect(md).not.toContain('## MVP Scope');
+        // The scope rationale surfaces as the decision callout in the summary.
+        const summaryStart = md.indexOf('## Implementation Summary');
+        const summaryEnd = md.indexOf('\n## ', summaryStart + 1);
+        expect(md.slice(summaryStart, summaryEnd)).toContain('> [!DECISION] Focus on the capture loop first.');
+        // "Later" scope items surface as Deferred entries in the Decision Log.
+        expect(md).toContain('- **Deferred**: Integrations someday');
+    });
+
+    it('excludes deferred features from Detailed Features and logs them as Deferred', () => {
+        const md = renderPremiumMarkdown(richPrd);
+        const featuresStart = md.indexOf('## Detailed Features');
+        const featuresEnd = md.indexOf('\n## ', featuresStart + 1);
+        const featuresBlock = md.slice(featuresStart, featuresEnd);
+        expect(featuresBlock).toContain('### Quick Capture');
+        // f2 is tier 'later' — deferred features never render as detail sections.
+        expect(featuresBlock).not.toContain('### Weekly Review');
+        expect(md).toContain('- **Deferred** (f2): Weekly Review');
+    });
+
+    it('excludes an untagged feature deferred via mvpScope.later from Detailed Features', () => {
+        const md = renderPremiumMarkdown({
+            ...richPrd,
+            features: [
+                ...richPrd.features,
+                { id: 'f9', name: 'Anki Export', description: 'CSV utility', userValue: 'v', complexity: 'low' }, // no tier
+            ],
+            mvpScope: { mvp: [], v1: [], later: ['Anki Export (f9)'] },
+        });
+        expect(md).not.toContain('### Anki Export');
+        expect(md).toContain('- **Deferred** (f9): Anki Export — CSV utility');
+    });
+
+    it('preserves explicit mvpScope entries with no matching tagged feature in the summary', () => {
+        const md = renderPremiumMarkdown({
+            ...richPrd,
+            mvpScope: { mvp: ['Basic auth and onboarding'], v1: [], later: [] },
+        });
+        const summaryStart = md.indexOf('## Implementation Summary');
+        const summaryEnd = md.indexOf('\n## ', summaryStart + 1);
+        expect(md.slice(summaryStart, summaryEnd)).toContain('Basic auth and onboarding');
+    });
+
+    it('never references deferred features from Feature Systems', () => {
+        const md = renderPremiumMarkdown({
+            ...richPrd,
+            featureSystems: [
+                { id: 's1', name: 'Capture System', purpose: 'p', featureIds: ['f1', 'f2'] },
+            ],
+        });
+        expect(md).toContain('**Features:** f1');
+        expect(md).not.toContain('**Features:** f1, f2');
+    });
+
     it('omits Instrumentation from Success Metrics', () => {
         const md = renderPremiumMarkdown(richPrd);
         expect(md).toContain('## Success Metrics');

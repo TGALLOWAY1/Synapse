@@ -26,8 +26,10 @@ import type {
 } from '../../types';
 import { coerceToBulletList } from '../textCleanup';
 import {
+    deriveDeferredFeatureIds,
     deriveImplementationSummary,
     isImplementationSummaryEmpty,
+    splitFeaturesByTier,
 } from '../derive/implementationSummary';
 import { splitAssumptions, deriveDecisionLog } from '../derive/prdDecisions';
 import { sanitizeRolePermissions } from '../prdRolesSanitizer';
@@ -274,22 +276,33 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
 
     // Implementation Summary — synthesized from features/risks/assumptions so
     // exports (PDF, markdown download) carry the same "what to build first"
-    // entry point the in-app PRD now shows.
+    // entry point the in-app PRD now shows. THE section presenting MVP/V1
+    // scope (the old `## MVP Scope` block duplicated it and was removed);
+    // the scope rationale renders here as the decision callout.
     const summary = deriveImplementationSummary(prd);
-    if (!isImplementationSummaryEmpty(summary)) {
+    if (!isImplementationSummaryEmpty(summary) || prd.mvpScope?.rationale) {
         lines.push('## Implementation Summary');
         lines.push('');
+        if (prd.mvpScope?.rationale) {
+            lines.push(`> [!DECISION] ${prd.mvpScope.rationale}`);
+            lines.push('');
+        }
         if (summary.buildFirst.length > 0) {
             lines.push('### Build First');
             summary.buildFirst.forEach((f, i) => {
+                const id = f.id ? `**${f.id}** ` : '';
                 const reason = f.reason ? ` — ${f.reason}` : '';
-                lines.push(`${i + 1}. **${f.id}** ${f.name}${reason}`);
+                lines.push(`${i + 1}. ${id}${f.name}${reason}`);
             });
             lines.push('');
         }
         if (summary.buildNext.length > 0) {
             lines.push('### Build Next');
-            summary.buildNext.forEach(f => lines.push(`- **${f.id}** ${f.name}`));
+            summary.buildNext.forEach(f => {
+                const id = f.id ? `**${f.id}** ` : '';
+                const reason = f.reason ? ` — ${f.reason}` : '';
+                lines.push(`- ${id}${f.name}${reason}`);
+            });
             lines.push('');
         }
         if (summary.highestRisks.length > 0) {
@@ -320,20 +333,25 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
     if (decisionLog.length > 0) {
         lines.push('## Decision Log');
         decisionLog.forEach(e => {
-            const verdict = e.kind === 'feature'
-                ? 'Feature confirmed'
-                : e.verdict === 'confirmed' ? 'Confirmed' : 'Marked incorrect';
-            const note = e.note ? ` — Correction: ${e.note}` : '';
-            lines.push(`- **${verdict}** (${e.label}): ${e.statement}${note}`);
+            const verdict = e.verdict === 'deferred'
+                ? 'Deferred'
+                : e.kind === 'feature'
+                    ? 'Feature confirmed'
+                    : e.verdict === 'confirmed' ? 'Confirmed' : 'Marked incorrect';
+            const notePrefix = e.verdict === 'rejected' ? ' — Correction: ' : ' — ';
+            const note = e.note ? `${notePrefix}${e.note}` : '';
+            const label = e.label ? ` (${e.label})` : '';
+            lines.push(`- **${verdict}**${label}: ${e.statement}${note}`);
         });
         lines.push('');
     }
 
     // ── Section order is a logical reading flow (see StructuredPRDView, which
-    // mirrors it): Product Overview → Target Users → MVP Scope → Features →
-    // UX → Metrics → Risks → Technical Architecture → Data Model → State
-    // Machines → NFRs → reference appendix → Where the Detail Lives (static
-    // handoff appendix). This ordering is presentation-only; downstream
+    // mirrors it): Product Overview → Target Users → Features → UX → Metrics
+    // → Risks → Technical Architecture → Data Model → State Machines → NFRs →
+    // reference appendix → Where the Detail Lives (static handoff appendix).
+    // MVP/V1 scope lives in the Implementation Summary above; deferred scope
+    // in the Decision Log. This ordering is presentation-only; downstream
     // artifacts consume the StructuredPRD object by field, not this markdown,
     // so blocks may be reordered freely without affecting generation.
 
@@ -385,42 +403,27 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // ── MVP Scope (what ships first — placed before the full feature detail) ─
-    if (prd.mvpScope) {
-        lines.push('## MVP Scope');
-        if (prd.mvpScope.rationale) {
-            lines.push(`> [!DECISION] ${prd.mvpScope.rationale}`);
-            lines.push('');
-        }
-        lines.push('**MVP — ship first:**');
-        prd.mvpScope.mvp.forEach(i => lines.push(`- \`[MVP]\` ${i}`));
-        if (prd.mvpScope.v1?.length) {
-            lines.push('');
-            lines.push('**V1 — soon after launch:**');
-            prd.mvpScope.v1.forEach(i => lines.push(`- \`[V1]\` ${i}`));
-        }
-        if (prd.mvpScope.later?.length) {
-            lines.push('');
-            lines.push('**Later:**');
-            prd.mvpScope.later.forEach(i => lines.push(`- \`[Later]\` ${i}`));
-        }
-        lines.push('');
-    }
-
     // ── Core Features ───────────────────────────────────────────────────
     // Detailed Features first — the concrete features — then the Feature
-    // Systems grouping (mirrors StructuredPRDView's order).
+    // Systems grouping (mirrors StructuredPRDView's order). MVP (and
+    // unclassified) features render first, V1 features after (collapsed in
+    // the app); deferred features are excluded — they appear only as
+    // Deferred entries in the Decision Log above.
+    const featureGroups = splitFeaturesByTier(prd.features, deriveDeferredFeatureIds(prd));
     lines.push('## Detailed Features');
-    prd.features.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
+    featureGroups.mvp.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
+    featureGroups.v1.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
 
-    // Feature Systems
+    // Feature Systems — never reference deferred features (Decision Log only).
+    const deferredIds = new Set(featureGroups.deferred.map(f => f.id.toLowerCase()));
     if (prd.featureSystems?.length) {
         lines.push('## Feature Systems');
         prd.featureSystems.forEach(s => {
             lines.push(`### ${s.name}`);
             lines.push(`**Purpose:** ${s.purpose}`);
             if (s.endToEndBehavior) lines.push(`**End-to-end behavior:** ${s.endToEndBehavior}`);
-            if (s.featureIds?.length) lines.push(`**Features:** ${s.featureIds.join(', ')}`);
+            const visibleIds = (s.featureIds ?? []).filter(id => !deferredIds.has(id.toLowerCase()));
+            if (visibleIds.length) lines.push(`**Features:** ${visibleIds.join(', ')}`);
             if (s.dependencies?.length) lines.push(`**Dependencies:** ${s.dependencies.join(', ')}`);
             if (s.edgeCases?.length) {
                 lines.push('**Edge cases:**');
