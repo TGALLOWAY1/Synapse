@@ -28,9 +28,11 @@ import { CategoryBadge } from './dataModel/badges';
 
 interface Props {
     content: string;
-    /** Optional provenance label ("Version 2") for the overview header. */
-    prdVersionLabel?: string;
-    /** Optional freshness state for the overview header. */
+    /**
+     * Optional freshness state for the overview header (the "Current" pill).
+     * PRD provenance is intentionally not passed here — it's shown once at the
+     * artifact/page level, not repeated inside the summary card.
+     */
     staleness?: StalenessState;
 }
 
@@ -75,7 +77,7 @@ function MethodPill({ method }: { method: string }) {
     );
 }
 
-export function DataModelRenderer({ content, prdVersionLabel, staleness }: Props) {
+export function DataModelRenderer({ content, staleness }: Props) {
     const { parsed, sourceMarkdown } = useMemo(() => {
         const json = tryParseAsJson(content);
         if (json) {
@@ -102,7 +104,6 @@ export function DataModelRenderer({ content, prdVersionLabel, staleness }: Props
         <DataModelBody
             key={signature}
             parsed={parsed}
-            prdVersionLabel={prdVersionLabel}
             staleness={staleness}
         />
     );
@@ -110,11 +111,10 @@ export function DataModelRenderer({ content, prdVersionLabel, staleness }: Props
 
 interface BodyProps {
     parsed: ParsedDataModel;
-    prdVersionLabel?: string;
     staleness?: StalenessState;
 }
 
-function DataModelBody({ parsed, prdVersionLabel, staleness }: BodyProps) {
+function DataModelBody({ parsed, staleness }: BodyProps) {
     const isMobile = useIsMobile();
     const { graph, summary } = useMemo(() => analyzeDataModel(parsed), [parsed]);
 
@@ -189,7 +189,7 @@ function DataModelBody({ parsed, prdVersionLabel, staleness }: BodyProps) {
 
     return (
         <div className="space-y-6">
-            <DataModelOverview summary={summary} prdVersionLabel={prdVersionLabel} staleness={staleness} />
+            <DataModelOverview summary={summary} staleness={staleness} />
 
             {parsed.overview && (
                 <section className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">

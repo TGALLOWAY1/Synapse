@@ -859,8 +859,17 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     The **`data_model` renderer** (`DataModelRenderer.tsx` +
     `src/components/renderers/dataModel/`) presents the artifact as an
     interactive entity-relationship design surface rather than a schema dump:
-    a compact **overview header** (`DataModelOverview` — provenance/freshness +
-    entity/relationship/constraint/index/PII counts), an **ER-style diagram**
+    a compact **overview header** (`DataModelOverview` — a single header row of
+    database-icon + "Data Model" title with an optional freshness pill, over a
+    2-col-on-mobile grid of **six metric tiles**: entities, relationships,
+    constraints, indexes, entities-with-PII, and **API endpoints** — the API
+    count comes straight from `summary.apiEndpointCount`, never hardcoded).
+    **Provenance is deliberately NOT shown inside this card** — "Generated from
+    PRD Version N" lives once at the artifact/page level
+    (`ArtifactWorkspace.renderVersionControls`), so the card takes only
+    `staleness` (the "Current" pill), not `prdVersionLabel`. Don't re-add a
+    subtitle count line or a "From PRD …" pill to the card. Next comes an
+    **ER-style diagram**
     (`EntityGraph`) that mirrors the artifact dependency graph / user-flow
     diagrams (rounded node cards, deterministic layered SVG layout, directional
     cardinality-labelled edges, click-a-node-to-open-its-card), and
@@ -878,15 +887,24 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     unresolved/self references separately, and derives conservative entity
     **categories** (`core`/`user_config`/`generated`/`system`/`external`, from
     userFacing/mutability/integration-shaped signals only) used for the optional
-    "Group by category" swimlanes and node accents. The renderer keeps the legacy
-    ReactMarkdown fallback for unparseable content and preserves the
-    "How This Data Model Works", "How This Appears in the Product", and
+    "Group by category" swimlanes and node accents. **Relationship-edge labels
+    never overlap entity cards:** `EntityGraph` places each verb+cardinality pill
+    with the pure, unit-tested **`placeEdgeLabels`** collision solver (also in
+    `dataModelGraph.ts`) — each label starts on its edge midpoint (between-row
+    labels already sit in the clear row gap and don't move), and any label that
+    would intersect a card (chiefly same-row/horizontal edges, whose midpoint
+    lands on the cards' shared vertical centre) is nudged to the nearest clear,
+    canvas-clamped position and tethered to its edge with a thin dashed line; the
+    graph reserves a top/bottom label lane (`ROW_GAP`) only when a same-row edge
+    exists. Don't reintroduce raw midpoint positioning for the pills. The renderer
+    keeps the legacy ReactMarkdown fallback for unparseable content and preserves
+    the "How This Data Model Works", "How This Appears in the Product", and
     "API Endpoints" sections. Multi-entity models start collapsed (single-entity
-    expanded) for scannability; provenance/freshness reach the overview via the
-    optional `prdVersionLabel`/`staleness` props threaded through
-    `ArtifactContentRenderer` for `data_model` only. Do **not** change
-    `dataModelMarkdown.ts`'s parser output shape without re-checking
-    `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
+    expanded) for scannability; freshness reaches the overview via the optional
+    `staleness` prop threaded through `ArtifactContentRenderer` for `data_model`
+    (the `prdVersionLabel` prop is passed only to `implementation_plan` now). Do
+    **not** change `dataModelMarkdown.ts`'s parser output shape without
+    re-checking `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
     The `component_inventory` renderer is a mobile-first, searchable
     component library (sticky search + category/complexity/used-in
     filters, expandable cards with live previews) decomposed under

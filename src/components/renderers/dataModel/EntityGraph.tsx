@@ -1,7 +1,9 @@
 import { useMemo, useState } from 'react';
 import { Database, GitBranch, MousePointerClick } from 'lucide-react';
 import {
-    computeDataModelLayout, type DataModelGraph, type DataModelNode,
+    computeDataModelLayout, placeEdgeLabels,
+    type DataModelGraph, type DataModelNode, type DataModelEdge,
+    type EdgeLabelInput, type Rect,
 } from '../../../lib/dataModelGraph';
 import { CATEGORY_STYLES, EDGE_STROKE } from './dataModelStyles';
 import { CategoryBadge } from './badges';
@@ -23,6 +25,18 @@ const GAP_X = 40;
 const ROW_GAP = 92;
 
 type Selection = { type: 'node'; id: string } | { type: 'edge'; id: string } | null;
+
+/**
+ * Estimate a relationship pill's rendered footprint (verb line + optional
+ * cardinality line) so the collision solver can keep it off the entity cards.
+ * Slightly generous on width and clamped to the pill's `max-w-[10rem]`.
+ */
+function estimateLabelSize(edge: DataModelEdge): { w: number; h: number } {
+    const chars = Math.max(edge.verb.length, edge.cardinality?.length ?? 0);
+    const w = Math.min(160, Math.max(48, chars * 6.5 + 20));
+    const h = edge.cardinality ? 34 : 22;
+    return { w, h };
+}
 
 function NodeCardInner({ node }: { node: DataModelNode }) {
     return (
@@ -93,25 +107,87 @@ export function EntityGraph(props: Props) {
     const geometry = useMemo(() => {
         const maxCols = Math.max(1, ...layout.rows.map(r => r.length));
         const canvasW = maxCols * CARD_W + (maxCols - 1) * GAP_X;
-        const canvasH = layout.rows.length * CARD_H + Math.max(0, layout.rows.length - 1) * ROW_GAP;
+        const baseH = layout.rows.length * CARD_H + Math.max(0, layout.rows.length - 1) * ROW_GAP;
+
+        // Same-row (horizontal) edges are the overlap-prone case: their label
+        // would land on the cards' vertical centre. When any exist we reserve a
+        // clear label lane above and below the card stack so lifted labels always
+        // have room — including single-row graphs, which have no inter-row gap to
+        // borrow. Non-hierarchical graphs pay nothing (lane = 0).
+        const rowOf = new Map<string, number>();
+        layout.rows.forEach((row, r) => row.forEach(id => rowOf.set(id, r)));
+        const hasSameRowEdge = graph.edges.some(e => rowOf.get(e.fromId) === rowOf.get(e.toId));
+        const lane = hasSameRowEdge ? ROW_GAP : 0;
+
+        const canvasH = baseH + lane * 2;
         const positions = new Map<string, { x: number; y: number }>();
         layout.rows.forEach((row, r) => {
             const rowWidth = row.length * CARD_W + (row.length - 1) * GAP_X;
             row.forEach((id, i) => {
                 positions.set(id, {
                     x: (canvasW - rowWidth) / 2 + i * (CARD_W + GAP_X),
-                    y: r * (CARD_H + ROW_GAP),
+                    y: lane + r * (CARD_H + ROW_GAP),
                 });
             });
         });
         return { canvasW, canvasH, positions };
-    }, [layout]);
+    }, [layout, graph.edges]);
+
+    const { canvasW, canvasH, positions } = geometry;
+
+    // Edge path geometry + natural (edge-midpoint) label anchor, independent of
+    // selection so the collision solver below can be memoized.
+    const edgeGeometry = useMemo(() => {
+        return graph.edges.map(edge => {
+            const from = positions.get(edge.fromId);
+            const to = positions.get(edge.toId);
+            if (!from || !to) return null;
+            let x1: number, y1: number, x2: number, y2: number, d: string, mx: number, my: number;
+            if (to.y > from.y) {
+                x1 = from.x + CARD_W / 2; y1 = from.y + CARD_H;
+                x2 = to.x + CARD_W / 2; y2 = to.y;
+                const midY = (y1 + y2) / 2;
+                d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+                mx = (x1 + x2) / 2; my = midY;
+            } else if (to.y < from.y) {
+                x1 = from.x + CARD_W / 2; y1 = from.y;
+                x2 = to.x + CARD_W / 2; y2 = to.y + CARD_H;
+                const midY = (y1 + y2) / 2;
+                d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
+                mx = (x1 + x2) / 2; my = midY;
+            } else {
+                const leftToRight = to.x >= from.x;
+                x1 = from.x + (leftToRight ? CARD_W : 0); y1 = from.y + CARD_H / 2;
+                x2 = to.x + (leftToRight ? 0 : CARD_W); y2 = to.y + CARD_H / 2;
+                const midX = (x1 + x2) / 2;
+                d = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
+                mx = midX; my = (y1 + y2) / 2;
+            }
+            return { edge, d, mx, my };
+        }).filter((e): e is NonNullable<typeof e> => e !== null);
+    }, [graph.edges, positions]);
+
+    // Collision-aware label placement — pills never overlap the entity cards.
+    const labelPlacements = useMemo(() => {
+        const cardRects: Rect[] = graph.nodes
+            .map(n => {
+                const p = positions.get(n.id);
+                return p ? { x: p.x, y: p.y, w: CARD_W, h: CARD_H } : null;
+            })
+            .filter((r): r is Rect => r !== null);
+        const inputs: EdgeLabelInput[] = edgeGeometry.map(({ edge, mx, my }) => {
+            const { w, h } = estimateLabelSize(edge);
+            return { id: edge.id, cx: mx, cy: my, w, h };
+        });
+        return new Map(
+            placeEdgeLabels(inputs, cardRects, { width: canvasW, height: canvasH })
+                .map(p => [p.id, p]),
+        );
+    }, [edgeGeometry, graph.nodes, positions, canvasW, canvasH]);
 
     if (graph.edges.length === 0) {
         return <EntityGrid {...props} />;
     }
-
-    const { canvasW, canvasH, positions } = geometry;
 
     // Which edges / nodes are highlighted by the current selection.
     const activeEdgeIds = new Set<string>();
@@ -134,36 +210,7 @@ export function EntityGraph(props: Props) {
         }
     }
 
-    // Edge path + midpoint label position, choosing connection points by the
-    // relative vertical position of the two nodes (down / up / same row).
-    const edgeRenders = graph.edges.map(edge => {
-        const from = positions.get(edge.fromId);
-        const to = positions.get(edge.toId);
-        if (!from || !to) return null;
-        const active = activeEdgeIds.has(edge.id);
-        let x1: number, y1: number, x2: number, y2: number, d: string, mx: number, my: number;
-        if (to.y > from.y) {
-            x1 = from.x + CARD_W / 2; y1 = from.y + CARD_H;
-            x2 = to.x + CARD_W / 2; y2 = to.y;
-            const midY = (y1 + y2) / 2;
-            d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
-            mx = (x1 + x2) / 2; my = midY;
-        } else if (to.y < from.y) {
-            x1 = from.x + CARD_W / 2; y1 = from.y;
-            x2 = to.x + CARD_W / 2; y2 = to.y + CARD_H;
-            const midY = (y1 + y2) / 2;
-            d = `M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`;
-            mx = (x1 + x2) / 2; my = midY;
-        } else {
-            const leftToRight = to.x >= from.x;
-            x1 = from.x + (leftToRight ? CARD_W : 0); y1 = from.y + CARD_H / 2;
-            x2 = to.x + (leftToRight ? 0 : CARD_W); y2 = to.y + CARD_H / 2;
-            const midX = (x1 + x2) / 2;
-            d = `M ${x1} ${y1} C ${midX} ${y1}, ${midX} ${y2}, ${x2} ${y2}`;
-            mx = midX; my = (y1 + y2) / 2;
-        }
-        return { edge, active, d, mx, my };
-    }).filter((e): e is NonNullable<typeof e> => e !== null);
+    const edgeRenders = edgeGeometry.map(g => ({ ...g, active: activeEdgeIds.has(g.edge.id) }));
 
     return (
         <div className="space-y-2">
@@ -209,30 +256,56 @@ export function EntityGraph(props: Props) {
                                 markerStart={edge.arrow === 'both' ? `url(#dm-arrow-${active ? 'active' : 'base'}-start)` : undefined}
                             />
                         ))}
+                        {/* Tether a label to its edge when the collision solver
+                            had to lift it off the connector's midpoint. */}
+                        {edgeRenders.map(({ edge, active, mx, my }) => {
+                            const p = labelPlacements.get(edge.id);
+                            if (!p || !p.moved) return null;
+                            return (
+                                <line
+                                    key={`tether-${edge.id}`}
+                                    x1={mx}
+                                    y1={my}
+                                    x2={p.x}
+                                    y2={p.y}
+                                    stroke={active ? EDGE_STROKE.active : EDGE_STROKE.base}
+                                    strokeWidth={1}
+                                    strokeDasharray="2 3"
+                                />
+                            );
+                        })}
                     </svg>
 
-                    {/* Edge labels (verb + cardinality) as positioned pills. */}
-                    {edgeRenders.map(({ edge, active, mx, my }) => (
-                        <button
-                            key={`label-${edge.id}`}
-                            type="button"
-                            onClick={() => setSelection(sel =>
-                                sel?.type === 'edge' && sel.id === edge.id ? null : { type: 'edge', id: edge.id },
-                            )}
-                            style={{ left: mx, top: my, transform: 'translate(-50%, -50%)' }}
-                            className={`absolute z-10 max-w-[10rem] rounded-full border px-2 py-0.5 text-[10px] font-medium leading-tight shadow-sm transition ${
-                                active
-                                    ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
-                                    : 'border-neutral-200 bg-white text-neutral-600 hover:border-indigo-200'
-                            }`}
-                            title={edge.description || `${edge.verb}${edge.cardinality ? ` (${edge.cardinality})` : ''}`}
-                        >
-                            <span className="block truncate">{edge.verb}</span>
-                            {edge.cardinality && (
-                                <span className="block text-[9px] font-mono text-neutral-400 leading-none">{edge.cardinality}</span>
-                            )}
-                        </button>
-                    ))}
+                    {/* Edge labels (verb + cardinality) as positioned pills, placed
+                        by the collision solver so they never cover an entity card. */}
+                    {edgeRenders.map(({ edge, active, mx, my }) => {
+                        const placement = labelPlacements.get(edge.id);
+                        return (
+                            <button
+                                key={`label-${edge.id}`}
+                                type="button"
+                                onClick={() => setSelection(sel =>
+                                    sel?.type === 'edge' && sel.id === edge.id ? null : { type: 'edge', id: edge.id },
+                                )}
+                                style={{
+                                    left: placement?.x ?? mx,
+                                    top: placement?.y ?? my,
+                                    transform: 'translate(-50%, -50%)',
+                                }}
+                                className={`absolute z-10 max-w-[10rem] rounded-full border px-2 py-0.5 text-[10px] font-medium leading-tight shadow-sm transition ${
+                                    active
+                                        ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
+                                        : 'border-neutral-200 bg-white text-neutral-600 hover:border-indigo-200'
+                                }`}
+                                title={edge.description || `${edge.verb}${edge.cardinality ? ` (${edge.cardinality})` : ''}`}
+                            >
+                                <span className="block truncate">{edge.verb}</span>
+                                {edge.cardinality && (
+                                    <span className="block text-[9px] font-mono text-neutral-400 leading-none">{edge.cardinality}</span>
+                                )}
+                            </button>
+                        );
+                    })}
 
                     {/* Entity nodes. */}
                     {graph.nodes.map(node => {
