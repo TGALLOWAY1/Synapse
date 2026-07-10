@@ -90,7 +90,7 @@ export const SEVERITY_LABELS: Record<ScreenReviewIssueSeverity, string> = {
 export type SystemReadinessStatus = 'ready' | 'needs_review' | 'blocked';
 
 export const SYSTEM_READINESS_LABELS: Record<SystemReadinessStatus, string> = {
-    ready: 'Ready to accept',
+    ready: 'Ready to confirm',
     needs_review: 'Review recommended',
     blocked: 'Blocking issues',
 };

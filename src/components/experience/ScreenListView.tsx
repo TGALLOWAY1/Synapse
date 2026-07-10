@@ -252,13 +252,16 @@ export function ScreenListView({
                         { value: 'all', label: 'All flows' },
                         ...flowOptions.map(f => ({ value: f, label: f })),
                     ]} />
+                {/* One vocabulary: Draft / Needs review / Confirmed. The old
+                    'Ready' option filtered on the legacy implementation_ready
+                    status the UI no longer sets (its filter id survives in the
+                    lib for compatibility). */}
                 <SelectControl label="Status" value={status} onChange={v => setStatus(v as StatusFilter)}
                     options={[
                         { value: 'all', label: 'Any status' },
                         { value: 'draft', label: 'Draft' },
                         { value: 'needs_review', label: 'Needs review' },
-                        { value: 'accepted', label: 'Accepted' },
-                        { value: 'ready', label: 'Ready' },
+                        { value: 'accepted', label: 'Confirmed' },
                     ]} />
                 {anyFilterActive && (
                     <button
@@ -297,7 +300,12 @@ export function ScreenListView({
                             <span className="text-xs text-neutral-400 truncate">· {section.subtitle}</span>
                         )}
                     </header>
-                    <ul className="grid grid-cols-1 lg:grid-cols-2 gap-3">
+                    {/* A single-card group renders full width — a lone half-width
+                        card beside permanent whitespace read as a layout bug
+                        (audit M9). */}
+                    <ul className={section.items.length === 1
+                        ? 'grid grid-cols-1 gap-3'
+                        : 'grid grid-cols-1 lg:grid-cols-2 gap-3'}>
                         {section.items.map((item, i) => (
                             <li key={item.id}>
                                 <ScreenCard
@@ -306,12 +314,12 @@ export function ScreenListView({
                                     readiness={readiness.get(item.id)}
                                     reviewModel={reviewModels.get(item.id)}
                                     downstreamImpact={downstreamByScreen.get(item.id)}
-                                    handoff={handoffByScreen.get(item.id)}
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
                                     trustContext={trustContext}
-                                    artifactControls={artifactControls}
+                                    features={features}
+                                    prdVersionLabel={artifactControls?.prdVersionLabel}
                                     onSelect={() => onSelectScreen(item.id)}
                                 />
                             </li>
@@ -329,6 +337,20 @@ export function ScreenListView({
                 onToggle={() => setMetadataOpen(o => !o)}
             >
                 <div className="space-y-4">
+                    {/* Artifact-wide metadata, history & actions — rendered ONCE
+                        here (they act on the whole screen_inventory / mockup
+                        artifact; repeating them inside every card implied a
+                        per-screen scope they never had). */}
+                    {artifactControls && (
+                        <div className="rounded-xl border border-neutral-200 bg-white p-4">
+                            <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500 mb-2">
+                                Artifact metadata &amp; actions
+                            </h4>
+                            <dl className="space-y-2 text-[11px]">
+                                <ArtifactControlsBlock controls={artifactControls} />
+                            </dl>
+                        </div>
+                    )}
                     <ScreenCoveragePanel
                         summary={coverage}
                         variantCoverage={variantCoverage}
@@ -427,19 +449,19 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
 };
 
 function ScreenCard({
-    ordinal, item, readiness, reviewModel, downstreamImpact, handoff, mockupPlatform, mobileRelevant, generatedVariants, trustContext, artifactControls, onSelect,
+    ordinal, item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, trustContext, features, prdVersionLabel, onSelect,
 }: {
     ordinal?: number;
     item: ScreenExperienceItem;
     readiness?: ScreenReadiness;
     reviewModel?: ScreenReviewModel;
     downstreamImpact?: ScreenDownstreamImpact;
-    handoff?: ScreenImplementationHandoff;
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
     trustContext?: VariantTrustContext;
-    artifactControls?: ScreenArtifactControls;
+    features?: readonly Feature[];
+    prdVersionLabel?: string;
     onSelect: () => void;
 }) {
     const [detailsOpen, setDetailsOpen] = useState(false);
@@ -473,11 +495,8 @@ function ScreenCard({
                         </h4>
                     </div>
                     <div className="flex items-center gap-1.5 shrink-0">
-                        {item.isEdited && (
-                            <span className="text-[10px] uppercase tracking-wide text-neutral-500 bg-neutral-100 px-1.5 py-0.5 rounded">
-                                Edited
-                            </span>
-                        )}
+                        {/* Priority is the one prominent badge; the EDITED chip
+                            moved into "Show details" (audit L1). */}
                         <span className={`text-xs px-2 py-0.5 rounded-full font-semibold ${PRIORITY_STYLES[priority]}`}>
                             {priority}
                         </span>
@@ -494,12 +513,15 @@ function ScreenCard({
                 <FlowStrip name={screen.name} connections={connections} />
 
                 {/* One-line, low-color footer: mockup availability + readiness. */}
+                {/* One status badge (readiness) + one muted info line (mockup
+                    availability) — not two competing positive-signal styles
+                    (audit L3). */}
                 <div className="mt-auto pt-2 flex items-center gap-3 flex-wrap text-[11px] text-neutral-500">
-                    <span className="inline-flex items-center gap-1" title="Mockup availability for this screen">
-                        <ImageIcon size={12} className={variantSummary.hasMockup ? 'text-emerald-500' : 'text-neutral-300'} />
-                        {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup'}
-                    </span>
                     {readiness && <ReadinessBadge readiness={readiness} />}
+                    <span className="inline-flex items-center gap-1 text-neutral-400" title="Mockup availability for this screen">
+                        <ImageIcon size={12} className="text-neutral-300" aria-hidden />
+                        {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup yet'}
+                    </span>
                     <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
                 </div>
             </button>
@@ -522,9 +544,9 @@ function ScreenCard({
                         connections={connections}
                         reviewModel={reviewModel}
                         downstreamImpact={downstreamImpact}
-                        handoff={handoff}
                         variantSummary={variantSummary}
-                        artifactControls={artifactControls}
+                        features={features}
+                        prdVersionLabel={prdVersionLabel}
                     />
                 )}
             </div>
@@ -577,18 +599,36 @@ const DOWNSTREAM_LABELS: Record<string, string> = {
     export: 'Export',
 };
 
+/** Resolve raw featureRef strings ("F1: Role selection", "f-2") to PRD feature
+ * NAMES so the disclosure never shows bare internal ids. Unresolvable refs fall
+ * back to their raw text. */
+function featureNamesForRefs(refs: readonly string[], features?: readonly Feature[]): string[] {
+    if (!features || features.length === 0) return [...refs];
+    return refs.map(raw => {
+        const m = raw.trim().match(/([fF]-?\d+)/);
+        if (!m) return raw;
+        const norm = m[1].toLowerCase().replace(/-/g, '');
+        const feature = features.find(f => f.id.toLowerCase().replace(/-/g, '') === norm);
+        return feature ? feature.name : raw;
+    });
+}
+
 /** Secondary metadata, revealed on demand. Neutral typography with warning
- * color reserved for genuine issues (blockers, risks, stale/blocked states). */
+ * color reserved for genuine issues (blockers, risks, stale/blocked states).
+ * Deliberately design-review-scoped: no implementation-handoff verdicts here
+ * (those live with the Implementation Plan / export), and no artifact-wide
+ * actions (those render once, in the project-metadata section — repeating them
+ * per card implied a per-screen scope they never had). */
 function CardDetails({
-    item, connections, reviewModel, downstreamImpact, handoff, variantSummary, artifactControls,
+    item, connections, reviewModel, downstreamImpact, variantSummary, features, prdVersionLabel,
 }: {
     item: ScreenExperienceItem;
     connections: ReturnType<typeof deriveScreenConnections>;
     reviewModel?: ScreenReviewModel;
     downstreamImpact?: ScreenDownstreamImpact;
-    handoff?: ScreenImplementationHandoff;
     variantSummary: ReturnType<typeof summarizeScreenVariants>;
-    artifactControls?: ScreenArtifactControls;
+    features?: readonly Feature[];
+    prdVersionLabel?: string;
 }) {
     const { screen } = item;
     const featureRefs = screen.featureRefs ?? [];
@@ -610,58 +650,54 @@ function CardDetails({
                 </DetailRow>
             )}
 
-            {/* Review */}
-            {reviewModel && (
-                <DetailRow label="Review">
-                    <span className="text-neutral-700">
-                        {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
-                    </span>
-                    <span className="text-neutral-300 mx-1" aria-hidden>·</span>
-                    <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>
-                        {reviewModel.blockingCount > 0
-                            ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
-                            : reviewModel.reviewCount > 0
-                                ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
-                                : SYSTEM_READINESS_LABELS[reviewModel.systemReadiness]}
-                    </span>
-                    {reviewModel.freshness === 'outdated' && (
-                        <span className="block text-amber-600 mt-0.5">Review may be outdated — the screen changed after sign-off.</span>
-                    )}
-                </DetailRow>
-            )}
+            {/* Review — the system hint renders only when it tells the user
+                something their own status doesn't: open blockers/review items,
+                or "ready to confirm" on a not-yet-confirmed screen. On a
+                confirmed, issue-free screen a suggestion like "Ready to
+                accept" is stale noise. */}
+            {reviewModel && (() => {
+                const confirmed = reviewModel.userStatus === 'accepted'
+                    || reviewModel.userStatus === 'implementation_ready';
+                const hint = reviewModel.blockingCount > 0
+                    ? `${reviewModel.blockingCount} ${reviewModel.blockingCount === 1 ? 'blocker' : 'blockers'}`
+                    : reviewModel.reviewCount > 0
+                        ? `${reviewModel.reviewCount} review ${reviewModel.reviewCount === 1 ? 'item' : 'items'}`
+                        : !confirmed && reviewModel.systemReadiness === 'ready'
+                            ? SYSTEM_READINESS_LABELS.ready
+                            : null;
+                return (
+                    <DetailRow label="Review">
+                        <span className="text-neutral-700">
+                            {reviewModel.userStatus ? REVIEW_STATUS_LABELS[reviewModel.userStatus] : 'Not reviewed'}
+                        </span>
+                        {hint && (
+                            <>
+                                <span className="text-neutral-300 mx-1" aria-hidden>·</span>
+                                <span className={SYSTEM_READINESS_TONE[reviewModel.systemReadiness]}>{hint}</span>
+                            </>
+                        )}
+                        {reviewModel.freshness === 'outdated' && (
+                            <span className="block text-amber-600 mt-0.5">Review may be outdated — the screen changed after sign-off.</span>
+                        )}
+                    </DetailRow>
+                );
+            })()}
 
-            {/* Traceability */}
-            <DetailRow label="Traceability">
+            {/* Traceability — feature NAMES, not raw ids. */}
+            <DetailRow label="PRD features">
                 {featureRefs.length > 0
-                    ? `Covers ${featureRefs.length} PRD ${featureRefs.length === 1 ? 'feature' : 'features'}: ${featureRefs.join(', ')}`
+                    ? featureNamesForRefs(featureRefs, features).join(', ')
                     : <span className="text-neutral-400">No linked PRD features — review recommended</span>}
             </DetailRow>
 
-            {/* Implementation / handoff */}
-            {handoff && (
-                <DetailRow label="Handoff">
-                    <span className={
-                        handoff.readiness.status === 'blocked' ? 'text-red-600'
-                            : handoff.readiness.status === 'review_recommended' ? 'text-amber-600'
-                                : 'text-emerald-600'
-                    }>
-                        {HANDOFF_STATUS_LABELS[handoff.readiness.status]}
-                    </span>
-                    {handoff.traceBridge && (handoff.traceBridge.implementationPlan.confidence === 'missing'
-                        || ['weak', 'estimated', 'missing'].includes(handoff.traceBridge.overall.confidence)) && (
-                        <span className="block text-amber-600 mt-0.5">
-                            Downstream trace estimated or missing — confirm before building.
-                        </span>
-                    )}
-                </DetailRow>
-            )}
-
-            {/* Mockup coverage detail */}
+            {/* Mockup coverage — the primary mockup is the only required asset;
+                extra variants are optional and framed that way. */}
             <DetailRow label="Mockups">
-                {variantSummary.hasMockup ? variantSummary.label : 'Not generated yet'}
-                {variantSummary.coverageUnknown && (
-                    <span className="block text-neutral-400 mt-0.5">Coverage unknown — generated before coverage metadata was captured.</span>
-                )}
+                {variantSummary.hasMockup
+                    ? `Primary mockup ready${variantSummary.missing > 0
+                        ? ` · ${variantSummary.missing} optional ${variantSummary.missing === 1 ? 'variant' : 'variants'} available on demand`
+                        : ''}`
+                    : 'Not generated yet'}
             </DetailRow>
 
             {/* States */}
@@ -690,10 +726,18 @@ function CardDetails({
                 </DetailRow>
             )}
 
-            {/* Metadata / History / Actions — relocated from the old global
-                toolbar. Version history is the screen-inventory artifact's,
-                mockup history/regeneration the mockup artifact's. */}
-            {artifactControls && <ArtifactControlsBlock controls={artifactControls} />}
+            {/* Provenance — one quiet line (also notes user edits, whose chip
+                left the card face). */}
+            {(prdVersionLabel || item.isEdited) && (
+                <DetailRow label="Source">
+                    {prdVersionLabel ? `Generated from PRD ${prdVersionLabel}` : 'Generated'}
+                    {item.isEdited && (
+                        <span className="block text-neutral-400 mt-0.5">
+                            Edited — this screen carries your manual changes.
+                        </span>
+                    )}
+                </DetailRow>
+            )}
         </dl>
     );
 }
@@ -791,12 +835,6 @@ function formatTimestamp(ts: number): string {
         return '—';
     }
 }
-
-const HANDOFF_STATUS_LABELS: Record<ScreenImplementationHandoff['readiness']['status'], string> = {
-    ready: 'Ready',
-    review_recommended: 'Needs review',
-    blocked: 'Blocked',
-};
 
 function DetailRow({ label, children }: { label: string; children: React.ReactNode }) {
     return (

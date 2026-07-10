@@ -42,16 +42,28 @@ export function inlineWithFeatures(text: string, opts: Options): ReactNode {
         }
         const id = normalizeId(m[1]);
         const feature = opts.featuresById?.get(id);
+        const showName = opts.showFeatureName ?? true;
         segments.push(
             <FeatureReferenceChip
                 key={`f-${key++}-${id}`}
                 refToken={{ id, raw: m[0] }}
                 feature={feature}
                 onSelect={opts.onSelectFeature}
-                showName={opts.showFeatureName ?? true}
+                showName={showName}
             />
         );
         cursor = m.index + m[0].length;
+        // Generated text usually writes the feature name right after its token
+        // ("[f1] Image Ingestion"). The chip already renders the name, so
+        // swallow the duplicate from the prose — otherwise every feature
+        // appears twice.
+        if (showName && feature?.name) {
+            const rest = text.slice(cursor);
+            const ws = rest.match(/^\s*/)?.[0].length ?? 0;
+            if (rest.slice(ws).toLowerCase().startsWith(feature.name.toLowerCase())) {
+                cursor += ws + feature.name.length;
+            }
+        }
     }
     if (cursor < text.length) {
         const tail = text.slice(cursor);

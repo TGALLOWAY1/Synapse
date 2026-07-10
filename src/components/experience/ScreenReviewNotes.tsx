@@ -30,6 +30,14 @@ function riskKey(description: string): string {
     return description.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'risk';
 }
 
+/** Notes whose home is the Mockups tab (variant availability, legacy sync
+ * state) — never repeated as review notes. */
+const MOCKUPS_TAB_NOTE_IDS: ReadonlySet<string> = new Set([
+    'mockup_mobile_missing',
+    'mockup_state_variants_missing',
+    'mockup_freshness_unknown',
+]);
+
 const SEVERITY_DOT: Record<ScreenReviewIssueSeverity, string> = {
     blocking: 'bg-red-500',
     review: 'bg-amber-500',
@@ -73,21 +81,30 @@ export function ScreenReviewNotes({
     // the summary issue to avoid saying the same thing twice. Handoff-category
     // issues are dropped entirely: developer handoff moved to the Implementation
     // Plan artifact, so a "thin handoff" note is not resolvable from Screens and
-    // would only route to a dead-end editor. (The lib still emits it for the
-    // list-level handoff rollups; it just isn't a Screens review note.)
-    const noteIssues = issues.filter(i => i.category !== 'risks' && i.category !== 'handoff');
+    // would only route to a dead-end editor. Optional-variant availability and
+    // legacy sync-unknown notes belong to the Mockups tab, which already shows
+    // the same information in context — repeating them here inflated the review
+    // count on confirmed screens. (The lib still emits all of these for the
+    // list-level rollups; they just aren't Screens review notes.)
+    const noteIssues = issues.filter(i => i.category !== 'risks' && i.category !== 'handoff'
+        && !MOCKUPS_TAB_NOTE_IDS.has(i.id));
     const visibleIssues = noteIssues.filter(i => !dismissed.has(i.id));
     const addressedCount = noteIssues.length - visibleIssues.length;
 
     const openRisks = risks.filter(r => !riskResolutions[riskKey(r.description)]?.trim());
     const resolvedRisks = risks.filter(r => riskResolutions[riskKey(r.description)]?.trim());
 
-    const itemCount = visibleIssues.length + openRisks.length;
+    // The collapsed banner counts only items awaiting a decision (risks +
+    // review/blocking notes). Info notes stay visible once expanded but must
+    // not read as review pressure.
+    const actionableIssues = visibleIssues.filter(i => i.severity !== 'info');
+    const infoCount = visibleIssues.length - actionableIssues.length;
+    const itemCount = actionableIssues.length + openRisks.length;
     const [open, setOpen] = useState(false);
     const [showAddressed, setShowAddressed] = useState(false);
 
     // Nothing to review → a quiet, positive line rather than an empty panel.
-    if (itemCount === 0 && addressedCount === 0 && resolvedRisks.length === 0) {
+    if (itemCount === 0 && infoCount === 0 && addressedCount === 0 && resolvedRisks.length === 0) {
         return (
             <div className="flex items-center gap-1.5 text-[11px] text-neutral-400">
                 <Check size={12} className="text-emerald-500" aria-hidden />
@@ -103,12 +120,22 @@ export function ScreenReviewNotes({
                 onClick={() => setOpen(o => !o)}
                 className="w-full flex items-center justify-between gap-2 px-4 py-3 hover:bg-neutral-50 transition"
             >
-                <span className="flex items-center gap-2 min-w-0">
-                    <MessageSquare size={14} className="text-neutral-400 shrink-0" aria-hidden />
-                    <span className="text-sm font-medium text-neutral-800">Review notes</span>
+                {/* Stacks left-aligned on narrow screens instead of wrapping into
+                    a centered jumble; one row on sm+. */}
+                <span className="flex flex-col items-start gap-0.5 min-w-0 text-left sm:flex-row sm:items-center sm:gap-2">
+                    <span className="flex items-center gap-2">
+                        <MessageSquare size={14} className="text-neutral-400 shrink-0" aria-hidden />
+                        <span className="text-sm font-medium text-neutral-800">Review notes</span>
+                    </span>
                     {itemCount > 0 ? (
                         <span className="text-[11px] text-neutral-500">
-                            {itemCount} {itemCount === 1 ? 'item' : 'items'} may benefit from review
+                            {actionableIssues.length === 0
+                                ? `${openRisks.length} ${openRisks.length === 1 ? 'risk' : 'risks'} to resolve`
+                                : `${itemCount} ${itemCount === 1 ? 'item' : 'items'} to review`}
+                        </span>
+                    ) : infoCount > 0 ? (
+                        <span className="text-[11px] text-neutral-400">
+                            {infoCount} {infoCount === 1 ? 'note' : 'notes'}
                         </span>
                     ) : (
                         <span className="text-[11px] text-emerald-600">All notes addressed</span>

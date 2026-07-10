@@ -320,6 +320,42 @@ describe('buildScreenCoverageSummary', () => {
         expect(summary.message).toContain('All 1 screens');
     });
 
+    it('counts user-accepted (confirmed) screens as ready — the Screens UI has one sign-off action', () => {
+        // Regression for the audit's C1 contradiction: a fully confirmed
+        // project used to roll up as "0 of N ready" because only the legacy
+        // implementation_ready status (no longer settable from Screens) was
+        // counted.
+        const payload = makeMockupPayload([
+            { id: 'm1', name: 'Home Dashboard', sourceScreenId: 'scr-home' },
+        ]);
+        const flows = parseFlows(FLOWS_MD);
+        const index = buildScreenIndex(
+            makeInventory([readyScreen]),
+            flows,
+            payload,
+            { 'scr-home': { reviewStatus: 'accepted' } },
+        );
+        const readiness = buildReadinessIndex(index);
+        const summary = buildScreenCoverageSummary(index, readiness, flows, FEATURES);
+        expect(summary.ready).toBe(1);
+        expect(summary.readyWithWarnings).toBe(0);
+        expect(summary.message).toContain('All 1 screens are confirmed');
+    });
+
+    it('flags a user-accept over open warnings, never letting it read all-clear', () => {
+        const index = buildScreenIndex(
+            makeInventory([bareScreen]),
+            [],
+            null,
+            { 'scr-bare': { reviewStatus: 'accepted' } },
+        );
+        const readiness = buildReadinessIndex(index);
+        const summary = buildScreenCoverageSummary(index, readiness, null, undefined);
+        expect(summary.ready).toBe(1);
+        expect(summary.readyWithWarnings).toBe(1);
+        expect(summary.message).not.toContain('All 1 screens');
+    });
+
     it('does not report all-clear when a warned override is the only "ready" screen', () => {
         // A single bare screen (lots of derived gaps) marked implementation_ready
         // by the user. It counts as ready, but the derived warnings remain, so the

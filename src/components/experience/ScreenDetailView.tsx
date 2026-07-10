@@ -15,8 +15,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from 'react';
 import {
-    AlertTriangle, ArrowLeft, GitBranch, Image as ImageIcon, Link2, Loader2, Pencil,
-    RefreshCcw, RotateCcw, Workflow,
+    AlertTriangle, ArrowLeft, ArrowRight as ArrowRightIcon, GitBranch, Image as ImageIcon,
+    Link2, Loader2, Pencil, RefreshCcw, RotateCcw, Workflow,
 } from 'lucide-react';
 import type {
     Feature, GenerationStatus, MockupPayload, MockupSettings, ScreenPriority,
@@ -53,6 +53,7 @@ import { MockupScreenImage } from '../mockups/MockupScreenImage';
 import { FlowJourney } from '../renderers/userFlows/FlowJourney';
 import { StepCard } from '../renderers/userFlows/StepCard';
 import { FeatureDetailDrawer } from '../renderers/userFlows/FeatureDetailDrawer';
+import { inlineWithFeatures } from '../renderers/userFlows/inlineWithFeatures';
 import type { FeatureRef, FlowIssue } from '../renderers/userFlows/types';
 import { ScreenDetailTabs, type ScreenDetailTab } from './ScreenDetailTabs';
 
@@ -111,6 +112,9 @@ interface Props {
     unmatchedMockups?: Array<{ id: string; name: string }>;
     /** Persists a screenLinks repair binding the chosen mockup to this screen. */
     onLinkMockup?: (mockupScreenId: string) => void;
+    /** Opens the User Flows artifact (the flow document lives there — the Flow
+     * tab only shows this screen's slice of it). */
+    onOpenUserFlows?: () => void;
 }
 
 export function ScreenDetailView({
@@ -118,6 +122,7 @@ export function ScreenDetailView({
     onNavigateToScreen, availableScreenSlugs,
     screenImageContext, mockupContext, mobileRelevant, mockupStatus, onRetryMockup,
     features, onSaveScreenEdit, onAddToMockups, unmatchedMockups, onLinkMockup,
+    onOpenUserFlows,
 }: Props) {
     const { screen } = item;
     const priority = stylablePriority(screen.priority);
@@ -311,27 +316,6 @@ export function ScreenDetailView({
 
             {activeTab === 'overview' && (
                 <div className="space-y-3">
-                    {onSaveScreenEdit && !editing && (
-                        <div className="flex items-center justify-end gap-2">
-                            {item.isEdited && (
-                                <button
-                                    type="button"
-                                    onClick={() => onSaveScreenEdit(item.id, null)}
-                                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs text-neutral-600 hover:bg-neutral-100 rounded-md transition"
-                                    title="Discard your edits and show the generated content"
-                                >
-                                    <RotateCcw size={12} /> Reset to generated
-                                </button>
-                            )}
-                            <button
-                                type="button"
-                                onClick={() => setEditing(true)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                            >
-                                <Pencil size={12} /> Edit details
-                            </button>
-                        </div>
-                    )}
                     {onSaveScreenEdit && editing ? (
                         <ScreenEditForm
                             item={item}
@@ -350,6 +334,27 @@ export function ScreenDetailView({
                             imageStorageName={item.baseScreen.name}
                             primaryMockup={primaryMockup}
                             reviewNotes={reviewNotes}
+                            headerActions={onSaveScreenEdit ? (
+                                <>
+                                    {item.isEdited && (
+                                        <button
+                                            type="button"
+                                            onClick={() => onSaveScreenEdit(item.id, null)}
+                                            className="inline-flex items-center gap-1 text-[11px] text-neutral-500 hover:text-neutral-700 transition"
+                                            title="Discard your edits and show the generated content"
+                                        >
+                                            <RotateCcw size={11} /> Reset
+                                        </button>
+                                    )}
+                                    <button
+                                        type="button"
+                                        onClick={() => setEditing(true)}
+                                        className="inline-flex items-center gap-1 text-[11px] font-medium text-indigo-600 hover:text-indigo-800 transition"
+                                    >
+                                        <Pencil size={11} /> Edit details
+                                    </button>
+                                </>
+                            ) : undefined}
                         />
                     )}
                     {item.edit?.notes && !editing && (
@@ -368,6 +373,7 @@ export function ScreenDetailView({
                     onNavigateToScreen={onNavigateToScreen}
                     availableScreenSlugs={availableScreenSlugs}
                     features={features}
+                    onOpenUserFlows={onOpenUserFlows}
                 />
             )}
 
@@ -487,13 +493,14 @@ function ScreenEditForm({
 // --- Flow tab ---------------------------------------------------------------
 
 function FlowTab({
-    item, flowGroups, onNavigateToScreen, availableScreenSlugs, features,
+    item, flowGroups, onNavigateToScreen, availableScreenSlugs, features, onOpenUserFlows,
 }: {
     item: ScreenExperienceItem;
     flowGroups: ScreenFlowGroup[];
     onNavigateToScreen: (slug: string) => void;
     availableScreenSlugs: ReadonlySet<string>;
     features?: Feature[];
+    onOpenUserFlows?: () => void;
 }) {
     const featuresById = useMemo(() => {
         if (!features) return undefined;
@@ -559,7 +566,9 @@ function FlowTab({
                             </span>
                         </header>
                         {group.flow.goal && (
-                            <p className="text-xs text-neutral-500 mb-3">{group.flow.goal}</p>
+                            <p className="text-xs text-neutral-500 mb-3">
+                                {inlineWithFeatures(group.flow.goal, { featuresById, onSelectFeature })}
+                            </p>
                         )}
                         <div className="rounded-lg border border-indigo-100 bg-indigo-50/50 px-3 py-2.5 mb-3">
                             <div className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600 mb-1.5">
@@ -609,6 +618,11 @@ function FlowTab({
                                 </p>
                             )}
                         </div>
+                        {/* The journey (with this screen's steps highlighted) is
+                            the one rendering of the flow here — rows expand in
+                            place for full step detail. The old per-screen
+                            StepCard dump repeated the same steps a third time
+                            on this tab (audit H5). */}
                         <FlowJourney
                             flowIndex={group.flowIndex}
                             steps={group.flow.steps}
@@ -616,17 +630,31 @@ function FlowTab({
                             highlightedStepIndices={highlighted}
                             onNavigateToScreen={onNavigateToScreen}
                             availableScreenSlugs={availableScreenSlugs}
+                            renderStepDetail={(stepIndex) => {
+                                const step = group.flow.steps[stepIndex];
+                                if (!step) return null;
+                                return (
+                                    <StepCard
+                                        embedded
+                                        flowIndex={group.flowIndex}
+                                        step={step}
+                                        inlineIssues={inlineByStep.get(stepIndex) ?? []}
+                                        featuresById={featuresById}
+                                        onSelectFeature={onSelectFeature}
+                                    />
+                                );
+                            }}
                         />
-                        {group.steps.map(({ step, stepIndex }) => (
-                            <StepCard
-                                key={stepIndex}
-                                flowIndex={group.flowIndex}
-                                step={step}
-                                inlineIssues={inlineByStep.get(stepIndex) ?? []}
-                                featuresById={featuresById}
-                                onSelectFeature={onSelectFeature}
-                            />
-                        ))}
+                        {onOpenUserFlows && (
+                            <button
+                                type="button"
+                                onClick={onOpenUserFlows}
+                                className="inline-flex items-center gap-1 text-xs font-medium text-indigo-600 hover:text-indigo-800 transition"
+                            >
+                                Open this flow in User Flows
+                                <ArrowRightIcon size={12} aria-hidden />
+                            </button>
+                        )}
                     </section>
                 );
             })}
@@ -723,7 +751,6 @@ function MockupsTab({
             <MockupVariantsPanel
                 item={item}
                 variants={variants}
-                summary={variantSummary}
                 mockupContext={mockupContext}
                 onSetVariantStatus={setVariantStatus}
             />
@@ -812,28 +839,27 @@ function MockupsTab({
                 )}
             </div>
 
-            {/* Recommended variants discovery — even without a mockup, show what
-                this screen probably wants so missing viewports/states are visible. */}
+            {/* Suggested variants discovery — even without a mockup, show what
+                this screen could document. Neutral framing: an ungenerated
+                variant is an on-demand option, never a deficit (audit H1). */}
             {variantSummary.recommended > 0 && (
                 <div className="bg-white rounded-lg border border-neutral-200 p-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap mb-2">
                         <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">
-                            Recommended variants
+                            Suggested variants
                         </h4>
-                        <span className="text-[10px] text-neutral-400">
-                            {variantSummary.generated} of {variantSummary.recommended} generated
-                        </span>
+                        <span className="text-[10px] text-neutral-400">Optional</span>
                     </div>
                     <ul className="space-y-1 text-xs">
                         {variants.filter(v => v.required).map(v => (
                             <li key={v.id} className="flex items-center justify-between gap-2">
                                 <span className="text-neutral-700">{formatVariantLabel(v)}</span>
-                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${
+                                <span className={`text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 whitespace-nowrap ${
                                     v.status === 'missing'
-                                        ? 'text-amber-700 bg-amber-50 ring-amber-200'
+                                        ? 'text-neutral-500 bg-neutral-50 ring-neutral-200'
                                         : 'text-emerald-700 bg-emerald-50 ring-emerald-200'
                                 }`}>
-                                    {VARIANT_STATUS_LABELS[v.status]}
+                                    {v.status === 'missing' ? 'Available on demand' : VARIANT_STATUS_LABELS[v.status]}
                                 </span>
                             </li>
                         ))}

@@ -59,10 +59,11 @@ export function FlowSidebar({
 }: Props) {
     const grouped = groupFlows(flows);
     const selected = flows[selectedIndex];
-    // Desktop rail collapses to a narrow numbered strip so the flow list is
-    // one click away without permanently dominating horizontal space. A
-    // single-flow artifact never needs a switcher, so the rail hides entirely.
-    const [railExpanded, setRailExpanded] = useState(false);
+    // Desktop rail defaults to the NAMED flow list — the collapsed numbered
+    // strip read as decoration and hid flows 2..N (audit L4). Users can still
+    // collapse it to reclaim width. A single-flow artifact never needs a
+    // switcher, so the rail hides entirely.
+    const [railExpanded, setRailExpanded] = useState(true);
     const multiFlow = flows.length > 1;
 
     useEffect(() => {

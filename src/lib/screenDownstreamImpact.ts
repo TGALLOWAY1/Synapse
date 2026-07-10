@@ -255,7 +255,7 @@ export function buildScreenDownstreamImpact(input: DownstreamScreenInput): Scree
             kind: 'mockups',
             severity: 'info',
             title: 'Mockup freshness unknown',
-            description: 'Some older mockups do not include freshness metadata. Review visually if this screen is implementation-critical.',
+            description: 'Some mockups were generated before Synapse tracked PRD versions. Review them visually if this screen is implementation-critical.',
         });
     }
 
@@ -383,11 +383,15 @@ export function buildRecommendedNextActions(inputs: readonly DownstreamScreenInp
             push(`Review ${i.title} because it changed after sign-off.`);
         }
     }
-    // 7. Review unknown legacy mockups if implementation-critical (P0).
-    for (const i of inputs) {
-        if (i.isP0 && i.mockupFreshnessUnknown) {
-            push(`Review legacy mockups for ${i.title} if it is implementation-critical.`);
-        }
+    // 7. One deduplicated nudge for pre-version-tracking mockups on P0 screens
+    //    (a per-screen sentence here used to repeat itself four times in a row —
+    //    audit H3).
+    const unknownP0 = inputs.filter(i => i.isP0 && i.mockupFreshnessUnknown).map(i => i.title);
+    if (unknownP0.length > 0) {
+        const names = unknownP0.length <= 3
+            ? unknownP0.join(', ')
+            : `${unknownP0.slice(0, 3).join(', ')} and ${unknownP0.length - 3} more`;
+        push(`Visually confirm the older mockups on ${names} — they predate PRD version tracking.`);
     }
 
     return actions.slice(0, 5);
@@ -448,10 +452,11 @@ export function buildScreensPreflight(
         review.push('Implementation Plan review recommended once the P0 screens are current.');
     }
 
-    // Info — unknown legacy mockup freshness.
+    // Info — mockups that predate version tracking (plain provenance, not
+    // "freshness metadata" jargon).
     const unknownMockups = inputs.filter(i => i.mockupFreshnessUnknown).length;
     if (unknownMockups > 0) {
-        info.push(`${unknownMockups} ${plural(unknownMockups, 'screen')} have legacy mockups with no freshness metadata.`);
+        info.push(`${unknownMockups} ${plural(unknownMockups, 'screen')} have mockups generated before Synapse tracked PRD versions — their sync state can't be confirmed automatically.`);
     }
 
     // Export / snapshot caveats — Phase 3D: variant images travel in snapshots

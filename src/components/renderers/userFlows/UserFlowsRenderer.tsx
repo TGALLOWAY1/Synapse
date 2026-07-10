@@ -148,31 +148,31 @@ export function UserFlowsRenderer({
                     related={related}
                 />
 
+                {/* The journey is the SINGLE rendering of the flow's steps —
+                    rows expand in place for full step detail. The old
+                    "Step-by-step flow" section repeated every step as a second
+                    full card list on the same page (audit H5). */}
                 <FlowJourney
                     flowIndex={safeIndex}
                     steps={flow.steps}
                     issuesByStep={issuesByStep}
                     onNavigateToScreen={onNavigateToScreen}
                     availableScreenSlugs={availableScreenSlugs}
-                />
-
-                {flow.steps.length > 0 && (
-                    <section className="mb-4">
-                        <p className="text-[10px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">
-                            Step-by-step flow
-                        </p>
-                        {flow.steps.map(step => (
+                    renderStepDetail={(stepIndex) => {
+                        const step = flow.steps[stepIndex];
+                        if (!step) return null;
+                        return (
                             <StepCard
-                                key={step.index}
+                                embedded
                                 flowIndex={safeIndex}
                                 step={step}
-                                inlineIssues={inlineByStep.get(step.index) ?? []}
+                                inlineIssues={inlineByStep.get(stepIndex) ?? []}
                                 featuresById={featuresById}
                                 onSelectFeature={onSelectFeature}
                             />
-                        ))}
-                    </section>
-                )}
+                        );
+                    }}
+                />
 
                 {flow.steps.length === 0 && flow.rest && (
                     <section className="bg-white rounded-xl border border-neutral-200 p-4 mb-4 prose prose-sm prose-neutral max-w-none">

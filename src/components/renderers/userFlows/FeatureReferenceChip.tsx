@@ -25,8 +25,11 @@ export function FeatureReferenceChip({ refToken, feature, onSelect, showName = t
             data-testid={`feature-ref-${refToken.id}`}
         >
             <span className="font-mono uppercase">{idLabel}</span>
+            {/* Always visible — the surrounding prose's duplicate of the name is
+                swallowed by inlineWithFeatures, so hiding this on small screens
+                would leave mobile with a bare id. */}
             {showName && name && (
-                <span className="hidden sm:inline font-medium normal-case text-fuchsia-800">
+                <span className="font-medium normal-case text-fuchsia-800">
                     {name}
                 </span>
             )}

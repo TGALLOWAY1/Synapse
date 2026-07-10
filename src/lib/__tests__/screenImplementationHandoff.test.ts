@@ -263,6 +263,27 @@ describe('deriveHandoffReadiness', () => {
         expect(r.status).toBe('review_recommended');
     });
 
+    it('a missing optional mobile variant never downgrades readiness', () => {
+        // Optional viewport variants are on-demand documentation — they appear
+        // in the QA checklist but must not make an accepted screen read
+        // "review recommended" (audit H1/H2).
+        const r = deriveHandoffReadiness(readinessSignals({ mobileMissing: true }));
+        expect(r.status).toBe('ready');
+    });
+
+    it('unknown mockup freshness (legacy metadata) never downgrades readiness', () => {
+        // The caller maps unknown freshness to mockupFreshnessConcern: false —
+        // asserted end-to-end here via buildScreenImplementationHandoff.
+        const h = buildScreenImplementationHandoff(handoffInput({
+            reviewModel: reviewModel({ userStatus: 'accepted', freshness: 'current' }),
+            variants: [variant({
+                status: 'generated', source: 'legacy',
+                freshness: { status: 'unknown', reasons: [], severity: 'info', estimated: true },
+            })],
+        }));
+        expect(h.readiness.status).toBe('ready');
+    });
+
     it('15. missing data trace creates a review warning', () => {
         const r = deriveHandoffReadiness(readinessSignals({ dataDependenciesMissing: true }));
         expect(r.status).toBe('review_recommended');

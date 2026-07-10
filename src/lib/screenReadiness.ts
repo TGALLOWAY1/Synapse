@@ -39,11 +39,14 @@ export type ScreenReviewStatus =
     | 'accepted'
     | 'implementation_ready';
 
+// One review vocabulary across Screens (audit 4.2): a signed-off screen is
+// "Confirmed" — including the legacy implementation_ready status, which the
+// Screens UI no longer sets but must keep rendering.
 export const REVIEW_STATUS_LABELS: Record<ScreenReviewStatus, string> = {
     draft: 'Draft',
     needs_review: 'Needs review',
-    accepted: 'Accepted',
-    implementation_ready: 'Ready to build',
+    accepted: 'Confirmed',
+    implementation_ready: 'Confirmed',
 };
 
 export const VALID_REVIEW_STATUSES: ReadonlySet<string> = new Set([
@@ -705,8 +708,14 @@ export function parseDecisionBranches(decision: string): DecisionBranch[] {
     return branches;
 }
 
+// Also strips the generator's square-bracket wrappers ("[condition] →
+// [outcome]") so branches read as prose, not raw notation.
 const cleanBranchText = (text: string): string =>
-    text.trim().replace(/^\*+|\*+$/g, '').replace(/[.,;]+$/, '').trim();
+    text.trim()
+        .replace(/^\*+|\*+$/g, '')
+        .replace(/^\[/, '').replace(/\]$/, '')
+        .replace(/[.,;]+$/, '')
+        .trim();
 
 /** Flow decision steps referencing this screen whose decisions have NO
  * parseable branch outcome — the "Decision: user chooses path" smell. */
@@ -748,7 +757,12 @@ export interface ScreenCoverageSummary {
     mockups: { covered: number; total: number };
     /** Total risk entries across all screens (all unresolved — see gaps). */
     openRisks: number;
-    /** Screens whose (user-set or derived) status is implementation_ready. */
+    /** Screens that are CONFIRMED — user-signed-off (accepted /
+     * implementation_ready) or derived implementation_ready. The Screens UI
+     * has one sign-off action (Confirm), which maps to `accepted`, so the
+     * rollup counts sign-off — not the legacy `implementation_ready` status
+     * the UI no longer sets (counting only that read "0 ready" on fully
+     * confirmed projects). */
     ready: number;
     /** Subset of `ready` that was user-overridden while derived review-trigger
      * warnings remain (accepted_with_warnings) — these must never let the
@@ -778,15 +792,15 @@ function buildMessage(
     topGapKinds: ScreenGapKind[],
 ): string {
     if (total === 0) return 'No screens yet.';
-    // "Ready" alone isn't clean if a user marked a screen ready over unresolved
-    // derived warnings — those must still be surfaced, never hidden behind an
-    // all-clear message.
+    // "Confirmed" alone isn't clean if a user confirmed a screen over
+    // unresolved derived warnings — those must still be surfaced, never hidden
+    // behind an all-clear message.
     const cleanReady = ready - readyWithWarnings;
     if (cleanReady === total) {
-        return `All ${total} screens pass the derived readiness checks. Review them once more before implementation.`;
+        return `All ${total} screens are confirmed and pass the derived checks.`;
     }
     const parts: string[] = [
-        `${cleanReady} of ${total} screens pass the derived readiness checks.`,
+        `${cleanReady} of ${total} screens confirmed.`,
     ];
     if (needsReview > 0) {
         const gapText = topGapKinds
@@ -800,7 +814,7 @@ function buildMessage(
     }
     if (readyWithWarnings > 0) {
         parts.push(
-            `${readyWithWarnings} marked ready ${readyWithWarnings === 1 ? 'still has' : 'still have'} open warnings.`,
+            `${readyWithWarnings} confirmed ${readyWithWarnings === 1 ? 'screen' : 'screens'} still ${readyWithWarnings === 1 ? 'has' : 'have'} open warnings.`,
         );
     }
     return parts.join(' ');
@@ -896,10 +910,10 @@ export function buildScreenCoverageSummary(
     for (const item of items) {
         const r = readiness.get(item.id);
         if (!r) continue;
-        if (r.status === 'implementation_ready') {
+        if (r.status === 'implementation_ready' || r.status === 'accepted') {
             ready += 1;
-            // A user override that still carries review-trigger warnings is
-            // "ready" only because a human said so — it must not make the
+            // A user sign-off that still carries review-trigger warnings is
+            // "confirmed" only because a human said so — it must not make the
             // artifact-level rollup read as all-clear.
             if (r.gaps.some(g => g.kind === 'accepted_with_warnings')) readyWithWarnings += 1;
         }

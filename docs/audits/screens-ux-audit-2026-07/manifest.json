@@ -1,0 +1,218 @@
+[
+  {
+    "file": "10-screens-list-desktop.png",
+    "fullHeightPx": 1593,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "desktop",
+    "group": "screens-overview",
+    "state": "Screens list, default (grouped by flow), collapsed details",
+    "interaction": "Assets stage \u2192 Screens sidebar row"
+  },
+  {
+    "file": "10-screens-list-mobile.png",
+    "fullHeightPx": 2012,
+    "segments": 3,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "mobile",
+    "group": "screens-overview",
+    "state": "Screens list, default (grouped by flow), collapsed details",
+    "interaction": "Assets stage \u2192 Screens sidebar row"
+  },
+  {
+    "file": "11-screens-list-card-details-desktop.png",
+    "fullHeightPx": 1910,
+    "segments": 3,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "desktop",
+    "group": "screens-overview",
+    "state": "Screens list with first two cards' \"Show details\" expanded",
+    "interaction": "Clicked \"Show details\" on first two cards"
+  },
+  {
+    "file": "11-screens-list-card-details-mobile.png",
+    "fullHeightPx": 2778,
+    "segments": 4,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "mobile",
+    "group": "screens-overview",
+    "state": "Screens list with first two cards' \"Show details\" expanded",
+    "interaction": "Clicked \"Show details\" on first two cards"
+  },
+  {
+    "file": "12-screens-list-readiness-metadata-desktop.png",
+    "fullHeightPx": 3075,
+    "segments": 4,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "desktop",
+    "group": "review-risk",
+    "state": "Screens list with \"Project readiness & metadata\" section expanded (coverage, preflight, handoff export)",
+    "interaction": "Expanded the collapsed metadata section at the bottom of the list"
+  },
+  {
+    "file": "12-screens-list-readiness-metadata-mobile.png",
+    "fullHeightPx": 4357,
+    "segments": 6,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "mobile",
+    "group": "review-risk",
+    "state": "Screens list with \"Project readiness & metadata\" section expanded (coverage, preflight, handoff export)",
+    "interaction": "Expanded the collapsed metadata section at the bottom of the list"
+  },
+  {
+    "file": "20-user-flows-desktop.png",
+    "fullHeightPx": 3216,
+    "segments": 4,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "desktop",
+    "group": "flows",
+    "state": "User Flows artifact (flow journey view), default state",
+    "interaction": "Selected User Flows in artifact nav"
+  },
+  {
+    "file": "20-user-flows-mobile.png",
+    "fullHeightPx": 4313,
+    "segments": 6,
+    "route": "/p/00000000-0000-4000-8000-000000000d01",
+    "viewport": "mobile",
+    "group": "flows",
+    "state": "User Flows artifact (flow journey view), default state",
+    "interaction": "Selected User Flows in artifact nav"
+  },
+  {
+    "file": "30-detail-flow-desktop.png",
+    "fullHeightPx": 4305,
+    "segments": 5,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library&screenTab=flow",
+    "viewport": "desktop",
+    "group": "flows",
+    "state": "Screen Detail \u203a Flow \u2014 \"Infographic Library\" (has generated primary mockup)",
+    "interaction": "Clicked the Flow tab"
+  },
+  {
+    "file": "30-detail-flow-mobile.png",
+    "fullHeightPx": 5250,
+    "segments": 7,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library&screenTab=flow",
+    "viewport": "mobile",
+    "group": "flows",
+    "state": "Screen Detail \u203a Flow \u2014 \"Infographic Library\" (has generated primary mockup)",
+    "interaction": "Clicked the Flow tab"
+  },
+  {
+    "file": "30-detail-mockups-desktop.png",
+    "fullHeightPx": 1804,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library&screenTab=mockups",
+    "viewport": "desktop",
+    "group": "mockups",
+    "state": "Screen Detail \u203a Mockups \u2014 \"Infographic Library\" (has generated primary mockup)",
+    "interaction": "Clicked the Mockups tab"
+  },
+  {
+    "file": "30-detail-mockups-mobile.png",
+    "fullHeightPx": 1684,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library&screenTab=mockups",
+    "viewport": "mobile",
+    "group": "mockups",
+    "state": "Screen Detail \u203a Mockups \u2014 \"Infographic Library\" (has generated primary mockup)",
+    "interaction": "Clicked the Mockups tab"
+  },
+  {
+    "file": "30-detail-overview-desktop.png",
+    "fullHeightPx": 1864,
+    "segments": 3,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library",
+    "viewport": "desktop",
+    "group": "screen-detail",
+    "state": "Screen Detail \u203a Overview \u2014 \"Infographic Library\" (has generated primary mockup)",
+    "interaction": "Clicked the \"Infographic Library\" card"
+  },
+  {
+    "file": "30-detail-overview-mobile.png",
+    "fullHeightPx": 1672,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library",
+    "viewport": "mobile",
+    "group": "screen-detail",
+    "state": "Screen Detail \u203a Overview \u2014 \"Infographic Library\" (has generated primary mockup)",
+    "interaction": "Clicked the \"Infographic Library\" card"
+  },
+  {
+    "file": "31-detail-overview-expanded-desktop.png",
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library",
+    "viewport": "desktop",
+    "group": "review-risk",
+    "state": "Screen Detail \u203a Overview with Review notes expanded (2 info notes + 2 risks with resolution boxes)",
+    "interaction": "Clicked the Review notes disclosure header"
+  },
+  {
+    "file": "31-detail-overview-expanded-mobile.png",
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-infographic-library",
+    "viewport": "mobile",
+    "group": "review-risk",
+    "state": "Screen Detail \u203a Overview with Review notes expanded (2 info notes + 2 risks with resolution boxes)",
+    "interaction": "Clicked the Review notes disclosure header"
+  },
+  {
+    "file": "34-detail-flow-desktop.png",
+    "fullHeightPx": 1519,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-ingestion-workspace&screenTab=flow",
+    "viewport": "desktop",
+    "group": "flows",
+    "state": "Screen Detail \u203a Flow \u2014 \"Ingestion Workspace\" (additional representative screen)",
+    "interaction": "Clicked the Flow tab"
+  },
+  {
+    "file": "34-detail-flow-mobile.png",
+    "fullHeightPx": 1976,
+    "segments": 3,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-ingestion-workspace&screenTab=flow",
+    "viewport": "mobile",
+    "group": "flows",
+    "state": "Screen Detail \u203a Flow \u2014 \"Ingestion Workspace\" (additional representative screen)",
+    "interaction": "Clicked the Flow tab"
+  },
+  {
+    "file": "34-detail-mockups-desktop.png",
+    "fullHeightPx": 1804,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-ingestion-workspace&screenTab=mockups",
+    "viewport": "desktop",
+    "group": "mockups",
+    "state": "Screen Detail \u203a Mockups \u2014 \"Ingestion Workspace\" (additional representative screen)",
+    "interaction": "Clicked the Mockups tab"
+  },
+  {
+    "file": "34-detail-mockups-mobile.png",
+    "fullHeightPx": 1652,
+    "segments": 2,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-ingestion-workspace&screenTab=mockups",
+    "viewport": "mobile",
+    "group": "mockups",
+    "state": "Screen Detail \u203a Mockups \u2014 \"Ingestion Workspace\" (additional representative screen)",
+    "interaction": "Clicked the Mockups tab"
+  },
+  {
+    "file": "34-detail-overview-desktop.png",
+    "fullHeightPx": 1886,
+    "segments": 3,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-ingestion-workspace",
+    "viewport": "desktop",
+    "group": "screen-detail",
+    "state": "Screen Detail \u203a Overview \u2014 \"Ingestion Workspace\" (additional representative screen)",
+    "interaction": "Clicked the \"Ingestion Workspace\" card"
+  },
+  {
+    "file": "34-detail-overview-mobile.png",
+    "fullHeightPx": 1694,
+    "segments": 3,
+    "route": "/p/00000000-0000-4000-8000-000000000d01?screen=scr-ingestion-workspace",
+    "viewport": "mobile",
+    "group": "screen-detail",
+    "state": "Screen Detail \u203a Overview \u2014 \"Ingestion Workspace\" (additional representative screen)",
+    "interaction": "Clicked the \"Ingestion Workspace\" card"
+  }
+]

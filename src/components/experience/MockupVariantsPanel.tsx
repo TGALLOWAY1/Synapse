@@ -29,7 +29,6 @@ import {
     type DerivedMockupVariant,
     type MockupVariantStatus,
     type MockupViewport,
-    type ScreenMockupVariantSummary,
 } from '../../lib/mockupVariants';
 import {
     buildVariantSourceSignature,
@@ -50,9 +49,11 @@ const VIEWPORT_ICON: Record<MockupViewport, typeof Monitor> = {
     tablet: Tablet,
 };
 
+// 'missing' is neutral, never amber — an optional variant that hasn't been
+// generated is an available option, not a failure (audit H1).
 const STATUS_PILL: Record<MockupVariantStatus, string> = {
     generated: 'text-emerald-700 bg-emerald-50 ring-emerald-200',
-    missing: 'text-amber-700 bg-amber-50 ring-amber-200',
+    missing: 'text-neutral-500 bg-neutral-50 ring-neutral-200',
     accepted: 'text-sky-700 bg-sky-50 ring-sky-200',
     not_needed: 'text-neutral-500 bg-neutral-100 ring-neutral-200',
 };
@@ -84,7 +85,9 @@ const PRD_SYNC_LABELS: Record<MockupVariantFreshnessStatus, string> = {
     current: 'In sync with PRD',
     possibly_stale: 'May need regeneration',
     stale: 'Needs regeneration',
-    unknown: 'PRD sync unknown',
+    // Plain provenance, not jargon: an older mockup simply predates version
+    // tracking — nothing is wrong with it (audit H3/4.1).
+    unknown: 'Generated before version tracking',
 };
 
 /** Compact PRD-sync badge for a generated variant (nothing shown for a
@@ -102,7 +105,6 @@ function FreshnessBadge({ status }: { status: MockupVariantFreshnessStatus }) {
 interface Props {
     item: ScreenExperienceItem;
     variants: DerivedMockupVariant[];
-    summary: ScreenMockupVariantSummary;
     mockupContext: ScreenDetailMockupContext;
     /** Persists a per-variant status onto the screen edit overlay (null clears
      * it back to the tracked/derived status). */
@@ -147,7 +149,7 @@ function buildDefaultSidecarManifest(
 }
 
 export function MockupVariantsPanel({
-    item, variants, summary, mockupContext, onSetVariantStatus,
+    item, variants, mockupContext, onSetVariantStatus,
 }: Props) {
     const [selectedId, setSelectedId] = useState<string>(() => {
         const generated = variants.find(v => v.status === 'generated');
@@ -160,11 +162,19 @@ export function MockupVariantsPanel({
         [item.baseScreen, item.mockupScreen],
     );
 
-    const summaryParts: string[] = [
-        `${summary.generated} of ${summary.recommended} recommended ${summary.recommended === 1 ? 'variant' : 'variants'} generated`,
-    ];
-    if (summary.missing > 0) summaryParts.push(`${summary.missing} missing`);
-    if (summary.coverageUnknown) summaryParts.push('coverage unknown for legacy mockup');
+    // Optional variants are framed as available options, never a deficit —
+    // no "N missing" counts, no amber (audit H1).
+    const hasPrimary = variants.some(v => v.id === 'default');
+    const primaryVariants = variants.filter(v => v.id === 'default');
+    const optionalVariants = variants.filter(v => v.id !== 'default');
+    const optionalAvailable = optionalVariants.filter(v => v.status === 'missing').length;
+    const summaryParts: string[] = [];
+    if (hasPrimary) summaryParts.push('Primary mockup');
+    if (optionalVariants.length > 0) {
+        summaryParts.push(optionalAvailable > 0
+            ? `${optionalAvailable} optional ${optionalAvailable === 1 ? 'variant' : 'variants'} available on demand`
+            : `${optionalVariants.length} optional ${optionalVariants.length === 1 ? 'variant' : 'variants'}`);
+    }
 
     return (
         <div className="space-y-3">
@@ -174,18 +184,15 @@ export function MockupVariantsPanel({
                 <p className="text-xs text-neutral-500 mt-0.5">
                     Generated product screen previews mapped to this screen&rsquo;s states and viewports.
                 </p>
-                <p className="mt-1.5 text-[11px] text-neutral-500">{summaryParts.join(' · ')}</p>
-                <p className="mt-1 inline-flex items-start gap-1 text-[11px] text-neutral-400">
-                    <Info size={10} className="shrink-0 mt-px" aria-hidden />
-                    Generated variant images are included in project snapshots, so they travel with a
-                    saved snapshot and can be restored on another device. They don&rsquo;t yet sync
-                    automatically across devices.
-                </p>
+                {summaryParts.length > 0 && (
+                    <p className="mt-1.5 text-[11px] text-neutral-500">{summaryParts.join(' · ')}</p>
+                )}
             </div>
 
-            {/* Variant gallery — pills, selectable */}
+            {/* Variant gallery — primary first, optional variants grouped and
+                labeled as on-demand rather than "missing". */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
-                {variants.map(v => (
+                {primaryVariants.map(v => (
                     <VariantCard
                         key={v.id}
                         variant={v}
@@ -194,6 +201,23 @@ export function MockupVariantsPanel({
                     />
                 ))}
             </div>
+            {optionalVariants.length > 0 && (
+                <div>
+                    <h4 className="text-[11px] font-semibold uppercase tracking-wide text-neutral-400 mb-1.5">
+                        Optional variants — generate on demand
+                    </h4>
+                    <div className="grid grid-cols-1 sm:grid-cols-2 gap-2">
+                        {optionalVariants.map(v => (
+                            <VariantCard
+                                key={v.id}
+                                variant={v}
+                                selected={v.id === selected?.id}
+                                onSelect={() => setSelectedId(v.id)}
+                            />
+                        ))}
+                    </div>
+                </div>
+            )}
 
             {/* Selected variant detail */}
             {selected && (
@@ -241,11 +265,6 @@ function VariantCard({
                 </span>
             </div>
             <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[10px]">
-                {variant.required && variant.status === 'missing' && variant.id !== 'default' && (
-                    <span className="uppercase tracking-wide text-violet-700 bg-violet-50 ring-1 ring-violet-100 px-1.5 py-px rounded">
-                        Recommended
-                    </span>
-                )}
                 {variant.status === 'generated' && (
                     <span className={COVERAGE_TONE[variant.coverageStatus]}>
                         Coverage: {COVERAGE_STATUS_LABELS[variant.coverageStatus].toLowerCase()}
@@ -255,7 +274,7 @@ function VariantCard({
                     <FreshnessBadge status={variant.freshness.status} />
                 )}
                 {variant.status === 'missing' && (
-                    <span className="text-neutral-400">Not generated yet</span>
+                    <span className="text-neutral-400">Available on demand</span>
                 )}
             </div>
         </button>
@@ -478,15 +497,19 @@ function VariantDetail({
                 />
             )}
 
-            {/* Storage clarity — per-variant images are saved on this device and
-                now travel in project snapshots (the legacy default image path is
-                unchanged, so only the generated variant images carry this note). */}
+            {/* Storage clarity — tucked behind a disclosure; persistence trivia
+                shouldn't sit in the primary view (audit M6). */}
             {variant.source === 'variant' && (
-                <p className="text-[11px] text-neutral-400 flex items-start gap-1">
-                    <Info size={10} className="shrink-0 mt-px" aria-hidden />
-                    Storage: Saved on this device and included in project snapshots — restorable on
-                    another device from a saved snapshot.
-                </p>
+                <details className="text-[11px] text-neutral-400">
+                    <summary className="inline-flex items-center gap-1 cursor-pointer list-none hover:text-neutral-600">
+                        <Info size={10} className="shrink-0" aria-hidden /> Where is this image stored?
+                    </summary>
+                    <p className="mt-1">
+                        Saved on this device and included in project snapshots — restorable on another
+                        device from a saved snapshot. Variant images don&rsquo;t yet sync automatically
+                        across devices.
+                    </p>
+                </details>
             )}
 
             {/* Notes */}
@@ -762,18 +785,20 @@ function SpecCoverageSection({
                     <ul className="space-y-1 text-xs">
                         {specCoverage.map((row, i) => (
                             <li key={i} className="flex items-center justify-between gap-2">
-                                <span className="text-neutral-700">{row.element}</span>
+                                <span className="text-neutral-700 min-w-0">{row.element}</span>
+                                {/* nowrap — these used to wrap mid-phrase ("In mockup / spec")
+                                    on narrow screens. */}
                                 {row.status === 'in_spec' ? (
-                                    <span className="text-emerald-700 font-medium">In mockup spec</span>
+                                    <span className="text-emerald-700 font-medium whitespace-nowrap shrink-0">In spec</span>
                                 ) : (
-                                    <span className="text-amber-700">Not in mockup spec</span>
+                                    <span className="text-amber-700 whitespace-nowrap shrink-0">Not in spec</span>
                                 )}
                             </li>
                         ))}
                     </ul>
                     <p className="text-[11px] text-neutral-400 mt-2">
                         Compared against the mockup&rsquo;s generation spec, not the rendered image —
-                        treat &ldquo;Not in mockup spec&rdquo; as a prompt to double-check the visual.
+                        treat &ldquo;Not in spec&rdquo; as a prompt to double-check the visual.
                     </p>
                 </>
             )}
@@ -781,6 +806,12 @@ function SpecCoverageSection({
     );
 }
 
+/**
+ * Per-variant actions, reduced to skip/undo. "Mark accepted" was removed:
+ * Confirm Screen is the ONE acceptance concept in Screens, and a second
+ * per-variant acceptance multiplied the review model (audit M5). Legacy
+ * 'accepted' overlay values still render via their status pill.
+ */
 function VariantActions({
     variant, onSetVariantStatus,
 }: {
@@ -788,7 +819,6 @@ function VariantActions({
     onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
 }) {
     if (!onSetVariantStatus) return null;
-    const btn = 'text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition';
     if (variant.userSet) {
         return (
             <button
@@ -800,38 +830,16 @@ function VariantActions({
             </button>
         );
     }
-    if (variant.status === 'generated') {
+    if (variant.status === 'missing') {
         return (
             <button
                 type="button"
-                onClick={() => onSetVariantStatus(variant.id, 'accepted')}
-                className={`${btn} shrink-0 inline-flex items-center gap-1`}
-                title="Confirm this variant looks good"
+                onClick={() => onSetVariantStatus(variant.id, 'not_needed')}
+                className="text-[10px] px-2 py-0.5 rounded bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition shrink-0"
+                title="Skip this optional variant"
             >
-                <CheckCircle2 size={11} aria-hidden /> Mark accepted
+                Not needed
             </button>
-        );
-    }
-    if (variant.status === 'missing') {
-        return (
-            <div className="flex items-center gap-1.5 shrink-0">
-                <button
-                    type="button"
-                    onClick={() => onSetVariantStatus(variant.id, 'accepted')}
-                    className={btn}
-                    title="Confirm this variant is covered — e.g. you uploaded or verified it outside the generated set"
-                >
-                    Mark accepted
-                </button>
-                <button
-                    type="button"
-                    onClick={() => onSetVariantStatus(variant.id, 'not_needed')}
-                    className={btn}
-                    title="Skip this recommended variant"
-                >
-                    Not needed
-                </button>
-            </div>
         );
     }
     return null;
