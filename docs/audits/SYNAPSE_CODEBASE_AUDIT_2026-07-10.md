@@ -6,6 +6,17 @@
 **Method:** documentation and source review, clean dependency installation, lint/test/build validation, manual browser journeys at desktop and mobile widths, screenshot review, and source tracing from observed behavior  
 **Constraint:** audit only. No application code was changed.
 
+## Resolution log
+
+The sections below are the point-in-time audit record and are left as written.
+Fixes applied after the audit are tracked here and in a **Resolution** block
+appended to each affected finding.
+
+| Finding | Status | Resolved by | Summary |
+| --- | --- | --- | --- |
+| SYN-002 | ✅ Resolved (2026-07-10) | PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya` | Demo hydration moved to the route boundary: `DemoRouteGate` wraps `ProjectWorkspace` on `/p/<DEMO_PROJECT_ID>` and runs `loadDemoProject()` before mount; entry buttons navigate only. See the Resolution block under SYN-002. |
+| All other findings | Open | — | — |
+
 ## 1. Executive summary
 
 Synapse is healthier than its size and domain complexity initially suggest. A clean install produces a passing TypeScript production build, a clean lint run, and **1,495 passing Vitest tests across 162 files**. The codebase has several strong foundations: project data is namespaced per user, cloud sync is local-first with explicit revision-conflict handling, interrupted generations are reconciled after reload, artifact generation is dependency-aware, partial PRD output is not silently treated as complete, and server APIs consistently enforce session ownership. The live Data Model and Implementation Plan views were visually strong on both desktop and mobile, and the deployed journey produced no browser-console errors during the audit.
@@ -195,6 +206,8 @@ Add an E2E test that opens the demo anonymously, attempts representative mutatio
 
 ## [SYN-002] A cold direct demo URL does not hydrate the demo project
 
+**Status: ✅ Resolved — 2026-07-10, PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267) (`fix(demo): hydrate public demo at route boundary`, commit `59a92d5`). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -234,6 +247,73 @@ Coordinate with SYN-001 so hydration can reset/validate the demo baseline. Avoid
 **Suggested validation**
 
 Playwright tests in clean contexts for direct link, cached refresh, unavailable pointer, retry, and browser back/forward.
+
+**Resolution (2026-07-10 — PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya`)**
+
+Implemented exactly along the recommended shape — a route-level loader that owns
+the complete initialization contract, with no second demo store and no
+duplicated snapshot-restoration logic:
+
+- **`src/components/DemoRouteGate.tsx` (new).** `App.tsx`'s `ProjectRoute` now
+  wraps the demo branch in `DemoRouteGate` (and is exported for route tests).
+  The gate calls the existing store action `loadDemoProject()` and mounts
+  `ProjectWorkspace` **only after** hydration reports the demo available, so
+  the workspace's missing-project recovery path (`ProjectWorkspace.tsx`
+  "Project not found" toast + bounce to `/`) can no longer fire for the demo.
+  While restoring it renders an accessible `role="status"` "Loading demo
+  project…" state; on failure (`available: false` with no cache, or a thrown
+  restore error) it renders a `role="alert"` "Unable to load demo" state with
+  **Retry** (re-enters the loading phase and re-runs hydration) and **Return
+  home** (Link to `/`) — never a silent redirect.
+- **`src/lib/demoRouteHydration.ts` (new).** A module-level single-flight
+  wrapper (`hydrateDemoProject()`) so React Strict Mode's double effect
+  invocation shares ONE `loadDemoProject()` pass — the audit's "avoid double
+  fetches under Strict Mode" risk. The in-flight promise clears on settle, so
+  Retry and later remounts (back/forward) run a fresh pass; the store's
+  pointer probe keeps a repeat pass cheap when the cache is current.
+- **Namespace-switch guard (new behavior, discovered during the fix).** The
+  gate waits for the auth session to settle (`authStore.loading === false`)
+  before hydrating: `authStore.setUser` → `applyProjectUser` wipes and
+  rehydrates the project store's localStorage namespace, which would discard a
+  demo restored mid-transition. The old button-only flow never raced this
+  (buttons were clickable only after session resolution); a direct URL load
+  does.
+- **Entry buttons are navigation-only.** The `LoginPage`/`HomePage` demo
+  button handlers no longer call `loadDemoProject()` (their spinner state and
+  failure toasts were removed); they `navigate('/p/<DEMO_PROJECT_ID>')` and
+  the route loader is the single source of truth.
+- **Cache/freshness policy is untouched.** All decisions stay inside
+  `loadDemoProject()` (`src/store/slices/projectSlice.ts`): pointer match →
+  reuse cache; missing cache → fetch + restore; stale pointer → re-fetch and
+  overwrite; failed fetch with a known-valid cache → keep serving the cache.
+- **Docs.** `CLAUDE.md`'s demo section now documents the route-owned rule
+  ("do not re-add `loadDemoProject()` calls to button handlers").
+
+*Acceptance criteria:* all three met — clean-browser direct URL loads the
+demo; refresh works with and without a cache; failure produces the explicit
+retry/return state instead of a bounce.
+
+*Validation:* committed **Vitest** suites rather than a committed Playwright
+suite (the audit's Batch 1 brief excluded adding an application-wide
+Playwright suite): `src/components/__tests__/DemoRouteGate.test.tsx` (cold
+load, valid cache, stale pointer, snapshot failure, restore-throw,
+pointer-probe failure over cache, Retry, Return home, Strict Mode
+single-pass, auth-settle guard) and
+`src/components/__tests__/DemoEntryRouting.test.tsx` (route-boundary
+hydration, ordinary-project routing signed in/out, Login/Home button
+navigation). The suggested browser scenarios were additionally verified with
+an ad-hoc Playwright script against the dev server (API mocked at the network
+layer): direct link, warm refresh, cleared-storage refresh, stale pointer,
+failure → Retry → Return home, both entry pages, back/forward, desktop +
+390 px mobile — 22/22 checks. `npm run lint` / `npm test` (1,533 tests) /
+`npm run build` all passed.
+
+*Deliberately out of scope (still open):* the SYN-001 read-only/reset policy
+(the gate is the natural place to later validate/reset the demo baseline —
+the coordination point this finding's "Dependencies and risks" anticipated);
+the SYN-006 committed E2E demo contract; SYN-003 image-completeness handling
+(an `imagesComplete: false` partial restore still opens by design, and the
+gate surfaces no indicator for it — recorded as a follow-up in PR #267).
 
 ## [SYN-003] Mockup “Generated” status does not require an actual image
 
@@ -941,7 +1021,7 @@ Demo-only checks appear in `App`, project/image sync, design setup, project work
 ### Recommended first fixes
 
 1. Enforce read-only persistent state and add deterministic reset (SYN-001).
-2. Hydrate at the route boundary (SYN-002).
+2. ~~Hydrate at the route boundary (SYN-002).~~ ✅ Done — PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267) (`DemoRouteGate`; see the SYN-002 Resolution block).
 3. Reject/preserve against incomplete pinned image manifests and make status image-aware (SYN-003).
 4. Add the small E2E demo contract (SYN-006).
 5. Then align the tour/demo dataset and polish the first-screen path (SYN-008).
