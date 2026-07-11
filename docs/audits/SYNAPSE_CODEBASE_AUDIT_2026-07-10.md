@@ -14,8 +14,9 @@ appended to each affected finding.
 
 | Finding | Status | Resolved by | Summary |
 | --- | --- | --- | --- |
+| SYN-001 | 🟡 Partially resolved (2026-07-10) | PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269), commits `9730d65`, `63887ce`, `fdd3aed`, branch `fix/demo-read-only-capabilities` | The public demo now has one centralized read-only capability policy enforced in UI and durable mutation boundaries. Persistent PRD, artifact, review, generation, design, image, task, workflow, and export-state changes are denied while exploration remains available. **Reset Demo and baseline restoration remain open** as the intentionally deferred portion of SYN-001. See the Resolution block under SYN-001. |
 | SYN-002 | ✅ Resolved (2026-07-10) | PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya` | Demo hydration moved to the route boundary: `DemoRouteGate` wraps `ProjectWorkspace` on `/p/<DEMO_PROJECT_ID>` and runs `loadDemoProject()` before mount; entry buttons navigate only. See the Resolution block under SYN-002. |
-| All other findings | Open | — | — |
+| SYN-003–SYN-018 | Open | — | — |
 
 ## 1. Executive summary
 
@@ -163,6 +164,8 @@ No P0 finding was supported by the evidence gathered.
 
 ## [SYN-001] The public demo is mutable and a destructive state change survives refresh
 
+**Status: 🟡 Partially resolved — 2026-07-10, PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269) (`fix/demo-read-only-capabilities`; commits `9730d65`, `63887ce`, `fdd3aed`). Persistent mutation prevention is complete; Reset Demo remains open. See the Resolution block below.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -203,6 +206,94 @@ Inventory mutation entry points beyond `ProjectWorkspace`, including metadata ov
 **Suggested validation**
 
 Add an E2E test that opens the demo anonymously, attempts representative mutations, reloads, and asserts the original final/version/artifact state. Test reset with a deliberately corrupted local demo cache.
+
+**Resolution — read-only capability boundary (2026-07-10 — PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269), branch `fix/demo-read-only-capabilities`)**
+
+Implemented the mutation-prevention portion of this finding without creating a
+demo-only workspace or second store:
+
+- **One authoritative capability model.** `src/lib/projectCapabilities.ts`
+  defines `ProjectCapabilities`, `getProjectCapabilities`, and the reusable
+  `assertProjectCapability` domain guard. `DEMO_PROJECT_ID` may explore but is
+  denied every durable capability: project/PRD edits, finality, artifact edits,
+  review state, generation, Design System management, workflow persistence,
+  and external export state. Missing/unknown projects fail conservatively.
+  `src/hooks/useProjectCapabilities.ts` is the React adapter; components do not
+  accumulate new raw demo-id mutation checks.
+- **Project and PRD boundaries.** Project deletion/stage persistence, Design
+  System setup, spine text/structured edits, regeneration, finality, version
+  restoration, product metadata, preflight state, safety/generation results,
+  and branch create/reply/merge/delete actions assert capabilities before
+  writing. Demo Project/Assets/History navigation uses component-local state,
+  preserving exploration without persisting `currentStage`.
+- **Artifact and review boundaries.** Artifact create/update/delete, version
+  creation/preference/restoration, mark-current confirmation, metadata overlays,
+  feedback status, screen edits, prompt edits, review/checklist/confirmation
+  state, warning dismissals, relinks, plan progress, and mockup coverage overlays
+  are rejected before changing durable state.
+- **Generation and image boundaries.** `artifactJobController.startAll`,
+  `regenerateSlots`, `retrySlot`, and `resumeIfNeeded` reject the demo before a
+  job or paid request starts. The legacy mockup image store, variant image store,
+  coverage-sidecar writer, Screen Inventory upload writer, and preferred-upload
+  writer also assert capabilities before network or IndexedDB writes.
+- **Tasks, workflow, and external-export state.** Task extraction/save, status,
+  removal, recorded GitHub/Linear/Markdown export references, and persisted
+  orchestration metrics are guarded. The Convert-to-Tasks entry point is absent
+  for the demo, so its external provider workflow cannot be started from the
+  public project. Local copy/download exports that do not mutate project state
+  remain available.
+- **Intentional UI treatment.** Mutation-only controls are hidden: Final,
+  regenerate/retry, PRD and artifact edit/refine, restore, mark-current, review
+  and confirmation, Design System direction, uploads/replacements, task
+  management, branch refinement, and dependency-graph update actions. Where a
+  visible disabled generation affordance still explains the product, it carries
+  the accessible reason “This example project is read-only.” Version history,
+  comparisons, tabs, filters, sorting, expansion, dependency inspection, screen
+  details, and mockup viewing remain usable.
+- **One read-only explanation.** `DemoReadOnlyNotice` adds a single accessible
+  workspace-level `role="status"` message explaining that visitors can explore
+  the complete example without changing the saved project; artifact surfaces do
+  not repeat warning clutter.
+- **Architecture documentation.** `CLAUDE.md` now records the policy as the
+  required boundary for future durable mutation domains.
+
+*Acceptance status:* mutation-prevention criteria are met: the demo cannot
+change PRD finality/content, artifact content or versions, screen/prompt edits,
+reviews/confirmations, workflow metadata, Design System state, generated assets,
+uploads, tasks, or external-export claims through protected actions. Ordinary
+projects retain the same representative editing operations. Navigation and
+inspection remain available. The original acceptance criterion requiring a
+deterministic Reset Demo / baseline reload is **not met in this batch** and is
+the reason SYN-001 remains partially rather than fully resolved.
+
+*Tests:* `src/lib/__tests__/projectCapabilities.test.ts` covers demo, ordinary,
+missing-project, and exploration policy; `src/store/__tests__/demoReadOnlyMutations.test.ts`
+covers finality, PRD edits, screen/review metadata, generation/regeneration,
+Design System, workflow state, and ordinary-project parity;
+`src/components/__tests__/DemoReadOnlySurfaces.test.tsx` covers the notice,
+hidden generation/update/restore controls, dependency inspection, and version
+comparison. Existing affected component/store fixtures were updated to use
+real project identities under the new conservative unknown-project rule.
+
+*Validation:* `npm run lint` passed; `npm test` passed **1,545 tests across 167
+files**; `npm run build` passed with only the pre-existing generated-CSS,
+mixed static/dynamic import, and large-chunk warnings. Browser verification used
+the local application with the deployed public snapshot at 1,440 px and 390 px:
+PRD, Assets, Screens filters, screen detail, Mockups, Design System history,
+Data Model, and Implementation Plan remained explorable; mutation controls were
+absent; the 390 px journey had no horizontal overflow. The browser declined the
+final ordinary-project/console-inspection leg, so ordinary-project parity is
+supported by the passing store/component tests rather than claimed as a browser
+result.
+
+*Commits:* `9730d65` (`refactor(demo): add centralized project capabilities`),
+`63887ce` (`fix(demo): prevent persistent mutations in public projects`), and
+`fdd3aed` (`test(demo): cover read-only capability enforcement`).
+
+*Deliberately deferred:* Reset Demo, clearing only the local demo namespace,
+automatic baseline restoration after earlier cache corruption, image-manifest
+validation, and the full committed Playwright demo contract. Those remain the
+follow-up needed to close the remaining portion of SYN-001.
 
 ## [SYN-002] A cold direct demo URL does not hydrate the demo project
 
