@@ -224,6 +224,56 @@ describe('decision-edit coalescing', () => {
         expect(store().spineVersions[projectId]).toHaveLength(lenBefore + 1); // appended
     });
 
+    it('an artifact generated against the latest breaks the chain (next decision edit appends)', () => {
+        const { projectId, latestId } = seed();
+        const store = () => useProjectStore.getState();
+        store().editSpineStructuredPRD(projectId, latestId, prd('d1'), {
+            changeSource: 'decision_edit',
+            editSummary: 'Confirmed assumption: A',
+            decisionDelta: { confirmed: 1 },
+        });
+        const decisionEdit = store().spineVersions[projectId].find(s => s.isLatest)!;
+
+        // Simulate an artifact generated against the decision-edit version
+        // (e.g. finalize → generate → unfinalize, or an early design-system
+        // run): its spine sourceRef pins the version id freshness compares.
+        useProjectStore.setState((state) => ({
+            artifactVersions: {
+                ...state.artifactVersions,
+                'artifact-1': [{
+                    id: 'av-1',
+                    artifactId: 'artifact-1',
+                    versionNumber: 1,
+                    parentVersionId: null,
+                    content: 'generated content',
+                    metadata: {},
+                    sourceRefs: [{
+                        id: 'ref-1',
+                        sourceArtifactId: 'spine',
+                        sourceArtifactVersionId: decisionEdit.id,
+                        sourceType: 'spine' as const,
+                    }],
+                    generationPrompt: '',
+                    isPreferred: true,
+                    createdAt: Date.now(),
+                }],
+            },
+        }));
+        const lenBefore = store().spineVersions[projectId].length;
+
+        store().editSpineStructuredPRD(projectId, decisionEdit.id, prd('d2'), {
+            changeSource: 'decision_edit',
+            editSummary: 'Confirmed assumption: B',
+            decisionDelta: { confirmed: 1 },
+        });
+        // Appended, not amended — the referenced version's content must stay
+        // exactly what the artifact was generated from.
+        const spines = store().spineVersions[projectId];
+        expect(spines).toHaveLength(lenBefore + 1);
+        expect(spines.find(s => s.id === decisionEdit.id)!.structuredPRD?.vision).toBe('d1');
+        expect(spines.find(s => s.isLatest)!.id).not.toBe(decisionEdit.id);
+    });
+
     it('editing a NON-latest spineId with decision_edit appends (never amends)', () => {
         const { projectId, latestId } = seed();
         const store = () => useProjectStore.getState();

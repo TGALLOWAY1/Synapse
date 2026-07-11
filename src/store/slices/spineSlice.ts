@@ -354,14 +354,29 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
 
             const latest = currentVersions.find(v => v.isLatest);
 
+            // Never amend a version that downstream artifacts were generated
+            // against: freshness compares each artifact's recorded spine ref to
+            // the latest spine id, so mutating content under a referenced id
+            // would leave those artifacts reading "current" against changed
+            // content (e.g. finalize → generate assets → unfinalize → confirm,
+            // or an early design-system run against a decision-edit version).
+            // Appending instead makes the freshness engine flag them normally.
+            const latestHasArtifactRefs =
+                !!latest
+                && Object.values(state.artifactVersions).some(versions =>
+                    versions.some(v => v.sourceRefs?.some(r =>
+                        r.sourceType === 'spine' && r.sourceArtifactVersionId === latest.id)));
+
             // Amend iff this is a Decisions-tab edit whose target IS the current
-            // latest version, that version is not final, and it was itself
-            // produced by a decision edit (so we only coalesce a contiguous run).
+            // latest version, that version is not final, no generated artifact
+            // references it, and it was itself produced by a decision edit (so
+            // we only coalesce a contiguous run).
             const canAmend =
                 changeSource === 'decision_edit'
                 && !!latest
                 && latest.id === spineId
                 && !latest.isFinal
+                && !latestHasArtifactRefs
                 && latest.provenance?.changeSource === 'decision_edit';
 
             if (canAmend && latest) {
