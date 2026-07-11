@@ -163,6 +163,8 @@ No P0 finding was supported by the evidence gathered.
 
 ## [SYN-001] The public demo is mutable and a destructive state change survives refresh
 
+**Status: ✅ Resolved — 2026-07-10, current working tree (`fix(demo): enforce read-only capability policy and deterministic reset`). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -203,6 +205,61 @@ Inventory mutation entry points beyond `ProjectWorkspace`, including metadata ov
 **Suggested validation**
 
 Add an E2E test that opens the demo anonymously, attempts representative mutations, reloads, and asserts the original final/version/artifact state. Test reset with a deliberately corrupted local demo cache.
+
+**Resolution (2026-07-10 — current working tree, `fix(demo): enforce read-only capability policy and deterministic reset`)**
+
+Implemented a single capability boundary around the existing route-owned demo
+hydration architecture; no demo-only workspace or duplicate snapshot restore
+path was introduced:
+
+- **Central capability policy.** `src/lib/projectCapabilities.ts` defines the
+  public demo as explorable while denying persistence, generation, image
+  mutation, and external side effects. Normal projects retain all capabilities.
+  The policy is used by shared UI handlers and wraps persistent Zustand actions
+  at store creation, so direct action invocation cannot mutate the demo even if
+  a future or secondary control misses a presentation-layer check.
+- **Mutation surface protection.** PRD text/finality/versioning, branch/refine,
+  project metadata, design setup, artifacts and artifact versions, feedback and
+  review state, implementation tasks, and export metadata are covered by the
+  authoritative store-action guard. PRD regeneration is rejected before its
+  provider call, and mockup generation is rejected at the image
+  provider/persistence boundary. Existing server and image-sync exclusions for
+  `DEMO_PROJECT_ID` remain in place.
+- **Read-only shared UI.** The ordinary `ProjectWorkspace` and structured PRD
+  surfaces consult the same policy. Persistent handlers do not open or perform
+  mutations in demo mode, and editable PRD surfaces render read-only while
+  navigation, stages, tabs, history inspection, selection, and other ephemeral
+  exploration remain available.
+- **One visitor-facing notice.** The existing demo banner now explains once
+  that the example is read-only, invites visitors to explore connected
+  artifacts and history, states that editing and generation are disabled, and
+  provides the single **Reset demo** action. Reset exposes an accessible busy
+  state and actionable retry message without duplicating `DemoRouteGate`'s
+  initial-load failure UI.
+- **Deterministic reset.** `resetDemoProject()` uses the existing hydration
+  single-flight path with `force: true`. Before rehydration it removes only
+  `DEMO_PROJECT_ID` data from every persisted project-keyed collection and
+  clears its legacy mockup, screen-inventory, and variant-image IndexedDB
+  records. Signed-in projects, their images, and the owner-controlled pinned
+  snapshot are untouched. Repeated clicks and React Strict Mode share the
+  existing single-flight protection.
+- **Legacy cache invalidation.** `DEMO_CACHE_POLICY_VERSION` stamps restored
+  baselines. A cache from the former mutable policy is cleared and forcibly
+  restored once; a current-format cache continues to use the pinned-snapshot
+  pointer fast path during ordinary route navigation.
+
+*Acceptance criteria:* all four met — persistent demo actions are rejected at
+the shared boundary; legacy/corrupted caches are replaced by the pinned
+baseline; reset is scoped to the demo and forces restoration; and read-only
+communication is consolidated into one notice.
+
+*Validation:* focused Vitest coverage for capability policy and route/store
+hydration passed (19 tests), along with `npm run lint`, `npm run build`, and
+`git diff --check`. The production build retains the audit's pre-existing CSS
+minification and large-chunk warnings. An ad hoc browser run was attempted, but
+the configured `agent-browser` executable was unavailable in this workspace;
+no browser result is claimed here. The committed application-wide semantic E2E
+contract remains intentionally tracked by SYN-006.
 
 ## [SYN-002] A cold direct demo URL does not hydrate the demo project
 
@@ -1012,7 +1069,7 @@ At 1,440 px the workspace is dense but coherent. Core content generally has more
 
 ### Reliability and data isolation
 
-The public snapshot is isolated from server project/image sync by explicit `DEMO_PROJECT_ID` exclusions, so the audit found no path for an anonymous visitor to overwrite the owner’s pinned source. Local isolation is weaker: demo content is stored in the same Zustand structures and ordinary mutation handlers remain active. A visitor can corrupt their cached copy and no reset exists (SYN-001). Failure-tolerant image hydration prioritizes fresh partial data over a stale complete cache, which is an unsuitable trade for a curated public demo (SYN-003).
+The public snapshot is isolated from server project/image sync by explicit `DEMO_PROJECT_ID` exclusions, so the audit found no path for an anonymous visitor to overwrite the owner’s pinned source. The former local-isolation gap is now closed by the resolved SYN-001 capability policy, authoritative mutation guards, cache-policy invalidation, and demo-scoped reset. Failure-tolerant image hydration still prioritizes fresh partial data over a stale complete cache, which is an unsuitable trade for a curated public demo (SYN-003).
 
 ### Implementation boundary assessment
 
@@ -1141,7 +1198,7 @@ The dominant systemic issue is not excessive feature count; it is that newer, ri
 
 | ID | Recommendation | Importance | Severity | Effort | Confidence | Category | Scope | Dependency |
 | -- | -------------- | ---------: | -------: | -----: | ---------: | -------- | ----- | ---------- |
-| SYN-001 | Enforce read-only demo policy and reset | P1 | S2 | M | High | Demo | Cross-component | Before demo polish |
+| SYN-001 | ✅ Resolved — enforce read-only demo policy and reset | P1 | S2 | M | High | Demo | Cross-component | Complete; precedes demo polish |
 | SYN-002 | Hydrate demo at route boundary | P1 | S2 | S | High | Reliability | Cross-component | Coordinate with 001 |
 | SYN-003 | Require real image for generated status; validate pinned snapshot | P1 | S2 | M | High | Demo | Cross-artifact | Image-store inventory |
 | SYN-004 | Remove unsanitized raw HTML rendering | P1 | S2 | S | High | Security | Cross-component | Legacy-content check |
@@ -1162,7 +1219,7 @@ The dominant systemic issue is not excessive feature count; it is that newer, ri
 
 ## 10. Top ten recommended actions
 
-1. **Make demo persistence read-only and resettable (SYN-001).** This is the highest-impact fix because a public visitor can currently break the core demo with a visible control. Primarily a fix; visible outcome is a deterministic, trustworthy demo. Effort M. Do first with the route loader.
+1. **✅ Completed: make demo persistence read-only and resettable (SYN-001).** The centralized capability boundary, mutation guards, cache invalidation, and deterministic reset now prevent a public visitor from persistently damaging the demo while preserving exploration.
 2. **Make the demo URL self-hydrating (SYN-002).** Shared links must work from a clean browser. Primarily a fix; visible outcome is reliable direct entry and refresh. Effort S. Do alongside action 1.
 3. **Guarantee complete mockup imagery and truthful generated status (SYN-003).** The current contradiction is the demo’s most damaging visual failure. Primarily a fix; visible outcome is a complete mockup instead of an API-key/upload warning. Effort M. Do after loader/cache policy is explicit.
 4. **Remove raw HTML from Design System Markdown (SYN-004).** This closes the clearest concrete content-security boundary with a smaller implementation. Primarily a fix and deletion; visible behavior remains hex swatches with hostile HTML inert. Effort S. Can ship independently and early.
