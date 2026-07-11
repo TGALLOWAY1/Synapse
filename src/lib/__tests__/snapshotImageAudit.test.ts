@@ -1,5 +1,5 @@
 import { describe, it, expect } from 'vitest';
-import { auditMockupImageCoverage } from '../snapshotImageAudit';
+import { auditMockupImageCoverage, countMockupSpecScreens } from '../snapshotImageAudit';
 import type { Artifact, ArtifactVersion } from '../../types';
 import { MOCKUP_SPEC_V1 } from '../../types';
 
@@ -107,5 +107,40 @@ describe('auditMockupImageCoverage', () => {
             artifacts: [mockupArtifact(null)],
         });
         expect(warnings).toHaveLength(1);
+    });
+});
+
+describe('countMockupSpecScreens (SYN-003)', () => {
+    it('counts the preferred mockup version screens', () => {
+        expect(countMockupSpecScreens(
+            [mockupArtifact()], [mockupVersion(['Home', 'Settings'])],
+        )).toEqual({ versionId: MOCKUP_VERSION_ID, screenCount: 2 });
+    });
+
+    it('returns null when there is no mockup artifact', () => {
+        expect(countMockupSpecScreens([], [mockupVersion(['Home'])])).toBeNull();
+    });
+
+    it('returns null when the preferred version is unparseable', () => {
+        const version = { ...mockupVersion([]), content: 'not json', metadata: {} };
+        expect(countMockupSpecScreens([mockupArtifact()], [version])).toBeNull();
+    });
+
+    it('returns null for a mockup spec with no screens (payload requires >=1)', () => {
+        // tryParsePayload rejects a zero-screen payload, so there is nothing to
+        // count — the pin gate treats "no parseable mockup screens" as pass.
+        expect(countMockupSpecScreens([mockupArtifact()], [mockupVersion([])])).toBeNull();
+    });
+
+    it('includes user-added extraScreens overlay in the count', () => {
+        const version: ArtifactVersion = {
+            ...mockupVersion(['Home']),
+            metadata: {
+                format: MOCKUP_SPEC_V1,
+                extraScreens: [{ id: 'extra-1', name: 'Added Screen', purpose: 'p' }],
+            },
+        };
+        expect(countMockupSpecScreens([mockupArtifact()], [version]))
+            .toEqual({ versionId: MOCKUP_VERSION_ID, screenCount: 2 });
     });
 });

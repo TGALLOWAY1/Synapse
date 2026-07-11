@@ -37,7 +37,7 @@ import {
 } from '../../lib/screenImplementationHandoff';
 import {
     buildScreenMockupVariants, summarizeScreenVariants,
-    type GeneratedVariantMap, type MockupVariantCoverageSummary,
+    type GeneratedVariantMap, type MockupImagePresence, type MockupVariantCoverageSummary,
 } from '../../lib/mockupVariants';
 import {
     buildScreenGroups, deriveScreenConnections, flowFilterOptions, hasFlowGrouping,
@@ -104,6 +104,10 @@ interface Props {
     /** Phase 3B: resolves a screen's manifest-backed generated variants so the
      * card reflects real generation (e.g. "Mobile: generated"). */
     generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
+    /** SYN-003: resolves a screen's authoritative default-mockup image presence
+     * so the primary Default variant only reads "Generated" when a rendered
+     * image actually exists. Absent → legacy spec-join behavior. */
+    defaultImagePresenceByScreen?: (screenId: string) => MockupImagePresence | undefined;
     /** Phase 3C: current trust context for per-screen variant freshness. */
     trustContext?: VariantTrustContext;
     /** Canonical PRD features — enables handoff/traceability derivation (Phase 5A). */
@@ -134,7 +138,7 @@ type StatusFilter = 'all' | 'draft' | 'needs_review' | 'accepted' | 'ready';
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
-    generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan,
+    generatedVariantsByScreen, defaultImagePresenceByScreen, trustContext, features, traceDataModel, tracePlan,
     projectName, exportManifest, artifactControls,
     onSelectScreen, onGenerateMissingMockups,
 }: Props) {
@@ -162,7 +166,8 @@ export function ScreenListView({
             if (!model) continue;
             const variants = buildScreenMockupVariants(item, {
                 platform: mockupPlatform, mobileRelevant,
-                generatedVariants: generatedVariantsByScreen?.(item.id), trustContext,
+                generatedVariants: generatedVariantsByScreen?.(item.id),
+                defaultImagePresence: defaultImagePresenceByScreen?.(item.id), trustContext,
             });
             map.set(item.id, buildScreenImplementationHandoff({
                 item, reviewModel: model, variants,
@@ -171,7 +176,7 @@ export function ScreenListView({
             }));
         }
         return map;
-    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan]);
+    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, defaultImagePresenceByScreen, trustContext, features, traceDataModel, tracePlan]);
 
     const p0Ids = useMemo(
         () => new Set(index.items.filter(i => i.screen.priority === 'P0' || i.screen.priority === 'core').map(i => i.id)),
@@ -317,6 +322,7 @@ export function ScreenListView({
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
+                                    defaultImagePresence={defaultImagePresenceByScreen?.(item.id)}
                                     trustContext={trustContext}
                                     features={features}
                                     prdVersionLabel={artifactControls?.prdVersionLabel}
@@ -449,7 +455,7 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
 };
 
 function ScreenCard({
-    ordinal, item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, trustContext, features, prdVersionLabel, onSelect,
+    ordinal, item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, defaultImagePresence, trustContext, features, prdVersionLabel, onSelect,
 }: {
     ordinal?: number;
     item: ScreenExperienceItem;
@@ -459,6 +465,7 @@ function ScreenCard({
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
+    defaultImagePresence?: MockupImagePresence;
     trustContext?: VariantTrustContext;
     features?: readonly Feature[];
     prdVersionLabel?: string;
@@ -469,7 +476,7 @@ function ScreenCard({
     const priority = stylablePriority(screen.priority);
     const connections = deriveScreenConnections(item);
     const variants = buildScreenMockupVariants(item, {
-        platform: mockupPlatform, mobileRelevant, generatedVariants, trustContext,
+        platform: mockupPlatform, mobileRelevant, generatedVariants, defaultImagePresence, trustContext,
     });
     const variantSummary = summarizeScreenVariants(variants);
 

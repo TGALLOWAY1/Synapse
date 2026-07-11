@@ -8,6 +8,23 @@ import { parseFlows } from '../renderers/userFlows/parseFlow';
 import { ScreenListView } from '../experience/ScreenListView';
 import { ScreenDetailView } from '../experience/ScreenDetailView';
 import { useProjectStore } from '../../store/projectStore';
+import { useMockupImageStore } from '../../store/mockupImageStore';
+import type { MockupImageRecord } from '../../types';
+
+// SYN-003: the primary Default variant now reads "Generated" only when a real
+// image exists in the mockup image store. Detail-view tests that exercise a
+// genuinely-generated default seed one here so presence resolves to 'present'.
+function seedDefaultMockupImage(versionId: string, mockupScreenId: string) {
+    const record = {
+        key: `${versionId}:${mockupScreenId}:low`,
+        projectId: 'p1', artifactId: 'a1', versionId, screenId: mockupScreenId,
+        dataUrl: 'data:image/png;base64,DEF', quality: 'low' as const, prompt: '', generatedAt: 1,
+    } satisfies MockupImageRecord;
+    useMockupImageStore.setState((s) => ({
+        images: { ...s.images, [record.key]: record },
+        loadedVersions: { ...s.loadedVersions, [versionId]: true },
+    }));
+}
 
 // Render smoke tests for the upgraded Screens experience views: the coverage
 // & readiness panel, list filters, and the structured Overview / Flow /
@@ -16,6 +33,7 @@ import { useProjectStore } from '../../store/projectStore';
 
 beforeEach(() => {
     useProjectStore.setState({ projects: { p1: { id: 'p1', name: 'Test', createdAt: 1 } } });
+    useMockupImageStore.setState({ images: {}, inFlight: {}, errors: {}, loadedVersions: {} });
     vi.stubGlobal(
         'matchMedia',
         vi.fn().mockImplementation((query: string) => ({
@@ -371,6 +389,9 @@ function renderContractDetail(
     const index = buildScreenIndex(contractInventory, [], contractPayload, opts.edits);
     const readiness = buildReadinessIndex(index, FEATURES);
     const item = index.byId.get('scr-submission')!;
+    // The default mockup ('m-sub') is a genuinely generated image in these
+    // tests — seed it so SYN-003 image-presence resolves to 'present'.
+    if (opts.withMockupContext !== false) seedDefaultMockupImage('v1', 'm-sub');
     return render(
         <ScreenDetailView
             item={item}

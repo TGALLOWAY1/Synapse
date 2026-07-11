@@ -46,6 +46,38 @@ const resolveMockupVersion = (
     return own.reduce((a, b) => (b.versionNumber > a.versionNumber ? b : a));
 };
 
+export interface MockupSpecScreenCount {
+    /** Preferred mockup artifact version id these screens belong to. */
+    versionId: string;
+    /** Number of screens the mockup spec describes (payload + extraScreens). */
+    screenCount: number;
+}
+
+/**
+ * Count the screens the preferred mockup spec describes (payload screens +
+ * user-added `extraScreens` overlay). Returns null when there is no mockup
+ * artifact / no parseable preferred version. Pure — shared by the save-time
+ * image audit AND the pin-time completeness gate (SYN-003), so both reason
+ * about the same "how many mockup screens does this snapshot claim?" number.
+ */
+export function countMockupSpecScreens(
+    artifacts: Artifact[],
+    artifactVersions: ArtifactVersion[],
+): MockupSpecScreenCount | null {
+    const mockupArtifact = artifacts.find((a) => a.type === 'mockup');
+    if (!mockupArtifact) return null;
+
+    const version = resolveMockupVersion(mockupArtifact, artifactVersions);
+    if (!version) return null;
+
+    const payload = tryParsePayload(version);
+    if (!payload) return null;
+    const extraScreens = readExtraMockupScreens(
+        version.metadata as Record<string, unknown> | undefined,
+    );
+    return { versionId: version.id, screenCount: payload.screens.length + extraScreens.length };
+}
+
 /**
  * Returns human-readable warnings for mockup-image gaps in a snapshot bundle.
  * Empty when the project has no mockup artifact, the mockup spec has no screens,
@@ -55,21 +87,11 @@ const resolveMockupVersion = (
 export function auditMockupImageCoverage(input: MockupImageAuditInput): string[] {
     const warnings: string[] = [];
 
-    const mockupArtifact = input.artifacts.find((a) => a.type === 'mockup');
-    if (!mockupArtifact) return warnings;
-
-    const version = resolveMockupVersion(mockupArtifact, input.artifactVersions);
-    if (!version) return warnings;
-
-    const payload = tryParsePayload(version);
-    if (!payload) return warnings;
-    const extraScreens = readExtraMockupScreens(
-        version.metadata as Record<string, unknown> | undefined,
-    );
-    const screenCount = payload.screens.length + extraScreens.length;
+    const spec = countMockupSpecScreens(input.artifacts, input.artifactVersions);
+    if (!spec) return warnings;
+    const { versionId, screenCount } = spec;
     if (screenCount === 0) return warnings;
 
-    const versionId = version.id;
     const aiImages = input.images.filter((r) => r.versionId === versionId).length;
     const uploadedImages = input.screenImages.filter(
         (r) => r.artifactVersionId === versionId,

@@ -518,8 +518,13 @@ function countVariantFreshness(variants: readonly DerivedMockupVariant[]): { sta
 
 /** Options for the whole-index builder: the per-item options plus an optional
  * per-screen generated-variant lookup (mirrors the coverage summary). */
-export interface BuildReviewIndexOptions extends Omit<BuildReviewModelOptions, 'generatedVariants'> {
+export interface BuildReviewIndexOptions
+    extends Omit<BuildReviewModelOptions, 'generatedVariants' | 'defaultImagePresence'> {
     generatedVariantsByScreen?: (screenId: string) => BuildVariantOptions['generatedVariants'];
+    /** SYN-003: per-screen authoritative default-image presence (mirrors
+     * generatedVariantsByScreen). Threaded into each screen's variant grid so
+     * the review model's mockup signals reflect real image presence. */
+    defaultImagePresenceByScreen?: (screenId: string) => BuildVariantOptions['defaultImagePresence'];
 }
 
 /** Review model for every screen in the index, keyed by canonical id. */
@@ -527,12 +532,13 @@ export function buildScreenReviewIndex(
     index: ScreenExperienceIndex,
     options: BuildReviewIndexOptions = {},
 ): Map<string, ScreenReviewModel> {
-    const { generatedVariantsByScreen, ...itemOptions } = options;
+    const { generatedVariantsByScreen, defaultImagePresenceByScreen, ...itemOptions } = options;
     const out = new Map<string, ScreenReviewModel>();
     for (const item of index.items) {
         out.set(item.id, buildScreenReviewModelForItem(item, {
             ...itemOptions,
             generatedVariants: generatedVariantsByScreen?.(item.id),
+            defaultImagePresence: defaultImagePresenceByScreen?.(item.id),
         }));
     }
     return out;

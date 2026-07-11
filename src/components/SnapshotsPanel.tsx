@@ -137,18 +137,44 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     // the public `?demo=1` endpoint, so no owner token is needed to view it.
     const handleSetDemo = async (id: string) => {
         const willClear = demoSnapshotId === id;
-        const snapshot = snapshots?.find((s) => s.id === id);
-        const imageTotal = snapshot
-            ? snapshot.imageCount + (snapshot.screenImageCount ?? 0)
-            : null;
-        // Pinning a snapshot with no images means the public demo will render
-        // mockup specs with no preview images — warn before it goes live.
-        const noImagesWarning = !willClear && imageTotal === 0
-            ? '\n\nHeads up: this snapshot contains 0 images, so the demo will show mockups with no rendered previews. Re-save a snapshot that includes the mockup images if you want them to appear.'
-            : '';
+
+        // SYN-003 — pin-time completeness HARD GATE (no override; pre-launch,
+        // the owner's recourse is to regenerate the images + re-save). A demo
+        // whose mockup spec describes screens but carries 0 rendered images
+        // would render "Generated" cards with no image — refuse to pin it.
+        // (The server backstops this with a 422; this is the fast, explanatory
+        // client block.) Unpinning is never gated. `mockupScreenCount === 0`
+        // (a legitimate PRD-only demo) pins cleanly.
+        if (!willClear) {
+            const snapshot = snapshots?.find((s) => s.id === id);
+            const totalImages = snapshot
+                ? snapshot.imageCount + (snapshot.screenImageCount ?? 0) + (snapshot.variantImageCount ?? 0)
+                : 0;
+            const mockupScreenCount = snapshot?.mockupScreenCount;
+            if (mockupScreenCount !== undefined && mockupScreenCount > 0 && totalImages === 0) {
+                setError(
+                    `This snapshot's mockup spec describes ${mockupScreenCount} screen`
+                    + `${mockupScreenCount === 1 ? '' : 's'} but contains 0 rendered images — `
+                    + 'the demo would claim mockups it can’t show. Generate the images, save a '
+                    + 'new snapshot, and pin that.',
+                );
+                return;
+            }
+            if (mockupScreenCount === undefined && totalImages === 0) {
+                // Legacy snapshot with no completeness metadata and no images —
+                // block and ask for a re-save so Synapse can verify it.
+                setError(
+                    'This snapshot has 0 rendered images and predates image-completeness '
+                    + 'tracking, so Synapse can’t verify its mockups. Re-save this snapshot '
+                    + 'with the current app version, then pin the new snapshot.',
+                );
+                return;
+            }
+        }
+
         const confirmMsg = willClear
             ? 'Unset this snapshot as the public demo? The "View demo project" button will stop working until another snapshot is set.'
-            : `Make this snapshot the public demo? Any visitor (no owner token required) will be able to load it from the home page.${noImagesWarning}`;
+            : 'Make this snapshot the public demo? Any visitor (no owner token required) will be able to load it from the home page.';
         if (!confirm(confirmMsg)) return;
         setBusy(`demo:${id}`);
         setError(null);

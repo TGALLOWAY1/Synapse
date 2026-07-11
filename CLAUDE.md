@@ -187,12 +187,36 @@ in snapshots.
   had `imageCount: 0`. `auditMockupImageCoverage` runs inside `saveSnapshot` and,
   when the mockup version has ≥1 screen but no mockup image (AI / uploaded /
   variant) was collected for that version id, returns a warning surfaced through
-  the existing `onWarnings` → `SnapshotsPanel` amber notice. It **never blocks the
-  save** (specs are still worth keeping) — it just makes the gap visible before a
-  pin. `SnapshotsPanel.handleSetDemo` also adds a heads-up when pinning a
-  zero-image snapshot as the demo. A snapshot with no images is a data condition
-  the owner must fix by regenerating the mockup images and re-saving/re-pinning;
-  no restore/render change can recover images the blob never contained.
+  the existing `onWarnings` → `SnapshotsPanel` amber notice. **Saving is still
+  never blocked** (specs are worth keeping) — the save-time audit only makes the
+  gap visible. `snapshotImageAudit.ts` also exports the pure
+  **`countMockupSpecScreens(artifacts, artifactVersions)`** (preferred mockup
+  version → `{ versionId, screenCount }`, incl. the `extraScreens` overlay;
+  `auditMockupImageCoverage` reuses it) — the shared "how many mockup screens
+  does this snapshot claim?" number the pin-time gate keys off. A snapshot with
+  no images is a data condition the owner must fix by regenerating the mockup
+  images and re-saving/re-pinning; no restore/render change can recover images
+  the blob never contained.
+
+- **Pin-time completeness gate (SYN-003) — a HARD BLOCK, unlike the save-time
+  audit.** Pinning a snapshot as the public demo is where a zero-image mockup
+  spec does real damage (the demo claims "Generated" screens it can't show), so
+  the pin is gated, not merely warned. `saveSnapshot` records
+  `manifest.mockupScreenCount` (from `countMockupSpecScreens`) and
+  `manifest.variantImageCount` (both optional on the wire — legacy manifests lack
+  them; the client gate covers those). **Client hard block**
+  (`SnapshotsPanel.handleSetDemo`, no override — pre-launch, the owner's recourse
+  is regenerate + re-save): when `mockupScreenCount > 0` and total images
+  (`imageCount + screenImageCount + variantImageCount`) is 0, it shows an
+  actionable error and does NOT call `setDemoSnapshot`; a **legacy** summary (no
+  `mockupScreenCount`) with zero images also blocks, asking for a re-save with
+  the current app version; `mockupScreenCount === 0` (a legitimate PRD-only demo)
+  pins cleanly; the unpin path is never gated. **Server backstop**
+  (`api/snapshots.js` `handlePutDemo`): it counts the snapshot's per-image blobs
+  (keys under `.../images/`) and, when that count is 0 and the manifest's
+  `mockupScreenCount > 0`, rejects **422 `demo_snapshot_incomplete`** (a readable
+  message surfaced through the client `setDemoSnapshot` error path); legacy
+  manifests without the field pass (client gate covers them).
 
 - **The public demo has one read-only capability boundary.**
   `src/lib/projectCapabilities.ts` is authoritative for durable project actions;
@@ -242,11 +266,22 @@ in snapshots.
   (`fetchImageWithRetry`); on the public demo path (`loadDemoSnapshotPublic`)
   an image that still fails is **dropped** (`imagesComplete: false` on the
   returned payload, a client-only field) instead of rejecting the whole
-  snapshot. `loadDemoProject` restores an incomplete payload (fresh-partial
-  beats stale cache) but skips stamping `demoSourceSnapshotId`, so the next
-  open re-fetches and self-heals. This is the fix for "mobile shows the demo
-  without its screen-inventory images": one failed image fetch used to reject
-  the entire fresh snapshot and silently fall back to the stale cached demo.
+  snapshot. `loadDemoProject` restores an incomplete payload but **skips
+  stamping `demoSourceSnapshotId`**, so the next open re-fetches and self-heals.
+  This is the fix for "mobile shows the demo without its screen-inventory
+  images": one failed image fetch used to reject the entire fresh snapshot and
+  silently fall back to the stale cached demo.
+  **Stamp = known-complete; the freshness precedence keys off it (SYN-003).**
+  Because `demoSourceSnapshotId` is written **only** when the restore was NOT
+  image-incomplete, a *stamped* cache is provably a full restore. So the
+  precedence is: a **stamped (known-complete) cache beats a fresh-but-partial
+  fetch** — when the pointer changed but the fresh fetch returns
+  `imagesComplete: false` AND a stamped cache exists, `loadDemoProject` keeps
+  serving the complete cache and does NOT overwrite it (the now-stale stamp vs.
+  the live pointer already drives a re-fetch / self-heal on the next open).
+  **Fresh-partial still beats no cache or an un-stamped cache** (a partial demo
+  is better than an empty one), and it still leaves the stamp off so it heals.
+  Do NOT restore a partial fetch over a stamped cache.
   Owner-token `loadSnapshot` keeps strict all-or-nothing semantics (a restore
   over real data must not be partial). Server side, the public demo GET
   channel has its own rate-limit scope (`snapshots-demo`, 300/min in
@@ -2263,7 +2298,38 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     for the Mockups-tab gallery + screen-card summary + coverage-panel rollup.
     A legacy single-image mockup normalizes to **`Desktop · Default`**
     (`source: 'legacy'`, `coverageStatus: 'unknown'` — no per-variant coverage
-    metadata was ever captured). Recommendations are DERIVED estimates:
+    metadata was ever captured). **The primary Default variant's `generated`
+    status is gated on ACTUAL image presence, not the spec join alone (SYN-003).**
+    `buildScreenMockupVariants` takes an optional
+    `BuildVariantOptions.defaultImagePresence` (`present` | `absent` | `checking`
+    | `unknown`) — the authoritative image-store evidence for the Default slot,
+    derived by the pure `src/lib/mockupImagePresence.ts`
+    (`deriveDefaultImagePresence`: ANY record in the AI mockup store OR the
+    screen-inventory upload store → `present`; both stores settled + none →
+    `absent`; otherwise `checking`). The Default is `generated`/`legacy` only when
+    the spec join exists AND presence `!== 'absent'`; an image-absent default is
+    honest `missing` with **`source: 'derived_missing'`**, `coverageStatus:
+    'unknown'`, and a "spec exists but no rendered image was found" note.
+    `checking` keeps it `generated` (no flap mid-hydration) and the UI shows a
+    neutral "Checking…" pill (`imagePresence` rides on every
+    `DerivedMockupVariant`). **Unset / `'unknown'` = EXACT legacy behavior**, so
+    un-wired callers and pure tests are unchanged. Callers resolve presence from
+    the reactive stores and pass it down: `ArtifactWorkspace` builds a memoized
+    `defaultImagePresenceByScreen(screenId)` (loading `mockupImageStore` +
+    `screenInventoryImageStore` for the mockup version — the list/coverage views
+    used to never load them) and threads it into
+    `buildMockupVariantCoverageSummary` / `buildScreenReviewIndex` (both gained a
+    per-screen `defaultImagePresenceByScreen` option) and `ScreenListView`;
+    `ScreenDetailView` derives its own for the open screen. `mockupImageStore`
+    gained a `loadedVersions` settled-signal (set on BOTH the records-found and
+    the empty path) so a consumer can tell "no image yet, still loading" from
+    "provably absent". **Deliberate non-change:** `screenReadiness.ts`
+    `buildMockupVariantRows` / the `missing_mockup_p0` gap stay SPEC-derived —
+    readiness gaps are work-planning signals in pure batch derivations with no
+    reactive store access; making them device-image-aware would flip statuses
+    transiently during hydration and conflate "asset missing on this device" with
+    "work not done". The variant layer is the visual-truth surface.
+    Recommendations are DERIVED estimates:
     `Desktop · Default` for every primary screen, `Mobile · Default` **only
     when the project is `mobileRelevant`** (mobile-first / responsive — then on
     every screen, P0 included), and important documented states. **A web/desktop
@@ -2307,9 +2373,13 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `src/components/experience/MockupVariantImage.tsx`)** — the Mockups tab can
     now GENERATE / regenerate / retry ONE specific non-default variant
     (`Mobile · Default`, `Desktop · Empty History`, …). The **default variant
-    (`id === 'default'`) is deliberately left on the legacy `MockupScreenImage`
-    path unchanged** (keys `versionId:screenId:quality`, coverage stays
-    "unknown"); every OTHER variant uses a **dedicated, independent** per-variant
+    (`id === 'default'`) still RENDERS through the legacy `MockupScreenImage`
+    path** (keys `versionId:screenId:quality`, coverage stays "unknown") — in
+    `MockupVariantsPanel` the `isPrimaryImageSlot` router mounts it even for an
+    image-absent (`derived_missing`) default, because that component is also the
+    generate/upload CTA. Its `generated` *status*, though, is now gated on real
+    image presence (`defaultImagePresence` — see the Phase 3A bullet), NOT the
+    spec join alone. Every OTHER variant uses a **dedicated, independent** per-variant
     IDB store keyed **`versionId:screenId:variantId:quality`** so generating one
     variant never overwrites another. `buildVariantGenerationRequest` assembles a
     variant-scoped request (viewport + state + core regions/actions/criteria/

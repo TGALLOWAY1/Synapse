@@ -203,6 +203,18 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             return { projectId: DEMO_PROJECT_ID, available: !!existing };
         }
 
+        // SYN-003: a STAMPED cache is provably known-complete — `demoSourceSnapshotId`
+        // is only written when the restore was NOT image-incomplete (see the
+        // stamp guard below). So when the fresh fetch itself dropped images
+        // (`imagesComplete === false`) and we hold such a cache, DON'T overwrite
+        // a complete demo with a partial one — keep serving the cache. The stamp
+        // is now stale vs. the live pointer, which already drives a re-fetch /
+        // self-heal on the next open. (Fresh-partial still wins when there is no
+        // cache, or the cache is un-stamped — a partial demo beats an empty one.)
+        if (payload.imagesComplete === false && existing?.demoSourceSnapshotId) {
+            return { projectId: DEMO_PROJECT_ID, available: true };
+        }
+
         await restoreSnapshotAs(payload, DEMO_PROJECT_ID);
 
         // Stamp the source snapshot id so the next click can short-circuit
@@ -212,9 +224,11 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         //
         // EXCEPT when the load dropped images (`imagesComplete === false`:
         // some per-image fetches kept failing — flaky network / rate limit).
-        // We still restore what we have (fresh-partial beats stale cache) but
-        // leave the stamp off so the next demo open re-fetches and self-heals
-        // to the full image set instead of pinning the partial copy forever.
+        // We still restore what we have (fresh-partial beats an empty / un-stamped
+        // state) but leave the stamp off so the next demo open re-fetches and
+        // self-heals to the full image set instead of pinning the partial copy
+        // forever — AND so the "stamped cache is known-complete" invariant above
+        // holds.
         const sourceId = payload.imagesComplete === false
             ? null
             : payload.manifest?.id ?? pointer?.snapshotId ?? null;

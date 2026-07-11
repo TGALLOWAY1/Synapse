@@ -15,8 +15,14 @@
 // (ScreenMetadataEdit.mockupVariantStatus), keyed by variant id.
 //
 // Honesty rules (mirroring screenReadiness):
-//   - Status is tracked from generated mockup METADATA + the user's overlay,
-//     never from inspecting rendered pixels.
+//   - Status is tracked from generated mockup METADATA + real image-store
+//     evidence + the user's overlay, never from inspecting rendered pixels.
+//   - The primary Default variant only reads as 'generated' when a rendered
+//     image actually EXISTS (SYN-003): the caller passes an authoritative
+//     `defaultImagePresence` derived from the mockup / screen-inventory image
+//     stores. A spec join with no image is honest 'missing' (source
+//     'derived_missing'), never a false "Generated" claim. Absent the option
+//     (un-wired callers / pure tests) the legacy spec-join behavior is kept.
 //   - Recommendations are DERIVED estimates from the screen priority + spec —
 //     label them as such, never as authoritative.
 //   - Legacy single-image mockups carry no per-variant coverage metadata, so
@@ -42,6 +48,15 @@ import {
 } from './mockupVariantTrust';
 
 export type MockupViewport = 'desktop' | 'mobile' | 'tablet';
+
+/** Real image-store presence for the primary Default variant (SYN-003):
+ *   'present'  — a rendered image (AI or uploaded) exists on this device;
+ *   'absent'   — both image stores settled and neither holds an image;
+ *   'checking' — a store is still hydrating, so presence is not yet known
+ *                (the variant stays 'generated' to avoid a mid-load flap);
+ *   'unknown'  — the caller supplied no evidence → keep legacy spec-join
+ *                behavior (un-wired callers, existing pure tests). */
+export type MockupImagePresence = 'present' | 'absent' | 'checking' | 'unknown';
 
 /** Variant fulfilment status. Aligns with MockupVariantRowStatus in
  * screenReadiness so overlay values stay interchangeable. */
@@ -75,6 +90,12 @@ export interface DerivedMockupVariant {
     /** True when the coverage figure is an estimate (spec-to-spec token overlap
      * or "not captured"), never a visual inspection. Always true today. */
     coverageEstimated: boolean;
+    /** Real image-store presence (SYN-003). Default slot: from
+     * `BuildVariantOptions.defaultImagePresence` (defaulting 'unknown' — legacy
+     * behavior). Non-default variants: 'present'/'absent' from their own image
+     * record (they already key off real per-variant records). Lets the UI show
+     * a neutral "Checking…" state instead of flapping to "missing" mid-load. */
+    imagePresence: MockupImagePresence;
     /** Short human notes explaining status / recommendation / coverage. */
     notes: string[];
     /** Phase 3C: staleness of a generated variant vs. the current screen /
@@ -169,11 +190,19 @@ export interface BuildVariantOptions {
     /** Phase 3B: manifest-backed generated variants for THIS screen, keyed by
      * variant id. A non-default variant present here renders as 'generated'
      * with its manifest coverage. Absent → the Phase 3A derived-missing model.
-     * The default variant's generation state still comes from the legacy
-     * mockup join (item.mockupScreen), never this map. A `default` entry here
-     * is the Phase 3C coverage sidecar — it supplies the default variant's
-     * coverage + source signature WITHOUT changing its generation state. */
+     * The default variant's generation state comes from the mockup spec join
+     * (item.mockupScreen) GATED by `defaultImagePresence` (SYN-003), never this
+     * map. A `default` entry here is the Phase 3C coverage sidecar — it supplies
+     * the default variant's coverage + source signature WITHOUT changing its
+     * generation state. */
     generatedVariants?: GeneratedVariantMap;
+    /** SYN-003: authoritative image-store evidence for the primary Default slot
+     * (from src/lib/mockupImagePresence.ts). Unset or 'unknown' → EXACT legacy
+     * behavior: the Default variant is 'generated' whenever the spec join
+     * exists. 'present'/'checking' → 'generated'; 'absent' → 'missing' (source
+     * 'derived_missing'), so a spec with no rendered image never claims
+     * "Generated". Only meaningful for the primary Default row. */
+    defaultImagePresence?: MockupImagePresence;
     /** Phase 3C: the CURRENT screen/design/PRD context, used to compute each
      * generated variant's freshness. Absent → generated variants carry no
      * freshness (the caller isn't wired for staleness yet). */
@@ -282,7 +311,9 @@ export function buildScreenMockupVariants(
     }
 
     const generatedVariants = options.generatedVariants ?? {};
-    return seeds.map(seed => buildVariant(item, seed, overlay, generatedVariants, options.trustContext));
+    return seeds.map(seed => buildVariant(
+        item, seed, overlay, generatedVariants, options.defaultImagePresence, options.trustContext,
+    ));
 }
 
 function buildVariant(
@@ -290,19 +321,33 @@ function buildVariant(
     seed: VariantSeed,
     overlay: Record<string, 'accepted' | 'not_needed'>,
     generatedVariants: GeneratedVariantMap,
+    defaultImagePresence: MockupImagePresence | undefined,
     trustContext?: VariantTrustContext,
 ): DerivedMockupVariant {
     const override: 'accepted' | 'not_needed' | undefined = overlay[seed.overlayKey];
-    // The legacy default variant is generated iff the screen joins a mockup.
-    const legacyGenerated = seed.generatedSlot && Boolean(item.mockupScreen);
     // A non-default variant is generated iff the per-variant image store has a
     // record for it (Phase 3B). The default slot never reads this map for its
     // generation state — its image lives in the legacy store.
     const variantImage = !seed.generatedSlot ? generatedVariants[seed.overlayKey] : undefined;
+
+    // SYN-003: image presence for THIS variant.
+    //   - default slot: from the caller-supplied option ('unknown' = legacy).
+    //   - non-default:  it already keys off a real per-variant record.
+    const presence: MockupImagePresence = seed.generatedSlot
+        ? (defaultImagePresence ?? 'unknown')
+        : (variantImage ? 'present' : 'absent');
+
+    // The default variant is generated iff it joins a mockup SPEC *and* a
+    // rendered image is not provably absent (present / checking / unknown). A
+    // spec join with an absent image is honest 'missing', never "Generated".
+    const specJoined = seed.generatedSlot && Boolean(item.mockupScreen);
+    const legacyGenerated = specJoined && presence !== 'absent';
+    // A spec exists for this screen but its rendered image is gone (SYN-003).
+    const specJoinedImageAbsent = specJoined && presence === 'absent';
     // Phase 3C: a coverage sidecar for the default variant (metadata only) —
     // supplies the default's coverage + source signature without altering that
     // it renders via the legacy path.
-    const defaultSidecar = seed.generatedSlot ? generatedVariants[seed.overlayKey] : undefined;
+    const defaultSidecar = legacyGenerated ? generatedVariants[seed.overlayKey] : undefined;
     const generated = legacyGenerated || Boolean(variantImage);
     const status: MockupVariantStatus = override ?? (generated ? 'generated' : 'missing');
     const source: MockupVariantSource = variantImage
@@ -333,6 +378,11 @@ function buildVariant(
         notes.push('Marked not needed — excluded from recommended coverage.');
     } else if (override === 'accepted') {
         notes.push('Marked accepted by you — e.g. verified or uploaded outside the generated set.');
+    } else if (specJoinedImageAbsent) {
+        // SYN-003: never claim spec "aligned" coverage for a render that doesn't
+        // exist — coverage stays 'unknown' and the note is honest and actionable.
+        coverageStatus = 'unknown';
+        notes.push('A mockup spec exists for this screen, but no rendered image was found — generate or upload the image to complete it.');
     } else if (seed.required) {
         // Not generated, not user-marked → a recommended-but-missing variant.
         notes.push(recommendationReason(item.screen, seed));
@@ -379,6 +429,7 @@ function buildVariant(
         source,
         coverageStatus,
         coverageEstimated: true,
+        imagePresence: presence,
         notes,
         freshness,
     };
@@ -509,10 +560,15 @@ export interface MockupVariantCoverageSummary {
 
 /** Options for the artifact-level rollup. Extends BuildVariantOptions with a
  * per-screen generated-variant lookup so manifest-backed coverage is counted. */
-export interface CoverageSummaryOptions extends Omit<BuildVariantOptions, 'generatedVariants'> {
+export interface CoverageSummaryOptions extends Omit<BuildVariantOptions, 'generatedVariants' | 'defaultImagePresence'> {
     /** Resolve THIS screen's manifest-backed generated variants (variant image
      * store), keyed by variant id. Absent → the derived-only rollup. */
     generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
+    /** SYN-003: resolve THIS screen's authoritative default-image presence
+     * (src/lib/mockupImagePresence.ts). Absent → legacy spec-join behavior, so
+     * an image-absent default over-counts as generated (the pre-fix behavior);
+     * wire it so the rollup reflects real image presence. */
+    defaultImagePresenceByScreen?: (screenId: string) => MockupImagePresence | undefined;
 }
 
 /** Roll up variant coverage across the whole screen index for the Screen
@@ -532,11 +588,15 @@ export function buildMockupVariantCoverageSummary(
     let manifestBackedGenerated = 0;
     const freshnessVerdicts: MockupVariantFreshness[] = [];
 
-    const { generatedVariantsByScreen, ...variantOptions } = options;
+    const { generatedVariantsByScreen, defaultImagePresenceByScreen, ...variantOptions } = options;
 
     for (const item of index.items) {
         const generatedVariants = generatedVariantsByScreen?.(item.id);
-        const variants = buildScreenMockupVariants(item, { ...variantOptions, generatedVariants });
+        const variants = buildScreenMockupVariants(item, {
+            ...variantOptions,
+            generatedVariants,
+            defaultImagePresence: defaultImagePresenceByScreen?.(item.id),
+        });
         const isP0 = normalizeScreenPriority(item.screen.priority) === 'P0';
         // Only P0 screens that actually recommend a Mobile default count toward
         // the "Mobile coverage (P0)" rollup — a web/desktop project recommends

@@ -71,6 +71,7 @@ function variant(overrides: Partial<DerivedMockupVariant> = {}): DerivedMockupVa
         source: 'legacy',
         coverageStatus: 'unknown',
         coverageEstimated: true,
+        imagePresence: 'present',
         notes: [],
         ...overrides,
     };

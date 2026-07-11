@@ -38,10 +38,14 @@ import {
 } from '../../lib/screenReviewWorkflow';
 import {
     buildScreenMockupVariants, formatVariantLabel, summarizeScreenVariants,
-    VARIANT_STATUS_LABELS, type GeneratedVariantMap,
+    VARIANT_STATUS_LABELS, type GeneratedVariantMap, type MockupImagePresence,
 } from '../../lib/mockupVariants';
+import { deriveDefaultImagePresence } from '../../lib/mockupImagePresence';
+import { buildScreenScopeKey } from '../../lib/mockupImageStore';
+import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore';
+import { useMockupImageStore } from '../../store/mockupImageStore';
 import { MockupVariantsPanel } from './MockupVariantsPanel';
 import { ScreenConfirmPanel } from './ScreenConfirmPanel';
 import { ScreenReviewNotes } from './ScreenReviewNotes';
@@ -157,6 +161,37 @@ export function ScreenDetailView({
         return out;
     }, [variantImages, versionId, item.id]);
 
+    // SYN-003: authoritative default-mockup image presence for THIS screen. The
+    // AI mockup store keys default images by the mockup version id; user-uploaded
+    // default mockups live in the screen-inventory store keyed by the SAME mockup
+    // version id + screen slug. Load and read both so the Default variant only
+    // claims "Generated" when a rendered image actually exists.
+    const loadMockupImages = useMockupImageStore(s => s.loadForVersion);
+    const mockupImages = useMockupImageStore(s => s.images);
+    const mockupLoadedVersions = useMockupImageStore(s => s.loadedVersions);
+    const invUploadImages = useScreenInventoryImageStore(s => s.images);
+    const invUploadHydrated = useScreenInventoryImageStore(s => s.hydrated);
+    useEffect(() => {
+        if (!versionId) return;
+        void loadMockupImages(versionId);
+        // Uploaded default mockups key on the mockup version id, so hydrate it
+        // into the screen-inventory store too (idempotent — guarded by hydrated).
+        void loadForArtifactVersion(versionId);
+    }, [versionId, loadMockupImages, loadForArtifactVersion]);
+    const defaultImagePresence = useMemo<MockupImagePresence | undefined>(() => {
+        const mockupScreen = item.mockupScreen;
+        if (!versionId || !mockupScreen) return undefined;
+        const scope = buildScreenScopeKey(versionId, mockupScreen.id);
+        const uploadSlug = slugifyScreenName(mockupScreen.name);
+        return deriveDefaultImagePresence({
+            mockupImagesLoaded: mockupLoadedVersions[versionId] === true,
+            hasMockupRecord: Object.keys(mockupImages).some(k => k.startsWith(scope)),
+            inventoryHydrated: invUploadHydrated[versionId] === true,
+            hasUploadedRecord: Object.values(invUploadImages).some(
+                r => r.artifactVersionId === versionId && r.screenSlug === uploadSlug),
+        });
+    }, [versionId, item.mockupScreen, mockupLoadedVersions, mockupImages, invUploadHydrated, invUploadImages]);
+
     // Derived review model — user confirmation status vs. derived issues +
     // freshness. Drives the confirm panel and the review notes.
     const reviewModel = useMemo<ScreenReviewModel>(() => buildScreenReviewModelForItem(item, {
@@ -165,7 +200,8 @@ export function ScreenDetailView({
         features,
         trustContext: mockupContext?.trustContext,
         generatedVariants,
-    }), [item, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, features, generatedVariants]);
+        defaultImagePresence,
+    }), [item, mockupContext?.settings.platform, mockupContext?.trustContext, mobileRelevant, features, generatedVariants, defaultImagePresence]);
 
     // Persist a review change into the screenEdits overlay (status on
     // `reviewStatus`; supporting record on `review`). Merges from the existing
@@ -389,6 +425,7 @@ export function ScreenDetailView({
                     onLinkMockup={onLinkMockup}
                     onSaveScreenEdit={onSaveScreenEdit}
                     generatedVariants={generatedVariants}
+                    defaultImagePresence={defaultImagePresence}
                 />
             )}
         </div>
@@ -710,7 +747,7 @@ function DecisionBranches({ decision }: { decision: string }) {
 
 function MockupsTab({
     item, mockupContext, mobileRelevant, mockupStatus, onRetryMockup, onAddToMockups,
-    unmatchedMockups, onLinkMockup, onSaveScreenEdit, generatedVariants,
+    unmatchedMockups, onLinkMockup, onSaveScreenEdit, generatedVariants, defaultImagePresence,
 }: {
     item: ScreenExperienceItem;
     mockupContext?: ScreenDetailMockupContext;
@@ -723,6 +760,8 @@ function MockupsTab({
     onSaveScreenEdit?: (screenId: string, edit: ScreenMetadataEdit | null) => void;
     /** Manifest-backed generated variants for this screen (loaded by the parent). */
     generatedVariants: GeneratedVariantMap;
+    /** SYN-003: authoritative default-mockup image presence (loaded by the parent). */
+    defaultImagePresence?: MockupImagePresence;
 }) {
     const [linkTarget, setLinkTarget] = useState('');
 
@@ -731,6 +770,7 @@ function MockupsTab({
         mobileRelevant,
         trustContext: mockupContext?.trustContext,
         generatedVariants,
+        defaultImagePresence,
     });
     const variantSummary = summarizeScreenVariants(variants);
 
