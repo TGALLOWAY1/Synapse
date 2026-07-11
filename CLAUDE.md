@@ -571,6 +571,41 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     The legacy multi-pass scoring + revision passes were removed — old projects
     in localStorage retain their saved `qualityScores`, but no new generation
     writes them.
+    - **Three-view PRD IA — Overview · Features · Decisions
+      (`StructuredPRDView` + `src/lib/derive/prdViews.ts`).** The in-app PRD is
+      **one canonical artifact presented through three coordinated tab views**,
+      NOT three artifacts — they share the same spine version, finalization
+      state, revision history, freshness/provenance, and downstream
+      relationships. `StructuredPRDView` is the single tabbed shell (rendered by
+      BOTH hosts — the editable `ProjectWorkspace` PRD stage and the read-only
+      `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
+      **Overview** = product brief (executive summary, problem/thesis, vision,
+      principles, JTBD/users, success metrics, a **compact Scope** block — the
+      scope *decision* rationale + MVP/next feature reference **chips** that link
+      into the Features view + a deferred count linking to Decisions, deliberately
+      NOT the full feature cards (those live only in the Features view, so the
+      Overview never duplicates the feature spec), constraints/NFRs, grounding
+      appendix, and a progressively-disclosed "Architecture & additional context" block holding
+      the legacy technical sections — architecture/roles/UX/loops/data-model/
+      state-machines — so nothing is discarded). **Features** = feature systems
+      → individual `FeatureCard`s, grouped by `groupFeaturesBySystem` (system
+      header shown once; a trailing "Other features" bucket for system-less
+      features), a compact filter select (All/MVP/Later/Needs review/Confirmed
+      via `filterFeatures`/`featureFilterCounts`), and an explicit-only
+      traceability strip (`deriveFeatureTrace` — system membership + resolved
+      dependency features; never keyword-inferred links). **Decisions** = Needs
+      Input (low-confidence unresolved assumptions) + Assumptions to Validate
+      (med/high, via `splitDecisionInputs`) → the parameterized
+      `ReviewConfirmSection`; Decision Log (decided items only) via
+      `DecisionLogSection`; and `DeferredRisksSection` (deferred scope + risks
+      via `deriveRisks`). The active view is **navigational-only URL state**
+      (`?prdView=overview|features|decisions`, wired by both hosts via
+      `useSearchParams`; `coercePrdView` normalizes; `overview` omits the param)
+      — NEVER a PRD content revision. Cross-view links (a scope card jumps to its
+      feature; a feature's "Summary" jumps back) switch the tab and scroll after
+      the target view renders. All derivations in `prdViews.ts` are pure and
+      unit-tested; the workflow (confirm/edit → `editSpineStructuredPRD`) is
+      unchanged, so versioning/finalization/downstream all still work.
     - **PRD Review & Confirm + Decision Log (2026-07 mobile cleanup pass).**
       Assumptions no longer render as a passive trailing "Assumptions" section
       (or as the Implementation Summary's "Open Decisions" list — both are
@@ -2565,6 +2600,24 @@ or structured JSON. It also offers a **"Copy for coding agent"** preset
 PRD + build-relevant core artifacts (mockups excluded), with copy and download.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
+
+**The default PRD export is ONE coherent three-part document** mirroring the
+in-app Overview/Features/Decisions views: `renderPremiumMarkdown`
+(`src/lib/services/prdMarkdownRenderer.ts`) emits `# Part I — Product Overview`
+→ `# Part II — Feature Specification` → `# Part III — Decisions and Validation`
+→ `# Appendices` (Architecture & Additional Context holding legacy technical
+sections, a Traceability Index, domain grounding, and the "Where the Detail
+Lives" handoff appendix). It is composed from pure per-part builders
+(`overviewLines`/`featuresLines`/`decisionsLines`/`appendixLines`), and
+`renderPrdSectionMarkdown(prd, 'overview'|'features'|'decisions')` renders a
+single part for the **section-specific export** option (not the default).
+`ExportModal` renders the PRD from the canonical `structuredPRD` object via
+`renderPremiumMarkdown` (falling back to stored `responseText` for legacy
+PRDs with no structured payload), so the three-part structure is guaranteed
+regardless of the saved markdown. The renderer is still the source of
+`SpineVersion.responseText`, so reordering it is presentation-only —
+downstream artifacts consume the `StructuredPRD` object by field, never the
+markdown; no consumer parses it by heading.
 
 **Exports are version-aware.** `src/lib/exportManifest.ts` (pure) builds an
 **export manifest** — per asset: version number, generated-from PRD version

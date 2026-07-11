@@ -1,4 +1,4 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
@@ -23,6 +23,7 @@ import { ConsolidationModal } from './ConsolidationModal';
 import { SettingsModal } from './SettingsModal';
 import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
+import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
@@ -61,6 +62,16 @@ export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const capabilities = useProjectCapabilities(projectId);
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
+    const prdView = coercePrdView(searchParams.get('prdView'));
+    const setPrdView = (next: PrdViewId) => {
+        setSearchParams(prev => {
+            const p = new URLSearchParams(prev);
+            if (next === 'overview') p.delete('prdView');
+            else p.set('prdView', next);
+            return p;
+        }, { replace: true });
+    };
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
     const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
@@ -1348,6 +1359,8 @@ export function ProjectWorkspace() {
                                                 spineId={activeSpine.id}
                                                 structuredPRD={activeSpine.structuredPRD}
                                                 readOnly={isOldVersion || !capabilities.canEditProjectContent}
+                                                view={prdView}
+                                                onViewChange={setPrdView}
                                             />
                                         ) : (
                                             <div className="prose prose-neutral max-w-none">

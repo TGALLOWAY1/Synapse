@@ -3,6 +3,7 @@ import { Pencil, Check, X, Circle, ArrowUp } from 'lucide-react';
 import type { Feature } from '../types';
 import { MvpTag } from './prd/PremiumSections';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
+import { isDisplayableFeatureId } from '../lib/derive/prdDecisions';
 
 interface FeatureCardProps {
     feature: Feature;
@@ -77,10 +78,18 @@ export function FeatureCard({ feature, onUpdate, onToggleConfirm, onBackToSummar
     return (
         <div className={`group p-4 bg-white border rounded-lg transition ${confirmed ? 'border-emerald-200' : 'border-neutral-200 hover:border-neutral-300'}`}>
             <div className="flex items-start justify-between mb-2 gap-2">
-                <div className="flex items-center gap-2 flex-wrap min-w-0">
-                    <FeatureIdBadge id={feature.id} />
-                    <h4 className="font-bold text-neutral-900">{feature.name}</h4>
-                    <MvpTag tier={feature.tier} />
+                <div className="min-w-0 flex-1">
+                    {/* Keep the id (F1) and tier (MVP) chips together on their own
+                        line so the feature name can use the full column width and
+                        only wraps when it truly must — not word-by-word beside the
+                        badges. Hidden entirely when neither chip applies. */}
+                    {(feature.tier || isDisplayableFeatureId(feature.id)) && (
+                        <div className="flex items-center gap-2 mb-1">
+                            <FeatureIdBadge id={feature.id} />
+                            <MvpTag tier={feature.tier} />
+                        </div>
+                    )}
+                    <h4 className="font-bold text-neutral-900 break-words">{feature.name}</h4>
                 </div>
                 <div className="flex items-center gap-1 shrink-0">
                     {onBackToSummary && (

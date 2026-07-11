@@ -18,17 +18,30 @@ import {
     serializeEntities,
     serializeActions,
 } from '../lib/groundingFields';
-import { ImplementationSummarySection } from './prd/ImplementationSummarySection';
 import { ReviewConfirmSection } from './prd/ReviewConfirmSection';
 import { DecisionLogSection } from './prd/DecisionLogSection';
-import { splitAssumptions, deriveDecisionLog } from '../lib/derive/prdDecisions';
+import { DeferredRisksSection } from './prd/DeferredRisksSection';
+import { PrdViewTabs } from './prd/PrdViewTabs';
+import { FeatureIdBadge } from './prd/FeatureIdBadge';
+import { deriveDecisionLog, isDisplayableFeatureId } from '../lib/derive/prdDecisions';
 import {
     deriveDeferredFeatureIds,
     deriveImplementationSummary,
     featureDetailAnchorId,
     isImplementationSummaryEmpty,
-    splitFeaturesByTier,
 } from '../lib/derive/implementationSummary';
+import {
+    coercePrdView,
+    deriveFeatureTrace,
+    deriveRisks,
+    featureFilterCounts,
+    filterFeatures,
+    groupFeaturesBySystem,
+    splitDecisionInputs,
+    FEATURE_FILTERS,
+    type FeatureFilterId,
+    type PrdViewId,
+} from '../lib/derive/prdViews';
 import {
     ExecutiveSummarySection,
     ProductThesisSection,
@@ -36,12 +49,10 @@ import {
     PrinciplesSection,
     UserLoopsSection,
     UxArchitectureSection,
-    FeatureSystemsSection,
     DataModelSection,
     StateMachinesSection,
     RolesSection,
     ArchFlowsSection,
-    RisksDetailedSection,
     MetricsSection,
     HandoffAppendixSection,
 } from './prd/PremiumSections';
@@ -51,6 +62,15 @@ interface StructuredPRDViewProps {
     spineId: string;
     structuredPRD: StructuredPRD;
     readOnly: boolean;
+    /**
+     * Active view (Overview | Features | Decisions). Optional controlled prop:
+     * hosts wire it to URL query state (`?prdView=…`) for deep-linkable,
+     * refresh-stable navigation. When omitted the component keeps view state
+     * internally, so it renders standalone (e.g. in tests) without a router.
+     * This is purely NAVIGATIONAL UI state — never persisted as PRD content.
+     */
+    view?: PrdViewId;
+    onViewChange?: (view: PrdViewId) => void;
 }
 
 type EditingSection =
@@ -72,13 +92,30 @@ const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'target
     risks: 'Risks',
 };
 
-export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly }: StructuredPRDViewProps) {
+export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange }: StructuredPRDViewProps) {
     const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
     const [editingSection, setEditingSection] = useState<EditingSection>(null);
     const [editValue, setEditValue] = useState('');
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
     const contentRef = useRef<HTMLDivElement>(null);
+
+    // View state: controlled by the host (URL) when `view` is provided, else
+    // internal. Navigational only — never a PRD content revision.
+    const [internalView, setInternalView] = useState<PrdViewId>('overview');
+    const activeView = coercePrdView(view ?? internalView);
+    const setView = (next: PrdViewId) => {
+        if (onViewChange) onViewChange(next);
+        else setInternalView(next);
+    };
+
+    // Feature filter (Features view). Purely navigational component state.
+    const [featureFilter, setFeatureFilter] = useState<FeatureFilterId>('all');
+    // Collapsed feature-system groups (by id).
+    const [collapsedGroups, setCollapsedGroups] = useState<Set<string>>(new Set());
+    // Overview: progressively disclose the technical/architecture detail so the
+    // brief stays calm and editorial (one level of disclosure, not nested).
+    const [showTechnicalDetail, setShowTechnicalDetail] = useState(false);
 
     // On mobile, gate selection behind an explicit "Select text to edit" mode so
     // the Synapse sheet doesn't collide with the native iOS toolbar. Desktop is
@@ -355,22 +392,32 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         );
     };
 
-    const { unresolved: unresolvedAssumptions } = splitAssumptions(structuredPRD.assumptions);
-    const decisionLog = deriveDecisionLog(structuredPRD);
+    // ── Decisions view derivations ─────────────────────────────────────
+    const { needsInput, toValidate } = splitDecisionInputs(structuredPRD.assumptions);
+    const allDecisionLog = deriveDecisionLog(structuredPRD);
+    // Decision Log = decided items only (deferred scope splits into its own
+    // section so the two never read as the same thing).
+    const decisionLog = allDecisionLog.filter(e => e.verdict !== 'deferred');
+    const deferredEntries = allDecisionLog.filter(e => e.verdict === 'deferred');
+    const risks = useMemo(() => deriveRisks(structuredPRD), [structuredPRD]);
 
-    // ── Detailed Features grouping & summary ↔ detail navigation ───────
-    // MVP (and unclassified) features render by default; V1 features sit
-    // behind a collapsed disclosure; deferred (tier 'later') features are
-    // NOT rendered here — they appear only as Decision Log entries above.
+    // ── Features view derivations ──────────────────────────────────────
     const deferredFeatureIds = useMemo(
         () => deriveDeferredFeatureIds(structuredPRD),
         [structuredPRD],
     );
-    const featureGroups = useMemo(
-        () => splitFeaturesByTier(structuredPRD.features, deferredFeatureIds),
+    const filterCounts = useMemo(
+        () => featureFilterCounts(structuredPRD.features, deferredFeatureIds),
         [structuredPRD.features, deferredFeatureIds],
     );
-    const [showV1Features, setShowV1Features] = useState(false);
+    const filteredFeatures = useMemo(
+        () => filterFeatures(structuredPRD.features, featureFilter, deferredFeatureIds),
+        [structuredPRD.features, featureFilter, deferredFeatureIds],
+    );
+    const featureGroups = useMemo(
+        () => groupFeaturesBySystem(filteredFeatures, structuredPRD),
+        [filteredFeatures, structuredPRD],
+    );
     const pendingScrollRef = useRef<string | null>(null);
 
     const summaryPresent = useMemo(
@@ -380,29 +427,46 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         [structuredPRD],
     );
 
-    const scrollToAnchor = (elementId: string) => {
-        document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    };
-
-    // Jump from an Implementation Summary card to the feature's detail card,
-    // expanding the collapsed V1 group first when the target lives inside it.
+    // Cross-view navigation: an Implementation Summary card (Overview) jumps to
+    // the feature's detail card in the Features view; a feature card jumps back
+    // to the summary. The scroll is deferred until the target view has rendered.
     const handleNavigateToFeature = (featureId: string) => {
-        const elementId = featureDetailAnchorId(featureId);
-        if (!showV1Features && featureGroups.v1.some(f => f.id === featureId)) {
-            pendingScrollRef.current = elementId;
-            setShowV1Features(true);
-            return;
-        }
-        scrollToAnchor(elementId);
+        pendingScrollRef.current = featureDetailAnchorId(featureId);
+        if (featureFilter !== 'all') setFeatureFilter('all');
+        setView('features');
+        // Same-view case (already on Features): scroll on next frame.
+        if (activeView === 'features') requestAnimationFrame(runPendingScroll);
     };
 
-    // Scroll to a just-expanded V1 feature once it is actually in the DOM.
-    useEffect(() => {
+    const navigateToSummary = () => {
+        pendingScrollRef.current = 'prd-implementation-summary';
+        setView('overview');
+        if (activeView === 'overview') requestAnimationFrame(runPendingScroll);
+    };
+
+    const toggleGroup = (id: string) => {
+        setCollapsedGroups(prev => {
+            const next = new Set(prev);
+            if (next.has(id)) next.delete(id);
+            else next.add(id);
+            return next;
+        });
+    };
+
+    const runPendingScroll = () => {
         if (!pendingScrollRef.current) return;
         const elementId = pendingScrollRef.current;
         pendingScrollRef.current = null;
-        document.getElementById(elementId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, [showV1Features]);
+        const el = document.getElementById(elementId);
+        if (el && typeof el.scrollIntoView === 'function') {
+            el.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        }
+    };
+
+    // Run a pending cross-view scroll once the newly-active view has rendered.
+    useEffect(() => {
+        runPendingScroll();
+    }, [activeView]);
 
     const handleAddFeature = () => {
         const newFeature: Feature = {
@@ -648,15 +712,51 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
 
     // One feature detail card. Anchored so the Implementation Summary cards
     // can deep-link to it, with a back affordance returning to the summary.
-    const renderFeatureCard = (feature: Feature) => (
+    // Restrained, explicit-only traceability strip below a feature card:
+    // system membership + resolved dependency features. No inferred goal/metric
+    // links (we never fabricate relationships from keyword overlap).
+    const renderFeatureTrace = (feature: Feature, hideSystem = false) => {
+        const trace = deriveFeatureTrace(feature, structuredPRD);
+        const showSystem = trace.system && !hideSystem;
+        if (!showSystem && trace.dependencies.length === 0) return null;
+        return (
+            <div className="mt-2 flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-neutral-500">
+                {showSystem && trace.system && (
+                    <span className="inline-flex items-center gap-1">
+                        <span className="font-semibold text-neutral-400 uppercase tracking-wider">Part of</span>
+                        <span className="text-neutral-700">{trace.system.name}</span>
+                    </span>
+                )}
+                {trace.dependencies.length > 0 && (
+                    <span className="inline-flex items-center gap-1 flex-wrap">
+                        <span className="font-semibold text-neutral-400 uppercase tracking-wider">Depends on</span>
+                        {trace.dependencies.map(d => (
+                            <button
+                                key={d.id}
+                                type="button"
+                                onClick={() => handleNavigateToFeature(d.id)}
+                                className="text-indigo-600 hover:text-indigo-800 hover:underline"
+                                title={`Go to ${d.name}`}
+                            >
+                                {d.name}
+                            </button>
+                        ))}
+                    </span>
+                )}
+            </div>
+        );
+    };
+
+    const renderFeatureCard = (feature: Feature, hideSystem = false) => (
         <div key={feature.id} id={featureDetailAnchorId(feature.id)} className="relative group/feature scroll-mt-24">
             <FeatureCard
                 feature={feature}
                 onUpdate={handleFeatureUpdate}
-                onToggleConfirm={handleToggleFeatureConfirm}
-                onBackToSummary={summaryPresent ? () => scrollToAnchor('prd-implementation-summary') : undefined}
+                onToggleConfirm={deferredFeatureIds.has(feature.id) ? undefined : handleToggleFeatureConfirm}
+                onBackToSummary={summaryPresent ? navigateToSummary : undefined}
                 readOnly={readOnly}
             />
+            {renderFeatureTrace(feature, hideSystem)}
             {!readOnly && (
                 <button
                     onClick={() => {
@@ -707,174 +807,381 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly 
         );
     };
 
-    return (
-        <div className="relative">
-            <div ref={contentRef} className="space-y-2">
-                {renderGroundingBackfill()}
+    // ── Overview view: the concise product brief ───────────────────────
+    const renderConstraints = () => {
+        const constraints = structuredPRD.constraints ?? [];
+        const nfrs = structuredPRD.nonFunctionalRequirements ?? [];
+        if (constraints.length === 0 && nfrs.length === 0) return null;
+        return (
+            <div className="mb-8">
+                <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Constraints</h3>
+                </div>
+                <div className="grid sm:grid-cols-2 gap-3">
+                    {constraints.length > 0 && (
+                        <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Boundaries</p>
+                            <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
+                                {constraints.map((c, i) => <li key={i}>{c}</li>)}
+                            </ul>
+                        </div>
+                    )}
+                    {nfrs.length > 0 && (
+                        <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Non-functional requirements</p>
+                            <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
+                                {nfrs.map((c, i) => <li key={i}>{c}</li>)}
+                            </ul>
+                        </div>
+                    )}
+                </div>
+            </div>
+        );
+    };
 
-                {/* Premium PRD top — present only on PRDs generated by the new pipeline */}
-                {structuredPRD.executiveSummary && (
-                    <ExecutiveSummarySection summary={structuredPRD.executiveSummary} />
-                )}
-
-                {/* Implementation summary — synthesized from existing fields so a
-                    reader can answer "what should I build first?" without scrolling
-                    the entire document. THE section presenting MVP/V1 scope (the old
-                    MVP Scope lists duplicated it); its cards jump to the feature
-                    detail cards below. Hidden if the PRD has no actionable signal. */}
-                <ImplementationSummarySection
-                    prd={structuredPRD}
-                    onNavigateToFeature={handleNavigateToFeature}
-                />
-
-                {/* Review & Confirm — the actionable home for assumptions / open
-                    decisions (highest confidence first). Confirmed/corrected items
-                    move to the Decision Log below; both hide when empty. */}
-                <ReviewConfirmSection
-                    assumptions={unresolvedAssumptions}
-                    onConfirm={handleConfirmAssumption}
-                    onReject={handleRejectAssumption}
-                    readOnly={readOnly}
-                />
-
-                <DecisionLogSection
-                    entries={decisionLog}
-                    onUndoAssumption={handleUndoAssumption}
-                    onUndoFeature={(featureId) => {
-                        const f = structuredPRD.features.find(x => x.id === featureId);
-                        if (f) handleToggleFeatureConfirm(f);
-                    }}
-                    readOnly={readOnly}
-                />
-
-                {/* Section order is a logical reading flow (mirrors
-                    prdMarkdownRenderer): Product Overview → Target Users →
-                    Features → UX → Metrics → Risks → Technical Architecture →
-                    Data Model → State Machines → reference → Where the Detail
-                    Lives (static handoff appendix). MVP/V1 scope lives in the
-                    Implementation Summary at the top; deferred scope in the
-                    Decision Log. */}
-
-                {/* Product Overview: Vision → Problem → Thesis → Principles */}
-                {renderTextSection('Vision', 'vision', structuredPRD.vision)}
-
-                {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
-
-                {structuredPRD.productThesis && (
-                    <ProductThesisSection thesis={structuredPRD.productThesis} />
-                )}
-
-                {structuredPRD.principles && structuredPRD.principles.length > 0 && (
-                    <PrinciplesSection principles={structuredPRD.principles} />
-                )}
-
-                {/* Target Users — JTBD if available, else legacy targetUsers list */}
-                {structuredPRD.jtbd && structuredPRD.jtbd.length > 0
-                    ? <JtbdSection jtbd={structuredPRD.jtbd} />
-                    : renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
-
-                {/* Core Features — concrete features first, system grouping after.
-                    MVP (and unclassified) features show by default; V1 features are
-                    collapsed; deferred features render only in the Decision Log. */}
-                <div className="mb-8" id="prd-features">
-                    <div className="flex items-center justify-between mb-4 border-b border-neutral-200 pb-2">
-                        <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Detailed Features</h3>
-                        {!readOnly && (
+    // Compact scope surface for the Overview. Deliberately NOT the full feature
+    // list (that lives in the Features view) — it states the scope DECISION
+    // (rationale), which features are in MVP / next as small reference chips,
+    // and how many are deferred. Chips link into the Features/Decisions views.
+    const renderScopeGroup = (label: string, items: Array<{ id?: string; name: string }>) => {
+        if (items.length === 0) return null;
+        return (
+            <div className="mb-3 last:mb-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">{label}</p>
+                <div className="flex flex-wrap gap-1.5">
+                    {items.map((f, i) => {
+                        const clickable = !!f.id && isDisplayableFeatureId(f.id);
+                        const content = (
+                            <>
+                                {clickable && <FeatureIdBadge id={f.id} />}
+                                <span className="min-w-0 break-words">{f.name}</span>
+                            </>
+                        );
+                        return clickable ? (
                             <button
-                                onClick={handleAddFeature}
-                                className="flex items-center gap-1 text-xs text-indigo-500 hover:text-indigo-700 transition"
-                            >
-                                <Plus size={14} />
-                                Add Feature
-                            </button>
-                        )}
-                    </div>
-                    <div className="space-y-3">
-                        {featureGroups.mvp.map(feature => renderFeatureCard(feature))}
-                    </div>
-                    {featureGroups.v1.length > 0 && (
-                        <div className="mt-4">
-                            <button
+                                key={f.id}
                                 type="button"
-                                onClick={() => setShowV1Features(v => !v)}
-                                aria-expanded={showV1Features}
-                                className="flex items-center gap-1.5 text-xs font-bold uppercase tracking-wider text-blue-700 hover:text-blue-900 transition"
+                                onClick={() => handleNavigateToFeature(f.id!)}
+                                title={`Go to ${f.name} in Features`}
+                                className="inline-flex items-center gap-1.5 max-w-full text-left rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:border-indigo-300 hover:text-indigo-700 transition"
                             >
-                                {showV1Features ? <ChevronDown size={14} /> : <ChevronRight size={14} />}
-                                V1 — soon after launch
-                                <span className="font-normal normal-case tracking-normal text-neutral-400">
-                                    {featureGroups.v1.length} feature{featureGroups.v1.length === 1 ? '' : 's'} · {showV1Features ? 'hide' : 'show'}
-                                </span>
+                                {content}
                             </button>
-                            {showV1Features && (
-                                <div className="space-y-3 mt-3">
-                                    {featureGroups.v1.map(feature => renderFeatureCard(feature))}
-                                </div>
+                        ) : (
+                            <span
+                                key={`${f.name}-${i}`}
+                                className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
+                            >
+                                {f.name}
+                            </span>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
+    const renderScope = () => {
+        const summary = deriveImplementationSummary(structuredPRD);
+        const rationale = structuredPRD.mvpScope?.rationale;
+        const deferredCount = deferredFeatureIds.size;
+        if (isImplementationSummaryEmpty(summary) && !rationale) return null;
+        return (
+            <div className="mb-8 scroll-mt-24" id="prd-implementation-summary">
+                <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Scope</h3>
+                </div>
+                {rationale && (
+                    <div className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-neutral-800">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mr-1.5">Decision</span>
+                        {rationale}
+                    </div>
+                )}
+                <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
+                    {renderScopeGroup('Build first (MVP)', summary.buildFirst)}
+                    {renderScopeGroup('Build next', summary.buildNext)}
+                    {deferredCount > 0 && (
+                        <p className="text-xs text-neutral-500 mt-2">
+                            {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
+                            <button type="button" onClick={() => setView('decisions')} className="text-indigo-600 hover:text-indigo-800 underline">
+                                Decisions
+                            </button>{' '}tab.
+                        </p>
+                    )}
+                    <p className="text-[11px] text-neutral-400 mt-3">
+                        Full feature detail lives in the{' '}
+                        <button type="button" onClick={() => setView('features')} className="text-indigo-600 hover:text-indigo-800 underline">
+                            Features
+                        </button>{' '}tab.
+                    </p>
+                </div>
+            </div>
+        );
+    };
+
+    const hasTechnicalDetail =
+        !!structuredPRD.architecture
+        || !!structuredPRD.architectureFlows?.length
+        || !!structuredPRD.roles?.length
+        || !!structuredPRD.uxPages?.length
+        || !!structuredPRD.userLoops?.length
+        || (structuredPRD.richDataModel?.entities.length ?? 0) > 0
+        || !!structuredPRD.stateMachines?.length;
+
+    const renderOverview = () => (
+        <>
+            {renderGroundingBackfill()}
+
+            {/* Product Summary — the fastest way to understand the product. */}
+            {structuredPRD.executiveSummary && (
+                <ExecutiveSummarySection summary={structuredPRD.executiveSummary} />
+            )}
+
+            {/* Problem & Opportunity, then Vision / Value proposition. */}
+            {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
+
+            {structuredPRD.productThesis && (
+                <ProductThesisSection thesis={structuredPRD.productThesis} />
+            )}
+
+            {renderTextSection('Vision', 'vision', structuredPRD.vision)}
+
+            {structuredPRD.principles && structuredPRD.principles.length > 0 && (
+                <PrinciplesSection principles={structuredPRD.principles} />
+            )}
+
+            {/* Target Users — JTBD if available, else legacy targetUsers list */}
+            {structuredPRD.jtbd && structuredPRD.jtbd.length > 0
+                ? <JtbdSection jtbd={structuredPRD.jtbd} />
+                : renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
+
+            {/* Goals & Success Metrics */}
+            {structuredPRD.successMetrics && structuredPRD.successMetrics.length > 0 && (
+                <MetricsSection metrics={structuredPRD.successMetrics} />
+            )}
+
+            {/* Scope — the scope DECISION + compact references, not the full
+                feature list (that lives in the Features view). */}
+            {renderScope()}
+
+            {renderConstraints()}
+
+            {/* Grounding appendix — domain nouns/verbs the mockup engine uses. */}
+            {renderDomainEntities()}
+            {renderPrimaryActions()}
+
+            {/* Architecture & additional context — progressively disclosed so the
+                brief stays calm. Preserves legacy technical sections without a
+                separate artifact. */}
+            {hasTechnicalDetail && (
+                <div className="mb-8">
+                    <button
+                        type="button"
+                        onClick={() => setShowTechnicalDetail(v => !v)}
+                        aria-expanded={showTechnicalDetail}
+                        className="flex items-center gap-1.5 text-sm font-semibold text-neutral-700 hover:text-neutral-900 transition"
+                    >
+                        {showTechnicalDetail ? <ChevronDown size={16} /> : <ChevronRight size={16} />}
+                        Architecture &amp; additional context
+                    </button>
+                    {showTechnicalDetail && (
+                        <div className="mt-4">
+                            {structuredPRD.architecture &&
+                                renderTextSection('Architecture', 'architecture', structuredPRD.architecture)}
+                            {structuredPRD.architectureFlows && structuredPRD.architectureFlows.length > 0 && (
+                                <ArchFlowsSection flows={structuredPRD.architectureFlows} />
+                            )}
+                            {structuredPRD.roles && structuredPRD.roles.length > 0 && (
+                                <RolesSection roles={structuredPRD.roles} />
+                            )}
+                            {structuredPRD.uxPages && structuredPRD.uxPages.length > 0 && (
+                                <UxArchitectureSection pages={structuredPRD.uxPages} />
+                            )}
+                            {structuredPRD.userLoops && structuredPRD.userLoops.length > 0 && (
+                                <UserLoopsSection loops={structuredPRD.userLoops} />
+                            )}
+                            {structuredPRD.richDataModel && structuredPRD.richDataModel.entities.length > 0 && (
+                                <DataModelSection model={structuredPRD.richDataModel} />
+                            )}
+                            {structuredPRD.stateMachines && structuredPRD.stateMachines.length > 0 && (
+                                <StateMachinesSection machines={structuredPRD.stateMachines} />
                             )}
                         </div>
                     )}
-                    {featureGroups.deferred.length > 0 && (
-                        <p className="mt-4 text-xs text-neutral-500">
-                            {featureGroups.deferred.length} deferred feature{featureGroups.deferred.length === 1 ? ' is' : 's are'} recorded in the{' '}
-                            <a
-                                href="#prd-decision-log"
-                                onClick={(e) => { e.preventDefault(); scrollToAnchor('prd-decision-log'); }}
-                                className="text-indigo-600 hover:text-indigo-800 underline"
-                            >
-                                Decision Log
-                            </a>.
-                        </p>
-                    )}
                 </div>
+            )}
 
-                {structuredPRD.featureSystems && structuredPRD.featureSystems.length > 0 && (
-                    <FeatureSystemsSection systems={structuredPRD.featureSystems} deferredFeatureIds={deferredFeatureIds} />
+            <HandoffAppendixSection />
+        </>
+    );
+
+    // ── Features view: feature systems → individual features ───────────
+    const renderFeatureGroup = (group: ReturnType<typeof groupFeaturesBySystem>[number]) => {
+        const collapsed = collapsedGroups.has(group.id);
+        return (
+            <section key={group.id} className="rounded-xl border border-neutral-200 overflow-hidden">
+                <button
+                    type="button"
+                    onClick={() => toggleGroup(group.id)}
+                    aria-expanded={!collapsed}
+                    className="w-full flex items-start justify-between gap-3 px-4 py-3 bg-neutral-50 hover:bg-neutral-100 text-left transition"
+                >
+                    <div className="min-w-0">
+                        <div className="flex items-center gap-2">
+                            {collapsed ? <ChevronRight size={16} className="text-neutral-400 shrink-0" /> : <ChevronDown size={16} className="text-neutral-400 shrink-0" />}
+                            <h4 className="font-bold text-neutral-900">{group.name}</h4>
+                            <span className="text-[11px] text-neutral-400">
+                                {group.total} feature{group.total === 1 ? '' : 's'}
+                            </span>
+                        </div>
+                        {group.purpose && <p className="text-xs text-neutral-600 mt-1 ml-6">{group.purpose}</p>}
+                        {group.outcome && (
+                            <p className="text-xs text-neutral-500 mt-0.5 ml-6">
+                                <span className="font-semibold">Outcome:</span> {group.outcome}
+                            </p>
+                        )}
+                    </div>
+                    <div className="shrink-0 flex items-center gap-1.5 pt-0.5">
+                        {group.mvpCount > 0 && (
+                            <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-green-100 text-green-800 border-green-300">
+                                {group.mvpCount} MVP
+                            </span>
+                        )}
+                        {group.v1CountAll > 0 && (
+                            <span className="inline-block text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">
+                                {group.v1CountAll} later
+                            </span>
+                        )}
+                    </div>
+                </button>
+                {!collapsed && (
+                    <div className="p-4 space-y-3">
+                        {group.features.map(feature => renderFeatureCard(feature, !group.ungrouped))}
+                    </div>
                 )}
+            </section>
+        );
+    };
 
-                {/* User Experience: UX Architecture → Core User Loops */}
-                {structuredPRD.uxPages && structuredPRD.uxPages.length > 0 && (
-                    <UxArchitectureSection pages={structuredPRD.uxPages} />
+    const renderFeatures = () => {
+        const noFeatures = structuredPRD.features.length === 0;
+        return (
+            <>
+                <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
+                    <div className="flex items-center gap-2 min-w-0">
+                        <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Features</h3>
+                        <span className="text-[11px] text-neutral-400">{filterCounts.all} in scope</span>
+                    </div>
+                    <div className="flex items-center gap-2 shrink-0">
+                        <label htmlFor="prd-feature-filter" className="sr-only">Filter features</label>
+                        <select
+                            id="prd-feature-filter"
+                            value={featureFilter}
+                            onChange={e => setFeatureFilter(e.target.value as FeatureFilterId)}
+                            className="text-sm border border-neutral-200 rounded-md px-2.5 py-1.5 bg-white text-neutral-700 focus:outline-none focus:border-indigo-400"
+                        >
+                            {FEATURE_FILTERS.map(f => (
+                                <option key={f.id} value={f.id}>{f.label} ({filterCounts[f.id]})</option>
+                            ))}
+                        </select>
+                        {!readOnly && (
+                            <button
+                                onClick={handleAddFeature}
+                                className="inline-flex items-center gap-1 text-xs text-indigo-600 hover:text-indigo-800 border border-indigo-200 rounded-md px-2.5 py-1.5 transition"
+                            >
+                                <Plus size={14} />
+                                Add
+                            </button>
+                        )}
+                    </div>
+                </div>
+                {noFeatures ? (
+                    <div className="p-6 bg-neutral-50 border border-dashed border-neutral-200 rounded-lg text-sm text-neutral-500 text-center">
+                        No features captured in this PRD yet.
+                    </div>
+                ) : filteredFeatures.length === 0 ? (
+                    <div className="p-6 bg-neutral-50 border border-dashed border-neutral-200 rounded-lg text-sm text-neutral-500 text-center">
+                        No features match this filter.
+                    </div>
+                ) : (
+                    <div className="space-y-4">
+                        {featureGroups.map(group => renderFeatureGroup(group))}
+                    </div>
                 )}
+            </>
+        );
+    };
 
-                {structuredPRD.userLoops && structuredPRD.userLoops.length > 0 && (
-                    <UserLoopsSection loops={structuredPRD.userLoops} />
-                )}
+    // ── Decisions view: Needs Input → Assumptions → Log → Deferred/Risks ─
+    const decisionsEmpty =
+        needsInput.length === 0
+        && toValidate.length === 0
+        && decisionLog.length === 0
+        && deferredEntries.length === 0
+        && risks.length === 0;
 
-                {/* Success Metrics */}
-                {structuredPRD.successMetrics && structuredPRD.successMetrics.length > 0 && (
-                    <MetricsSection metrics={structuredPRD.successMetrics} />
-                )}
+    const renderDecisions = () => (
+        <>
+            <ReviewConfirmSection
+                assumptions={needsInput}
+                onConfirm={handleConfirmAssumption}
+                onReject={handleRejectAssumption}
+                readOnly={readOnly}
+                id="prd-needs-input"
+                title="Needs Input"
+                description="Low-confidence assumptions that need a decision before the PRD relies on them. Answer to confirm, or correct with the right direction."
+                confirmLabel="Confirm answer"
+            />
+            <ReviewConfirmSection
+                assumptions={toValidate}
+                onConfirm={handleConfirmAssumption}
+                onReject={handleRejectAssumption}
+                readOnly={readOnly}
+                id="prd-assumptions"
+                title="Assumptions to Validate"
+                description="Plausible statements Synapse assumed while drafting. Confirm the ones that hold — or correct them — and they move to the Decision Log."
+            />
+            <DecisionLogSection
+                entries={decisionLog}
+                onUndoAssumption={handleUndoAssumption}
+                onUndoFeature={(featureId) => {
+                    const f = structuredPRD.features.find(x => x.id === featureId);
+                    if (f) handleToggleFeatureConfirm(f);
+                }}
+                readOnly={readOnly}
+            />
+            <DeferredRisksSection deferred={deferredEntries} risks={risks} />
+            {decisionsEmpty && (
+                <div className="p-6 bg-neutral-50 border border-dashed border-neutral-200 rounded-lg text-sm text-neutral-500 text-center">
+                    No open questions, assumptions, decisions, or risks recorded for this PRD.
+                </div>
+            )}
+        </>
+    );
 
-                {/* Risks: prefer detailed, fall back to legacy bullet list */}
-                {structuredPRD.risksDetailed && structuredPRD.risksDetailed.length > 0
-                    ? <RisksDetailedSection risks={structuredPRD.risksDetailed} />
-                    : renderListSection('Risks', 'risks', structuredPRD.risks)}
+    const decisionsPending = needsInput.length + toValidate.length;
 
-                {/* Technical Architecture → Roles → Data Model → State Machines */}
-                {renderTextSection('Architecture', 'architecture', structuredPRD.architecture)}
-
-                {structuredPRD.architectureFlows && structuredPRD.architectureFlows.length > 0 && (
-                    <ArchFlowsSection flows={structuredPRD.architectureFlows} />
-                )}
-
-                {structuredPRD.roles && structuredPRD.roles.length > 0 && (
-                    <RolesSection roles={structuredPRD.roles} />
-                )}
-
-                {structuredPRD.richDataModel && structuredPRD.richDataModel.entities.length > 0 && (
-                    <DataModelSection model={structuredPRD.richDataModel} />
-                )}
-
-                {structuredPRD.stateMachines && structuredPRD.stateMachines.length > 0 && (
-                    <StateMachinesSection machines={structuredPRD.stateMachines} />
-                )}
-
-                {/* Appendix / Reference Material. Assumptions no longer render
-                    here — they live in Review & Confirm / Decision Log above. */}
-                {renderDomainEntities()}
-                {renderPrimaryActions()}
-
-                <HandoffAppendixSection />
+    return (
+        <div className="relative">
+            <PrdViewTabs
+                active={activeView}
+                onChange={setView}
+                counts={{
+                    features: filterCounts.all,
+                    decisions: decisionsPending,
+                }}
+            />
+            <div
+                ref={contentRef}
+                role="tabpanel"
+                id={`prd-panel-${activeView}`}
+                aria-labelledby={`prd-tab-${activeView}`}
+                tabIndex={0}
+                className="space-y-2 focus:outline-none"
+            >
+                {activeView === 'overview' && renderOverview()}
+                {activeView === 'features' && renderFeatures()}
+                {activeView === 'decisions' && renderDecisions()}
             </div>
 
             {selection && (

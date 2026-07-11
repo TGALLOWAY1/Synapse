@@ -33,9 +33,26 @@ interface Props {
     /** Mark the assumption incorrect, with an optional correction/clarification. */
     onReject: (assumptionId: string, note: string) => void;
     readOnly: boolean;
+    /** Section heading. Defaults to "Review & Confirm" (legacy usage). */
+    title?: string;
+    /** Explanatory copy under the heading. */
+    description?: string;
+    /** DOM id / scroll anchor. */
+    id?: string;
+    /** Label for the confirm action ("Confirm" | "Confirm answer" …). */
+    confirmLabel?: string;
 }
 
-export function ReviewConfirmSection({ assumptions, onConfirm, onReject, readOnly }: Props) {
+export function ReviewConfirmSection({
+    assumptions,
+    onConfirm,
+    onReject,
+    readOnly,
+    title = 'Review & Confirm',
+    description = 'Synapse made these assumptions while drafting the PRD. Confirm the ones that are right — or correct the ones that aren’t — and they move to the Decision Log.',
+    id = 'prd-review-confirm',
+    confirmLabel = 'Confirm',
+}: Props) {
     const [rejectingId, setRejectingId] = useState<string | null>(null);
     const [note, setNote] = useState('');
 
@@ -53,17 +70,14 @@ export function ReviewConfirmSection({ assumptions, onConfirm, onReject, readOnl
     };
 
     return (
-        <div id="prd-review-confirm" className="mb-8 scroll-mt-24">
+        <div id={id} className="mb-8 scroll-mt-24">
             <div className="flex items-center gap-2 mb-3 border-b border-neutral-200 pb-2">
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight whitespace-nowrap">
-                    Review &amp; Confirm
+                    {title}
                 </h3>
                 <span className="text-[11px] text-neutral-400">{assumptions.length}</span>
             </div>
-            <p className="text-sm text-neutral-600 mb-3">
-                Synapse made these assumptions while drafting the PRD. Confirm the ones that are
-                right — or correct the ones that aren&rsquo;t — and they move to the Decision Log.
-            </p>
+            <p className="text-sm text-neutral-600 mb-3">{description}</p>
             <ul className="space-y-2">
                 {assumptions.map(a => (
                     <li key={a.id} className="rounded-lg border border-neutral-200 bg-white px-4 py-3">
@@ -80,7 +94,7 @@ export function ReviewConfirmSection({ assumptions, onConfirm, onReject, readOnl
                                         className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition"
                                         aria-label={`Confirm assumption: ${a.statement}`}
                                     >
-                                        <Check size={13} /> Confirm
+                                        <Check size={13} /> {confirmLabel}
                                     </button>
                                     <button
                                         type="button"
