@@ -1332,7 +1332,7 @@ export type ProjectTask = {
     status: TaskStatus;
     createdAt: number;
     updatedAt: number;
-    /** Populated when the task is exported to GitHub/Linear/markdown. */
+    /** Populated when the task is exported to GitHub/markdown. */
     externalRefs?: TaskExternalRef[];
 };
 

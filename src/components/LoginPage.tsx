@@ -203,17 +203,23 @@ export function LoginPage() {
                     {/* Name (sign-up only) */}
                     {tab === 'signup' && (
                         <div>
+                            <label htmlFor="login-name" className="sr-only">
+                                Name
+                            </label>
                             <div className="relative">
                                 <UserIcon
                                     size={16}
                                     className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"
                                 />
                                 <input
+                                    id="login-name"
                                     type="text"
                                     value={name}
                                     onChange={(e) => setName(e.target.value)}
                                     placeholder="Name"
                                     autoComplete="name"
+                                    aria-invalid={fieldErrors.name ? true : undefined}
+                                    aria-describedby={fieldErrors.name ? 'login-name-error' : undefined}
                                     className={`w-full bg-black/40 border rounded-xl pl-11 pr-4 py-3 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 transition ${
                                         fieldErrors.name
                                             ? 'border-red-500/60 focus:ring-red-500/40 focus:border-red-500/60'
@@ -222,24 +228,32 @@ export function LoginPage() {
                                 />
                             </div>
                             {fieldErrors.name && (
-                                <p className="mt-1.5 text-xs text-red-300">{fieldErrors.name}</p>
+                                <p id="login-name-error" className="mt-1.5 text-xs text-red-300">
+                                    {fieldErrors.name}
+                                </p>
                             )}
                         </div>
                     )}
 
                     {/* Email */}
                     <div>
+                        <label htmlFor="login-email" className="sr-only">
+                            Email
+                        </label>
                         <div className="relative">
                             <Mail
                                 size={16}
                                 className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"
                             />
                             <input
+                                id="login-email"
                                 type="email"
                                 value={email}
                                 onChange={(e) => setEmail(e.target.value)}
                                 placeholder="Email"
                                 autoComplete="email"
+                                aria-invalid={fieldErrors.email ? true : undefined}
+                                aria-describedby={fieldErrors.email ? 'login-email-error' : undefined}
                                 className={`w-full bg-black/40 border rounded-xl pl-11 pr-4 py-3 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 transition ${
                                     fieldErrors.email
                                         ? 'border-red-500/60 focus:ring-red-500/40 focus:border-red-500/60'
@@ -248,23 +262,31 @@ export function LoginPage() {
                             />
                         </div>
                         {fieldErrors.email && (
-                            <p className="mt-1.5 text-xs text-red-300">{fieldErrors.email}</p>
+                            <p id="login-email-error" className="mt-1.5 text-xs text-red-300">
+                                {fieldErrors.email}
+                            </p>
                         )}
                     </div>
 
                     {/* Password */}
                     <div>
+                        <label htmlFor="login-password" className="sr-only">
+                            Password
+                        </label>
                         <div className="relative">
                             <Lock
                                 size={16}
                                 className="absolute left-4 top-1/2 -translate-y-1/2 text-neutral-500 pointer-events-none"
                             />
                             <input
+                                id="login-password"
                                 type="password"
                                 value={password}
                                 onChange={(e) => setPassword(e.target.value)}
                                 placeholder="Password"
                                 autoComplete={tab === 'signin' ? 'current-password' : 'new-password'}
+                                aria-invalid={fieldErrors.password ? true : undefined}
+                                aria-describedby={fieldErrors.password ? 'login-password-error' : undefined}
                                 className={`w-full bg-black/40 border rounded-xl pl-11 pr-4 py-3 text-sm text-neutral-100 placeholder:text-neutral-500 focus:outline-none focus:ring-2 transition ${
                                     fieldErrors.password
                                         ? 'border-red-500/60 focus:ring-red-500/40 focus:border-red-500/60'
@@ -273,7 +295,9 @@ export function LoginPage() {
                             />
                         </div>
                         {fieldErrors.password && (
-                            <p className="mt-1.5 text-xs text-red-300">{fieldErrors.password}</p>
+                            <p id="login-password-error" className="mt-1.5 text-xs text-red-300">
+                                {fieldErrors.password}
+                            </p>
                         )}
                     </div>
 
@@ -286,20 +310,6 @@ export function LoginPage() {
                         {submitting && <Loader2 size={16} className="animate-spin" />}
                         {primaryLabel}
                     </button>
-
-                    {/* Forgot password (intentionally disabled — future work) */}
-                    {tab === 'signin' && (
-                        <div className="flex justify-end">
-                            <button
-                                type="button"
-                                disabled
-                                title="Password reset is coming soon"
-                                className="text-xs text-neutral-400 disabled:cursor-not-allowed hover:text-indigo-300 transition"
-                            >
-                                Forgot password?
-                            </button>
-                        </div>
-                    )}
 
                     {/* Divider */}
                     <div className="flex items-center gap-3">

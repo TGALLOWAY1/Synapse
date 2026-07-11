@@ -610,6 +610,16 @@ export const DEFAULT_VARIANT_ID = 'default';
  * State rows exist for every documented state; per-state mockup generation
  * isn't wired yet, so a state row is 'missing' unless the user marked it
  * accepted (e.g. covered by an upload) or not needed.
+ *
+ * SYN-003 — DELIBERATE non-change: this stays SPEC-derived (item.mockupScreen),
+ * NOT device-image-aware. Readiness gaps (incl. `missing_mockup_p0`) are
+ * WORK-PLANNING signals evaluated in pure batch derivations with no reactive
+ * store access; making them depend on IndexedDB/blob image presence would flip
+ * review statuses transiently during lazy hydration and conflate "asset missing
+ * on THIS device" with "work not done". The variant layer
+ * (src/lib/mockupVariants.ts, gated by `defaultImagePresence`) is the
+ * visual-truth surface; readiness answers "is the mockup planned?", not "does a
+ * rendered PNG exist here right now?".
  */
 export function buildMockupVariantRows(
     item: Pick<ScreenExperienceItem, 'screen' | 'mockupScreen' | 'edit'>,

@@ -8,6 +8,23 @@ import { parseFlows } from '../renderers/userFlows/parseFlow';
 import { ScreenListView } from '../experience/ScreenListView';
 import { ScreenDetailView } from '../experience/ScreenDetailView';
 import { useProjectStore } from '../../store/projectStore';
+import { useMockupImageStore } from '../../store/mockupImageStore';
+import type { MockupImageRecord } from '../../types';
+
+// SYN-003: the primary Default variant now reads "Generated" only when a real
+// image exists in the mockup image store. Detail-view tests that exercise a
+// genuinely-generated default seed one here so presence resolves to 'present'.
+function seedDefaultMockupImage(versionId: string, mockupScreenId: string) {
+    const record = {
+        key: `${versionId}:${mockupScreenId}:low`,
+        projectId: 'p1', artifactId: 'a1', versionId, screenId: mockupScreenId,
+        dataUrl: 'data:image/png;base64,DEF', quality: 'low' as const, prompt: '', generatedAt: 1,
+    } satisfies MockupImageRecord;
+    useMockupImageStore.setState((s) => ({
+        images: { ...s.images, [record.key]: record },
+        loadedVersions: { ...s.loadedVersions, [versionId]: true },
+    }));
+}
 
 // Render smoke tests for the upgraded Screens experience views: the coverage
 // & readiness panel, list filters, and the structured Overview / Flow /
@@ -16,6 +33,7 @@ import { useProjectStore } from '../../store/projectStore';
 
 beforeEach(() => {
     useProjectStore.setState({ projects: { p1: { id: 'p1', name: 'Test', createdAt: 1 } } });
+    useMockupImageStore.setState({ images: {}, inFlight: {}, errors: {}, loadedVersions: {} });
     vi.stubGlobal(
         'matchMedia',
         vi.fn().mockImplementation((query: string) => ({
@@ -218,6 +236,32 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         expect(queryByText('Advanced')).toBeNull();
     });
 
+    it('constrains the Flow/Status selects so a very long flow name cannot force page overflow (SYN-009)', () => {
+        const longFlowTitle = 'Onboarding, Account Setup, Profile Verification, and Initial Dashboard Configuration Walkthrough';
+        const longFlowMd = `### Flow: ${longFlowTitle}\n**Goal:** Land and explore\n**Steps:**\n1. [Home Dashboard] — User opens the app → System loads the feed\n`;
+        const flows = parseFlows(longFlowMd);
+        const index = buildScreenIndex(inventory, flows, payload);
+        const readiness = buildReadinessIndex(index);
+        const coverage = buildScreenCoverageSummary(index, readiness, flows, FEATURES);
+        const { getByLabelText } = render(
+            <ScreenListView index={index} readiness={readiness} coverage={coverage} onSelectScreen={() => {}} />,
+        );
+        const flowSelect = getByLabelText('Flow') as HTMLSelectElement;
+        // The select (and its label wrapper) must be able to shrink instead of
+        // forcing the row — and therefore the page — wider than the viewport.
+        expect(flowSelect.className).toContain('min-w-0');
+        expect(flowSelect.className).toContain('max-w-full');
+        expect(flowSelect.parentElement?.className).toContain('min-w-0');
+        expect(flowSelect.parentElement?.className).toContain('max-w-full');
+        // The option text is the flow name alone — no redundant "Flow: " prefix
+        // that used to double the intrinsic width (checked on the select's own
+        // options, scoped past the group header which legitimately reuses the
+        // same flow title as plain text elsewhere on the page).
+        const optionTexts = [...flowSelect.querySelectorAll('option')].map(o => o.textContent);
+        expect(optionTexts).toContain(longFlowTitle);
+        expect(optionTexts).not.toContain(`Flow: ${longFlowTitle}`);
+    });
+
     it('renders an empty-filter state instead of nothing', () => {
         const { index, readiness, coverage } = buildFixtures();
         const { getByText, getByLabelText } = render(
@@ -345,6 +389,9 @@ function renderContractDetail(
     const index = buildScreenIndex(contractInventory, [], contractPayload, opts.edits);
     const readiness = buildReadinessIndex(index, FEATURES);
     const item = index.byId.get('scr-submission')!;
+    // The default mockup ('m-sub') is a genuinely generated image in these
+    // tests — seed it so SYN-003 image-presence resolves to 'present'.
+    if (opts.withMockupContext !== false) seedDefaultMockupImage('v1', 'm-sub');
     return render(
         <ScreenDetailView
             item={item}

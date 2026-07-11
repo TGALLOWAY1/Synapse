@@ -73,6 +73,11 @@ interface ImageStoreState {
     inFlight: Record<string, InFlight>;
     /** Map of `${versionId}:${screenId}` -> error message. */
     errors: Record<string, string>;
+    /** SYN-003: versions whose `loadForVersion` has fully settled (records found
+     * OR the version genuinely has none). Lets a consumer distinguish "no image
+     * yet, still hydrating" from "no image, provably absent" so the Screens
+     * variant grid never claims "Generated" for an image it can't find. */
+    loadedVersions: Record<string, true>;
 
     /** Hydrate this version's images from IndexedDB into the reactive cache. */
     loadForVersion: (versionId: string) => Promise<void>;
@@ -113,10 +118,13 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
     images: {},
     inFlight: {},
     errors: {},
+    loadedVersions: {},
 
     loadForVersion: async (versionId) => {
         const records = await idbListImages(versionId);
         const haveKeys = new Set(records.map((r) => r.key));
+        // Surface locally-cached records immediately — they must not wait on
+        // the network hydration of refs this device is missing.
         if (records.length > 0) {
             set((state) => {
                 const next = { ...state.images };
@@ -130,14 +138,19 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         // and surface it in the reactive cache. Lazy — only on view, never a
         // bulk download on sign-in.
         const missing = getRefsForVersion(versionId).filter((r) => !haveKeys.has(r.key));
-        if (missing.length === 0) return;
-        const hydrated = await hydrateMissingRefs(missing);
-        if (hydrated.length === 0) return;
+        const hydrated = missing.length > 0 ? await hydrateMissingRefs(missing) : [];
         for (const record of hydrated) await idbPutImage(record);
+
+        // SYN-003: mark the version settled on EVERY path (the empty path
+        // previously returned without a set(), so a consumer could never tell
+        // "no image yet" from "still loading").
         set((state) => {
             const next = { ...state.images };
             for (const r of hydrated) next[r.key] = r;
-            return { images: next };
+            return {
+                images: next,
+                loadedVersions: { ...state.loadedVersions, [versionId]: true },
+            };
         });
     },
 

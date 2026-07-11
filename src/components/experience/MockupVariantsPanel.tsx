@@ -111,10 +111,18 @@ interface Props {
     onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
 }
 
-/** The variant that holds the single generated image (primary Default). The
- * image renders whenever a mockup exists for this screen — even after the user
- * marks the default "accepted" (which flips status off 'generated'). */
-const holdsGeneratedImage = (v: DerivedMockupVariant, hasMockup: boolean): boolean =>
+/** Routes the primary Default variant to the MockupScreenImage preview slot.
+ * This is a SLOT router, NOT an image-presence claim (SYN-003): MockupScreenImage
+ * must still mount for a spec-joined default even when the rendered image is
+ * absent (source 'derived_missing') / still checking, because it is ALSO the
+ * generate/upload CTA surface — mounting it is how the user creates the missing
+ * image. It stays gated on `hasMockup` (a real mockup screen to render/generate
+ * against); a default with no spec join at all can't mount it. `derived_missing`
+ * (image absent) is covered because the spec join keeps `hasMockup` true. */
+const isPrimaryImageSlot = (v: DerivedMockupVariant, hasMockup: boolean): boolean =>
+    // Deliberately does NOT exclude `source === 'derived_missing'` (an
+    // image-absent default): that IS the case where the user needs the
+    // generate/upload CTA, so the slot must still render.
     v.id === 'default' && hasMockup;
 
 /**
@@ -260,9 +268,17 @@ function VariantCard({
                         {formatVariantLabel(variant)}
                     </span>
                 </div>
-                <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${STATUS_PILL[variant.status]}`}>
-                    {VARIANT_STATUS_LABELS[variant.status]}
-                </span>
+                {variant.id === 'default' && variant.imagePresence === 'checking' ? (
+                    // SYN-003: don't claim "Generated" while the image store is
+                    // still hydrating — show a neutral checking state instead.
+                    <span className="shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 text-neutral-500 bg-neutral-50 ring-neutral-200">
+                        Checking…
+                    </span>
+                ) : (
+                    <span className={`shrink-0 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${STATUS_PILL[variant.status]}`}>
+                        {VARIANT_STATUS_LABELS[variant.status]}
+                    </span>
+                )}
             </div>
             <div className="mt-1.5 flex items-center gap-2 flex-wrap text-[10px]">
                 {variant.status === 'generated' && (
@@ -290,7 +306,7 @@ function VariantDetail({
     specCoverage: ReturnType<typeof buildMockupSpecCoverage>;
     onSetVariantStatus?: (variantId: string, status: 'accepted' | 'not_needed' | null) => void;
 }) {
-    const primaryGenerated = holdsGeneratedImage(variant, Boolean(item.mockupScreen));
+    const primaryGenerated = isPrimaryImageSlot(variant, Boolean(item.mockupScreen));
     // The default variant keeps the legacy MockupScreenImage; every other
     // variant (mobile/desktop default, state variants) uses the Phase 3B
     // per-variant generation path.
@@ -402,7 +418,9 @@ function VariantDetail({
                 <div className="min-w-0">
                     <h4 className="text-sm font-semibold text-neutral-900">{formatVariantLabel(variant)}</h4>
                     <p className="text-[11px] text-neutral-500 mt-0.5">
-                        Status: {VARIANT_STATUS_LABELS[variant.status]}
+                        Status: {variant.id === 'default' && variant.imagePresence === 'checking'
+                            ? 'Checking…'
+                            : VARIANT_STATUS_LABELS[variant.status]}
                         {variant.userSet && ' (set by you)'}
                         {variant.status === 'generated' && variant.source === 'legacy' && ' · Source: existing mockup'}
                         {variant.status === 'generated' && variant.source === 'variant' && ' · Source: generated variant'}

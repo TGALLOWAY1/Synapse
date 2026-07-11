@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
@@ -40,7 +40,11 @@ import {
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
 import { resolveDataModelForTrace, resolvePlanForTrace } from '../lib/screenArtifactTraceBridge';
 import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../lib/screenReviewWorkflow';
-import { buildMockupVariantCoverageSummary, type GeneratedVariantMap } from '../lib/mockupVariants';
+import { buildMockupVariantCoverageSummary, type GeneratedVariantMap, type MockupImagePresence } from '../lib/mockupVariants';
+import { deriveDefaultImagePresence } from '../lib/mockupImagePresence';
+import { buildScreenScopeKey } from '../lib/mockupImageStore';
+import { useScreenInventoryImageStore } from '../store/screenInventoryImageStore';
+import { slugifyScreenName } from '../lib/screenInventoryImageStore';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
 import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
@@ -462,6 +466,45 @@ export function ArtifactWorkspace({
         return map;
     }, [variantImagesMap, mockupVersionId]);
 
+    // SYN-003: authoritative default-mockup image presence, resolved per screen
+    // from the real image stores (AI mockup store + screen-inventory store,
+    // which also holds user-uploaded mockups). List / coverage views used to
+    // never load these (only a mounted MockupScreenImage did), so a screen's
+    // primary Default variant could read "Generated" while no image exists.
+    // Load both here so the derived variant grid gates the claim on a real image.
+    const loadMockupImagesForVersion = useMockupImageStore(s => s.loadForVersion);
+    const mockupImagesMap = useMockupImageStore(s => s.images);
+    const mockupLoadedVersions = useMockupImageStore(s => s.loadedVersions);
+    const loadScreenImagesForVersion = useScreenInventoryImageStore(s => s.loadForArtifactVersion);
+    const screenUploadImagesMap = useScreenInventoryImageStore(s => s.images);
+    const screenUploadHydrated = useScreenInventoryImageStore(s => s.hydrated);
+    useEffect(() => {
+        if (!mockupVersionId) return;
+        void loadMockupImagesForVersion(mockupVersionId);
+        // User-uploaded mockups live in the screen-inventory store keyed by the
+        // MOCKUP version id, so hydrate that too for the uploaded-record fallback.
+        void loadScreenImagesForVersion(mockupVersionId);
+    }, [mockupVersionId, loadMockupImagesForVersion, loadScreenImagesForVersion]);
+    const defaultImagePresenceByScreen = useCallback((screenId: string): MockupImagePresence | undefined => {
+        if (!mockupVersionId) return undefined;
+        const item = screenIndex.byId.get(screenId);
+        const mockupScreen = item?.mockupScreen;
+        if (!mockupScreen) return undefined; // no spec join → presence is moot
+        const scope = buildScreenScopeKey(mockupVersionId, mockupScreen.id);
+        const hasMockupRecord = Object.keys(mockupImagesMap).some(k => k.startsWith(scope));
+        const uploadSlug = slugifyScreenName(mockupScreen.name);
+        const hasUploadedRecord = Object.values(screenUploadImagesMap).some(
+            r => r.artifactVersionId === mockupVersionId && r.screenSlug === uploadSlug,
+        );
+        return deriveDefaultImagePresence({
+            mockupImagesLoaded: mockupLoadedVersions[mockupVersionId] === true,
+            hasMockupRecord,
+            inventoryHydrated: screenUploadHydrated[mockupVersionId] === true,
+            hasUploadedRecord,
+        });
+    }, [mockupVersionId, screenIndex, mockupImagesMap, mockupLoadedVersions,
+        screenUploadImagesMap, screenUploadHydrated]);
+
     // Phase 3C: current screen/design/PRD context for variant freshness. Primitive
     // selects (not the wrapper object) keep the selector output reference-stable.
     const designSystemVersionId = useProjectStore(s => selectPreferredDesignSystem(s, projectId)?.versionId);
@@ -479,8 +522,9 @@ export function ArtifactWorkspace({
             mobileRelevant,
             trustContext,
             generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
+            defaultImagePresenceByScreen,
         }),
-        [screenIndex, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
+        [screenIndex, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen, defaultImagePresenceByScreen],
     );
 
     // Phase 4A: per-screen review models (user status vs. system readiness,
@@ -493,8 +537,9 @@ export function ArtifactWorkspace({
             mobileRelevant,
             trustContext,
             generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
+            defaultImagePresenceByScreen,
         }),
-        [screenIndex, structuredPRD.features, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
+        [screenIndex, structuredPRD.features, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen, defaultImagePresenceByScreen],
     );
     const artifactReview = useMemo(
         () => summarizeArtifactReviewReadiness(screenIndex, screenReviewModels),
@@ -1073,6 +1118,7 @@ export function ArtifactWorkspace({
                         exportManifest={exportManifest}
                         artifactControls={screensArtifactControls}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
+                        defaultImagePresenceByScreen={defaultImagePresenceByScreen}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
                             capabilities.canGenerateArtifacts && mockupDetailContext

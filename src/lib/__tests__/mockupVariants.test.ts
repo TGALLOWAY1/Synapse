@@ -351,3 +351,97 @@ describe('buildScreenMockupVariants with generatedVariants (Phase 3B)', () => {
         expect(rollup.p0Total).toBe(1);
     });
 });
+
+// --- SYN-003: image-presence gating of the primary Default variant -----------
+
+describe('buildScreenMockupVariants with defaultImagePresence (SYN-003)', () => {
+    const joinedIndex = () => buildScreenIndex(
+        makeInventory([{ id: 'scr-x', name: 'Screen X', priority: 'P0', purpose: 'p' }]),
+        [],
+        makeMockupPayload([{ id: 'm1', name: 'Screen X', sourceScreenId: 'scr-x' }]),
+    );
+
+    it('option omitted → byte-identical legacy behavior (spec join = generated)', () => {
+        const item = joinedIndex().items[0];
+        const legacy = buildScreenMockupVariants(item);
+        const explicitUnknown = buildScreenMockupVariants(item, { defaultImagePresence: 'unknown' });
+        const dfltLegacy = legacy.find(v => v.id === 'default')!;
+        const dfltUnknown = explicitUnknown.find(v => v.id === 'default')!;
+        expect(dfltLegacy.status).toBe('generated');
+        expect(dfltLegacy.source).toBe('legacy');
+        // 'unknown' is exactly the legacy path (imagePresence aside).
+        expect(dfltUnknown.status).toBe('generated');
+        expect(dfltUnknown.source).toBe('legacy');
+        expect(dfltLegacy.imagePresence).toBe('unknown');
+    });
+
+    it("presence 'present' → unchanged (generated / legacy)", () => {
+        const dflt = buildScreenMockupVariants(joinedIndex().items[0], {
+            defaultImagePresence: 'present',
+        }).find(v => v.id === 'default')!;
+        expect(dflt.status).toBe('generated');
+        expect(dflt.source).toBe('legacy');
+        expect(dflt.imagePresence).toBe('present');
+    });
+
+    it("presence 'checking' → stays generated but imagePresence is 'checking'", () => {
+        const dflt = buildScreenMockupVariants(joinedIndex().items[0], {
+            defaultImagePresence: 'checking',
+        }).find(v => v.id === 'default')!;
+        expect(dflt.status).toBe('generated');
+        expect(dflt.imagePresence).toBe('checking');
+    });
+
+    it("presence 'absent' → missing / derived_missing / unknown coverage + honest note", () => {
+        const dflt = buildScreenMockupVariants(joinedIndex().items[0], {
+            defaultImagePresence: 'absent',
+        }).find(v => v.id === 'default')!;
+        expect(dflt.status).toBe('missing');
+        expect(dflt.source).toBe('derived_missing');
+        expect(dflt.coverageStatus).toBe('unknown');
+        expect(dflt.imagePresence).toBe('absent');
+        expect(dflt.notes.join(' ')).toMatch(/no rendered image was found/i);
+    });
+
+    it("an image-absent default reports hasMockup=false in the per-screen summary", () => {
+        const variants = buildScreenMockupVariants(joinedIndex().items[0], {
+            defaultImagePresence: 'absent',
+        });
+        expect(summarizeScreenVariants(variants).hasMockup).toBe(false);
+        // With a real image present, the same screen reports hasMockup true.
+        const present = buildScreenMockupVariants(joinedIndex().items[0], {
+            defaultImagePresence: 'present',
+        });
+        expect(summarizeScreenVariants(present).hasMockup).toBe(true);
+    });
+
+    it('a user overlay override still wins over an absent image', () => {
+        const index = buildScreenIndex(
+            makeInventory([{ id: 'scr-x', name: 'Screen X', priority: 'P0', purpose: 'p' }]),
+            [],
+            makeMockupPayload([{ id: 'm1', name: 'Screen X', sourceScreenId: 'scr-x' }]),
+            { 'scr-x': { mockupVariantStatus: { 'default': 'accepted' } } },
+        );
+        const dflt = buildScreenMockupVariants(index.items[0], {
+            defaultImagePresence: 'absent',
+        }).find(v => v.id === 'default')!;
+        expect(dflt.status).toBe('accepted');
+        expect(dflt.userSet).toBe(true);
+    });
+
+    it('the rollup drops an image-absent default via defaultImagePresenceByScreen', () => {
+        const index = joinedIndex();
+        const withImage = buildMockupVariantCoverageSummary(index, {
+            defaultImagePresenceByScreen: () => 'present',
+        })!;
+        const withoutImage = buildMockupVariantCoverageSummary(index, {
+            defaultImagePresenceByScreen: () => 'absent',
+        })!;
+        // Same recommended total; but the absent default is no longer counted
+        // as generated.
+        expect(withImage.recommendedGenerated).toBeGreaterThan(withoutImage.recommendedGenerated);
+        // An absent default is not a manifest-backed / legacy-image mockup, so it
+        // drops out of the legacy-unknown tally too.
+        expect(withoutImage.legacyUnknownMockups).toBe(0);
+    });
+});

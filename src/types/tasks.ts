@@ -35,7 +35,7 @@ export interface ImplementationTask {
     suggestedLabels?: string[];
 }
 
-export type ExportTargetId = 'markdown' | 'github' | 'linear';
+export type ExportTargetId = 'markdown' | 'github';
 
 export interface ExportOptions {
     target: ExportTargetId;
@@ -63,8 +63,6 @@ export interface ExportResult {
     target: ExportTargetId;
     succeeded: TaskExportItemResult[];
     failed: TaskExportItemResult[];
-    /** True when the provider returned simulated success (Linear stub). */
-    mock?: boolean;
     /** Top-level error that prevented any task from being attempted. */
     fatalError?: string;
     /** Generic notes from the provider (e.g. "tasks.md downloaded"). */

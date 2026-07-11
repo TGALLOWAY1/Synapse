@@ -16,7 +16,13 @@ appended to each affected finding.
 | --- | --- | --- | --- |
 | SYN-001 | 🟡 Partially resolved (2026-07-10) | PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269), commits `9730d65`, `63887ce`, `fdd3aed`, branch `fix/demo-read-only-capabilities` | The public demo now has one centralized read-only capability policy enforced in UI and durable mutation boundaries. Persistent PRD, artifact, review, generation, design, image, task, workflow, and export-state changes are denied while exploration remains available. **Reset Demo and baseline restoration remain open** as the intentionally deferred portion of SYN-001. See the Resolution block under SYN-001. |
 | SYN-002 | ✅ Resolved (2026-07-10) | PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya` | Demo hydration moved to the route boundary: `DemoRouteGate` wraps `ProjectWorkspace` on `/p/<DEMO_PROJECT_ID>` and runs `loadDemoProject()` before mount; entry buttons navigate only. See the Resolution block under SYN-002. |
-| SYN-003–SYN-018 | Open | — | — |
+| SYN-003 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275), branch `claude/synapse-audit-review-sycska` | The primary Default mockup variant only reads "Generated" when a rendered image actually exists (image-store-derived `defaultImagePresence` with a neutral "Checking…" hydration state); a known-complete cached demo is never overwritten by a partial hydration; pinning a zero-image demo snapshot is hard-blocked client-side and rejected 422 server-side. See the Resolution block under SYN-003. |
+| SYN-004 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | `rehype-raw` removed from the Design System markdown fallback and from dependencies; hex swatches render as plain React nodes; raw HTML in artifact content stays inert. See the Resolution block under SYN-004. |
+| SYN-007 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Auth inputs carry visually-hidden labels, `aria-invalid`, and `aria-describedby` error associations. See the Resolution block under SYN-007. |
+| SYN-009 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Screens filter selects constrained (`min-w-0 max-w-full`, options no longer duplicate the label), removing the 360 px page overflow. See the Resolution block under SYN-009. |
+| SYN-014 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Mocked Linear provider deleted entirely (registry, adapter, UI branches, `mock` flag, `'linear'` target id). See the Resolution block under SYN-014. |
+| SYN-018 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Disabled "Forgot password?" affordance removed; `docs/auth.md` aligned. See the Resolution block under SYN-018. |
+| SYN-005, SYN-006, SYN-008, SYN-010–SYN-013, SYN-015–SYN-017 | Open | — | — |
 
 ## 1. Executive summary
 
@@ -416,6 +422,8 @@ gate surfaces no indicator for it — recorded as a follow-up in PR #267).
 
 ## [SYN-003] Mockup “Generated” status does not require an actual image
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) (`claude/synapse-audit-review-sycska`). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -457,7 +465,19 @@ Image records span legacy mockup, screen, and variant stores. First identify the
 
 Unit-test status derivation with spec/no image, image/no sidecar, and complete records. Integration-test partial snapshot fallback. E2E-test that every visible “Generated” primary demo card has a rendered image.
 
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+- **Image-aware status.** `buildVariant` (`src/lib/mockupVariants.ts`) now gates the primary Default variant on real image-store evidence: a new `MockupImagePresence` (`present`/`absent`/`checking`/`unknown`) threads from the AI mockup store ∪ the screen-inventory upload store (pure helper `src/lib/mockupImagePresence.ts`; new `loadedVersions` settled-signal in `src/store/mockupImageStore.ts`). A spec join with a provably absent image is honest `missing` (`source: 'derived_missing'`, coverage `unknown`, actionable note); `checking` avoids a mid-hydration flap and renders a neutral “Checking…” pill. Un-wired callers keep exact legacy behavior. Wired through `ArtifactWorkspace`, `ScreenListView`, `ScreenDetailView`, and the review index; the readiness layer’s `missing_mockup_p0` deliberately stays spec-derived (work-planning signal, not device-local presence — rationale recorded in `screenReadiness.ts`).
+- **Cache preference.** `loadDemoProject` no longer overwrites a stamped (provably known-complete) cached demo with a partial (`imagesComplete: false`) hydration; fresh-partial still beats no cache or an un-stamped partial cache.
+- **Pin-time gate.** Snapshot saves record `mockupScreenCount`/`variantImageCount` in the manifest; `SnapshotsPanel.handleSetDemo` hard-blocks pinning a zero-image snapshot whose spec describes screens (no override; actionable message), and `api/snapshots.js handlePutDemo` rejects `422 demo_snapshot_incomplete` as a server backstop (legacy manifests without the field pass server-side; the client gate covers them).
+
+*Tests:* extended `mockupVariants` (presence matrix, override precedence, rollup), `loadDemoProject` (cache-preference matrix), `snapshotImageAudit` (`countMockupSpecScreens`); new `mockupImagePresence`, `SnapshotsPanel`, and `api/__tests__/snapshots.test.js` suites. Full gate: `npm run build`, `npm run lint`, `npm test` (1,611 tests / 174 files) all pass.
+
+*Residual:* the pinned public demo still carries its zero-image snapshot — the UI now says so honestly (“Not generated” + guidance) instead of claiming “Generated”. Fully restoring the demo story requires the owner to regenerate mockup images and re-pin a complete snapshot (now enforced by the gate); that canonical fixture is also the prerequisite for SYN-006.
+
 ## [SYN-004] Legacy Design System Markdown permits unsanitized raw HTML
+
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -498,6 +518,10 @@ Prefer deletion: remove the legacy Markdown fallback entirely when it has no int
 **Suggested validation**
 
 Renderer tests with malicious HTML and safe hex-token visualization, plus a browser CSP regression test. Validate the canonical demo rather than preserving old raw-HTML snapshots.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+Implemented along the recommended shape — deletion of raw-HTML parsing rather than a sanitization policy: removed `rehypeRaw` from `FallbackMarkdown` and the `rehype-raw` package from dependencies (its only usage). The `annotateHexes` raw-`<span>` injection and the `data-hex` span override were replaced by a pure text transform (`renderTextWithHexSwatches`/`withHexSwatches`) applied through react-markdown `components` overrides (`p`/`li`/`td`/`code`/`strong`/`em`), so hex swatches still render while raw HTML in content stays inert text under react-markdown defaults. New `src/components/__tests__/DesignSystemRenderer.test.tsx` proves `<script>`, `<iframe srcdoc>`, and `<img onerror>` create no DOM elements, swatches survive, and legacy markdown design systems stay readable. The legacy fallback path itself was retained — token-less design systems in existing dev projects still render — but it no longer widens the trust boundary.
 
 ## [SYN-005] Two freshness engines can give the same artifact incompatible statuses
 
@@ -585,6 +609,8 @@ Run the suite in clean and cached contexts at 1,440 and 360 px; repeat several t
 
 ## [SYN-007] Authentication inputs have no programmatic labels or error associations
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -624,6 +650,10 @@ Low visual risk. Ensure tab switching does not leave stale error references.
 **Suggested validation**
 
 Testing Library `getByRole('textbox', {name: ...})` assertions, keyboard-only sign-in/sign-up, and VoiceOver or NVDA verification of invalid submissions.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+Name, email, and password inputs in `LoginPage.tsx` now carry visually-hidden `<label htmlFor>` elements with stable ids (`login-name`/`login-email`/`login-password`), set `aria-invalid` when invalid, and reference their per-field error message via `aria-describedby` only while the message exists (so the sign-in/sign-up switch can never leave a dangling reference). Placeholders, icons, autocomplete attributes, and all visual styling are unchanged; the existing `role="alert" aria-live="polite"` form-level banner is retained. New `src/components/__tests__/LoginPageA11y.test.tsx` covers role/name resolution, invalid-submit `aria-invalid` + described-by association, and tab-switch cleanup. Screen-reader (VoiceOver/NVDA) verification was not performed in this environment and remains a manual follow-up.
 
 ### P2 — Medium
 
@@ -671,6 +701,8 @@ Five-user comprehension check: ask what each CTA does, what changed between vers
 
 ## [SYN-009] The Flow filter causes horizontal overflow at 360 px
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P2 — Medium
@@ -709,6 +741,10 @@ Native select rendering varies by platform; test Safari/iOS as well as Chromium.
 **Suggested validation**
 
 Component fixture with a 100-character flow name plus E2E width assertions and mobile screenshots.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+`SelectControl` in `ScreenListView.tsx` now constrains intrinsic width: the control row, label wrapper, and native `<select>` carry `min-w-0` / `max-w-full`, and `<option>` text no longer duplicates the control label (`Flow: …`), which had doubled intrinsic width with long generated flow names. The accessible name is preserved (existing `sr-only` span + `aria-label`). A component test with a ~100-character flow title asserts the constraint classes and option text shape (jsdom cannot measure layout; the E2E width assertion belongs to the deferred SYN-006 suite).
 
 ## [SYN-010] User content edits mutate an existing artifact version in place
 
@@ -882,6 +918,8 @@ Time a clean-clone setup by someone unfamiliar with the repo; run every document
 
 ## [SYN-014] A mocked Linear provider reports fake production success
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P2 — Medium
@@ -921,6 +959,10 @@ Check analytics or product commitments before deletion. This does not require bu
 **Suggested validation**
 
 Provider-registry unit test and task-export UI smoke test confirming only supported destinations appear.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+Deleted entirely per the owner's decision (no local “Linear-ready JSON” replacement): `linearExporter.ts`, its registry entry, the `ConvertToTasksModal` mock-success toast and Linear attach branches, the `ExportResult.mock` flag, the `'linear'` `ExportTargetId` member, and the mock-pinning test. GitHub and Markdown exports are unchanged; a new `taskExportRegistry.test.ts` pins `EXPORT_PROVIDERS` to exactly the real providers. `docs/backlog/BACKLOG.md`'s external-tracker entry was rewritten to record the deletion and scope a from-scratch real Linear integration. Persisted `externalRefs` data is unaffected — the feature was always mocked, so no real `target: 'linear'` record could exist.
 
 ## [SYN-015] Dependency advisories need routine upgrades, not emergency remediation
 
@@ -1050,6 +1092,8 @@ Keyboard/VoiceOver pass, Testing Library role assertions, and 360 px target-box 
 
 ## [SYN-018] A disabled “Forgot password?” control advertises a nonexistent workflow
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P3 — Low
@@ -1088,6 +1132,10 @@ Confirm there is no support process that relies on the visible wording.
 **Suggested validation**
 
 Login screenshot and accessible-controls smoke test.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+The disabled button (and its future-work comment) was removed with no replacement placeholder; `docs/auth.md` now records password reset as future work with “no UI affordance exists yet.” The LoginPage a11y test suite asserts no “Forgot password” control renders on either tab.
 
 ### P4 — Optional
 
