@@ -61,4 +61,23 @@ describe('updateSpineStructuredPRD — canonical spine attachment', () => {
         const spine = useProjectStore.getState().spineVersions[projectId][0];
         expect(spine.canonicalSpine).toBeUndefined();
     });
+
+    it('drops the inherited (stale) canonicalSpine on an appended edit version', () => {
+        const store = useProjectStore.getState();
+        const { projectId } = store.createProject('MoodTune', 'idea');
+        const v1 = useProjectStore.getState().spineVersions[projectId][0];
+        // Settle so canonicalSpine is attached to v1.
+        store.updateSpineStructuredPRD(projectId, v1.id, prd, 'md', { generationMeta: meta, prdVersion: 2 });
+        expect(useProjectStore.getState().spineVersions[projectId][0].canonicalSpine).toBeDefined();
+
+        // An edit clones v1 but must not carry its now-stale canonicalSpine.
+        store.editSpineStructuredPRD(projectId, v1.id, { ...prd, vision: 'Edited.' }, {
+            responseText: 'edited md',
+            editSummary: 'Updated section: Vision',
+        });
+
+        const latest = useProjectStore.getState().spineVersions[projectId].find(s => s.isLatest)!;
+        expect(latest.id).not.toBe(v1.id);
+        expect(latest.canonicalSpine).toBeUndefined();
+    });
 });

@@ -221,11 +221,27 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // version (preserving history) via editSpineStructuredPRD. Each call site
     // passes a useful default summary; no manual entry required.
     const savePRD = (updated: StructuredPRD, editSummary: string) => {
-        const markdown = structuredPRDToMarkdown(updated);
         editSpineStructuredPRD(projectId, spineId, updated, {
-            responseText: markdown,
+            responseText: structuredPRDToMarkdown(updated),
             changeSource: 'user_edit',
             editSummary,
+        });
+    };
+
+    // Decisions-tab confirm/reject/undo edits. These coalesce onto the latest
+    // spine version in place (see editSpineStructuredPRD) so a burst of clicks
+    // doesn't spawn N near-identical full PRD copies. The markdown re-render
+    // mirrors savePRD; the decisionDelta drives the coalesced aggregate summary.
+    const saveDecision = (
+        updated: StructuredPRD,
+        summary: string,
+        kind: 'confirmed' | 'corrected' | 'reopened',
+    ) => {
+        editSpineStructuredPRD(projectId, spineId, updated, {
+            responseText: structuredPRDToMarkdown(updated),
+            changeSource: 'decision_edit',
+            editSummary: summary,
+            decisionDelta: { [kind]: 1 },
         });
     };
 
@@ -334,6 +350,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         assumptionId: string,
         patch: Partial<NonNullable<StructuredPRD['assumptions']>[number]>,
         editSummary: string,
+        kind: 'confirmed' | 'corrected' | 'reopened',
     ) => {
         const updated = {
             ...structuredPRD,
@@ -341,7 +358,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 a.id === assumptionId ? { ...a, ...patch } : a,
             ),
         };
-        savePRD(updated, editSummary);
+        saveDecision(updated, editSummary, kind);
     };
 
     const handleConfirmAssumption = (assumptionId: string) => {
@@ -351,6 +368,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             assumptionId,
             { decision: 'confirmed', decisionNote: undefined, decidedAt: Date.now() },
             `Confirmed assumption: ${truncate(a.statement)}`,
+            'confirmed',
         );
     };
 
@@ -361,6 +379,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             assumptionId,
             { decision: 'rejected', decisionNote: note || undefined, decidedAt: Date.now() },
             `Marked assumption incorrect: ${truncate(a.statement)}`,
+            'corrected',
         );
     };
 
@@ -371,6 +390,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             assumptionId,
             { decision: undefined, decisionNote: undefined, decidedAt: undefined },
             `Reopened assumption: ${truncate(a.statement)}`,
+            'reopened',
         );
     };
 
@@ -384,11 +404,12 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     : f,
             ),
         };
-        savePRD(
+        saveDecision(
             updated,
             confirmed
                 ? `Confirmed feature: ${feature.name || 'Untitled'}`
                 : `Reopened feature: ${feature.name || 'Untitled'}`,
+            confirmed ? 'confirmed' : 'reopened',
         );
     };
 

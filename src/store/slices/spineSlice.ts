@@ -8,6 +8,7 @@ import type {
 import type { ProjectState, SpineGenerationMetaInput } from '../types';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
+import { buildDecisionEditSummary } from '../../lib/derive/prdDecisions';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -337,13 +338,93 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         const historyEventId = uuidv4();
         const changeSource = opts?.changeSource ?? 'user_edit';
         const editSummary = opts?.editSummary ?? 'Edited PRD';
+        const decisionDelta = opts?.decisionDelta;
+        const zeroCounts = () => ({ confirmed: 0, corrected: 0, reopened: 0 });
+
+        // The updater is synchronous, so we can record which branch ran (amend
+        // vs append) to shape the return value. Decisions-tab edits (confirm/
+        // reject/undo) coalesce onto the latest version in place instead of
+        // spamming a full clone per click; every other edit appends as before.
+        let amendedSpineId: string | null = null;
 
         set((state) => {
             const currentVersions = state.spineVersions[projectId] || [];
             const src = currentVersions.find(s => s.id === spineId);
             if (!src) return state;
 
+            const latest = currentVersions.find(v => v.isLatest);
+
+            // Amend iff this is a Decisions-tab edit whose target IS the current
+            // latest version, that version is not final, and it was itself
+            // produced by a decision edit (so we only coalesce a contiguous run).
+            const canAmend =
+                changeSource === 'decision_edit'
+                && !!latest
+                && latest.id === spineId
+                && !latest.isFinal
+                && latest.provenance?.changeSource === 'decision_edit';
+
+            if (canAmend && latest) {
+                const prevCounts = latest.provenance?.decisionCounts ?? zeroCounts();
+                const mergedCounts = {
+                    confirmed: prevCounts.confirmed + (decisionDelta?.confirmed ?? 0),
+                    corrected: prevCounts.corrected + (decisionDelta?.corrected ?? 0),
+                    reopened: prevCounts.reopened + (decisionDelta?.reopened ?? 0),
+                };
+                const mergedTotal = mergedCounts.confirmed + mergedCounts.corrected + mergedCounts.reopened;
+                // Preserve the FIRST specific summary only while the run is a
+                // single edit; once ≥2 edits coalesce, switch to the aggregate.
+                const nextSummary = buildDecisionEditSummary(
+                    mergedCounts,
+                    mergedTotal === 1 ? latest.provenance?.editSummary : undefined,
+                );
+
+                const amendedSpine: SpineVersion = {
+                    ...latest,
+                    // Same id + createdAt — this is an in-place amend, not a new version.
+                    structuredPRD: nextStructuredPRD,
+                    responseText: opts?.responseText ?? latest.responseText,
+                    isLatest: true,
+                    provenance: {
+                        changeSource: 'decision_edit',
+                        editSummary: nextSummary,
+                        decisionCounts: mergedCounts,
+                    },
+                };
+
+                const updatedSpines = currentVersions.map(v => (v.id === latest.id ? amendedSpine : v));
+
+                // Update (never append) the matching Edited history event so the
+                // log shows the coalesced summary, not one row per click. If none
+                // exists, leave events untouched (never append a duplicate).
+                const events = state.historyEvents[projectId] || [];
+                const idx = events.findIndex(e => e.spineVersionId === latest.id && e.type === 'Edited');
+                const nextEvents = idx >= 0
+                    ? events.map((e, i) => (i === idx ? { ...e, description: nextSummary } : e))
+                    : events;
+
+                amendedSpineId = latest.id;
+                return {
+                    spineVersions: { ...state.spineVersions, [projectId]: updatedSpines },
+                    historyEvents: { ...state.historyEvents, [projectId]: nextEvents },
+                };
+            }
+
             const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
+
+            // Seed decision counts when starting a new coalescable decision-edit
+            // run; keep the caller's specific summary as the first-edit label.
+            const provenance: SpineVersion['provenance'] = changeSource === 'decision_edit'
+                ? {
+                    changeSource,
+                    editSummary,
+                    decisionCounts: {
+                        confirmed: decisionDelta?.confirmed ?? 0,
+                        corrected: decisionDelta?.corrected ?? 0,
+                        reopened: decisionDelta?.reopened ?? 0,
+                    },
+                }
+                : { changeSource, editSummary };
 
             // Clone the source spine fully so generation metadata carries
             // forward, then apply the edit + provenance.
@@ -359,7 +440,12 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 generationPhase: 'complete',
                 // A historical edit must not inherit a stale error/safety stub.
                 generationError: undefined,
-                provenance: { changeSource, editSummary },
+                // The inherited canonicalSpine is stale the moment structuredPRD
+                // changes; drop it (nothing reads SpineVersion.canonicalSpine —
+                // artifact generation always rebuilds it lazily from structuredPRD)
+                // to keep edit versions small and avoid localStorage quota blowout.
+                canonicalSpine: undefined,
+                provenance,
             };
             // Optional generation-meta overrides (e.g. updated failedSections).
             if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
@@ -383,7 +469,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             };
         });
 
-        return { newSpineId };
+        return { newSpineId: amendedSpineId ?? newSpineId };
     },
 
     // Versioning: restore a historical spine by appending a NEW latest version

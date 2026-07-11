@@ -39,6 +39,7 @@ const SOURCE_LABEL: Record<VersionChangeSource, string> = {
     revert: 'Restored',
     consistency_review: 'Consistency review',
     marked_current: 'Confirmed current',
+    decision_edit: 'Decisions',
 };
 
 const SOURCE_CLASS: Record<VersionChangeSource, string> = {
@@ -50,6 +51,7 @@ const SOURCE_CLASS: Record<VersionChangeSource, string> = {
     revert: 'bg-amber-50 text-amber-700 border-amber-200',
     consistency_review: 'bg-teal-50 text-teal-700 border-teal-200',
     marked_current: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    decision_edit: 'bg-violet-50 text-violet-700 border-violet-200',
 };
 
 function formatTime(ts: number): string {
