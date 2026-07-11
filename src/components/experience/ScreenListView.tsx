@@ -17,7 +17,9 @@ import {
     Layers, RefreshCcw, ShieldCheck, Workflow,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { DataModelContent, Feature, MockupPlatform, StalenessState, StructuredImplementationPlan } from '../../types';
+import type { DataModelContent, Feature, MockupPlatform, StructuredImplementationPlan } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
+import { isStaleStatus } from '../../lib/artifactFreshness';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     screenMatchesFilter,
@@ -50,7 +52,7 @@ import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ScreenPreflightPanel } from './ScreenPreflightPanel';
 import { ScreensHandoffExportPanel } from './ScreensHandoffExportPanel';
 import { ReadinessBadge } from './ReadinessBadge';
-import { StalenessBadge } from '../StalenessBadge';
+import { FreshnessBadge } from '../FreshnessBadge';
 
 const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
 
@@ -65,9 +67,9 @@ const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
 export interface ScreenArtifactControls {
     /** "Version N" label of the PRD the screen inventory was generated from. */
     prdVersionLabel?: string;
-    /** Screen-inventory staleness against the current PRD. */
-    staleness?: StalenessState;
-    /** "What changed" tooltip detail for the staleness badge. */
+    /** Screen-inventory freshness against the current PRD (canonical status). */
+    staleness?: DependencyNodeStatus;
+    /** "What changed" tooltip detail for the freshness badge. */
     stalenessDetail?: string;
     /** Timestamp (ms) the current mockup version was generated, if any. */
     lastMockupGeneratedAt?: number;
@@ -756,7 +758,7 @@ function ArtifactControlsBlock({ controls }: { controls: ScreenArtifactControls 
         prdVersionLabel, staleness, stalenessDetail, lastMockupGeneratedAt, mockupDesignDrift,
         onMarkUpToDate, onOpenVersionHistory, onOpenMockupHistory, onRegenerateMockup,
     } = controls;
-    const isStale = !!staleness && staleness !== 'current';
+    const isStale = isStaleStatus(staleness);
     const hasMetadata = !!prdVersionLabel || isStale || lastMockupGeneratedAt !== undefined;
     const hasHistory = !!onOpenVersionHistory || !!onOpenMockupHistory;
     const hasActions = (isStale && !!onMarkUpToDate) || !!onRegenerateMockup;
@@ -769,7 +771,7 @@ function ArtifactControlsBlock({ controls }: { controls: ScreenArtifactControls 
                     {prdVersionLabel && (
                         <span className="inline-flex items-center gap-1.5">
                             Generated from PRD {prdVersionLabel}
-                            {isStale && <StalenessBadge staleness={staleness} detail={stalenessDetail} />}
+                            {isStale && <FreshnessBadge status={staleness} detail={stalenessDetail} />}
                         </span>
                     )}
                     {lastMockupGeneratedAt !== undefined && (

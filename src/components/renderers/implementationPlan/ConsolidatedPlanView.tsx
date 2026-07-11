@@ -1,6 +1,7 @@
 import { useEffect, useMemo, useState } from 'react';
 import { ArrowRight, ClipboardList } from 'lucide-react';
-import type { ConsolidatedImplementationPlan, ProjectTask, StalenessState } from '../../../types';
+import type { ConsolidatedImplementationPlan, ProjectTask } from '../../../types';
+import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
 import {
     collectAllPromptPacks,
     consolidatedPlanToMarkdown,
@@ -28,7 +29,7 @@ interface Props {
     plan: ConsolidatedImplementationPlan;
     /** "Version 2" — the PRD version this plan was generated from. */
     prdVersionLabel?: string;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
     /** Source artifact versions recorded at generation time ("Data Model v1"). */
     sourceVersions?: string[];
     /** Saved (converted) tasks for this artifact — marks plan tasks as tracked. */

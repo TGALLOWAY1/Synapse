@@ -71,7 +71,7 @@ export function ProjectWorkspace() {
     };
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -307,10 +307,20 @@ export function ProjectWorkspace() {
     // Downstream artifacts that would be marked possibly outdated if a different
     // PRD version becomes latest — i.e. those currently in sync with the latest
     // spine. Used to warn in the revert confirmation.
-    const getStaleArtifactTitles = (): string[] =>
-        getArtifacts(projectId)
-            .filter(a => a.type !== 'prd' && getArtifactStaleness(projectId, a.id) === 'current')
-            .map(a => a.title);
+    const getStaleArtifactTitles = (): string[] => {
+        if (!projectId) return [];
+        // Artifacts currently in sync with the latest spine (up_to_date) are
+        // exactly the ones a revert to a different PRD version will invalidate.
+        const { context, evaluations } = evaluateProjectFreshness(useProjectStore.getState(), projectId);
+        const titles: string[] = [];
+        for (const [slot, artifactId] of Object.entries(context.artifactIdBySlot)) {
+            if (!artifactId) continue;
+            if (evaluations.get(slot as DependencyNodeId)?.status !== 'up_to_date') continue;
+            const artifact = getArtifact(projectId, artifactId);
+            if (artifact) titles.push(artifact.title);
+        }
+        return titles;
+    };
 
     const handleRestoreSpine = (sourceSpineId: string) => {
         if (!capabilities.canEditProjectContent) return;

@@ -1,18 +1,21 @@
 import {
     Database, GitBranch, ShieldCheck, ShieldAlert, SlidersHorizontal, KeyRound, Network,
 } from 'lucide-react';
-import type { StalenessState } from '../../../types';
 import type { DataModelSummary } from '../../../lib/dataModelGraph';
+import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
 
 interface Props {
     summary: DataModelSummary;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
 }
 
-const STALENESS_CONFIG: Record<StalenessState, { label: string; className: string }> = {
-    current: { label: 'Current', className: 'bg-green-50 text-green-700 ring-1 ring-green-200' },
-    possibly_outdated: { label: 'May be outdated', className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' },
-    outdated: { label: 'Outdated', className: 'bg-red-50 text-red-700 ring-1 ring-red-200' },
+// The freshness pill STAYS shown when fresh (up_to_date → green "Up to date")
+// as well as when stale. Statuses without an entry render nothing (the pill is
+// hidden) — matching the old "undefined → hidden" behavior.
+const STALENESS_CONFIG: Partial<Record<DependencyNodeStatus, { label: string; className: string }>> = {
+    up_to_date: { label: 'Up to date', className: 'bg-green-50 text-green-700 ring-1 ring-green-200' },
+    update_recommended: { label: 'Update recommended', className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' },
+    needs_update: { label: 'Needs update', className: 'bg-amber-100 text-amber-800 ring-1 ring-amber-300' },
 };
 
 function StatTile({
@@ -66,7 +69,7 @@ export function DataModelOverview({ summary, staleness }: Props) {
                 </div>
                 {stale && (
                     <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full font-medium ${stale.className}`}>
-                        {staleness === 'current'
+                        {staleness === 'up_to_date'
                             ? <ShieldCheck size={11} />
                             : <ShieldAlert size={11} />}
                         {stale.label}

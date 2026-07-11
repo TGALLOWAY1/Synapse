@@ -1,6 +1,8 @@
 import { useMemo } from 'react';
 import { AlertTriangle, CheckCircle2, GitBranch } from 'lucide-react';
-import type { ConsolidatedImplementationPlan, StalenessState } from '../../../types';
+import type { ConsolidatedImplementationPlan } from '../../../types';
+import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
+import { isStaleStatus } from '../../../lib/artifactFreshness';
 import {
     buildCoverageMatrix,
     type ChangeImpactEntry,
@@ -11,7 +13,7 @@ interface Props {
     plan: ConsolidatedImplementationPlan;
     /** "Version 2" — the PRD version this plan was generated from. */
     prdVersionLabel?: string;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
     /** Source artifact versions recorded at generation time ("Data Model v1"). */
     sourceVersions?: string[];
     onOpenMilestone: (milestoneId: string) => void;
@@ -97,7 +99,7 @@ export function CoverageTab({ plan, prdVersionLabel, staleness, sourceVersions =
         );
     }
 
-    const isStale = staleness && staleness !== 'current';
+    const isStale = isStaleStatus(staleness);
     const provenance = [
         ...(prdVersionLabel ? [`PRD ${prdVersionLabel}`] : []),
         ...sourceVersions,

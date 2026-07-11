@@ -1,6 +1,7 @@
 import type {
-    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, ProjectTask, StalenessState, UXPage,
+    CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, ProjectTask, UXPage,
 } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
@@ -66,8 +67,8 @@ interface DispatchProps {
     /** Consumed by `implementation_plan`: source PRD version label. (Data Model
      * shows provenance at the page level, so it doesn't take this.) */
     prdVersionLabel?: string;
-    /** Consumed by `data_model` and `implementation_plan`: freshness state. */
-    staleness?: StalenessState;
+    /** Consumed by `data_model` and `implementation_plan`: canonical freshness. */
+    staleness?: DependencyNodeStatus;
 }
 
 /**

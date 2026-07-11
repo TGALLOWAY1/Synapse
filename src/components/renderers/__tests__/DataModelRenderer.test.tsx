@@ -50,7 +50,7 @@ const twoEntityModel: DataModelContent = {
     apiEndpoints: [],
 };
 
-function renderModel(content: DataModelContent, props: Partial<{ staleness: 'current' | 'possibly_outdated' | 'outdated' }> = {}) {
+function renderModel(content: DataModelContent, props: Partial<{ staleness: 'up_to_date' | 'needs_update' | 'update_recommended' }> = {}) {
     return render(<DataModelRenderer content={JSON.stringify(content)} {...props} />);
 }
 
@@ -75,7 +75,7 @@ describe('DataModelRenderer — overview header', () => {
 
     it('does not repeat PRD provenance or a count subtitle inside the card', () => {
         // Provenance ("From PRD Version N") lives at the page level, not the card.
-        const { getByLabelText } = renderModel(modelWithApi, { staleness: 'current' });
+        const { getByLabelText } = renderModel(modelWithApi, { staleness: 'up_to_date' });
         const overview = getByLabelText('Data model overview');
         expect(overview).not.toHaveTextContent('From PRD');
         // The old "6 entities · 5 API endpoints" subtitle is gone — the entity
@@ -84,10 +84,10 @@ describe('DataModelRenderer — overview header', () => {
         expect(within(overview).queryByText(/API endpoints/)).toBeNull(); // lowercase subtitle form
     });
 
-    it('keeps the freshness ("Current") pill when staleness is provided', () => {
-        const { getByLabelText } = renderModel(twoEntityModel, { staleness: 'current' });
+    it('keeps the freshness ("Up to date") pill when status is provided', () => {
+        const { getByLabelText } = renderModel(twoEntityModel, { staleness: 'up_to_date' });
         const overview = getByLabelText('Data model overview');
-        expect(overview).toHaveTextContent('Current');
+        expect(overview).toHaveTextContent('Up to date');
     });
 
     it('renders six metric cards, including a real API-endpoint count', () => {
