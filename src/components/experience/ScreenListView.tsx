@@ -246,7 +246,7 @@ export function ScreenListView({
         <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-5">
             {/* Minimal control row — Flow + Status only. Everything else moved
                 into each screen's "Show details". */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <SelectControl label="Flow" value={flow} onChange={setFlow}
                     options={[
                         { value: 'all', label: 'All flows' },
@@ -388,16 +388,16 @@ function SelectControl({
     options: Array<{ value: string; label: string }>;
 }) {
     return (
-        <label className="inline-flex items-center gap-1 text-xs text-neutral-500">
+        <label className="inline-flex items-center gap-1 text-xs text-neutral-500 min-w-0 max-w-full">
             <span className="sr-only">{label}</span>
             <select
                 value={value}
                 onChange={e => onChange(e.target.value)}
                 aria-label={label}
-                className="py-1.5 pl-2 pr-6 rounded-lg border border-neutral-200 text-neutral-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
+                className="min-w-0 max-w-full py-1.5 pl-2 pr-6 rounded-lg border border-neutral-200 text-neutral-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
             >
                 {options.map(o => (
-                    <option key={o.value} value={o.value}>{label}: {o.label}</option>
+                    <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
             </select>
         </label>

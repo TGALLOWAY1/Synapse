@@ -218,6 +218,32 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         expect(queryByText('Advanced')).toBeNull();
     });
 
+    it('constrains the Flow/Status selects so a very long flow name cannot force page overflow (SYN-009)', () => {
+        const longFlowTitle = 'Onboarding, Account Setup, Profile Verification, and Initial Dashboard Configuration Walkthrough';
+        const longFlowMd = `### Flow: ${longFlowTitle}\n**Goal:** Land and explore\n**Steps:**\n1. [Home Dashboard] — User opens the app → System loads the feed\n`;
+        const flows = parseFlows(longFlowMd);
+        const index = buildScreenIndex(inventory, flows, payload);
+        const readiness = buildReadinessIndex(index);
+        const coverage = buildScreenCoverageSummary(index, readiness, flows, FEATURES);
+        const { getByLabelText } = render(
+            <ScreenListView index={index} readiness={readiness} coverage={coverage} onSelectScreen={() => {}} />,
+        );
+        const flowSelect = getByLabelText('Flow') as HTMLSelectElement;
+        // The select (and its label wrapper) must be able to shrink instead of
+        // forcing the row — and therefore the page — wider than the viewport.
+        expect(flowSelect.className).toContain('min-w-0');
+        expect(flowSelect.className).toContain('max-w-full');
+        expect(flowSelect.parentElement?.className).toContain('min-w-0');
+        expect(flowSelect.parentElement?.className).toContain('max-w-full');
+        // The option text is the flow name alone — no redundant "Flow: " prefix
+        // that used to double the intrinsic width (checked on the select's own
+        // options, scoped past the group header which legitimately reuses the
+        // same flow title as plain text elsewhere on the page).
+        const optionTexts = [...flowSelect.querySelectorAll('option')].map(o => o.textContent);
+        expect(optionTexts).toContain(longFlowTitle);
+        expect(optionTexts).not.toContain(`Flow: ${longFlowTitle}`);
+    });
+
     it('renders an empty-filter state instead of nothing', () => {
         const { index, readiness, coverage } = buildFixtures();
         const { getByText, getByLabelText } = render(
