@@ -204,6 +204,41 @@ export function ProjectWorkspace() {
         // to later param changes would yank the stage from under the user.
     }, [projectId, capabilities.canPersistWorkflowState]);
 
+    // Early background generation of the Design System artifact (WP3). As soon
+    // as a design-system preset is chosen AND the PRD has settled successfully,
+    // kick off design_system in the background so the later finalize `startAll`
+    // finds it already done and skips it — the user no longer watches it
+    // "generating" after finalize. The controller applies the full gate set
+    // (capabilities/demo, generation gate, gemini key, slot-done, active-run);
+    // these guards are cheap short-circuits and keep the effect deps honest.
+    // Covers both orderings: a preset picked mid-generation fires when
+    // generationPhase flips to 'complete'; a preset picked after completion
+    // fires on the preset change. Derived above the early return so the hook
+    // lives with the others; the whole store is subscribed, so the spine/project
+    // objects re-reference (immutable updates) exactly when these fields change.
+    const earlyDesignSpine = projectId ? getLatestSpine(projectId) : undefined;
+    const earlyDesignProject = projectId ? getProject(projectId) : undefined;
+    useEffect(() => {
+        if (!projectId || !earlyDesignSpine) return;
+        // Only act on the current latest spine — not while viewing an old one.
+        if (viewedSpineId && viewedSpineId !== earlyDesignSpine.id) return;
+        if (!earlyDesignProject?.designSystemPreset) return;
+        // Finalize owns generation from here; also prevents a double-fire from
+        // handleChooseDesignSystemPreset and post-final ChangeDirectionModal.
+        if (earlyDesignSpine.isFinal) return;
+        if (earlyDesignSpine.generationPhase !== 'complete') return;
+        if (!earlyDesignSpine.structuredPRD) return;
+        if (earlyDesignSpine.generationError) return;
+        if (earlyDesignSpine.safetyReview?.status === 'blocked') return;
+        artifactJobController.ensureDesignSystemForSpine({
+            projectId,
+            spineVersionId: earlyDesignSpine.id,
+            prdContent: earlyDesignSpine.responseText,
+            structuredPRD: earlyDesignSpine.structuredPRD,
+            projectPlatform: earlyDesignProject.platform,
+        });
+    }, [projectId, viewedSpineId, earlyDesignSpine, earlyDesignProject]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
