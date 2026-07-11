@@ -101,8 +101,11 @@ describe('StructuredPRDView — three-view IA', () => {
     it('defaults to the Overview view with the product brief', () => {
         renderView();
         expect(screen.getByRole('tab', { name: /Overview/ })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByText('Implementation Summary')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Scope' })).toBeInTheDocument();
         expect(screen.getByText('Success Metrics')).toBeInTheDocument();
+        // The Overview shows scope as compact references, NOT the full feature
+        // spec — feature detail (user value, criteria) lives in the Features view.
+        expect(screen.queryByText('User Value:')).toBeNull();
         // Overview omits Instrumentation column / legacy values.
         expect(screen.queryByText(/instrumentation/i)).toBeNull();
         expect(screen.queryByText('legacy event name')).toBeNull();
@@ -186,10 +189,10 @@ describe('StructuredPRDView — three-view IA', () => {
         expect(within(deferred).getByText('Deferred scope')).toBeInTheDocument();
     });
 
-    it('summary cards cross-navigate to the feature in the Features view', () => {
+    it('scope references cross-navigate to the feature in the Features view', () => {
         renderView();
         const summary = document.getElementById('prd-implementation-summary')!;
-        const link = within(summary).getByTitle('Jump to Quick Capture details');
+        const link = within(summary).getByTitle('Go to Quick Capture in Features');
         fireEvent.click(link);
         // Now on the Features view, with the feature card + back affordance.
         expect(screen.getByRole('tab', { name: /Features/ })).toHaveAttribute('aria-selected', 'true');

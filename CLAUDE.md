@@ -580,9 +580,12 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       BOTH hosts — the editable `ProjectWorkspace` PRD stage and the read-only
       `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
       **Overview** = product brief (executive summary, problem/thesis, vision,
-      principles, JTBD/users, success metrics, the Implementation Summary as the
-      single scope surface, constraints/NFRs, grounding appendix, and a
-      progressively-disclosed "Architecture & additional context" block holding
+      principles, JTBD/users, success metrics, a **compact Scope** block — the
+      scope *decision* rationale + MVP/next feature reference **chips** that link
+      into the Features view + a deferred count linking to Decisions, deliberately
+      NOT the full feature cards (those live only in the Features view, so the
+      Overview never duplicates the feature spec), constraints/NFRs, grounding
+      appendix, and a progressively-disclosed "Architecture & additional context" block holding
       the legacy technical sections — architecture/roles/UX/loops/data-model/
       state-machines — so nothing is discarded). **Features** = feature systems
       → individual `FeatureCard`s, grouped by `groupFeaturesBySystem` (system

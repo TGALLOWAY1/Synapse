@@ -18,12 +18,12 @@ import {
     serializeEntities,
     serializeActions,
 } from '../lib/groundingFields';
-import { ImplementationSummarySection } from './prd/ImplementationSummarySection';
 import { ReviewConfirmSection } from './prd/ReviewConfirmSection';
 import { DecisionLogSection } from './prd/DecisionLogSection';
 import { DeferredRisksSection } from './prd/DeferredRisksSection';
 import { PrdViewTabs } from './prd/PrdViewTabs';
-import { deriveDecisionLog } from '../lib/derive/prdDecisions';
+import { FeatureIdBadge } from './prd/FeatureIdBadge';
+import { deriveDecisionLog, isDisplayableFeatureId } from '../lib/derive/prdDecisions';
 import {
     deriveDeferredFeatureIds,
     deriveImplementationSummary,
@@ -839,6 +839,86 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         );
     };
 
+    // Compact scope surface for the Overview. Deliberately NOT the full feature
+    // list (that lives in the Features view) — it states the scope DECISION
+    // (rationale), which features are in MVP / next as small reference chips,
+    // and how many are deferred. Chips link into the Features/Decisions views.
+    const renderScopeGroup = (label: string, items: Array<{ id?: string; name: string }>) => {
+        if (items.length === 0) return null;
+        return (
+            <div className="mb-3 last:mb-0">
+                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">{label}</p>
+                <div className="flex flex-wrap gap-1.5">
+                    {items.map((f, i) => {
+                        const clickable = !!f.id && isDisplayableFeatureId(f.id);
+                        const content = (
+                            <>
+                                {clickable && <FeatureIdBadge id={f.id} />}
+                                <span className="min-w-0 break-words">{f.name}</span>
+                            </>
+                        );
+                        return clickable ? (
+                            <button
+                                key={f.id}
+                                type="button"
+                                onClick={() => handleNavigateToFeature(f.id!)}
+                                title={`Go to ${f.name} in Features`}
+                                className="inline-flex items-center gap-1.5 max-w-full text-left rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:border-indigo-300 hover:text-indigo-700 transition"
+                            >
+                                {content}
+                            </button>
+                        ) : (
+                            <span
+                                key={`${f.name}-${i}`}
+                                className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
+                            >
+                                {f.name}
+                            </span>
+                        );
+                    })}
+                </div>
+            </div>
+        );
+    };
+
+    const renderScope = () => {
+        const summary = deriveImplementationSummary(structuredPRD);
+        const rationale = structuredPRD.mvpScope?.rationale;
+        const deferredCount = deferredFeatureIds.size;
+        if (isImplementationSummaryEmpty(summary) && !rationale) return null;
+        return (
+            <div className="mb-8 scroll-mt-24" id="prd-implementation-summary">
+                <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
+                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Scope</h3>
+                </div>
+                {rationale && (
+                    <div className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-neutral-800">
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mr-1.5">Decision</span>
+                        {rationale}
+                    </div>
+                )}
+                <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
+                    {renderScopeGroup('Build first (MVP)', summary.buildFirst)}
+                    {renderScopeGroup('Build next', summary.buildNext)}
+                    {deferredCount > 0 && (
+                        <p className="text-xs text-neutral-500 mt-2">
+                            {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
+                            <button type="button" onClick={() => setView('decisions')} className="text-indigo-600 hover:text-indigo-800 underline">
+                                Decisions
+                            </button>{' '}tab.
+                        </p>
+                    )}
+                    <p className="text-[11px] text-neutral-400 mt-3">
+                        Full feature detail lives in the{' '}
+                        <button type="button" onClick={() => setView('features')} className="text-indigo-600 hover:text-indigo-800 underline">
+                            Features
+                        </button>{' '}tab.
+                    </p>
+                </div>
+            </div>
+        );
+    };
+
     const hasTechnicalDetail =
         !!structuredPRD.architecture
         || !!structuredPRD.architectureFlows?.length
@@ -880,11 +960,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 <MetricsSection metrics={structuredPRD.successMetrics} />
             )}
 
-            {/* Scope — THE MVP/V1 scope surface (cards deep-link into Features). */}
-            <ImplementationSummarySection
-                prd={structuredPRD}
-                onNavigateToFeature={handleNavigateToFeature}
-            />
+            {/* Scope — the scope DECISION + compact references, not the full
+                feature list (that lives in the Features view). */}
+            {renderScope()}
 
             {renderConstraints()}
 
