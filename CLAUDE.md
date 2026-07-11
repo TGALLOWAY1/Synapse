@@ -176,6 +176,21 @@ add it to `collectProjectBundle`/`collectScreenImages`/`collectVariantImages`, t
 restore writers, and `namespaceSnapshotForRestore`, or it silently won't travel
 in snapshots.
 
+- **The public demo has one read-only capability boundary.**
+  `src/lib/projectCapabilities.ts` is authoritative for durable project actions;
+  `getProjectCapabilities` fails conservatively for a missing project and denies
+  project/spine edits, finality, artifact/version/metadata changes, reviews,
+  generation, design-system changes, persisted workflow/task state, and external
+  task exports for `DEMO_PROJECT_ID`. Persisted Zustand slice actions, artifact
+  generation controllers, and IndexedDB image writers assert the relevant
+  capability before doing work. React surfaces consume
+  `useProjectCapabilities` to hide mutation-only controls; the demo's pipeline
+  stage is component state so PRD / Assets / History navigation remains
+  explorable without persisting `currentStage`. Do not add raw demo-id mutation
+  checks or a second demo store/workspace—extend the capability categories when
+  a new durable mutation domain is introduced. Local copy/download exports that
+  do not mutate project state remain available.
+
 - **Demo hydration is route-owned.** The public demo route
   (`/p/<DEMO_PROJECT_ID>` in `App.tsx`'s `ProjectRoute`) wraps
   `ProjectWorkspace` in `DemoRouteGate` (`src/components/DemoRouteGate.tsx`),
@@ -2599,7 +2614,7 @@ Regenerate / Mark up to date / Decide later — defaulted from
 `expandSelectionWithTroubledUpstreams` (a selected dependent must never rebuild
 from a stale unselected visible input; marked-current upstreams count as
 healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
-(spine stays non-final). First finalize / demo / job-active keep the direct
+(spine stays non-final). First finalize and job-active re-finalizes keep the direct
 `startAll` path. Do not reintroduce a blind full regeneration on re-finalize.
 
 ### PRD highlight → branch selection pipeline
