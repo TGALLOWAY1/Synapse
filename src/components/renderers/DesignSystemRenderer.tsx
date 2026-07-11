@@ -1,7 +1,6 @@
-import { useMemo } from 'react';
+import { useMemo, Children, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import rehypeRaw from 'rehype-raw';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
 import { getDesignSystemPresetLabel } from '../../lib/designSystemPresets';
@@ -459,11 +458,6 @@ function UsageRules({ tokens }: { tokens: DesignTokens }) {
 // ─── Legacy markdown renderer (preserved as-is for back-compat) ──────────
 
 const HEX_RE = /#[0-9a-fA-F]{6}\b/g;
-const HEX_TEST = /^#[0-9a-fA-F]{6}$/;
-
-function annotateHexes(markdown: string): string {
-    return markdown.replace(HEX_RE, hex => `<span data-hex="${hex}">${hex}</span>`);
-}
 
 function HexSwatch({ hex }: { hex: string }) {
     return (
@@ -478,12 +472,51 @@ function HexSwatch({ hex }: { hex: string }) {
     );
 }
 
+// Splits a plain-text string on hex color literals and wraps each match in a
+// swatch. Kept as a pure text transform (no HTML injection) so hex previews
+// no longer depend on raw-HTML passthrough — see the react-markdown
+// `components` overrides below, which apply this only to string children.
+function renderTextWithHexSwatches(text: string, keyPrefix: string): ReactNode[] {
+    const matches = text.match(HEX_RE) ?? [];
+    if (matches.length === 0) return [text];
+    const parts = text.split(HEX_RE);
+    const out: ReactNode[] = [];
+    parts.forEach((part, i) => {
+        if (part) out.push(part);
+        if (i < matches.length) {
+            out.push(<HexSwatch key={`${keyPrefix}-hex-${i}`} hex={matches[i]} />);
+        }
+    });
+    return out;
+}
+
+// Applies renderTextWithHexSwatches to the string children of a rendered
+// markdown node, leaving element children (nested bold/italic/code, which
+// get their own component overrides) untouched.
+function withHexSwatches(children: ReactNode, keyPrefix: string): ReactNode {
+    return Children.toArray(children).map((child, i) =>
+        typeof child === 'string' ? renderTextWithHexSwatches(child, `${keyPrefix}-${i}`) : child,
+    );
+}
+
 const baseComponents: Components = {
-    span(props) {
-        const dataHex = (props as Record<string, unknown>)['data-hex'] as string | undefined;
-        if (dataHex && HEX_TEST.test(dataHex)) return <HexSwatch hex={dataHex} />;
-        const { children, ...rest } = props;
-        return <span {...rest}>{children}</span>;
+    p({ children, ...rest }) {
+        return <p {...rest}>{withHexSwatches(children, 'p')}</p>;
+    },
+    li({ children, ...rest }) {
+        return <li {...rest}>{withHexSwatches(children, 'li')}</li>;
+    },
+    td({ children, ...rest }) {
+        return <td {...rest}>{withHexSwatches(children, 'td')}</td>;
+    },
+    code({ children, ...rest }) {
+        return <code {...rest}>{withHexSwatches(children, 'code')}</code>;
+    },
+    strong({ children, ...rest }) {
+        return <strong {...rest}>{withHexSwatches(children, 'strong')}</strong>;
+    },
+    em({ children, ...rest }) {
+        return <em {...rest}>{withHexSwatches(children, 'em')}</em>;
     },
 };
 
@@ -709,15 +742,10 @@ function SpacingSection({ body }: { body: string }) {
 }
 
 function FallbackMarkdown({ body }: { body: string }) {
-    const annotated = useMemo(() => annotateHexes(body), [body]);
     return (
         <div className="prose prose-sm prose-neutral max-w-none">
-            <ReactMarkdown
-                remarkPlugins={[remarkGfm]}
-                rehypePlugins={[rehypeRaw]}
-                components={baseComponents}
-            >
-                {annotated}
+            <ReactMarkdown remarkPlugins={[remarkGfm]} components={baseComponents}>
+                {body}
             </ReactMarkdown>
         </div>
     );
