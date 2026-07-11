@@ -14,6 +14,7 @@ import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, 
 import { readValidationBlockers } from '../lib/artifactBlockingValidation';
 import { ArtifactContentRenderer } from './renderers';
 import { StructuredPRDView } from './StructuredPRDView';
+import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { MockupViewer } from './mockups/MockupViewer';
 import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import { GenerationProgress } from './GenerationProgress';
@@ -305,6 +306,15 @@ export function ArtifactWorkspace({
     // invalid/stale id simply misses `byId` and falls back to the list.
     const [searchParams, setSearchParams] = useSearchParams();
     const selectedScreenId = searchParams.get('screen');
+    const prdView = coercePrdView(searchParams.get('prdView'));
+    const setPrdView = (next: PrdViewId) => {
+        setSearchParams(prev => {
+            const p = new URLSearchParams(prev);
+            if (next === 'overview') p.delete('prdView');
+            else p.set('prdView', next);
+            return p;
+        }, { replace: true });
+    };
     const rawScreenTab = searchParams.get('screenTab');
     const screenTab: ScreenDetailTab =
         rawScreenTab === 'flow' || rawScreenTab === 'mockups'
@@ -858,6 +868,8 @@ export function ArtifactWorkspace({
                         spineId={spineVersionId}
                         structuredPRD={structuredPRD}
                         readOnly
+                        view={prdView}
+                        onViewChange={setPrdView}
                     />
                 </div>
             );

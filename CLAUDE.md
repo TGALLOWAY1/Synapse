@@ -571,6 +571,38 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     The legacy multi-pass scoring + revision passes were removed — old projects
     in localStorage retain their saved `qualityScores`, but no new generation
     writes them.
+    - **Three-view PRD IA — Overview · Features · Decisions
+      (`StructuredPRDView` + `src/lib/derive/prdViews.ts`).** The in-app PRD is
+      **one canonical artifact presented through three coordinated tab views**,
+      NOT three artifacts — they share the same spine version, finalization
+      state, revision history, freshness/provenance, and downstream
+      relationships. `StructuredPRDView` is the single tabbed shell (rendered by
+      BOTH hosts — the editable `ProjectWorkspace` PRD stage and the read-only
+      `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
+      **Overview** = product brief (executive summary, problem/thesis, vision,
+      principles, JTBD/users, success metrics, the Implementation Summary as the
+      single scope surface, constraints/NFRs, grounding appendix, and a
+      progressively-disclosed "Architecture & additional context" block holding
+      the legacy technical sections — architecture/roles/UX/loops/data-model/
+      state-machines — so nothing is discarded). **Features** = feature systems
+      → individual `FeatureCard`s, grouped by `groupFeaturesBySystem` (system
+      header shown once; a trailing "Other features" bucket for system-less
+      features), a compact filter select (All/MVP/Later/Needs review/Confirmed
+      via `filterFeatures`/`featureFilterCounts`), and an explicit-only
+      traceability strip (`deriveFeatureTrace` — system membership + resolved
+      dependency features; never keyword-inferred links). **Decisions** = Needs
+      Input (low-confidence unresolved assumptions) + Assumptions to Validate
+      (med/high, via `splitDecisionInputs`) → the parameterized
+      `ReviewConfirmSection`; Decision Log (decided items only) via
+      `DecisionLogSection`; and `DeferredRisksSection` (deferred scope + risks
+      via `deriveRisks`). The active view is **navigational-only URL state**
+      (`?prdView=overview|features|decisions`, wired by both hosts via
+      `useSearchParams`; `coercePrdView` normalizes; `overview` omits the param)
+      — NEVER a PRD content revision. Cross-view links (a scope card jumps to its
+      feature; a feature's "Summary" jumps back) switch the tab and scroll after
+      the target view renders. All derivations in `prdViews.ts` are pure and
+      unit-tested; the workflow (confirm/edit → `editSpineStructuredPRD`) is
+      unchanged, so versioning/finalization/downstream all still work.
     - **PRD Review & Confirm + Decision Log (2026-07 mobile cleanup pass).**
       Assumptions no longer render as a passive trailing "Assumptions" section
       (or as the Implementation Summary's "Open Decisions" list — both are
