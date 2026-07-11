@@ -1,0 +1,33 @@
+<svg width="1024" height="1024" viewBox="0 0 1024 1024" fill="none" xmlns="http://www.w3.org/2000/svg">
+  <defs>
+    <filter id="shadow" x="-20%" y="-20%" width="140%" height="140%"><feDropShadow dx="0" dy="22" stdDeviation="26" flood-color="#64748B" flood-opacity=".22"/></filter>
+    <radialGradient id="glow" cx="50%" cy="18%" r="82%"><stop stop-color="#FFFFFF"/><stop offset="1" stop-color="#EEF4FF"/></radialGradient>
+    <linearGradient id="blue" x1="365" y1="616" x2="444" y2="812" gradientUnits="userSpaceOnUse"><stop stop-color="#60A5FA"/><stop offset=".55" stop-color="#2563EB"/><stop offset="1" stop-color="#1E3A8A"/></linearGradient>
+    <linearGradient id="teal" x1="268" y1="353" x2="446" y2="598" gradientUnits="userSpaceOnUse"><stop stop-color="#22D3EE"/><stop offset="1" stop-color="#0F766E"/></linearGradient>
+    <linearGradient id="line1" x1="432" y1="398" x2="696" y2="234" gradientUnits="userSpaceOnUse"><stop stop-color="#38BDF8"/><stop offset="1" stop-color="#2563EB"/></linearGradient>
+    <linearGradient id="line2" x1="438" y1="512" x2="699" y2="386" gradientUnits="userSpaceOnUse"><stop stop-color="#2DD4BF"/><stop offset="1" stop-color="#0891B2"/></linearGradient>
+    <linearGradient id="line3" x1="443" y1="604" x2="702" y2="578" gradientUnits="userSpaceOnUse"><stop stop-color="#22D3EE"/><stop offset="1" stop-color="#4F46E5"/></linearGradient>
+    <linearGradient id="line4" x1="444" y1="654" x2="708" y2="779" gradientUnits="userSpaceOnUse"><stop stop-color="#8B5CF6"/><stop offset="1" stop-color="#6D28D9"/></linearGradient>
+    <linearGradient id="cardBlue" x1="684" y1="152" x2="865" y2="306" gradientUnits="userSpaceOnUse"><stop stop-color="#3B82F6"/><stop offset="1" stop-color="#0B63E5"/></linearGradient>
+    <linearGradient id="cardTeal" x1="684" y1="334" x2="865" y2="488" gradientUnits="userSpaceOnUse"><stop stop-color="#22D3EE"/><stop offset="1" stop-color="#0796A4"/></linearGradient>
+    <linearGradient id="cardPurple" x1="684" y1="516" x2="865" y2="670" gradientUnits="userSpaceOnUse"><stop stop-color="#8B5CF6"/><stop offset="1" stop-color="#5B21B6"/></linearGradient>
+  </defs>
+  <rect x="96" y="96" width="832" height="832" rx="170" fill="#F8FAFF"/>
+  <rect x="96" y="96" width="832" height="832" rx="170" fill="url(#glow)"/>
+  <g filter="url(#shadow)">
+    <path d="M201 680c30-67 102-91 174-91s144 24 174 91c10 23-6 50-31 52-106 8-211 8-317 0-25-2-41-29-31-52z" fill="url(#blue)"/>
+    <path d="M362 405c0-39-30-85-97-102-13-3-25 7-22 20 15 72 69 112 119 115v135c0 12 10 22 22 22s22-10 22-22V438c50-3 104-43 119-115 3-13-9-23-22-20-67 17-97 63-97 102-10 12-19 31-22 54-3-23-12-42-22-54z" fill="url(#teal)"/>
+    <path d="M294 345c35 21 59 50 75 91" stroke="#67E8F9" stroke-width="9" stroke-linecap="round" opacity=".45"/>
+    <path d="M473 345c-34 22-57 51-73 91" stroke="#67E8F9" stroke-width="9" stroke-linecap="round" opacity=".45"/>
+    <path d="M480 494c70-38 70-143 126-200 30-31 63-43 101-43" stroke="url(#line1)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M479 559c70-23 82-111 152-124 26-5 52-4 78-4" stroke="url(#line2)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M479 630c67-7 102-17 160 3 33 12 50 16 71 14" stroke="url(#line3)" stroke-width="16" stroke-linecap="round"/>
+    <path d="M479 679c62 23 74 124 157 145 28 7 51 5 78 5" stroke="url(#line4)" stroke-width="16" stroke-linecap="round"/>
+    <circle cx="725" cy="251" r="32" fill="#2563EB"/><circle cx="725" cy="431" r="32" fill="#0EA5B7"/><circle cx="725" cy="647" r="32" fill="#6D28D9"/><circle cx="725" cy="829" r="32" fill="#7C3AED"/>
+    <rect x="694" y="150" width="216" height="130" rx="28" fill="url(#cardBlue)"/><rect x="694" y="332" width="216" height="130" rx="28" fill="url(#cardTeal)"/><rect x="694" y="514" width="216" height="130" rx="28" fill="url(#cardPurple)"/><rect x="694" y="696" width="216" height="130" rx="28" fill="#EEF2FF"/>
+    <path d="M744 199h108M744 228h56M820 228h42M744 257h82" stroke="white" stroke-width="14" stroke-linecap="round" opacity=".9"/>
+    <circle cx="754" cy="374" r="15" fill="white"/><path d="M734 424l43-56 35 45 22-29 45 60H734z" fill="white" opacity=".93"/>
+    <path d="M800 546v34M760 612h80M720 612h40v32h-40zM840 612h40v32h-40zM780 546h40v34h-40z" stroke="white" stroke-width="16" stroke-linejoin="round"/>
+    <rect x="736" y="725" width="128" height="34" rx="7" fill="#93A8EA"/><rect x="736" y="778" width="56" height="48" rx="7" fill="#93A8EA"/><rect x="808" y="778" width="56" height="48" rx="7" fill="#93A8EA"/><path d="M761 802h18M833 802h18" stroke="white" stroke-width="10" stroke-linecap="round"/>
+  </g>
+</svg>

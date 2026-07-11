@@ -301,7 +301,8 @@ export function HomePage() {
             {/* Top bar */}
             <div className="flex items-center justify-between px-6 py-4">
                 <div className="flex items-center gap-3">
-                    <h1 className="text-2xl font-bold tracking-tight">Synapse</h1>
+                    <img src="/icon.svg" alt="Synapse icon" className="h-10 w-10 rounded-xl shadow-sm" />
+                    <h1 className="bg-gradient-to-r from-sky-500 via-blue-600 to-violet-600 bg-clip-text text-2xl font-bold tracking-tight text-transparent">Synapse</h1>
                 </div>
                 <div className="flex items-center gap-2">
                     {user && (
@@ -382,6 +383,10 @@ export function HomePage() {
             {/* Main content — vertically centered */}
             <div className="flex-1 flex flex-col items-center justify-center px-6 pb-12 -mt-8">
                 <div className="w-full max-w-2xl">
+                    <div className="mb-6 flex justify-center">
+                        <img src="/icon.svg" alt="Synapse icon" className="h-28 w-28 rounded-[1.75rem] drop-shadow-xl" />
+                    </div>
+
                     {/* Take the interactive tour + View demo project — inline pills */}
                     <div className="flex flex-wrap justify-center items-center gap-2 mb-8">
                         <button
@@ -404,9 +409,12 @@ export function HomePage() {
                     </div>
 
                     {/* Hero title */}
-                    <h2 className="text-4xl md:text-5xl font-bold text-center mb-8">
+                    <h2 className="mb-3 bg-gradient-to-r from-sky-500 via-blue-600 to-violet-600 bg-clip-text text-center text-4xl font-bold text-transparent md:text-5xl">
                         Welcome to Synapse
                     </h2>
+                    <p className="mb-8 text-center text-lg text-neutral-500">
+                        From plain-language to product blueprint
+                    </p>
 
                     {/* Example prompt pills */}
                     <div className="flex gap-2 overflow-x-auto pb-3 mb-6 scrollbar-hide">
