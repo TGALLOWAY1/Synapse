@@ -1,6 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectStore } from '../projectStore';
 import { DEMO_PROJECT_ID } from '../../data/demoProject';
+import { DEMO_CACHE_POLICY_VERSION } from '../slices/projectSlice';
 import type { SnapshotPayload } from '../../lib/snapshotClient';
 import type { Project } from '../../types';
 
@@ -29,6 +30,7 @@ function seedDemo(sourceId: string | undefined): void {
         id: DEMO_PROJECT_ID,
         name: 'Demo',
         createdAt: 0,
+        demoCachePolicyVersion: DEMO_CACHE_POLICY_VERSION,
         ...(sourceId ? { demoSourceSnapshotId: sourceId } : {}),
     };
     useProjectStore.setState((state) => ({

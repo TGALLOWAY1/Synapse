@@ -11,7 +11,12 @@ import {
 } from '../../lib/snapshotClient';
 import { projectsDebug } from '../../lib/projectsDebug';
 import { resolveProjectStorageName } from '../userScope';
+import { deleteImagesForVersion } from '../../lib/mockupImageStore';
+import { deleteScreenImagesForArtifactVersion } from '../../lib/screenInventoryImageStore';
+import { deleteVariantImagesForVersion } from '../../lib/mockupVariantImageStore';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
+
+export const DEMO_CACHE_POLICY_VERSION = 1;
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -24,6 +29,7 @@ export type ProjectSlice = {
     setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
     markDesignSetupComplete: ProjectState['markDesignSetupComplete'];
     loadDemoProject: ProjectState['loadDemoProject'];
+    clearDemoProject: ProjectState['clearDemoProject'];
 };
 
 export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice> = (set, get) => ({
@@ -176,18 +182,44 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     // before any heavy bundle/image download. If the pointer fetch itself
     // fails (offline / proxy error), we fall back to the cached copy so the
     // demo still opens.
-    loadDemoProject: async () => {
+    clearDemoProject: async () => {
+        const versions = get().artifactVersions[DEMO_PROJECT_ID] || [];
+        await Promise.all(versions.flatMap((version) => [
+            deleteImagesForVersion(version.id),
+            deleteScreenImagesForArtifactVersion(version.id),
+            deleteVariantImagesForVersion(version.id),
+        ]));
+        set((state) => {
+            const keys = ['projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts', 'artifactVersions', 'feedbackItems', 'tasks', 'workflowRuns'] as const;
+            const next: Record<string, unknown> = {};
+            for (const key of keys) {
+                const copy = { ...state[key] };
+                delete copy[DEMO_PROJECT_ID];
+                next[key] = copy;
+            }
+            return next as Partial<ProjectState>;
+        });
+    },
+
+    loadDemoProject: async ({ force = false } = {}) => {
         const existing = get().projects[DEMO_PROJECT_ID];
+
+        // Old caches were writable. Discard them once; current baseline caches
+        // keep the normal pointer-based fast path.
+        if (existing && existing.demoCachePolicyVersion !== DEMO_CACHE_POLICY_VERSION) {
+            await get().clearDemoProject();
+            return get().loadDemoProject({ force: true });
+        }
 
         const pointer = await loadDemoSnapshotPointer().catch((err) => {
             console.error('[loadDemoProject] failed to read demo pointer', err);
             return null;
         });
 
-        if (existing && pointer && existing.demoSourceSnapshotId === pointer.snapshotId) {
+        if (!force && existing && pointer && existing.demoSourceSnapshotId === pointer.snapshotId) {
             return { projectId: DEMO_PROJECT_ID, available: true };
         }
-        if (existing && !pointer) {
+        if (!force && existing && !pointer) {
             // Pointer probe failed — keep the cached demo rather than wiping
             // it. Better stale than empty.
             return { projectId: DEMO_PROJECT_ID, available: true };
@@ -218,14 +250,18 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         const sourceId = payload.imagesComplete === false
             ? null
             : payload.manifest?.id ?? pointer?.snapshotId ?? null;
-        if (sourceId) {
+        {
             set((state) => {
                 const restored = state.projects[DEMO_PROJECT_ID];
                 if (!restored) return {};
                 return {
                     projects: {
                         ...state.projects,
-                        [DEMO_PROJECT_ID]: { ...restored, demoSourceSnapshotId: sourceId },
+                        [DEMO_PROJECT_ID]: {
+                            ...restored,
+                            ...(sourceId ? { demoSourceSnapshotId: sourceId } : {}),
+                            demoCachePolicyVersion: DEMO_CACHE_POLICY_VERSION,
+                        },
                     },
                 };
             });

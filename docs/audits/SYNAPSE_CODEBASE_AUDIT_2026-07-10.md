@@ -14,7 +14,7 @@ appended to each affected finding.
 
 | Finding | Status | Resolved by | Summary |
 | --- | --- | --- | --- |
-| SYN-001 | 🟡 Partially resolved (2026-07-10) | PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269), commits `9730d65`, `63887ce`, `fdd3aed`, branch `fix/demo-read-only-capabilities` | The public demo now has one centralized read-only capability policy enforced in UI and durable mutation boundaries. Persistent PRD, artifact, review, generation, design, image, task, workflow, and export-state changes are denied while exploration remains available. **Reset Demo and baseline restoration remain open** as the intentionally deferred portion of SYN-001. See the Resolution block under SYN-001. |
+| SYN-001 | ✅ Resolved (2026-07-10) | PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269) plus reset follow-up PR #271 | The centralized policy denies persistent demo mutations while preserving exploration. Reset Demo now clears only the local demo namespace and associated image records, invalidates legacy mutable caches, and forces restoration through the existing route-owned hydration flow. |
 | SYN-002 | ✅ Resolved (2026-07-10) | PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya` | Demo hydration moved to the route boundary: `DemoRouteGate` wraps `ProjectWorkspace` on `/p/<DEMO_PROJECT_ID>` and runs `loadDemoProject()` before mount; entry buttons navigate only. See the Resolution block under SYN-002. |
 | SYN-003–SYN-018 | Open | — | — |
 
@@ -172,7 +172,7 @@ No P0 finding was supported by the evidence gathered.
 
 ## [SYN-001] The public demo is mutable and a destructive state change survives refresh
 
-**Status: 🟡 Partially resolved — 2026-07-10, PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269) (`fix/demo-read-only-capabilities`; commits `9730d65`, `63887ce`, `fdd3aed`). Persistent mutation prevention is complete; Reset Demo remains open. See the Resolution block below.**
+**Status: ✅ Resolved — 2026-07-10. PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269) completed the read-only capability boundary; follow-up PR #271 adds deterministic reset and legacy cache invalidation. See the Resolution blocks below.**
 
 **Labels**
 
@@ -298,10 +298,22 @@ result.
 `63887ce` (`fix(demo): prevent persistent mutations in public projects`), and
 `fdd3aed` (`test(demo): cover read-only capability enforcement`).
 
-*Deliberately deferred:* Reset Demo, clearing only the local demo namespace,
-automatic baseline restoration after earlier cache corruption, image-manifest
-validation, and the full committed Playwright demo contract. Those remain the
-follow-up needed to close the remaining portion of SYN-001.
+**Resolution — deterministic reset and cache policy (2026-07-10 — follow-up PR #271)**
+
+- `DemoReadOnlyNotice` now provides the single accessible **Reset demo** action,
+  with a busy state and retryable failure message.
+- `resetDemoProject()` reuses the route hydration single-flight with
+  `force: true`; it does not create a second loader or restoration path.
+- `clearDemoProject()` removes only `DEMO_PROJECT_ID` collections and its
+  legacy mockup, Screen Inventory, and mockup-variant IndexedDB namespaces.
+  Signed-in projects, their images, and the pinned owner snapshot are untouched.
+- `DEMO_CACHE_POLICY_VERSION` discards caches created under the former mutable
+  policy once. Current baseline caches retain the existing pointer-match fast
+  path during ordinary navigation.
+
+Together with PR #269, all SYN-001 acceptance criteria are met. Image-manifest
+completeness remains SYN-003, and the committed browser contract remains
+SYN-006.
 
 ## [SYN-002] A cold direct demo URL does not hydrate the demo project
 

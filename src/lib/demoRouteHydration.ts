@@ -11,16 +11,23 @@ export type DemoHydrationResult = { available: boolean };
 // a repeat pass cheap whenever the cached demo is still current.
 let inFlight: Promise<DemoHydrationResult> | null = null;
 
-export function hydrateDemoProject(): Promise<DemoHydrationResult> {
+export function hydrateDemoProject(options?: { force?: boolean }): Promise<DemoHydrationResult> {
     if (!inFlight) {
         inFlight = useProjectStore
             .getState()
-            .loadDemoProject()
+            .loadDemoProject(options)
             .finally(() => {
                 inFlight = null;
             });
     }
     return inFlight;
+}
+
+/** Explicit reset used by the one public-demo notice. It shares the route
+ * loader's single-flight protection, so repeated clicks and Strict Mode are safe. */
+export async function resetDemoProject(): Promise<DemoHydrationResult> {
+    await useProjectStore.getState().clearDemoProject();
+    return hydrateDemoProject({ force: true });
 }
 
 // Test-only escape hatch: drops a leaked in-flight promise between tests so
