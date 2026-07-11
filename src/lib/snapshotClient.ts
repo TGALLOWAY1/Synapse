@@ -47,6 +47,7 @@ import {
     type MockupVariantImageSnapshot,
 } from './mockupVariantSnapshot';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
+import { auditMockupImageCoverage } from './snapshotImageAudit';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -260,8 +261,24 @@ export const saveSnapshot = async (
     const { snapshot: variantWire, images: variantImages } =
         splitVariantSnapshotImages(fullVariantSnapshot);
     bundle.mockupVariantImages = variantWire;
-    if (onWarnings && fullVariantSnapshot.summary.warnings?.length) {
-        onWarnings(fullVariantSnapshot.summary.warnings);
+
+    // Surface any pre-save integrity warnings (variant size-guard drops PLUS a
+    // "mockup spec has screens but no images were found" gap — the failure mode
+    // that let an image-less snapshot be pinned as the public demo). Reported
+    // together so the owner sees every reason a saved snapshot may be missing
+    // preview images before they pin it.
+    if (onWarnings) {
+        const warnings = [
+            ...auditMockupImageCoverage({
+                artifacts: bundle.artifacts,
+                artifactVersions: bundle.artifactVersions,
+                images,
+                screenImages,
+                variantImages: fullVariantSnapshot,
+            }),
+            ...(fullVariantSnapshot.summary.warnings ?? []),
+        ];
+        if (warnings.length > 0) onWarnings(warnings);
     }
 
     onProgress?.({ phase: 'bundle', completed: 0, total: 0 });

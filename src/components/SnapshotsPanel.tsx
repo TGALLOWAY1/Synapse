@@ -137,9 +137,18 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
     // the public `?demo=1` endpoint, so no owner token is needed to view it.
     const handleSetDemo = async (id: string) => {
         const willClear = demoSnapshotId === id;
+        const snapshot = snapshots?.find((s) => s.id === id);
+        const imageTotal = snapshot
+            ? snapshot.imageCount + (snapshot.screenImageCount ?? 0)
+            : null;
+        // Pinning a snapshot with no images means the public demo will render
+        // mockup specs with no preview images — warn before it goes live.
+        const noImagesWarning = !willClear && imageTotal === 0
+            ? '\n\nHeads up: this snapshot contains 0 images, so the demo will show mockups with no rendered previews. Re-save a snapshot that includes the mockup images if you want them to appear.'
+            : '';
         const confirmMsg = willClear
             ? 'Unset this snapshot as the public demo? The "View demo project" button will stop working until another snapshot is set.'
-            : 'Make this snapshot the public demo? Any visitor (no owner token required) will be able to load it from the home page.';
+            : `Make this snapshot the public demo? Any visitor (no owner token required) will be able to load it from the home page.${noImagesWarning}`;
         if (!confirm(confirmMsg)) return;
         setBusy(`demo:${id}`);
         setError(null);
@@ -347,7 +356,7 @@ export function SnapshotsPanel({ projectId, onClose, onRestored }: SnapshotsPane
                             </ul>
                             <p className="mt-1.5 text-amber-200/70">
                                 The screen specs and mockup metadata are still saved — only some
-                                variant images were left out.
+                                preview images may be missing.
                             </p>
                         </div>
                     )}
