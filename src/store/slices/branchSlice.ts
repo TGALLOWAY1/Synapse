@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { Branch, SpineVersion, HistoryEvent } from '../../types';
 import type { ProjectState } from '../types';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 
 export type BranchSlice = {
     branches: Record<string, Branch[]>;
@@ -16,6 +17,7 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
     branches: {},
 
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         const branchId = uuidv4();
         const now = Date.now();
         const newBranch: Branch = {
@@ -43,6 +45,7 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
     },
 
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectBranches = state.branches[projectId] || [];
             const updatedBranches = projectBranches.map(b => {
@@ -64,6 +67,7 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
     },
 
     mergeBranch: (projectId: string, branchId: string, newSpineText: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         // Validate against a snapshot, but perform the array derivations inside
         // the set() updater against the fresh `state` so a concurrent spine /
         // branch mutation cannot be clobbered by a stale snapshot.
@@ -130,6 +134,7 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
     },
 
     deleteBranch: (projectId: string, branchId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectBranches = state.branches[projectId] || [];
             return {

@@ -18,6 +18,8 @@ import {
     setPreferredScreenImage as idbSetPreferred,
     slugifyScreenName,
 } from '../lib/screenInventoryImageStore';
+import { assertProjectCapability } from '../lib/projectCapabilities';
+import { useProjectStore } from './projectStore';
 
 interface UploadArgs {
     projectId: string;
@@ -101,6 +103,7 @@ export const useScreenInventoryImageStore = create<ImageStoreState>((set, get) =
     },
 
     upload: async ({ projectId, artifactId, artifactVersionId, screenName, file, prompt }) => {
+        assertProjectCapability(useProjectStore.getState().projects[projectId], 'canEditArtifacts');
         const slug = slugifyScreenName(screenName);
         const bucket = bucketKey(artifactVersionId, slug);
         if (get().uploading[bucket]) return;
@@ -162,6 +165,13 @@ export const useScreenInventoryImageStore = create<ImageStoreState>((set, get) =
 
     setPreferred: async (artifactVersionId, screenName, versionNumber) => {
         const slug = slugifyScreenName(screenName);
+        const record = Object.values(get().images).find(
+            image => image.artifactVersionId === artifactVersionId && image.screenSlug === slug,
+        );
+        assertProjectCapability(
+            record ? useProjectStore.getState().projects[record.projectId] : undefined,
+            'canEditArtifacts',
+        );
         const updated = await idbSetPreferred(artifactVersionId, slug, versionNumber);
         if (updated.length === 0) return;
         set((state) => {

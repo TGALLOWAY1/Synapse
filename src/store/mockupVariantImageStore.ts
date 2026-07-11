@@ -25,6 +25,7 @@ import {
 import type { MockupPlatform } from '../types';
 import { selectPreferredDesignTokens } from '../lib/designTokens';
 import { useProjectStore } from './projectStore';
+import { assertProjectCapability } from '../lib/projectCapabilities';
 import {
     buildVariantImageKey,
     getVariantImage as idbGetVariantImage,
@@ -137,6 +138,7 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
     },
 
     putSidecar: async (record) => {
+        assertProjectCapability(useProjectStore.getState().projects[record.projectId], 'canEditArtifacts');
         await idbPutVariantImage(record);
         set((state) => ({ images: { ...state.images, [record.key]: record } }));
     },
@@ -154,6 +156,7 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
         projectId, artifactId, versionId, platform, request, quality,
         sourceSignature, generatedFrom,
     }) => {
+        assertProjectCapability(useProjectStore.getState().projects[projectId], 'canGenerateArtifacts');
         const scope = variantScope(versionId, request.screenId, request.variantId);
         if (get().inFlight[scope]) return; // one generation per variant at a time
 

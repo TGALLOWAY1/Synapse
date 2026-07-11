@@ -19,6 +19,7 @@ import { callOpenAIImage } from '../lib/openaiClient';
 import { buildScreenImagePrompt, pickImageSize } from '../lib/services/mockupImageService';
 import { selectPreferredDesignTokens } from '../lib/designTokens';
 import { useProjectStore } from './projectStore';
+import { assertProjectCapability } from '../lib/projectCapabilities';
 import {
     buildImageKey,
     buildScreenScopeKey,
@@ -162,6 +163,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
     },
 
     generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated }) => {
+        assertProjectCapability(useProjectStore.getState().projects[projectId], 'canGenerateArtifacts');
         const scope = screenScope(versionId, screen.id);
         if (get().inFlight[scope]) return; // already generating something for this screen
 

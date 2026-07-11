@@ -4,6 +4,7 @@ import type { DesignTokens, ScreenItem } from '../../types';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
 import { buildExternalMockupPrompt } from '../../lib/services/screenInventoryImageService';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
+import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
 
 export interface ScreenImageGalleryContext {
     projectId: string;
@@ -35,6 +36,7 @@ interface Props {
 
 export function ScreenImageGallery({ screen, context, storageName }: Props) {
     const { projectId, artifactId, artifactVersionId, productTitle, productSummary, designTokens, platformHint } = context;
+    const capabilities = useProjectCapabilities(projectId);
     const fileInputRef = useRef<HTMLInputElement>(null);
     const [copied, setCopied] = useState(false);
     const [lightboxKey, setLightboxKey] = useState<string | null>(null);
@@ -88,26 +90,28 @@ export function ScreenImageGallery({ screen, context, storageName }: Props) {
                     {copied ? <Check size={12} className="text-green-600" /> : <Copy size={12} />}
                     {copied ? 'Copied' : 'Copy image prompt'}
                 </button>
-                <button
-                    type="button"
-                    onClick={() => fileInputRef.current?.click()}
-                    disabled={isUploading}
-                    className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition"
-                >
-                    {isUploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
-                    {isUploading ? 'Uploading…' : versions.length === 0 ? 'Upload image' : 'Upload new'}
-                </button>
-                <input
-                    ref={fileInputRef}
-                    type="file"
-                    accept="image/*"
-                    className="hidden"
-                    onChange={(e) => {
-                        handleFile(e.target.files?.[0]);
-                        // Reset so re-uploading the same filename still triggers onChange.
-                        if (fileInputRef.current) fileInputRef.current.value = '';
-                    }}
-                />
+                {capabilities.canEditArtifacts && <>
+                    <button
+                        type="button"
+                        onClick={() => fileInputRef.current?.click()}
+                        disabled={isUploading}
+                        className="inline-flex items-center gap-1 text-[11px] font-medium px-2 py-1 rounded bg-indigo-50 text-indigo-700 hover:bg-indigo-100 disabled:opacity-60 disabled:cursor-not-allowed transition"
+                    >
+                        {isUploading ? <Loader2 size={12} className="animate-spin" /> : <Upload size={12} />}
+                        {isUploading ? 'Uploading…' : versions.length === 0 ? 'Upload image' : 'Upload new'}
+                    </button>
+                    <input
+                        ref={fileInputRef}
+                        type="file"
+                        accept="image/*"
+                        className="hidden"
+                        onChange={(e) => {
+                            handleFile(e.target.files?.[0]);
+                            // Reset so re-uploading the same filename still triggers onChange.
+                            if (fileInputRef.current) fileInputRef.current.value = '';
+                        }}
+                    />
+                </>}
             </div>
 
             {error && (
@@ -145,9 +149,12 @@ export function ScreenImageGallery({ screen, context, storageName }: Props) {
                                     type="button"
                                     onClick={() => {
                                         if (isActive) setLightboxKey(v.key);
-                                        else void setPreferred(artifactVersionId, screen.name, v.versionNumber);
+                                        else if (capabilities.canEditArtifacts) void setPreferred(artifactVersionId, screen.name, v.versionNumber);
+                                        else setLightboxKey(v.key);
                                     }}
-                                    title={isActive ? `v${v.versionNumber} (active) — click to enlarge` : `Switch to v${v.versionNumber}`}
+                                    title={isActive
+                                        ? `v${v.versionNumber} (active) — click to enlarge`
+                                        : capabilities.canEditArtifacts ? `Switch to v${v.versionNumber}` : `View v${v.versionNumber}`}
                                     className={`relative w-10 h-10 rounded overflow-hidden border transition ${
                                         isActive
                                             ? 'border-indigo-500 ring-2 ring-indigo-200'

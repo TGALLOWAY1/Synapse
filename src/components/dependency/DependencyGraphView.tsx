@@ -26,6 +26,7 @@ import { findFeatureReferences, makeSpineChangeResolver } from '../../lib/spineC
 import type {
     ArtifactSlotKey, GenerationStatus, ProjectPlatform, StructuredPRD,
 } from '../../types';
+import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
 
 interface DependencyGraphViewProps {
     projectId: string;
@@ -115,6 +116,7 @@ type ViewMode = 'graph' | 'impact';
 export function DependencyGraphView({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode,
 }: DependencyGraphViewProps) {
+    const capabilities = useProjectCapabilities(projectId);
     const {
         getArtifacts, getPreferredVersion, getSpineVersions, getArtifactVersions, getJob,
     } = useProjectStore();
@@ -192,6 +194,7 @@ export function DependencyGraphView({
     const startArgs = { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform };
 
     const runUpdates = (order: DependencyNodeId[]) => {
+        if (!capabilities.canGenerateArtifacts) return;
         const slots = order.filter((id): id is ArtifactSlotKey => id !== 'prd');
         if (slots.length === 0) return;
         if (slots.length === 1) {
@@ -343,7 +346,7 @@ export function DependencyGraphView({
                             {summaryCounts.generating > 0 && ` · ${summaryCounts.generating} generating`}
                             {summaryCounts.error > 0 && ` · ${summaryCounts.error} failed`}
                         </span>
-                        {recommendedUpdates.length > 0 && (
+                            {capabilities.canGenerateArtifacts && recommendedUpdates.length > 0 && (
                             <button
                                 type="button"
                                 disabled={jobActive}
@@ -481,9 +484,9 @@ export function DependencyGraphView({
                     onClose={() => setSelectedId(null)}
                     onSelect={selectNode}
                     onOpenNode={onOpenNode}
-                    onUpdate={() => confirmSingleUpdate(selectedId)}
-                    onUpdateImpacted={() => confirmImpactedUpdate(selectedId)}
-                    onMarkCurrent={canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
+                    onUpdate={capabilities.canGenerateArtifacts ? () => confirmSingleUpdate(selectedId) : undefined}
+                    onUpdateImpacted={capabilities.canGenerateArtifacts ? () => confirmImpactedUpdate(selectedId) : undefined}
+                    onMarkCurrent={capabilities.canReviewArtifacts && canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
                     removedFeatureRefs={selectedRemovedFeatureRefs}
                     jobActive={jobActive}
                     titleOf={titleOf}
@@ -717,8 +720,8 @@ interface DetailPanelProps {
     onClose: () => void;
     onSelect: (id: DependencyNodeId) => void;
     onOpenNode: (id: DependencyNodeId) => void;
-    onUpdate: () => void;
-    onUpdateImpacted: () => void;
+    onUpdate?: () => void;
+    onUpdateImpacted?: () => void;
     /** Present only when the node is stale and can be confirmed current. */
     onMarkCurrent?: () => void;
     /** Removed-feature names this artifact's content still mentions. */
@@ -747,7 +750,7 @@ function DetailPanel({
     const Icon = NODE_ICONS[nodeId] ?? Package;
     const deps = getDirectDependencies(graph, nodeId);
     const { direct, indirect } = computeDownstreamImpacts(graph, nodeId);
-    const canUpdate = nodeId !== 'prd';
+    const canUpdate = nodeId !== 'prd' && Boolean(onUpdate);
     const impacted = evaluation.status === 'up_to_date' && evaluation.impactedBy.length > 0;
 
     const TABS: Array<{ key: DetailTab; label: string }> = [
@@ -935,7 +938,7 @@ function DetailPanel({
                                     </p>
                                 </div>
                             ) : null}
-                            {canUpdate && (direct.length > 0 || indirect.length > 0) && (
+                            {canUpdate && onUpdateImpacted && (direct.length > 0 || indirect.length > 0) && (
                                 <button
                                     type="button"
                                     disabled={jobActive}

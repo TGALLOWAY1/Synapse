@@ -11,6 +11,7 @@ import {
 } from '../../lib/snapshotClient';
 import { projectsDebug } from '../../lib/projectsDebug';
 import { resolveProjectStorageName } from '../userScope';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -79,6 +80,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     },
 
     deleteProject: (projectId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const newProjects = { ...state.projects };
             delete newProjects[projectId];
@@ -121,6 +123,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     },
 
     setProjectStage: (projectId: string, stage: PipelineStage) => {
+        assertProjectCapability(get().projects[projectId], 'canPersistWorkflowState');
         set((state) => ({
             projects: {
                 ...state.projects,
@@ -131,6 +134,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     },
 
     setProjectDesignSystemPreset: (projectId: string, presetId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canManageDesignSystem');
         set((state) => {
             const project = state.projects[projectId];
             if (!project) return state;
@@ -146,6 +150,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
     },
 
     markDesignSetupComplete: (projectId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canManageDesignSystem');
         set((state) => {
             const project = state.projects[projectId];
             if (!project) return state;
