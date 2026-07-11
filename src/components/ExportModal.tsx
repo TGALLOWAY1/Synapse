@@ -15,6 +15,8 @@ import {
     type PrdExportSection,
 } from '../lib/services/prdMarkdownRenderer';
 import { buildExportManifest, renderManifestMarkdown, type ExportManifestEntry } from '../lib/exportManifest';
+import { useProjectFreshness } from '../hooks/useProjectFreshness';
+import { isStaleStatus } from '../lib/artifactFreshness';
 import {
     CORE_ARTIFACT_DISPLAY_ORDER,
     getArtifactMeta,
@@ -41,8 +43,11 @@ interface ExportModalProps {
 export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const {
         getProject, getLatestSpine, getArtifacts, getArtifactVersions,
-        getArtifactStaleness, getSpineVersions,
+        getSpineVersions,
     } = useProjectStore();
+    // Canonical freshness — the export manifest's status column reads the same
+    // evaluator the workspace headers and Project Map do.
+    const freshness = useProjectFreshness(projectId);
     const { addToast } = useToastStore();
     const syncInfo = useProjectSyncStore((s) => s.projects[projectId]);
     const [exporting, setExporting] = useState(false);
@@ -97,7 +102,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         .map(meta => coreArtifacts.find(a => a.subtype === meta.subtype))
         .filter((a): a is Artifact => Boolean(a));
 
-    // --- Version manifest + staleness (what exactly is being exported) ------
+    // --- Version manifest + freshness (what exactly is being exported) ------
     const spines = getSpineVersions(projectId);
     const spineLabelOf = (spineId?: string): string | undefined => {
         if (!spineId) return undefined;
@@ -112,7 +117,8 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
             generatedFromPrdLabel: spineLabelOf(
                 preferred?.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId,
             ),
-            staleness: getArtifactStaleness(projectId, a.id),
+            // Missing (no preferred version) honestly reads "Not generated".
+            status: freshness.byArtifactId.get(a.id)?.status ?? 'missing',
         };
     });
     const manifest = buildExportManifest({
@@ -120,7 +126,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         prdLabel: spineLabelOf(latestSpine?.id),
         entries: manifestEntries,
     });
-    const staleTitles = manifestEntries.filter(e => e.staleness !== 'current').map(e => e.title);
+    const staleTitles = manifestEntries.filter(e => isStaleStatus(e.status)).map(e => e.title);
 
     // The default PRD export is one coherent three-part document. Prefer
     // rendering it from the canonical structured object so the Part I/II/III
