@@ -53,11 +53,13 @@ import { artifactJobController } from '../lib/services/artifactJobController';
 import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem } from '../types';
-import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
+import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
+import { DemoReadOnlyNotice } from './DemoReadOnlyNotice';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
+    const capabilities = useProjectCapabilities(projectId);
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
@@ -84,6 +86,9 @@ export function ProjectWorkspace() {
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
     const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
+    // Demo navigation is intentionally session-only. Ordinary projects retain
+    // their existing persisted currentStage behavior.
+    const [readOnlyStage, setReadOnlyStage] = useState<PipelineStage | null>(null);
     // Post-finalization transition. `showFinalizeSuccess` drives the success
     // modal shown immediately after Mark Final; `finalizeAutoOpen` is the
     // one-shot intent handed to ArtifactWorkspace so it auto-opens the panel
@@ -186,11 +191,12 @@ export function ProjectWorkspace() {
         const spine = store.getLatestSpine(projectId);
         if (!proj || proj.currentStage === 'workspace') return;
         if (spine?.isFinal && spine.structuredPRD && spine.safetyReview?.status !== 'blocked') {
-            store.setProjectStage(projectId, 'workspace');
+            if (capabilities.canPersistWorkflowState) store.setProjectStage(projectId, 'workspace');
+            else setReadOnlyStage('workspace');
         }
         // Mount-only by design (store read via getState, not deps): reacting
         // to later param changes would yank the stage from under the user.
-    }, [projectId]);
+    }, [projectId, capabilities.canPersistWorkflowState]);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -199,9 +205,13 @@ export function ProjectWorkspace() {
     const historyEvents = getHistoryEvents(projectId);
     const allSpines = getSpineVersions(projectId);
 
-    const pipelineStage = project?.currentStage || 'prd';
+    const pipelineStage = capabilities.canPersistWorkflowState
+        ? project?.currentStage || 'prd'
+        : readOnlyStage ?? project?.currentStage ?? 'prd';
     const setPipelineStage = (stage: PipelineStage) => {
-        if (projectId) setProjectStage(projectId, stage);
+        if (!projectId) return;
+        if (capabilities.canPersistWorkflowState) setProjectStage(projectId, stage);
+        else if (capabilities.canExplore) setReadOnlyStage(stage);
     };
 
     const activeSpine = viewedSpineId ? allSpines.find(s => s.id === viewedSpineId) || latestSpine : latestSpine;
@@ -297,6 +307,7 @@ export function ProjectWorkspace() {
             .map(a => a.title);
 
     const handleRestoreSpine = (sourceSpineId: string) => {
+        if (!capabilities.canEditProjectContent) return;
         revertSpineToVersion(projectId, sourceSpineId);
         // Return to the (new) latest version after restoring.
         setViewedSpineId(null);
@@ -331,6 +342,7 @@ export function ProjectWorkspace() {
     };
 
     const handleRegenerate = async () => {
+        if (!capabilities.canGenerateArtifacts) return;
         // Ref guard, not just `isGenerating`: two clicks in the same tick both
         // see the stale React state and would launch two concurrent pipelines
         // whose results interleave on different spines.
@@ -432,6 +444,7 @@ export function ProjectWorkspace() {
     // Re-run a single failed section, merging the new slice back into the
     // current spine's PRD while leaving every other section intact.
     const handleRetrySection = async (sectionId: string) => {
+        if (!capabilities.canGenerateArtifacts) return;
         if (!projectId || !activeSpine?.structuredPRD || isOldVersion || retryingStepId) return;
         const sourcePrompt = activeSpine.promptText;
         const id = sectionId as SectionId;
@@ -502,6 +515,7 @@ export function ProjectWorkspace() {
     };
 
     const handleApplyFeedback = (feedback: FeedbackItem) => {
+        if (!capabilities.canReviewArtifacts) return;
         if (!projectId || !latestSpine) return;
         const intent = `[Feedback: ${feedback.title}] ${feedback.description}`;
         storCreateBranch(projectId, latestSpine.id, feedback.title, intent);
@@ -544,6 +558,7 @@ export function ProjectWorkspace() {
         && pipelineStage !== 'workspace';
 
     const handleToggleFinal = () => {
+        if (!capabilities.canChangeFinality) return;
         if (!projectId || !activeSpine) return;
         // Blocked spines can never advance to the workspace / artifact stage.
         if (activeSpine.safetyReview?.status === 'blocked') return;
@@ -570,12 +585,12 @@ export function ProjectWorkspace() {
     // Continues the finalize flow after the incomplete-PRD gate. If this real
     // project will generate assets but hasn't picked a design-system direction
     // yet, ask first — the choice steers the design system (and therefore
-    // mockups + copied prompts). The demo never generates and skips through.
+    // mockups + copied prompts).
     // `ackIncomplete` records whether the user acknowledged generating from a
     // partial PRD; it's carried across the preset gate.
     const startFinalizeFlow = (ackIncomplete: boolean) => {
         if (!projectId || !activeSpine) return;
-        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID && !project?.designSystemPreset) {
+        if (activeSpine.structuredPRD && capabilities.canGenerateArtifacts && !project?.designSystemPreset) {
             pendingIncompleteAck.current = ackIncomplete;
             setShowPresetChoice(true);
             return;
@@ -697,6 +712,7 @@ export function ProjectWorkspace() {
     };
 
     const handleUpdatePlanConfirm = (choices: Record<string, UpdatePlanChoice>) => {
+        if (!capabilities.canGenerateArtifacts) return;
         if (!projectId || !activeSpine?.structuredPRD || !updatePlan) return;
         // Finalize first — the durable record every path below depends on.
         markSpineFinal(projectId, activeSpine.id, true);
@@ -747,14 +763,14 @@ export function ProjectWorkspace() {
     };
 
     // Performs the actual finalize + asset kickoff. Split out so it can run
-    // either directly (preset already chosen / demo) or after the preset gate.
+    // either directly (preset already chosen) or after the preset gate.
     const finalizeAndGenerate = (ackIncomplete: boolean) => {
         if (!projectId || !activeSpine) return;
 
         // Re-finalize with existing assets: route through the Update Assets
         // plan instead of blindly regenerating everything. First finalize (no
-        // assets yet), the demo, and mid-run finalizes keep the direct path.
-        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
+        // assets yet) and mid-run finalizes keep the direct path.
+        if (activeSpine.structuredPRD && capabilities.canGenerateArtifacts) {
             const jobActive = !!assetJob && Object.values(assetJob.slots).some(
                 s => s && (s.status === 'generating' || s.status === 'queued'),
             );
@@ -773,7 +789,7 @@ export function ProjectWorkspace() {
         // while the success modal is visible. We deliberately do NOT switch
         // to the Assets stage yet — the modal owns the transition, and its
         // "Open Assets" action performs the navigation + panel auto-open.
-        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
+        if (activeSpine.structuredPRD && capabilities.canGenerateArtifacts) {
             artifactJobController.startAll({
                 projectId,
                 spineVersionId: activeSpine.id,
@@ -787,6 +803,7 @@ export function ProjectWorkspace() {
     };
 
     const handleChooseDesignSystemPreset = (presetId: string) => {
+        if (!capabilities.canManageDesignSystem) return;
         if (!projectId) return;
         // Persist the choice synchronously so the generation pipeline reads it
         // off the project when design_system runs.
@@ -803,7 +820,7 @@ export function ProjectWorkspace() {
         if (!projectId) return;
         setShowFinalizeSuccess(false);
         setFinalizeAutoOpen(true);
-        setProjectStage(projectId, 'workspace');
+        setPipelineStage('workspace');
     };
 
     const handleExport = () => {
@@ -836,7 +853,7 @@ export function ProjectWorkspace() {
                                     : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
                             : 'Initializing...'}
                     </span>
-                    {projectId !== DEMO_PROJECT_ID && (
+                    {!capabilities.isReadOnly && (
                         <span className="hidden md:inline-flex shrink-0">
                             <ProjectCloudStatus projectId={projectId} signedIn={!!authUser} />
                         </span>
@@ -867,7 +884,7 @@ export function ProjectWorkspace() {
                         <Download size={14} />
                         <span className="hidden sm:inline">Export</span>
                     </button>
-                    {!isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
+                    {capabilities.canChangeFinality && !isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
                         <button
                             onClick={handleToggleFinal}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${activeSpine?.isFinal ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
@@ -899,28 +916,30 @@ export function ProjectWorkspace() {
                                 style={{ position: 'fixed', top: overflowMenuPos.top, right: overflowMenuPos.right }}
                                 className="bg-neutral-800 border border-neutral-700 rounded-lg shadow-xl py-1 z-[1000] min-w-[180px]"
                             >
-                                <button
-                                    onClick={() => { setIsSettingsOpen(true); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
-                                >
-                                    <Settings size={14} className="text-indigo-400" />
-                                    Project Settings
-                                </button>
-                                <button
-                                    onClick={() => { setIsSnapshotsOpen(true); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
-                                >
-                                    <Cloud size={14} className="text-indigo-400" />
-                                    Cloud Snapshots
-                                </button>
-                                <button
-                                    onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}
-                                    disabled={isGenerating || hasBranches || isOldVersion}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
-                                >
-                                    <RefreshCcw size={14} className={`text-neutral-500 ${isGenerating ? 'animate-spin' : ''}`} />
-                                    {isGenerating ? 'Regenerating...' : 'Regenerate Draft'}
-                                </button>
+                                {!capabilities.isReadOnly && (<>
+                                    <button
+                                        onClick={() => { setIsSettingsOpen(true); setShowNavOverflow(false); }}
+                                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                    >
+                                        <Settings size={14} className="text-indigo-400" />
+                                        Project Settings
+                                    </button>
+                                    <button
+                                        onClick={() => { setIsSnapshotsOpen(true); setShowNavOverflow(false); }}
+                                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition border-b border-white/5"
+                                    >
+                                        <Cloud size={14} className="text-indigo-400" />
+                                        Cloud Snapshots
+                                    </button>
+                                    <button
+                                        onClick={() => { handleRegenerate(); setShowNavOverflow(false); }}
+                                        disabled={isGenerating || hasBranches || isOldVersion}
+                                        className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition disabled:opacity-30 disabled:hover:bg-transparent"
+                                    >
+                                        <RefreshCcw size={14} className={`text-neutral-500 ${isGenerating ? 'animate-spin' : ''}`} />
+                                        {isGenerating ? 'Regenerating...' : 'Regenerate Draft'}
+                                    </button>
+                                </>)}
                                 <button
                                     onClick={() => { setShowPrdHistory(true); setShowNavOverflow(false); }}
                                     disabled={allSpines.length === 0}
@@ -1048,7 +1067,7 @@ export function ProjectWorkspace() {
                         after: latestSpine?.structuredPRD,
                     })}
                     getStaleArtifactTitles={getStaleArtifactTitles}
-                    onRestore={handleRestoreSpine}
+                    onRestore={capabilities.canEditProjectContent ? handleRestoreSpine : undefined}
                     onClose={() => setShowPrdHistory(false)}
                 />
             )}
@@ -1058,10 +1077,12 @@ export function ProjectWorkspace() {
                     fromLabel={getVersionLabel(activeSpine.id)}
                     toLabel="Current"
                     onClose={() => setBannerCompareOpen(false)}
-                    onRestore={() => { setBannerCompareOpen(false); setBannerRestoreOpen(true); }}
+                    onRestore={capabilities.canEditProjectContent
+                        ? () => { setBannerCompareOpen(false); setBannerRestoreOpen(true); }
+                        : undefined}
                 />
             )}
-            {bannerRestoreOpen && activeSpine && (
+            {bannerRestoreOpen && activeSpine && capabilities.canEditProjectContent && (
                 <RevertConfirmModal
                     kind="prd"
                     sourceLabel={getVersionLabel(activeSpine.id)}
@@ -1090,21 +1111,16 @@ export function ProjectWorkspace() {
                 />
             </div>
 
-            {/* Demo-mode banner: shown only for the prepopulated demo project.
-                Regenerate / refine buttons stay active; the existing no-key
-                error paths surface readable messages if the user clicks one. */}
-            {projectId === DEMO_PROJECT_ID && (
-                <div className="shrink-0 bg-indigo-500/10 border-b border-indigo-500/30 text-indigo-200 text-sm px-4 py-2 flex items-center justify-center gap-2 z-10">
-                    <span>
-                        You&apos;re viewing the demo project. Regenerating or refining requires your own Gemini API key — add one in Settings to customize.
-                    </span>
-                </div>
+            {/* One workspace-level explanation; individual artifacts stay free
+                of repetitive read-only warnings. */}
+            {capabilities.isReadOnly && (
+                <DemoReadOnlyNotice />
             )}
 
             {/* Cross-device conflict banner: the cloud copy changed on another
                 device while this device has unsynced edits. Blocks silent
                 overwrite — the user picks keep-local / use-cloud / download. */}
-            {projectId !== DEMO_PROJECT_ID && authUser && (
+            {!capabilities.isReadOnly && authUser && (
                 <div className="shrink-0 px-4 py-2 z-10 empty:hidden">
                     <ProjectConflictBanner projectId={projectId} />
                 </div>
@@ -1138,12 +1154,14 @@ export function ProjectWorkspace() {
                                         Compare with current
                                     </button>
                                 )}
-                                <button
-                                    onClick={() => setBannerRestoreOpen(true)}
-                                    className="font-semibold underline hover:text-yellow-900"
-                                >
-                                    Restore this version
-                                </button>
+                                {capabilities.canEditProjectContent && (
+                                    <button
+                                        onClick={() => setBannerRestoreOpen(true)}
+                                        className="font-semibold underline hover:text-yellow-900"
+                                    >
+                                        Restore this version
+                                    </button>
+                                )}
                                 <button
                                     onClick={() => setViewedSpineId(null)}
                                     className="font-semibold underline hover:text-yellow-900"
@@ -1176,7 +1194,8 @@ export function ProjectWorkspace() {
                                 {/* Feedback items from mockups/artifacts */}
                                 <FeedbackItemsList
                                     projectId={projectId}
-                                    onApplyToPRD={handleApplyFeedback}
+                                    onApplyToPRD={capabilities.canEditProjectContent ? handleApplyFeedback : undefined}
+                                    readOnly={!capabilities.canReviewArtifacts}
                                 />
 
                                 {activeSpine ? (
@@ -1188,7 +1207,7 @@ export function ProjectWorkspace() {
                                                 <ProgressTimeline
                                                     steps={timelineSteps}
                                                     messages={prdProgress?.messages}
-                                                    onRetryStep={handleRetrySection}
+                                                    onRetryStep={capabilities.canGenerateArtifacts ? handleRetrySection : undefined}
                                                     retryingStepId={retryingStepId ?? undefined}
                                                     onViewHistory={() => setPipelineStage('history')}
                                                 />
@@ -1243,7 +1262,8 @@ export function ProjectWorkspace() {
                                             && !activeSpine.generationError
                                             && activeSpine.structuredPRD
                                             && !isPRDActivelyGenerating
-                                            && persistedFailedSections.length > 0 && (
+                                            && persistedFailedSections.length > 0
+                                            && capabilities.canGenerateArtifacts && (
                                             <div className="mb-6 rounded-xl border border-amber-200 bg-amber-50 p-4">
                                                 <p className="font-semibold text-amber-900 text-sm mb-1">
                                                     This PRD is incomplete — {persistedFailedSections.length} section{persistedFailedSections.length > 1 ? 's' : ''} failed to generate
@@ -1271,7 +1291,7 @@ export function ProjectWorkspace() {
                                         {activeSpine.safetyReview?.status === 'blocked' ? (
                                             <SafetyReviewView
                                                 review={activeSpine.safetyReview}
-                                                canRevise={!isOldVersion && !hasBranches && !isGenerating}
+                                                canRevise={capabilities.canGenerateArtifacts && !isOldVersion && !hasBranches && !isGenerating}
                                                 onRevise={handleRegenerate}
                                             />
                                         ) : activeSpine.generationError ? (
@@ -1296,7 +1316,7 @@ export function ProjectWorkspace() {
                                                                 </div>
                                                             </details>
                                                         )}
-                                                        <div className="flex items-center gap-3">
+                                                        {capabilities.canGenerateArtifacts && <div className="flex items-center gap-3">
                                                             <button
                                                                 onClick={handleRegenerate}
                                                                 disabled={isGenerating || hasBranches}
@@ -1304,7 +1324,7 @@ export function ProjectWorkspace() {
                                                             >
                                                                 Try Again
                                                             </button>
-                                                        </div>
+                                                        </div>}
                                                     </div>
                                                 </div>
                                             </div>
@@ -1327,7 +1347,7 @@ export function ProjectWorkspace() {
                                                 projectId={projectId}
                                                 spineId={activeSpine.id}
                                                 structuredPRD={activeSpine.structuredPRD}
-                                                readOnly={isOldVersion}
+                                                readOnly={isOldVersion || !capabilities.canEditProjectContent}
                                             />
                                         ) : (
                                             <div className="prose prose-neutral max-w-none">
@@ -1335,7 +1355,7 @@ export function ProjectWorkspace() {
                                                     projectId={projectId}
                                                     spineVersionId={activeSpine.id}
                                                     text={activeSpine.responseText}
-                                                    readOnly={isOldVersion}
+                                                    readOnly={isOldVersion || !capabilities.canEditProjectContent}
                                                 />
                                             </div>
                                         )}
@@ -1345,7 +1365,7 @@ export function ProjectWorkspace() {
                                         <ProgressTimeline
                                             steps={timelineSteps}
                                             messages={prdProgress?.messages}
-                                            onRetryStep={handleRetrySection}
+                                            onRetryStep={capabilities.canGenerateArtifacts ? handleRetrySection : undefined}
                                             retryingStepId={retryingStepId ?? undefined}
                                             onViewHistory={() => setPipelineStage('history')}
                                         />
@@ -1397,6 +1417,7 @@ export function ProjectWorkspace() {
                                         spineVersionId={latestSpine.id}
                                         onConsolidate={(branch) => setConsolidatingBranch(branch)}
                                         onCanvasOpen={(branchId) => setActiveCanvasBranchId(branchId)}
+                                        readOnly={!capabilities.canEditProjectContent}
                                     />
                                 ) : (
                                     <div className="text-sm text-neutral-500 p-4 text-center border border-dashed border-neutral-300 rounded-lg bg-white shadow-sm mt-4 flex items-center justify-center gap-2">
@@ -1452,7 +1473,7 @@ export function ProjectWorkspace() {
 
             </div>
 
-            {consolidatingBranch && latestSpine && (
+            {capabilities.canEditProjectContent && consolidatingBranch && latestSpine && (
                 <ConsolidationModal
                     projectId={projectId}
                     branch={consolidatingBranch}
@@ -1461,7 +1482,7 @@ export function ProjectWorkspace() {
                 />
             )}
 
-            {activeCanvasBranchId && (
+            {capabilities.canEditProjectContent && activeCanvasBranchId && (
                 <BranchCanvas
                     projectId={projectId}
                     branchId={activeCanvasBranchId}

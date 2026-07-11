@@ -7,6 +7,7 @@ import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../../
 import { parseFlows } from '../renderers/userFlows/parseFlow';
 import { ScreenListView } from '../experience/ScreenListView';
 import { ScreenDetailView } from '../experience/ScreenDetailView';
+import { useProjectStore } from '../../store/projectStore';
 
 // Render smoke tests for the upgraded Screens experience views: the coverage
 // & readiness panel, list filters, and the structured Overview / Flow /
@@ -14,6 +15,7 @@ import { ScreenDetailView } from '../experience/ScreenDetailView';
 // states/refs/navigation), which must render fallbacks, never crash.
 
 beforeEach(() => {
+    useProjectStore.setState({ projects: { p1: { id: 'p1', name: 'Test', createdAt: 1 } } });
     vi.stubGlobal(
         'matchMedia',
         vi.fn().mockImplementation((query: string) => ({

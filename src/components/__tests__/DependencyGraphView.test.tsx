@@ -86,7 +86,7 @@ function seedStore(opts: { spines: SpineVersion[]; generated: boolean; artifactS
         versions.push(mockup.version);
     }
     useProjectStore.setState({
-        projects: {},
+        projects: { [PROJECT_ID]: { id: PROJECT_ID, name: 'Test', createdAt: 1 } },
         spineVersions: { [PROJECT_ID]: opts.spines },
         artifacts: { [PROJECT_ID]: artifacts },
         artifactVersions: { [PROJECT_ID]: versions },

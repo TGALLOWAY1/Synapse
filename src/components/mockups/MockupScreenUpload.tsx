@@ -19,6 +19,7 @@ import { useScreenInventoryImageStore } from '../../store/screenInventoryImageSt
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 import { buildScreenImagePrompt, pickImageSize } from '../../lib/services/mockupImageService';
 import { copyToClipboard } from '../../lib/utils/copyToClipboard';
+import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
 
 interface Props {
     projectId: string;
@@ -48,6 +49,7 @@ export function MockupScreenUpload({
     settings,
     forcedFallback,
 }: Props) {
+    const capabilities = useProjectCapabilities(projectId);
     const loadForArtifactVersion = useScreenInventoryImageStore((s) => s.loadForArtifactVersion);
     const upload = useScreenInventoryImageStore((s) => s.upload);
     const clearError = useScreenInventoryImageStore((s) => s.clearError);
@@ -115,11 +117,11 @@ export function MockupScreenUpload({
                         <span className="text-[11px] text-neutral-400">
                             {new Date(preferred.generatedAt).toLocaleString(undefined, { month: 'short', day: 'numeric', hour: '2-digit', minute: '2-digit' })}
                         </span>
-                        <label className="ml-auto inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md text-neutral-600 hover:bg-neutral-100 cursor-pointer transition">
+                        {capabilities.canEditArtifacts && <label className="ml-auto inline-flex items-center gap-1.5 text-xs px-3 py-1.5 rounded-md text-neutral-600 hover:bg-neutral-100 cursor-pointer transition">
                             <Upload size={12} />
                             Replace
                             <input type="file" accept="image/*" className="hidden" onChange={handleFile} />
-                        </label>
+                        </label>}
                     </div>
                 </>
             ) : (
@@ -160,7 +162,7 @@ export function MockupScreenUpload({
                         </div>
                     )}
 
-                    <div className="mt-4 flex items-center gap-3">
+                    {capabilities.canEditArtifacts && <div className="mt-4 flex items-center gap-3">
                         <label className={`inline-flex items-center gap-2 text-sm px-4 py-2 rounded-md font-medium cursor-pointer transition ${
                             isUploading
                                 ? 'bg-neutral-200 text-neutral-500 cursor-wait'
@@ -177,7 +179,7 @@ export function MockupScreenUpload({
                             />
                         </label>
                         <span className="text-[11px] text-neutral-400">Waiting for your upload</span>
-                    </div>
+                    </div>}
                 </div>
             )}
         </div>

@@ -33,6 +33,7 @@ vi.mock('../../lib/screenInventoryImageStore', () => {
 });
 
 import { useScreenInventoryImageStore } from '../screenInventoryImageStore';
+import { useProjectStore } from '../projectStore';
 
 const makeFile = (name = 'mock.png') =>
     new File([new Uint8Array([1, 2, 3, 4])], name, { type: 'image/png' });
@@ -40,6 +41,7 @@ const makeFile = (name = 'mock.png') =>
 describe('mockup manual upload — uploaded image accepted as the mockup source', () => {
     beforeEach(() => {
         useScreenInventoryImageStore.setState({ images: {}, hydrated: {}, uploading: {}, errors: {} });
+        useProjectStore.setState({ projects: { p1: { id: 'p1', name: 'Test', createdAt: 1 } } });
     });
 
     it('stores an uploaded file as the preferred image for a mockup screen', async () => {

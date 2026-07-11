@@ -51,7 +51,7 @@ function seedStore() {
         createdAt: 1,
     };
     useProjectStore.setState({
-        projects: {},
+        projects: { [PROJECT_ID]: { id: PROJECT_ID, name: 'Test', createdAt: 1 } },
         spineVersions: { [PROJECT_ID]: [spine as SpineVersion] },
         historyEvents: {},
         branches: {},

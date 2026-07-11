@@ -13,9 +13,10 @@ interface BranchListProps {
     spineVersionId: string;
     onConsolidate: (branch: Branch) => void;
     onCanvasOpen?: (branchId: string) => void;
+    readOnly?: boolean;
 }
 
-export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasOpen }: BranchListProps) {
+export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasOpen, readOnly = false }: BranchListProps) {
     const [animationParent] = useAutoAnimate();
     const { getBranchesForSpine, addBranchMessage, deleteBranch } = useProjectStore();
     const branches = getBranchesForSpine(projectId, spineVersionId);
@@ -79,7 +80,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                             <div className={`text-xs px-2 py-1 rounded-full border ${branch.status === 'active' ? 'bg-indigo-50 border-indigo-200 text-indigo-700' : 'bg-neutral-100 border-neutral-200 text-neutral-500'}`}>
                                 {branch.status}
                             </div>
-                            {branch.status === 'active' && (
+                            {branch.status === 'active' && !readOnly && (
                                 <div className="flex items-center gap-1 mt-1">
                                     <button
                                         onClick={() => onCanvasOpen?.(branch.id)}
@@ -105,7 +106,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                     </div>
 
                     {/* Consolidate Bar */}
-                    {branch.status === 'active' && (
+                    {branch.status === 'active' && !readOnly && (
                         <div className="px-3 pb-3 bg-neutral-50 flex justify-end">
                              <button
                                 onClick={() => onConsolidate(branch)}
@@ -135,7 +136,7 @@ export function BranchList({ projectId, spineVersionId, onConsolidate, onCanvasO
                     </div>
 
                     {/* Input */}
-                    {branch.status === 'active' && (
+                    {branch.status === 'active' && !readOnly && (
                         <form onSubmit={(e) => handleReply(e, branch)} className="p-2 border-t border-neutral-200 bg-white flex gap-2">
                             <input
                                 type="text"

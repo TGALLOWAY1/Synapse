@@ -56,6 +56,7 @@ import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
 } from '../types';
+import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
 
 // Stable empty reference for the tasks selector. Returning `[]` literal each
 // call would make Zustand's useSyncExternalStore see a fresh snapshot on every
@@ -250,6 +251,7 @@ export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
     autoOpenIntent, onAutoOpenConsumed,
 }: ArtifactWorkspaceProps) {
+    const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
     const {
         getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
@@ -516,6 +518,7 @@ export function ArtifactWorkspace({
     // Repair: pin/relink a mockup screen to a canonical screen (persisted on
     // the mockup version — survives renames and name drift thereafter).
     const handleRelinkMockupScreen = (mockupScreenId: string, screenId: string) => {
+        if (!capabilities.canEditArtifacts) return;
         if (!mockupArtifact || !mockupPreferred) return;
         const links = { ...readScreenLinks(mockupPreferred.metadata), [mockupScreenId]: screenId };
         updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, { screenLinks: links });
@@ -523,6 +526,7 @@ export function ArtifactWorkspace({
 
     // Repair: hide a warning (current behavior is kept — nothing else changes).
     const handleDismissScreenIssue = (issueKey: string) => {
+        if (!capabilities.canReviewArtifacts) return;
         if (!invArtifact || !invPreferred) return;
         const dismissed = new Set(readDismissedScreenIssues(invPreferred.metadata));
         dismissed.add(issueKey);
@@ -533,6 +537,7 @@ export function ArtifactWorkspace({
 
     // Persist (or clear, with null) one screen's metadata edit overlay.
     const handleSaveScreenEdit = (screenId: string, edit: ScreenMetadataEdit | null) => {
+        if (!capabilities.canEditArtifacts) return;
         if (!invArtifact || !invPreferred) return;
         const current = readScreenEdits(invPreferred.metadata);
         const next: Record<string, ScreenMetadataEdit> = { ...current };
@@ -551,6 +556,7 @@ export function ArtifactWorkspace({
     // per-screen action (or the confirmed batch below), so adding coverage is
     // free. Returns the appended MockupScreen specs.
     const addScreensToMockups = (screenIds: string[]): MockupScreen[] => {
+        if (!capabilities.canEditArtifacts) return [];
         if (!mockupArtifact || !mockupPreferred) return [];
         const existing = readExtraMockupScreens(mockupPreferred.metadata);
         const appended: MockupScreen[] = [];
@@ -580,6 +586,7 @@ export function ArtifactWorkspace({
     // panel; failures leave that screen on its generate/upload placeholder.
     const [missingMockupsConfirm, setMissingMockupsConfirm] = useState<{ count: number } | null>(null);
     const handleGenerateMissingMockups = () => {
+        if (!capabilities.canGenerateArtifacts) return;
         const missing = screenIndex.items.filter(i => !i.mockupScreen).map(i => i.id);
         if (missing.length === 0 || !mockupArtifact || !mockupPreferred || !mockupPayload) {
             setMissingMockupsConfirm(null);
@@ -651,10 +658,11 @@ export function ArtifactWorkspace({
     // store), so without this the user lands on a workspace where missing
     // artifacts silently sit at "Idle" with no resume affordance.
     useEffect(() => {
+        if (!capabilities.canGenerateArtifacts) return;
         artifactJobController.resumeIfNeeded({
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
-    }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform]);
+    }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, capabilities.canGenerateArtifacts]);
 
     // Scroll the content pane back to the top on every page switch (including
     // opening/closing a screen detail page).
@@ -725,6 +733,7 @@ export function ArtifactWorkspace({
     });
 
     const handleRetrySlot = (slot: ArtifactSlotKey) => {
+        if (!capabilities.canGenerateArtifacts) return;
         artifactJobController.retrySlot(slot, {
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
@@ -765,6 +774,7 @@ export function ArtifactWorkspace({
     // confirm — the preset only takes effect when the design system is
     // regenerated, so we lead the user straight into that step.
     const handleChooseDirection = (presetId: string) => {
+        if (!capabilities.canManageDesignSystem) return;
         setProjectDesignSystemPreset(projectId, presetId);
         setShowDirectionPicker(false);
         const ds = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === 'design_system');
@@ -818,7 +828,7 @@ export function ArtifactWorkspace({
                         Since {prdLabel ?? 'generation'}: {changeSummary.headline}
                     </span>
                 )}
-                {staleness !== 'current' && latestSpineId && (
+                {capabilities.canReviewArtifacts && staleness !== 'current' && latestSpineId && (
                     <button
                         type="button"
                         onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
@@ -900,13 +910,13 @@ export function ArtifactWorkspace({
                                 {screensError?.message && (
                                     <p className="text-sm text-neutral-600 mt-1 break-words">{screensError.message}</p>
                                 )}
-                                <button
+                                {capabilities.canGenerateArtifacts && <button
                                     type="button"
                                     onClick={() => handleRetrySlot('screen_inventory')}
                                     className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                                 >
                                     <RefreshCcw size={14} /> Retry
-                                </button>
+                                </button>}
                             </div>
                         </div>
                     </div>
@@ -955,11 +965,11 @@ export function ArtifactWorkspace({
                         mockupContext={mockupDetailContext}
                         mobileRelevant={mobileRelevant}
                         mockupStatus={slotStatusFor('mockup')}
-                        onRetryMockup={() => handleRetrySlot('mockup')}
+                        onRetryMockup={capabilities.canGenerateArtifacts ? () => handleRetrySlot('mockup') : undefined}
                         features={structuredPRD.features}
-                        onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
+                        onSaveScreenEdit={capabilities.canEditArtifacts && invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
                         onAddToMockups={
-                            mockupDetailContext && !detailItem.mockupScreen
+                            capabilities.canEditArtifacts && mockupDetailContext && !detailItem.mockupScreen
                                 ? () => handleAddScreenToMockups(detailItem.id)
                                 : undefined
                         }
@@ -971,7 +981,7 @@ export function ArtifactWorkspace({
                                 : undefined
                         }
                         onLinkMockup={
-                            mockupArtifact && mockupPreferred && !detailItem.mockupScreen
+                            capabilities.canEditArtifacts && mockupArtifact && mockupPreferred && !detailItem.mockupScreen
                                 ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
                                 : undefined
                         }
@@ -1011,12 +1021,12 @@ export function ArtifactWorkspace({
                     : undefined,
                 lastMockupGeneratedAt: mockupPreferred?.createdAt,
                 mockupDesignDrift: screensDesignDrift,
-                onMarkUpToDate: invArtifact && latestSpineId
+                onMarkUpToDate: capabilities.canReviewArtifacts && invArtifact && latestSpineId
                     ? () => markArtifactCurrentForSpine(projectId, invArtifact.id, latestSpineId)
                     : undefined,
                 onOpenVersionHistory: invArtifact ? () => setVersionHistoryArtifactId(invArtifact.id) : undefined,
                 onOpenMockupHistory: mockupArtifact ? () => setVersionHistoryArtifactId(mockupArtifact.id) : undefined,
-                onRegenerateMockup: mockupPreferred
+                onRegenerateMockup: capabilities.canGenerateArtifacts && mockupPreferred
                     ? () => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })
                     : undefined,
             };
@@ -1029,8 +1039,8 @@ export function ArtifactWorkspace({
                             <ReferenceWarningsPanel
                                 issues={visibleScreenIssues}
                                 screenOptions={screenIndex.items.map(i => ({ id: i.id, name: i.screen.name }))}
-                                onRelink={mockupArtifact && mockupPreferred ? handleRelinkMockupScreen : undefined}
-                                onDismiss={invArtifact && invPreferred ? handleDismissScreenIssue : undefined}
+                                onRelink={capabilities.canEditArtifacts && mockupArtifact && mockupPreferred ? handleRelinkMockupScreen : undefined}
+                                onDismiss={capabilities.canReviewArtifacts && invArtifact && invPreferred ? handleDismissScreenIssue : undefined}
                             />
                         </div>
                     )}
@@ -1053,7 +1063,7 @@ export function ArtifactWorkspace({
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
-                            mockupDetailContext
+                            capabilities.canGenerateArtifacts && mockupDetailContext
                                 ? () => setMissingMockupsConfirm({
                                     count: screenIndex.items.filter(i => !i.mockupScreen).length,
                                 })
@@ -1102,13 +1112,13 @@ export function ArtifactWorkspace({
                             {error?.message && (
                                 <p className="text-sm text-neutral-600 mt-1 break-words">{error.message}</p>
                             )}
-                            <button
+                            {capabilities.canGenerateArtifacts && <button
                                 type="button"
                                 onClick={() => handleRetrySlot(activeSelection)}
                                 className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                             >
                                 <RefreshCcw size={14} /> Retry
-                            </button>
+                            </button>}
                         </div>
                     </div>
                 </div>
@@ -1158,13 +1168,13 @@ export function ArtifactWorkspace({
                 <div className="space-y-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                         {renderVersionControls(mockup.id, preferred)}
-                        <button
+                        {capabilities.canGenerateArtifacts && <button
                             type="button"
                             onClick={() => setMockupRegenConfirm({ nextVersion: preferred.versionNumber + 1 })}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
                         >
                             <RefreshCcw size={12} /> Regenerate Mockup
-                        </button>
+                        </button>}
                     </div>
                     {designSystemDrift && (
                         <div className="flex items-start justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -1179,13 +1189,13 @@ export function ArtifactWorkspace({
                                     </p>
                                 </div>
                             </div>
-                            <button
+                            {capabilities.canGenerateArtifacts && <button
                                 type="button"
                                 onClick={() => setMockupRegenConfirm({ nextVersion: preferred.versionNumber + 1 })}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-md transition shrink-0"
                             >
                                 <RefreshCcw size={12} /> Regenerate Mockup
-                            </button>
+                            </button>}
                         </div>
                     )}
                     <MockupErrorBoundary resetKey={preferred.id}>
@@ -1240,7 +1250,7 @@ export function ArtifactWorkspace({
                 return packPreferred?.content;
             })()
             : undefined;
-        const handleUpdatePromptEdits = subtype === 'prompt_pack'
+        const handleUpdatePromptEdits = subtype === 'prompt_pack' && capabilities.canEditArtifacts
             ? (next: Record<number, string>) => {
                 updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next }, {
                     historyDescription: 'Developer prompt edited',
@@ -1254,12 +1264,12 @@ export function ArtifactWorkspace({
         const planSavedTasks = subtype === 'implementation_plan'
             ? projectTasks.filter(t => t.sourceArtifactId === artifact.id)
             : undefined;
-        const handleConvertToTasks = subtype === 'implementation_plan'
+        const handleConvertToTasks = subtype === 'implementation_plan' && capabilities.canPersistWorkflowState
             ? () => setTasksModalSource({ artifactId: artifact.id, content: preferred.content })
             : undefined;
         // Progress is per-version plumbing (like relink/dismiss), not a
         // content edit — no history event.
-        const handleUpdatePlanProgress = subtype === 'implementation_plan'
+        const handleUpdatePlanProgress = subtype === 'implementation_plan' && capabilities.canPersistWorkflowState
             ? (next: unknown) => {
                 updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { planProgress: next });
             }
@@ -1314,17 +1324,17 @@ export function ArtifactWorkspace({
                             <p className="text-xs text-amber-700 mt-2">
                                 The content below is preserved for review. Regenerate this artifact to try to resolve it.
                             </p>
-                            <button
+                            {capabilities.canGenerateArtifacts && <button
                                 type="button"
                                 onClick={() => handleRetrySlot(activeSelection)}
                                 className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 hover:bg-amber-700 text-white transition"
                             >
                                 <RefreshCcw size={12} /> Regenerate
-                            </button>
+                            </button>}
                         </div>
                     </div>
                 )}
-                {subtype === 'design_system' && (
+                {subtype === 'design_system' && capabilities.canManageDesignSystem && (
                     <DesignDirectionControl
                         presetId={designSystemPreset}
                         onChangeDirection={() => setShowDirectionPicker(true)}
@@ -1334,7 +1344,7 @@ export function ArtifactWorkspace({
                     />
                 )}
                 {subtype === 'implementation_plan' && (
-                    <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} />
+                    <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} readOnly={!capabilities.canPersistWorkflowState} />
                 )}
                 <div className={
                     subtype === 'implementation_plan'
@@ -1549,7 +1559,7 @@ export function ArtifactWorkspace({
                 </div>
             </main>
 
-            {tasksModalSource && (
+            {tasksModalSource && capabilities.canPersistWorkflowState && (
                 <ConvertToTasksModal
                     projectId={projectId}
                     sourceArtifactId={tasksModalSource.artifactId}
@@ -1749,7 +1759,9 @@ export function ArtifactWorkspace({
                             before: versions.find(v => v.id === id)?.content ?? '',
                             after: preferred?.content ?? '',
                         })}
-                        onRestore={(id) => revertArtifactToVersion(projectId, artifactId, id)}
+                        onRestore={capabilities.canEditArtifacts
+                            ? (id) => revertArtifactToVersion(projectId, artifactId, id)
+                            : undefined}
                         onClose={() => setVersionHistoryArtifactId(null)}
                     />
                 );

@@ -4,7 +4,10 @@ import type { WorkflowRun } from '../../types';
 
 const reset = () =>
     useProjectStore.setState({
-        projects: {},
+        projects: {
+            p1: { id: 'p1', name: 'Project 1', createdAt: 1 },
+            p2: { id: 'p2', name: 'Project 2', createdAt: 1 },
+        },
         spineVersions: {},
         historyEvents: {},
         branches: {},
