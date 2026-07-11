@@ -483,8 +483,8 @@ export function evaluateDependencyGraph(
 
             // Mockups record the design system's tokensHash on the source ref
             // (SourceRef.anchorInfo). Token-identical regenerations keep the
-            // hash stable, so hash comparison beats version-id comparison —
-            // mirrors stalenessSlice's mockup rule.
+            // hash stable, so hash comparison beats version-id comparison — a
+            // token-identical design regen keeps mockups current.
             if (node.id === 'mockup' && dep === 'design_system') {
                 const designRef = version.sourceRefs.find(
                     r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',

@@ -1231,8 +1231,6 @@ export interface ProjectJobState {
     slots: Record<ArtifactSlotKey, SlotState>;
 }
 
-export type StalenessState = 'current' | 'possibly_outdated' | 'outdated';
-
 export type SourceRef = {
     id: string;
     sourceArtifactId: string;

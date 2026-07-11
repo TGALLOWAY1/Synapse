@@ -2,7 +2,7 @@ import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
     PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
-    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState,
+    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus,
     ArtifactSlotKey, ProjectJobState, SlotState,
     QualityScores, GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
@@ -230,9 +230,6 @@ export interface ProjectState {
     getWorkflowRuns: (projectId: string) => WorkflowRun[];
     getAllWorkflowRuns: () => WorkflowRun[];
     clearWorkflowRuns: (projectId: string) => void;
-
-    // Staleness
-    getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;
 
     // Background generation jobs (transient — excluded from persist)
     jobs: Record<string, ProjectJobState | undefined>;
