@@ -2579,6 +2579,24 @@ PRD + build-relevant core artifacts (mockups excluded), with copy and download.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
 
+**The default PRD export is ONE coherent three-part document** mirroring the
+in-app Overview/Features/Decisions views: `renderPremiumMarkdown`
+(`src/lib/services/prdMarkdownRenderer.ts`) emits `# Part I — Product Overview`
+→ `# Part II — Feature Specification` → `# Part III — Decisions and Validation`
+→ `# Appendices` (Architecture & Additional Context holding legacy technical
+sections, a Traceability Index, domain grounding, and the "Where the Detail
+Lives" handoff appendix). It is composed from pure per-part builders
+(`overviewLines`/`featuresLines`/`decisionsLines`/`appendixLines`), and
+`renderPrdSectionMarkdown(prd, 'overview'|'features'|'decisions')` renders a
+single part for the **section-specific export** option (not the default).
+`ExportModal` renders the PRD from the canonical `structuredPRD` object via
+`renderPremiumMarkdown` (falling back to stored `responseText` for legacy
+PRDs with no structured payload), so the three-part structure is guaranteed
+regardless of the saved markdown. The renderer is still the source of
+`SpineVersion.responseText`, so reordering it is presentation-only —
+downstream artifacts consume the `StructuredPRD` object by field, never the
+markdown; no consumer parses it by heading.
+
 **Exports are version-aware.** `src/lib/exportManifest.ts` (pure) builds an
 **export manifest** — per asset: version number, generated-from PRD version
 label, and staleness at export time — rendered by `renderManifestMarkdown` into

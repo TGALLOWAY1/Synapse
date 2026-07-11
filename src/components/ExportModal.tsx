@@ -9,6 +9,11 @@ import { parseScreenInventory, screenInventoryToMarkdown } from '../lib/screenIn
 import { downloadFile } from '../lib/utils/downloadFile';
 import { copyToClipboard } from '../lib/utils/copyToClipboard';
 import { buildAgentHandoff } from '../lib/exportHandoff';
+import {
+    renderPremiumMarkdown,
+    renderPrdSectionMarkdown,
+    type PrdExportSection,
+} from '../lib/services/prdMarkdownRenderer';
 import { buildExportManifest, renderManifestMarkdown, type ExportManifestEntry } from '../lib/exportManifest';
 import {
     CORE_ARTIFACT_DISPLAY_ORDER,
@@ -117,9 +122,33 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     });
     const staleTitles = manifestEntries.filter(e => e.staleness !== 'current').map(e => e.title);
 
+    // The default PRD export is one coherent three-part document. Prefer
+    // rendering it from the canonical structured object so the Part I/II/III
+    // structure is guaranteed regardless of the stored responseText; fall back
+    // to the saved markdown for legacy PRDs with no structured payload.
+    const prdMarkdown = (): string =>
+        latestSpine?.structuredPRD
+            ? renderPremiumMarkdown(latestSpine.structuredPRD)
+            : latestSpine?.responseText ?? '';
+
     const exportPRD = () => {
         if (!latestSpine) return;
-        downloadFile(latestSpine.responseText, `${project?.name || 'project'}-prd.md`);
+        downloadFile(prdMarkdown(), `${project?.name || 'project'}-prd.md`);
+    };
+
+    // Section-specific export (Product Overview / Feature Specification /
+    // Decisions and Validation). Not the default — one PRD stays the default.
+    const PRD_SECTIONS: Array<{ id: PrdExportSection; label: string; file: string }> = [
+        { id: 'overview', label: 'Product Overview', file: 'overview' },
+        { id: 'features', label: 'Feature Specification', file: 'features' },
+        { id: 'decisions', label: 'Decisions & Validation', file: 'decisions' },
+    ];
+    const exportPrdSection = (section: PrdExportSection, file: string) => {
+        if (!latestSpine?.structuredPRD) return;
+        downloadFile(
+            renderPrdSectionMarkdown(latestSpine.structuredPRD, section),
+            `${project?.name || 'project'}-prd-${file}.md`,
+        );
     };
 
     const exportArtifact = (artifact: Artifact) => {
@@ -165,7 +194,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const buildFullBundle = (): string => {
         const sections: string[] = [renderManifestMarkdown(manifest), '\n---\n'];
         if (latestSpine) {
-            sections.push('# Product Requirements Document\n', latestSpine.responseText, '\n---\n');
+            sections.push('# Product Requirements Document\n', prdMarkdown(), '\n---\n');
         }
         for (const artifact of orderedCoreArtifacts) {
             const content = artifactContent(artifact);
@@ -184,7 +213,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
     const buildHandoff = (): string =>
         buildAgentHandoff({
             projectName: project?.name || 'This product',
-            prdMarkdown: latestSpine?.responseText,
+            prdMarkdown: latestSpine ? prdMarkdown() : undefined,
             manifestMarkdown: renderManifestMarkdown(manifest),
             artifacts: orderedCoreArtifacts.map(a => ({
                 subtype: a.subtype ?? '',
@@ -354,7 +383,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                             </div>
                         </button>
                         <button
-                            onClick={() => copyText('prd', latestSpine?.responseText ?? '', 'the PRD')}
+                            onClick={() => copyText('prd', prdMarkdown(), 'the PRD')}
                             disabled={!latestSpine}
                             aria-label="Copy PRD to clipboard"
                             title="Copy to clipboard"
@@ -365,6 +394,25 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                                 : <Copy size={16} className="text-neutral-400" />}
                         </button>
                     </div>
+
+                    {/* PRD sections — Overview / Features / Decisions. The default
+                        export above is one complete PRD; these are per-part. */}
+                    {latestSpine?.structuredPRD && (
+                        <div className="pl-1">
+                            <div className="flex flex-wrap gap-1.5">
+                                {PRD_SECTIONS.map(s => (
+                                    <button
+                                        key={s.id}
+                                        onClick={() => exportPrdSection(s.id, s.file)}
+                                        className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs text-neutral-600 border border-neutral-200 rounded-md hover:bg-neutral-50 transition"
+                                    >
+                                        <Download size={12} className="text-neutral-400" />
+                                        {s.label}
+                                    </button>
+                                ))}
+                            </div>
+                        </div>
+                    )}
 
                     {/* Individual Artifacts — same names and order as the Assets tab */}
                     {orderedCoreArtifacts.length > 0 && (
