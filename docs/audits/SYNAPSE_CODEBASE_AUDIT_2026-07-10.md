@@ -14,7 +14,7 @@ appended to each affected finding.
 
 | Finding | Status | Resolved by | Summary |
 | --- | --- | --- | --- |
-| SYN-001 | 🟡 Partially resolved (2026-07-10) | PR [#269](https://github.com/TGALLOWAY1/Synapse/pull/269), commits `9730d65`, `63887ce`, `fdd3aed`, branch `fix/demo-read-only-capabilities` | The public demo now has one centralized read-only capability policy enforced in UI and durable mutation boundaries. Persistent PRD, artifact, review, generation, design, image, task, workflow, and export-state changes are denied while exploration remains available. **Reset Demo and baseline restoration remain open** as the intentionally deferred portion of SYN-001. See the Resolution block under SYN-001. |
+| SYN-001 | ✅ Resolved (2026-07-11) | PRs [#269](https://github.com/TGALLOWAY1/Synapse/pull/269) + [#276](https://github.com/TGALLOWAY1/Synapse/pull/276) (commit `194c935`) | The read-only capability policy shipped in PR #269; PR #276 closes the deferred remainder with a deterministic **Reset Demo**: `resetDemoProject()` wipes only the demo namespace (nine store maps + transient job/progress slices + all three IndexedDB image stores + reactive caches) and reloads the pinned snapshot, exposed as "Reset demo" on the read-only notice and "Reset & reload demo" on the demo route gate's failure state. See the Resolution blocks under SYN-001. |
 | SYN-002 | ✅ Resolved (2026-07-10) | PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya` | Demo hydration moved to the route boundary: `DemoRouteGate` wraps `ProjectWorkspace` on `/p/<DEMO_PROJECT_ID>` and runs `loadDemoProject()` before mount; entry buttons navigate only. See the Resolution block under SYN-002. |
 | SYN-003 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275), branch `claude/synapse-audit-review-sycska` | The primary Default mockup variant only reads "Generated" when a rendered image actually exists (image-store-derived `defaultImagePresence` with a neutral "Checking…" hydration state); a known-complete cached demo is never overwritten by a partial hydration; pinning a zero-image demo snapshot is hard-blocked client-side and rejected 422 server-side. See the Resolution block under SYN-003. |
 | SYN-004 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | `rehype-raw` removed from the Design System markdown fallback and from dependencies; hex swatches render as plain React nodes; raw HTML in artifact content stays inert. See the Resolution block under SYN-004. |
@@ -22,7 +22,10 @@ appended to each affected finding.
 | SYN-009 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Screens filter selects constrained (`min-w-0 max-w-full`, options no longer duplicate the label), removing the 360 px page overflow. See the Resolution block under SYN-009. |
 | SYN-014 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Mocked Linear provider deleted entirely (registry, adapter, UI branches, `mock` flag, `'linear'` target id). See the Resolution block under SYN-014. |
 | SYN-018 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Disabled "Forgot password?" affordance removed; `docs/auth.md` aligned. See the Resolution block under SYN-018. |
-| SYN-005, SYN-006, SYN-008, SYN-010–SYN-013, SYN-015–SYN-017 | Open | — | — |
+| SYN-005 | ✅ Resolved (2026-07-11) | PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commits `07b4393`, `a41fdbc`, `7b146d2`, `e7bb357`, `be81335`, `0918db9` | Both freshness engines replaced by the single canonical evaluator (`evaluateDependencyGraph`) behind a new pure input-assembly seam (`src/lib/artifactFreshness.ts`) and React hook (`useProjectFreshness`); `stalenessSlice`, `StalenessState`, `StalenessBadge`, both duplicated assembly loops, and all three duplicated tokensHash checks deleted. See the Resolution block under SYN-005. |
+| SYN-016 | ✅ Resolved (2026-07-11) | PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `f7667bc` | Tailwind CSS-parse warning, mixed static/dynamic import warnings, and the expired Gemini model migration block removed. See the Resolution block under SYN-016. |
+| SYN-017 | ✅ Resolved (2026-07-11) | PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `5850464` | Tour progress dots use honest button semantics (`aria-current="step"`, no fake tablist) with ≥24×24 targets; hidden Previous button no longer focusable. See the Resolution block under SYN-017. |
+| SYN-006, SYN-008, SYN-010–SYN-013, SYN-015 | Open | — | — |
 
 ## 1. Executive summary
 
@@ -309,6 +312,45 @@ automatic baseline restoration after earlier cache corruption, image-manifest
 validation, and the full committed Playwright demo contract. Those remain the
 follow-up needed to close the remaining portion of SYN-001.
 
+**Resolution — Reset Demo (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `194c935`)**
+
+The deferred remainder is implemented (image-manifest validation had already
+shipped with SYN-003's pin-time gate; the Playwright contract remains SYN-006):
+
+- **`resetDemoProject()`** (`src/store/slices/projectSlice.ts`, typed in
+  `src/store/types.ts`) — a demo-only, capability-exempt session action (like
+  `loadDemoProject`; it deliberately does not reuse `deleteProject`, whose
+  capability guard rejects the demo). It (1) best-effort deletes every
+  mockup / screen-inventory / variant IndexedDB image record keyed to the
+  demo's namespaced artifact-version ids — the variant store must be cleared
+  explicitly because `restoreSnapshotAs`'s variant restore is a conservative
+  merge, not delete-then-put; (2) clears the reactive image caches via a new
+  `clearVersions(versionIds)` setter on all three reactive image stores;
+  (3) in one `set()` deletes the demo key from all nine project-keyed maps
+  plus the transient `jobs`/`prdProgress`/`prdSectionStatus` slices (the maps
+  `deleteProject` misses); (4) re-runs `loadDemoProject()` — the wipe removed
+  the `demoSourceSnapshotId` stamp, so the reload can never short-circuit on
+  the cache and always restores the pinned baseline.
+- **Single-flight safety** — `resetDemoProjectSingleFlight()`
+  (`src/lib/demoRouteHydration.ts`) waits out any in-flight hydration and
+  registers the reset+reload as the new in-flight promise, so a concurrent
+  route hydration joins it instead of racing the same IndexedDB/store keys.
+- **UI** — `DemoReadOnlyNotice` gains an inline "Reset demo" control
+  (confirm → "Resetting…" → inline `role="alert"` error on failure);
+  `DemoRouteGate`'s failure state gains "Reset & reload demo", the
+  cache-corruption recovery path this finding called for.
+
+*Acceptance status:* all original criteria are now met — refresh and repeat
+entry produce the pinned baseline (PR #269 + SYN-003 cache policy), reset is
+deterministic and touches only the demo namespace, and signed-in projects are
+untouched.
+
+*Tests:* `src/store/__tests__/resetDemoProject.test.ts` (corrupted-demo wipe
+incl. per-version IDB deletes and cache clears, forced full re-fetch,
+no-demo case, IDB-failure tolerance),
+`src/components/__tests__/DemoReadOnlyNoticeReset.test.tsx`, and an extended
+`DemoRouteGate.test.tsx`.
+
 ## [SYN-002] A cold direct demo URL does not hydrate the demo project
 
 **Status: ✅ Resolved — 2026-07-10, PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267) (`fix(demo): hydrate public demo at route boundary`, commit `59a92d5`). See the Resolution block at the end of this finding.**
@@ -525,6 +567,8 @@ Implemented along the recommended shape — deletion of raw-HTML parsing rather 
 
 ## [SYN-005] Two freshness engines can give the same artifact incompatible statuses
 
+**Status: ✅ Resolved — 2026-07-11, PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -564,6 +608,60 @@ This touches gating and regeneration decisions. Retain the mockup token/design-s
 **Suggested validation**
 
 Table-driven tests for PRD drift, hard-dependency drift, identical token regeneration, missing refs, manual mark-current, and in-flight/error jobs; one integration test should assert all consuming surfaces agree.
+
+**Resolution (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commits `07b4393`, `a41fdbc`, `7b146d2`, `e7bb357`, `be81335`, `0918db9`)**
+
+Implemented exactly along the recommended replacement shape — one canonical
+evaluator, no transitional adapters:
+
+- **Engine B wins.** `evaluateDependencyGraph` (unchanged) is the single
+  freshness engine; a characterization suite
+  (`src/lib/__tests__/artifactFreshnessCharacterization.test.ts`) first proved
+  it subsumes every Engine-A scenario, including the headline contradiction
+  (data_model regenerated → implementation_plan header said "Current" while
+  the graph said "Needs update").
+- **One input-assembly seam.** New pure `src/lib/artifactFreshness.ts`
+  (`buildDependencyEvaluationInput` / `evaluateProjectFreshness` /
+  `invertToArtifactIds`) replaces the two hand-rolled, duplicated assembly
+  loops in `DependencyGraphView` and `ProjectWorkspace`; it also owns the ONE
+  status label map (`DEPENDENCY_STATUS_LABELS`) plus `isStaleStatus` /
+  `hasDesignTokenDrift`. New `useProjectFreshness(projectId)` hook
+  (selector-stable, memoized — also fixing the graph view's previously
+  unmemoized per-render evaluation) serves React consumers.
+- **All consumers migrated together:** artifact header strip + Mark-up-to-date
+  gate, Screens artifact controls, MockupViewer, Data Model overview pill,
+  Implementation Plan header/coverage, export manifest (`staleness` →
+  `status`; a missing preferred version now honestly reads "Not generated"),
+  revert warning (`getStaleArtifactTitles`), dependency graph, and the
+  Update Assets plan. The three duplicated mockup-tokensHash drift checks
+  converged on the evaluator's `design_tokens_changed` reason.
+- **Deleted:** `stalenessSlice.ts`, the `StalenessState` type,
+  `StalenessBadge` (superseded by `FreshnessBadge`), both duplicated assembly
+  loops, and the duplicate `PLAN_STATUS_LABELS`/`STATUS_LABELS` maps. The
+  documented vocabulary split (system freshness `DependencyNodeStatus` vs
+  user review/readiness) is recorded in CLAUDE.md and
+  `docs/ARTIFACT_DEPENDENCY_GRAPH.md`.
+- **Deliberate tightenings:** the Mark-up-to-date affordance is gated on
+  `isStaleStatus` (it previously also showed for missing-version states where
+  the action throws); hard evidence (`needs_update`) and advisory heuristics
+  (`update_recommended`) remain distinct everywhere; `no_provenance` stays
+  advisory.
+
+*Acceptance status:* all three criteria met — every surface derives from the
+same evaluation result (pinned by the new integration test
+`src/store/__tests__/freshnessSurfacesAgree.test.ts`: after a hard-dependency
+regeneration, the hook/evaluator, export manifest, recommended updates, and
+renderer labels must agree); regenerating a hard dependency now flips the
+header, export, graph, and plan consistently; one documented status
+vocabulary separates system evidence from user review/readiness.
+
+*Tests:* characterization suite (8 scenarios), `artifactFreshness.test.ts`
+(table-driven against a real store incl. mark-current and revert round trips,
+absorbing the deleted `stalenessAfterRevert` / `stalenessSlice.designTokens`
+suites), hook stability + badge tests, rewritten `exportManifest.test.ts`,
+extended `artifactSlice.markCurrent.test.ts`, and the surfaces-agree
+integration test. Full gate: `npm run build`, `npm run lint`, `npm test`
+(1,640 tests / 178 files) all pass.
 
 ## [SYN-006] There is no end-to-end contract protecting the public demo
 
@@ -1009,6 +1107,8 @@ Record before/after `npm audit`, lockfile diff, full validation suite, and direc
 
 ## [SYN-016] Production build succeeds but emits invalid generated CSS and ineffective split hints
 
+**Status: ✅ Resolved — 2026-07-11, PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `f7667bc`. See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P3 — Low
@@ -1048,7 +1148,32 @@ Avoid broad scanner exclusions that could remove real classes.
 
 Production build plus focused data-model Markdown tests and a grep of emitted CSS.
 
+**Resolution (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `f7667bc`)**
+
+- The three identical table-separator regexes in `dataModelMarkdown.ts` were
+  extracted into one module-level `TABLE_SEPARATOR_ROW` constant with the
+  character class reordered to `[\s:|-]` (identical matching semantics), so
+  Tailwind's content scanner no longer sees an arbitrary-property token. A
+  first attempt that repeated the old bracket sequence in a code comment
+  reproduced the warning — the comment describes the fix without spelling the
+  sequence.
+- The `toastStore`/`llmProvider` dynamic imports in `ProjectWorkspace`,
+  `HomePage`, and `runPrdGeneration` were made consistently static (the
+  route-splitting decision belongs to SYN-011), deleting the now-dead
+  dynamic-import failure fallback in `runPrdGeneration`.
+- The expired 2026-04 Gemini model localStorage migration
+  (`migrateGeminiModel` + sentinel key + retired `synapse-meet-dismissed`
+  sweep) was deleted from `App.tsx` per the audit's safe-deletion candidate;
+  a stale doc-comment referencing it in `tourPersistence.ts` was corrected.
+
+*Acceptance:* `npm run build` emits neither warning; the emitted CSS contains
+no `-: |` declaration (grep verified); only the pre-existing large-chunk
+warning (SYN-011) remains. Parser behavior stays pinned by the existing
+dataModelMarkdown tests.
+
 ## [SYN-017] Tour progress controls use incomplete tab semantics and undersized targets
+
+**Status: ✅ Resolved — 2026-07-11, PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `5850464`. See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -1089,6 +1214,23 @@ Changing semantics may require adjusting TourPage headings/focus after step chan
 **Suggested validation**
 
 Keyboard/VoiceOver pass, Testing Library role assertions, and 360 px target-box measurement.
+
+**Resolution (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `5850464`)**
+
+Implemented the "ordinary named buttons" option the finding offered: the
+progress-dot container is now `role="group"` with `aria-label="Tour
+progress"`; each dot keeps its "Go to step N of 6" name and exposes
+`aria-current="step"` on the active step instead of the fake
+`role="tab"`/`aria-selected` pattern (the tour's existing global arrow-key
+handling in `TourPage` is the keyboard model). Each dot's hit area grew to
+≥24×24 CSS pixels (`min-h-6 min-w-7`, non-overlapping) while the small
+animated visual pill is unchanged; the Previous button is `disabled` while
+visually hidden at step 0, removing it from the tab order.
+`TourProgressRail` was reviewed and already used honest semantics and
+adequate targets. New `src/components/__tests__/TourNav.test.tsx` (8 cases)
+pins the semantics, names, `aria-current`, sizing classes, and disabled
+state; `TourPage.test.tsx` remains green. The VoiceOver/NVDA pass remains a
+manual follow-up, as with SYN-007.
 
 ## [SYN-018] A disabled “Forgot password?” control advertises a nonexistent workflow
 
