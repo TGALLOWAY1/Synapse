@@ -21,7 +21,7 @@ import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
 import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
-import { StalenessBadge } from './StalenessBadge';
+import { FreshnessBadge } from './FreshnessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
@@ -56,7 +56,8 @@ import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
-import { makeSpineChangeResolver } from '../lib/spineChangeAnalysis';
+import { useProjectFreshness } from '../hooks/useProjectFreshness';
+import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -259,10 +260,14 @@ export function ArtifactWorkspace({
     const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
     const {
-        getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
+        getArtifacts, getPreferredVersion, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
     } = useProjectStore();
+    // Canonical freshness for every artifact-status surface in this workspace
+    // (version-controls strip, Screens artifact controls, mockup drift banner,
+    // renderer staleness props). One evaluator — no per-surface recomputation.
+    const freshness = useProjectFreshness(projectId);
     // Reactive read of the project's chosen visual direction, so the Design
     // System "Design direction" control re-renders when it changes.
     const designSystemPreset = useProjectStore(s => s.projects[projectId]?.designSystemPreset);
@@ -845,26 +850,25 @@ export function ArtifactWorkspace({
         return idx >= 0 ? `Version ${idx + 1}` : undefined;
     };
 
-    // Change-aware staleness: "what changed since spine X" against the latest
-    // spine, memoized per spine pair for the render pass.
+    // Latest spine id is the "mark up to date" target; still read from the store
+    // (the seam exposes it too, but the mark-current writer wants the store's).
     const allSpines = getSpineVersions(projectId);
     const latestSpineId = allSpines.find(s => s.isLatest)?.id;
-    const spineChangeFor = useMemo(
-        () => makeSpineChangeResolver(allSpines, latestSpineId),
-        [allSpines, latestSpineId],
-    );
 
     // Header strip shown above a generated artifact: provenance chip ("Generated
-    // from PRD Version X"), staleness badge (+ what-changed detail), a
+    // from PRD Version X"), freshness badge (+ what-changed detail), a
     // "Mark up to date" escape hatch when stale, and a Version history entry.
+    // Freshness comes from the canonical evaluator; the "what changed" summary
+    // rides on the evaluation's prd_changed reason (no separate resolver).
     const renderVersionControls = (
         artifactId: string,
         preferred: { sourceRefs: { sourceType: string; sourceArtifactVersionId: string }[] },
     ) => {
-        const staleness = getArtifactStaleness(projectId, artifactId);
+        const ev = freshness.byArtifactId.get(artifactId);
+        const status = ev?.status;
         const spineRef = preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
         const prdLabel = resolveSpineLabel(spineRef);
-        const changeSummary = staleness !== 'current' && spineRef ? spineChangeFor(spineRef) : null;
+        const changeSummary = ev?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary ?? null;
         return (
             <div className="flex items-center gap-2 flex-wrap">
                 {prdLabel && (
@@ -872,8 +876,8 @@ export function ArtifactWorkspace({
                         Generated from PRD {prdLabel}
                     </span>
                 )}
-                <StalenessBadge
-                    staleness={staleness}
+                <FreshnessBadge
+                    status={status}
                     detail={changeSummary
                         ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
                         : undefined}
@@ -883,7 +887,7 @@ export function ArtifactWorkspace({
                         Since {prdLabel ?? 'generation'}: {changeSummary.headline}
                     </span>
                 )}
-                {capabilities.canReviewArtifacts && staleness !== 'current' && latestSpineId && (
+                {capabilities.canReviewArtifacts && isStaleStatus(status) && latestSpineId && (
                     <button
                         type="button"
                         onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
@@ -1057,22 +1061,18 @@ export function ArtifactWorkspace({
             // and into each screen card's "Show details" (progressive
             // disclosure) — passed to ScreenListView as `artifactControls` so
             // the list surfaces the screens themselves immediately.
-            const mockupDesignRef = mockupPreferred?.sourceRefs.find(
-                r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
-            );
-            const currentDesignForScreens = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
-            const screensDesignDrift = !!mockupDesignRef
-                && !!currentDesignForScreens?.tokensHash
-                && currentDesignForScreens.tokensHash !== mockupDesignRef.anchorInfo;
+            // Design-system drift on the mockups is the canonical evaluator's
+            // design_tokens_changed reason (mirrors the mockup-view banner).
+            const screensDesignDrift = hasDesignTokenDrift(freshness.bySlot('mockup'));
 
-            const invStaleness = invArtifact ? getArtifactStaleness(projectId, invArtifact.id) : undefined;
+            const invEval = invArtifact ? freshness.byArtifactId.get(invArtifact.id) : undefined;
+            const invStatus = invEval?.status;
             const invSpineRef = invPreferred?.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
             const invPrdLabel = resolveSpineLabel(invSpineRef);
-            const invChangeSummary = invStaleness && invStaleness !== 'current' && invSpineRef
-                ? spineChangeFor(invSpineRef) : null;
+            const invChangeSummary = invEval?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary ?? null;
             const screensArtifactControls = {
                 prdVersionLabel: invPrdLabel,
-                staleness: invStaleness,
+                staleness: invStatus,
                 stalenessDetail: invChangeSummary
                     ? `PRD changes since ${invPrdLabel ?? 'this was generated'}: ${invChangeSummary.headline}`
                     : undefined,
@@ -1208,20 +1208,14 @@ export function ArtifactWorkspace({
                 );
             }
             const settings = extractMockupSettings(preferred);
-            const staleness = getArtifactStaleness(projectId, mockup.id);
+            const mockupEval = freshness.bySlot('mockup');
+            const staleness = mockupEval?.status;
             // Did the design system's tokens change since these mockups were
-            // generated? Mirrors stalenessSlice's mockup check: compare the
-            // tokensHash recorded on the mockup's design_system source ref
-            // against the project's current preferred design system. When they
-            // differ, prompt the user to regenerate so the new visual direction
-            // actually reaches the images.
-            const designRef = preferred.sourceRefs.find(
-                r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
-            );
-            const currentDesign = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
-            const designSystemDrift = !!designRef
-                && !!currentDesign?.tokensHash
-                && currentDesign.tokensHash !== designRef.anchorInfo;
+            // generated? The canonical evaluator's design_tokens_changed reason
+            // is the single source (tokensHash drift on the mockup's
+            // design_system source ref). When set, prompt the user to regenerate
+            // so the new visual direction reaches the images.
+            const designSystemDrift = hasDesignTokenDrift(mockupEval);
             return (
                 <div className="space-y-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
@@ -1459,7 +1453,7 @@ export function ArtifactWorkspace({
                         }
                         staleness={
                             subtype === 'data_model' || subtype === 'implementation_plan'
-                                ? getArtifactStaleness(projectId, artifact.id)
+                                ? freshness.byArtifactId.get(artifact.id)?.status
                                 : undefined
                         }
                     />

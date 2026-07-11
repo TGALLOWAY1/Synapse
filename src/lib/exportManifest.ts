@@ -5,14 +5,16 @@
 // Pure: the caller (ExportModal) prepares the entries from live store state;
 // nothing here reads the store or is persisted.
 
-import type { StalenessState } from '../types';
+import type { DependencyNodeStatus } from './artifactDependencyGraph';
+import { DEPENDENCY_STATUS_LABELS, isStaleStatus } from './artifactFreshness';
 
 export interface ExportManifestEntry {
     title: string;
     versionNumber?: number;
     /** Positional label of the PRD version this asset was generated from. */
     generatedFromPrdLabel?: string;
-    staleness: StalenessState;
+    /** Canonical freshness status (missing → "Not generated"). */
+    status: DependencyNodeStatus;
 }
 
 export interface ExportManifest {
@@ -22,7 +24,7 @@ export interface ExportManifest {
     /** Positional label of the exported PRD version ("Version 3"). */
     prdLabel?: string;
     entries: ExportManifestEntry[];
-    /** Entries whose staleness is not 'current'. */
+    /** Entries whose status is stale (needs_update / update_recommended). */
     staleCount: number;
 }
 
@@ -37,15 +39,9 @@ export function buildExportManifest(input: {
         exportedAt: (input.exportedAt ?? new Date()).toISOString(),
         prdLabel: input.prdLabel,
         entries: input.entries,
-        staleCount: input.entries.filter((e) => e.staleness !== 'current').length,
+        staleCount: input.entries.filter((e) => isStaleStatus(e.status)).length,
     };
 }
-
-const STALENESS_LABELS: Record<StalenessState, string> = {
-    current: 'Current',
-    possibly_outdated: 'May be outdated',
-    outdated: 'Outdated',
-};
 
 /**
  * Render the manifest as a markdown block for the bundle / handoff exports.
@@ -64,7 +60,7 @@ export function renderManifestMarkdown(manifest: ExportManifest): string {
         lines.push('', '| Asset | Version | Generated from | Status |', '| --- | --- | --- | --- |');
         for (const e of manifest.entries) {
             lines.push(
-                `| ${e.title} | ${e.versionNumber !== undefined ? `v${e.versionNumber}` : '—'} | ${e.generatedFromPrdLabel ?? '—'} | ${STALENESS_LABELS[e.staleness]} |`,
+                `| ${e.title} | ${e.versionNumber !== undefined ? `v${e.versionNumber}` : '—'} | ${e.generatedFromPrdLabel ?? '—'} | ${DEPENDENCY_STATUS_LABELS[e.status]} |`,
             );
         }
     }

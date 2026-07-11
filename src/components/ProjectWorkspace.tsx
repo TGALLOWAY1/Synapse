@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
+import { useToastStore } from '../store/toastStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -36,16 +37,12 @@ import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifact
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, UpdateAssetsPlanModal, type VersionEntry, type UpdatePlanChoice, type UpdatePlanRow } from './versions';
 import {
-    buildArtifactDependencyGraph,
     computeRecommendedUpdates,
-    evaluateDependencyGraph,
     expandSelectionWithTroubledUpstreams,
-    type DependencyEvaluationInput,
     type DependencyNodeId,
-    type DependencyNodeStatus,
 } from '../lib/artifactDependencyGraph';
-import { findFeatureReferences, makeSpineChangeResolver, summarizeSpineChange } from '../lib/spineChangeAnalysis';
-import { selectPreferredDesignSystem } from '../lib/designTokens';
+import { evaluateProjectFreshness, DEPENDENCY_STATUS_LABELS } from '../lib/artifactFreshness';
+import { findFeatureReferences, summarizeSpineChange } from '../lib/spineChangeAnalysis';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
@@ -74,7 +71,7 @@ export function ProjectWorkspace() {
     };
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -177,12 +174,10 @@ export function ProjectWorkspace() {
     const projectExists = !!projectId && !!getProject(projectId);
     useEffect(() => {
         if (projectId && !projectExists) {
-            import('../store/toastStore').then(({ useToastStore }) => {
-                useToastStore.getState().addToast({
-                    type: 'info',
-                    title: 'Project not found',
-                    message: 'It may have been deleted or saved in a different browser.',
-                });
+            useToastStore.getState().addToast({
+                type: 'info',
+                title: 'Project not found',
+                message: 'It may have been deleted or saved in a different browser.',
             });
             navigate('/', { replace: true });
         }
@@ -312,10 +307,20 @@ export function ProjectWorkspace() {
     // Downstream artifacts that would be marked possibly outdated if a different
     // PRD version becomes latest — i.e. those currently in sync with the latest
     // spine. Used to warn in the revert confirmation.
-    const getStaleArtifactTitles = (): string[] =>
-        getArtifacts(projectId)
-            .filter(a => a.type !== 'prd' && getArtifactStaleness(projectId, a.id) === 'current')
-            .map(a => a.title);
+    const getStaleArtifactTitles = (): string[] => {
+        if (!projectId) return [];
+        // Artifacts currently in sync with the latest spine (up_to_date) are
+        // exactly the ones a revert to a different PRD version will invalidate.
+        const { context, evaluations } = evaluateProjectFreshness(useProjectStore.getState(), projectId);
+        const titles: string[] = [];
+        for (const [slot, artifactId] of Object.entries(context.artifactIdBySlot)) {
+            if (!artifactId) continue;
+            if (evaluations.get(slot as DependencyNodeId)?.status !== 'up_to_date') continue;
+            const artifact = getArtifact(projectId, artifactId);
+            if (artifact) titles.push(artifact.title);
+        }
+        return titles;
+    };
 
     const handleRestoreSpine = (sourceSpineId: string) => {
         if (!capabilities.canEditProjectContent) return;
@@ -616,57 +621,30 @@ export function ProjectWorkspace() {
     const buildUpdatePlanContext = () => {
         if (!projectId || !activeSpine?.structuredPRD) return null;
         const store = useProjectStore.getState();
-        const graph = buildArtifactDependencyGraph();
-        const spines = store.spineVersions[projectId] || [];
-        const projectArtifacts = store.artifacts[projectId] || [];
-        const mockupArtifact = projectArtifacts.find(a => a.type === 'mockup');
-
-        const snapshots: DependencyEvaluationInput['snapshots'] = {};
-        const artifactIdBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
+        // The ONE canonical seam builds the input, evaluates it as-of the spine
+        // being finalized, and attaches its own change-aware resolver — so this
+        // plan shows exactly the statuses/reasons the Project Map would.
+        const { context, evaluations } = evaluateProjectFreshness(store, projectId, {
+            asOfSpineId: activeSpine.id,
+            includeSlotStatus: false,
+        });
+        // The seam doesn't carry artifact content (it stays compact) — the
+        // removed-feature scan needs it, so look it up per resolved slot.
         const contentBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
-        for (const node of graph.nodes) {
-            if (node.id === 'prd') continue;
-            const slotKey = node.id as ArtifactSlotKey;
-            const artifact = slotKey === 'mockup'
-                ? mockupArtifact
-                : projectArtifacts.find(a => a.type === 'core_artifact' && a.subtype === slotKey && a.status !== 'archived');
-            const preferred = artifact ? store.getPreferredVersion(projectId, artifact.id) : undefined;
-            if (artifact && preferred) {
-                artifactIdBySlot[slotKey] = artifact.id;
-                contentBySlot[slotKey] = preferred.content;
-                snapshots[slotKey] = {
-                    artifactId: artifact.id,
-                    version: {
-                        id: preferred.id,
-                        versionNumber: preferred.versionNumber,
-                        createdAt: preferred.createdAt,
-                        sourceRefs: preferred.sourceRefs,
-                        provenance: preferred.provenance,
-                        metadata: preferred.metadata,
-                    },
-                };
-            }
+        for (const [slot, artifactId] of Object.entries(context.artifactIdBySlot)) {
+            if (!artifactId) continue;
+            const preferred = store.getPreferredVersion(projectId, artifactId);
+            if (preferred) contentBySlot[slot as ArtifactSlotKey] = preferred.content;
         }
 
-        const evaluations = evaluateDependencyGraph(graph, {
-            spineVersionIds: spines.map(s => s.id),
-            latestSpineId: activeSpine.id,
-            currentDesignTokensHash: selectPreferredDesignSystem(store, projectId)?.tokensHash,
-            snapshots,
-            spineChangeFor: makeSpineChangeResolver(spines, activeSpine.id),
-        });
-
-        return { graph, evaluations, snapshots, artifactIdBySlot, contentBySlot, spines };
-    };
-
-    const PLAN_STATUS_LABELS: Record<DependencyNodeStatus, string> = {
-        source: 'Source of truth',
-        up_to_date: 'Up to date',
-        needs_update: 'Needs update',
-        update_recommended: 'Update recommended',
-        generating: 'Generating…',
-        error: 'Failed',
-        missing: 'Not generated',
+        return {
+            graph: context.graph,
+            evaluations,
+            snapshots: context.input.snapshots,
+            artifactIdBySlot: context.artifactIdBySlot,
+            contentBySlot,
+            spines: context.spines,
+        };
     };
 
     const openUpdatePlan = (ctx: NonNullable<ReturnType<typeof buildUpdatePlanContext>>, ack: boolean) => {
@@ -687,7 +665,7 @@ export function ProjectWorkspace() {
                 return {
                     id: node.id,
                     title: node.title,
-                    statusLabel: PLAN_STATUS_LABELS[status],
+                    statusLabel: DEPENDENCY_STATUS_LABELS[status],
                     isStale: recommended.has(node.id),
                     changeHeadline: summary
                         ? `Since ${ev?.prdVersionLabel ?? 'generation'}: ${summary.headline}`

@@ -233,6 +233,33 @@ in snapshots.
   a new durable mutation domain is introduced. Local copy/download exports that
   do not mutate project state remain available.
 
+- **Reset Demo (SYN-001) — a deterministic "restore to pinned snapshot",
+  route/store-owned like `loadDemoProject` itself.** `projectSlice.resetDemoProject()`
+  deliberately bypasses the read-only capability guards above rather than
+  extending them (this is a session/route-level concern, not a durable project
+  mutation): it wipes all nine project-keyed store maps plus the transient
+  `jobs`/`prdProgress`/`prdSectionStatus` slices for `DEMO_PROJECT_ID`, deletes
+  every mockup/screen-inventory/variant IDB image record for the demo's
+  artifact version ids (`deleteImagesForVersion` / `deleteScreenImagesForArtifactVersion`
+  / `deleteVariantImagesForVersion`, each best-effort/try-caught so one failed
+  delete can't abort the reset), and explicitly clears the matching reactive
+  Zustand caches (`clearVersions` on all three of `mockupImageStore` /
+  `screenInventoryImageStore` / `mockupVariantImageStore`) — required because
+  `restoreSnapshotAs` never proactively evicts those caches itself (the mockup/
+  screen-inventory caches only self-heal lazily via `loadForVersion`, and the
+  variant cache's `mergeRecords` only ever adds/updates keys, never removes a
+  stale one), so without this a demo reset could leave a corrupted record
+  visible in memory even after IndexedDB was wiped. Deleting
+  `projects[DEMO_PROJECT_ID]` drops the `demoSourceSnapshotId` stamp, so the
+  action's final step — calling `loadDemoProject()` — can never cache-short-circuit;
+  it always performs a full re-fetch + restore. `src/lib/demoRouteHydration.ts`'s
+  `resetDemoProjectSingleFlight()` shares the module's `inFlight` slot with
+  `hydrateDemoProject()` so a reset can't race a concurrent hydration pass:
+  it waits out any in-flight hydration first, then registers its own promise
+  as the new `inFlight` slot. UI: a "Reset demo" control with an inline
+  confirm on `DemoReadOnlyNotice`, and a "Reset & reload demo" action on
+  `DemoRouteGate`'s failed state (alongside Retry / Return home).
+
 - **Demo hydration is route-owned.** The public demo route
   (`/p/<DEMO_PROJECT_ID>` in `App.tsx`'s `ProjectRoute`) wraps
   `ProjectWorkspace` in `DemoRouteGate` (`src/components/DemoRouteGate.tsx`),
@@ -894,8 +921,9 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       screens/mockups. Do **not** re-add per-asset lock icons to downstream
       rows.
     - **Mockup-drift prompt.** Regenerating the design system produces a new
-      `tokensHash`, which `stalenessSlice` already uses to flip dependent mockups
-      to `possibly_outdated` (the auto-flag). On top of that, the Mockups view in
+      `tokensHash`, which the canonical freshness evaluator surfaces as a
+      `design_tokens_changed` reason (flipping dependent mockups to
+      `needs_update`). On top of that, the Mockups view in
       `ArtifactWorkspace` renders an amber **"Design system changed … Regenerate
       the mockups"** banner when the mockup's recorded design_system
       `anchorInfo` (tokensHash) differs from the project's current preferred
@@ -1316,7 +1344,7 @@ navigate to `/p/:projectId` **without** starting PRD generation.
 
 ### State (`src/store/`)
 
-`useProjectStore` is one Zustand store composed from 10 slices in
+`useProjectStore` is one Zustand store composed from 9 slices in
 `src/store/slices/`:
 
 - `projectSlice` — Project CRUD, current stage
@@ -1354,7 +1382,6 @@ navigate to `/p/:projectId` **without** starting PRD generation.
   `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`
   via `setPreferredVersion` — keeps the audit log honest.
 - `feedbackSlice` — FeedbackItems with intent classification
-- `stalenessSlice` — Staleness checks
 - `generationJobsSlice` — Per-project job tracking (transient; stripped
   from persistence)
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
@@ -2603,14 +2630,28 @@ stale and why, and the safe update order. See
   `update_recommended`, never hard `needs_update`). `sourceRefs` already
   travel in `ArtifactVersion` through persistence/sync/snapshots, so no
   schema change was involved.
-- **Staleness is deterministic** (`evaluateDependencyGraph`): spine-ref drift
-  and recorded dependency-ref drift → `needs_update`; the mockup
-  design-tokensHash rule mirrors `stalenessSlice` (hash comparison beats
-  version-id comparison — a token-identical regen keeps mockups current);
-  missing/error/generating come from artifact presence + live job slots.
-  Upstream trouble propagates downstream as `impactedBy` (blue "Impacted"
-  pill). Keep this evaluator and `stalenessSlice` consistent if either rule
-  set changes.
+- **`evaluateDependencyGraph` is THE single freshness engine (SYN-005).** The
+  legacy `stalenessSlice` / `getArtifactStaleness` (3-value `StalenessState`:
+  current/possibly_outdated/outdated) was deleted; every surface now reads this
+  one evaluator through the shared seam. **`src/lib/artifactFreshness.ts`**
+  assembles its `DependencyEvaluationInput` from raw store slices
+  (`buildDependencyEvaluationInput` / `evaluateProjectFreshness` /
+  `invertToArtifactIds`) — **never hand-roll the store→input loop again** (that
+  duplication across DependencyGraphView and the update-plan builder was the
+  SYN-005 defect). **`useProjectFreshness(projectId)`** is the selector-stable
+  React entry (used by DependencyGraphView, ArtifactWorkspace, ExportModal).
+  **`DEPENDENCY_STATUS_LABELS`** is the ONLY status-label map; `isStaleStatus`
+  (needs_update | update_recommended) and `hasDesignTokenDrift` are the shared
+  predicates; `FreshnessBadge` is the inline badge (renders only for stale
+  statuses). Staleness itself is deterministic: spine-ref drift and recorded
+  dependency-ref drift → `needs_update`; the mockup design-tokensHash rule (a
+  `design_tokens_changed` reason) uses hash comparison over version-id
+  comparison — a token-identical regen keeps mockups current; missing/error/
+  generating come from artifact presence + live job slots. Upstream trouble
+  propagates downstream as `impactedBy` (blue "Impacted" pill).
+  **System freshness (`DependencyNodeStatus`) is a SEPARATE vocabulary from the
+  user review/readiness statuses** (`screenReadiness` / `screenReviewWorkflow`)
+  — never merge them.
 - **Actions reuse existing flows.** Single update → `retrySlot`; batch →
   `artifactJobController.regenerateSlots(slots, args)`, a thin wrapper over
   the existing `executeJob` (dependency-layer order, mockup last — no second
@@ -2711,7 +2752,8 @@ versions of **both** PRDs (spines) and artifacts:
   artifact text. Read-only except for opening the restore confirmation.
 - `RevertConfirmModal` — non-destructive restore confirmation; the PRD variant
   warns which downstream artifacts will be marked possibly outdated (computed by
-  the caller via `getArtifactStaleness`).
+  the caller via `evaluateProjectFreshness` — the artifacts currently
+  `up_to_date` with the latest spine).
 
 Diffs are computed on the fly from stored snapshots by **`src/lib/versionDiff.ts`**
 (pure, jsdiff-backed: `diffText`, `diffStructuredPRD`, `getDiffSummary`) —
@@ -2719,7 +2761,8 @@ nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 **Version History** overflow-menu item) and adds **Compare with current** /
 **Restore this version** to the read-only historical-version banner;
 `ArtifactWorkspace` shows a **Version history** button + a "Generated from PRD
-Version X" chip + `StalenessBadge` above each generated artifact. Restores route
+Version X" chip + `FreshnessBadge` (driven by `useProjectFreshness`) above each
+generated artifact. Restores route
 to `revertSpineToVersion` / `revertArtifactToVersion`. **Revert always appends a
 new version and never deletes history.** See `docs/VERSIONING_AUDIT.md` for the
 Phase 1 design and `docs/VERSIONING_V2_PLAN.md` for the change-awareness layer
@@ -2739,7 +2782,7 @@ must NEVER suppress a hard `needs_update`), `findFeatureReferences`
 attaches a `changeSummary` to `prd_changed` reasons + a node-level
 `likelyUnaffected` flag (only when the PRD change is the sole reason). Surfaced
 in the graph detail panel ("What changed: …", removed-feature still-referenced
-warnings), the `StalenessBadge` tooltip, and the artifact-header strip.
+warnings), the `FreshnessBadge` tooltip, and the artifact-header strip.
 Everything is computed at read time from stored snapshots — nothing persisted.
 
 **Provenance is complete.** Every version-creating path stamps

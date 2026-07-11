@@ -27,6 +27,7 @@ export function TourNav({
                 type="button"
                 onClick={onPrev}
                 aria-label="Previous"
+                disabled={activeIndex === 0}
                 className={`flex h-12 w-12 items-center justify-center rounded-full border border-neutral-700 text-neutral-300 transition hover:border-indigo-500/60 hover:text-white ${
                     activeIndex === 0 ? 'pointer-events-none opacity-0' : 'opacity-100'
                 }`}
@@ -34,18 +35,17 @@ export function TourNav({
                 <ArrowLeft size={20} />
             </button>
 
-            <div className="flex items-center gap-2" role="tablist" aria-label="Tour progress">
+            <div className="flex items-center gap-1" role="group" aria-label="Tour progress">
                 {Array.from({ length: TOTAL_STEPS }).map((_, i) => {
                     const isActive = i === activeIndex;
                     return (
                         <button
                             key={i}
                             type="button"
-                            role="tab"
-                            aria-selected={isActive}
+                            aria-current={isActive ? 'step' : undefined}
                             aria-label={`Go to step ${i + 1} of ${TOTAL_STEPS}`}
                             onClick={() => onGoto(i)}
-                            className="py-2"
+                            className="flex min-h-6 min-w-7 items-center justify-center"
                         >
                             <motion.span
                                 layout

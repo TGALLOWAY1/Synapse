@@ -112,6 +112,14 @@ interface ImageStoreState {
 
     /** Clear the error state for one screen (e.g. on retry click). */
     clearError: (versionId: string, screenId: string) => void;
+
+    /** Evict cached records + settled-flags for these versions. IndexedDB
+     * stays the source of truth (nothing here touches it) — this only
+     * invalidates the in-memory reactive cache so a subsequent
+     * `loadForVersion` can't briefly serve pre-wipe data after something
+     * else (e.g. a demo reset) deletes the underlying IDB records out from
+     * under this cache. */
+    clearVersions: (versionIds: string[]) => void;
 }
 
 export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
@@ -249,6 +257,20 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             const next = { ...state.errors };
             delete next[scope];
             return { errors: next };
+        });
+    },
+
+    clearVersions: (versionIds) => {
+        if (versionIds.length === 0) return;
+        const idSet = new Set(versionIds);
+        set((state) => {
+            const images = { ...state.images };
+            for (const key of Object.keys(images)) {
+                if (idSet.has(images[key].versionId)) delete images[key];
+            }
+            const loadedVersions = { ...state.loadedVersions };
+            for (const id of versionIds) delete loadedVersions[id];
+            return { images, loadedVersions };
         });
     },
 }));

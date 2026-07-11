@@ -1,12 +1,13 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ChevronDown, ChevronRight, FileText, Sparkles, Check, ArrowUp, MessageSquareText, AlertTriangle, Loader2, RefreshCcw, Clock, Images } from 'lucide-react';
-import type { MockupImageRecord, MockupPayload, MockupScreen, MockupSettings, StalenessState } from '../../types';
+import type { MockupImageRecord, MockupPayload, MockupScreen, MockupSettings } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import { useScreenInventoryImageStore } from '../../store/screenInventoryImageStore';
 import { buildScreenScopeKey } from '../../lib/mockupImageStore';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 import { computeMockupImageCompletion, type ScreenImageState } from '../../lib/mockupImageCompletion';
-import { StalenessBadge } from '../StalenessBadge';
+import { FreshnessBadge } from '../FreshnessBadge';
 import { MockupScreenImage } from './MockupScreenImage';
 import { MockupPromptDialog } from './MockupPromptDialog';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -14,7 +15,7 @@ import { useIsMobile } from '../../lib/useIsMobile';
 type Props = {
     payload: MockupPayload;
     settings: MockupSettings;
-    staleness: StalenessState;
+    staleness?: DependencyNodeStatus;
     versionNumber: number;
     createdAt: number;
     sourceSpineVersionId?: string;
@@ -360,7 +361,7 @@ export function MockupViewer({
                                 </span>
                             )}
                             <span className="text-[11px] text-neutral-500">{pageCountLabel}</span>
-                            <StalenessBadge staleness={staleness} />
+                            <FreshnessBadge status={staleness} />
                         </div>
                         <span className="text-[11px] text-neutral-400 tabular-nums">
                             v{versionNumber} · {formatDate(createdAt)}

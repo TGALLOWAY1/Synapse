@@ -3,8 +3,8 @@ import { buildExportManifest, renderManifestMarkdown } from '../exportManifest';
 import { buildAgentHandoff } from '../exportHandoff';
 
 const entries = [
-    { title: 'Design System', versionNumber: 2, generatedFromPrdLabel: 'Version 3', staleness: 'current' as const },
-    { title: 'Data Model', versionNumber: 1, generatedFromPrdLabel: 'Version 1', staleness: 'possibly_outdated' as const },
+    { title: 'Design System', versionNumber: 2, generatedFromPrdLabel: 'Version 3', status: 'up_to_date' as const },
+    { title: 'Data Model', versionNumber: 1, generatedFromPrdLabel: 'Version 1', status: 'needs_update' as const },
 ];
 
 describe('buildExportManifest', () => {
@@ -27,15 +27,25 @@ describe('renderManifestMarkdown', () => {
         }));
         expect(md).toContain('## Export Manifest');
         expect(md).toContain('- PRD: Version 3');
-        expect(md).toContain('| Design System | v2 | Version 3 | Current |');
-        expect(md).toContain('| Data Model | v1 | Version 1 | May be outdated |');
+        expect(md).toContain('| Design System | v2 | Version 3 | Up to date |');
+        expect(md).toContain('| Data Model | v1 | Version 1 | Needs update |');
         expect(md).toContain('1 asset in this export was flagged');
     });
 
-    it('omits the warning when everything is current', () => {
+    it('renders "Not generated" for an artifact with no preferred version (missing)', () => {
         const md = renderManifestMarkdown(buildExportManifest({
             projectName: 'Acme',
-            entries: [{ title: 'Data Model', versionNumber: 1, staleness: 'current' }],
+            entries: [{ title: 'Implementation Plan', status: 'missing' }],
+        }));
+        expect(md).toContain('| Implementation Plan | — | — | Not generated |');
+        // 'missing' is not a stale status, so it isn't counted / warned.
+        expect(md).not.toContain('flagged');
+    });
+
+    it('omits the warning when everything is up to date', () => {
+        const md = renderManifestMarkdown(buildExportManifest({
+            projectName: 'Acme',
+            entries: [{ title: 'Data Model', versionNumber: 1, status: 'up_to_date' }],
         }));
         expect(md).not.toContain('flagged');
     });

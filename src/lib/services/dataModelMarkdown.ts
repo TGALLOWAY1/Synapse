@@ -31,6 +31,14 @@ const TOP_SECTION_HEADINGS = new Set([
 
 const CALLOUT_RE = /^>\s*\[!(CONSTRAINT|PRIVACY|INDEX|RELATIONSHIP)\]\s*(.*)$/i;
 
+// GFM table header-separator-row check (e.g. `| --- | :--- |`). Character-class
+// order is irrelevant to matching semantics, but starting the class with a
+// whitespace escape (rather than a leading hyphen/colon/pipe) keeps Tailwind's
+// content scanner from misreading this pattern as arbitrary-property class
+// syntax when it statically scans this source file — see SYN-016. Do not
+// reorder the class back to lead with a hyphen.
+const TABLE_SEPARATOR_ROW = /^\s*\|?\s*[\s:|-]+$/;
+
 export type ParsedCalloutKind = 'CONSTRAINT' | 'PRIVACY' | 'INDEX' | 'RELATIONSHIP';
 
 export interface ParsedCallout {
@@ -431,7 +439,7 @@ function parseFieldsTable(lines: string[]): DataField[] {
     while (i < lines.length) {
         const line = lines[i];
         const isHeader = /^\s*\|.*Field.*\|.*Type.*\|.*Required.*\|.*Description.*\|\s*$/i.test(line);
-        if (isHeader && i + 1 < lines.length && /^\s*\|?\s*[-:|\s]+$/.test(lines[i + 1])) {
+        if (isHeader && i + 1 < lines.length && TABLE_SEPARATOR_ROW.test(lines[i + 1])) {
             i += 2;
             while (i < lines.length && /^\s*\|.*\|\s*$/.test(lines[i])) {
                 const cells = lines[i]
@@ -719,7 +727,7 @@ function parseApiEndpointsTable(body: string[]): ParsedApiEndpoint[] {
     while (i < body.length) {
         const line = body[i];
         const isHeader = /^\s*\|.*Method.*\|.*Path.*\|.*Description.*\|/i.test(line);
-        if (isHeader && i + 1 < body.length && /^\s*\|?\s*[-:|\s]+$/.test(body[i + 1])) {
+        if (isHeader && i + 1 < body.length && TABLE_SEPARATOR_ROW.test(body[i + 1])) {
             i += 2;
             while (i < body.length && /^\s*\|.*\|\s*$/.test(body[i])) {
                 const cells = body[i]
@@ -751,7 +759,7 @@ function parseProductMappingTable(body: string[]): ParsedProductMapping[] {
     while (i < body.length) {
         const line = body[i];
         const isHeader = /^\s*\|.*Field.*\|.*UI behavior.*\|/i.test(line);
-        if (isHeader && i + 1 < body.length && /^\s*\|?\s*[-:|\s]+$/.test(body[i + 1])) {
+        if (isHeader && i + 1 < body.length && TABLE_SEPARATOR_ROW.test(body[i + 1])) {
             i += 2;
             while (i < body.length && /^\s*\|.*\|\s*$/.test(body[i])) {
                 const cells = body[i]

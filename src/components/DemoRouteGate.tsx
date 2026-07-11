@@ -2,7 +2,7 @@ import { useEffect, useState, type ReactElement } from 'react';
 import { Link } from 'react-router-dom';
 import { Loader2 } from 'lucide-react';
 import { useAuthStore } from '../store/authStore';
-import { hydrateDemoProject } from '../lib/demoRouteHydration';
+import { hydrateDemoProject, resetDemoProjectSingleFlight } from '../lib/demoRouteHydration';
 
 type DemoGatePhase = 'loading' | 'ready' | 'failed';
 
@@ -46,6 +46,17 @@ export function DemoRouteGate({ children }: { children: ReactElement }) {
     if (phase === 'ready') return children;
 
     if (phase === 'failed') {
+        // "Reset & reload demo" clears any (possibly corrupt) cached demo
+        // state first, in case the load failure is caused by a stale/broken
+        // local cache rather than a transient network issue. It shares the
+        // same single-flight slot as ordinary hydration (see
+        // `resetDemoProjectSingleFlight`), so kicking it off here and then
+        // flipping to 'loading' lets the effect below join the SAME
+        // in-flight promise instead of racing a second pass.
+        const handleResetAndReload = () => {
+            void resetDemoProjectSingleFlight();
+            setPhase('loading');
+        };
         return (
             <div className="min-h-screen flex items-center justify-center px-6">
                 <div role="alert" className="max-w-md w-full text-center space-y-4">
@@ -55,13 +66,20 @@ export function DemoRouteGate({ children }: { children: ReactElement }) {
                         usually a temporary connection issue — or no demo
                         snapshot has been published yet.
                     </p>
-                    <div className="flex items-center justify-center gap-3">
+                    <div className="flex flex-wrap items-center justify-center gap-3">
                         <button
                             type="button"
                             onClick={() => setPhase('loading')}
                             className="inline-flex items-center gap-2 px-4 py-2 rounded-xl bg-indigo-600 text-white text-sm hover:bg-indigo-700 transition"
                         >
                             Retry
+                        </button>
+                        <button
+                            type="button"
+                            onClick={handleResetAndReload}
+                            className="inline-flex items-center gap-2 px-4 py-2 rounded-xl border border-white/15 text-sm text-neutral-300 hover:border-white/30 hover:text-white transition"
+                        >
+                            Reset &amp; reload demo
                         </button>
                         <Link
                             to="/"

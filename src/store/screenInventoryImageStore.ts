@@ -53,6 +53,14 @@ interface ImageStoreState {
 
     /** Clear an upload error for one screen bucket (e.g. on retry). */
     clearError: (artifactVersionId: string, screenName: string) => void;
+
+    /** Evict cached records + the `hydrated` settled-flag for these artifact
+     * versions. IndexedDB stays the source of truth — this only invalidates
+     * the in-memory reactive cache. Clearing `hydrated` matters here:
+     * `loadForArtifactVersion` short-circuits when a version is already
+     * marked hydrated, so without this a caller re-loading after an external
+     * IDB wipe (e.g. a demo reset) would keep serving the stale cache. */
+    clearVersions: (artifactVersionIds: string[]) => void;
 }
 
 const bucketKey = (artifactVersionId: string, screenSlug: string): string =>
@@ -189,6 +197,20 @@ export const useScreenInventoryImageStore = create<ImageStoreState>((set, get) =
             const next = { ...state.errors };
             delete next[bucket];
             return { errors: next };
+        });
+    },
+
+    clearVersions: (artifactVersionIds) => {
+        if (artifactVersionIds.length === 0) return;
+        const idSet = new Set(artifactVersionIds);
+        set((state) => {
+            const images = { ...state.images };
+            for (const key of Object.keys(images)) {
+                if (idSet.has(images[key].artifactVersionId)) delete images[key];
+            }
+            const hydrated = { ...state.hydrated };
+            for (const id of artifactVersionIds) delete hydrated[id];
+            return { images, hydrated };
         });
     },
 }));

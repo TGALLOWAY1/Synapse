@@ -2,7 +2,8 @@ import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Layers, Sparkles } from 'lucide-react';
-import type { DataModelContent, StalenessState } from '../../types';
+import type { DataModelContent } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import {
     parseDataModelMarkdown,
     dataModelToMarkdown,
@@ -42,7 +43,7 @@ interface Props {
      * PRD provenance is intentionally not passed here — it's shown once at the
      * artifact/page level, not repeated inside the summary card.
      */
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
 }
 
 function tryParseAsJson(content: string): DataModelContent | null {
@@ -120,7 +121,7 @@ export function DataModelRenderer({ content, staleness }: Props) {
 
 interface BodyProps {
     parsed: ParsedDataModel;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
 }
 
 function DataModelBody({ parsed, staleness }: BodyProps) {

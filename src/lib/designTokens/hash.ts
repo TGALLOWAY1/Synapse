@@ -2,7 +2,7 @@
 // whether downstream mockups need to be considered stale: if the hash on
 // the mockup's recorded design-system source ref differs from the current
 // preferred design-system version's hash, the tokens drifted and the
-// mockup is `possibly_outdated`.
+// canonical evaluator flags the mockup with its design_tokens_changed reason.
 //
 // We deliberately avoid `crypto.subtle` (async, not always available in
 // Node test environments without polyfills) and use a small synchronous

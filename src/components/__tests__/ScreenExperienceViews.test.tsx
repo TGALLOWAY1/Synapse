@@ -627,7 +627,7 @@ describe('Phase 4A Screens list + coverage panel', () => {
                 coverage={coverage}
                 artifactControls={{
                     prdVersionLabel: 'Version 3',
-                    staleness: 'current',
+                    staleness: 'up_to_date',
                     lastMockupGeneratedAt: 1_700_000_000_000,
                     onOpenVersionHistory,
                     onOpenMockupHistory,

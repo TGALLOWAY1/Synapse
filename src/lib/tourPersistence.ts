@@ -4,7 +4,7 @@
  * Deliberately kept OUT of the Zustand project store — it's a single UI flag,
  * so it uses the repo's simple direct-localStorage pattern (like the retired
  * `synapse-meet-dismissed` key) with defensive try/catch for private-mode /
- * storage-disabled environments (mirrors `migrateGeminiModel` in App.tsx).
+ * storage-disabled environments.
  */
 export const TOUR_COMPLETED_KEY = 'synapse-tour-completed';
 

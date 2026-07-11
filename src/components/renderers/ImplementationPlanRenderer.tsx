@@ -3,7 +3,8 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Calendar, ChevronRight, Flag, Layers, ListChecks, Target, Users } from 'lucide-react';
 import { SectionTabs, type SectionTabItem } from '../SectionTabs';
-import type { ProjectTask, StalenessState } from '../../types';
+import type { ProjectTask } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import {
     parseImplementationPlan,
     parseMilestoneBody,
@@ -40,7 +41,7 @@ interface Props {
     promptPackContent?: string;
     /** "Version 2" — the PRD version this plan was generated from. */
     prdVersionLabel?: string;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
     /** Source artifact versions recorded at generation time ("Data Model v1"). */
     sourceVersions?: string[];
     /** Saved (converted) tasks for this artifact — marks plan tasks as tracked. */

@@ -133,34 +133,10 @@ function RequireOwner({ children }: { children: ReactElement }) {
   return children;
 }
 
-/**
- * One-shot migration: move anyone still on `gemini-2.5-flash` to the new
- * default (`gemini-3-flash-preview`) which has better capacity headroom.
- * Gated by a sentinel localStorage key so it only runs once — a user who
- * deliberately re-selects 2.5 Flash afterward is respected.
- */
-const GEMINI_MODEL_MIGRATION_KEY = 'GEMINI_MODEL_MIGRATED_2026_04';
-function migrateGeminiModel() {
-  try {
-    if (localStorage.getItem(GEMINI_MODEL_MIGRATION_KEY)) return;
-    const current = localStorage.getItem('GEMINI_MODEL');
-    if (current === 'gemini-2.5-flash') {
-      localStorage.setItem('GEMINI_MODEL', 'gemini-3-flash-preview');
-    }
-    localStorage.setItem(GEMINI_MODEL_MIGRATION_KEY, '1');
-    // Sweep the retired "Meet Synapse" banner-dismissal key — the interactive
-    // tour now owns its own completion state (`synapse-tour-completed`).
-    localStorage.removeItem('synapse-meet-dismissed');
-  } catch {
-    // localStorage unavailable (private mode, etc.) — skip migration.
-  }
-}
-
 function App() {
   const refreshSession = useAuthStore((s) => s.refreshSession);
 
   useEffect(() => {
-    migrateGeminiModel();
     migrateGeminiFlashModel();
     refreshSession();
   }, [refreshSession]);
