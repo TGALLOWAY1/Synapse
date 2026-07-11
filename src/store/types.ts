@@ -69,6 +69,16 @@ export interface ProjectState {
     // page surfaces a friendly "no demo set" message.
     loadDemoProject: () => Promise<{ projectId: string; available: boolean }>;
 
+    // SYN-001: deterministic "Reset Demo" — wipes every local trace of the
+    // demo project (all nine project-keyed store maps, transient job/
+    // progress state, and the three IDB image stores + their reactive
+    // caches) and falls through to `loadDemoProject()` for a full re-fetch +
+    // restore from the pinned snapshot. Route/store-owned like
+    // `loadDemoProject`; deliberately bypasses the read-only capability
+    // guards rather than extending them. Operates only on DEMO_PROJECT_ID —
+    // no projectId param.
+    resetDemoProject: () => Promise<{ projectId: string; available: boolean }>;
+
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (

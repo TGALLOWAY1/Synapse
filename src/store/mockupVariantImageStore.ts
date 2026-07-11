@@ -85,6 +85,15 @@ interface VariantImageStoreState {
 
     cancel: (versionId: string, screenId: string, variantId: string) => void;
     clearError: (versionId: string, screenId: string, variantId: string) => void;
+
+    /** Evict cached records for these versions. IndexedDB stays the source of
+     * truth — this only invalidates the in-memory reactive cache. Needed
+     * because `mergeRecords` (the snapshot-restore path) only ever ADDS/
+     * updates keys present in an incoming record set; it never removes a
+     * stale key that isn't part of that set. A caller that wipes the
+     * underlying IDB records out from under this cache (e.g. a demo reset)
+     * must call this first or a stale record can survive indefinitely. */
+    clearVersions: (versionIds: string[]) => void;
 }
 
 const QUALITY_RANK: Record<MockupImageQuality, number> = { low: 0, medium: 1, high: 2 };
@@ -243,6 +252,18 @@ export const useMockupVariantImageStore = create<VariantImageStoreState>((set, g
             const next = { ...state.errors };
             delete next[scope];
             return { errors: next };
+        });
+    },
+
+    clearVersions: (versionIds) => {
+        if (versionIds.length === 0) return;
+        const idSet = new Set(versionIds);
+        set((state) => {
+            const images = { ...state.images };
+            for (const key of Object.keys(images)) {
+                if (idSet.has(images[key].versionId)) delete images[key];
+            }
+            return { images };
         });
     },
 }));

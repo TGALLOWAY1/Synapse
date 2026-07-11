@@ -12,6 +12,12 @@ import {
 import { projectsDebug } from '../../lib/projectsDebug';
 import { resolveProjectStorageName } from '../userScope';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
+import { deleteImagesForVersion } from '../../lib/mockupImageStore';
+import { deleteScreenImagesForArtifactVersion } from '../../lib/screenInventoryImageStore';
+import { deleteVariantImagesForVersion } from '../../lib/mockupVariantImageStore';
+import { useMockupImageStore } from '../mockupImageStore';
+import { useScreenInventoryImageStore } from '../screenInventoryImageStore';
+import { useMockupVariantImageStore } from '../mockupVariantImageStore';
 
 export type ProjectSlice = {
     projects: Record<string, Project>;
@@ -24,6 +30,7 @@ export type ProjectSlice = {
     setProjectDesignSystemPreset: ProjectState['setProjectDesignSystemPreset'];
     markDesignSetupComplete: ProjectState['markDesignSetupComplete'];
     loadDemoProject: ProjectState['loadDemoProject'];
+    resetDemoProject: ProjectState['resetDemoProject'];
 };
 
 export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice> = (set, get) => ({
@@ -246,5 +253,95 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
         }
 
         return { projectId: DEMO_PROJECT_ID, available: true };
+    },
+
+    // SYN-001: a deterministic "Reset Demo" for the public read-only demo
+    // project. This is a session/route-level concern like `loadDemoProject`
+    // itself — NOT a durable capability — so it deliberately bypasses the
+    // read-only capability guards (`assertProjectCapability`) instead of
+    // extending them; the demo is the only project this ever touches
+    // (no projectId param).
+    //
+    // Sequence: wipe every piece of local state the demo namespace owns
+    // (the nine project-keyed store maps, the transient job/progress slices,
+    // and all three IDB image stores + their reactive Zustand caches), then
+    // fall through to `loadDemoProject()` for a full re-fetch + restore from
+    // the pinned snapshot. Deleting `projects[DEMO_PROJECT_ID]` also removes
+    // the `demoSourceSnapshotId` stamp, so the subsequent `loadDemoProject()`
+    // call can never cache-short-circuit — it always performs a full restore.
+    resetDemoProject: async () => {
+        const versionIds = (get().artifactVersions[DEMO_PROJECT_ID] ?? []).map((v) => v.id);
+
+        // Best-effort IDB cleanup — a failed delete must never abort the
+        // reset; the full restore below repopulates IndexedDB regardless.
+        for (const versionId of versionIds) {
+            try {
+                await deleteImagesForVersion(versionId);
+            } catch (err) {
+                console.warn('[resetDemoProject] failed to delete mockup images for version', versionId, err);
+            }
+            try {
+                await deleteScreenImagesForArtifactVersion(versionId);
+            } catch (err) {
+                console.warn('[resetDemoProject] failed to delete screen-inventory images for version', versionId, err);
+            }
+            try {
+                await deleteVariantImagesForVersion(versionId);
+            } catch (err) {
+                console.warn('[resetDemoProject] failed to delete mockup variant images for version', versionId, err);
+            }
+        }
+
+        // Evict the reactive Zustand caches that mirror those IDB stores.
+        // `restoreSnapshotAs` never proactively clears these (the mockup /
+        // screen-inventory caches self-heal lazily via `loadForVersion`, and
+        // the variant cache only ever merges) — a full wipe needs an explicit
+        // clear so a stale in-memory record can never survive the reset.
+        useMockupImageStore.getState().clearVersions(versionIds);
+        useScreenInventoryImageStore.getState().clearVersions(versionIds);
+        useMockupVariantImageStore.getState().clearVersions(versionIds);
+
+        set((state) => {
+            const projects = { ...state.projects };
+            delete projects[DEMO_PROJECT_ID];
+            const spineVersions = { ...state.spineVersions };
+            delete spineVersions[DEMO_PROJECT_ID];
+            const historyEvents = { ...state.historyEvents };
+            delete historyEvents[DEMO_PROJECT_ID];
+            const branches = { ...state.branches };
+            delete branches[DEMO_PROJECT_ID];
+            const artifacts = { ...state.artifacts };
+            delete artifacts[DEMO_PROJECT_ID];
+            const artifactVersions = { ...state.artifactVersions };
+            delete artifactVersions[DEMO_PROJECT_ID];
+            const feedbackItems = { ...state.feedbackItems };
+            delete feedbackItems[DEMO_PROJECT_ID];
+            const tasks = { ...state.tasks };
+            delete tasks[DEMO_PROJECT_ID];
+            const workflowRuns = { ...state.workflowRuns };
+            delete workflowRuns[DEMO_PROJECT_ID];
+            const jobs = { ...state.jobs };
+            delete jobs[DEMO_PROJECT_ID];
+            const prdProgress = { ...state.prdProgress };
+            delete prdProgress[DEMO_PROJECT_ID];
+            const prdSectionStatus = { ...state.prdSectionStatus };
+            delete prdSectionStatus[DEMO_PROJECT_ID];
+            return {
+                projects,
+                spineVersions,
+                historyEvents,
+                branches,
+                artifacts,
+                artifactVersions,
+                feedbackItems,
+                tasks,
+                workflowRuns,
+                jobs,
+                prdProgress,
+                prdSectionStatus,
+            };
+        });
+
+        return get().loadDemoProject();
     },
 });

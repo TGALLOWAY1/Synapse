@@ -23,6 +23,23 @@ export function hydrateDemoProject(): Promise<DemoHydrationResult> {
     return inFlight;
 }
 
+// SYN-001: "Reset Demo" shares the same single-flight slot as
+// `hydrateDemoProject` so a reset can never race a concurrent hydration pass
+// over the same IndexedDB/store keys. If a hydration is already in flight
+// (e.g. the route just mounted and `loadDemoProject()` is mid-restore), we
+// wait for it to settle — success or failure, we don't care which — before
+// wiping anything, then run the reset and register ITS promise as the new
+// `inFlight` slot so any hydration call that arrives while the reset is
+// running joins it instead of starting a redundant, racing pass.
+export function resetDemoProjectSingleFlight(): Promise<DemoHydrationResult> {
+    const afterPending = inFlight ? inFlight.catch(() => undefined) : Promise.resolve();
+    const run = afterPending.then(() => useProjectStore.getState().resetDemoProject());
+    inFlight = run.finally(() => {
+        inFlight = null;
+    });
+    return inFlight;
+}
+
 // Test-only escape hatch: drops a leaked in-flight promise between tests so
 // one test's pending hydration can't satisfy the next test's call.
 export function resetDemoHydrationForTests(): void {

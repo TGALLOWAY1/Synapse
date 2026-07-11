@@ -233,6 +233,33 @@ in snapshots.
   a new durable mutation domain is introduced. Local copy/download exports that
   do not mutate project state remain available.
 
+- **Reset Demo (SYN-001) — a deterministic "restore to pinned snapshot",
+  route/store-owned like `loadDemoProject` itself.** `projectSlice.resetDemoProject()`
+  deliberately bypasses the read-only capability guards above rather than
+  extending them (this is a session/route-level concern, not a durable project
+  mutation): it wipes all nine project-keyed store maps plus the transient
+  `jobs`/`prdProgress`/`prdSectionStatus` slices for `DEMO_PROJECT_ID`, deletes
+  every mockup/screen-inventory/variant IDB image record for the demo's
+  artifact version ids (`deleteImagesForVersion` / `deleteScreenImagesForArtifactVersion`
+  / `deleteVariantImagesForVersion`, each best-effort/try-caught so one failed
+  delete can't abort the reset), and explicitly clears the matching reactive
+  Zustand caches (`clearVersions` on all three of `mockupImageStore` /
+  `screenInventoryImageStore` / `mockupVariantImageStore`) — required because
+  `restoreSnapshotAs` never proactively evicts those caches itself (the mockup/
+  screen-inventory caches only self-heal lazily via `loadForVersion`, and the
+  variant cache's `mergeRecords` only ever adds/updates keys, never removes a
+  stale one), so without this a demo reset could leave a corrupted record
+  visible in memory even after IndexedDB was wiped. Deleting
+  `projects[DEMO_PROJECT_ID]` drops the `demoSourceSnapshotId` stamp, so the
+  action's final step — calling `loadDemoProject()` — can never cache-short-circuit;
+  it always performs a full re-fetch + restore. `src/lib/demoRouteHydration.ts`'s
+  `resetDemoProjectSingleFlight()` shares the module's `inFlight` slot with
+  `hydrateDemoProject()` so a reset can't race a concurrent hydration pass:
+  it waits out any in-flight hydration first, then registers its own promise
+  as the new `inFlight` slot. UI: a "Reset demo" control with an inline
+  confirm on `DemoReadOnlyNotice`, and a "Reset & reload demo" action on
+  `DemoRouteGate`'s failed state (alongside Retry / Return home).
+
 - **Demo hydration is route-owned.** The public demo route
   (`/p/<DEMO_PROJECT_ID>` in `App.tsx`'s `ProjectRoute`) wraps
   `ProjectWorkspace` in `DemoRouteGate` (`src/components/DemoRouteGate.tsx`),
