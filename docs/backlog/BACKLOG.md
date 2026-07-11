@@ -220,19 +220,18 @@ generated/stored/rendered.
   preserve user state across regenerations.
 - [~] **External tracker sync.** Export tasks to GitHub Issues / Linear /
   Jira with bidirectional status sync. _Partial: one-way export to GitHub
-  Issues (PAT-based), Linear (mocked), and Markdown shipped via
-  `ConvertToTasksModal` + `src/lib/services/taskExport/`. Follow-ups
-  itemised below._
-  - [ ] **Real Linear export.** `linearExporter.ts` builds the real
-    payload (`buildLinearIssueInput`) and tests cover it, but the network
-    call is mocked. To finish: add `LINEAR_API_KEY` (and optional
-    `LINEAR_TEAM_ID`) inputs to `SettingsModal.tsx` next to the GitHub
-    fields, replace the stub branch with a real
-    `https://api.linear.app/graphql` `issueCreate` mutation per task,
-    and add a label-resolution pass (Linear stores labels as IDs, not
-    strings — same shape as `fetchExistingLabels` in
-    `githubExporter.ts`). Drop the `(mock)` badge in
-    `ConvertToTasksModal.tsx` once `mock: true` is gone. ~1 day.
+  Issues (PAT-based) and Markdown shipped via `ConvertToTasksModal` +
+  `src/lib/services/taskExport/`. Follow-ups itemised below._
+  - [ ] **Real Linear export.** The old mocked provider (fake `LIN-MOCK-*`
+    success) was **deleted** per audit finding SYN-014 — a simulated
+    external integration misrepresents the product. Building the real one
+    is a from-scratch item: a new `linearExporter.ts` provider registered
+    in `EXPORT_PROVIDERS` (re-add `'linear'` to `ExportTargetId`),
+    `LINEAR_API_KEY` (and optional `LINEAR_TEAM_ID`) inputs in
+    `SettingsModal.tsx` next to the GitHub fields, a real
+    `https://api.linear.app/graphql` `issueCreate` mutation per task, and
+    a label-resolution pass (Linear stores labels as IDs, not strings —
+    same shape as `fetchExistingLabels` in `githubExporter.ts`). ~1–2 days.
   - [ ] **GitHub OAuth with `repo` scope.** Today the export uses a
     user-supplied PAT in `localStorage` — same security posture as the
     Gemini key. `api/_lib/github.js` only has `read:user`/`user:email`
