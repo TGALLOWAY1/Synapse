@@ -14,12 +14,13 @@ import { createPrdProgressSlice } from './slices/prdProgressSlice';
 import { createTasksSlice } from './slices/tasksSlice';
 import { createMetricsSlice } from './slices/metricsSlice';
 import { markInterruptedGenerations } from './interruptedGeneration';
+import { guardProjectStoreActions } from '../lib/projectCapabilities';
 
 export type { ProjectState } from './types';
 
 export const useProjectStore = create<ProjectState>()(
     persist(
-        (...a) => ({
+        (...a) => guardProjectStoreActions({
             ...createProjectSlice(...a),
             ...createSpineSlice(...a),
             ...createBranchSlice(...a),

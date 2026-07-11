@@ -19,6 +19,8 @@ export type Project = {
     // has pinned a newer demo snapshot and re-fetch instead of serving stale
     // local cache. Optional so legacy persisted projects keep working.
     demoSourceSnapshotId?: string;
+    /** Bumps when the public demo cache policy changes. */
+    demoCachePolicyVersion?: number;
     // The user-chosen design-system direction (a `DESIGN_SYSTEM_PRESETS` id,
     // e.g. 'saas_minimal' or 'custom'), picked once before artifact generation.
     // Steers design_system generation and, through it, the visual language of

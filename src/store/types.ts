@@ -67,7 +67,8 @@ export interface ProjectState {
     // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
     // a demo snapshot was available. When `available` is false, the home
     // page surfaces a friendly "no demo set" message.
-    loadDemoProject: () => Promise<{ projectId: string; available: boolean }>;
+    loadDemoProject: (options?: { force?: boolean }) => Promise<{ projectId: string; available: boolean }>;
+    clearDemoProject: () => Promise<void>;
 
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;

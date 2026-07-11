@@ -55,6 +55,8 @@ import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
+import { resetDemoProject } from '../lib/demoRouteHydration';
+import { canPerformProjectAction } from '../lib/projectCapabilities';
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
@@ -116,6 +118,22 @@ export function ProjectWorkspace() {
     const regenerateInFlight = useRef(false);
     const [overflowMenuPos, setOverflowMenuPos] = useState<{ top: number; right: number } | null>(null);
     const [animationParent] = useAutoAnimate();
+    const [isResettingDemo, setIsResettingDemo] = useState(false);
+    const [demoResetError, setDemoResetError] = useState<string | null>(null);
+
+    const handleResetDemo = async () => {
+        if (isResettingDemo) return;
+        setIsResettingDemo(true);
+        setDemoResetError(null);
+        try {
+            const result = await resetDemoProject();
+            if (!result.available) setDemoResetError('The example could not be restored. Please try again.');
+        } catch {
+            setDemoResetError('The example could not be restored. Please try again.');
+        } finally {
+            setIsResettingDemo(false);
+        }
+    };
 
     // Position the portaled overflow menu relative to its trigger button.
     useLayoutEffect(() => {
@@ -297,6 +315,7 @@ export function ProjectWorkspace() {
             .map(a => a.title);
 
     const handleRestoreSpine = (sourceSpineId: string) => {
+        if (!canPerformProjectAction(projectId, 'persist')) return;
         revertSpineToVersion(projectId, sourceSpineId);
         // Return to the (new) latest version after restoring.
         setViewedSpineId(null);
@@ -335,7 +354,7 @@ export function ProjectWorkspace() {
         // see the stale React state and would launch two concurrent pipelines
         // whose results interleave on different spines.
         if (regenerateInFlight.current) return;
-        if (!projectId || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
+        if (!projectId || !canPerformProjectAction(projectId, 'generate') || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
         regenerateInFlight.current = true;
         let activeNewSpineId: string | null = null;
         try {
@@ -502,7 +521,7 @@ export function ProjectWorkspace() {
     };
 
     const handleApplyFeedback = (feedback: FeedbackItem) => {
-        if (!projectId || !latestSpine) return;
+        if (!projectId || !canPerformProjectAction(projectId, 'persist') || !latestSpine) return;
         const intent = `[Feedback: ${feedback.title}] ${feedback.description}`;
         storCreateBranch(projectId, latestSpine.id, feedback.title, intent);
         updateFeedbackStatus(projectId, feedback.id, 'accepted');
@@ -544,7 +563,7 @@ export function ProjectWorkspace() {
         && pipelineStage !== 'workspace';
 
     const handleToggleFinal = () => {
-        if (!projectId || !activeSpine) return;
+        if (!projectId || !canPerformProjectAction(projectId, 'persist') || !activeSpine) return;
         // Blocked spines can never advance to the workspace / artifact stage.
         if (activeSpine.safetyReview?.status === 'blocked') return;
         const next = !activeSpine.isFinal;
@@ -1090,14 +1109,15 @@ export function ProjectWorkspace() {
                 />
             </div>
 
-            {/* Demo-mode banner: shown only for the prepopulated demo project.
-                Regenerate / refine buttons stay active; the existing no-key
-                error paths surface readable messages if the user clicks one. */}
+            {/* One intentional explanation of the public demo policy. */}
             {projectId === DEMO_PROJECT_ID && (
-                <div className="shrink-0 bg-indigo-500/10 border-b border-indigo-500/30 text-indigo-200 text-sm px-4 py-2 flex items-center justify-center gap-2 z-10">
-                    <span>
-                        You&apos;re viewing the demo project. Regenerating or refining requires your own Gemini API key — add one in Settings to customize.
-                    </span>
+                <div className="shrink-0 bg-indigo-500/10 border-b border-indigo-500/30 text-indigo-200 text-sm px-4 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 z-10" role="status" aria-live="polite">
+                    <span>This is a read-only example project. Explore its connected artifacts and history; editing and generation are disabled.</span>
+                    <button type="button" onClick={handleResetDemo} disabled={isResettingDemo}
+                        className="font-medium underline underline-offset-2 disabled:opacity-60">
+                        {isResettingDemo ? 'Resetting demo…' : 'Reset demo'}
+                    </button>
+                    {demoResetError && <span role="alert">{demoResetError}</span>}
                 </div>
             )}
 
@@ -1327,7 +1347,7 @@ export function ProjectWorkspace() {
                                                 projectId={projectId}
                                                 spineId={activeSpine.id}
                                                 structuredPRD={activeSpine.structuredPRD}
-                                                readOnly={isOldVersion}
+                                                readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
                                             />
                                         ) : (
                                             <div className="prose prose-neutral max-w-none">
@@ -1335,7 +1355,7 @@ export function ProjectWorkspace() {
                                                     projectId={projectId}
                                                     spineVersionId={activeSpine.id}
                                                     text={activeSpine.responseText}
-                                                    readOnly={isOldVersion}
+                                                    readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
                                                 />
                                             </div>
                                         )}
