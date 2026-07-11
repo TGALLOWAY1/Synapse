@@ -286,43 +286,186 @@ describe('DataModelRenderer — grouped category headers (no redundant label)', 
     });
 });
 
+describe('DataModelRenderer — entity search', () => {
+    afterEach(() => vi.unstubAllGlobals());
+
+    it('filters entities by name and preserves category context', () => {
+        const result = renderModel(groupedModel);
+        const input = result.getByLabelText('Search entities');
+        fireEvent.change(input, { target: { value: 'flashcard' } });
+
+        expect(result.container.querySelector('#data-model-entity-flashcard')).toBeTruthy();
+        expect(result.container.querySelector('#data-model-entity-knowledgenode')).toBeNull();
+        expect(result.container.querySelector('#data-model-entity-auditlog')).toBeNull();
+        // The surviving entity keeps its category header (context preserved).
+        expect(within(entitiesSection(result.getByRole)).getByText('Core Product Data')).toBeInTheDocument();
+    });
+
+    it('matches on category and status metadata, not just the name', () => {
+        const result = renderModel(groupedModel);
+        const input = result.getByLabelText('Search entities');
+        // "system metadata" is the AuditLog category label (system, userFacing:false).
+        fireEvent.change(input, { target: { value: 'system metadata' } });
+
+        expect(result.container.querySelector('#data-model-entity-auditlog')).toBeTruthy();
+        expect(result.container.querySelector('#data-model-entity-flashcard')).toBeNull();
+    });
+
+    it('shows an empty state and a working clear button when nothing matches', () => {
+        const result = renderModel(groupedModel);
+        const input = result.getByLabelText('Search entities') as HTMLInputElement;
+        fireEvent.change(input, { target: { value: 'zzzznope' } });
+
+        expect(result.getByText(/No entities match/i)).toBeInTheDocument();
+        fireEvent.click(result.getByLabelText('Clear search'));
+        expect(input.value).toBe('');
+        expect(result.container.querySelector('#data-model-entity-flashcard')).toBeTruthy();
+    });
+});
+
+describe('DataModelRenderer — expand all / collapse all', () => {
+    it('expands and collapses every visible entity, reflecting the current state', () => {
+        const result = renderModel(twoEntityModel);
+        // Collapsed by default — a body field is hidden.
+        expect(result.queryByText('total_cents')).toBeNull();
+
+        const expandBtn = result.getByRole('button', { name: /Expand all/i });
+        fireEvent.click(expandBtn);
+        expect(result.getByText('total_cents')).toBeInTheDocument();
+
+        // The control now reflects the expanded state.
+        const collapseBtn = result.getByRole('button', { name: /Collapse all/i });
+        fireEvent.click(collapseBtn);
+        expect(result.queryByText('total_cents')).toBeNull();
+    });
+});
+
+describe('DataModelRenderer — metadata footer pluralization', () => {
+    const pluralModel: DataModelContent = {
+        entities: [
+            {
+                name: 'Alpha',
+                description: 'Singular metadata everywhere.',
+                userFacing: true,
+                mutability: 'mutable',
+                fields: [{ name: 'id', type: 'UUID', required: true, description: 'pk' }],
+                relationships: [{ type: 'has_many', target: 'Beta' }],
+                constraints: ['id must be unique'],
+                indexes: ['idx_alpha on (id)'],
+                privacyRules: ['id must be redacted'],
+            },
+            {
+                name: 'Beta',
+                description: 'Plural fields.',
+                userFacing: true,
+                mutability: 'mutable',
+                fields: [
+                    { name: 'id', type: 'UUID', required: true, description: 'pk' },
+                    { name: 'label', type: 'String', required: false, description: 'label' },
+                ],
+                relationships: [{ type: 'belongs_to', target: 'Alpha' }],
+            },
+        ],
+        apiEndpoints: [],
+    };
+
+    it('uses singular labels for counts of one', () => {
+        const { container } = renderModel(pluralModel);
+        const alpha = container.querySelector('#data-model-entity-alpha') as HTMLElement;
+        expect(within(alpha).getByText('1 field')).toBeInTheDocument();
+        expect(within(alpha).getByText('1 relationship')).toBeInTheDocument();
+        expect(within(alpha).getByText('1 constraint')).toBeInTheDocument();
+        expect(within(alpha).getByText('1 privacy rule')).toBeInTheDocument();
+        expect(within(alpha).getByText('1 index')).toBeInTheDocument();
+    });
+
+    it('uses plural labels for counts greater than one', () => {
+        const { container } = renderModel(pluralModel);
+        const beta = container.querySelector('#data-model-entity-beta') as HTMLElement;
+        expect(within(beta).getByText('2 fields')).toBeInTheDocument();
+    });
+});
+
+describe('DataModelRenderer — category header band', () => {
+    it('renders each category once with its entity count', () => {
+        const result = renderModel(groupedModel);
+        const section = entitiesSection(result.getByRole);
+        // Core Product Data holds KnowledgeNode + Flashcard → count of 2.
+        const coreHeader = within(section).getByText('Core Product Data').closest('div');
+        expect(coreHeader).toBeTruthy();
+        expect(within(coreHeader as HTMLElement).getByText('2')).toBeInTheDocument();
+    });
+});
+
+describe('DataModelRenderer — missing optional metadata', () => {
+    it('omits status chips and count chips that have no data, without crashing', () => {
+        const sparse: DataModelContent = {
+            entities: [
+                { name: 'Bare', description: 'Only fields.', fields: [{ name: 'id', type: 'UUID', required: true, description: 'pk' }], relationships: [] },
+                { name: 'Bare2', description: 'Also bare.', fields: [{ name: 'id', type: 'UUID', required: true, description: 'pk' }], relationships: [] },
+            ],
+            apiEndpoints: [],
+        };
+        const { container } = renderModel(sparse);
+        const card = container.querySelector('#data-model-entity-bare') as HTMLElement;
+        expect(card).toBeTruthy();
+        // No mutability / user-facing data → no such chips; no relationships/etc. → no count chips.
+        expect(within(card).queryByText('Mutable')).toBeNull();
+        expect(within(card).queryByText('User-facing')).toBeNull();
+        expect(within(card).queryByText(/relationship/)).toBeNull();
+        expect(within(card).queryByText(/constraint/)).toBeNull();
+        // The single "1 field" count still renders.
+        expect(within(card).getByText('1 field')).toBeInTheDocument();
+    });
+});
+
+describe('DataModelRenderer — selected/expanded card styling', () => {
+    it('applies a subtle accent border to the expanded entity', () => {
+        const { container } = renderModel(twoEntityModel);
+        const orderCard = container.querySelector('#data-model-entity-order') as HTMLElement;
+        expect(orderCard.className).not.toContain('border-indigo-300');
+
+        fireEvent.click(orderCard.querySelector('button')!);
+        expect(orderCard.className).toContain('border-indigo-300');
+    });
+});
+
 describe('DataModelRenderer — mobile entity-card chip density', () => {
     afterEach(() => vi.unstubAllGlobals());
 
-    it('caps chips on a collapsed mobile card and keeps Contains PII visible', () => {
+    it('keeps the high-value semantic chips and never shows a redundant "Indexed" chip', () => {
         stubViewport(true);
         const { container } = renderModel(groupedModel);
         const card = container.querySelector('#data-model-entity-infographicsource') as HTMLElement;
         expect(card).toBeTruthy();
 
-        // PII stays prominent; lower-priority chips collapse into "+N more".
+        // The three meaningful statuses show; PII leads. "Indexed" is never a
+        // status chip (it duplicates the "indexes" footer count).
         expect(within(card).getByText('Contains PII')).toBeInTheDocument();
-        expect(within(card).getByText('+2 more')).toBeInTheDocument();
-        expect(within(card).queryByText('mostly immutable')).toBeNull();
-        // The "Indexed" attribute chip is hidden (the lowercase "indexes" count
-        // label is a different string and unaffected).
+        expect(within(card).getByText('User-facing')).toBeInTheDocument();
+        expect(within(card).getByText('mostly immutable')).toBeInTheDocument();
         expect(within(card).queryByText('Indexed')).toBeNull();
     });
 
     it('drops the low-value "No PII" chip on a collapsed mobile card', () => {
         stubViewport(true);
         const { container } = renderModel(groupedModel);
-        // KnowledgeNode: User-facing + mutable + Indexed = 3 chips, No PII dropped.
+        // KnowledgeNode: user-facing + mutable, no PII → "No PII" is dropped on mobile.
         const card = container.querySelector('#data-model-entity-knowledgenode') as HTMLElement;
         expect(within(card).queryByText('No PII')).toBeNull();
-        expect(within(card).queryByText('+1 more')).toBeNull();
         expect(within(card).getByText('User-facing')).toBeInTheDocument();
-        expect(within(card).getByText('Indexed')).toBeInTheDocument();
+        expect(within(card).getByText('mutable')).toBeInTheDocument();
+        expect(within(card).queryByText('Indexed')).toBeNull();
     });
 
-    it('shows every chip on desktop (no "+N more" truncation)', () => {
+    it('shows the "No PII" chip on desktop for an entity without PII', () => {
         stubViewport(false);
         const { container } = renderModel(groupedModel);
-        const card = container.querySelector('#data-model-entity-infographicsource') as HTMLElement;
-        expect(within(card).getByText('Contains PII')).toBeInTheDocument();
-        expect(within(card).getByText('mostly immutable')).toBeInTheDocument();
-        expect(within(card).getByText('Indexed')).toBeInTheDocument();
-        expect(within(card).queryByText(/\+\d+ more/)).toBeNull();
+        // AuditLog: System entity, no PII → "No PII" is visible on desktop.
+        const card = container.querySelector('#data-model-entity-auditlog') as HTMLElement;
+        expect(within(card).getByText('System')).toBeInTheDocument();
+        expect(within(card).getByText('No PII')).toBeInTheDocument();
+        expect(within(card).queryByText('Indexed')).toBeNull();
     });
 
     it('aligns the entity title so long names truncate without pushing the chevron', () => {

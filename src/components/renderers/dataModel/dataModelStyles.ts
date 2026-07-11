@@ -23,12 +23,16 @@ export const CATEGORY_STYLES: Record<EntityCategory, {
     accent: string;
     /** Soft icon tile background. */
     tile: string;
+    /** Soft tinted header band that visually connects a category to its cards. */
+    band: string;
+    /** Count-pill styling shown on the category header band. */
+    count: string;
 }> = {
-    core: { chip: 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200', accent: 'border-l-indigo-400', tile: 'bg-indigo-50 text-indigo-600' },
-    user_config: { chip: 'bg-violet-100 text-violet-700 ring-1 ring-violet-200', accent: 'border-l-violet-400', tile: 'bg-violet-50 text-violet-600' },
-    generated: { chip: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200', accent: 'border-l-emerald-400', tile: 'bg-emerald-50 text-emerald-600' },
-    system: { chip: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200', accent: 'border-l-slate-400', tile: 'bg-slate-100 text-slate-500' },
-    external: { chip: 'bg-amber-100 text-amber-800 ring-1 ring-amber-200', accent: 'border-l-amber-400', tile: 'bg-amber-50 text-amber-600' },
+    core: { chip: 'bg-indigo-100 text-indigo-700 ring-1 ring-indigo-200', accent: 'border-l-indigo-400', tile: 'bg-indigo-50 text-indigo-600', band: 'bg-indigo-50/70 ring-1 ring-indigo-100', count: 'bg-indigo-100 text-indigo-700' },
+    user_config: { chip: 'bg-violet-100 text-violet-700 ring-1 ring-violet-200', accent: 'border-l-violet-400', tile: 'bg-violet-50 text-violet-600', band: 'bg-violet-50/70 ring-1 ring-violet-100', count: 'bg-violet-100 text-violet-700' },
+    generated: { chip: 'bg-emerald-100 text-emerald-700 ring-1 ring-emerald-200', accent: 'border-l-emerald-400', tile: 'bg-emerald-50 text-emerald-600', band: 'bg-emerald-50/70 ring-1 ring-emerald-100', count: 'bg-emerald-100 text-emerald-700' },
+    system: { chip: 'bg-slate-100 text-slate-600 ring-1 ring-slate-200', accent: 'border-l-slate-400', tile: 'bg-slate-100 text-slate-500', band: 'bg-slate-100/70 ring-1 ring-slate-200', count: 'bg-slate-200 text-slate-700' },
+    external: { chip: 'bg-amber-100 text-amber-800 ring-1 ring-amber-200', accent: 'border-l-amber-400', tile: 'bg-amber-50 text-amber-600', band: 'bg-amber-50/70 ring-1 ring-amber-100', count: 'bg-amber-100 text-amber-800' },
 };
 
 /** Type-chip styling per coarse field-type family. */

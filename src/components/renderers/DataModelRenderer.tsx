@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronsDownUp, ChevronsUpDown, Layers, Sparkles } from 'lucide-react';
+import { ChevronsDownUp, ChevronsUpDown, Layers, Search, Sparkles, X } from 'lucide-react';
 import type { DataModelContent, StalenessState } from '../../types';
 import {
     parseDataModelMarkdown,
@@ -14,16 +14,28 @@ import {
     entityAnchorId,
     resolveEntityId,
     slugifyEntity,
+    ENTITY_CATEGORY_LABEL,
     ENTITY_CATEGORY_ORDER,
     type DataModelNode,
+    type EntityCategory,
 } from '../../lib/dataModelGraph';
-import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
 import { useArtifactOutline } from '../../lib/useArtifactOutline';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { DataModelOverview } from './dataModel/DataModelOverview';
 import { EntityGraph } from './dataModel/EntityGraph';
 import { EntityCard } from './dataModel/EntityCard';
-import { CategoryBadge } from './dataModel/badges';
+import { CategoryHeader } from './dataModel/badges';
+import { EntityGuide } from './dataModel/EntityGuide';
+
+interface EntityPair {
+    entity: ParsedEntity;
+    node: DataModelNode;
+}
+
+interface EntityCategoryGroup {
+    category: EntityCategory | null;
+    items: EntityPair[];
+}
 
 interface Props {
     content: string;
@@ -121,10 +133,10 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
     const nodeIdSet = useMemo(() => new Set(graph.nodes.map(n => n.id)), [graph]);
 
     // Entity + derived node pairs, in document order.
-    const pairs = useMemo(
+    const pairs = useMemo<EntityPair[]>(
         () => parsed.entities
             .map(entity => ({ entity, node: nodeById.get(slugifyEntity(entity.name)) }))
-            .filter((p): p is { entity: ParsedEntity; node: DataModelNode } => Boolean(p.node)),
+            .filter((p): p is EntityPair => Boolean(p.node)),
         [parsed, nodeById],
     );
 
@@ -135,12 +147,31 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
     const canGroup = distinctCategories >= 2 && pairs.length >= 4;
     const [grouped, setGrouped] = useState(canGroup);
 
+    // Search filters by name, description, category, and status metadata; grouping
+    // and category context are preserved on the filtered results.
+    const [search, setSearch] = useState('');
+    const query = search.trim().toLowerCase();
+    const visiblePairs = useMemo(() => {
+        if (!query) return pairs;
+        return pairs.filter(({ entity, node }) => {
+            const haystack = [
+                entity.name,
+                entity.description,
+                ENTITY_CATEGORY_LABEL[node.category],
+                node.mutability ?? '',
+                node.userFacing === true ? 'user-facing' : node.userFacing === false ? 'system' : '',
+                node.hasPII ? 'contains pii' : 'no pii',
+            ].join(' ').toLowerCase();
+            return haystack.includes(query);
+        });
+    }, [pairs, query]);
+
     const orderedPairs = useMemo(() => {
-        if (!grouped) return pairs;
-        return [...pairs].sort(
+        if (!grouped) return visiblePairs;
+        return [...visiblePairs].sort(
             (a, b) => ENTITY_CATEGORY_ORDER.indexOf(a.node.category) - ENTITY_CATEGORY_ORDER.indexOf(b.node.category),
         );
-    }, [pairs, grouped]);
+    }, [visiblePairs, grouped]);
 
     // Expansion — single-entity models open by default; larger ones start
     // collapsed for scannability.
@@ -148,16 +179,11 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
         () => (pairs.length === 1 ? new Set(pairs.map(p => p.node.id)) : new Set()),
     );
 
-    const outlineItems: ArtifactOutlineItem[] = useMemo(
-        () => orderedPairs.map(({ entity, node }) => ({
-            id: entityAnchorId(entity.name),
-            label: entity.name,
-            countLabel: `${node.fieldCount} ${node.fieldCount === 1 ? 'field' : 'fields'}`,
-        })),
+    const outlineIds = useMemo(
+        () => orderedPairs.map(({ entity }) => entityAnchorId(entity.name)),
         [orderedPairs],
     );
-    const outlineIds = useMemo(() => outlineItems.map(i => i.id), [outlineItems]);
-    const { activeId, scrollTo } = useArtifactOutline(outlineIds);
+    const { scrollTo } = useArtifactOutline(outlineIds);
 
     const toggleEntity = (nodeId: string) =>
         setExpandedIds(prev => {
@@ -168,23 +194,38 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
         });
 
     const focusEntity = (nodeId: string) => {
+        // Clear any active search so a graph-focused entity is never hidden.
+        setSearch('');
         setExpandedIds(prev => (prev.has(nodeId) ? prev : new Set(prev).add(nodeId)));
         const node = nodeById.get(nodeId);
         if (node) scrollTo(entityAnchorId(node.name));
     };
 
-    const allExpanded = expandedIds.size >= pairs.length;
+    // Expand/Collapse-all operates over the currently-visible (filtered) set.
+    const allVisibleExpanded = orderedPairs.length > 0 && orderedPairs.every(p => expandedIds.has(p.node.id));
     const toggleAll = () =>
-        setExpandedIds(allExpanded ? new Set() : new Set(pairs.map(p => p.node.id)));
+        setExpandedIds(prev => {
+            const next = new Set(prev);
+            if (allVisibleExpanded) orderedPairs.forEach(p => next.delete(p.node.id));
+            else orderedPairs.forEach(p => next.add(p.node.id));
+            return next;
+        });
 
     const resolveTargetId = (name: string) => resolveEntityId(name, nodeIdSet);
 
-    // Category boundaries for grouped rendering — derived purely so no variable
-    // is reassigned during render.
-    const orderedWithHeader = orderedPairs.map((pair, i) => ({
-        ...pair,
-        showHeader: grouped && (i === 0 || orderedPairs[i - 1].node.category !== pair.node.category),
-    }));
+    // Group ordered pairs into category sections (grouped) or a single section.
+    const groups = useMemo<EntityCategoryGroup[]>(() => {
+        if (!grouped) return [{ category: null, items: orderedPairs }];
+        const out: EntityCategoryGroup[] = [];
+        for (const pair of orderedPairs) {
+            const last = out[out.length - 1];
+            if (last && last.category === pair.node.category) last.items.push(pair);
+            else out.push({ category: pair.node.category, items: [pair] });
+        }
+        return out;
+    }, [grouped, orderedPairs]);
+
+    const showGuide = pairs.length >= 3;
 
     return (
         <div className="space-y-6">
@@ -219,77 +260,122 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
             )}
 
             {graph.nodes.length > 0 && (
-                <EntityGraph graph={graph} onOpenEntity={focusEntity} />
+                <div id="data-model-relationships" className="scroll-mt-24">
+                    <EntityGraph graph={graph} onOpenEntity={focusEntity} />
+                </div>
             )}
 
             {pairs.length > 0 && (
-                <section className="space-y-3">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 inline-flex items-center gap-1.5">
+                <section aria-label="Entities" className="space-y-4">
+                    {/* Section header */}
+                    <div className="flex items-center justify-between gap-2">
+                        <h3 className="text-sm font-semibold text-neutral-900 inline-flex items-center gap-1.5">
                             <Layers className="w-4 h-4 text-neutral-400" /> Entities
+                            <span className="text-xs font-normal text-neutral-400">
+                                {pairs.length} {pairs.length === 1 ? 'entity' : 'entities'}
+                            </span>
                         </h3>
-                        <div className="flex items-center gap-1.5">
+                    </div>
+
+                    {/* Toolbar — search takes the full width on mobile; the secondary
+                        controls sit beside it on desktop and wrap below on mobile. */}
+                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
+                        <div className="relative w-full sm:max-w-xs">
+                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" aria-hidden="true" />
+                            <input
+                                type="text"
+                                value={search}
+                                onChange={e => setSearch(e.target.value)}
+                                aria-label="Search entities"
+                                placeholder="Search entities…"
+                                className="w-full pl-8 pr-8 py-1.5 text-sm rounded-md border border-neutral-200 bg-white text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300"
+                            />
+                            {search && (
+                                <button
+                                    type="button"
+                                    onClick={() => setSearch('')}
+                                    aria-label="Clear search"
+                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-neutral-400 hover:text-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                                >
+                                    <X size={14} />
+                                </button>
+                            )}
+                        </div>
+                        <div className="flex items-center gap-1.5 flex-wrap sm:ml-auto">
                             {canGroup && (
                                 <button
                                     type="button"
                                     onClick={() => setGrouped(g => !g)}
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
+                                    aria-pressed={grouped}
+                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
                                         grouped
                                             ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
                                             : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'
                                     }`}
                                 >
-                                    <Layers size={12} /> Group by category
+                                    <Layers size={13} /> Group by category
                                 </button>
                             )}
                             {pairs.length > 1 && (
                                 <button
                                     type="button"
                                     onClick={toggleAll}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 transition"
+                                    disabled={orderedPairs.length === 0}
+                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 transition disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
                                 >
-                                    {allExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
-                                    {allExpanded ? 'Collapse all' : 'Expand all'}
+                                    {allVisibleExpanded ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />}
+                                    {allVisibleExpanded ? 'Collapse all' : 'Expand all'}
                                 </button>
                             )}
                         </div>
                     </div>
 
-                    {pairs.length > 1 && (
-                        <ArtifactOutlineNav
-                            title="Entities"
-                            items={outlineItems}
-                            activeId={activeId}
-                            activeLabel="Current entity"
-                            defaultExpanded={false}
-                            collapseOnSelect={isMobile}
-                            onSelect={scrollTo}
-                        />
-                    )}
-
-                    <div className="space-y-3">
-                        {orderedWithHeader.map(({ entity, node, showHeader }) => {
-                            return (
-                                <div key={node.id}>
-                                    {showHeader && (
-                                        <div className="flex items-center gap-2 pt-2 pb-1.5">
-                                            <CategoryBadge category={node.category} />
-                                            <span className="flex-1 h-px bg-neutral-100" />
-                                        </div>
-                                    )}
-                                    <EntityCard
-                                        entity={entity}
-                                        node={node}
-                                        expanded={expandedIds.has(node.id)}
-                                        onToggle={() => toggleEntity(node.id)}
-                                        resolveTargetId={resolveTargetId}
-                                        onNavigateToEntity={focusEntity}
-                                        showCategory={!grouped}
-                                        isMobile={isMobile}
-                                    />
+                    {/* Entity list + optional supporting guide. The guide only
+                        becomes a sidebar at very wide widths (2xl) so it never
+                        squeezes the entity cards in the narrower artifact column;
+                        below that it stacks under the list as a compact panel. */}
+                    <div className={showGuide ? '2xl:grid 2xl:grid-cols-[minmax(0,1fr)_15rem] 2xl:gap-6 2xl:items-start' : ''}>
+                        <div className="space-y-6 min-w-0">
+                            {orderedPairs.length === 0 ? (
+                                <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-center text-sm text-neutral-500">
+                                    No entities match “{search.trim()}”.
                                 </div>
-                            );
-                        })}
+                            ) : (
+                                groups.map(group => (
+                                    <div key={group.category ?? 'all'} className="space-y-2.5">
+                                        {group.category && (
+                                            <CategoryHeader category={group.category} count={group.items.length} />
+                                        )}
+                                        <div className="space-y-2.5">
+                                            {group.items.map(({ entity, node }) => (
+                                                <EntityCard
+                                                    key={node.id}
+                                                    entity={entity}
+                                                    node={node}
+                                                    expanded={expandedIds.has(node.id)}
+                                                    onToggle={() => toggleEntity(node.id)}
+                                                    resolveTargetId={resolveTargetId}
+                                                    onNavigateToEntity={focusEntity}
+                                                    showCategory={!grouped}
+                                                    isMobile={isMobile}
+                                                />
+                                            ))}
+                                        </div>
+                                    </div>
+                                ))
+                            )}
+                        </div>
+
+                        {showGuide && (
+                            <div className="mt-6 max-w-md 2xl:mt-0 2xl:max-w-none">
+                                <EntityGuide
+                                    categoryCount={distinctCategories}
+                                    grouped={grouped}
+                                    hasRelationships={graph.nodes.length > 0 && graph.edges.length > 0}
+                                    hasApiEndpoints={parsed.apiEndpoints.length > 0}
+                                />
+                            </div>
+                        )}
                     </div>
                 </section>
             )}
@@ -321,7 +407,7 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
             )}
 
             {parsed.apiEndpoints.length > 0 && (
-                <section className="space-y-2">
+                <section id="data-model-api-endpoints" className="space-y-2 scroll-mt-24">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">API Endpoints</h3>
                     <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
                         <table className="w-full text-xs">

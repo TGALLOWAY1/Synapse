@@ -966,12 +966,36 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     **ER-style diagram**
     (`EntityGraph`) that mirrors the artifact dependency graph / user-flow
     diagrams (rounded node cards, deterministic layered SVG layout, directional
-    cardinality-labelled edges, click-a-node-to-open-its-card), and
-    **collapsible entity cards** (`EntityCard`) whose expanded state shows
+    cardinality-labelled edges, click-a-node-to-open-its-card), and the
+    **Entities browser** — a scannable, low-noise entity list (redesigned
+    2026-07). The browser has a section header ("Entities" + a live entity
+    count) and a compact toolbar: a **Search** field (filters by name /
+    description / category / status metadata; a graph-node click via
+    `focusEntity` clears the search so a focused entity is never hidden), the
+    **Group by category** toggle, and **Expand all / Collapse all** (which
+    operate over the currently-visible/filtered set). Grouped entities render
+    under a **connected, soft-tinted `CategoryHeader` band** (icon tile + name +
+    count pill — replacing the old detached category pill + horizontal rule);
+    the band's tint comes from `CATEGORY_STYLES[category].band`/`.count`. Each
+    **collapsible entity card** (`EntityCard`) shows, collapsed: icon + name +
+    a small set of high-value **status chips** (`EntityAttributeBadges` — only
+    Contains PII / User-facing-or-System / mutability / No PII, in that priority;
+    "Indexed" is deliberately NOT a status chip since it duplicates the footer
+    index count) that sit on the name row on desktop and wrap below it on mobile,
+    a 2-line-clamped description, and a **quiet, pluralised metadata footer**
+    (`CountChip`: "1 field" / "2 fields", "1 relationship", "1 privacy rule",
+    "1 index" — neutral bordered chips, rose only for the privacy warning). The
+    expanded/selected card carries a subtle indigo accent border + tint (state is
+    never colour-only — border + ring + elevation + chevron rotation) and shows
     grouped field tables (colour-coded type chips, required/indexed markers) and
     compact **inspector rows** (`InspectorRow`) for relationships / constraints /
     privacy / indexes in a fixed colour language (relationship=blue,
-    constraint=purple, privacy=rose, index=slate, warning=amber). All of it is
+    constraint=purple, privacy=rose, index=slate, warning=amber). A compact,
+    non-duplicative **`EntityGuide`** (status legend + category count + in-page
+    jump links to the relationships diagram / API endpoints) renders as a sticky
+    sidebar only at `2xl` (so it never squeezes the cards in the narrower artifact
+    column) and stacks below the list otherwise — it deliberately omits the six
+    header metrics, which already live in `DataModelOverview`. All of it is
     **derived, never hand-drawn**, by the pure, unit-tested
     **`src/lib/dataModelGraph.ts`** (`analyzeDataModel` → graph + summary): it
     recovers structured relationships from the parser's `RELATIONSHIP` callouts
@@ -981,7 +1005,7 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     unresolved/self references separately, and derives conservative entity
     **categories** (`core`/`user_config`/`generated`/`system`/`external`, from
     userFacing/mutability/integration-shaped signals only) used for the optional
-    "Group by category" swimlanes and node accents. **Relationship-edge labels
+    "Group by category" entity-list grouping and node accents. **Relationship-edge labels
     never overlap entity cards:** `EntityGraph` places each verb+cardinality pill
     with the pure, unit-tested **`placeEdgeLabels`** collision solver (also in
     `dataModelGraph.ts`) — each label starts on its edge midpoint (between-row
