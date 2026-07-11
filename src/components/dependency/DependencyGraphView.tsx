@@ -6,26 +6,22 @@ import {
 } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 import { artifactJobController } from '../../lib/services/artifactJobController';
-import { selectPreferredDesignSystem } from '../../lib/designTokens';
 import {
     buildArtifactDependencyGraph,
     computeDisplayEdges,
     computeDownstreamImpacts,
     computeGraphLayout,
-    computeRecommendedUpdates,
     computeUpdateOrder,
-    evaluateDependencyGraph,
     getDependencyNode,
     getDirectDependencies,
-    type DependencyEvaluationInput,
     type DependencyNodeEvaluation,
     type DependencyNodeId,
     type DependencyNodeStatus,
 } from '../../lib/artifactDependencyGraph';
-import { findFeatureReferences, makeSpineChangeResolver } from '../../lib/spineChangeAnalysis';
-import type {
-    ArtifactSlotKey, GenerationStatus, ProjectPlatform, StructuredPRD,
-} from '../../types';
+import { useProjectFreshness } from '../../hooks/useProjectFreshness';
+import { DEPENDENCY_STATUS_LABELS } from '../../lib/artifactFreshness';
+import { findFeatureReferences } from '../../lib/spineChangeAnalysis';
+import type { ArtifactSlotKey, ProjectPlatform, StructuredPRD } from '../../types';
 import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
 
 interface DependencyGraphViewProps {
@@ -56,16 +52,6 @@ const CARD_H = 86;
 const GAP_X = 28;
 const ROW_GAP = 64;
 
-const STATUS_LABELS: Record<DependencyNodeStatus, string> = {
-    source: 'Source of truth',
-    up_to_date: 'Up to date',
-    needs_update: 'Needs update',
-    update_recommended: 'Update recommended',
-    generating: 'Generating…',
-    error: 'Failed',
-    missing: 'Not generated',
-};
-
 const STATUS_PILL_CLASSES: Record<DependencyNodeStatus, string> = {
     source: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     up_to_date: 'bg-green-50 text-green-700 border-green-200',
@@ -90,7 +76,7 @@ function StatusPill({ status }: { status: DependencyNodeStatus }) {
     return (
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-medium ${STATUS_PILL_CLASSES[status]}`}>
             <StatusIcon status={status} />
-            {STATUS_LABELS[status]}
+            {DEPENDENCY_STATUS_LABELS[status]}
         </span>
     );
 }
@@ -117,11 +103,14 @@ export function DependencyGraphView({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode,
 }: DependencyGraphViewProps) {
     const capabilities = useProjectCapabilities(projectId);
-    const {
-        getArtifacts, getPreferredVersion, getSpineVersions, getArtifactVersions, getJob,
-    } = useProjectStore();
+    const { getPreferredVersion, getSpineVersions, getArtifactVersions, getJob } = useProjectStore();
 
-    const graph = useMemo(() => buildArtifactDependencyGraph(), []);
+    // Freshness comes from the ONE canonical seam — the same input assembly and
+    // evaluator (evaluateDependencyGraph) every other surface consumes — so the
+    // graph can never disagree with the artifact headers, export manifest, or
+    // update plan. The hook memoizes the evaluation and attaches its own
+    // change-aware resolver (prd_changed reasons carry a changeSummary).
+    const { graph, evaluations, recommendedUpdates, artifactIdBySlot } = useProjectFreshness(projectId);
     const layout = useMemo(() => computeGraphLayout(graph), [graph]);
     const displayEdges = useMemo(() => computeDisplayEdges(graph), [graph]);
 
@@ -133,60 +122,17 @@ export function DependencyGraphView({
         { title: string; order: DependencyNodeId[] } | null
     >(null);
 
-    // --- evaluation input from live store data --------------------------------
+    // Spines + live job are still read directly: the PRD history list, the
+    // "mark up to date" target spine, and the jobActive gate.
     const spines = getSpineVersions(projectId);
     const latestSpine = spines.find(s => s.isLatest);
     const job = getJob(projectId);
-    const coreArtifacts = getArtifacts(projectId, 'core_artifact');
-    const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
-    const currentDesign = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
 
-    const snapshots: DependencyEvaluationInput['snapshots'] = {};
-    const slotStatus: Partial<Record<ArtifactSlotKey, GenerationStatus>> = {};
-    const artifactIdByNode = new Map<DependencyNodeId, string>();
-    for (const node of graph.nodes) {
-        if (node.id === 'prd') continue;
-        const slotKey = node.id as ArtifactSlotKey;
-        const artifact = slotKey === 'mockup'
-            ? mockupArtifact
-            : coreArtifacts.find(a => a.subtype === slotKey && a.status !== 'archived');
-        const preferred = artifact ? getPreferredVersion(projectId, artifact.id) : undefined;
-        if (artifact && preferred) {
-            artifactIdByNode.set(node.id, artifact.id);
-            snapshots[slotKey] = {
-                artifactId: artifact.id,
-                version: {
-                    id: preferred.id,
-                    versionNumber: preferred.versionNumber,
-                    createdAt: preferred.createdAt,
-                    sourceRefs: preferred.sourceRefs,
-                    provenance: preferred.provenance,
-                    metadata: preferred.metadata,
-                },
-            };
-        }
-        const live = job?.slots[slotKey]?.status;
-        if (live && live !== 'idle') slotStatus[slotKey] = live;
-    }
+    // node id → artifact id (content lookup / mark-current / history). The PRD
+    // node has no backing artifact.
+    const artifactIdOf = (id: DependencyNodeId): string | undefined =>
+        id === 'prd' ? undefined : artifactIdBySlot[id as ArtifactSlotKey];
 
-    // Change-aware staleness: resolves "what changed since spine X" against
-    // the latest spine (memoized per spine pair inside the resolver).
-    const spineChangeFor = useMemo(
-        () => makeSpineChangeResolver(spines, latestSpine?.id),
-        [spines, latestSpine?.id],
-    );
-
-    const evaluations = evaluateDependencyGraph(graph, {
-        spineVersionIds: spines.map(s => s.id),
-        latestSpineId: latestSpine?.id,
-        latestSpineProvenance: latestSpine?.provenance,
-        currentDesignTokensHash: currentDesign?.tokensHash,
-        snapshots,
-        slotStatus,
-        spineChangeFor,
-    });
-
-    const recommendedUpdates = computeRecommendedUpdates(graph, evaluations);
     const jobActive = !!job && Object.values(job.slots).some(
         s => s && (s.status === 'generating' || s.status === 'queued'),
     );
@@ -269,11 +215,11 @@ export function DependencyGraphView({
     const canMarkCurrent = (id: DependencyNodeId): boolean => {
         const ev = evalOf(id);
         return !!latestSpine
-            && artifactIdByNode.has(id)
+            && !!artifactIdOf(id)
             && (ev?.status === 'needs_update' || ev?.status === 'update_recommended');
     };
     const markCurrentNode = (id: DependencyNodeId) => {
-        const artifactId = artifactIdByNode.get(id);
+        const artifactId = artifactIdOf(id);
         if (!artifactId || !latestSpine) return;
         useProjectStore.getState().markArtifactCurrentForSpine(projectId, artifactId, latestSpine.id);
     };
@@ -284,7 +230,7 @@ export function DependencyGraphView({
         if (!selectedId || selectedId === 'prd' || !selectedEval) return [];
         const summary = selectedEval.reasons.find(r => r.kind === 'prd_changed')?.changeSummary;
         if (!summary || summary.features.removed.length === 0) return [];
-        const artifactId = artifactIdByNode.get(selectedId);
+        const artifactId = artifactIdOf(selectedId);
         const content = artifactId ? getPreferredVersion(projectId, artifactId)?.content ?? '' : '';
         if (!content) return [];
         const candidate = [{ artifactId: artifactId!, title: titleOf(selectedId), content }];
@@ -447,7 +393,7 @@ export function DependencyGraphView({
                                             ? 'Source of truth'
                                             : ev?.versionNumber !== undefined
                                                 ? `v${ev.versionNumber}${ev.generatedAt ? ` · ${new Date(ev.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}`
-                                                : STATUS_LABELS[status]}
+                                                : DEPENDENCY_STATUS_LABELS[status]}
                                     </div>
                                     <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
                                         {node.id === 'prd'
@@ -498,8 +444,8 @@ export function DependencyGraphView({
                                 createdAt: s.createdAt,
                                 changeSource: s.provenance?.changeSource,
                             })).reverse()
-                            : (artifactIdByNode.has(selectedId)
-                                ? [...getArtifactVersions(projectId, artifactIdByNode.get(selectedId)!)]
+                            : (artifactIdOf(selectedId)
+                                ? [...getArtifactVersions(projectId, artifactIdOf(selectedId)!)]
                                     .sort((a, b) => b.versionNumber - a.versionNumber)
                                     .map(v => ({
                                         id: v.id,
