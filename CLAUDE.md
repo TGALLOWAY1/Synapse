@@ -176,6 +176,24 @@ add it to `collectProjectBundle`/`collectScreenImages`/`collectVariantImages`, t
 restore writers, and `namespaceSnapshotForRestore`, or it silently won't travel
 in snapshots.
 
+- **Save-time mockup-image audit (`src/lib/snapshotImageAudit.ts`, pure).**
+  Mockup SPECS (the `mockup` artifact version JSON) and mockup IMAGES (IDB blobs
+  shipped one-per-request) are collected independently, so nothing forces them to
+  agree — it was possible to save, then pin as the public demo, a snapshot whose
+  mockup spec listed screens but carried **zero** images (images generated in
+  another browser, IDB cleared, or only the spec regenerated), and the demo then
+  rendered mockup specs with no previews (the mockups "disappeared"). This is the
+  root cause of the "demo lost its mockups" bug: the pinned demo blob genuinely
+  had `imageCount: 0`. `auditMockupImageCoverage` runs inside `saveSnapshot` and,
+  when the mockup version has ≥1 screen but no mockup image (AI / uploaded /
+  variant) was collected for that version id, returns a warning surfaced through
+  the existing `onWarnings` → `SnapshotsPanel` amber notice. It **never blocks the
+  save** (specs are still worth keeping) — it just makes the gap visible before a
+  pin. `SnapshotsPanel.handleSetDemo` also adds a heads-up when pinning a
+  zero-image snapshot as the demo. A snapshot with no images is a data condition
+  the owner must fix by regenerating the mockup images and re-saving/re-pinning;
+  no restore/render change can recover images the blob never contained.
+
 - **The public demo has one read-only capability boundary.**
   `src/lib/projectCapabilities.ts` is authoritative for durable project actions;
   `getProjectCapabilities` fails conservatively for a missing project and denies
