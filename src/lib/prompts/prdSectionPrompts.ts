@@ -223,7 +223,7 @@ ${grounding !== UNAVAILABLE ? `Domain entities: ${grounding}` : ''}
 Return JSON with:
 - architecture: string — 2–3 paragraph decision narrative: the chosen stack and why, the major components and their responsibilities, key integration points, and significant build-vs-buy decisions
 - architectureFlows: array of { name, steps (array of strings) } — the 2–3 highest-risk system flows only (e.g. auth, the core data write), each an ordered numbered sequence of at most 7 decision-level steps
-- nonFunctionalRequirements: array of strings — testable requirements spanning performance, accessibility, security, privacy, reliability, scalability, observability, and cost
+- nonFunctionalRequirements: array of strings — measurable quality-of-service targets with concrete numeric thresholds, spanning performance (e.g. "p95 page load under 2 seconds"), security, accessibility (e.g. "WCAG 2.1 AA"), reliability, scalability, and observability. Every item must state a testable target, not a vague aspiration. These are quality-of-service targets ONLY — never budget, timeline, technology-stack, or build constraints; those belong in constraints below.
 - constraints: array of strings — budget, timeline, technical, regulatory, or integration constraints`,
         };
     },

@@ -89,7 +89,6 @@ export function ProjectWorkspace() {
     const [isBranchesVisible, setIsBranchesVisible] = useState(true);
     const [activeRightTab, setActiveRightTab] = useState<'branches' | 'history'>('branches');
     const [activeCanvasBranchId, setActiveCanvasBranchId] = useState<string | null>(null);
-    const [showStructuredView, setShowStructuredView] = useState(true);
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
@@ -1260,24 +1259,6 @@ export function ProjectWorkspace() {
                                             <SafetyBoundariesCard review={activeSpine.safetyReview} />
                                         )}
 
-                                        {/* View toggle when structured PRD exists (hidden for blocked spines) */}
-                                        {activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' && (
-                                            <div className="flex items-center gap-2 mb-6">
-                                                <button
-                                                    onClick={() => setShowStructuredView(true)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Structured View
-                                                </button>
-                                                <button
-                                                    onClick={() => setShowStructuredView(false)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Markdown View
-                                                </button>
-                                            </div>
-                                        )}
-
                                         {/* Partial result: some sections failed and were merged as
                                             empty stubs. Surfaced from the persisted generationMeta so
                                             the warning survives refresh; each button re-runs only
@@ -1366,7 +1347,7 @@ export function ProjectWorkspace() {
                                                     <div className="h-3.5 bg-neutral-100 rounded w-5/6" />
                                                 </div>
                                             </div>
-                                        ) : activeSpine.structuredPRD && showStructuredView ? (
+                                        ) : activeSpine.structuredPRD ? (
                                             <StructuredPRDView
                                                 projectId={projectId}
                                                 spineId={activeSpine.id}
