@@ -1,6 +1,7 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
+import { useToastStore } from '../store/toastStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
@@ -177,12 +178,10 @@ export function ProjectWorkspace() {
     const projectExists = !!projectId && !!getProject(projectId);
     useEffect(() => {
         if (projectId && !projectExists) {
-            import('../store/toastStore').then(({ useToastStore }) => {
-                useToastStore.getState().addToast({
-                    type: 'info',
-                    title: 'Project not found',
-                    message: 'It may have been deleted or saved in a different browser.',
-                });
+            useToastStore.getState().addToast({
+                type: 'info',
+                title: 'Project not found',
+                message: 'It may have been deleted or saved in a different browser.',
             });
             navigate('/', { replace: true });
         }

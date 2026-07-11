@@ -12,7 +12,7 @@ import {
     buildSafetyReviewMarkdown,
 } from './safety';
 import type { ProjectPlatform } from '../types';
-import type { PreflightContext } from './llmProvider';
+import { generateStructuredPRD, type PreflightContext } from './llmProvider';
 import { detectSurface } from './services/prdGenerationLog';
 
 /**
@@ -71,21 +71,6 @@ export async function runPrdGeneration({
     store.clearPrdProgress(projectId);
     store.clearSectionStatus(projectId);
     store.markSpineGenerationStarted(projectId, spineId);
-
-    let generateStructuredPRD;
-    try {
-        ({ generateStructuredPRD } = await import('./llmProvider'));
-    } catch (e) {
-        const err = normalizeError(e);
-        console.error('[Module load failed]', err.raw);
-        useProjectStore.getState().setSpineError(projectId, spineId, {
-            message: 'Failed to load generation module. Try refreshing the page.',
-            category: err.category,
-            timestamp: err.timestamp,
-            raw: err.raw,
-        });
-        return;
-    }
 
     try {
         await generateStructuredPRD(

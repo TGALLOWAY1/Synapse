@@ -9,6 +9,7 @@ import { SettingsModal } from './SettingsModal';
 import { ProjectDrawer } from './ProjectDrawer';
 import { PreflightModeChoice } from './preflight/PreflightModeChoice';
 import { runPrdGeneration } from '../lib/runPrdGeneration';
+import { enhancePrompt } from '../lib/llmProvider';
 import { normalizeError } from '../lib/errors';
 import type { ProjectPlatform, PreflightMode } from '../types';
 import { useAuthStore } from '../store/authStore';
@@ -240,20 +241,16 @@ export function HomePage() {
 
         setIsEnhancing(true);
         try {
-            const { enhancePrompt } = await import('../lib/llmProvider');
             const enhanced = await enhancePrompt(promptText.trim());
             setPromptText(enhanced);
         } catch (e) {
             const err = normalizeError(e);
             console.error('[Enhance prompt failed]', err.raw);
-            // Toast integration added in Phase 5 — for now uses toastStore directly
-            import('../store/toastStore').then(({ useToastStore }) => {
-                useToastStore.getState().addToast({
-                    type: 'warning',
-                    title: 'Prompt enhancement failed',
-                    message: 'Your original prompt was kept.',
-                });
-            }).catch(() => { /* toast store not yet available */ });
+            useToastStore.getState().addToast({
+                type: 'warning',
+                title: 'Prompt enhancement failed',
+                message: 'Your original prompt was kept.',
+            });
         } finally {
             setIsEnhancing(false);
         }
