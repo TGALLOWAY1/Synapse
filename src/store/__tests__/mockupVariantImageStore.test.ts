@@ -34,6 +34,7 @@ vi.mock('../../lib/openaiClient', () => ({
 vi.mock('../../lib/designTokens', () => ({ selectPreferredDesignTokens: () => undefined }));
 
 import { useMockupVariantImageStore } from '../mockupVariantImageStore';
+import { useProjectStore } from '../projectStore';
 
 const makeRequest = (
     overrides: Partial<MockupVariantGenerationRequest> = {},
@@ -65,6 +66,7 @@ describe('mockupVariantImageStore.generate', () => {
         shouldFail = false;
         currentB64 = 'BASE64DATA';
         useMockupVariantImageStore.setState({ images: {}, inFlight: {}, errors: {} });
+        useProjectStore.setState({ projects: { p1: { id: 'p1', name: 'Test', createdAt: 1 } } });
     });
 
     it('stores a generated variant under a per-variant key with its manifest', async () => {

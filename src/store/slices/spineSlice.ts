@@ -6,6 +6,7 @@ import type {
     PreflightSession,
 } from '../../types';
 import type { ProjectState, SpineGenerationMetaInput } from '../types';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 
 export type SpineSlice = {
@@ -50,6 +51,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     spineVersions: {},
 
     updateSpineText: (projectId: string, spineId: string, text: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -60,6 +62,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     regenerateSpine: (projectId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         // Validate against a snapshot, but perform the array derivations inside
         // the set() updater against the fresh `state` so a concurrent spine
         // mutation cannot be clobbered by a stale snapshot.
@@ -117,6 +120,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => {
+        assertProjectCapability(get().projects[projectId], 'canChangeFinality');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -133,6 +137,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
 
     // --- Preflight clarification --------------------------------------------
     initPreflightSession: (projectId, spineId, mode, originalIdea) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map((s) =>
@@ -155,6 +160,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightQuestions: (projectId, spineId, questions, usedFallback) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -170,6 +176,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightAnswer: (projectId, spineId, questionId, answer, skipped) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -184,6 +191,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightIndex: (projectId, spineId, index) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -206,6 +214,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightSummary: (projectId, spineId, { summary, assumptions, unknowns }) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -221,6 +230,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     completePreflightSession: (projectId, spineId) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -234,6 +244,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightError: (projectId, spineId, message) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -246,6 +257,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -262,6 +274,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         responseText: string,
         meta?: SpineGenerationMetaInput,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s => {
@@ -314,6 +327,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     // the fresh `state` (concurrency rule); the new id is a UUID and display
     // labels derive from array position, never the id.
     editSpineStructuredPRD: (projectId, spineId, nextStructuredPRD, opts) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         // Validate against a snapshot; do array derivations inside set().
         const source = (get().spineVersions[projectId] || []).find(s => s.id === spineId);
         if (!source) throw new Error('No spine version to edit');
@@ -376,6 +390,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     // cloning its content. The source version is never mutated or deleted, so
     // all history before the revert is preserved.
     revertSpineToVersion: (projectId, sourceSpineId) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         const versions = get().spineVersions[projectId] || [];
         const sourceIdx = versions.findIndex(s => s.id === sourceSpineId);
         if (sourceIdx < 0) throw new Error('No spine version to restore');
@@ -432,6 +447,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         scores: QualityScores,
         generationMeta?: GenerationMeta,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s => {
@@ -450,6 +466,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         projectId: string,
         meta: { productName?: string; productCategory?: string },
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const project = state.projects[projectId];
             if (!project) return state;
@@ -461,6 +478,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     markSpineGenerationStarted: (projectId: string, spineId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -476,6 +494,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         review: SpineSafetyReview,
         responseText?: string,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const spine = projectSpines.find(s => s.id === spineId);
@@ -520,6 +539,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const spine = projectSpines.find(s => s.id === spineId);

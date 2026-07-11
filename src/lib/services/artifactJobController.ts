@@ -43,6 +43,14 @@ import { hasOpenAIKey } from '../openaiClient';
 import { selectPreferredDesignSystem } from '../designTokens';
 import { parseScreenInventory } from '../screenInventoryNormalize';
 import { parseComponentInventoryMarkdown } from '../componentInventoryParse';
+import { assertProjectCapability } from '../projectCapabilities';
+
+function assertArtifactGenerationAllowed(projectId: string): void {
+    assertProjectCapability(
+        useProjectStore.getState().projects[projectId],
+        'canGenerateArtifacts',
+    );
+}
 
 export interface StartArgs {
     projectId: string;
@@ -731,6 +739,7 @@ export const artifactJobController = {
      * completion only queues slots still missing.
      */
     startAll(args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         // Downstream protection: a spine blocked by safety review — or an
         // incomplete (partial) PRD the user hasn't acknowledged — can never
         // drive artifact generation, even if startAll is reached directly.
@@ -780,6 +789,7 @@ export const artifactJobController = {
      * their update buttons off the live job state.
      */
     regenerateSlots(slots: ArtifactSlotKey[], args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
         if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
@@ -827,6 +837,7 @@ export const artifactJobController = {
      * race against it.
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         const failureKey = retryFailureKey(args.projectId, slot);
         if ((retryFailures.get(failureKey) ?? 0) >= MAX_RETRY_FAILURES) {
             useProjectStore.getState().setSlotStatus(args.projectId, slot, {
@@ -916,6 +927,7 @@ export const artifactJobController = {
      * final spine. Skips when generation is already active.
      */
     resumeIfNeeded(args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         if (this.isActive(args.projectId)) return;
         // Only auto-wake for *visible* pending slots. A hidden slot that errored
         // stays pending forever (no version), and without this filter every

@@ -19,6 +19,7 @@ import { callOpenAIImage } from '../lib/openaiClient';
 import { buildScreenImagePrompt, pickImageSize } from '../lib/services/mockupImageService';
 import { selectPreferredDesignTokens } from '../lib/designTokens';
 import { useProjectStore } from './projectStore';
+import { assertProjectCapability } from '../lib/projectCapabilities';
 import {
     buildImageKey,
     buildScreenScopeKey,
@@ -30,7 +31,6 @@ import { getRefsForVersion } from '../lib/imageRefRegistry';
 import { fetchBlobAsDataUrl } from '../lib/imageRefsClient';
 import { mockupRecordFromRef, type ImageRef } from '../lib/imageRef';
 import { notifyMockupImageGenerated } from './projectImageSync';
-import { canPerformProjectAction } from '../lib/projectCapabilities';
 
 // Pull blob bytes for refs the local IndexedDB doesn't have yet (cross-device
 // case). Concurrency-limited so a version with many screens doesn't open a fetch
@@ -163,9 +163,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
     },
 
     generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated }) => {
-        // This is the write/provider boundary; callers cannot accidentally
-        // turn the public example into a billable image-generation surface.
-        if (!canPerformProjectAction(projectId, 'image')) return;
+        assertProjectCapability(useProjectStore.getState().projects[projectId], 'canGenerateArtifacts');
         const scope = screenScope(versionId, screen.id);
         if (get().inFlight[scope]) return; // already generating something for this screen
 

@@ -4,7 +4,7 @@ import type { ImplementationTask } from '../../types/tasks';
 
 const reset = () =>
     useProjectStore.setState({
-        projects: {},
+        projects: { p1: { id: 'p1', name: 'Test', createdAt: 1 } },
         spineVersions: {},
         historyEvents: {},
         branches: {},

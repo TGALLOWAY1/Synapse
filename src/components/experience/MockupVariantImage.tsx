@@ -19,6 +19,7 @@ import { useMockupVariantImageStore } from '../../store/mockupVariantImageStore'
 import type { MockupVariantGenerationRequest } from '../../lib/mockupVariantRequest';
 import type { MockupVariantSourceSignature } from '../../lib/mockupVariantTrust';
 import { formatVariantLabel, type DerivedMockupVariant } from '../../lib/mockupVariants';
+import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
 
 interface Props {
     projectId: string;
@@ -42,6 +43,7 @@ export function MockupVariantImage({
     projectId, artifactId, versionId, platform, variant, request,
     sourceSignature, generatedFrom,
 }: Props) {
+    const capabilities = useProjectCapabilities(projectId);
     const scope = `${versionId}:${request.screenId}:${request.variantId}`;
     const record = useMockupVariantImageStore(s => s.getBestRecord(versionId, request.screenId, request.variantId));
     // Subscribe to the images map so a freshly-stored record re-renders us.
@@ -60,8 +62,10 @@ export function MockupVariantImage({
 
     const keyPresent = hasOpenAIKey();
     const uploadMode = getMockupImageMode() === 'user_uploaded';
-    const canGenerate = keyPresent && !uploadMode;
-    const gateReason = uploadMode ? UPLOAD_MODE_MESSAGE : DEMO_KEYLESS_MESSAGE;
+    const canGenerate = capabilities.canGenerateArtifacts && keyPresent && !uploadMode;
+    const gateReason = !capabilities.canGenerateArtifacts
+        ? 'This example project is read-only.'
+        : uploadMode ? UPLOAD_MODE_MESSAGE : DEMO_KEYLESS_MESSAGE;
 
     const handleGenerate = (quality: MockupImageQuality) => {
         if (!canGenerate) return;

@@ -41,10 +41,10 @@ describe('design setup project state', () => {
         expect(project.designSystemPreset).toBeUndefined();
     });
 
-    it('both actions are no-ops for unknown projects', () => {
+    it('both actions reject unknown projects conservatively', () => {
         const before = useProjectStore.getState().projects;
-        useProjectStore.getState().setProjectDesignSystemPreset('nope', 'custom');
-        useProjectStore.getState().markDesignSetupComplete('nope');
+        expect(() => useProjectStore.getState().setProjectDesignSystemPreset('nope', 'custom')).toThrow();
+        expect(() => useProjectStore.getState().markDesignSetupComplete('nope')).toThrow();
         expect(useProjectStore.getState().projects).toEqual(before);
     });
 });

@@ -14,6 +14,7 @@ const EMPTY_TASKS: ProjectTask[] = [];
 interface TaskChecklistProps {
     projectId: string;
     sourceArtifactId: string;
+    readOnly?: boolean;
 }
 
 const PRIORITY_STYLE: Record<string, string> = {
@@ -32,11 +33,12 @@ const NEXT_STATUS: Record<TaskStatus, TaskStatus> = {
     blocked: 'todo',
 };
 
-function StatusButton({ status, onClick }: { status: TaskStatus; onClick: () => void }) {
-    const label =
+function StatusButton({ status, onClick, disabled = false }: { status: TaskStatus; onClick: () => void; disabled?: boolean }) {
+    const actionLabel =
         status === 'done' ? 'Done — click to reset'
             : status === 'in_progress' ? 'In progress — click to mark done'
                 : 'To do — click to start';
+    const label = disabled ? `${status.replace('_', ' ')} (read-only)` : actionLabel;
     const Icon = status === 'done' ? CheckCircle2 : status === 'in_progress' ? Clock : Circle;
     const color =
         status === 'done' ? 'text-green-600'
@@ -46,6 +48,7 @@ function StatusButton({ status, onClick }: { status: TaskStatus; onClick: () => 
         <button
             type="button"
             onClick={onClick}
+            disabled={disabled}
             aria-label={label}
             title={label}
             className={`shrink-0 p-1 -m-1 transition ${color}`}
@@ -55,7 +58,7 @@ function StatusButton({ status, onClick }: { status: TaskStatus; onClick: () => 
     );
 }
 
-export function TaskChecklist({ projectId, sourceArtifactId }: TaskChecklistProps) {
+export function TaskChecklist({ projectId, sourceArtifactId, readOnly = false }: TaskChecklistProps) {
     const tasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
     const setTaskStatus = useProjectStore(s => s.setTaskStatus);
     const removeProjectTask = useProjectStore(s => s.removeProjectTask);
@@ -96,9 +99,10 @@ export function TaskChecklist({ projectId, sourceArtifactId }: TaskChecklistProp
                                 <StatusButton
                                     status={task.status}
                                     onClick={() => setTaskStatus(projectId, task.id, NEXT_STATUS[task.status])}
+                                    disabled={readOnly}
                                 />
                                 <div className="flex-1 min-w-0">
-                                    <button
+                                    {!readOnly && <button
                                         type="button"
                                         onClick={() => setExpandedId(expanded ? null : task.id)}
                                         className="w-full flex items-center gap-1.5 text-left"
@@ -107,7 +111,7 @@ export function TaskChecklist({ projectId, sourceArtifactId }: TaskChecklistProp
                                         <span className={`text-sm font-medium truncate ${task.status === 'done' ? 'text-neutral-400 line-through' : 'text-neutral-800'}`}>
                                             {task.title}
                                         </span>
-                                    </button>
+                                    </button>}
                                     {expanded && (
                                         <div className="mt-2 ml-[19px] space-y-2">
                                             <p className="text-xs text-neutral-600 leading-relaxed">{task.summary}</p>

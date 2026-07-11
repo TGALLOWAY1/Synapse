@@ -1,6 +1,7 @@
 import type { StateCreator } from 'zustand';
 import type { WorkflowRun } from '../../types';
 import type { ProjectState } from '../types';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 
 // Persisted orchestration-metrics history. Each project keeps a capped, newest-
 // first list of WorkflowRun records (PRD generations and artifact bundles) so
@@ -24,6 +25,7 @@ export const createMetricsSlice: StateCreator<ProjectState, [], [], MetricsSlice
     workflowRuns: {},
 
     recordWorkflowRun: (run) => {
+        assertProjectCapability(get().projects[run.projectId], 'canPersistWorkflowState');
         set((state) => {
             const existing = state.workflowRuns[run.projectId] ?? [];
             const next = [run, ...existing].slice(0, RUNS_PER_PROJECT_CAP);
@@ -42,6 +44,7 @@ export const createMetricsSlice: StateCreator<ProjectState, [], [], MetricsSlice
     },
 
     clearWorkflowRuns: (projectId) => {
+        assertProjectCapability(get().projects[projectId], 'canPersistWorkflowState');
         set((state) => {
             if (!state.workflowRuns[projectId]) return state;
             const next = { ...state.workflowRuns };
