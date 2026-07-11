@@ -186,20 +186,6 @@ describe('DataModelRenderer — inspector rows + categories', () => {
         // Category badge derived (mostly_immutable + user-facing → Generated Outputs).
         expect(container).toHaveTextContent('Generated Outputs');
     });
-
-    it('offers a group-by-category control for larger, mixed-category models', () => {
-        const model: DataModelContent = {
-            entities: [
-                { name: 'User', description: '', userFacing: true, mutability: 'mutable', fields: [{ name: 'id', type: 'UUID', required: true, description: '' }], relationships: [] },
-                { name: 'AuditLog', description: '', userFacing: false, fields: [{ name: 'id', type: 'UUID', required: true, description: '' }], relationships: [] },
-                { name: 'Receipt', description: '', userFacing: true, mutability: 'immutable', fields: [{ name: 'id', type: 'UUID', required: true, description: '' }], relationships: [] },
-                { name: 'WebhookDelivery', description: '', userFacing: true, fields: [{ name: 'id', type: 'UUID', required: true, description: '' }], relationships: [] },
-            ],
-            apiEndpoints: [],
-        };
-        const { getByRole } = renderModel(model);
-        expect(getByRole('button', { name: /Group by category/i })).toBeInTheDocument();
-    });
 });
 
 // A mixed-category model that groups by default (>= 4 entities, >= 2 categories).
@@ -249,9 +235,7 @@ const groupedModel: DataModelContent = {
 
 /** The Entities list section (excludes the ER diagram, which also shows category badges). */
 function entitiesSection(getByRole: ReturnType<typeof renderModel>['getByRole']): HTMLElement {
-    const section = getByRole('button', { name: /Group by category/i }).closest('section');
-    if (!section) throw new Error('entities section not found');
-    return section as HTMLElement;
+    return getByRole('region', { name: 'Entities' });
 }
 
 describe('DataModelRenderer — grouped category headers (no redundant label)', () => {
@@ -260,8 +244,8 @@ describe('DataModelRenderer — grouped category headers (no redundant label)', 
     it('shows each category name once — in the group header, not repeated as plain text', () => {
         const result = renderModel(groupedModel);
         const section = entitiesSection(result.getByRole);
-        // Grouped by default: the header pill is the only "Core Product Data" in
-        // the list — the old duplicate plain-text label is gone and cards omit it.
+        // Multi-category models always group: the header band is the only
+        // "Core Product Data" in the list, and cards omit the redundant chip.
         expect(within(section).getAllByText('Core Product Data')).toHaveLength(1);
     });
 
@@ -272,71 +256,11 @@ describe('DataModelRenderer — grouped category headers (no redundant label)', 
         expect(within(card).queryByText('Core Product Data')).toBeNull();
     });
 
-    it('restores the per-card category chip when grouping is turned off', () => {
-        const result = renderModel(groupedModel);
-        fireEvent.click(result.getByRole('button', { name: /Group by category/i }));
-
-        const section = entitiesSection(result.getByRole);
-        // Ungrouped: no group header, so each of the two Core entities shows its
-        // own chip to preserve context.
-        expect(within(section).getAllByText('Core Product Data')).toHaveLength(2);
-
-        const card = result.container.querySelector('#data-model-entity-knowledgenode') as HTMLElement;
-        expect(within(card).getByText('Core Product Data')).toBeInTheDocument();
-    });
-});
-
-describe('DataModelRenderer — entity search', () => {
-    afterEach(() => vi.unstubAllGlobals());
-
-    it('filters entities by name and preserves category context', () => {
-        const result = renderModel(groupedModel);
-        const input = result.getByLabelText('Search entities');
-        fireEvent.change(input, { target: { value: 'flashcard' } });
-
-        expect(result.container.querySelector('#data-model-entity-flashcard')).toBeTruthy();
-        expect(result.container.querySelector('#data-model-entity-knowledgenode')).toBeNull();
-        expect(result.container.querySelector('#data-model-entity-auditlog')).toBeNull();
-        // The surviving entity keeps its category header (context preserved).
-        expect(within(entitiesSection(result.getByRole)).getByText('Core Product Data')).toBeInTheDocument();
-    });
-
-    it('matches on category and status metadata, not just the name', () => {
-        const result = renderModel(groupedModel);
-        const input = result.getByLabelText('Search entities');
-        // "system metadata" is the AuditLog category label (system, userFacing:false).
-        fireEvent.change(input, { target: { value: 'system metadata' } });
-
-        expect(result.container.querySelector('#data-model-entity-auditlog')).toBeTruthy();
-        expect(result.container.querySelector('#data-model-entity-flashcard')).toBeNull();
-    });
-
-    it('shows an empty state and a working clear button when nothing matches', () => {
-        const result = renderModel(groupedModel);
-        const input = result.getByLabelText('Search entities') as HTMLInputElement;
-        fireEvent.change(input, { target: { value: 'zzzznope' } });
-
-        expect(result.getByText(/No entities match/i)).toBeInTheDocument();
-        fireEvent.click(result.getByLabelText('Clear search'));
-        expect(input.value).toBe('');
-        expect(result.container.querySelector('#data-model-entity-flashcard')).toBeTruthy();
-    });
-});
-
-describe('DataModelRenderer — expand all / collapse all', () => {
-    it('expands and collapses every visible entity, reflecting the current state', () => {
+    it('shows the per-card category chip for a single-category (ungrouped) model', () => {
+        // twoEntityModel is all one category → no band, so each card shows its chip.
         const result = renderModel(twoEntityModel);
-        // Collapsed by default — a body field is hidden.
-        expect(result.queryByText('total_cents')).toBeNull();
-
-        const expandBtn = result.getByRole('button', { name: /Expand all/i });
-        fireEvent.click(expandBtn);
-        expect(result.getByText('total_cents')).toBeInTheDocument();
-
-        // The control now reflects the expanded state.
-        const collapseBtn = result.getByRole('button', { name: /Collapse all/i });
-        fireEvent.click(collapseBtn);
-        expect(result.queryByText('total_cents')).toBeNull();
+        const section = entitiesSection(result.getByRole);
+        expect(within(section).getAllByText('Core Product Data')).toHaveLength(2);
     });
 });
 

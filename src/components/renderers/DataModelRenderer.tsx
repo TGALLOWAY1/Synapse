@@ -1,7 +1,7 @@
 import { useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronsDownUp, ChevronsUpDown, Layers, Search, Sparkles, X } from 'lucide-react';
+import { Layers, Sparkles } from 'lucide-react';
 import type { DataModelContent, StalenessState } from '../../types';
 import {
     parseDataModelMarkdown,
@@ -14,7 +14,6 @@ import {
     entityAnchorId,
     resolveEntityId,
     slugifyEntity,
-    ENTITY_CATEGORY_LABEL,
     ENTITY_CATEGORY_ORDER,
     type DataModelNode,
     type EntityCategory,
@@ -25,7 +24,6 @@ import { DataModelOverview } from './dataModel/DataModelOverview';
 import { EntityGraph } from './dataModel/EntityGraph';
 import { EntityCard } from './dataModel/EntityCard';
 import { CategoryHeader } from './dataModel/badges';
-import { EntityGuide } from './dataModel/EntityGuide';
 
 interface EntityPair {
     entity: ParsedEntity;
@@ -140,38 +138,21 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
         [parsed, nodeById],
     );
 
+    // Entities are always organised into their derived category sections when the
+    // model spans more than one category (the mockup's organizing principle); a
+    // single-category model renders as a flat list with no header band.
     const distinctCategories = useMemo(
         () => new Set(pairs.map(p => p.node.category)).size,
         [pairs],
     );
-    const canGroup = distinctCategories >= 2 && pairs.length >= 4;
-    const [grouped, setGrouped] = useState(canGroup);
-
-    // Search filters by name, description, category, and status metadata; grouping
-    // and category context are preserved on the filtered results.
-    const [search, setSearch] = useState('');
-    const query = search.trim().toLowerCase();
-    const visiblePairs = useMemo(() => {
-        if (!query) return pairs;
-        return pairs.filter(({ entity, node }) => {
-            const haystack = [
-                entity.name,
-                entity.description,
-                ENTITY_CATEGORY_LABEL[node.category],
-                node.mutability ?? '',
-                node.userFacing === true ? 'user-facing' : node.userFacing === false ? 'system' : '',
-                node.hasPII ? 'contains pii' : 'no pii',
-            ].join(' ').toLowerCase();
-            return haystack.includes(query);
-        });
-    }, [pairs, query]);
+    const grouped = distinctCategories >= 2;
 
     const orderedPairs = useMemo(() => {
-        if (!grouped) return visiblePairs;
-        return [...visiblePairs].sort(
+        if (!grouped) return pairs;
+        return [...pairs].sort(
             (a, b) => ENTITY_CATEGORY_ORDER.indexOf(a.node.category) - ENTITY_CATEGORY_ORDER.indexOf(b.node.category),
         );
-    }, [visiblePairs, grouped]);
+    }, [pairs, grouped]);
 
     // Expansion — single-entity models open by default; larger ones start
     // collapsed for scannability.
@@ -194,22 +175,10 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
         });
 
     const focusEntity = (nodeId: string) => {
-        // Clear any active search so a graph-focused entity is never hidden.
-        setSearch('');
         setExpandedIds(prev => (prev.has(nodeId) ? prev : new Set(prev).add(nodeId)));
         const node = nodeById.get(nodeId);
         if (node) scrollTo(entityAnchorId(node.name));
     };
-
-    // Expand/Collapse-all operates over the currently-visible (filtered) set.
-    const allVisibleExpanded = orderedPairs.length > 0 && orderedPairs.every(p => expandedIds.has(p.node.id));
-    const toggleAll = () =>
-        setExpandedIds(prev => {
-            const next = new Set(prev);
-            if (allVisibleExpanded) orderedPairs.forEach(p => next.delete(p.node.id));
-            else orderedPairs.forEach(p => next.add(p.node.id));
-            return next;
-        });
 
     const resolveTargetId = (name: string) => resolveEntityId(name, nodeIdSet);
 
@@ -224,8 +193,6 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
         }
         return out;
     }, [grouped, orderedPairs]);
-
-    const showGuide = pairs.length >= 3;
 
     return (
         <div className="space-y-6">
@@ -260,15 +227,13 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
             )}
 
             {graph.nodes.length > 0 && (
-                <div id="data-model-relationships" className="scroll-mt-24">
-                    <EntityGraph graph={graph} onOpenEntity={focusEntity} />
-                </div>
+                <EntityGraph graph={graph} onOpenEntity={focusEntity} />
             )}
 
             {pairs.length > 0 && (
                 <section aria-label="Entities" className="space-y-4">
                     {/* Section header */}
-                    <div className="flex items-center justify-between gap-2">
+                    <div className="flex items-center gap-2">
                         <h3 className="text-sm font-semibold text-neutral-900 inline-flex items-center gap-1.5">
                             <Layers className="w-4 h-4 text-neutral-400" /> Entities
                             <span className="text-xs font-normal text-neutral-400">
@@ -277,105 +242,30 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
                         </h3>
                     </div>
 
-                    {/* Toolbar — search takes the full width on mobile; the secondary
-                        controls sit beside it on desktop and wrap below on mobile. */}
-                    <div className="flex flex-col sm:flex-row sm:items-center gap-2">
-                        <div className="relative w-full sm:max-w-xs">
-                            <Search size={14} className="absolute left-2.5 top-1/2 -translate-y-1/2 text-neutral-400 pointer-events-none" aria-hidden="true" />
-                            <input
-                                type="text"
-                                value={search}
-                                onChange={e => setSearch(e.target.value)}
-                                aria-label="Search entities"
-                                placeholder="Search entities…"
-                                className="w-full pl-8 pr-8 py-1.5 text-sm rounded-md border border-neutral-200 bg-white text-neutral-800 placeholder:text-neutral-400 focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:border-indigo-300"
-                            />
-                            {search && (
-                                <button
-                                    type="button"
-                                    onClick={() => setSearch('')}
-                                    aria-label="Clear search"
-                                    className="absolute right-2 top-1/2 -translate-y-1/2 p-0.5 rounded text-neutral-400 hover:text-neutral-600 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                                >
-                                    <X size={14} />
-                                </button>
-                            )}
-                        </div>
-                        <div className="flex items-center gap-1.5 flex-wrap sm:ml-auto">
-                            {canGroup && (
-                                <button
-                                    type="button"
-                                    onClick={() => setGrouped(g => !g)}
-                                    aria-pressed={grouped}
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 ${
-                                        grouped
-                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                            : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'
-                                    }`}
-                                >
-                                    <Layers size={13} /> Group by category
-                                </button>
-                            )}
-                            {pairs.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={toggleAll}
-                                    disabled={orderedPairs.length === 0}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1.5 text-xs font-medium rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 transition disabled:opacity-40 disabled:cursor-not-allowed focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
-                                >
-                                    {allVisibleExpanded ? <ChevronsDownUp size={13} /> : <ChevronsUpDown size={13} />}
-                                    {allVisibleExpanded ? 'Collapse all' : 'Expand all'}
-                                </button>
-                            )}
-                        </div>
-                    </div>
-
-                    {/* Entity list + optional supporting guide. The guide only
-                        becomes a sidebar at very wide widths (2xl) so it never
-                        squeezes the entity cards in the narrower artifact column;
-                        below that it stacks under the list as a compact panel. */}
-                    <div className={showGuide ? '2xl:grid 2xl:grid-cols-[minmax(0,1fr)_15rem] 2xl:gap-6 2xl:items-start' : ''}>
-                        <div className="space-y-6 min-w-0">
-                            {orderedPairs.length === 0 ? (
-                                <div className="rounded-lg border border-dashed border-neutral-200 bg-neutral-50/60 px-4 py-8 text-center text-sm text-neutral-500">
-                                    No entities match “{search.trim()}”.
+                    {/* Entities organised into their derived category sections. */}
+                    <div className="space-y-6">
+                        {groups.map(group => (
+                            <div key={group.category ?? 'all'} className="space-y-2.5">
+                                {group.category && (
+                                    <CategoryHeader category={group.category} count={group.items.length} />
+                                )}
+                                <div className="space-y-2.5">
+                                    {group.items.map(({ entity, node }) => (
+                                        <EntityCard
+                                            key={node.id}
+                                            entity={entity}
+                                            node={node}
+                                            expanded={expandedIds.has(node.id)}
+                                            onToggle={() => toggleEntity(node.id)}
+                                            resolveTargetId={resolveTargetId}
+                                            onNavigateToEntity={focusEntity}
+                                            showCategory={!grouped}
+                                            isMobile={isMobile}
+                                        />
+                                    ))}
                                 </div>
-                            ) : (
-                                groups.map(group => (
-                                    <div key={group.category ?? 'all'} className="space-y-2.5">
-                                        {group.category && (
-                                            <CategoryHeader category={group.category} count={group.items.length} />
-                                        )}
-                                        <div className="space-y-2.5">
-                                            {group.items.map(({ entity, node }) => (
-                                                <EntityCard
-                                                    key={node.id}
-                                                    entity={entity}
-                                                    node={node}
-                                                    expanded={expandedIds.has(node.id)}
-                                                    onToggle={() => toggleEntity(node.id)}
-                                                    resolveTargetId={resolveTargetId}
-                                                    onNavigateToEntity={focusEntity}
-                                                    showCategory={!grouped}
-                                                    isMobile={isMobile}
-                                                />
-                                            ))}
-                                        </div>
-                                    </div>
-                                ))
-                            )}
-                        </div>
-
-                        {showGuide && (
-                            <div className="mt-6 max-w-md 2xl:mt-0 2xl:max-w-none">
-                                <EntityGuide
-                                    categoryCount={distinctCategories}
-                                    grouped={grouped}
-                                    hasRelationships={graph.nodes.length > 0 && graph.edges.length > 0}
-                                    hasApiEndpoints={parsed.apiEndpoints.length > 0}
-                                />
                             </div>
-                        )}
+                        ))}
                     </div>
                 </section>
             )}
@@ -407,7 +297,7 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
             )}
 
             {parsed.apiEndpoints.length > 0 && (
-                <section id="data-model-api-endpoints" className="space-y-2 scroll-mt-24">
+                <section className="space-y-2">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">API Endpoints</h3>
                     <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
                         <table className="w-full text-xs">

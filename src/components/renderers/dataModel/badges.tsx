@@ -53,29 +53,6 @@ export function CategoryHeader({ category, count }: { category: EntityCategory; 
     );
 }
 
-/**
- * A compact, restrained legend explaining the status treatments used on entity
- * cards (status is never communicated by colour alone — each swatch is labelled).
- */
-export function StatusLegend() {
-    const rows: Array<{ swatch: string; label: string }> = [
-        { swatch: 'bg-emerald-400', label: 'User-facing — visible to end users' },
-        { swatch: 'bg-slate-400', label: 'System — internal data' },
-        { swatch: 'bg-amber-400', label: 'Mutable — can be updated' },
-        { swatch: 'bg-blue-400', label: 'Immutable — read-only after creation' },
-        { swatch: 'bg-rose-400', label: 'Contains PII — privacy-sensitive' },
-    ];
-    return (
-        <ul className="space-y-1.5">
-            {rows.map(r => (
-                <li key={r.label} className="flex items-center gap-2 text-[11px] text-neutral-600">
-                    <span className={`inline-block w-2 h-2 rounded-full shrink-0 ${r.swatch}`} aria-hidden="true" />
-                    <span className="min-w-0">{r.label}</span>
-                </li>
-            ))}
-        </ul>
-    );
-}
 
 /**
  * The small set of high-value, semantic status labels for an entity, in priority

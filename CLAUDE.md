@@ -968,15 +968,15 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     diagrams (rounded node cards, deterministic layered SVG layout, directional
     cardinality-labelled edges, click-a-node-to-open-its-card), and the
     **Entities browser** — a scannable, low-noise entity list (redesigned
-    2026-07). The browser has a section header ("Entities" + a live entity
-    count) and a compact toolbar: a **Search** field (filters by name /
-    description / category / status metadata; a graph-node click via
-    `focusEntity` clears the search so a focused entity is never hidden), the
-    **Group by category** toggle, and **Expand all / Collapse all** (which
-    operate over the currently-visible/filtered set). Grouped entities render
-    under a **connected, soft-tinted `CategoryHeader` band** (icon tile + name +
-    count pill — replacing the old detached category pill + horizontal rule);
-    the band's tint comes from `CATEGORY_STYLES[category].band`/`.count`. Each
+    2026-07). It is deliberately minimal: a section header ("Entities" + a live
+    entity count) and then the entities themselves — **no search box, no
+    group-by-category toggle, and no expand-all control** (all removed by owner
+    request as unnecessary noise on this surface). A model spanning **more than
+    one derived category is always grouped** into **connected, soft-tinted
+    `CategoryHeader` bands** (icon tile + name + count pill — replacing the old
+    detached category pill + horizontal rule; band tint from
+    `CATEGORY_STYLES[category].band`/`.count`); a single-category model renders as
+    a flat list (no band) with each card showing its own category chip. Each
     **collapsible entity card** (`EntityCard`) shows, collapsed: icon + name +
     a small set of high-value **status chips** (`EntityAttributeBadges` — only
     Contains PII / User-facing-or-System / mutability / No PII, in that priority;
@@ -990,12 +990,7 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     grouped field tables (colour-coded type chips, required/indexed markers) and
     compact **inspector rows** (`InspectorRow`) for relationships / constraints /
     privacy / indexes in a fixed colour language (relationship=blue,
-    constraint=purple, privacy=rose, index=slate, warning=amber). A compact,
-    non-duplicative **`EntityGuide`** (status legend + category count + in-page
-    jump links to the relationships diagram / API endpoints) renders as a sticky
-    sidebar only at `2xl` (so it never squeezes the cards in the narrower artifact
-    column) and stacks below the list otherwise — it deliberately omits the six
-    header metrics, which already live in `DataModelOverview`. All of it is
+    constraint=purple, privacy=rose, index=slate, warning=amber). All of it is
     **derived, never hand-drawn**, by the pure, unit-tested
     **`src/lib/dataModelGraph.ts`** (`analyzeDataModel` → graph + summary): it
     recovers structured relationships from the parser's `RELATIONSHIP` callouts
