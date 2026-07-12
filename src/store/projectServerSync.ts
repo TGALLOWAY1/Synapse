@@ -15,6 +15,7 @@ import {
   mergeBundlesIntoSource,
   overwriteBundlesIntoSource,
   projectSlicesChanged,
+  pickBundleSource,
   type BundleSource,
   type ProjectBundle,
 } from '../lib/projectBundle';
@@ -53,17 +54,7 @@ const pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let knownProjectIds = new Set<string>();
 
 function bundleSourceOf(state: ReturnType<typeof useProjectStore.getState>): BundleSource {
-  return {
-    projects: state.projects,
-    spineVersions: state.spineVersions,
-    historyEvents: state.historyEvents,
-    branches: state.branches,
-    artifacts: state.artifacts,
-    artifactVersions: state.artifactVersions,
-    feedbackItems: state.feedbackItems,
-    tasks: state.tasks,
-    workflowRuns: state.workflowRuns,
-  };
+  return pickBundleSource(state);
 }
 
 /** Project ids worth syncing (excludes the read-only public demo). */

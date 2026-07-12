@@ -1542,10 +1542,14 @@ rules:
   namespaced data of their own), and the import **merges additively** (existing
   ids always win, so a re-import can only add projects, never overwrite/delete
   one the user already has). **Do not** read the project store before
-  `applyProjectUser` has run for the current user, and keep
-  `emptyPersistedState()` in `projectUserSync` in sync with **both** the
-  persisted slice fields **and** the slices re-persisted by
-  `repersistCurrentState()`.
+  `applyProjectUser` has run for the current user. The nine project-keyed
+  collections are listed in exactly one place —
+  `ALL_PROJECT_COLLECTIONS`/`ARRAY_COLLECTIONS` in `src/lib/projectBundle.ts`
+  — and `emptyPersistedState()`/`repersistCurrentState()` in `projectUserSync`
+  (plus `MERGEABLE_COLLECTIONS` in `userScope.ts`, `bundleSourceOf` in
+  `projectServerSync.ts`, and `projectRecovery.ts`) all derive from it via
+  `emptyBundleSource()`/`pickBundleSource()`, so adding a tenth collection is a
+  one-line change there rather than five hand-edits.
   - **Namespace-switch data-loss guard:** `applyProjectUser` wipes in-memory
     state (`setState(emptyPersistedState())`, which queues a *debounced* persist
     write of the empty state to the target namespace) and then calls

@@ -16,26 +16,18 @@ import {
   mergeNamespaceInto,
 } from './userScope';
 import { projectsDebug } from '../lib/projectsDebug';
+import { emptyBundleSource, pickBundleSource } from '../lib/projectBundle';
 
 // Re-export the offer/decline helpers so UI imports a single store-facing
 // module rather than reaching into userScope directly.
 export { getLegacyImportOffer, declineLegacyImport } from './userScope';
 
-// Fresh, empty values for every persisted collection. Used to wipe in-memory
-// state before rehydrating from a different user's namespace so nothing from
-// the previous account survives the switch.
+// Fresh, empty values for every persisted collection (ALL_PROJECT_COLLECTIONS
+// in projectBundle.ts — the single source of truth for this key list). Used to
+// wipe in-memory state before rehydrating from a different user's namespace so
+// nothing from the previous account survives the switch.
 function emptyPersistedState() {
-  return {
-    projects: {},
-    spineVersions: {},
-    historyEvents: {},
-    branches: {},
-    artifacts: {},
-    artifactVersions: {},
-    feedbackItems: {},
-    tasks: {},
-    workflowRuns: {},
-  };
+  return emptyBundleSource();
 }
 
 /**
@@ -53,18 +45,7 @@ function emptyPersistedState() {
  * by `setState(emptyPersistedState())` (see applyProjectUser).
  */
 function repersistCurrentState(): void {
-  const s = useProjectStore.getState();
-  useProjectStore.setState({
-    projects: s.projects,
-    spineVersions: s.spineVersions,
-    historyEvents: s.historyEvents,
-    branches: s.branches,
-    artifacts: s.artifacts,
-    artifactVersions: s.artifactVersions,
-    feedbackItems: s.feedbackItems,
-    tasks: s.tasks,
-    workflowRuns: s.workflowRuns,
-  });
+  useProjectStore.setState(pickBundleSource(useProjectStore.getState()));
 }
 
 /**

@@ -1,5 +1,5 @@
 import { json, methodNotAllowed } from '../_lib/response.js';
-import { parseJsonBody } from '../_lib/validate.js';
+import { readJsonBody } from '../_lib/body.js';
 import { requireUser } from '../_lib/requireUser.js';
 import { isVaultConfigured } from '../_lib/cryptoVault.js';
 import { getDecryptedProviderKey } from '../_lib/providerKeys.js';
@@ -49,7 +49,7 @@ export default async function handler(req, res) {
     });
   }
 
-  const body = await parseJsonBody(req);
+  const body = await readJsonBody(req);
   const prompt = typeof body?.prompt === 'string' ? body.prompt : '';
   const size = ALLOWED_SIZES.has(body?.size) ? body.size : '1024x1024';
   const quality = ALLOWED_QUALITY.has(body?.quality) ? body.quality : 'low';
