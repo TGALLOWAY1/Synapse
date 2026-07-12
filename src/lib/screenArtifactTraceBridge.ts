@@ -25,10 +25,13 @@ import type {
 import { normalizeFeatureId } from './screenReadiness';
 import { extractStructuredPlan, parseImplementationPlan, parseMilestoneBody } from './services/implementationPlanParser';
 import { parseDataModelMarkdown } from './services/dataModelMarkdown';
+import { TRACE_CONFIDENCE_RANK as CONFIDENCE_RANK } from './screenStatusShared';
+import type { TraceConfidence } from './screenStatusShared';
 
 // --- Types -------------------------------------------------------------------
 
-export type TraceConfidence = 'explicit' | 'strong' | 'weak' | 'estimated' | 'missing';
+export type { TraceConfidence } from './screenStatusShared';
+export { TRACE_CONFIDENCE_LABELS } from './screenStatusShared';
 
 export type DataModelMatchSource =
     | 'explicit_screen_ref'
@@ -122,10 +125,6 @@ export interface ScreenTraceContext {
 
 // --- Confidence helpers ------------------------------------------------------
 
-const CONFIDENCE_RANK: Record<TraceConfidence, number> = {
-    missing: 0, estimated: 1, weak: 2, strong: 3, explicit: 4,
-};
-
 /** The stronger of two confidences (ties → the first). */
 function maxConfidence(a: TraceConfidence, b: TraceConfidence): TraceConfidence {
     return CONFIDENCE_RANK[a] >= CONFIDENCE_RANK[b] ? a : b;
@@ -142,14 +141,6 @@ function rollup(confidences: readonly TraceConfidence[]): TraceConfidence {
     for (const c of confidences) best = maxConfidence(best, c);
     return best;
 }
-
-export const TRACE_CONFIDENCE_LABELS: Record<TraceConfidence, string> = {
-    explicit: 'Explicit trace',
-    strong: 'Strong match',
-    weak: 'Weak match',
-    estimated: 'Estimated',
-    missing: 'Missing',
-};
 
 // --- Text helpers ------------------------------------------------------------
 

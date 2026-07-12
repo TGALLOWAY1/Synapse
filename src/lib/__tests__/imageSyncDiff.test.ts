@@ -2,21 +2,20 @@ import { describe, it, expect } from 'vitest';
 import { computeImagesToUpload, computeOrphanedHashes } from '../imageSyncDiff';
 
 describe('computeImagesToUpload', () => {
-  it('uploads only keys absent from BOTH the server and the uploaded markers', () => {
+  it('uploads only keys absent from the server refs', () => {
     const out = computeImagesToUpload(
       ['a', 'b', 'c', 'd'],
-      new Set(['b']), // already on server
-      new Set(['c']), // already marked uploaded
+      new Set(['b', 'c']), // already on server
     );
     expect(out.sort()).toEqual(['a', 'd']);
   });
 
   it('dedups repeated local keys', () => {
-    expect(computeImagesToUpload(['a', 'a', 'a'], new Set(), new Set())).toEqual(['a']);
+    expect(computeImagesToUpload(['a', 'a', 'a'], new Set())).toEqual(['a']);
   });
 
-  it('returns nothing when everything is already synced', () => {
-    expect(computeImagesToUpload(['a', 'b'], new Set(['a', 'b']), new Set())).toEqual([]);
+  it('returns nothing when everything is already on the server', () => {
+    expect(computeImagesToUpload(['a', 'b'], new Set(['a', 'b']))).toEqual([]);
   });
 });
 

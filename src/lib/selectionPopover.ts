@@ -1,8 +1,7 @@
 /**
  * Pure, framework-agnostic helpers for the PRD text-selection action dialog.
  *
- * These were extracted from the duplicated inline logic in
- * `SelectableSpine.tsx` and `StructuredPRDView.tsx` so the selection-validation
+ * Consumed by `StructuredPRDView.tsx` so the selection-validation
  * and viewport-clamping rules can be unit tested and shared by the
  * desktop popover and the mobile bottom sheet.
  */

@@ -33,34 +33,3 @@ export function validateName(value) {
   if (trimmed.length > MAX_NAME_LEN) return { ok: false, error: 'Name is too long.' };
   return { ok: true, value: trimmed };
 }
-
-/**
- * Read and JSON-parse the request body. Vercel Node functions sometimes deliver
- * `req.body` already parsed, sometimes as a raw string, and sometimes as a
- * stream depending on the content-type header. Handle all three.
- */
-export async function parseJsonBody(req) {
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return req.body;
-  }
-  if (typeof req.body === 'string' && req.body.length > 0) {
-    try {
-      return JSON.parse(req.body);
-    } catch {
-      return {};
-    }
-  }
-
-  const chunks = [];
-  for await (const chunk of req) {
-    chunks.push(typeof chunk === 'string' ? Buffer.from(chunk) : chunk);
-  }
-  if (chunks.length === 0) return {};
-  const raw = Buffer.concat(chunks).toString('utf8');
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}

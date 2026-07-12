@@ -2,7 +2,7 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     SpineVersion, HistoryEvent, StructuredPRD,
-    QualityScores, GenerationMeta, SpineSafetyReview,
+    SpineSafetyReview,
     PreflightSession,
 } from '../../types';
 import type { ProjectState, SpineGenerationMetaInput } from '../types';
@@ -21,7 +21,6 @@ export type SpineSlice = {
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
     editSpineStructuredPRD: ProjectState['editSpineStructuredPRD'];
     revertSpineToVersion: ProjectState['revertSpineToVersion'];
-    updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
     setSpineError: ProjectState['setSpineError'];
@@ -282,7 +281,6 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 if (s.id !== spineId) return s;
                 const next: SpineVersion = { ...s, structuredPRD, responseText };
                 if (meta?.sourcePrompt !== undefined) next.sourcePrompt = meta.sourcePrompt;
-                if (meta?.qualityScores !== undefined) next.qualityScores = meta.qualityScores;
                 if (meta?.generationMeta !== undefined) next.generationMeta = meta.generationMeta;
                 if (meta?.model !== undefined) next.model = meta.model;
                 if (meta?.prdVersion !== undefined) next.prdVersion = meta.prdVersion;
@@ -464,7 +462,6 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             };
             // Optional generation-meta overrides (e.g. updated failedSections).
             if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
-            if (opts?.meta?.qualityScores !== undefined) newSpine.qualityScores = opts.meta.qualityScores;
             if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
             if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
             if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
@@ -540,27 +537,6 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         });
 
         return { newSpineId };
-    },
-
-    updateSpineQualityScores: (
-        projectId: string,
-        spineId: string,
-        scores: QualityScores,
-        generationMeta?: GenerationMeta,
-    ) => {
-        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
-        set((state) => {
-            const projectSpines = state.spineVersions[projectId] || [];
-            const updatedSpines = projectSpines.map(s => {
-                if (s.id !== spineId) return s;
-                return {
-                    ...s,
-                    qualityScores: scores,
-                    ...(generationMeta ? { generationMeta } : {}),
-                };
-            });
-            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
-        });
     },
 
     updateProjectProductMetadata: (

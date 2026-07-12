@@ -49,7 +49,8 @@ below are the durable follow-ups that need backend work.
       See `docs/SERVER_PROJECT_STORAGE.md`. Implemented as: `api/_lib/projectsStore.js`
       (owner-scoped data layer + indexes), `api/projects.js` (session-gated CRUD),
       and the client sync layer (`projectBundle.ts`, `projectsClient.ts`,
-      `projectServerSync.ts`, `projectSyncStore.ts`, `projectMigration.ts`).
+      `projectServerSync.ts`, `projectSyncStore.ts`; upload state derives from
+      durable `projectSyncMeta`).
 
   Deferred follow-ups for server project storage:
   - [ ] **Conflict resolution.** Pull is currently *additive* — a server project

@@ -64,10 +64,6 @@ Phase 1 already applied in commit `claude/synapse-codebase-audit-tIUSS`.
 - [ ] **Eventually retire `onRehydrateStorage` legacy stage migration** in
   `src/store/projectStore.ts:42-58` once analytics show no projects in
   legacy stages for 60+ days.
-- [ ] **Eventually retire `qualityScores` field** on `SpineVersion` and its
-  conditional setters in `src/store/slices/spineSlice.ts:121, 143`. Pure
-  backward-compat; defer indefinitely unless a v3 schema rev forces a clean
-  break.
 
 ### Optional / opportunistic
 

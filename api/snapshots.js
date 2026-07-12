@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { put, list, del } from '@vercel/blob';
 import { json, methodNotAllowed } from './_lib/response.js';
+import { readJsonBody } from './_lib/body.js';
 import { enforceRateLimit } from './_lib/rateLimit.js';
 import { requireOwner } from './_lib/ownerAuth.js';
 
@@ -37,35 +38,6 @@ const DEMO_POINTER_PATH = 'snapshots/_demo.json';
 const ID_RE = /^[0-9a-f-]{8,64}$/i;
 const IMAGE_KEY_MAX = 512;
 const CURRENT_SCHEMA_VERSION = 2;
-
-async function readJsonBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body;
-  if (typeof req.body === 'string' && req.body.length > 0) {
-    return JSON.parse(req.body);
-  }
-  return await new Promise((resolve, reject) => {
-    let total = 0;
-    const chunks = [];
-    req.on('data', (chunk) => {
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        reject(new Error('payload_too_large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on('error', reject);
-  });
-}
 
 const nowIso = () => new Date().toISOString();
 
@@ -146,7 +118,7 @@ async function clearDemoPointer() {
 async function handlePost(req, res) {
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
   } catch (err) {
     if (err?.message === 'payload_too_large') {
       return json(res, 413, { error: 'payload_too_large', limitBytes: MAX_BODY_BYTES });
@@ -237,7 +209,7 @@ async function handleImagePost(id, req, res) {
 
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
   } catch (err) {
     if (err?.message === 'payload_too_large') {
       return json(res, 413, { error: 'payload_too_large', limitBytes: MAX_BODY_BYTES });

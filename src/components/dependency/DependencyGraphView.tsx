@@ -23,6 +23,7 @@ import { DEPENDENCY_STATUS_LABELS } from '../../lib/artifactFreshness';
 import { findFeatureReferences } from '../../lib/spineChangeAnalysis';
 import type { ArtifactSlotKey, ProjectPlatform, StructuredPRD } from '../../types';
 import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface DependencyGraphViewProps {
     projectId: string;
@@ -460,60 +461,37 @@ export function DependencyGraphView({
 
             {/* Update confirm modal */}
             {updateConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setUpdateConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title={updateConfirm.title}
+                    cancelLabel="Cancel"
+                    confirmLabel={
+                        <>
+                            <RefreshCcw size={13} />
+                            {updateConfirm.order.length === 1 ? 'Update' : `Update ${updateConfirm.order.length} artifacts`}
+                        </>
+                    }
+                    onCancel={() => setUpdateConfirm(null)}
+                    onConfirm={() => runUpdates(updateConfirm.order)}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={e => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="dep-update-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="dep-update-title" className="text-base font-bold text-neutral-900">
-                                {updateConfirm.title}
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                {updateConfirm.order.length === 1
-                                    ? `Regenerates ${titleOf(updateConfirm.order[0])} as a new version.`
-                                    : 'Regenerates these artifacts in dependency order, so nothing rebuilds from a stale input:'}
-                            </p>
-                            {updateConfirm.order.length > 1 && (
-                                <ol className="mt-2 space-y-1">
-                                    {updateConfirm.order.map((id, i) => (
-                                        <li key={id} className="flex items-center gap-2 text-sm text-neutral-800">
-                                            <span className="w-4 text-right text-[11px] text-neutral-400">{i + 1}.</span>
-                                            {titleOf(id)}
-                                        </li>
-                                    ))}
-                                </ol>
-                            )}
-                            <p className="text-xs text-neutral-500 mt-2">
-                                Current versions remain available in version history.
-                            </p>
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setUpdateConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => runUpdates(updateConfirm.order)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <RefreshCcw size={13} />
-                                {updateConfirm.order.length === 1 ? 'Update' : `Update ${updateConfirm.order.length} artifacts`}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        {updateConfirm.order.length === 1
+                            ? `Regenerates ${titleOf(updateConfirm.order[0])} as a new version.`
+                            : 'Regenerates these artifacts in dependency order, so nothing rebuilds from a stale input:'}
+                    </p>
+                    {updateConfirm.order.length > 1 && (
+                        <ol className="mt-2 space-y-1">
+                            {updateConfirm.order.map((id, i) => (
+                                <li key={id} className="flex items-center gap-2 text-sm text-neutral-800">
+                                    <span className="w-4 text-right text-[11px] text-neutral-400">{i + 1}.</span>
+                                    {titleOf(id)}
+                                </li>
+                            ))}
+                        </ol>
+                    )}
+                    <p className="text-xs text-neutral-500 mt-2">
+                        Current versions remain available in version history.
+                    </p>
+                </ConfirmDialog>
             )}
         </div>
     );

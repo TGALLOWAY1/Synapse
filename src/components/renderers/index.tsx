@@ -6,11 +6,9 @@ import type { ImplementationPlanProgress } from '../../lib/services/implementati
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
-import { ComponentInventoryRenderer } from './ComponentInventoryRenderer';
 import { DesignSystemRenderer } from './DesignSystemRenderer';
 import { UserFlowsRenderer } from './UserFlowsRenderer';
 import { ImplementationPlanRenderer } from './ImplementationPlanRenderer';
-import { PromptPackRenderer } from './PromptPackRenderer';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 
@@ -31,7 +29,7 @@ interface DispatchProps {
      * renderers fall back to a content-only view when absent.
      */
     projectId?: string;
-    /** Consumed by `prompt_pack` and `user_flows` for canonical feature ID resolution. */
+    /** Consumed by `user_flows` for canonical feature ID resolution. */
     features?: Feature[];
     /** Consumed only by `user_flows` to surface heuristic related-artifact links. */
     uxPages?: UXPage[];
@@ -56,14 +54,6 @@ interface DispatchProps {
     /** Only consumed by `implementation_plan`: source artifact versions the
      * plan was generated from ("Data Model v1"), for coverage provenance. */
     sourceVersions?: string[];
-    /** Only consumed by `prompt_pack`; per-prompt user edit overlay keyed by index. */
-    promptEdits?: Record<number, string>;
-    /** Only consumed by `prompt_pack`; persists the new edit overlay. */
-    onUpdatePromptEdits?: (next: Record<number, string>) => void;
-    /** Only consumed by `prompt_pack`; creation timestamp of the artifact version. */
-    generatedAt?: number;
-    /** Only consumed by `prompt_pack`; current artifact version number. */
-    versionNumber?: number;
     /** Consumed by `implementation_plan`: source PRD version label. (Data Model
      * shows provenance at the page level, so it doesn't take this.) */
     prdVersionLabel?: string;
@@ -75,17 +65,24 @@ interface DispatchProps {
  * Render artifact content using a type-specific renderer if available,
  * falling back to ReactMarkdown for markdown content.
  *
- * Three subtypes (`screen_inventory`, `data_model`, `component_inventory`)
- * are stored as JSON when generation succeeds and rendered through
- * structured renderers; the structured renderers return `null` if the
- * content turns out not to be JSON, and we fall through.
+ * Two subtypes (`screen_inventory`, `data_model`) are stored as JSON when
+ * generation succeeds and rendered through structured renderers; the
+ * structured renderers return `null` if the content turns out not to be
+ * JSON, and we fall through. (`component_inventory` is also JSON but is a
+ * hidden artifact with no reachable renderer — see below.)
  *
- * The four markdown-only subtypes (`design_system`, `user_flows`,
- * `implementation_plan`, `prompt_pack`) get bespoke layouts that parse
+ * The markdown-only subtypes (`design_system`, `user_flows`,
+ * `implementation_plan`) get bespoke layouts that parse
  * the conventional markdown shapes into rich visual presentations
  * (color swatches, milestone timeline, prompt cards, etc.). Each
  * gracefully falls back to ReactMarkdown if the conventions don't
  * match — older artifacts always remain readable.
+ *
+ * `component_inventory` and `prompt_pack` have no dispatch branch: both are
+ * hidden/retired `CoreArtifactSubtype`s (see `coreArtifactPipeline.ts`) that
+ * `ArtifactWorkspace`'s `slotMetas` filters out of the sidebar, so `selected`
+ * can never hold either value and these subtypes fall through to the plain
+ * ReactMarkdown renderer (unreachable in practice).
  */
 function isJsonString(str: string): boolean {
     try {
@@ -114,10 +111,6 @@ export function ArtifactContentRenderer({
     onConvertToTasks,
     onUpdatePlanProgress,
     sourceVersions,
-    promptEdits,
-    onUpdatePromptEdits,
-    generatedAt,
-    versionNumber,
     prdVersionLabel,
     staleness,
 }: DispatchProps) {
@@ -128,9 +121,6 @@ export function ArtifactContentRenderer({
         // PRD provenance (`prdVersionLabel`) is shown once at the page level, not
         // repeated inside the Data Model summary card — so it isn't passed here.
         return <DataModelRenderer content={content} staleness={staleness} />;
-    }
-    if (subtype === 'component_inventory' && isJsonString(content)) {
-        return <ComponentInventoryRenderer content={content} />;
     }
     if (subtype === 'design_system') {
         return <DesignSystemRenderer content={content} metadata={metadata} projectId={projectId} />;
@@ -161,18 +151,6 @@ export function ArtifactContentRenderer({
                 onConvertToTasks={onConvertToTasks}
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
-            />
-        );
-    }
-    if (subtype === 'prompt_pack') {
-        return (
-            <PromptPackRenderer
-                content={content}
-                features={features}
-                edits={promptEdits}
-                onUpdateEdits={onUpdatePromptEdits}
-                generatedAt={generatedAt}
-                versionNumber={versionNumber}
             />
         );
     }

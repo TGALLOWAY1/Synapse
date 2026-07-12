@@ -1,6 +1,7 @@
 import { handleUpload } from '@vercel/blob/client';
 import { del } from '@vercel/blob';
 import { json, methodNotAllowed } from './_lib/response.js';
+import { readJsonBody } from './_lib/body.js';
 import { requireUser } from './_lib/requireUser.js';
 import { enforceRateLimit } from './_lib/rateLimit.js';
 import {
@@ -83,7 +84,7 @@ async function handleImageUploadToken(req, res) {
 
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
   } catch (error) {
     if (error?.code === 'payload_too_large') {
       return json(res, 413, { error: 'payload_too_large', limitBytes: MAX_BODY_BYTES });
@@ -168,32 +169,6 @@ async function handleImageUploadToken(req, res) {
   }
 }
 
-async function readJsonBody(req) {
-  if (req.body && typeof req.body === 'object' && !Buffer.isBuffer(req.body)) {
-    return req.body;
-  }
-  const chunks = [];
-  let total = 0;
-  for await (const chunk of req) {
-    const buf = typeof chunk === 'string' ? Buffer.from(chunk) : chunk;
-    total += buf.length;
-    if (total > MAX_BODY_BYTES) {
-      const err = new Error('payload_too_large');
-      err.code = 'payload_too_large';
-      throw err;
-    }
-    chunks.push(buf);
-  }
-  if (chunks.length === 0) return {};
-  const raw = Buffer.concat(chunks).toString('utf8');
-  if (!raw) return {};
-  try {
-    return JSON.parse(raw);
-  } catch {
-    return {};
-  }
-}
-
 function truthy(value) {
   return value === '1' || value === 'true';
 }
@@ -256,7 +231,7 @@ export default async function handler(req, res) {
 
     if (req.method === 'PUT') {
       if (!isValidProjectId(id)) return json(res, 400, { error: 'invalid_id' });
-      const body = await readJsonBody(req);
+      const body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
       const bundle = body?.bundle ?? body;
       if (!bundle || typeof bundle !== 'object' || !bundle.project) {
         return json(res, 400, { error: 'invalid_bundle' });
@@ -291,14 +266,14 @@ export default async function handler(req, res) {
 
     if (req.method === 'POST') {
       if (action === 'import') {
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
         const bundles = Array.isArray(body?.bundles) ? body.bundles : [];
         const result = await importProjects(userId, bundles);
         return json(res, 200, result);
       }
       if (action === 'image-ref-put') {
         if (!isValidProjectId(id)) return json(res, 400, { error: 'invalid_id' });
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
         const ref = body?.ref ?? body;
         if (!isValidRef(ref)) return json(res, 400, { error: 'invalid_ref' });
         // The blobUrl must point inside the caller's own per-user prefix — never
@@ -311,7 +286,7 @@ export default async function handler(req, res) {
       }
       if (action === 'image-ref-delete') {
         if (!isValidProjectId(id)) return json(res, 400, { error: 'invalid_id' });
-        const body = await readJsonBody(req);
+        const body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
         const keys = Array.isArray(body?.keys) ? body.keys : [];
         const { deletedCount, orphanedBlobUrls } = await deleteImageRefs(userId, id, keys);
         await deleteBlobs(orphanedBlobUrls);

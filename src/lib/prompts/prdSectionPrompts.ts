@@ -45,17 +45,6 @@ ${PROMPT_CONTRACT}
 
 ${RUBRIC_DEFINITION}`;
 
-// Preamble for RETIRED sections (legacy single-section retry only). Omits
-// RUBRIC_DEFINITION: its lean-PRD rules ("database schemas, state machines …
-// do NOT belong in the PRD") would directly contradict these sections' own
-// asks (richDataModel / stateMachines / implementationPlan) and could thin or
-// empty the regenerated slice. A legacy retry must reproduce full detail.
-const RETIRED_SECTION_PREAMBLE = `${SAFETY_OVERRIDE}
-
-You are a senior product strategist and tech lead regenerating one section of an existing full-detail structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product. Produce the complete level of detail this section's schema asks for.
-
-${PROMPT_CONTRACT}`;
-
 const UNAVAILABLE = '<unavailable — infer conservatively and flag uncertainties as assumptions>';
 
 // Serialize a subset of the upstream PRD as compact JSON. Returns the
@@ -155,30 +144,6 @@ For every must- and should-priority feature, populate successCriteria, edgeCases
         };
     },
 
-    // ── RETIRED — legacy single-section retry only (see RETIRED_PRD_SECTIONS).
-    // The data_model artifact owns this detail now. Do NOT extend this builder
-    // or re-add the section to DEFAULT_PRD_SECTIONS.
-    data_model: (ctx) => {
-        const features = pick(ctx.upstream, 'features', 'featureSystems');
-        const grounding = pick(ctx.upstream, 'domainEntities', 'primaryActions');
-        const hasFeatures = features !== UNAVAILABLE;
-        const note = !hasFeatures ? missingNote('features') : '';
-        return {
-            system: `${RETIRED_SECTION_PREAMBLE}
-
-You are generating the data_model slice: richDataModel, stateMachines.
-${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
-            user: `${note}Product idea:\n${ctx.idea}
-
-${hasFeatures ? `Features: ${features}` : ''}
-Grounding entities: ${grounding}
-
-Return JSON with:
-- richDataModel: { entities: array of { name, description, fields (array of { name, type, required, notes? }), relationships?, constraints?, examples? } } — 4–8 entities. Examples must be realistic records using real-world names, statuses, and IDs.
-- stateMachines: array of { entity, states: array of { name, trigger?, nextStates?, userVisible?: string[], systemBehavior?: string[] } } — for 2–3 stateful entities. Provide trigger and nextStates for every non-terminal state. userVisible and systemBehavior are arrays of 1–5 distinct short sentences (≤ 140 chars each); never one paragraph, never repeat the same sentence.`,
-        };
-    },
-
     ux_loops: (ctx) => {
         const features = pick(ctx.upstream, 'features');
         const thesis = pick(ctx.upstream, 'productThesis', 'jtbd');
@@ -267,38 +232,6 @@ Return JSON with:
 - successMetrics: array of { name, target? } — 5–8 measurable product success criteria spanning activation, engagement, conversion, quality, and operational metrics. State the decision-level target; do NOT specify instrumentation, event names, or tracking implementation — analytics detail belongs to downstream artifacts.`,
         };
     },
-
-    // ── RETIRED — legacy single-section retry only (see RETIRED_PRD_SECTIONS).
-    // The implementation_plan artifact owns this detail now. Do NOT extend this
-    // builder or re-add the section to DEFAULT_PRD_SECTIONS.
-    implementation_plan: (ctx) => {
-        const features = pick(ctx.upstream, 'features', 'featureSystems');
-        const dataModel = pick(ctx.upstream, 'richDataModel');
-        const arch = pick(ctx.upstream, 'architecture', 'architectureFlows');
-        const hasFeatures = features !== UNAVAILABLE;
-        const hasArch = arch !== UNAVAILABLE;
-        const note = (!hasFeatures ? missingNote('features') : '') +
-            (!hasArch ? missingNote('architecture') : '');
-        return {
-            system: `${RETIRED_SECTION_PREAMBLE}
-
-You are generating the implementation_plan slice: a phased development roadmap. Phases and their goals must be concrete and actionable, not abstract; each phase must state the reasoning or dependency that determines its ordering.
-${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
-            user: `${note}Product idea:\n${ctx.idea}
-
-${hasFeatures ? `Features: ${features}` : ''}
-${dataModel !== UNAVAILABLE ? `Data model: ${dataModel}` : ''}
-${hasArch ? `Architecture: ${arch}` : ''}
-
-Return JSON with:
-- implementationPlan: {
-    phases: array of { name (e.g. "Phase 1: Foundation"), goals (array of strings), featureIds? (array of feature IDs from the features list), estimatedWeeks? },
-    techStack: array of strings (key technologies),
-    teamNotes?: string (team structure / hiring needs)
-  }
-Produce 3–5 phases from MVP foundation through full launch. Every must- and should-priority feature should map to exactly one phase via featureIds.`,
-        };
-    },
 };
 
 export const buildSectionPrompt = (
@@ -309,20 +242,15 @@ export const buildSectionPrompt = (
     return builder(ctx);
 };
 
-// Keyed by the FULL SectionId union — retired sections (data_model,
-// implementation_plan) keep their entries so legacy failed-section banners
-// and retries still resolve a title.
 export const SECTION_TITLES: Record<SectionId, string> = {
     product_basics: 'Product Basics',
     product_thesis: 'Product Thesis',
     grounding: 'Domain Grounding',
     features: 'Features',
-    data_model: 'Data Model',
     ux_loops: 'UX & Loops',
     architecture: 'Architecture',
     quality_risks: 'Risks',
     metrics_scope: 'Metrics & Scope',
-    implementation_plan: 'Implementation Plan',
 };
 
 /**
@@ -335,10 +263,8 @@ export const SECTION_DESCRIPTIONS: Record<SectionId, string> = {
     product_thesis: 'Creating the product thesis and value proposition',
     grounding: 'Identifying domain entities and primary actions',
     features: 'Specifying core features and capabilities',
-    data_model: 'Designing the data model and entities',
     ux_loops: 'Mapping key user flows and journeys',
     architecture: 'Outlining the technical architecture',
     quality_risks: 'Assessing risks and quality concerns',
     metrics_scope: 'Defining success metrics and project scope',
-    implementation_plan: 'Assembling the implementation roadmap',
 };

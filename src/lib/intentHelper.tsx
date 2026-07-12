@@ -21,7 +21,7 @@ export function getIntentInfo(text: string): IntentInfo | null {
     return match ? { intent: match.intent, helper: match.helper } : null;
 }
 
-/** Inline hint used in SelectableSpine's popover */
+/** Inline hint used in the selection popover */
 export function IntentHelperInline({ text }: { text: string }): React.ReactElement | null {
     const info = getIntentInfo(text);
     if (!info) return null;

@@ -141,9 +141,10 @@ Session-gated, rate-limited CRUD. All bodies are JSON; identity is the cookie.
 - Local projects are **never deleted on import** — they remain in `localStorage`
   as the offline cache.
 - Import is **idempotent**: the project's stable UUID is the server primary key,
-  so re-importing the same local project updates rather than duplicates. A local
-  migration marker (`synapse-projects-server-migrated::u:<userId>`) records which
-  local project ids have been pushed so the import banner doesn't re-offer them.
+  so re-importing the same local project updates rather than duplicates. There is
+  no separate migration-marker store — the "N local projects uploaded" count is
+  derived from durable sync meta (`projectSyncMeta`: a project is already
+  uploaded once it has a recorded `lastCloudSavedAt` / `lastSeenServerRevision`).
 - All sync/import failures are **non-fatal and logged** (`projectsDebug`) — a
   failed save leaves the local copy intact and surfaces a "Sync failed" state
   rather than throwing away work.

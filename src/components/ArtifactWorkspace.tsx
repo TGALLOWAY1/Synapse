@@ -25,6 +25,7 @@ import { FreshnessBadge } from './FreshnessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
+import { ConfirmDialog } from './common/ConfirmDialog';
 import { v4 as uuidv4 } from 'uuid';
 import {
     tryParsePayload, extractMockupSettings, mergeExtraScreens,
@@ -1289,9 +1290,6 @@ export function ArtifactWorkspace({
                         : 'responsive') as 'mobile' | 'desktop' | 'responsive',
             }
             : undefined;
-        const promptEdits = subtype === 'prompt_pack'
-            ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
-            : undefined;
         // Legacy projects may hold a standalone prompt_pack artifact (retired
         // subtype, no sidebar row). The Implementation Plan view consumes its
         // content through the adapter so those prompts appear as prompt packs.
@@ -1301,13 +1299,6 @@ export function ArtifactWorkspace({
                 const packPreferred = packArtifact ? getPreferredVersion(projectId, packArtifact.id) : undefined;
                 return packPreferred?.content;
             })()
-            : undefined;
-        const handleUpdatePromptEdits = subtype === 'prompt_pack' && capabilities.canEditArtifacts
-            ? (next: Record<number, string>) => {
-                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next }, {
-                    historyDescription: 'Developer prompt edited',
-                });
-            }
             : undefined;
         // Implementation Plan extras: saved tasks (tracked-task matching +
         // "Manage tasks (N)"), the Convert-to-Tasks entry point (now inside
@@ -1424,7 +1415,7 @@ export function ArtifactWorkspace({
                         metadata={preferred.metadata}
                         projectId={projectId}
                         features={
-                            subtype === 'prompt_pack' || subtype === 'user_flows'
+                            subtype === 'user_flows'
                                 ? structuredPRD.features
                                 : undefined
                         }
@@ -1439,10 +1430,6 @@ export function ArtifactWorkspace({
                         onConvertToTasks={handleConvertToTasks}
                         onUpdatePlanProgress={handleUpdatePlanProgress}
                         sourceVersions={planSourceVersions}
-                        promptEdits={promptEdits}
-                        onUpdatePromptEdits={handleUpdatePromptEdits}
-                        generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
-                        versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
                         prdVersionLabel={
                             // Data Model shows provenance once at the page level
                             // (the version-controls strip above), so only the plan
@@ -1623,107 +1610,53 @@ export function ArtifactWorkspace({
             )}
 
             {mockupRegenConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setMockupRegenConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title="Regenerate Mockup"
+                    cancelLabel="Cancel"
+                    confirmLabel={<><RefreshCcw size={13} /> Regenerate</>}
+                    onCancel={() => setMockupRegenConfirm(null)}
+                    onConfirm={() => {
+                        setMockupRegenConfirm(null);
+                        handleRetrySlot('mockup');
+                    }}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="mockup-regen-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="mockup-regen-title" className="text-base font-bold text-neutral-900">
-                                Regenerate Mockup
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                Creates Version {mockupRegenConfirm.nextVersion}.
-                            </p>
-                            <p className="text-xs text-neutral-500 mt-1">
-                                Current version remains available in version history.
-                            </p>
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setMockupRegenConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setMockupRegenConfirm(null);
-                                    handleRetrySlot('mockup');
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <RefreshCcw size={13} /> Regenerate
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        Creates Version {mockupRegenConfirm.nextVersion}.
+                    </p>
+                    <p className="text-xs text-neutral-500 mt-1">
+                        Current version remains available in version history.
+                    </p>
+                </ConfirmDialog>
             )}
 
             {missingMockupsConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setMissingMockupsConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title="Generate missing mockups"
+                    cancelLabel="Cancel"
+                    confirmLabel={<><Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}</>}
+                    onCancel={() => setMissingMockupsConfirm(null)}
+                    onConfirm={handleGenerateMissingMockups}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="missing-mockups-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="missing-mockups-title" className="text-base font-bold text-neutral-900">
-                                Generate missing mockups
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                Adds {missingMockupsConfirm.count} uncovered{' '}
-                                {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
-                                mockup set.
-                            </p>
-                            {hasOpenAIKey() ? (
-                                <p className="text-xs text-amber-700 mt-2">
-                                    A low-quality draft image will be generated per screen via OpenAI
-                                    gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
-                                    {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
-                                    own key (typically a few cents each). You can cancel any screen
-                                    while it&rsquo;s generating.
-                                </p>
-                            ) : (
-                                <p className="text-xs text-neutral-500 mt-2">
-                                    No OpenAI key is configured, so nothing will be generated — each
-                                    added screen shows a copyable prompt and an upload sheet instead.
-                                </p>
-                            )}
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setMissingMockupsConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleGenerateMissingMockups}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        Adds {missingMockupsConfirm.count} uncovered{' '}
+                        {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
+                        mockup set.
+                    </p>
+                    {hasOpenAIKey() ? (
+                        <p className="text-xs text-amber-700 mt-2">
+                            A low-quality draft image will be generated per screen via OpenAI
+                            gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
+                            {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
+                            own key (typically a few cents each). You can cancel any screen
+                            while it&rsquo;s generating.
+                        </p>
+                    ) : (
+                        <p className="text-xs text-neutral-500 mt-2">
+                            No OpenAI key is configured, so nothing will be generated — each
+                            added screen shows a copyable prompt and an upload sheet instead.
+                        </p>
+                    )}
+                </ConfirmDialog>
             )}
 
             {showDirectionPicker && (
@@ -1735,56 +1668,29 @@ export function ArtifactWorkspace({
             )}
 
             {designRegenConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setDesignRegenConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title="Regenerate design system"
+                    cancelLabel="Cancel"
+                    confirmLabel={<><RefreshCcw size={13} /> Regenerate</>}
+                    onCancel={() => setDesignRegenConfirm(null)}
+                    onConfirm={() => {
+                        setDesignRegenConfirm(null);
+                        handleRetrySlot('design_system');
+                    }}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="design-regen-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="design-regen-title" className="text-base font-bold text-neutral-900">
-                                Regenerate design system
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                Creates Version {designRegenConfirm.nextVersion} using your chosen direction.
-                            </p>
-                            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-500" />
-                                <p className="text-xs text-amber-800">
-                                    This changes the visual foundation, so your downstream assets —
-                                    mockups and the screen-level prompts you copy for external image
-                                    tools — may become out of date. You can regenerate them afterward.
-                                    The current version stays in version history.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setDesignRegenConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setDesignRegenConfirm(null);
-                                    handleRetrySlot('design_system');
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <RefreshCcw size={13} /> Regenerate
-                            </button>
-                        </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        Creates Version {designRegenConfirm.nextVersion} using your chosen direction.
+                    </p>
+                    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-500" />
+                        <p className="text-xs text-amber-800">
+                            This changes the visual foundation, so your downstream assets —
+                            mockups and the screen-level prompts you copy for external image
+                            tools — may become out of date. You can regenerate them afterward.
+                            The current version stays in version history.
+                        </p>
                     </div>
-                </div>
+                </ConfirmDialog>
             )}
 
             {versionHistoryArtifactId && (() => {

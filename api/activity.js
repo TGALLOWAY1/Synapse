@@ -1,7 +1,7 @@
 import { runMongoAction } from './_lib/db.js';
 import { json, methodNotAllowed } from './_lib/response.js';
 import { parseSessionCookie, verifySessionToken } from './_lib/session.js';
-import { parseJsonBody } from './_lib/validate.js';
+import { readJsonBody } from './_lib/body.js';
 import { enforceRateLimit } from './_lib/rateLimit.js';
 
 // Activity events are structured analytics we log for our own UI — reject
@@ -80,7 +80,7 @@ export default async function handler(req, res) {
     return;
   }
 
-  const body = await parseJsonBody(req);
+  const body = await readJsonBody(req);
   const rawType = body?.type;
   if (typeof rawType !== 'string' || rawType.length === 0 || rawType.length > MAX_TYPE_LEN) {
     return json(res, 400, { error: 'Missing activity type' });

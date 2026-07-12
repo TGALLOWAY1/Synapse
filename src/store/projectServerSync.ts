@@ -15,6 +15,7 @@ import {
   mergeBundlesIntoSource,
   overwriteBundlesIntoSource,
   projectSlicesChanged,
+  pickBundleSource,
   type BundleSource,
   type ProjectBundle,
 } from '../lib/projectBundle';
@@ -26,13 +27,14 @@ import {
   RevisionConflictError,
   type ServerProjectSummary,
 } from '../lib/projectsClient';
-import { markProjectsMigrated, getMigratedProjectIds } from '../lib/projectMigration';
 import {
   getProjectSyncMeta,
   setProjectSyncMeta,
   removeProjectSyncMeta,
   isServerNewer,
+  type ProjectSyncMeta,
 } from '../lib/projectSyncMeta';
+import type { ProjectSyncInfo } from './projectSyncStore';
 import { projectsDebug } from '../lib/projectsDebug';
 import { clearImageRefRegistry } from '../lib/imageRefRegistry';
 import {
@@ -53,22 +55,40 @@ const pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let knownProjectIds = new Set<string>();
 
 function bundleSourceOf(state: ReturnType<typeof useProjectStore.getState>): BundleSource {
-  return {
-    projects: state.projects,
-    spineVersions: state.spineVersions,
-    historyEvents: state.historyEvents,
-    branches: state.branches,
-    artifacts: state.artifacts,
-    artifactVersions: state.artifactVersions,
-    feedbackItems: state.feedbackItems,
-    tasks: state.tasks,
-    workflowRuns: state.workflowRuns,
-  };
+  return pickBundleSource(state);
 }
 
 /** Project ids worth syncing (excludes the read-only public demo). */
 function syncableIds(state: ReturnType<typeof useProjectStore.getState>): string[] {
   return Object.keys(state.projects).filter((id) => id !== DEMO_PROJECT_ID);
+}
+
+/**
+ * Whether a project has already reached the cloud at least once, derived from the
+ * durable sync meta (a recorded successful save or an observed server revision).
+ * Replaces the old projectMigration marker set — the server upsert is idempotent
+ * on the project UUID, so this only feeds the "N uploaded" UI count, never gates
+ * a push.
+ */
+function isProjectUploaded(userId: string, projectId: string): boolean {
+  const meta = getProjectSyncMeta(userId, projectId);
+  return meta.lastCloudSavedAt != null || meta.lastSeenServerRevision != null;
+}
+
+/**
+ * Write the durable sync meta (survives reload — the reconcile baseline) and the
+ * reactive per-project UI sync info together, so call sites don't hand-write both
+ * stores back-to-back. `meta` is a durable patch (setProjectSyncMeta); `ui` is a
+ * reactive PARTIAL merged onto the existing info (patchProjectSync). Either may be
+ * omitted. This is a call-site dedup only — no semantic change.
+ */
+function recordSyncState(
+  userId: string,
+  projectId: string,
+  opts: { meta?: Partial<ProjectSyncMeta>; ui?: Partial<ProjectSyncInfo> },
+): void {
+  if (opts.meta) setProjectSyncMeta(userId, projectId, opts.meta);
+  if (opts.ui) useProjectSyncStore.getState().patchProjectSync(projectId, opts.ui);
 }
 
 /**
@@ -103,16 +123,20 @@ function markConflict(
   detectedAt: 'reconcile' | 'push',
   server: { revision?: number; updatedAt?: string },
 ): void {
-  setProjectSyncMeta(userId, projectId, { conflict: true, hasUnsyncedChanges: true });
+  // lastCloudSavedAt is untouched by the meta patch below, so reading it first
+  // yields the same value it would after the write.
   const meta = getProjectSyncMeta(userId, projectId);
-  useProjectSyncStore.getState().patchProjectSync(projectId, {
-    state: 'conflict',
-    updatedAt: Date.now(),
-    lastCloudSavedAt: meta.lastCloudSavedAt,
-    conflict: {
-      detectedAt,
-      serverRevision: server.revision,
-      serverUpdatedAt: server.updatedAt,
+  recordSyncState(userId, projectId, {
+    meta: { conflict: true, hasUnsyncedChanges: true },
+    ui: {
+      state: 'conflict',
+      updatedAt: Date.now(),
+      lastCloudSavedAt: meta.lastCloudSavedAt,
+      conflict: {
+        detectedAt,
+        serverRevision: server.revision,
+        serverUpdatedAt: server.updatedAt,
+      },
     },
   });
   projectsDebug('project conflict detected', { projectId, detectedAt, server });
@@ -147,7 +171,6 @@ async function pushProjectNow(projectId: string): Promise<void> {
         ? meta.lastSeenServerUpdatedAt
         : undefined;
     const saved = await saveProject(projectId, bundle, { expectedRevision, expectedUpdatedAt });
-    if (activeUserId === userId) markProjectsMigrated(userId, [projectId]);
     recordCloudSaved(userId, projectId, saved);
     projectsDebug('project pushed to server', { projectId, revision: saved?.revision });
     // Image sync runs AFTER (and never blocks) the text save. Fire-and-forget:
@@ -165,12 +188,14 @@ async function pushProjectNow(projectId: string): Promise<void> {
     const message = error instanceof Error ? error.message : 'sync_failed';
     // A failed save NEVER drops local data — it stays in localStorage. Surface
     // the failure so the UI can show "Sync failed" and retry on the next change.
-    setProjectSyncMeta(userId, projectId, { lastCloudSaveError: message, hasUnsyncedChanges: true });
-    useProjectSyncStore.getState().patchProjectSync(projectId, {
-      state: 'error',
-      updatedAt: Date.now(),
-      error: message,
-      lastCloudSaveError: message,
+    recordSyncState(userId, projectId, {
+      meta: { lastCloudSaveError: message, hasUnsyncedChanges: true },
+      ui: {
+        state: 'error',
+        updatedAt: Date.now(),
+        error: message,
+        lastCloudSaveError: message,
+      },
     });
     projectsDebug('project push failed', { projectId, message });
   }
@@ -180,8 +205,10 @@ function schedulePush(projectId: string): void {
   if (activeUserId === null || projectId === DEMO_PROJECT_ID) return;
   // Durably mark unsynced edits so an offline/interrupted change isn't forgotten
   // across a reload, and so reconcile can tell a dirty project from a clean one.
-  setProjectSyncMeta(activeUserId, projectId, { hasUnsyncedChanges: true });
-  useProjectSyncStore.getState().patchProjectSync(projectId, { state: 'dirty', updatedAt: Date.now() });
+  recordSyncState(activeUserId, projectId, {
+    meta: { hasUnsyncedChanges: true },
+    ui: { state: 'dirty', updatedAt: Date.now() },
+  });
   const existing = pushTimers.get(projectId);
   if (existing) clearTimeout(existing);
   pushTimers.set(
@@ -352,14 +379,16 @@ async function reconcile(userId: string): Promise<void> {
       });
     }
 
-    // Local -> server: upload local-only projects (migration).
-    const migrated = getMigratedProjectIds(userId);
+    // Local -> server: upload local-only projects (migration). A project counts
+    // as newly uploaded when its durable sync meta shows no prior cloud save /
+    // observed server revision (see isProjectUploaded) — the reload-surviving
+    // "has this reached the cloud?" signal that replaced the migration markers.
     const toPush = [...localIds].filter((id) => !serverIds.has(id));
     let migratedCount = 0;
     for (const id of toPush) {
-      const wasMigrated = migrated.has(id);
+      const wasUploaded = isProjectUploaded(userId, id);
       await pushProjectNow(id);
-      if (!wasMigrated) migratedCount += 1;
+      if (!wasUploaded) migratedCount += 1;
     }
 
     // Retry pending uploads (dirty, both-exist, not server-newer) that a prior
@@ -481,8 +510,10 @@ export async function resolveConflictUseCloud(projectId: string): Promise<boolea
     if (!full?.data) {
       // Server copy is gone — nothing to adopt. Clear the conflict so the local
       // copy can push normally as a (re-)create.
-      setProjectSyncMeta(userId, projectId, { conflict: false });
-      useProjectSyncStore.getState().patchProjectSync(projectId, { state: 'dirty', conflict: undefined });
+      recordSyncState(userId, projectId, {
+        meta: { conflict: false },
+        ui: { state: 'dirty', conflict: undefined },
+      });
       return false;
     }
     applyBundlesOverwrite([full.data]);
@@ -510,16 +541,18 @@ export async function resolveConflictKeepLocal(projectId: string): Promise<boole
   try {
     // Read the server's current revision so our next push expects it and wins.
     const full = await fetchProject(projectId);
-    setProjectSyncMeta(userId, projectId, {
-      lastSeenServerRevision: typeof full?.revision === 'number' ? full.revision : undefined,
-      lastSeenServerUpdatedAt: typeof full?.updatedAt === 'string' ? full.updatedAt : undefined,
-      conflict: false,
-      hasUnsyncedChanges: true,
-    });
-    useProjectSyncStore.getState().patchProjectSync(projectId, {
-      state: 'dirty',
-      updatedAt: Date.now(),
-      conflict: undefined,
+    recordSyncState(userId, projectId, {
+      meta: {
+        lastSeenServerRevision: typeof full?.revision === 'number' ? full.revision : undefined,
+        lastSeenServerUpdatedAt: typeof full?.updatedAt === 'string' ? full.updatedAt : undefined,
+        conflict: false,
+        hasUnsyncedChanges: true,
+      },
+      ui: {
+        state: 'dirty',
+        updatedAt: Date.now(),
+        conflict: undefined,
+      },
     });
     await pushProjectNow(projectId);
     return getProjectSyncMeta(userId, projectId).conflict !== true;

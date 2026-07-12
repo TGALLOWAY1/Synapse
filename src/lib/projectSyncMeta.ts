@@ -10,7 +10,7 @@
 // observed" and "does this device have unsynced edits". Without a durable
 // baseline, a stale client can't tell whether the server advanced underneath it.
 //
-// Leaf module (localStorage only), mirroring projectMigration.ts's per-user
+// Leaf module (localStorage only), mirroring userScope.ts's per-user
 // namespacing. Back-compat: a project with no stored meta simply returns {} and
 // every field is optional, so legacy/anonymous data behaves exactly as before.
 

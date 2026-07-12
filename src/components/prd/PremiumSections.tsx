@@ -517,8 +517,9 @@ export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
 
 // (The old MvpScopeSection was removed: it duplicated the Implementation
 // Summary's Build First / Build Next buckets. The scope rationale now renders
-// as the Decision callout in ImplementationSummarySection and "Later" items
-// surface as Deferred entries in the Decision Log.)
+// as the Decision callout inside the Implementation Summary block — rendered
+// inline in StructuredPRDView, not as a standalone component — and "Later"
+// items surface as Deferred entries in the Decision Log.)
 
 // Instrumentation was dropped from this table: new generations no longer
 // produce it (analytics detail belongs to downstream artifacts) so the column

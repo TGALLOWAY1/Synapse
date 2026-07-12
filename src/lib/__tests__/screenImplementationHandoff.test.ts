@@ -15,7 +15,6 @@ import {
     deriveHandoffDataDependencies,
     deriveHandoffQaChecklist,
     deriveHandoffReadiness,
-    renderHandoffMarkdown,
     type ScreenHandoffInput,
     type HandoffReadinessSignals,
 } from '../screenImplementationHandoff';
@@ -326,44 +325,17 @@ describe('buildScreensHandoffRollup', () => {
     });
 });
 
-// --- 17. Markdown ------------------------------------------------------------
-
-describe('renderHandoffMarkdown', () => {
-    it('17. includes the key sections', () => {
-        const h = buildScreenImplementationHandoff(handoffInput());
-        const md = renderHandoffMarkdown(h);
-        expect(md).toMatch(/# Landing & Role Selection .*Implementation Handoff/);
-        expect(md).toContain('## Route');
-        expect(md).toContain('## Components');
-        expect(md).toContain('## State');
-        expect(md).toContain('## Events');
-        expect(md).toContain('## Data Dependencies');
-        expect(md).toContain('## Acceptance Criteria');
-        expect(md).toContain('## QA Checklist');
-        expect(md).toContain('## Build Tasks');
-    });
-
-    it('renders a "no data model entities" line when there are no data deps', () => {
-        const h = buildScreenImplementationHandoff(handoffInput({
-            item: item(screen({ outputData: [], handoff: undefined })),
-        }));
-        const md = renderHandoffMarkdown(h);
-        expect(md).toMatch(/No linked data model entities found/);
-    });
-});
-
 // --- 18. Legacy safety -------------------------------------------------------
 
 describe('legacy / incomplete screens', () => {
     it('18. an incomplete/legacy screen does not throw', () => {
         const legacy: ScreenItem = { name: 'Bare', priority: 'P2', purpose: '' };
         expect(() => {
-            const h = buildScreenImplementationHandoff({
+            buildScreenImplementationHandoff({
                 item: item(legacy, { id: 'scr-bare' }),
                 reviewModel: reviewModel(),
                 variants: [],
             });
-            renderHandoffMarkdown(h);
         }).not.toThrow();
     });
 });
@@ -453,17 +425,6 @@ describe('Phase 5B trace-backed handoff', () => {
         }));
         // A missing data-model trace never escalates past review_recommended.
         expect(h.readiness.status).not.toBe('blocked');
-    });
-
-    it('15. markdown export includes Data Model and Implementation Plan sections', () => {
-        const h = buildScreenImplementationHandoff(handoffInput({
-            dataModel: TRACE_DATA_MODEL,
-            implementationPlan: TRACE_PLAN,
-        }));
-        const md = renderHandoffMarkdown(h);
-        expect(md).toContain('## Trace Confidence');
-        expect(md).toContain('## Data Model Support');
-        expect(md).toContain('## Related Implementation Plan Items');
     });
 
     it('13. a P0 screen with no plan match appears in the preflight review', () => {

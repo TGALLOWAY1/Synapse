@@ -106,7 +106,7 @@ There is no Playwright suite despite the dev dependency.
 ## Tech Stack
 
 - React 19 + TypeScript + Vite 7
-- Tailwind CSS 3 + tailwind-merge + clsx
+- Tailwind CSS 3
 - framer-motion (page/drag transitions in the interactive product tour)
 - Zustand 5 with `persist` middleware (debounced localStorage)
 - Google Gemini API called directly from the browser; key in localStorage
@@ -395,8 +395,9 @@ device-scoped and never syncs) and full design.
   `RevisionConflictError` on 409).
 - **Durable sync metadata** (`src/lib/projectSyncMeta.ts`). A per-user
   localStorage map (`synapse-project-sync-meta::u:<userId>`, mirrors
-  `projectMigration.ts`) recording, **separately from user-authored project
-  content**, each project's `lastSeenServerRevision`/`lastSeenServerUpdatedAt`
+  `userScope.ts`'s per-user namespacing) recording, **separately from
+  user-authored project content**, each project's
+  `lastSeenServerRevision`/`lastSeenServerUpdatedAt`
   (the conflict-detection baseline), `lastCloudSavedAt`, `lastCloudSaveError`,
   `hasUnsyncedChanges` (durable dirty flag — survives reload so an offline edit
   isn't forgotten), and `conflict`. `isServerNewer(server, meta)` compares
@@ -419,8 +420,12 @@ device-scoped and never syncs) and full design.
   state (+ durable `lastCloudSaveError`). Conflict resolution is **explicit, never
   silent**: `resolveConflictUseCloud` (adopt cloud, discard local — offer a
   recovery download first) and `resolveConflictKeepLocal` (overwrite cloud from
-  local, re-baselined so the conditional push wins). `suspendPush` silences the
-  echo while applying pulled/overwritten bundles. The read-only demo project
+  local, re-baselined so the conditional push wins). The module-local
+  `recordSyncState(userId, projectId, { meta?, ui? })` helper writes the durable
+  meta (`setProjectSyncMeta`) and the reactive per-project UI info
+  (`patchProjectSync`) together at the sites that update both. `suspendPush`
+  silences the echo while applying pulled/overwritten bundles. The read-only
+  demo project
   (`DEMO_PROJECT_ID`) is never synced. A `beforeunload` guard warns only when
   cloud state is genuinely stuck (`conflict`/`error`), never for normal pending
   pushes.
@@ -442,14 +447,19 @@ device-scoped and never syncs) and full design.
   envelope) for at-risk cloud durability — failed save, expired session, network
   outage, server body-limit rejection, or an unresolved conflict. Reachable from
   the conflict banner and the export modal.
-- **Migration markers** (`src/lib/projectMigration.ts`). A per-user localStorage
-  set (`synapse-projects-server-migrated::u:<userId>`) of project ids already
-  pushed. The server upsert is idempotent on the stable UUID, so duplicates are
-  impossible regardless; the markers power the "N local projects uploaded"
-  state and avoid redundant re-uploads. **Local projects are never deleted on
-  import.** This is distinct from the anonymous→account *legacy* import
-  (`userScope.ts`); after a legacy import, `HomePage` triggers a server
-  reconcile so the newly-claimed projects upload to the account.
+- **Upload state derives from durable sync meta — no separate marker store.**
+  There is no `projectMigration.ts` marker set anymore; the server upsert is
+  idempotent on the stable project UUID, so re-uploading is inherently
+  harmless and **`reconcile` pushes every local-only project unconditionally**.
+  The "N local projects uploaded" UI count (`migratedCount` → `markPulled` →
+  `SyncStatusBanner`) is derived from `projectSyncMeta`: a project is "already
+  uploaded" when its `getProjectSyncMeta(userId, id)` has `lastCloudSavedAt`
+  or `lastSeenServerRevision` set (`isProjectUploaded` in `projectServerSync.ts`),
+  checked BEFORE the push so only newly-uploaded projects increment the count.
+  **Local projects are never deleted on import.** This is distinct from the
+  anonymous→account *legacy* import (`userScope.ts`); after a legacy import,
+  `HomePage` triggers a server reconcile so the newly-claimed projects upload
+  to the account.
 
 ### Cross-device mockup image sync (`api/_lib/imageRefsStore.js`, `src/store/projectImageSync.ts`)
 
@@ -502,13 +512,16 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
   tab-closed-early case and persists a minimal ref (routing parsed from the key).
 - **Push** (`pushProjectImages`, fired after each text save AND from
   `mockupImageStore.generate` via `notifyMockupImageGenerated` — generation
-  writes IDB directly and would otherwise never trigger a push). Diffs local
-  image keys against a per-user uploaded-marker set
-  (`synapse-mockup-images-uploaded::u:<userId>`, `src/lib/imageUploadMarker.ts`,
-  mirrors `projectMigration.ts`) + the server refs, uploads the missing ones,
-  persists refs, marks them. **Image sync NEVER blocks text sync** and every
-  failure is non-fatal (the image is left unmarked and retried next push); a
-  failed image never reverts local data.
+  writes IDB directly and would otherwise never trigger a push). The **server
+  refs are the single source of truth for "already uploaded"** (there is no
+  local uploaded-marker store): it fetches the project's refs, diffs local image
+  keys against them (`computeImagesToUpload` in `src/lib/imageSyncDiff.ts`),
+  uploads the missing ones, and persists a ref for each. **If the refs fetch
+  fails (offline / transient) the push round is DEFERRED — it returns early and
+  retries on the next push — never uploading blind.** Content-addressed blobs
+  (sha256 path, `allowOverwrite`) make any redundant re-upload harmless. **Image
+  sync NEVER blocks text sync** and every failure is non-fatal (a failed image
+  is retried next push); a failed image never reverts local data.
 - **Pull = refs only, hydrate lazily.** Reconcile pulls refs into an in-memory
   registry (`src/lib/imageRefRegistry.ts`, keyed by versionId). `loadForVersion`
   in the mockup image store, on an IndexedDB cache **miss** where a ref exists,
@@ -582,18 +595,22 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     data dependencies only** — a section lists another solely when it consumes
     that section's output as prompt context. **The PRD is the product decision
     document, not a container for downstream artifacts:** the former
-    `data_model` and `implementation_plan` PRD sections are **retired** from the
-    default graph (`RETIRED_PRD_SECTIONS` / `RETIRED_SECTION_IDS`) — the
-    dedicated data_model / implementation_plan *artifacts* own that detail, and
-    the PRD-embedded copies duplicated them (two entity lists was a standing
-    inconsistency source; `implementationPlan` was never rendered). Their
-    `SectionId`, prompt builder, slice schema, and title all survive solely so
-    single-section retry of legacy `generationMeta.failedSections` keeps
-    working (`prdSectionRetry.ts` looks sections up across
-    `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
-    sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
-    Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
-    rendering — the renderer blocks and optional `StructuredPRD` fields stay.
+    `data_model` and `implementation_plan` PRD sections were **removed
+    entirely** — their `SectionId`, prompt builder, slice schema, and title are
+    all gone. The dedicated data_model / implementation_plan *artifacts* own
+    that detail, and the PRD-embedded copies duplicated them (two entity lists
+    was a standing inconsistency source; `implementationPlan` was never
+    rendered). Single-section retry of a legacy
+    `generationMeta.failedSections` entry naming one of those ids now surfaces
+    the standard `Unknown PRD section` error (graceful degradation) —
+    `prdSectionRetry.ts` looks sections up over `DEFAULT_PRD_SECTIONS` only.
+    Never re-add either section to `DEFAULT_PRD_SECTIONS`, the `SectionId`
+    union, or the prompt/schema maps. NOTE: these retired PRD *sections* are
+    unrelated to the data_model/implementation_plan *artifacts* (whose
+    prompts/schemas live in `coreArtifactService`/`artifactSchemas.ts`), which
+    are untouched. Legacy PRDs with
+    `richDataModel`/`stateMachines`/`implementationPlan` keep rendering — the
+    renderer blocks and optional `StructuredPRD` fields stay.
     The remaining sections are prompted (and, where it matters,
     **schema-enforced** via lean slice schemas in `prdSchemas.ts` —
     `leanUxPageItemSchema`/`leanFeatureItemSchema`/`leanSuccessMetricSchema`,
@@ -626,9 +643,12 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     presentation-only and safe — downstream artifacts/mockups consume the
     `StructuredPRD` **object by field**, never this render order — but if you
     change one renderer's section order, change the other to match.
-    The legacy multi-pass scoring + revision passes were removed — old projects
-    in localStorage retain their saved `qualityScores`, but no new generation
-    writes them.
+    The legacy multi-pass scoring + revision passes were removed, and the
+    `qualityScores` field/plumbing they wrote (the `QualityScores` type,
+    `SpineVersion.qualityScores`, and the `updateSpineQualityScores` action)
+    have since been deleted outright — old persisted localStorage projects may
+    still carry the key in their stored JSON, but it is ignored on read and no
+    migration is needed.
     - **Three-view PRD IA — Overview · Features · Decisions
       (`StructuredPRDView` + `src/lib/derive/prdViews.ts`).** The in-app PRD is
       **one canonical artifact presented through three coordinated tab views**,
@@ -719,8 +739,10 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       section duplicated the summary's Build First / Build Next buckets and
       was removed from BOTH renderers (`StructuredPRDView` +
       `renderPremiumMarkdown`); the scope *rationale* (`mvpScope.rationale`)
-      now renders as the Decision callout at the top of
-      `ImplementationSummarySection`, and the summary buckets are **uncapped**
+      now renders as the Decision callout at the top of the Implementation
+      Summary block (rendered inline in `StructuredPRDView` — the standalone
+      `ImplementationSummarySection` component was removed as dead code; the
+      derivation lib below is unaffected), and the summary buckets are **uncapped**
       (every tagged MVP/V1 feature appears). `deriveImplementationSummary`
       (`src/lib/derive/implementationSummary.ts`) buckets by feature
       `tier`/`priority` when present; when a PRD has **no** tier/priority tags
@@ -1064,18 +1086,19 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     fallback) → the manual prompt+upload sheet (`MockupScreenUpload`, reusing the
     IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
     otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
-    `MockupImageStatusChip` summarizes per-version status (AI-generated /
-    uploaded / awaiting). **Two-phase completion:** a mockup has a SPEC phase
+    **Two-phase completion:** a mockup has a SPEC phase
     (the ArtifactVersion, marked done by the job controller as soon as the spec
     lands) and an independent IMAGE phase (one render per screen, async, can
     partially fail). `computeMockupImageCompletion` (`src/lib/mockupImageCompletion.ts`,
     pure) derives the visual status (`none`/`generating`/`partial`/`complete` +
     `failedScreenIds`) from per-screen image results so the UI never presents a
-    mockup as fully complete when images failed: `MockupImageStatusChip` shows a
-    red "Images incomplete · N failed" state, and `MockupViewer`'s header swaps
-    the flat "AI Generated" badge for the live status and renders a
-    "Retry failed images" banner (per-screen retry already exists in
-    `MockupScreenImage`). Image failures are tracked in the session-scoped
+    mockup as fully complete when images failed: `MockupViewer`'s header reads
+    this directly and swaps the flat "AI Generated" badge for a red
+    "Images incomplete · N failed" state, rendering a "Retry failed images"
+    banner (per-screen retry already exists in `MockupScreenImage`). (The
+    standalone `MockupImageStatusChip` component that used to render this state
+    was unused/dead — `MockupViewer` never consumed it — and has been removed;
+    the derivation lib is unchanged.) Image failures are tracked in the session-scoped
     `mockupImageStore` `errors`/`inFlight` maps (transient — a reload re-attempts
     on view). The Settings section is `settings/ArtifactModelsSection.tsx`,
     now the single place PRD **and** artifact models are configured: the PRD row
@@ -1163,17 +1186,20 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     (the `prdVersionLabel` prop is passed only to `implementation_plan` now). Do
     **not** change `dataModelMarkdown.ts`'s parser output shape without
     re-checking `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
-    The `component_inventory` renderer is a mobile-first, searchable
-    component library (sticky search + category/complexity/used-in
-    filters, expandable cards with live previews) decomposed under
-    `src/components/renderers/componentInventory/`. Its schema/types carry
-    optional `accessibility`, `previewType`, and per-prop `required`
-    fields (all backward-compatible — older saved inventories lack them);
-    when absent, `inferPreview.ts` derives a `previewType` and a
-    heuristic, review-flagged accessibility contract at render time so
-    every card still shows a preview and a dedicated a11y block.
-    `componentInventoryParse.ts` round-trips all these fields through
-    markdown.
+    `component_inventory` (UI Components) is a **hidden artifact** (see
+    "Post-finalization transition" below) with no reachable render UI — the
+    old mobile-first searchable component-library renderer (sticky search +
+    category/complexity/used-in filters, expandable cards with live previews,
+    under `src/components/renderers/componentInventory/`) was removed as dead
+    code (`ArtifactWorkspace`'s `slotMetas` filters hidden subtypes out of the
+    sidebar, so `selected` can never hold `component_inventory` and the
+    dispatch branch was unreachable). Generation, storage, and parsing are
+    unaffected: the artifact still generates (mockups softly consume it for
+    per-screen `componentRefs`) and its schema/types (optional `accessibility`,
+    `previewType`, per-prop `required` fields, all backward-compatible) still
+    round-trip through markdown via `src/lib/componentInventoryParse.ts`, which
+    remains in place for that purpose even with no renderer left to consume it
+    directly.
     **Artifact in-page navigation** is a shared, collapsible **Artifact
     Outline** — `src/components/ArtifactOutlineNav.tsx` (presentational/
     controlled) + `src/lib/useArtifactOutline.ts` (scroll-spy via
@@ -1182,30 +1208,29 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     navigator: a numbered list/card, subtle purple active highlight + a
     "Current section/entity" badge, `collapseOnSelect` on mobile (passed
     `isMobile`) with a floating re-open button. Used by the **Design System**
-    (sections), **Data Model** (entities), and **Developer Prompts**
-    (`prompt_pack`, prompts) renderers, which anchor each section with a
-    `scroll-mt-*` id matching an outline item. This **replaced the old
-    wrapping "pill" nav** (`SectionTabs`) on the first two pages and the old
-    permanent left rail on Developer Prompts — do not reintroduce pills or a
-    side rail there; `SectionTabs` survives only in the Implementation Plan
-    renderer's legacy-markdown fallback path. When a document-style artifact
-    needs in-page nav, reuse
+    (sections) and **Data Model** (entities) renderers, which anchor each
+    section with a `scroll-mt-*` id matching an outline item. This **replaced
+    the old wrapping "pill" nav** (the deleted `SectionTabs`) on both pages — do
+    not reintroduce pills there. The Implementation Plan renderer's
+    legacy/adapter-null fallback is now plain markdown + a Convert-to-Tasks
+    action row (no milestone cards, no in-page nav). When a document-style
+    artifact needs in-page nav, reuse
     `ArtifactOutlineNav`/`useArtifactOutline` rather than introducing another
     navigation style.
-    The `prompt_pack` (**Developer Prompts**) renderer
-    (`PromptPackRenderer.tsx`) survives only for legacy persisted artifacts
-    (the subtype is retired — no sidebar row, no new generation): a vertical
-    document driven by the shared outline (one card per `### N. Title`), with
-    Edit + Copy Prompt actions and a per-prompt `promptEdits` metadata
-    overlay. Its markdown parser lives in
-    `src/lib/services/promptPackParser.ts`, shared with the implementation-
-    plan adapter (which is how legacy Developer Prompts surface inside the
-    consolidated view). **Generated prompts are agent-agnostic** — neither
-    the legacy prompt_pack prompt nor the implementation_plan prompt-pack
-    instructions (`coreArtifactService.ts`) may name or recommend a specific
-    coding agent (Cursor, Claude Code, ChatGPT, Copilot). `generatedAt`
-    (version `createdAt`) and `versionNumber` thread through
-    `ArtifactContentRenderer`.
+    The standalone `prompt_pack` (**Developer Prompts**) renderer
+    (`PromptPackRenderer.tsx`, formerly a vertical document of prompt cards
+    with Edit + Copy actions and a per-prompt `promptEdits` overlay, driven by
+    the shared outline) has been **deleted as unreachable** — the subtype is
+    retired (no sidebar row, no new generation), so `ArtifactContentRenderer`
+    had no dispatch path that could ever render it. Legacy `prompt_pack`
+    content is **not lost**: it still surfaces read-only inside the
+    consolidated **Implementation Plan** view via
+    `implementationPlanAdapter.ts`'s "Unassigned Prompt Packs" grouping. The
+    markdown parser (`src/lib/services/promptPackParser.ts`) is shared between
+    the two and remains in place. **Generated prompts are agent-agnostic** —
+    neither the legacy prompt_pack prompt nor the implementation_plan
+    prompt-pack instructions (`coreArtifactService.ts`) may name or recommend a
+    specific coding agent (Cursor, Claude Code, ChatGPT, Copilot).
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and
@@ -1530,10 +1555,14 @@ rules:
   namespaced data of their own), and the import **merges additively** (existing
   ids always win, so a re-import can only add projects, never overwrite/delete
   one the user already has). **Do not** read the project store before
-  `applyProjectUser` has run for the current user, and keep
-  `emptyPersistedState()` in `projectUserSync` in sync with **both** the
-  persisted slice fields **and** the slices re-persisted by
-  `repersistCurrentState()`.
+  `applyProjectUser` has run for the current user. The nine project-keyed
+  collections are listed in exactly one place —
+  `ALL_PROJECT_COLLECTIONS`/`ARRAY_COLLECTIONS` in `src/lib/projectBundle.ts`
+  — and `emptyPersistedState()`/`repersistCurrentState()` in `projectUserSync`
+  (plus `MERGEABLE_COLLECTIONS` in `userScope.ts`, `bundleSourceOf` in
+  `projectServerSync.ts`, and `projectRecovery.ts`) all derive from it via
+  `emptyBundleSource()`/`pickBundleSource()`, so adding a tenth collection is a
+  one-line change there rather than five hand-edits.
   - **Namespace-switch data-loss guard:** `applyProjectUser` wipes in-memory
     state (`setState(emptyPersistedState())`, which queues a *debounced* persist
     write of the empty state to the target namespace) and then calls
@@ -1613,9 +1642,9 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               DesignSetupStep — pick a visual direction while the PRD
               generates in the background (see "Design System Presets")
               ↓
-  PRD stage:       StructuredPRDView (the only view once a structured PRD
-                   exists; SelectableSpine is the legacy fallback for spines
-                   with no structuredPRD) — text selection →
+  PRD stage:       StructuredPRDView (the only interactive view; legacy spines
+                   with no structuredPRD render as read-only ReactMarkdown with
+                   no selection/branch UI) — text selection →
                    branch creation → AI conversation → consolidateBranch()
                    merges into spine (local or doc-wide scope, see
                    ConsolidationModal). Selection → action dialog runs
@@ -1875,8 +1904,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     details" disclosure) → PRD features (collapsed) → Screen details (collapsed:
     navigation, core UI regions, data, states). The noisy provenance badges
     ("Derived / Estimated / Mapped at generation / For your information") are gone.
-    `ScreenDownstreamImpactSection` is no longer shown in Screen Detail (its data
-    still feeds the list/coverage/preflight surfaces).
+    The `ScreenDownstreamImpactSection` component (which used to render this
+    data inline in Screen Detail) has been **deleted as unreachable UI** —
+    Screen Detail never rendered it after this simplification pass; the
+    underlying `screenDownstreamImpact.ts` derivation lib is unchanged and
+    still feeds the list/coverage/preflight surfaces below.
 - **Views** — `src/components/experience/`: `ScreenListView` (a **flow-first**
   list — screens are the primary focus, implementation/traceability/readiness
   data is kept but visually secondary), `ScreenDetailView` +
@@ -2128,11 +2160,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   preflight (blocking / review / info / recommended next steps / export-snapshot
   caveats — e.g. the Phase 3D variant-image cross-device-sync gap).
   `analyzeScreensDownstream(index, reviewModels, artifactReview)` is the single
-  entry point the workspace calls. **UI:** `ScreenDownstreamImpactSection`
-  (the component still exists and renders the impacted-artifact list / calm
-  empty states, but per the design-review simplification it is **no longer shown
-  in Screen Detail** — downstream-impact data now surfaces only via the list +
-  coverage + preflight surfaces), a compact downstream note in each `ScreenListView`
+  entry point the workspace calls. **UI:** the `ScreenDownstreamImpactSection`
+  component (which rendered the impacted-artifact list / calm empty states) has
+  been **removed** — per the design-review simplification it was never shown in
+  Screen Detail after this pass, so downstream-impact data now surfaces only via
+  a compact downstream note in each `ScreenListView`
   card's "Show details" disclosure (only when a blocking/review impact exists —
   info-only shows nothing), a
   **Downstream impact** section in `ScreenCoveragePanel` (which, per the
@@ -2187,8 +2219,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   screen on a legacy project read "review recommended" — both still surface in
   the QA checklist only.
   `buildScreensHandoffRollup(handoffs, p0Ids)` rolls up ready/review/blocked
-  **gated on P0**; `renderHandoffMarkdown` is the copy-to-clipboard export;
-  `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
+  **gated on P0** (the export panel uses `renderScreensHandoffExportMarkdown`
+  from `screenHandoffExport.ts` — see Phase 5C below; the per-screen
+  `renderHandoffMarkdown` copy export was deleted as dead code once that panel
+  shipped); `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
   structural `PreflightContribution` param on `buildScreensPreflight` /
   `analyzeScreensDownstream` (screenDownstreamImpact **never imports** the handoff
   module — that would cycle; the caller passes the contribution in). **UI (per
@@ -2257,10 +2291,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `traceBridge`, adds trace-review **readiness** signals
     (`dataModelTraceMissing` / `planBridgeMissing` (accepted P0 only) /
     `traceConfidenceWeakForP0` — all **review-recommended, never blocking**; they
-    fire only when the relevant artifact was PRESENT), extends
-    `renderHandoffMarkdown` with `## Trace Confidence` / `## Data Model Support` /
-    `## Related Implementation Plan Items`, and folds trace guidance into
-    `buildHandoffPreflightContribution`. `buildScreensHandoffRollup` gained a
+    fire only when the relevant artifact was PRESENT), and folds trace guidance
+    into `buildHandoffPreflightContribution` (the since-deleted
+    `renderHandoffMarkdown` used to render matching `## Trace Confidence` /
+    `## Data Model Support` / `## Related Implementation Plan Items` sections;
+    the Phase 5C export below covers this ground now). `buildScreensHandoffRollup` gained a
     `ScreensTraceRollup` (strong/estimated/missing counts + P0 plan/data-model
     gaps; null when no screen carried a bridge).
   - **UI.** The per-screen `ScreenHandoffView` (which rendered the **Trace
@@ -2874,9 +2909,10 @@ healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
 The core PRD-refinement gesture — highlight PRD text, get a contextual
 action dialog (Clarify / Expand / Specify / Alternative / Replace), spawn
 a history-tracked branch — is detection-source-agnostic and works on
-both desktop and touch. Both PRD renderers (`SelectableSpine.tsx` for
-markdown PRDs, `StructuredPRDView.tsx` for structured PRDs) share one
-pipeline; do not reintroduce per-component `onMouseUp` selection logic.
+both desktop and touch. The selection pipeline now has a single consumer,
+`StructuredPRDView.tsx` (the structured PRD renderer); legacy spines with no
+`structuredPRD` render as read-only markdown with no selection/branch UI. Do
+not reintroduce per-component `onMouseUp` selection logic.
 
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
