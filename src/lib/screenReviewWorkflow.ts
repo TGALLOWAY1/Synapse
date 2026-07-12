@@ -86,7 +86,9 @@ export const SEVERITY_LABELS: Record<ScreenReviewIssueSeverity, string> = {
 // --- System readiness --------------------------------------------------------
 
 /** Synapse's derived estimate of a screen's build-readiness — distinct from
- * the user's review status. */
+ * the user's review status. This is its OWN vocabulary tied to the persisted
+ * reviewStatus and stays here deliberately; do NOT merge it with the related
+ * handoff/export/trace vocabularies in `screenStatusShared.ts`. */
 export type SystemReadinessStatus = 'ready' | 'needs_review' | 'blocked';
 
 export const SYSTEM_READINESS_LABELS: Record<SystemReadinessStatus, string> = {

@@ -42,10 +42,12 @@ import type {
 } from './screenReviewWorkflow';
 import type { MockupVariantFreshness } from './mockupVariantTrust';
 import type { ScreenDownstreamImpact } from './screenDownstreamImpact';
+import { TRACE_CONFIDENCE_RANK as CONFIDENCE_RANK_LOCAL } from './screenStatusShared';
+import type { ScreenHandoffStatus } from './screenStatusShared';
 
 // --- Types -------------------------------------------------------------------
 
-export type ScreenImplementationReadiness = 'ready' | 'review_recommended' | 'blocked';
+export type ScreenImplementationReadiness = ScreenHandoffStatus;
 
 export type HandoffConfidence = 'explicit' | 'derived' | 'missing';
 
@@ -1003,9 +1005,6 @@ function upgradeDataDependencies(
     }
 }
 
-const CONFIDENCE_RANK_LOCAL: Record<TraceConfidence, number> = {
-    missing: 0, estimated: 1, weak: 2, strong: 3, explicit: 4,
-};
 const normalizeTraceLabel = (s: string): string => s.toLowerCase().replace(/[^a-z0-9]/g, '');
 const singularTrace = (s: string): string => (s.length > 3 && s.endsWith('s') ? s.slice(0, -1) : s);
 

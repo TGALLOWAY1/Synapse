@@ -28,6 +28,7 @@ import type {
 import type { ParsedFlow } from '../components/renderers/userFlows/types';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from './screenExperience';
+import type { ScreenHandoffStatus, TraceConfidence } from './screenStatusShared';
 
 // --- Review status -----------------------------------------------------------
 
@@ -371,7 +372,7 @@ export interface ScreenFeatureLink {
  *                 coverage is estimated from what does link;
  *   'missing'   — no refs at all.
  */
-export type TraceabilityConfidence = 'explicit' | 'estimated' | 'missing';
+export type TraceabilityConfidence = Extract<TraceConfidence, 'explicit' | 'estimated' | 'missing'>;
 
 export interface ScreenTraceability {
     features: ScreenFeatureLink[];
@@ -1006,7 +1007,7 @@ export interface ScreenFilterReview {
     /** Phase 4B: true when this screen has a blocking/review downstream impact. */
     downstreamReviewNeeded?: boolean;
     /** Phase 5A: implementation-handoff readiness for this screen. */
-    handoffReadiness?: 'ready' | 'review_recommended' | 'blocked';
+    handoffReadiness?: ScreenHandoffStatus;
 }
 
 export function screenMatchesFilter(
