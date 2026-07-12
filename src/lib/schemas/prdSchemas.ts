@@ -412,15 +412,6 @@ export const featuresSliceSchema = {
     required: ["features"],
 };
 
-export const dataModelSliceSchema = {
-    type: "OBJECT",
-    properties: {
-        richDataModel: richDataModelSchema,
-        stateMachines: { type: "ARRAY", items: stateMachineSchema },
-    },
-    required: ["richDataModel"],
-};
-
 export const uxSliceSchema = {
     type: "OBJECT",
     properties: {
@@ -461,55 +452,24 @@ export const metricsScopeSliceSchema = {
     required: ["successMetrics"],
 };
 
-const implementationPlanPhaseSchema = {
-    type: "OBJECT",
-    properties: {
-        name: { type: "STRING" },
-        goals: { type: "ARRAY", items: { type: "STRING" } },
-        featureIds: { type: "ARRAY", items: { type: "STRING" } },
-        estimatedWeeks: { type: "NUMBER" },
-    },
-    required: ["name", "goals"],
-};
-
-export const implementationPlanSliceSchema = {
-    type: "OBJECT",
-    properties: {
-        implementationPlan: {
-            type: "OBJECT",
-            properties: {
-                phases: { type: "ARRAY", items: implementationPlanPhaseSchema },
-                techStack: { type: "ARRAY", items: { type: "STRING" } },
-                teamNotes: { type: "STRING" },
-            },
-            required: ["phases"],
-        },
-    },
-    required: ["implementationPlan"],
-};
-
 export type SectionId =
     | 'product_basics'
     | 'product_thesis'
     | 'grounding'
     | 'features'
-    | 'data_model'
     | 'ux_loops'
     | 'architecture'
     | 'quality_risks'
-    | 'metrics_scope'
-    | 'implementation_plan';
+    | 'metrics_scope';
 
 export const SECTION_SCHEMAS: Record<SectionId, object> = {
     product_basics: productBasicsSchema,
     product_thesis: productThesisSliceSchema,
     grounding: groundingSliceSchema,
     features: featuresSliceSchema,
-    data_model: dataModelSliceSchema,
     ux_loops: uxSliceSchema,
     architecture: architectureSliceSchema,
     quality_risks: qualityRisksSliceSchema,
     metrics_scope: metricsScopeSliceSchema,
-    implementation_plan: implementationPlanSliceSchema,
 };
 

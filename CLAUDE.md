@@ -582,18 +582,22 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     data dependencies only** — a section lists another solely when it consumes
     that section's output as prompt context. **The PRD is the product decision
     document, not a container for downstream artifacts:** the former
-    `data_model` and `implementation_plan` PRD sections are **retired** from the
-    default graph (`RETIRED_PRD_SECTIONS` / `RETIRED_SECTION_IDS`) — the
-    dedicated data_model / implementation_plan *artifacts* own that detail, and
-    the PRD-embedded copies duplicated them (two entity lists was a standing
-    inconsistency source; `implementationPlan` was never rendered). Their
-    `SectionId`, prompt builder, slice schema, and title all survive solely so
-    single-section retry of legacy `generationMeta.failedSections` keeps
-    working (`prdSectionRetry.ts` looks sections up across
-    `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
-    sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
-    Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
-    rendering — the renderer blocks and optional `StructuredPRD` fields stay.
+    `data_model` and `implementation_plan` PRD sections were **removed
+    entirely** — their `SectionId`, prompt builder, slice schema, and title are
+    all gone. The dedicated data_model / implementation_plan *artifacts* own
+    that detail, and the PRD-embedded copies duplicated them (two entity lists
+    was a standing inconsistency source; `implementationPlan` was never
+    rendered). Single-section retry of a legacy
+    `generationMeta.failedSections` entry naming one of those ids now surfaces
+    the standard `Unknown PRD section` error (graceful degradation) —
+    `prdSectionRetry.ts` looks sections up over `DEFAULT_PRD_SECTIONS` only.
+    Never re-add either section to `DEFAULT_PRD_SECTIONS`, the `SectionId`
+    union, or the prompt/schema maps. NOTE: these retired PRD *sections* are
+    unrelated to the data_model/implementation_plan *artifacts* (whose
+    prompts/schemas live in `coreArtifactService`/`artifactSchemas.ts`), which
+    are untouched. Legacy PRDs with
+    `richDataModel`/`stateMachines`/`implementationPlan` keep rendering — the
+    renderer blocks and optional `StructuredPRD` fields stay.
     The remaining sections are prompted (and, where it matters,
     **schema-enforced** via lean slice schemas in `prdSchemas.ts` —
     `leanUxPageItemSchema`/`leanFeatureItemSchema`/`leanSuccessMetricSchema`,
