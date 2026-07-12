@@ -10,7 +10,6 @@
 import type { ProviderOptions } from '../geminiClient';
 import type {
     StructuredPRD,
-    QualityScores,
     GenerationMeta,
 } from '../../types';
 
@@ -33,9 +32,6 @@ export interface PrdPipelineOptions extends ProviderOptions {
 export interface PrdPipelineResult {
     structuredPRD: StructuredPRD;
     markdown: string;
-    /** Retained for backward compatibility with persisted projects from the
-     *  removed multi-pass scoring pipeline; never populated by current code. */
-    qualityScores?: QualityScores;
     generationMeta: GenerationMeta;
     model: string;
 }

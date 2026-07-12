@@ -431,7 +431,7 @@ const MAX_CRITERIA = 8;
  * restates a fact the spec already carries in checkable form. Consumers must
  * label the list as derived.
  */
-export function deriveAcceptanceCriteria(screen: ScreenItem): string[] {
+function deriveAcceptanceCriteria(screen: ScreenItem): string[] {
     const out: string[] = [];
     if (screen.userIntent?.trim()) {
         out.push(`The user can accomplish their goal on this screen: ${trimSentence(screen.userIntent)}.`);
@@ -512,7 +512,7 @@ export interface ScreenHandoff {
  * existing fields — no route, prop, or accessibility data exists in the
  * legacy generated spec, so none is fabricated here; the UI shows
  * "Not specified". (Phase 2 contract artifacts use resolveScreenHandoff.) */
-export function buildScreenHandoff(screen: ScreenItem): ScreenHandoff {
+function buildScreenHandoff(screen: ScreenItem): ScreenHandoff {
     const components = (screen.coreUIElements && screen.coreUIElements.length > 0
         ? screen.coreUIElements
         : screen.components ?? []).filter(c => c.trim());

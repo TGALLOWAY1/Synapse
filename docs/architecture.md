@@ -32,7 +32,7 @@ synapse/
 | Layer | Choice | Notes |
 |---|---|---|
 | View | React 19 + TypeScript | Vite 7 dev server and build |
-| Styling | Tailwind CSS 3 | `tailwind-merge` + `clsx` for conditional classes |
+| Styling | Tailwind CSS 3 | |
 | State | Zustand 5 | `persist` middleware, debounced `localStorage` |
 | Routing | React Router v7 | `/`, `/about`, `/p/:projectId` |
 | LLM | Google Gemini 2.5 | Direct browser calls with user-supplied key |

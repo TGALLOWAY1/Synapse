@@ -276,20 +276,6 @@ export type ImplementationPlan = {
     teamNotes?: string;
 };
 
-// --- Quality scoring (7-dimension rubric, 1–5 each) ---
-
-export type QualityScores = {
-    specificity: number;
-    uxUsefulness: number;
-    engineeringUsefulness: number;
-    strategicClarity: number;
-    formatting: number;
-    acceptanceCriteria: number;
-    downstreamReadiness: number;
-    overall: number;
-    notes?: string;
-};
-
 export type GenerationPassRecord = {
     stage: string;                         // 'strategy' | 'render_score' | 'revision'
     ms: number;
@@ -690,7 +676,6 @@ export type SpineVersion = {
     generationPhase?: 'running' | 'complete';
     // --- Premium PRD additions (all optional). ---
     sourcePrompt?: string;                 // original user prompt at generation time
-    qualityScores?: QualityScores;
     model?: string;                        // model used for generation
     generationMeta?: GenerationMeta;
     prdVersion?: number;                   // schema version (1 = legacy; 2 = premium)

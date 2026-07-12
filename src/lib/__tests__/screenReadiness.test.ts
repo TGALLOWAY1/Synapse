@@ -6,9 +6,7 @@ import {
     buildMockupVariantRows,
     buildReadinessIndex,
     buildScreenCoverageSummary,
-    buildScreenHandoff,
     buildScreenTraceability,
-    deriveAcceptanceCriteria,
     deriveScreenReadiness,
     detectScreenGaps,
     normalizeFeatureId,
@@ -201,56 +199,6 @@ describe('buildScreenTraceability', () => {
 
     it('normalizes feature ids for matching (F-1 ≡ f1)', () => {
         expect(normalizeFeatureId('F-1')).toBe(normalizeFeatureId('f1'));
-    });
-});
-
-// --- Acceptance criteria ------------------------------------------------------------
-
-describe('deriveAcceptanceCriteria', () => {
-    it('derives criteria from intent, exits, states, and risks', () => {
-        const criteria = deriveAcceptanceCriteria({
-            ...readyScreen,
-            risks: ['Corrupted local storage'],
-        });
-        expect(criteria.some(c => c.includes('what changed since my last visit'))).toBe(true);
-        expect(criteria.some(c => c.includes('"Open item" takes the user to Item Detail when an item exists'))).toBe(true);
-        expect(criteria.some(c => c.includes('"Empty" state appears when no activity yet'))).toBe(true);
-        expect(criteria.some(c => c.includes('Corrupted local storage'))).toBe(true);
-    });
-
-    it('returns an empty list for a screen with nothing derivable', () => {
-        expect(deriveAcceptanceCriteria(bareScreen)).toEqual([]);
-    });
-
-    it('caps and dedupes the list', () => {
-        const screen: ScreenItem = {
-            ...readyScreen,
-            risks: Array.from({ length: 20 }, (_, i) => `Risk ${i}`),
-        };
-        const criteria = deriveAcceptanceCriteria(screen);
-        expect(criteria.length).toBeLessThanOrEqual(8);
-        expect(new Set(criteria).size).toBe(criteria.length);
-    });
-});
-
-// --- Handoff ---------------------------------------------------------------------------
-
-describe('buildScreenHandoff', () => {
-    it('re-projects existing fields without inventing anything', () => {
-        const h = buildScreenHandoff(readyScreen);
-        expect(h.components).toEqual(['Activity feed', 'Header bar']);
-        expect(h.states).toEqual(['Default', 'Empty']);
-        expect(h.events).toEqual([
-            { label: 'Open item', target: 'Item Detail', condition: 'an item exists' },
-        ]);
-        expect(h.outputs).toEqual(['selected item id']);
-    });
-
-    it('falls back to the legacy components alias', () => {
-        const h = buildScreenHandoff({ ...bareScreen, components: ['Legacy chip'] });
-        expect(h.components).toEqual(['Legacy chip']);
-        expect(h.states).toEqual([]);
-        expect(h.events).toEqual([]);
     });
 });
 

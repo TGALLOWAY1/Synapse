@@ -4,7 +4,7 @@ import type {
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
     SourceRef, FeedbackItem, FeedbackType, FeedbackStatus,
     ArtifactSlotKey, ProjectJobState, SlotState,
-    QualityScores, GenerationMeta, SpineSafetyReview,
+    GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
     ProjectTask, TaskStatus, TaskExternalRef,
     WorkflowRun, VersionProvenance,
@@ -15,7 +15,6 @@ import type { PrdSectionStatusEntry } from './slices/prdProgressSlice';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
-    qualityScores?: QualityScores;
     generationMeta?: GenerationMeta;
     model?: string;
     prdVersion?: number;
@@ -87,12 +86,6 @@ export interface ProjectState {
         structuredPRD: StructuredPRD,
         responseText: string,
         meta?: SpineGenerationMetaInput,
-    ) => void;
-    updateSpineQualityScores: (
-        projectId: string,
-        spineId: string,
-        scores: import('../types').QualityScores,
-        generationMeta?: import('../types').GenerationMeta,
     ) => void;
     // Versioning: append a NEW spine version from an edited structuredPRD
     // (clones the source spine, applies the edit, becomes the new isLatest)

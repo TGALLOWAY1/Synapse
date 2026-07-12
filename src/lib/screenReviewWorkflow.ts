@@ -544,35 +544,6 @@ export function buildScreenReviewIndex(
     return out;
 }
 
-// --- Status transitions ------------------------------------------------------
-
-/** The transitions the UI offers, given the current user status. A screen with
- * no user status yet behaves like 'draft'. */
-export interface ReviewTransitions {
-    canAccept: boolean;
-    canRequestChanges: boolean;
-    canMarkImplementationReady: boolean;
-}
-
-export function reviewTransitionsFor(status: ScreenReviewStatus | undefined): ReviewTransitions {
-    const s = status ?? 'draft';
-    return {
-        // Accept is offered from any state except already-accepted.
-        canAccept: s !== 'accepted',
-        // Request changes is always available (an escape hatch).
-        canRequestChanges: true,
-        // Implementation-ready is a promotion from accepted (or a direct
-        // promotion the UI confirms) — never offered when already there.
-        canMarkImplementationReady: s !== 'implementation_ready',
-    };
-}
-
-/** Whether marking implementation-ready is clean (no blocking issues) — the UI
- * still allows an override with a reason when blockers exist. */
-export function canMarkImplementationReadyCleanly(model: ScreenReviewModel): boolean {
-    return model.blockingCount === 0;
-}
-
 // --- Review freshness (re-review after acceptance) ---------------------------
 
 export type ScreenReviewFreshnessStatus = 'current' | 'outdated' | 'unknown';

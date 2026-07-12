@@ -106,7 +106,7 @@ There is no Playwright suite despite the dev dependency.
 ## Tech Stack
 
 - React 19 + TypeScript + Vite 7
-- Tailwind CSS 3 + tailwind-merge + clsx
+- Tailwind CSS 3
 - framer-motion (page/drag transitions in the interactive product tour)
 - Zustand 5 with `persist` middleware (debounced localStorage)
 - Google Gemini API called directly from the browser; key in localStorage
@@ -626,9 +626,12 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     presentation-only and safe — downstream artifacts/mockups consume the
     `StructuredPRD` **object by field**, never this render order — but if you
     change one renderer's section order, change the other to match.
-    The legacy multi-pass scoring + revision passes were removed — old projects
-    in localStorage retain their saved `qualityScores`, but no new generation
-    writes them.
+    The legacy multi-pass scoring + revision passes were removed, and the
+    `qualityScores` field/plumbing they wrote (the `QualityScores` type,
+    `SpineVersion.qualityScores`, and the `updateSpineQualityScores` action)
+    have since been deleted outright — old persisted localStorage projects may
+    still carry the key in their stored JSON, but it is ignored on read and no
+    migration is needed.
     - **Three-view PRD IA — Overview · Features · Decisions
       (`StructuredPRDView` + `src/lib/derive/prdViews.ts`).** The in-app PRD is
       **one canonical artifact presented through three coordinated tab views**,
@@ -2194,8 +2197,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   screen on a legacy project read "review recommended" — both still surface in
   the QA checklist only.
   `buildScreensHandoffRollup(handoffs, p0Ids)` rolls up ready/review/blocked
-  **gated on P0**; `renderHandoffMarkdown` is the copy-to-clipboard export;
-  `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
+  **gated on P0** (the export panel uses `renderScreensHandoffExportMarkdown`
+  from `screenHandoffExport.ts` — see Phase 5C below; the per-screen
+  `renderHandoffMarkdown` copy export was deleted as dead code once that panel
+  shipped); `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
   structural `PreflightContribution` param on `buildScreensPreflight` /
   `analyzeScreensDownstream` (screenDownstreamImpact **never imports** the handoff
   module — that would cycle; the caller passes the contribution in). **UI (per
@@ -2264,10 +2269,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `traceBridge`, adds trace-review **readiness** signals
     (`dataModelTraceMissing` / `planBridgeMissing` (accepted P0 only) /
     `traceConfidenceWeakForP0` — all **review-recommended, never blocking**; they
-    fire only when the relevant artifact was PRESENT), extends
-    `renderHandoffMarkdown` with `## Trace Confidence` / `## Data Model Support` /
-    `## Related Implementation Plan Items`, and folds trace guidance into
-    `buildHandoffPreflightContribution`. `buildScreensHandoffRollup` gained a
+    fire only when the relevant artifact was PRESENT), and folds trace guidance
+    into `buildHandoffPreflightContribution` (the since-deleted
+    `renderHandoffMarkdown` used to render matching `## Trace Confidence` /
+    `## Data Model Support` / `## Related Implementation Plan Items` sections;
+    the Phase 5C export below covers this ground now). `buildScreensHandoffRollup` gained a
     `ScreensTraceRollup` (strong/estimated/missing counts + P0 plan/data-model
     gaps; null when no screen carried a bridge).
   - **UI.** The per-screen `ScreenHandoffView` (which rendered the **Trace
