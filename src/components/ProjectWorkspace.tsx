@@ -36,6 +36,7 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
+import { ConfirmDialog } from './common/ConfirmDialog';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, UpdateAssetsPlanModal, type VersionEntry, type UpdatePlanChoice, type UpdatePlanRow } from './versions';
 import {
     computeRecommendedUpdates,
@@ -1019,41 +1020,27 @@ export function ProjectWorkspace() {
             </div>
 
             {showIncompletePrdConfirm && (
-                <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
-                    <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-                        <div className="flex items-start gap-3 p-5 border-b border-neutral-100">
-                            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
-                            <div>
-                                <h3 className="font-semibold text-neutral-900">Generate assets from an incomplete PRD?</h3>
-                                <p className="text-sm text-neutral-600 mt-1">
-                                    {persistedFailedSections.length} PRD section{persistedFailedSections.length > 1 ? 's' : ''} failed
-                                    to generate. Downstream artifacts (screens, data model, mockups, and more) will be built
-                                    from partial source material and may be inconsistent or incomplete. They'll be tagged as
-                                    generated from an incomplete PRD.
-                                </p>
-                                <p className="text-sm text-neutral-600 mt-2">
-                                    We recommend retrying the failed sections first.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-2 p-4">
-                            <button
-                                type="button"
-                                onClick={() => setShowIncompletePrdConfirm(false)}
-                                className="px-3 py-1.5 text-sm rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
-                            >
-                                Retry sections first
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { setShowIncompletePrdConfirm(false); startFinalizeFlow(true); }}
-                                className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition"
-                            >
-                                Generate anyway
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                <ConfirmDialog
+                    tone="amber"
+                    title="Generate assets from an incomplete PRD?"
+                    icon={<AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />}
+                    dismissOnBackdropClick={false}
+                    maxWidthClassName="max-w-md"
+                    cancelLabel="Retry sections first"
+                    confirmLabel="Generate anyway"
+                    onCancel={() => setShowIncompletePrdConfirm(false)}
+                    onConfirm={() => { setShowIncompletePrdConfirm(false); startFinalizeFlow(true); }}
+                >
+                    <p className="text-sm text-neutral-600 mt-1">
+                        {persistedFailedSections.length} PRD section{persistedFailedSections.length > 1 ? 's' : ''} failed
+                        to generate. Downstream artifacts (screens, data model, mockups, and more) will be built
+                        from partial source material and may be inconsistent or incomplete. They'll be tagged as
+                        generated from an incomplete PRD.
+                    </p>
+                    <p className="text-sm text-neutral-600 mt-2">
+                        We recommend retrying the failed sections first.
+                    </p>
+                </ConfirmDialog>
             )}
             {showPresetChoice && (
                 <DesignSystemPresetChoice

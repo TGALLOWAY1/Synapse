@@ -5,6 +5,7 @@ import { useScreenInventoryImageStore } from '../../store/screenInventoryImageSt
 import { buildExternalMockupPrompt } from '../../lib/services/screenInventoryImageService';
 import { slugifyScreenName } from '../../lib/screenInventoryImageStore';
 import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
+import { copyToClipboard } from '../../lib/utils/copyToClipboard';
 
 export interface ScreenImageGalleryContext {
     projectId: string;
@@ -66,7 +67,8 @@ export function ScreenImageGallery({ screen, context, storageName }: Props) {
     const lightboxRecord = lightboxKey ? versions.find(v => v.key === lightboxKey) : null;
 
     const handleCopy = () => {
-        navigator.clipboard.writeText(prompt).then(() => {
+        void copyToClipboard(prompt).then((ok) => {
+            if (!ok) return;
             setCopied(true);
             setTimeout(() => setCopied(false), 2000);
         });
