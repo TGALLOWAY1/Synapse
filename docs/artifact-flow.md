@@ -29,9 +29,9 @@ previous version is retained in history.
 
 ## 2. PRD → Branch → Consolidation
 
-**Entry:** `src/components/SelectableSpine.tsx`
+**Entry:** `src/components/StructuredPRDView.tsx`
 
-The user highlights any substring of the rendered PRD. `SelectableSpine`
+The user highlights any substring of the rendered PRD. `StructuredPRDView`
 uses `mark.js` to anchor the selection and opens the branch creation
 sheet. `createBranch()` on the store (`slices/branchSlice.ts`) creates a
 `Branch` record pinned to the current spine and the selected anchor text.

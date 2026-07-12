@@ -86,7 +86,8 @@ that markdown back into card / table layouts.
 `ProjectWorkspace.tsx` is the orchestrator for a single project. It reads
 the current stage from the store and swaps between five stage views:
 
-- `SelectableSpine.tsx` — the PRD canvas. Text selection spawns branches
+- `StructuredPRDView.tsx` — the PRD canvas. Text selection spawns branches
+  (legacy spines with no `structuredPRD` render as read-only markdown, no selection UI)
 - `MockupsView.tsx` — generate and diff mockup versions
 - `ArtifactsView.tsx` — bundle / individual generation, refinement, validation
 - `MarkupImageView.tsx` — SVG annotation artifacts

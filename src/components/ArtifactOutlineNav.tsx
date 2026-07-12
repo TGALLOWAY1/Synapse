@@ -29,8 +29,7 @@ export type ArtifactOutlineNavProps = {
 /**
  * Shared, collapsible outline navigation for long structured artifacts.
  *
- * Replaces the wrapping "pill" nav (`SectionTabs`) on the Design System and
- * Data Model pages with a single scannable list/card that mirrors the refined
+ * The single scannable list/card that mirrors the refined
  * Mockups "Pages" navigator: a collapsible header, compact numbered rows, a
  * subtle purple highlight + badge on the current row, and (on mobile) a
  * floating button to re-open the outline once it scrolls out of view.

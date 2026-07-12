@@ -5,6 +5,8 @@ import { useToastStore } from '../store/toastStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD } from '../lib/llmProvider';
 import { normalizeError, userMessage } from '../lib/errors';
@@ -18,7 +20,6 @@ import { ProgressTimeline } from './progress/ProgressTimeline';
 import { buildGenerationSteps } from './progress/buildGenerationSteps';
 import { regeneratePrdSection } from '../lib/services/prdSectionRetry';
 import { summarizeConsistencyReview } from '../lib/services/prdConsistencyReview';
-import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
 import { SettingsModal } from './SettingsModal';
@@ -1358,12 +1359,9 @@ export function ProjectWorkspace() {
                                             />
                                         ) : (
                                             <div className="prose prose-neutral max-w-none">
-                                                <SelectableSpine
-                                                    projectId={projectId}
-                                                    spineVersionId={activeSpine.id}
-                                                    text={activeSpine.responseText}
-                                                    readOnly={isOldVersion || !capabilities.canEditProjectContent}
-                                                />
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {activeSpine.responseText}
+                                                </ReactMarkdown>
                                             </div>
                                         )}
                                     </div>

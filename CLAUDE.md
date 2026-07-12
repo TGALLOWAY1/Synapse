@@ -1193,9 +1193,10 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     `isMobile`) with a floating re-open button. Used by the **Design System**
     (sections) and **Data Model** (entities) renderers, which anchor each
     section with a `scroll-mt-*` id matching an outline item. This **replaced
-    the old wrapping "pill" nav** (`SectionTabs`) on both pages — do not
-    reintroduce pills there; `SectionTabs` survives only in the Implementation
-    Plan renderer's legacy-markdown fallback path. When a document-style
+    the old wrapping "pill" nav** (the deleted `SectionTabs`) on both pages — do
+    not reintroduce pills there. The Implementation Plan renderer's
+    legacy/adapter-null fallback is now plain markdown + a Convert-to-Tasks
+    action row (no milestone cards, no in-page nav). When a document-style
     artifact needs in-page nav, reuse
     `ArtifactOutlineNav`/`useArtifactOutline` rather than introducing another
     navigation style.
@@ -1620,9 +1621,9 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               DesignSetupStep — pick a visual direction while the PRD
               generates in the background (see "Design System Presets")
               ↓
-  PRD stage:       StructuredPRDView (the only view once a structured PRD
-                   exists; SelectableSpine is the legacy fallback for spines
-                   with no structuredPRD) — text selection →
+  PRD stage:       StructuredPRDView (the only interactive view; legacy spines
+                   with no structuredPRD render as read-only ReactMarkdown with
+                   no selection/branch UI) — text selection →
                    branch creation → AI conversation → consolidateBranch()
                    merges into spine (local or doc-wide scope, see
                    ConsolidationModal). Selection → action dialog runs
@@ -2887,9 +2888,10 @@ healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
 The core PRD-refinement gesture — highlight PRD text, get a contextual
 action dialog (Clarify / Expand / Specify / Alternative / Replace), spawn
 a history-tracked branch — is detection-source-agnostic and works on
-both desktop and touch. Both PRD renderers (`SelectableSpine.tsx` for
-markdown PRDs, `StructuredPRDView.tsx` for structured PRDs) share one
-pipeline; do not reintroduce per-component `onMouseUp` selection logic.
+both desktop and touch. The selection pipeline now has a single consumer,
+`StructuredPRDView.tsx` (the structured PRD renderer); legacy spines with no
+`structuredPRD` render as read-only markdown with no selection/branch UI. Do
+not reintroduce per-component `onMouseUp` selection logic.
 
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
