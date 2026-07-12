@@ -1289,9 +1289,6 @@ export function ArtifactWorkspace({
                         : 'responsive') as 'mobile' | 'desktop' | 'responsive',
             }
             : undefined;
-        const promptEdits = subtype === 'prompt_pack'
-            ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
-            : undefined;
         // Legacy projects may hold a standalone prompt_pack artifact (retired
         // subtype, no sidebar row). The Implementation Plan view consumes its
         // content through the adapter so those prompts appear as prompt packs.
@@ -1301,13 +1298,6 @@ export function ArtifactWorkspace({
                 const packPreferred = packArtifact ? getPreferredVersion(projectId, packArtifact.id) : undefined;
                 return packPreferred?.content;
             })()
-            : undefined;
-        const handleUpdatePromptEdits = subtype === 'prompt_pack' && capabilities.canEditArtifacts
-            ? (next: Record<number, string>) => {
-                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next }, {
-                    historyDescription: 'Developer prompt edited',
-                });
-            }
             : undefined;
         // Implementation Plan extras: saved tasks (tracked-task matching +
         // "Manage tasks (N)"), the Convert-to-Tasks entry point (now inside
@@ -1424,7 +1414,7 @@ export function ArtifactWorkspace({
                         metadata={preferred.metadata}
                         projectId={projectId}
                         features={
-                            subtype === 'prompt_pack' || subtype === 'user_flows'
+                            subtype === 'user_flows'
                                 ? structuredPRD.features
                                 : undefined
                         }
@@ -1439,10 +1429,6 @@ export function ArtifactWorkspace({
                         onConvertToTasks={handleConvertToTasks}
                         onUpdatePlanProgress={handleUpdatePlanProgress}
                         sourceVersions={planSourceVersions}
-                        promptEdits={promptEdits}
-                        onUpdatePromptEdits={handleUpdatePromptEdits}
-                        generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
-                        versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
                         prdVersionLabel={
                             // Data Model shows provenance once at the page level
                             // (the version-controls strip above), so only the plan

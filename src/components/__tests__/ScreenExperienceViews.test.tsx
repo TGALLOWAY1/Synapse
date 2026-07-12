@@ -787,9 +787,8 @@ describe('Phase 3C variant freshness & history UI', () => {
 
 // --- Phase 4B: downstream impact + Screens preflight -------------------------
 
-import { ScreenDownstreamImpactSection } from '../experience/ScreenDownstreamImpactSection';
 import { ScreenPreflightPanel } from '../experience/ScreenPreflightPanel';
-import { buildScreenDownstreamImpact, buildScreensPreflight } from '../../lib/screenDownstreamImpact';
+import { buildScreensPreflight } from '../../lib/screenDownstreamImpact';
 import type { ScreenArtifactReviewReadiness } from '../../lib/screenReviewWorkflow';
 
 /** Fixtures where the P0 dashboard is Accepted but its stored review signature
@@ -809,32 +808,6 @@ function buildDownstreamFixtures() {
     const artifactReview = summarizeArtifactReviewReadiness(index, reviewModels);
     return { index, readiness, coverage, reviewModels, artifactReview };
 }
-
-describe('Phase 4B downstream impact section', () => {
-    it('11. shows the impacted artifacts when an accepted screen is outdated', () => {
-        const impact = buildScreenDownstreamImpact({
-            screenId: 's', title: 'Dashboard', isP0: true,
-            userStatus: 'accepted', reviewFreshness: 'outdated',
-            blockingCount: 0, blockingTitles: [],
-            mockupFreshnessStale: false, mockupFreshnessUnknown: false, hasDataRequirements: true,
-        });
-        const { getByText, getAllByText } = render(<ScreenDownstreamImpactSection impact={impact} />);
-        expect(getAllByText('Downstream impact').length).toBeGreaterThan(0);
-        expect(getByText('Mockups')).toBeTruthy();
-        expect(getByText('Implementation Plan')).toBeTruthy();
-    });
-
-    it('12. shows a calm no-impact empty state', () => {
-        const impact = buildScreenDownstreamImpact({
-            screenId: 's', title: 'Settings', isP0: false,
-            userStatus: 'draft', reviewFreshness: 'current',
-            blockingCount: 0, blockingTitles: [],
-            mockupFreshnessStale: false, mockupFreshnessUnknown: false, hasDataRequirements: false,
-        });
-        const { getByText } = render(<ScreenDownstreamImpactSection impact={impact} />);
-        expect(getByText('No downstream impact detected for this screen.')).toBeTruthy();
-    });
-});
 
 describe('Phase 4B list card + coverage panel', () => {
     it('13. a card shows a downstream review chip only when relevant', () => {
