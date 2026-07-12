@@ -5,6 +5,7 @@ import {
     deriveDecisionLog,
     resolveScopeFeature,
     isDisplayableFeatureId,
+    buildDecisionEditSummary,
 } from '../derive/prdDecisions';
 import type { Assumption, Feature, StructuredPRD } from '../../types';
 
@@ -271,5 +272,43 @@ describe('isDisplayableFeatureId', () => {
         expect(isDisplayableFeatureId('550e8400-e29b-41d4-a716-446655440000')).toBe(false);
         expect(isDisplayableFeatureId(undefined)).toBe(false);
         expect(isDisplayableFeatureId('')).toBe(false);
+    });
+});
+
+describe('buildDecisionEditSummary', () => {
+    it('preserves the first specific summary when total === 1', () => {
+        expect(
+            buildDecisionEditSummary({ confirmed: 1, corrected: 0, reopened: 0 }, 'Confirmed assumption: X…'),
+        ).toBe('Confirmed assumption: X…');
+    });
+
+    it('falls back to an aggregate when total === 1 but no firstSummary given', () => {
+        expect(buildDecisionEditSummary({ confirmed: 1, corrected: 0, reopened: 0 })).toBe('Confirmed 1 decision');
+    });
+
+    it('aggregates a single bucket with pluralization', () => {
+        expect(buildDecisionEditSummary({ confirmed: 3, corrected: 0, reopened: 0 })).toBe('Confirmed 3 decisions');
+    });
+
+    it('aggregates multiple buckets in priority order, joined with " · "', () => {
+        expect(buildDecisionEditSummary({ confirmed: 2, corrected: 1, reopened: 0 })).toBe(
+            'Confirmed 2 decisions · corrected 1',
+        );
+    });
+
+    it('leads with the first non-zero bucket in priority order, not the largest count', () => {
+        expect(buildDecisionEditSummary({ confirmed: 0, corrected: 1, reopened: 2 })).toBe(
+            'Corrected 1 decision · reopened 2',
+        );
+    });
+
+    it('ignores firstSummary once ≥2 edits coalesce', () => {
+        expect(
+            buildDecisionEditSummary({ confirmed: 2, corrected: 0, reopened: 0 }, 'Confirmed assumption: X…'),
+        ).toBe('Confirmed 2 decisions');
+    });
+
+    it('handles an all-zero tally defensively', () => {
+        expect(buildDecisionEditSummary({ confirmed: 0, corrected: 0, reopened: 0 })).toBe('Updated decisions');
     });
 });

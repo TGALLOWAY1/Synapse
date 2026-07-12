@@ -314,7 +314,7 @@ const overviewLines = (prd: StructuredPRD): string[] => {
             lines.push('');
         }
         if (summary.buildFirst.length > 0) {
-            lines.push('### Build First (MVP)');
+            lines.push('### Build First (MVP — Minimum Viable Product)');
             summary.buildFirst.forEach((f, i) => {
                 const id = f.id ? `**${f.id}** ` : '';
                 const reason = f.reason ? ` — ${f.reason}` : '';
@@ -337,7 +337,7 @@ const overviewLines = (prd: StructuredPRD): string[] => {
             lines.push('');
         }
         if (prd.nonFunctionalRequirements?.length) {
-            lines.push('### Non-Functional Requirements');
+            lines.push('### Quality & Performance Requirements');
             prd.nonFunctionalRequirements.forEach(r => lines.push(`- ${r}`));
             lines.push('');
         }
@@ -530,17 +530,6 @@ const appendixLines = (prd: StructuredPRD): string[] => {
         prd.primaryActions.forEach(a => lines.push(`- ${a.verb} ${a.target}`));
         lines.push('');
     }
-
-    // Static handoff appendix — wording must stay bullet-for-bullet identical to
-    // HandoffAppendixSection in PremiumSections.tsx (mirrored-renderer rule).
-    lines.push('## Where the Detail Lives');
-    lines.push('This PRD stays at the product-decision level. The deep specification is generated as dedicated downstream artifacts:');
-    lines.push('- **Data Model** — entities, fields, relationships, and state machines');
-    lines.push('- **Screens (Screen Inventory)** — per-screen components, states, and interactions');
-    lines.push('- **User Flows** — step-by-step journeys and decision points');
-    lines.push('- **Design System** — visual tokens and component conventions');
-    lines.push('- **Implementation Plan** — phased milestones, tasks, and quality gates');
-    lines.push('');
 
     return lines;
 };

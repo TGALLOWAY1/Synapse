@@ -1560,7 +1560,8 @@ export type VersionChangeSource =
     | 'user_edit'           // inline edit in the workspace
     | 'revert'              // restore of an earlier version
     | 'consistency_review'  // optional final reconciliation pass
-    | 'marked_current';     // user confirmed an artifact is still current for a newer PRD
+    | 'marked_current'      // user confirmed an artifact is still current for a newer PRD
+    | 'decision_edit';      // Decisions-tab confirm/reject/undo — consecutive edits amend the latest version in place
 
 export type VersionProvenance = {
     changeSource?: VersionChangeSource;
@@ -1568,6 +1569,10 @@ export type VersionProvenance = {
     revertedFromVersionId?: string;  // set when changeSource === 'revert'
     model?: string;                  // AI-generated versions
     prompt?: string;                 // AI-generated versions
+    // Running tally of coalesced Decisions-tab edits on this version, so the
+    // aggregate summary ("Confirmed 3 decisions · corrected 1") stays accurate
+    // as consecutive decision edits amend in place.
+    decisionCounts?: { confirmed: number; corrected: number; reopened: number };
 };
 
 export type HistoryEvent = {

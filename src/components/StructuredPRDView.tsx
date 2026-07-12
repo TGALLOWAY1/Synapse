@@ -54,7 +54,6 @@ import {
     RolesSection,
     ArchFlowsSection,
     MetricsSection,
-    HandoffAppendixSection,
 } from './prd/PremiumSections';
 
 interface StructuredPRDViewProps {
@@ -221,11 +220,28 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // version (preserving history) via editSpineStructuredPRD. Each call site
     // passes a useful default summary; no manual entry required.
     const savePRD = (updated: StructuredPRD, editSummary: string) => {
-        const markdown = structuredPRDToMarkdown(updated);
         editSpineStructuredPRD(projectId, spineId, updated, {
-            responseText: markdown,
+            responseText: structuredPRDToMarkdown(updated),
             changeSource: 'user_edit',
             editSummary,
+        });
+    };
+
+    // Decisions-tab confirm/reject/undo edits. These coalesce onto the latest
+    // spine version in place (see editSpineStructuredPRD) so a burst of clicks
+    // doesn't spawn N near-identical full PRD copies. The markdown re-render
+    // mirrors savePRD; the decisionDelta drives the coalesced aggregate summary.
+    const saveDecision = (
+        updated: StructuredPRD,
+        summary: string,
+        kind: 'confirmed' | 'corrected' | 'reopened',
+        count = 1,
+    ) => {
+        editSpineStructuredPRD(projectId, spineId, updated, {
+            responseText: structuredPRDToMarkdown(updated),
+            changeSource: 'decision_edit',
+            editSummary: summary,
+            decisionDelta: { [kind]: count },
         });
     };
 
@@ -334,6 +350,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         assumptionId: string,
         patch: Partial<NonNullable<StructuredPRD['assumptions']>[number]>,
         editSummary: string,
+        kind: 'confirmed' | 'corrected' | 'reopened',
     ) => {
         const updated = {
             ...structuredPRD,
@@ -341,7 +358,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 a.id === assumptionId ? { ...a, ...patch } : a,
             ),
         };
-        savePRD(updated, editSummary);
+        saveDecision(updated, editSummary, kind);
     };
 
     const handleConfirmAssumption = (assumptionId: string) => {
@@ -351,6 +368,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             assumptionId,
             { decision: 'confirmed', decisionNote: undefined, decidedAt: Date.now() },
             `Confirmed assumption: ${truncate(a.statement)}`,
+            'confirmed',
         );
     };
 
@@ -361,6 +379,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             assumptionId,
             { decision: 'rejected', decisionNote: note || undefined, decidedAt: Date.now() },
             `Marked assumption incorrect: ${truncate(a.statement)}`,
+            'corrected',
         );
     };
 
@@ -371,7 +390,29 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             assumptionId,
             { decision: undefined, decisionNote: undefined, decidedAt: undefined },
             `Reopened assumption: ${truncate(a.statement)}`,
+            'reopened',
         );
+    };
+
+    // "Confirm all" — bulk-confirms every unresolved assumption (Needs Input +
+    // Assumptions to Validate) in one coalesced spine edit rather than N calls.
+    const [confirmAllStep, setConfirmAllStep] = useState<'idle' | 'confirming'>('idle');
+
+    const handleConfirmAll = () => {
+        const now = Date.now();
+        const unresolved = (structuredPRD.assumptions ?? []).filter(a => !a.decision);
+        if (unresolved.length === 0) {
+            setConfirmAllStep('idle');
+            return;
+        }
+        const updated = {
+            ...structuredPRD,
+            assumptions: (structuredPRD.assumptions ?? []).map(a =>
+                a.decision ? a : { ...a, decision: 'confirmed' as const, decisionNote: undefined, decidedAt: now },
+            ),
+        };
+        saveDecision(updated, `Confirmed ${unresolved.length} assumptions`, 'confirmed', unresolved.length);
+        setConfirmAllStep('idle');
     };
 
     const handleToggleFeatureConfirm = (feature: Feature) => {
@@ -384,11 +425,12 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     : f,
             ),
         };
-        savePRD(
+        saveDecision(
             updated,
             confirmed
                 ? `Confirmed feature: ${feature.name || 'Untitled'}`
                 : `Reopened feature: ${feature.name || 'Untitled'}`,
+            confirmed ? 'confirmed' : 'reopened',
         );
     };
 
@@ -603,6 +645,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                         </button>
                     )}
                 </div>
+                <p className="text-xs text-neutral-500 mb-3">
+                    The core "things" your product stores and shows — Synapse uses them to ground screens, data models, and mockups.
+                </p>
                 {editing ? (
                     <div className="space-y-2">
                         <textarea
@@ -828,7 +873,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     )}
                     {nfrs.length > 0 && (
                         <div className="p-3 bg-neutral-50 border border-neutral-200 rounded-lg">
-                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Non-functional requirements</p>
+                            <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Quality & Performance Requirements</p>
                             <ul className="list-disc pl-4 space-y-0.5 text-sm text-neutral-700">
                                 {nfrs.map((c, i) => <li key={i}>{c}</li>)}
                             </ul>
@@ -898,7 +943,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     </div>
                 )}
                 <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
-                    {renderScopeGroup('Build first (MVP)', summary.buildFirst)}
+                    {renderScopeGroup('Build first (MVP — Minimum Viable Product)', summary.buildFirst)}
                     {renderScopeGroup('Build next', summary.buildNext)}
                     {deferredCount > 0 && (
                         <p className="text-xs text-neutral-500 mt-2">
@@ -1010,8 +1055,6 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     )}
                 </div>
             )}
-
-            <HandoffAppendixSection />
         </>
     );
 
@@ -1024,33 +1067,18 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     type="button"
                     onClick={() => toggleGroup(group.id)}
                     aria-expanded={!collapsed}
-                    className="w-full flex items-start justify-between gap-3 px-4 py-3 bg-neutral-50 hover:bg-neutral-100 text-left transition"
+                    className="w-full flex items-start gap-3 px-4 py-3 bg-neutral-50 hover:bg-neutral-100 text-left transition"
                 >
                     <div className="min-w-0">
                         <div className="flex items-center gap-2">
                             {collapsed ? <ChevronRight size={16} className="text-neutral-400 shrink-0" /> : <ChevronDown size={16} className="text-neutral-400 shrink-0" />}
-                            <h4 className="font-bold text-neutral-900">{group.name}</h4>
-                            <span className="text-[11px] text-neutral-400">
-                                {group.total} feature{group.total === 1 ? '' : 's'}
-                            </span>
+                            <h4 className="font-bold text-neutral-900 min-w-0 break-words">{group.name}</h4>
                         </div>
                         {group.purpose && <p className="text-xs text-neutral-600 mt-1 ml-6">{group.purpose}</p>}
                         {group.outcome && (
                             <p className="text-xs text-neutral-500 mt-0.5 ml-6">
                                 <span className="font-semibold">Outcome:</span> {group.outcome}
                             </p>
-                        )}
-                    </div>
-                    <div className="shrink-0 flex items-center gap-1.5 pt-0.5">
-                        {group.mvpCount > 0 && (
-                            <span className="inline-block text-[10px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-green-100 text-green-800 border-green-300">
-                                {group.mvpCount} MVP
-                            </span>
-                        )}
-                        {group.v1CountAll > 0 && (
-                            <span className="inline-block text-[10px] font-semibold uppercase tracking-wider px-1.5 py-0.5 rounded border bg-blue-50 text-blue-700 border-blue-200">
-                                {group.v1CountAll} later
-                            </span>
                         )}
                     </div>
                 </button>
@@ -1122,6 +1150,37 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     const renderDecisions = () => (
         <>
+            {!readOnly && decisionsPending >= 2 && (
+                <div className="mb-4">
+                    {confirmAllStep === 'idle' ? (
+                        <button
+                            type="button"
+                            onClick={() => setConfirmAllStep('confirming')}
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition"
+                        >
+                            <Check size={13} /> Confirm all ({decisionsPending})
+                        </button>
+                    ) : (
+                        <div className="inline-flex flex-wrap items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
+                            <span className="text-xs text-neutral-700">Confirm {decisionsPending} assumptions?</span>
+                            <button
+                                type="button"
+                                onClick={handleConfirmAll}
+                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition"
+                            >
+                                <Check size={12} /> Confirm
+                            </button>
+                            <button
+                                type="button"
+                                onClick={() => setConfirmAllStep('idle')}
+                                className="px-2.5 py-1 text-xs font-medium rounded-md text-neutral-500 hover:text-neutral-700 transition"
+                            >
+                                Cancel
+                            </button>
+                        </div>
+                    )}
+                </div>
+            )}
             <ReviewConfirmSection
                 assumptions={needsInput}
                 onConfirm={handleConfirmAssumption}

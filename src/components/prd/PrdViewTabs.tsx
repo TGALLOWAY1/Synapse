@@ -43,7 +43,7 @@ export function PrdViewTabs({ active, onChange, counts }: Props) {
             role="tablist"
             aria-label="PRD views"
             onKeyDown={onKeyDown}
-            className="flex items-center gap-1 overflow-x-auto -mx-1 px-1 mb-6 border-b border-neutral-200"
+            className="flex items-center gap-1 overflow-x-auto overflow-y-hidden -mx-1 px-1 mb-6 border-b border-neutral-200"
         >
             {PRD_VIEWS.map(view => {
                 const Icon = ICONS[view.id];

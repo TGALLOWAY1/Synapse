@@ -24,12 +24,11 @@ describe('renderPremiumMarkdown — three-part structure', () => {
         expect(app).toBeGreaterThan(iii);
     });
 
-    it('renders "Where the Detail Lives" as the last section', () => {
+    it('no longer renders the retired "Where the Detail Lives" handoff appendix', () => {
         const md = renderPremiumMarkdown(minimalPrd);
-        const headings = md.split('\n').filter((l) => l.startsWith('## '));
-        expect(headings[headings.length - 1]).toBe('## Where the Detail Lives');
-        expect(md).toContain('**Data Model** — entities, fields, relationships, and state machines');
-        expect(md).toContain('**Implementation Plan** — phased milestones, tasks, and quality gates');
+        expect(md).not.toContain('## Where the Detail Lives');
+        expect(md).not.toContain('**Data Model** — entities, fields, relationships, and state machines');
+        expect(md).not.toContain('**Implementation Plan** — phased milestones, tasks, and quality gates');
     });
 });
 

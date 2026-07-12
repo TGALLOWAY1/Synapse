@@ -108,6 +108,10 @@ export interface ProjectState {
             editSummary?: string;
             changeSource?: import('../types').VersionChangeSource;
             meta?: SpineGenerationMetaInput;
+            // Per-edit decision tally delta (Decisions-tab confirm/reject/undo).
+            // Merged into the version's provenance.decisionCounts; drives the
+            // in-place amend coalescing when changeSource === 'decision_edit'.
+            decisionDelta?: Partial<{ confirmed: number; corrected: number; reopened: number }>;
         },
     ) => { newSpineId: string };
     // Versioning: restore a historical spine by appending a new latest version

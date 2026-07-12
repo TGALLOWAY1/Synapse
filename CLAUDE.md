@@ -618,12 +618,8 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     **PRD reading order ≠ generation (DAG) order.** The human/agent-facing
     section order is a fixed logical flow (Product Overview → Target Users →
     MVP Scope → Core Features → UX → Success Metrics → Risks → Technical
-    Architecture → Data Model → State Machines → NFRs → reference appendix →
-    **"Where the Detail Lives"**, a static deterministic handoff appendix
-    pointing to the downstream artifacts, rendered unconditionally by both
-    renderers — legacy spines' persisted `responseText` picks it up on the
-    next re-render (edit / section retry / regenerate), while the in-app
-    Structured view shows it immediately for every PRD)
+    Architecture → Data Model → State Machines → NFRs → reference appendix —
+    now the final section)
     defined in **two mirrored renderers that must stay in sync**:
     `prdMarkdownRenderer.renderPremiumMarkdown` (export/`responseText`) and
     `StructuredPRDView`/`PremiumSections` (in-app). Reordering is
@@ -682,8 +678,29 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       `StructuredPRD` itself via all-optional fields (`Assumption.decision` /
       `decisionNote` / `decidedAt`; `Feature.confirmed` / `confirmedAt` —
       legacy PRDs simply read as "all unresolved"); every confirm/reject/undo
-      is a normal PRD edit through `editSpineStructuredPRD` (appends a
-      version, descriptive editSummary, undoable via version history). All
+      (and the feature confirm toggle) is a PRD edit through
+      `editSpineStructuredPRD` with `changeSource: 'decision_edit'` plus a
+      `decisionDelta` count (confirmed/corrected/reopened). **Consecutive
+      decision edits amend the latest spine version in place** instead of
+      appending one per click — same id/`createdAt`; `provenance.decisionCounts`
+      merges; `editSummary` is recomputed via the pure `buildDecisionEditSummary`
+      (`src/lib/derive/prdDecisions.ts` — the first edit's specific summary
+      survives alone, ≥2 coalesced edits switch to a deterministic aggregate
+      like "Confirmed 2 decisions · corrected 1"); the single matching `Edited`
+      history event is rewritten in place, never duplicated. N consecutive
+      confirms = 1 version — this is also the localStorage-quota fix (every
+      appended version used to carry a full `responseText` + `structuredPRD`
+      clone). **The coalesce chain breaks** (the next decision edit appends
+      normally) when the latest version's provenance isn't `decision_edit`, the
+      latest is `isFinal`, the edited version isn't the latest, or **any
+      `ArtifactVersion` carries a spine `sourceRef` to the latest version id**
+      (an artifact was generated against it — amending under a referenced id
+      would let the freshness engine read changed content as "current"; e.g.
+      finalize → generate → unfinalize → confirm, or an early design-system run
+      against a decision-edit version). A **"Confirm all (N)"** control in the
+      Decisions tab (inline two-step confirm) confirms every remaining
+      unresolved assumption in ONE call → one version. Undo remains available
+      via version history. All
       derivations (`sortAssumptionsByConfidence`, `splitAssumptions`,
       `deriveDecisionLog`, and `isDisplayableFeatureId`) are pure/read-side in
       `src/lib/derive/prdDecisions.ts`, which re-exports `resolveScopeFeature`
@@ -930,6 +947,30 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
       design system (`selectPreferredDesignSystem`), wired to the existing mockup
       regenerate-confirm. Mockup *images* are keyed by the new mockup version id,
       so the user must regenerate to pull the new visual direction through.
+    - **Early design-system generation.** `artifactJobController.ensureDesignSystemForSpine(args)`
+      generates the design_system artifact **in the background as soon as a
+      preset is chosen AND the PRD settles cleanly**, so a real run rarely
+      leaves the user watching design_system "generating" after finalize.
+      Triggered by one `ProjectWorkspace` effect covering both orderings
+      (preset picked mid-generation → fires when `generationPhase` flips to
+      `'complete'`; preset picked after generation → fires on the preset
+      change). Every gate is a **silent early-return, never a throw** (this
+      runs from an effect): missing `canGenerateArtifacts` capability (covers
+      the demo), `evaluateSpineGenerationGate` (safety-blocked / no PRD /
+      unacknowledged-incomplete PRD), a missing Gemini key (`hasGeminiKey` — an
+      early run would just burn a guaranteed failure), the slot already done
+      for this spine, and an already-active run (idempotent). Failures are
+      recorded silently on the slot; finalize self-heals by regenerating.
+      `startAll`'s own `isSlotDoneForSpine` check then skips the
+      already-generated slot on finalize. **Single-run chaining
+      (`RunState.single`):** `ensureDesignSystemForSpine` and `retrySlot`
+      register their run as `single`; if `startAll` (finalize) is called while
+      a `single` run is still in flight for the same spine, it **chains**
+      (`existing.promise.finally(() => startAll(args))`) instead of silently
+      no-op'ing — this also fixed a latent retrySlot-then-finalize race. A full
+      run (`startAll`/`regenerateSlots`) still no-ops a concurrent `startAll` as
+      before (idempotent). New generation entry points that can overlap a
+      single-slot run must follow this chaining pattern.
   - **Canonical PRD Spine (`src/lib/canonicalPrdSpine.ts`) — the primary,
     authoritative context for artifact generation.** `buildCanonicalPrdSpine(prd,
     options)` is a **pure, deterministic** builder (NEVER an LLM call) that
@@ -949,7 +990,13 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     on final settle (`updateSpineStructuredPRD`, only when `generationMeta` is
     present — a diagnostic/diffing copy; artifact generation always **rebuilds it
     lazily** from `structuredPRD` so old projects and post-edit PRDs stay
-    consistent). In `generateCoreArtifact` the prompt is assembled by the pure,
+    consistent). **`editSpineStructuredPRD` (every user edit, decision edit, and
+    section retry) explicitly drops the inherited `canonicalSpine`** on the new/
+    amended version — it goes stale the moment `structuredPRD` changes, nothing
+    reads `SpineVersion.canonicalSpine` besides the diagnostic copy, and
+    dropping it keeps edit versions smaller (relevant to the same
+    localStorage-quota concern the decision-edit coalescing above addresses).
+    In `generateCoreArtifact` the prompt is assembled by the pure,
     unit-tested **`src/lib/services/artifactPromptBuilder.ts`** (`buildArtifactPrompt`)
     with an explicit, machine-checkable **source hierarchy** — labeled sections in
     a fixed authority order: **`## TASK` → `## SOURCE HIERARCHY — READ FIRST`
@@ -1566,7 +1613,9 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               DesignSetupStep — pick a visual direction while the PRD
               generates in the background (see "Design System Presets")
               ↓
-  PRD stage:       SelectableSpine / StructuredPRDView — text selection →
+  PRD stage:       StructuredPRDView (the only view once a structured PRD
+                   exists; SelectableSpine is the legacy fallback for spines
+                   with no structuredPRD) — text selection →
                    branch creation → AI conversation → consolidateBranch()
                    merges into spine (local or doc-wide scope, see
                    ConsolidationModal). Selection → action dialog runs

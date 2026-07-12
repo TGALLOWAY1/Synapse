@@ -89,7 +89,6 @@ export function ProjectWorkspace() {
     const [isBranchesVisible, setIsBranchesVisible] = useState(true);
     const [activeRightTab, setActiveRightTab] = useState<'branches' | 'history'>('branches');
     const [activeCanvasBranchId, setActiveCanvasBranchId] = useState<string | null>(null);
-    const [showStructuredView, setShowStructuredView] = useState(true);
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
@@ -203,6 +202,41 @@ export function ProjectWorkspace() {
         // Mount-only by design (store read via getState, not deps): reacting
         // to later param changes would yank the stage from under the user.
     }, [projectId, capabilities.canPersistWorkflowState]);
+
+    // Early background generation of the Design System artifact (WP3). As soon
+    // as a design-system preset is chosen AND the PRD has settled successfully,
+    // kick off design_system in the background so the later finalize `startAll`
+    // finds it already done and skips it — the user no longer watches it
+    // "generating" after finalize. The controller applies the full gate set
+    // (capabilities/demo, generation gate, gemini key, slot-done, active-run);
+    // these guards are cheap short-circuits and keep the effect deps honest.
+    // Covers both orderings: a preset picked mid-generation fires when
+    // generationPhase flips to 'complete'; a preset picked after completion
+    // fires on the preset change. Derived above the early return so the hook
+    // lives with the others; the whole store is subscribed, so the spine/project
+    // objects re-reference (immutable updates) exactly when these fields change.
+    const earlyDesignSpine = projectId ? getLatestSpine(projectId) : undefined;
+    const earlyDesignProject = projectId ? getProject(projectId) : undefined;
+    useEffect(() => {
+        if (!projectId || !earlyDesignSpine) return;
+        // Only act on the current latest spine — not while viewing an old one.
+        if (viewedSpineId && viewedSpineId !== earlyDesignSpine.id) return;
+        if (!earlyDesignProject?.designSystemPreset) return;
+        // Finalize owns generation from here; also prevents a double-fire from
+        // handleChooseDesignSystemPreset and post-final ChangeDirectionModal.
+        if (earlyDesignSpine.isFinal) return;
+        if (earlyDesignSpine.generationPhase !== 'complete') return;
+        if (!earlyDesignSpine.structuredPRD) return;
+        if (earlyDesignSpine.generationError) return;
+        if (earlyDesignSpine.safetyReview?.status === 'blocked') return;
+        artifactJobController.ensureDesignSystemForSpine({
+            projectId,
+            spineVersionId: earlyDesignSpine.id,
+            prdContent: earlyDesignSpine.responseText,
+            structuredPRD: earlyDesignSpine.structuredPRD,
+            projectPlatform: earlyDesignProject.platform,
+        });
+    }, [projectId, viewedSpineId, earlyDesignSpine, earlyDesignProject]);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -1225,24 +1259,6 @@ export function ProjectWorkspace() {
                                             <SafetyBoundariesCard review={activeSpine.safetyReview} />
                                         )}
 
-                                        {/* View toggle when structured PRD exists (hidden for blocked spines) */}
-                                        {activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' && (
-                                            <div className="flex items-center gap-2 mb-6">
-                                                <button
-                                                    onClick={() => setShowStructuredView(true)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Structured View
-                                                </button>
-                                                <button
-                                                    onClick={() => setShowStructuredView(false)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Markdown View
-                                                </button>
-                                            </div>
-                                        )}
-
                                         {/* Partial result: some sections failed and were merged as
                                             empty stubs. Surfaced from the persisted generationMeta so
                                             the warning survives refresh; each button re-runs only
@@ -1331,7 +1347,7 @@ export function ProjectWorkspace() {
                                                     <div className="h-3.5 bg-neutral-100 rounded w-5/6" />
                                                 </div>
                                             </div>
-                                        ) : activeSpine.structuredPRD && showStructuredView ? (
+                                        ) : activeSpine.structuredPRD ? (
                                             <StructuredPRDView
                                                 projectId={projectId}
                                                 spineId={activeSpine.id}
