@@ -395,8 +395,9 @@ device-scoped and never syncs) and full design.
   `RevisionConflictError` on 409).
 - **Durable sync metadata** (`src/lib/projectSyncMeta.ts`). A per-user
   localStorage map (`synapse-project-sync-meta::u:<userId>`, mirrors
-  `projectMigration.ts`) recording, **separately from user-authored project
-  content**, each project's `lastSeenServerRevision`/`lastSeenServerUpdatedAt`
+  `userScope.ts`'s per-user namespacing) recording, **separately from
+  user-authored project content**, each project's
+  `lastSeenServerRevision`/`lastSeenServerUpdatedAt`
   (the conflict-detection baseline), `lastCloudSavedAt`, `lastCloudSaveError`,
   `hasUnsyncedChanges` (durable dirty flag — survives reload so an offline edit
   isn't forgotten), and `conflict`. `isServerNewer(server, meta)` compares
@@ -419,8 +420,12 @@ device-scoped and never syncs) and full design.
   state (+ durable `lastCloudSaveError`). Conflict resolution is **explicit, never
   silent**: `resolveConflictUseCloud` (adopt cloud, discard local — offer a
   recovery download first) and `resolveConflictKeepLocal` (overwrite cloud from
-  local, re-baselined so the conditional push wins). `suspendPush` silences the
-  echo while applying pulled/overwritten bundles. The read-only demo project
+  local, re-baselined so the conditional push wins). The module-local
+  `recordSyncState(userId, projectId, { meta?, ui? })` helper writes the durable
+  meta (`setProjectSyncMeta`) and the reactive per-project UI info
+  (`patchProjectSync`) together at the sites that update both. `suspendPush`
+  silences the echo while applying pulled/overwritten bundles. The read-only
+  demo project
   (`DEMO_PROJECT_ID`) is never synced. A `beforeunload` guard warns only when
   cloud state is genuinely stuck (`conflict`/`error`), never for normal pending
   pushes.
@@ -442,14 +447,19 @@ device-scoped and never syncs) and full design.
   envelope) for at-risk cloud durability — failed save, expired session, network
   outage, server body-limit rejection, or an unresolved conflict. Reachable from
   the conflict banner and the export modal.
-- **Migration markers** (`src/lib/projectMigration.ts`). A per-user localStorage
-  set (`synapse-projects-server-migrated::u:<userId>`) of project ids already
-  pushed. The server upsert is idempotent on the stable UUID, so duplicates are
-  impossible regardless; the markers power the "N local projects uploaded"
-  state and avoid redundant re-uploads. **Local projects are never deleted on
-  import.** This is distinct from the anonymous→account *legacy* import
-  (`userScope.ts`); after a legacy import, `HomePage` triggers a server
-  reconcile so the newly-claimed projects upload to the account.
+- **Upload state derives from durable sync meta — no separate marker store.**
+  There is no `projectMigration.ts` marker set anymore; the server upsert is
+  idempotent on the stable project UUID, so re-uploading is inherently
+  harmless and **`reconcile` pushes every local-only project unconditionally**.
+  The "N local projects uploaded" UI count (`migratedCount` → `markPulled` →
+  `SyncStatusBanner`) is derived from `projectSyncMeta`: a project is "already
+  uploaded" when its `getProjectSyncMeta(userId, id)` has `lastCloudSavedAt`
+  or `lastSeenServerRevision` set (`isProjectUploaded` in `projectServerSync.ts`),
+  checked BEFORE the push so only newly-uploaded projects increment the count.
+  **Local projects are never deleted on import.** This is distinct from the
+  anonymous→account *legacy* import (`userScope.ts`); after a legacy import,
+  `HomePage` triggers a server reconcile so the newly-claimed projects upload
+  to the account.
 
 ### Cross-device mockup image sync (`api/_lib/imageRefsStore.js`, `src/store/projectImageSync.ts`)
 
@@ -502,13 +512,16 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
   tab-closed-early case and persists a minimal ref (routing parsed from the key).
 - **Push** (`pushProjectImages`, fired after each text save AND from
   `mockupImageStore.generate` via `notifyMockupImageGenerated` — generation
-  writes IDB directly and would otherwise never trigger a push). Diffs local
-  image keys against a per-user uploaded-marker set
-  (`synapse-mockup-images-uploaded::u:<userId>`, `src/lib/imageUploadMarker.ts`,
-  mirrors `projectMigration.ts`) + the server refs, uploads the missing ones,
-  persists refs, marks them. **Image sync NEVER blocks text sync** and every
-  failure is non-fatal (the image is left unmarked and retried next push); a
-  failed image never reverts local data.
+  writes IDB directly and would otherwise never trigger a push). The **server
+  refs are the single source of truth for "already uploaded"** (there is no
+  local uploaded-marker store): it fetches the project's refs, diffs local image
+  keys against them (`computeImagesToUpload` in `src/lib/imageSyncDiff.ts`),
+  uploads the missing ones, and persists a ref for each. **If the refs fetch
+  fails (offline / transient) the push round is DEFERRED — it returns early and
+  retries on the next push — never uploading blind.** Content-addressed blobs
+  (sha256 path, `allowOverwrite`) make any redundant re-upload harmless. **Image
+  sync NEVER blocks text sync** and every failure is non-fatal (a failed image
+  is retried next push); a failed image never reverts local data.
 - **Pull = refs only, hydrate lazily.** Reconcile pulls refs into an in-memory
   registry (`src/lib/imageRefRegistry.ts`, keyed by versionId). `loadForVersion`
   in the mockup image store, on an IndexedDB cache **miss** where a ref exists,

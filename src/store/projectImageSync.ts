@@ -14,7 +14,6 @@ import { listImagesForVersion } from '../lib/mockupImageStore';
 import { sha256Hex, dataUrlToBlob, buildImageBlobPath, contentTypeFromDataUrl } from '../lib/imageBlobHash';
 import { buildMockupImageRef, type ImageRef } from '../lib/imageRef';
 import { computeImagesToUpload } from '../lib/imageSyncDiff';
-import { getUploadedImageKeys, markImagesUploaded } from '../lib/imageUploadMarker';
 import {
   fetchImageRefs,
   putImageRef,
@@ -64,15 +63,21 @@ export async function pushProjectImages(userId: string, projectId: string, versi
     if (records.length === 0) return;
     const byKey = new Map(records.map((r) => [r.key, r]));
 
-    // Diff against the server (best-effort) + the per-user uploaded markers.
-    let serverKeys = new Set<string>();
+    // The server refs are the single source of truth for "already uploaded".
+    // If the refs fetch fails (offline / transient), DEFER this push round rather
+    // than uploading blind — it retries on the next push. The blobs are
+    // content-addressed and idempotent, so a deferred round loses nothing.
+    let serverKeys: Set<string>;
     try {
       serverKeys = new Set((await fetchImageRefs(projectId)).map((r) => r.key));
-    } catch {
-      // Offline / transient: fall back to markers only. Re-upload is idempotent.
+    } catch (error) {
+      projectsDebug('pushProjectImages deferred — refs fetch failed', {
+        projectId,
+        message: error instanceof Error ? error.message : 'error',
+      });
+      return;
     }
-    const uploaded = getUploadedImageKeys(userId);
-    const toUpload = computeImagesToUpload(byKey.keys(), serverKeys, uploaded);
+    const toUpload = computeImagesToUpload(byKey.keys(), serverKeys);
     if (toUpload.length === 0) return;
 
     await runWithConcurrency(toUpload, UPLOAD_CONCURRENCY, async (key) => {
@@ -94,7 +99,6 @@ export async function pushProjectImages(userId: string, projectId: string, versi
         const ref: ImageRef = buildMockupImageRef(record, hash, url, blob.size);
         ref.projectId = projectId;
         await putImageRef(projectId, ref);
-        markImagesUploaded(userId, [record.key]);
         projectsDebug('image pushed to blob', { projectId, key: record.key });
       } catch (error) {
         projectsDebug('image push failed', {
