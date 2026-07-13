@@ -13,6 +13,7 @@ import type {
     ReviewSpecialistId,
     SpecialistDefinition,
     SpecialistRunResult,
+    ValidatedSpecialistFinding,
 } from './types';
 
 export interface SpecialistTransportInput {
@@ -29,7 +30,7 @@ export type SpecialistTransport = (input: SpecialistTransportInput) => Promise<s
 export type ReviewOrchestrationEvent =
     | { type: 'specialist_started'; specialistId: ReviewSpecialistId; attempt: number }
     | { type: 'specialist_retrying'; specialistId: ReviewSpecialistId; attempt: number; reason: string }
-    | { type: 'specialist_completed'; specialistId: ReviewSpecialistId; findingCount: number; groundedCount: number }
+    | { type: 'specialist_completed'; specialistId: ReviewSpecialistId; attempt: number; findingCount: number; groundedCount: number; findings: ValidatedSpecialistFinding[] }
     | { type: 'specialist_failed'; specialistId: ReviewSpecialistId; error: string }
     | { type: 'specialist_cancelled'; specialistId: ReviewSpecialistId };
 
@@ -80,8 +81,10 @@ export async function runSingleSpecialist(
             options.onEvent?.({
                 type: 'specialist_completed',
                 specialistId,
+                attempt,
                 findingCount: findings.length,
                 groundedCount: findings.filter(finding => finding.grounded).length,
+                findings,
             });
             return { specialistId, status: 'complete', attempts: attempt, findings };
         } catch (error) {

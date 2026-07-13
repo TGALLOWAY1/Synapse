@@ -200,7 +200,11 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             deleteVariantImagesForVersion(version.id),
         ]));
         set((state) => {
-            const keys = ['projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts', 'artifactVersions', 'feedbackItems', 'tasks', 'workflowRuns'] as const;
+            const keys = [
+                'projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts',
+                'artifactVersions', 'feedbackItems', 'reviewRuns', 'specialistRuns',
+                'reviewFindings', 'reviewIssues', 'planningRecords', 'tasks', 'workflowRuns',
+            ] as const;
             const next: Record<string, unknown> = {};
             for (const key of keys) {
                 const copy = { ...state[key] };

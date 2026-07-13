@@ -135,4 +135,3 @@ describe('review interruption recovery', () => {
         expect(specialists.p1.map(run => run.status)).toEqual(['interrupted', 'complete']);
     });
 });
-

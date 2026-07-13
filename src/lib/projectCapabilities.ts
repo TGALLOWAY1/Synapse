@@ -40,6 +40,10 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'deleteArtifact', 'createArtifactVersion', 'revertArtifactToVersion', 'markArtifactCurrentForSpine',
     'setPreferredVersion', 'updateArtifactVersionMetadata', 'createFeedbackItem',
     'updateFeedbackStatus', 'saveTasks', 'setTaskStatus', 'removeProjectTask', 'recordTaskExports',
+    'createReviewRun', 'updateReviewRun', 'createSpecialistRun', 'updateSpecialistRun',
+    'addReviewFinding', 'addReviewIssue', 'applyReviewIssueDisposition', 'createPlanningRecord',
+    'updatePlanningRecordStatusByUser', 'appendPlanningDecisionEvent', 'importPlanningAssumptions',
+    'addPlanningAssessment',
 ]);
 
 /** Wrap store writes once, at their authoritative shared boundary. */

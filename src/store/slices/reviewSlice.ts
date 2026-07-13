@@ -1,6 +1,8 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type {
+    DecisionAssessment,
+    DecisionEvent,
     PlanningRecord,
     PlanningRecordStatus,
     ReviewIssue,
@@ -9,6 +11,8 @@ import type {
     SpecialistFinding,
     SpecialistRun,
 } from '../../types';
+import { PLANNING_RECORD_SCHEMA_VERSION } from '../../types';
+import { appendDecisionEvent, importPrdAssumptions, normalizePlanningRecord } from '../../lib/planning';
 import type { ProjectState } from '../types';
 
 export type ReviewSlice = Pick<
@@ -27,6 +31,9 @@ export type ReviewSlice = Pick<
     | 'applyReviewIssueDisposition'
     | 'createPlanningRecord'
     | 'updatePlanningRecordStatusByUser'
+    | 'appendPlanningDecisionEvent'
+    | 'importPlanningAssumptions'
+    | 'addPlanningAssessment'
 >;
 
 const planningRecordInitialStatus = (
@@ -199,6 +206,14 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             status: planningRecordInitialStatus(input),
             createdAt: now,
             updatedAt: now,
+            schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
+            events: input.events ?? [{
+                id: uuidv4(),
+                planningRecordId: id,
+                type: 'created',
+                actor: input.createdBy === 'user' ? 'user' : 'synapse',
+                at: now,
+            }],
             // Creation never confirms a review-derived record, even if a caller
             // supplied a timestamp along with an unsafe requested status.
             confirmedAt: input.createdBy === 'specialist_review' ? undefined : input.confirmedAt,
@@ -214,24 +229,93 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
 
     updatePlanningRecordStatusByUser: (projectId, planningRecordId, status, patch) => {
         const now = Date.now();
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const record = records.find(item => item.id === planningRecordId);
+            if (!record) return state;
+            let event: DecisionEvent;
+            if (status === 'open') {
+                event = { id: uuidv4(), planningRecordId, type: 'reopened', actor: 'user', at: now, rationale: patch?.rationale };
+            } else if (status === 'deferred') {
+                event = { id: uuidv4(), planningRecordId, type: 'deferred', actor: 'user', at: now, rationale: patch?.rationale };
+            } else if (status === 'rejected') {
+                event = { id: uuidv4(), planningRecordId, type: 'premise_rejected', actor: 'user', at: now, reason: patch?.resolution || 'Rejected by the user', rationale: patch?.rationale };
+            } else {
+                event = { id: uuidv4(), planningRecordId, type: 'custom_answered', actor: 'user', at: now, answer: patch?.resolution || record.resolution || record.statement, rationale: patch?.rationale };
+            }
+            const result = appendDecisionEvent(normalizePlanningRecord(record), event);
+            if (!result.ok) return state;
+            const nextRecord = {
+                ...result.record,
+                ...(patch?.supersedesId ? { supersedesId: patch.supersedesId } : {}),
+                ...(patch?.resultingSpineVersionId ? { resultingSpineVersionId: patch.resultingSpineVersionId } : {}),
+                // Non-decision records historically use resolved; keep that
+                // compatibility projection while their event remains explicit.
+                status: status === 'resolved' ? 'resolved' as const : result.record.status,
+            };
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? nextRecord : item),
+                },
+            };
+        });
+    },
+
+    appendPlanningDecisionEvent: (projectId, planningRecordId, event) => {
+        let outcome: { ok: true; duplicate: boolean } | { ok: false; reason: string } = {
+            ok: false,
+            reason: 'Planning record not found.',
+        };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const record = records.find(item => item.id === planningRecordId);
+            if (!record) return state;
+            const result = appendDecisionEvent(normalizePlanningRecord(record), event);
+            if (!result.ok) {
+                outcome = result;
+                return state;
+            }
+            outcome = { ok: true, duplicate: result.duplicate };
+            if (result.duplicate) return state;
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
+                },
+            };
+        });
+        return outcome;
+    },
+
+    importPlanningAssumptions: (projectId, sourceSpineVersionId, structuredPRD) => {
+        let counts = { imported: 0, existing: 0 };
+        set((state) => {
+            const result = importPrdAssumptions({
+                projectId,
+                sourceSpineVersionId,
+                structuredPRD,
+                existingRecords: state.planningRecords[projectId] ?? [],
+            });
+            counts = { imported: result.imported.length, existing: result.existing.length };
+            if (result.imported.length === 0) return state;
+            return {
+                planningRecords: { ...state.planningRecords, [projectId]: result.records },
+            };
+        });
+        return counts;
+    },
+
+    addPlanningAssessment: (projectId, planningRecordId, assessment: DecisionAssessment) => {
         set((state) => ({
             planningRecords: {
                 ...state.planningRecords,
-                [projectId]: (state.planningRecords[projectId] ?? []).map((record) =>
-                    record.id === planningRecordId
-                        ? {
-                            ...record,
-                            ...patch,
-                            id: record.id,
-                            projectId: record.projectId,
-                            status,
-                            updatedAt: now,
-                            confirmedAt: status === 'confirmed' ? now : record.confirmedAt,
-                        }
-                        : record,
-                ),
+                [projectId]: (state.planningRecords[projectId] ?? []).map(record => {
+                    if (record.id !== planningRecordId) return record;
+                    const assessments = [...(record.assessments ?? []).filter(item => item.id !== assessment.id), assessment];
+                    return { ...record, assessments, updatedAt: Date.now() };
+                }),
             },
         }));
     },
 });
-

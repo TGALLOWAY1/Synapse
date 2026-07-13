@@ -1,4 +1,4 @@
-import { FileText, Package, Clock } from 'lucide-react';
+import { FileText, Package, Clock, ShieldCheck } from 'lucide-react';
 import type { PipelineStage } from '../types';
 
 interface PipelineStageBarProps {
@@ -10,12 +10,14 @@ interface PipelineStageBarProps {
 const stages: { key: PipelineStage; label: string; description: string; icon: typeof FileText }[] = [
     { key: 'prd', label: 'Project', description: 'The editable PRD and source of truth for downstream artifacts', icon: FileText },
     { key: 'workspace', label: 'Assets', description: 'Generated build assets — data model, flows, screens, components, and more', icon: Package },
+    { key: 'review', label: 'Review', description: 'Specialist review findings and the Decision Center', icon: ShieldCheck },
     { key: 'history', label: 'History', description: 'Chronological timeline of changes', icon: Clock },
 ];
 
 export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: PipelineStageBarProps) {
     const isEnabled = (stage: PipelineStage): boolean => {
         if (stage === 'prd' || stage === 'history') return true;
+        if (stage === 'review') return hasPRD;
         if (stage === 'workspace') return hasPRD;
         return false;
     };

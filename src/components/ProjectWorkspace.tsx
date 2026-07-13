@@ -55,6 +55,7 @@ import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
+import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
 import { resetDemoProject } from '../lib/demoRouteHydration';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
 
@@ -1142,6 +1143,8 @@ export function ProjectWorkspace() {
                         autoOpenIntent={finalizeAutoOpen}
                         onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
                     />
+                ) : pipelineStage === 'review' && activeSpine?.isFinal && activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
+                    <ReviewWorkspaceContainer projectId={projectId} />
                 ) : (
                 <>
                 {/* Left: Main Content Column */}

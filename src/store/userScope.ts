@@ -38,6 +38,11 @@ const MERGEABLE_COLLECTIONS = [
   'artifacts',
   'artifactVersions',
   'feedbackItems',
+  'reviewRuns',
+  'specialistRuns',
+  'reviewFindings',
+  'reviewIssues',
+  'planningRecords',
   'tasks',
   'workflowRuns',
 ] as const;

@@ -10,6 +10,7 @@ import type {
     WorkflowRun, VersionProvenance,
     ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue,
     ReviewIssueDisposition, PlanningRecord, PlanningRecordStatus,
+    DecisionEvent, DecisionAssessment,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
@@ -262,6 +263,21 @@ export interface ProjectState {
         planningRecordId: string,
         status: PlanningRecordStatus,
         patch?: Partial<Pick<PlanningRecord, 'resolution' | 'rationale' | 'resultingSpineVersionId' | 'supersedesId'>>,
+    ) => void;
+    appendPlanningDecisionEvent: (
+        projectId: string,
+        planningRecordId: string,
+        event: DecisionEvent,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    importPlanningAssumptions: (
+        projectId: string,
+        sourceSpineVersionId: string,
+        structuredPRD: StructuredPRD,
+    ) => { imported: number; existing: number };
+    addPlanningAssessment: (
+        projectId: string,
+        planningRecordId: string,
+        assessment: DecisionAssessment,
     ) => void;
 
     // Implementation task tracking. `saveTasks` persists an extracted set for a

@@ -1,6 +1,6 @@
 // Navigation stages. 'mockups' and 'artifacts' are legacy values preserved
 // for migration of older persisted projects; the active UI uses 'workspace'.
-export type PipelineStage = 'prd' | 'workspace' | 'history' | 'mockups' | 'artifacts';
+export type PipelineStage = 'prd' | 'workspace' | 'review' | 'history' | 'mockups' | 'artifacts';
 
 export type ProjectPlatform = 'app' | 'web';
 
@@ -1493,7 +1493,130 @@ export type PlanningRecordStatus =
     | 'rejected'
     | 'deferred'
     | 'resolved'
+    | 'invalidated'
     | 'superseded';
+
+/** Version of the durable planning-record contract (legacy records omit it). */
+export const PLANNING_RECORD_SCHEMA_VERSION = 1;
+
+export type PlanningDecisionOption = {
+    id: string;
+    label: string;
+    description?: string;
+    tradeoffs?: Array<{
+        kind: 'benefit' | 'cost' | 'risk' | 'constraint';
+        summary: string;
+    }>;
+};
+
+export type PlanningRecommendation = {
+    optionId?: string;
+    summary: string;
+    rationale?: string;
+    confidence?: 'high' | 'medium' | 'low';
+};
+
+/** Stable locator back to the context that caused a planning record to exist. */
+export type PlanningSourceRef = {
+    /** Stable, project-scoped identity used for idempotent imports. */
+    key: string;
+    sourceType: 'prd_assumption' | 'prd' | 'artifact' | 'preflight' | 'feedback' | 'review' | 'user';
+    sourceId: string;
+    sourceVersionId?: string;
+    artifactSubtype?: CoreArtifactSubtype;
+    locator?: ReviewEvidenceRef['locator'];
+};
+
+export type DecisionEventActor = 'user' | 'synapse' | 'migration';
+
+type DecisionEventBase = {
+    id: string;
+    planningRecordId: string;
+    at: number;
+    rationale?: string;
+};
+
+/**
+ * Consequential verdict events are structurally user-only. This makes it
+ * impossible for an assessment/model response to masquerade as approval.
+ */
+export type DecisionVerdictEvent = DecisionEventBase & { actor: 'user' } & (
+    | { type: 'option_selected'; optionId: string; answer?: string }
+    | { type: 'custom_answered'; answer: string }
+    | { type: 'deferred'; revisitAt?: number }
+    | { type: 'premise_rejected'; reason: string }
+    | { type: 'reopened' }
+    | { type: 'revised'; previousEventId: string; optionId?: string; answer?: string }
+    | { type: 'invalidated'; reason: string }
+    | { type: 'superseded'; supersededById: string }
+);
+
+export type DecisionEvent =
+    | DecisionVerdictEvent
+    | (DecisionEventBase & {
+        type: 'created' | 'imported';
+        actor: DecisionEventActor;
+        sourceKey?: string;
+    })
+    | (DecisionEventBase & {
+        type: 'impact_preview_requested';
+        actor: 'user';
+        baselineSpineVersionId: string;
+    })
+    | (DecisionEventBase & {
+        type: 'applied_to_plan';
+        actor: 'user';
+        impactPreviewId: string;
+        baselineSpineVersionId: string;
+        resultingSpineVersionId: string;
+    });
+
+export type DecisionImpactPreviewStatus = 'generating' | 'ready' | 'stale' | 'failed' | 'applied' | 'superseded';
+
+export type DecisionImpactPreview = {
+    id: string;
+    projectId: string;
+    planningRecordId: string;
+    decisionEventId: string;
+    status: DecisionImpactPreviewStatus;
+    baseline: {
+        spineVersionId: string;
+        spineContentHash: string;
+        dependencySignature?: string;
+    };
+    proposedPrdPatch?: Array<{
+        section: string;
+        operation: 'replace' | 'add' | 'remove';
+        entityId?: string;
+        beforeSummary?: string;
+        afterSummary?: string;
+        value?: unknown;
+    }>;
+    affectedPrdSections: string[];
+    affectedArtifactSlots: ArtifactSlotKey[];
+    possibleConflictRecordIds: string[];
+    explanation?: string;
+    error?: string;
+    createdAt: number;
+    appliedAt?: number;
+    resultingSpineVersionId?: string;
+};
+
+export type DecisionAssessment = {
+    id: string;
+    projectId: string;
+    planningRecordId: string;
+    sourceSpineVersionId: string;
+    status: 'fresh' | 'stale' | 'failed' | 'superseded';
+    recommendation?: PlanningRecommendation;
+    evidence: ReviewEvidenceRef[];
+    inferredAssumptions: string[];
+    possibleConflictRecordIds: string[];
+    impactPreview?: DecisionImpactPreview;
+    model?: string;
+    provider?: string;
+    createdAt: number;
+};
 
 export type PlanningRecord = {
     id: string;
@@ -1502,20 +1625,33 @@ export type PlanningRecord = {
     status: PlanningRecordStatus;
     title: string;
     statement: string;
+    /** Legacy display-only options; retained for stored records and callers. */
     options?: string[];
+    /** Structured choice model used by the Decision Center. */
+    decisionOptions?: PlanningDecisionOption[];
     recommendation?: string;
+    recommendationDetail?: PlanningRecommendation;
     resolution?: string;
     rationale?: string;
     evidence: ReviewEvidenceRef[];
     sourceFindingIds: string[];
     sourceReviewIssueId?: string;
     challengesRecordId?: string;
-    createdBy: 'user' | 'specialist_review';
+    createdBy: 'user' | 'specialist_review' | 'synapse' | 'migration';
     createdAt: number;
     updatedAt: number;
     confirmedAt?: number;
     resultingSpineVersionId?: string;
     supersedesId?: string;
+    schemaVersion?: typeof PLANNING_RECORD_SCHEMA_VERSION;
+    sources?: PlanningSourceRef[];
+    relatedPlanningRecordIds?: string[];
+    affectedFeatureIds?: string[];
+    affectedArtifactSlots?: ArtifactSlotKey[];
+    /** Append-only authority log. Legacy records derive from top-level fields. */
+    events?: DecisionEvent[];
+    /** Machine-authored analysis kept distinct from user-authored events. */
+    assessments?: DecisionAssessment[];
 };
 
 // --- Persisted implementation tasks --------------------------------------
