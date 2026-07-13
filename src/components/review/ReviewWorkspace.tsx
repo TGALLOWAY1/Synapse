@@ -33,6 +33,8 @@ export type ReviewSpecialistProgress = ReviewSpecialistOption & {
     status: 'queued' | 'running' | 'complete' | 'failed' | 'cancelled';
     findingCount?: number;
     error?: string;
+    coverageSummary?: string;
+    resolvedAreas?: string[];
 };
 
 export type ReviewEvidenceItem = {
@@ -292,6 +294,9 @@ function ReviewProgress({ run, onCancel, onRetrySpecialist, onRetrySynthesis }: 
                                 </div>
                                 <p className="mt-0.5 text-xs text-neutral-500">{specialist.responsibility}</p>
                                 {specialist.error && <p className="mt-1 text-xs text-red-600">{specialist.error}</p>}
+                                {specialist.status === 'complete' && specialist.findingCount === 0 && specialist.coverageSummary && (
+                                    <p className="mt-1 text-xs leading-5 text-emerald-700">{specialist.coverageSummary}</p>
+                                )}
                             </div>
                             {specialist.status === 'failed' && (
                                 <button type="button" onClick={() => onRetrySpecialist(specialist.id)} className="inline-flex min-h-9 items-center gap-1.5 rounded-lg border border-neutral-200 px-2.5 text-xs font-medium text-neutral-700 hover:bg-neutral-50">

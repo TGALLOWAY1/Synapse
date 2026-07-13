@@ -1380,6 +1380,8 @@ export type SpecialistRun = {
     status: SpecialistRunStatus;
     attemptCount: number;
     findingIds: string[];
+    coverageSummary?: string;
+    resolvedAreas?: string[];
     validation?: {
         valid: boolean;
         unsupportedEvidenceIds: string[];

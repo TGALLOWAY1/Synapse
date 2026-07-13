@@ -28,6 +28,7 @@ import {
     type ValidatedSpecialistFinding,
 } from '../../lib/review';
 import { useToastStore } from '../../store/toastStore';
+import { getStrongModel } from '../../lib/geminiClient';
 import {
     buildDecisionImpact,
     isDecisionImpactStale,
@@ -351,6 +352,8 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
                 warnings: result.findings.flatMap(finding => finding.validationWarnings),
             },
             error: result.error ? { message: result.error } : undefined,
+            coverageSummary: result.coverageSummary,
+            resolvedAreas: result.resolvedAreas,
         });
     };
 
@@ -378,8 +381,8 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             state.supersedeOpenReviewIssues(projectId, reviewId, clusters.map(cluster => `${reviewId}:${cluster.id}`));
             for (const cluster of clusters) persistCluster(reviewId, cluster, allFindings);
             state.updateReviewRun(projectId, reviewId, {
-                status: result.status === 'partial' ? 'partial' : 'complete',
-                synthesisStatus: 'complete',
+                status: result.status === 'failed' ? 'failed' : result.status === 'partial' ? 'partial' : 'complete',
+                synthesisStatus: result.status === 'failed' ? 'failed' : 'complete',
                 completedAt: Date.now(),
             });
         } catch (error) {
@@ -416,6 +419,8 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
                 responsibility: specialist.responsibility,
                 boundaries: specialist.boundaries,
                 contextRefIds: currentManifest.sources.map(source => source.sourceKey),
+                model: getStrongModel(),
+                provider: 'gemini',
             });
         }
         setActiveRunId(reviewId);
@@ -551,6 +556,8 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             status: specialistStatus(item.status),
             findingCount: item.findingIds.length,
             error: item.error?.message,
+            coverageSummary: item.coverageSummary,
+            resolvedAreas: item.resolvedAreas,
         })),
         issues: issueViews(run.id),
     }));
