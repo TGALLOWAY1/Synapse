@@ -1296,6 +1296,228 @@ export type FeedbackItem = {
     updatedAt: number;
 };
 
+// --- Adversarial planning review + Decision Center -------------------------
+// Reviews are durable, version-pinned workflows. AI observations never become
+// confirmed project decisions implicitly: SpecialistFinding -> ReviewIssue ->
+// PlanningRecord are deliberately separate records, and a review-created
+// PlanningRecord starts proposed/open.
+
+export type ReviewRunStatus =
+    | 'queued'
+    | 'running'
+    | 'synthesizing'
+    | 'complete'
+    | 'partial'
+    | 'failed'
+    | 'cancelled'
+    | 'interrupted';
+
+export type ReviewSynthesisStatus = 'pending' | 'running' | 'complete' | 'failed' | 'interrupted';
+
+export type ReviewSourceArtifactRef = {
+    artifactId: string;
+    artifactVersionId: string;
+    subtype?: CoreArtifactSubtype;
+    contentHash: string;
+};
+
+export type PersistedReviewContextManifest = {
+    spineVersionId: string;
+    spineContentHash: string;
+    canonicalSpineSchemaVersion?: number;
+    artifactRefs: ReviewSourceArtifactRef[];
+    missingArtifactSubtypes?: CoreArtifactSubtype[];
+    capturedAt: number;
+    contextSignature: string;
+};
+
+export type ReviewSpecialistSelection = {
+    specialistId: string;
+    label: string;
+    reason: string;
+};
+
+export type ReviewRun = {
+    id: string;
+    projectId: string;
+    sequenceNumber: number;
+    scope: {
+        kind: 'project' | 'artifact' | 'focus';
+        artifactIds?: string[];
+        focus?: string;
+    };
+    sourceManifest: PersistedReviewContextManifest;
+    selectedSpecialists: ReviewSpecialistSelection[];
+    status: ReviewRunStatus;
+    synthesisStatus: ReviewSynthesisStatus;
+    previousReviewId?: string;
+    modelPolicyVersion?: number;
+    createdAt: number;
+    startedAt?: number;
+    completedAt?: number;
+};
+
+export type SpecialistRunStatus =
+    | 'queued'
+    | 'running'
+    | 'complete'
+    | 'failed'
+    | 'timed_out'
+    | 'invalid'
+    | 'cancelled'
+    | 'interrupted';
+
+export type SpecialistRun = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    specialistId: string;
+    responsibility: string;
+    boundaries: string[];
+    contextRefIds: string[];
+    model?: string;
+    provider?: string;
+    status: SpecialistRunStatus;
+    attemptCount: number;
+    findingIds: string[];
+    validation?: {
+        valid: boolean;
+        unsupportedEvidenceIds: string[];
+        warnings: string[];
+    };
+    error?: { message: string; category?: string };
+    createdAt: number;
+    startedAt?: number;
+    completedAt?: number;
+};
+
+export type ReviewEvidenceRef = {
+    id: string;
+    sourceType: 'spine' | 'artifact';
+    sourceId: string;
+    sourceVersionId: string;
+    artifactSubtype?: CoreArtifactSubtype;
+    locator?: {
+        section?: string;
+        jsonPath?: string;
+        entityType?: string;
+        entityId?: string;
+    };
+    excerpt?: string;
+    excerptHash?: string;
+    verified: boolean;
+};
+
+export type SpecialistFindingKind =
+    | 'contradiction'
+    | 'risk'
+    | 'missing_information'
+    | 'assumption'
+    | 'recommendation'
+    | 'optional_improvement'
+    | 'user_judgment';
+
+export type SpecialistFinding = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    specialistRunId: string;
+    specialistId: string;
+    kind: SpecialistFindingKind;
+    title: string;
+    observation: string;
+    whyItMatters: string;
+    consequence?: string;
+    recommendedAction?: string;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    confidence: 'high' | 'medium' | 'low';
+    implementationImpact: 'blocker' | 'resolve_before_build' | 'deferrable';
+    evidence: ReviewEvidenceRef[];
+    fingerprint: string;
+    grounded: boolean;
+    createdAt: number;
+};
+
+export type ReviewIssueStatus =
+    | 'open'
+    | 'acted'
+    | 'deferred'
+    | 'dismissed'
+    | 'already_addressed'
+    | 'superseded';
+
+export type ReviewIssueDisposition = {
+    action:
+        | 'propose_record'
+        | 'link_existing'
+        | 'challenge_existing'
+        | 'request_revision'
+        | 'defer'
+        | 'dismiss'
+        | 'already_addressed';
+    actor: 'user';
+    at: number;
+    contextSignature: string;
+    reason?: string;
+    planningRecordId?: string;
+    resultingSpineVersionId?: string;
+    resultingArtifactVersionId?: string;
+};
+
+export type ReviewIssue = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    title: string;
+    summary: string;
+    kind: SpecialistFindingKind;
+    findingIds: string[];
+    specialistIds: string[];
+    relationship: 'standalone' | 'duplicate' | 'reinforcing' | 'disagreement';
+    perspectives?: Array<{ findingIds: string[]; recommendation: string; tradeoff?: string }>;
+    severity: SpecialistFinding['severity'];
+    confidence: SpecialistFinding['confidence'];
+    implementationImpact: SpecialistFinding['implementationImpact'];
+    status: ReviewIssueStatus;
+    dispositions: ReviewIssueDisposition[];
+    relatedPlanningRecordIds: string[];
+    createdAt: number;
+    updatedAt: number;
+};
+
+export type PlanningRecordType = 'decision' | 'assumption' | 'risk' | 'open_question' | 'conflict';
+export type PlanningRecordStatus =
+    | 'proposed'
+    | 'open'
+    | 'confirmed'
+    | 'rejected'
+    | 'deferred'
+    | 'resolved'
+    | 'superseded';
+
+export type PlanningRecord = {
+    id: string;
+    projectId: string;
+    type: PlanningRecordType;
+    status: PlanningRecordStatus;
+    title: string;
+    statement: string;
+    options?: string[];
+    recommendation?: string;
+    resolution?: string;
+    rationale?: string;
+    evidence: ReviewEvidenceRef[];
+    sourceFindingIds: string[];
+    sourceReviewIssueId?: string;
+    challengesRecordId?: string;
+    createdBy: 'user' | 'specialist_review';
+    createdAt: number;
+    updatedAt: number;
+    confirmedAt?: number;
+    resultingSpineVersionId?: string;
+    supersedesId?: string;
+};
+
 // --- Persisted implementation tasks --------------------------------------
 // `ImplementationTask` (src/types/tasks.ts) is the *transient* extraction
 // shape produced from an Implementation Plan. `ProjectTask` is its persisted

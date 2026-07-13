@@ -36,6 +36,11 @@ function bundleSourceOfStore(): BundleSource {
     feedbackItems: state.feedbackItems,
     tasks: state.tasks,
     workflowRuns: state.workflowRuns,
+    reviewRuns: state.reviewRuns,
+    specialistRuns: state.specialistRuns,
+    reviewFindings: state.reviewFindings,
+    reviewIssues: state.reviewIssues,
+    planningRecords: state.planningRecords,
   };
 }
 

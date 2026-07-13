@@ -8,6 +8,8 @@ import type {
     PreflightMode, PreflightQuestion,
     ProjectTask, TaskStatus, TaskExternalRef,
     WorkflowRun, VersionProvenance,
+    ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue,
+    ReviewIssueDisposition, PlanningRecord, PlanningRecordStatus,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
@@ -31,6 +33,14 @@ export interface ProjectState {
     artifacts: Record<string, Artifact[]>;
     artifactVersions: Record<string, ArtifactVersion[]>;
     feedbackItems: Record<string, FeedbackItem[]>;
+
+    // Durable adversarial reviews and Decision Center records. These are
+    // persisted independently so partial specialist success survives failure.
+    reviewRuns: Record<string, ReviewRun[]>;
+    specialistRuns: Record<string, SpecialistRun[]>;
+    reviewFindings: Record<string, SpecialistFinding[]>;
+    reviewIssues: Record<string, ReviewIssue[]>;
+    planningRecords: Record<string, PlanningRecord[]>;
 
     // Persisted implementation tasks, keyed by projectId.
     tasks: Record<string, ProjectTask[]>;
@@ -192,6 +202,50 @@ export interface ProjectState {
     ) => { feedbackId: string };
     updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => void;
     getFeedbackItems: (projectId: string, status?: FeedbackStatus) => FeedbackItem[];
+
+    // Adversarial planning review + Decision Center actions.
+    createReviewRun: (
+        projectId: string,
+        input: Omit<ReviewRun, 'id' | 'projectId' | 'sequenceNumber' | 'status' | 'synthesisStatus' | 'createdAt'>,
+    ) => { reviewId: string };
+    updateReviewRun: (
+        projectId: string,
+        reviewId: string,
+        patch: Partial<Pick<ReviewRun, 'status' | 'synthesisStatus' | 'startedAt' | 'completedAt'>>,
+    ) => void;
+    createSpecialistRun: (
+        projectId: string,
+        input: Omit<SpecialistRun, 'id' | 'projectId' | 'status' | 'attemptCount' | 'findingIds' | 'createdAt'>,
+    ) => { specialistRunId: string };
+    updateSpecialistRun: (
+        projectId: string,
+        specialistRunId: string,
+        patch: Partial<Omit<SpecialistRun, 'id' | 'projectId' | 'reviewId' | 'specialistId' | 'createdAt'>>,
+    ) => void;
+    addReviewFinding: (
+        projectId: string,
+        finding: Omit<SpecialistFinding, 'id' | 'projectId'> & { id?: string },
+    ) => { findingId: string };
+    addReviewIssue: (
+        projectId: string,
+        issue: Omit<ReviewIssue, 'id' | 'projectId' | 'status' | 'dispositions' | 'createdAt' | 'updatedAt'>
+            & { id?: string; createdAt?: number },
+    ) => { issueId: string };
+    applyReviewIssueDisposition: (
+        projectId: string,
+        issueId: string,
+        disposition: Omit<ReviewIssueDisposition, 'actor' | 'at'> & { at?: number },
+    ) => void;
+    createPlanningRecord: (
+        projectId: string,
+        input: Omit<PlanningRecord, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>,
+    ) => { planningRecordId: string };
+    updatePlanningRecordStatusByUser: (
+        projectId: string,
+        planningRecordId: string,
+        status: PlanningRecordStatus,
+        patch?: Partial<Pick<PlanningRecord, 'resolution' | 'rationale' | 'resultingSpineVersionId' | 'supersedesId'>>,
+    ) => void;
 
     // Implementation task tracking. `saveTasks` persists an extracted set for a
     // given Implementation Plan artifact, replacing any prior set for that

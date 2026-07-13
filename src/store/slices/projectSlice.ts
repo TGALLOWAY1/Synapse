@@ -104,6 +104,16 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newTasks[projectId];
             const newWorkflowRuns = { ...state.workflowRuns };
             delete newWorkflowRuns[projectId];
+            const newReviewRuns = { ...state.reviewRuns };
+            delete newReviewRuns[projectId];
+            const newSpecialistRuns = { ...state.specialistRuns };
+            delete newSpecialistRuns[projectId];
+            const newReviewFindings = { ...state.reviewFindings };
+            delete newReviewFindings[projectId];
+            const newReviewIssues = { ...state.reviewIssues };
+            delete newReviewIssues[projectId];
+            const newPlanningRecords = { ...state.planningRecords };
+            delete newPlanningRecords[projectId];
             return {
                 projects: newProjects,
                 spineVersions: newSpines,
@@ -114,6 +124,11 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 feedbackItems: newFeedbackItems,
                 tasks: newTasks,
                 workflowRuns: newWorkflowRuns,
+                reviewRuns: newReviewRuns,
+                specialistRuns: newSpecialistRuns,
+                reviewFindings: newReviewFindings,
+                reviewIssues: newReviewIssues,
+                planningRecords: newPlanningRecords,
             };
         });
     },

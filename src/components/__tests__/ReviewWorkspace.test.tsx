@@ -1,0 +1,152 @@
+import { fireEvent, render, screen } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import {
+    ReviewWorkspace,
+    type PlanningRecordView,
+    type ReviewRunView,
+    type ReviewSpecialistOption,
+    type ReviewWorkspaceProps,
+} from '../review/ReviewWorkspace';
+
+const panel: ReviewSpecialistOption[] = [
+    {
+        id: 'product',
+        name: 'Product & Scope',
+        responsibility: 'Tests scope, outcomes, and unresolved product choices.',
+        selectionReason: 'The PRD contains several deferred features.',
+        recommended: true,
+    },
+    {
+        id: 'security',
+        name: 'Security & Privacy',
+        responsibility: 'Tests sensitive data and trust boundaries.',
+        selectionReason: 'The plan includes account data.',
+        recommended: true,
+    },
+];
+
+const baseProps = (patch: Partial<ReviewWorkspaceProps> = {}): ReviewWorkspaceProps => ({
+    projectName: 'Atlas',
+    recommendedPanel: panel,
+    sourcesInScope: ['PRD Version 3', 'Screens v2'],
+    missingSources: [],
+    runs: [],
+    planningRecords: [],
+    onStartReview: vi.fn(),
+    onSelectRun: vi.fn(),
+    onCancelRun: vi.fn(),
+    onRetrySpecialist: vi.fn(),
+    onRetrySynthesis: vi.fn(),
+    onActOnIssue: vi.fn(),
+    onConfirmPlanningRecord: vi.fn(),
+    onReopenPlanningRecord: vi.fn(),
+    ...patch,
+});
+
+const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
+    id: 'review-1',
+    label: 'Review 1',
+    sourceLabel: 'PRD Version 3 + 1 artifact',
+    capturedAt: 1_700_000_000_000,
+    status: 'complete',
+    specialists: panel.map(s => ({ ...s, status: 'complete', findingCount: 1 })),
+    issues: [{
+        id: 'issue-1',
+        title: 'Retention behavior is not defined',
+        observation: 'The PRD requires uploads but does not define when source files are deleted.',
+        consequence: 'Engineering and privacy reviewers could implement incompatible retention periods.',
+        recommendedAction: 'Choose a retention period and deletion trigger.',
+        kind: 'decision_needed',
+        severity: 'blocking',
+        confidence: 'high',
+        status: 'open',
+        specialistNames: ['Product & Scope', 'Security & Privacy'],
+        affectedSources: ['PRD · Data handling'],
+        evidence: [{
+            id: 'evidence-1',
+            sourceLabel: 'PRD Version 3',
+            locator: 'Data handling',
+            excerpt: 'Users can upload source files for analysis.',
+        }],
+        perspectives: [
+            { specialistName: 'Security & Privacy', recommendation: 'Delete source files after extraction.' },
+            { specialistName: 'Product & Scope', recommendation: 'Retain files so users can revisit them.' },
+        ],
+        disagreement: true,
+    }],
+    ...patch,
+});
+
+describe('ReviewWorkspace', () => {
+    it('starts a recommended review with the selected panel and optional focus', () => {
+        const onStartReview = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ onStartReview })} />);
+
+        fireEvent.change(screen.getByLabelText('Optional focus'), { target: { value: 'Focus on mobile recovery' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));
+
+        expect(onStartReview).toHaveBeenCalledWith({
+            specialistIds: ['product', 'security'],
+            focus: 'Focus on mobile recovery',
+        });
+    });
+
+    it('shows durable specialist progress and retries only the failed specialist', () => {
+        const run = completeRun({
+            status: 'running',
+            specialists: [
+                { ...panel[0], status: 'complete', findingCount: 0 },
+                { ...panel[1], status: 'failed', error: 'Timed out' },
+            ],
+            issues: [],
+        });
+        const onRetrySpecialist = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id, onRetrySpecialist })} />);
+
+        expect(screen.getByText('1 of 2 specialist reviews complete')).toBeInTheDocument();
+        expect(screen.getByText('Timed out')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Retry' }));
+        expect(onRetrySpecialist).toHaveBeenCalledWith('review-1', 'security');
+    });
+
+    it('preserves disagreement and requires a reason before dismissing a finding', () => {
+        const run = completeRun();
+        const onActOnIssue = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id, onActOnIssue })} />);
+
+        expect(screen.getByText('Specialists disagree')).toBeInTheDocument();
+        expect(screen.getByText(/Raised independently by Product & Scope \+ Security & Privacy/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /Resolve/ }));
+        fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'dismiss' } });
+        const save = screen.getByRole('button', { name: 'Save action' });
+        expect(save).toBeDisabled();
+        fireEvent.change(screen.getByLabelText('Reason'), { target: { value: 'Policy already approved elsewhere' } });
+        fireEvent.click(save);
+
+        expect(onActOnIssue).toHaveBeenCalledWith(
+            'review-1',
+            'issue-1',
+            'dismiss',
+            'Policy already approved elsewhere',
+            undefined,
+        );
+    });
+
+    it('keeps proposed specialist records distinct from confirmed decisions', () => {
+        const records: PlanningRecordView[] = [{
+            id: 'record-1',
+            type: 'decision',
+            title: 'Choose the source-file retention period',
+            status: 'proposed',
+            sourceIssueIds: ['issue-1'],
+            createdAt: 1_700_000_000_000,
+        }];
+        const onConfirmPlanningRecord = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ planningRecords: records, onConfirmPlanningRecord })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: /Decision Center/ }));
+        expect(screen.getByText('proposed')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm decision' }));
+        expect(onConfirmPlanningRecord).toHaveBeenCalledWith('record-1');
+    });
+});

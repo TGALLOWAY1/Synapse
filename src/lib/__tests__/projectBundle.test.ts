@@ -19,6 +19,11 @@ function emptySource(): BundleSource {
     feedbackItems: {},
     tasks: {},
     workflowRuns: {},
+    reviewRuns: {},
+    specialistRuns: {},
+    reviewFindings: {},
+    reviewIssues: {},
+    planningRecords: {},
   };
 }
 
@@ -40,6 +45,8 @@ describe('extractProjectBundle', () => {
     expect(bundle!.spineVersions).toHaveLength(1);
     expect(bundle!.historyEvents).toEqual([]);
     expect(bundle!.workflowRuns).toEqual([]);
+    expect(bundle!.reviewRuns).toEqual([]);
+    expect(bundle!.planningRecords).toEqual([]);
   });
 
   it('returns null for an unknown project', () => {
@@ -77,6 +84,12 @@ describe('projectSlicesChanged', () => {
   it('detects a changed slice by reference', () => {
     const a = sourceWith('p1');
     const b: BundleSource = { ...a, spineVersions: { ...a.spineVersions, p1: [] } };
+    expect(projectSlicesChanged(a, b, 'p1')).toBe(true);
+  });
+
+  it('detects review-domain changes for cloud sync', () => {
+    const a = sourceWith('p1');
+    const b: BundleSource = { ...a, reviewIssues: { ...a.reviewIssues, p1: [] } };
     expect(projectSlicesChanged(a, b, 'p1')).toBe(true);
   });
 

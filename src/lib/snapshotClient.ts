@@ -24,6 +24,7 @@ import type {
     Artifact, ArtifactVersion, FeedbackItem, MockupImageRecord,
     ScreenInventoryImageRecord, ProjectTask, WorkflowRun,
     MockupVariantImageRecord,
+    ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
 import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
@@ -64,6 +65,11 @@ export type SnapshotProjectBundle = {
     // existed won't have them, and restore defaults to [].
     tasks?: ProjectTask[];
     workflowRuns?: WorkflowRun[];
+    reviewRuns?: ReviewRun[];
+    specialistRuns?: SpecialistRun[];
+    reviewFindings?: SpecialistFinding[];
+    reviewIssues?: ReviewIssue[];
+    planningRecords?: PlanningRecord[];
     // Phase 3D: per-variant mockup images (the Screens Mockups-tab variant
     // gallery) live in a dedicated IndexedDB store. They ride INSIDE the bundle
     // (which the server persists verbatim) in their WIRE form — image bytes are
@@ -173,6 +179,11 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
         feedbackItems: state.feedbackItems[projectId] ?? [],
         tasks: state.tasks[projectId] ?? [],
         workflowRuns: state.workflowRuns[projectId] ?? [],
+        reviewRuns: state.reviewRuns[projectId] ?? [],
+        specialistRuns: state.specialistRuns[projectId] ?? [],
+        reviewFindings: state.reviewFindings[projectId] ?? [],
+        reviewIssues: state.reviewIssues[projectId] ?? [],
+        planningRecords: state.planningRecords[projectId] ?? [],
     };
 };
 
@@ -625,6 +636,11 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
         feedbackItems: { ...state.feedbackItems, [projectId]: bundle.feedbackItems },
         tasks: { ...state.tasks, [projectId]: bundle.tasks ?? [] },
         workflowRuns: { ...state.workflowRuns, [projectId]: bundle.workflowRuns ?? [] },
+        reviewRuns: { ...state.reviewRuns, [projectId]: bundle.reviewRuns ?? [] },
+        specialistRuns: { ...state.specialistRuns, [projectId]: bundle.specialistRuns ?? [] },
+        reviewFindings: { ...state.reviewFindings, [projectId]: bundle.reviewFindings ?? [] },
+        reviewIssues: { ...state.reviewIssues, [projectId]: bundle.reviewIssues ?? [] },
+        planningRecords: { ...state.planningRecords, [projectId]: bundle.planningRecords ?? [] },
     }));
 
     return projectId;
@@ -744,6 +760,11 @@ export const restoreSnapshotAs = async (
         feedbackItems: { ...state.feedbackItems, [targetProjectId]: remapped.feedbackItems ?? [] },
         tasks: { ...state.tasks, [targetProjectId]: remapped.tasks ?? [] },
         workflowRuns: { ...state.workflowRuns, [targetProjectId]: remapped.workflowRuns ?? [] },
+        reviewRuns: { ...state.reviewRuns, [targetProjectId]: remapped.reviewRuns ?? [] },
+        specialistRuns: { ...state.specialistRuns, [targetProjectId]: remapped.specialistRuns ?? [] },
+        reviewFindings: { ...state.reviewFindings, [targetProjectId]: remapped.reviewFindings ?? [] },
+        reviewIssues: { ...state.reviewIssues, [targetProjectId]: remapped.reviewIssues ?? [] },
+        planningRecords: { ...state.planningRecords, [targetProjectId]: remapped.planningRecords ?? [] },
     }));
 
     return targetProjectId;

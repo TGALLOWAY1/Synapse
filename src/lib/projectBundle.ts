@@ -11,6 +11,7 @@
 import type {
   Project, SpineVersion, HistoryEvent, Branch,
   Artifact, ArtifactVersion, FeedbackItem, ProjectTask, WorkflowRun,
+  ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
 } from '../types';
 
 export interface ProjectBundle {
@@ -23,6 +24,12 @@ export interface ProjectBundle {
   feedbackItems: FeedbackItem[];
   tasks: ProjectTask[];
   workflowRuns: WorkflowRun[];
+  // Optional on the wire for projects saved before adversarial review existed.
+  reviewRuns?: ReviewRun[];
+  specialistRuns?: SpecialistRun[];
+  reviewFindings?: SpecialistFinding[];
+  reviewIssues?: ReviewIssue[];
+  planningRecords?: PlanningRecord[];
 }
 
 /** The persisted, project-id-keyed slices a bundle is assembled from. */
@@ -36,9 +43,14 @@ export interface BundleSource {
   feedbackItems: Record<string, FeedbackItem[]>;
   tasks: Record<string, ProjectTask[]>;
   workflowRuns: Record<string, WorkflowRun[]>;
+  reviewRuns: Record<string, ReviewRun[]>;
+  specialistRuns: Record<string, SpecialistRun[]>;
+  reviewFindings: Record<string, SpecialistFinding[]>;
+  reviewIssues: Record<string, ReviewIssue[]>;
+  planningRecords: Record<string, PlanningRecord[]>;
 }
 
-// The eight array-valued collections (everything except the `projects` map).
+// Array-valued collections (everything except the `projects` map).
 const ARRAY_COLLECTIONS = [
   'spineVersions',
   'historyEvents',
@@ -48,6 +60,11 @@ const ARRAY_COLLECTIONS = [
   'feedbackItems',
   'tasks',
   'workflowRuns',
+  'reviewRuns',
+  'specialistRuns',
+  'reviewFindings',
+  'reviewIssues',
+  'planningRecords',
 ] as const;
 
 /**
@@ -94,6 +111,11 @@ export function mergeBundlesIntoSource(
     feedbackItems: { ...source.feedbackItems },
     tasks: { ...source.tasks },
     workflowRuns: { ...source.workflowRuns },
+    reviewRuns: { ...source.reviewRuns },
+    specialistRuns: { ...source.specialistRuns },
+    reviewFindings: { ...source.reviewFindings },
+    reviewIssues: { ...source.reviewIssues },
+    planningRecords: { ...source.planningRecords },
   };
   const addedIds: string[] = [];
   for (const bundle of bundles) {
@@ -132,6 +154,11 @@ export function overwriteBundlesIntoSource(
     feedbackItems: { ...source.feedbackItems },
     tasks: { ...source.tasks },
     workflowRuns: { ...source.workflowRuns },
+    reviewRuns: { ...source.reviewRuns },
+    specialistRuns: { ...source.specialistRuns },
+    reviewFindings: { ...source.reviewFindings },
+    reviewIssues: { ...source.reviewIssues },
+    planningRecords: { ...source.planningRecords },
   };
   const replacedIds: string[] = [];
   for (const bundle of bundles) {

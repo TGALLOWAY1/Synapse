@@ -35,6 +35,11 @@ function emptyPersistedState() {
     feedbackItems: {},
     tasks: {},
     workflowRuns: {},
+    reviewRuns: {},
+    specialistRuns: {},
+    reviewFindings: {},
+    reviewIssues: {},
+    planningRecords: {},
   };
 }
 
@@ -64,6 +69,11 @@ function repersistCurrentState(): void {
     feedbackItems: s.feedbackItems,
     tasks: s.tasks,
     workflowRuns: s.workflowRuns,
+    reviewRuns: s.reviewRuns,
+    specialistRuns: s.specialistRuns,
+    reviewFindings: s.reviewFindings,
+    reviewIssues: s.reviewIssues,
+    planningRecords: s.planningRecords,
   });
 }
 
