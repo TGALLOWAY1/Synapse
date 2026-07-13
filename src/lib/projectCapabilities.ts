@@ -32,7 +32,7 @@ export function canPerformProjectAction(projectId: string | undefined, action: P
 export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'updateSpineText', 'regenerateSpine', 'markSpineFinal', 'createBranch', 'addBranchMessage',
     'mergeBranch', 'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
-    'editSpineStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
+    'editSpineStructuredPRD', 'compareAndAppendStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
     'updateProjectProductMetadata', 'markSpineGenerationStarted', 'setSpineSafetyReview',
     'setSpineError', 'initPreflightSession', 'setPreflightQuestions', 'setPreflightAnswer',
     'setPreflightIndex', 'setPreflightSummary', 'completePreflightSession', 'setPreflightError',

@@ -23,6 +23,10 @@ export interface SpineGenerationMetaInput {
     prdVersion?: number;
 }
 
+export type CompareAndAppendStructuredPRDResult =
+    | { status: 'applied'; newSpineId: string }
+    | { status: 'stale'; expectedLatestSpineId: string; actualLatestSpineId?: string };
+
 export interface ProjectState {
     projects: Record<string, Project>;
     spineVersions: Record<string, SpineVersion[]>;
@@ -111,6 +115,19 @@ export interface ProjectState {
             meta?: SpineGenerationMetaInput;
         },
     ) => { newSpineId: string };
+    // Guarded append for changes prepared against a known PRD baseline (for
+    // example, a future Decision Center impact preview). The latest-version
+    // comparison and append happen in the same Zustand transaction.
+    compareAndAppendStructuredPRD: (
+        projectId: string,
+        expectedLatestSpineId: string,
+        nextStructuredPRD: StructuredPRD,
+        opts?: {
+            editSummary?: string;
+            changeSource?: import('../types').VersionChangeSource;
+            meta?: SpineGenerationMetaInput;
+        },
+    ) => CompareAndAppendStructuredPRDResult;
     // Versioning: restore a historical spine by appending a new latest version
     // cloning its content. Never mutates or deletes the source version.
     revertSpineToVersion: (projectId: string, sourceSpineId: string) => { newSpineId: string };

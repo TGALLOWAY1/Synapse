@@ -5,8 +5,9 @@ import type {
     QualityScores, GenerationMeta, SpineSafetyReview,
     PreflightSession,
 } from '../../types';
-import type { ProjectState, SpineGenerationMetaInput } from '../types';
+import type { ProjectState, SpineGenerationMetaInput, CompareAndAppendStructuredPRDResult } from '../types';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
+import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -18,6 +19,7 @@ export type SpineSlice = {
     updateStructuredPRD: ProjectState['updateStructuredPRD'];
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
     editSpineStructuredPRD: ProjectState['editSpineStructuredPRD'];
+    compareAndAppendStructuredPRD: ProjectState['compareAndAppendStructuredPRD'];
     revertSpineToVersion: ProjectState['revertSpineToVersion'];
     updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
@@ -346,6 +348,9 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 // A historical edit must not inherit a stale error/safety stub.
                 generationError: undefined,
                 provenance: { changeSource, editSummary },
+                // Never carry the source version's canonical metadata onto a
+                // new id. Rebuilt below after all metadata overrides settle.
+                canonicalSpine: undefined,
             };
             // Optional generation-meta overrides (e.g. updated failedSections).
             if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
@@ -353,6 +358,22 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
             if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
             if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
+
+            try {
+                const project = state.projects[projectId];
+                newSpine.canonicalSpine = buildCanonicalPrdSpine(nextStructuredPRD, {
+                    projectName: project?.productName || project?.name,
+                    platform: project?.platform,
+                    designSystemPreset: project?.designSystemPreset,
+                    safetyReview: newSpine.safetyReview,
+                    sourceSpineVersionId: newSpineId,
+                    sourcePrdVersion: newSpine.prdVersion ?? src.canonicalSpine?.meta.sourcePrdVersion,
+                });
+            } catch {
+                // Preserve the edit while leaving no misleading canonical cache;
+                // artifact generation rebuilds this contract lazily.
+                newSpine.canonicalSpine = undefined;
+            }
 
             const editEvent: HistoryEvent = {
                 id: historyEventId,
@@ -370,6 +391,100 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         });
 
         return { newSpineId };
+    },
+
+    // Compare-and-append is the write barrier for a structured PRD change
+    // prepared from a version-bound preview. Crucially, the latest check lives
+    // inside set(): checking with get() first would leave a race between the
+    // check and append and could silently apply a stale preview.
+    compareAndAppendStructuredPRD: (
+        projectId,
+        expectedLatestSpineId,
+        nextStructuredPRD,
+        opts,
+    ) => {
+        const now = Date.now();
+        const newSpineId = uuidv4();
+        const historyEventId = uuidv4();
+        const editSummary = opts?.editSummary ?? 'Applied structured PRD revision';
+        let result: CompareAndAppendStructuredPRDResult = {
+            status: 'stale',
+            expectedLatestSpineId,
+        };
+
+        set((state) => {
+            const currentVersions = state.spineVersions[projectId] || [];
+            const latest = currentVersions.find(version => version.isLatest);
+            if (!latest || latest.id !== expectedLatestSpineId) {
+                result = {
+                    status: 'stale',
+                    expectedLatestSpineId,
+                    ...(latest ? { actualLatestSpineId: latest.id } : {}),
+                };
+                return state;
+            }
+
+            const project = state.projects[projectId];
+            const prdVersion = opts?.meta?.prdVersion
+                ?? latest.prdVersion
+                ?? latest.canonicalSpine?.meta.sourcePrdVersion;
+            const canonicalSpine = buildCanonicalPrdSpine(nextStructuredPRD, {
+                projectName: project?.productName || project?.name,
+                platform: project?.platform,
+                designSystemPreset: project?.designSystemPreset,
+                safetyReview: latest.safetyReview,
+                sourceSpineVersionId: newSpineId,
+                sourcePrdVersion: prdVersion,
+            });
+
+            const newSpine: SpineVersion = {
+                ...latest,
+                id: newSpineId,
+                createdAt: now,
+                isLatest: true,
+                isFinal: false,
+                structuredPRD: nextStructuredPRD,
+                responseText: renderPremiumMarkdown(nextStructuredPRD),
+                generationPhase: 'complete',
+                generationError: undefined,
+                provenance: {
+                    changeSource: opts?.changeSource ?? 'user_edit',
+                    editSummary,
+                },
+                canonicalSpine,
+            };
+            if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
+            if (opts?.meta?.qualityScores !== undefined) newSpine.qualityScores = opts.meta.qualityScores;
+            if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
+            if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
+            if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
+
+            const historyEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                spineVersionId: newSpineId,
+                type: 'Edited',
+                description: editSummary,
+                createdAt: now,
+            };
+
+            result = { status: 'applied', newSpineId };
+            return {
+                spineVersions: {
+                    ...state.spineVersions,
+                    [projectId]: [
+                        ...currentVersions.map(version => ({ ...version, isLatest: false })),
+                        newSpine,
+                    ],
+                },
+                historyEvents: {
+                    ...state.historyEvents,
+                    [projectId]: [...(state.historyEvents[projectId] || []), historyEvent],
+                },
+            };
+        });
+
+        return result;
     },
 
     // Versioning: restore a historical spine by appending a NEW latest version
@@ -406,7 +521,24 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     revertedFromVersionId: sourceSpineId,
                     editSummary: `Restored from ${sourceLabel}`,
                 },
+                // A restored version has a new identity even though its PRD
+                // content is historical; rebuild metadata for that identity.
+                canonicalSpine: undefined,
             };
+
+            if (newSpine.structuredPRD) try {
+                const project = state.projects[projectId];
+                newSpine.canonicalSpine = buildCanonicalPrdSpine(newSpine.structuredPRD, {
+                    projectName: project?.productName || project?.name,
+                    platform: project?.platform,
+                    designSystemPreset: project?.designSystemPreset,
+                    safetyReview: newSpine.safetyReview,
+                    sourceSpineVersionId: newSpineId,
+                    sourcePrdVersion: newSpine.prdVersion ?? src.canonicalSpine?.meta.sourcePrdVersion,
+                });
+            } catch {
+                newSpine.canonicalSpine = undefined;
+            }
 
             const revertEvent: HistoryEvent = {
                 id: historyEventId,
