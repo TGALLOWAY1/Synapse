@@ -5,6 +5,7 @@ interface PipelineStageBarProps {
     currentStage: PipelineStage;
     onStageChange: (stage: PipelineStage) => void;
     hasPRD: boolean;
+    canReview?: boolean;
 }
 
 const stages: { key: PipelineStage; label: string; description: string; icon: typeof FileText }[] = [
@@ -14,10 +15,10 @@ const stages: { key: PipelineStage; label: string; description: string; icon: ty
     { key: 'history', label: 'History', description: 'Chronological timeline of changes', icon: Clock },
 ];
 
-export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: PipelineStageBarProps) {
+export function PipelineStageBar({ currentStage, onStageChange, hasPRD, canReview = hasPRD }: PipelineStageBarProps) {
     const isEnabled = (stage: PipelineStage): boolean => {
         if (stage === 'prd' || stage === 'history') return true;
-        if (stage === 'review') return hasPRD;
+        if (stage === 'review') return canReview;
         if (stage === 'workspace') return hasPRD;
         return false;
     };

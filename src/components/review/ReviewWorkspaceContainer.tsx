@@ -1,4 +1,5 @@
-import { useMemo, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
+import { v4 as uuidv4 } from 'uuid';
 import { useProjectStore } from '../../store/projectStore';
 import type {
     PlanningRecord,
@@ -8,6 +9,7 @@ import type {
     SpecialistFinding,
     SpecialistFindingKind,
 } from '../../types';
+import type { DecisionEvent } from '../../types';
 import {
     buildReviewContextManifest,
     clusterGroundedFindings,
@@ -26,6 +28,12 @@ import {
     type ValidatedSpecialistFinding,
 } from '../../lib/review';
 import { useToastStore } from '../../store/toastStore';
+import {
+    buildDecisionImpact,
+    isDecisionImpactStale,
+    projectDecision,
+} from '../../lib/planning';
+import { canPerformProjectAction } from '../../lib/projectCapabilities';
 import {
     ReviewWorkspace,
     type PlanningRecordView,
@@ -91,9 +99,14 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? []);
     const [activeRunId, setActiveRunId] = useState<string>();
     const [busy, setBusy] = useState(false);
+    const canWrite = canPerformProjectAction(projectId, 'persist');
     const manifests = useRef(new Map<string, ReviewContextManifest>());
 
     const latestSpine = spines.find(spine => spine.isLatest) ?? spines.at(-1);
+    useEffect(() => {
+        if (!canWrite || !latestSpine?.structuredPRD) return;
+        useProjectStore.getState().importPlanningAssumptions(projectId, latestSpine.id, latestSpine.structuredPRD);
+    }, [canWrite, latestSpine?.id, latestSpine?.structuredPRD, projectId]);
     const preferredArtifacts = useMemo(() => artifacts.flatMap(artifact => {
         if (artifact.type !== 'core_artifact' || !artifact.subtype || !artifact.currentVersionId) return [];
         const version = artifactVersions.find(candidate => candidate.id === artifact.currentVersionId);
@@ -179,7 +192,8 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
 
     const persistFinding = (reviewId: string, specialistRunId: string, finding: ValidatedSpecialistFinding) => {
         const state = useProjectStore.getState();
-        if ((state.reviewFindings[projectId] ?? []).some(existing => existing.id === finding.id && existing.reviewId === reviewId)) return;
+        const persistedFindingId = `${reviewId}:${finding.id}`;
+        if ((state.reviewFindings[projectId] ?? []).some(existing => existing.id === persistedFindingId && existing.reviewId === reviewId)) return;
         const manifest = manifests.current.get(reviewId);
         const evidence: ReviewEvidenceRef[] = finding.evidence.map(item => {
             const locator = manifest?.locators.find(candidate => candidate.id === item.locatorId);
@@ -197,7 +211,7 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             };
         });
         const persisted: Omit<SpecialistFinding, 'id' | 'projectId'> & { id: string } = {
-            id: finding.id,
+            id: persistedFindingId,
             reviewId,
             specialistRunId,
             specialistId: finding.specialistId,
@@ -219,20 +233,23 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     };
 
     const persistCluster = (reviewId: string, cluster: FindingCluster, allFindings: ValidatedSpecialistFinding[]) => {
-        if ((useProjectStore.getState().reviewIssues[projectId] ?? []).some(existing => existing.id === cluster.id && existing.reviewId === reviewId)) return;
+        const state = useProjectStore.getState();
+        const persistedIssueId = `${reviewId}:${cluster.id}`;
+        if ((state.reviewIssues[projectId] ?? []).some(existing => existing.id === persistedIssueId && existing.reviewId === reviewId)) return;
         const lead = allFindings.find(finding => cluster.findingIds.includes(finding.id));
         if (!lead) return;
+        const findingIds = cluster.findingIds.map(id => id.startsWith(`${reviewId}:`) ? id : `${reviewId}:${id}`);
         const issue: Omit<ReviewIssue, 'id' | 'projectId' | 'status' | 'dispositions' | 'createdAt' | 'updatedAt'> & { id: string } = {
-            id: cluster.id,
+            id: persistedIssueId,
             reviewId,
             title: cluster.title,
             summary: lead.observation,
             kind: lead.type as SpecialistFindingKind,
-            findingIds: cluster.findingIds,
+            findingIds,
             specialistIds: cluster.specialistIds,
             relationship: cluster.consensus === 'single' ? 'standalone' : cluster.consensus,
             perspectives: cluster.perspectives.map(perspective => ({
-                findingIds: [perspective.findingId],
+                findingIds: [perspective.findingId.startsWith(`${reviewId}:`) ? perspective.findingId : `${reviewId}:${perspective.findingId}`],
                 recommendation: perspective.recommendation,
             })),
             severity: cluster.severity,
@@ -240,7 +257,38 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             implementationImpact: lead.implementationBlocking ? 'blocker' : lead.canDefer ? 'deferrable' : 'resolve_before_build',
             relatedPlanningRecordIds: [],
         };
-        useProjectStore.getState().addReviewIssue(projectId, issue);
+        state.addReviewIssue(projectId, issue);
+
+        // A dismissal is a user decision scoped to the exact reviewed context.
+        // Carry it forward only when a re-review finds the same fingerprint set
+        // against the unchanged context; changed sources intentionally reopen it.
+        const fingerprints = allFindings
+            .filter(finding => cluster.findingIds.includes(finding.id))
+            .map(finding => finding.fingerprint)
+            .sort()
+            .join('|');
+        const priorDismissed = (state.reviewIssues[projectId] ?? []).find(candidate => {
+            if (candidate.reviewId === reviewId || candidate.status !== 'dismissed') return false;
+            const priorFingerprints = (state.reviewFindings[projectId] ?? [])
+                .filter(finding => finding.reviewId === candidate.reviewId && candidate.findingIds.includes(finding.id))
+                .map(finding => finding.fingerprint)
+                .sort()
+                .join('|');
+            const disposition = candidate.dispositions.at(-1);
+            const run = (state.reviewRuns[projectId] ?? []).find(item => item.id === reviewId);
+            return priorFingerprints === fingerprints
+                && disposition?.action === 'dismiss'
+                && disposition.contextSignature === run?.sourceManifest.contextSignature;
+        });
+        const priorDisposition = priorDismissed?.dispositions.at(-1);
+        if (priorDisposition) {
+            state.applyReviewIssueDisposition(projectId, reviewId, persistedIssueId, {
+                action: 'dismiss',
+                contextSignature: priorDisposition.contextSignature,
+                reason: priorDisposition.reason,
+                at: priorDisposition.at,
+            });
+        }
     };
 
     const validatedFindingsForReview = (reviewId: string, manifest: ReviewContextManifest): ValidatedSpecialistFinding[] => {
@@ -326,7 +374,9 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             }
             state.updateReviewRun(projectId, reviewId, { status: 'synthesizing', synthesisStatus: 'running' });
             const allFindings = validatedFindingsForReview(reviewId, manifest);
-            for (const cluster of clusterGroundedFindings(allFindings)) persistCluster(reviewId, cluster, allFindings);
+            const clusters = clusterGroundedFindings(allFindings);
+            state.supersedeOpenReviewIssues(projectId, reviewId, clusters.map(cluster => `${reviewId}:${cluster.id}`));
+            for (const cluster of clusters) persistCluster(reviewId, cluster, allFindings);
             state.updateReviewRun(projectId, reviewId, {
                 status: result.status === 'partial' ? 'partial' : 'complete',
                 synthesisStatus: 'complete',
@@ -347,7 +397,7 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     };
 
     const handleStart = async ({ specialistIds, focus }: { specialistIds: string[]; focus?: string }) => {
-        if (!currentManifest || busy) return;
+        if (!canWrite || !currentManifest || busy) return;
         setBusy(true);
         const selected = specialistIds.filter((id): id is ReviewSpecialistId => id in SPECIALIST_REGISTRY);
         const state = useProjectStore.getState();
@@ -373,6 +423,7 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     };
 
     const handleRetrySpecialist = async (reviewId: string, specialistId: string) => {
+        if (!canWrite) return;
         const manifest = manifestForReview(reviewId);
         if (!manifest || !(specialistId in SPECIALIST_REGISTRY)) {
             useToastStore.getState().addToast({ type: 'warning', title: 'Review snapshot unavailable', message: 'One or more reviewed source versions are no longer available.' });
@@ -390,6 +441,7 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     };
 
     const handleResumeReview = async (reviewId: string) => {
+        if (!canWrite) return;
         const manifest = manifestForReview(reviewId);
         const run = reviewRuns.find(item => item.id === reviewId);
         if (!manifest || !run) {
@@ -402,7 +454,9 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             .filter((id): id is ReviewSpecialistId => id in SPECIALIST_REGISTRY);
         if (incomplete.length === 0) {
             const allFindings = validatedFindingsForReview(reviewId, manifest);
-            for (const cluster of clusterGroundedFindings(allFindings)) persistCluster(reviewId, cluster, allFindings);
+            const clusters = clusterGroundedFindings(allFindings);
+            useProjectStore.getState().supersedeOpenReviewIssues(projectId, reviewId, clusters.map(cluster => `${reviewId}:${cluster.id}`));
+            for (const cluster of clusters) persistCluster(reviewId, cluster, allFindings);
             useProjectStore.getState().updateReviewRun(projectId, reviewId, { status: 'complete', synthesisStatus: 'complete', completedAt: Date.now() });
             return;
         }
@@ -411,14 +465,17 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     };
 
     const handleIssueAction = (reviewId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => {
+        if (!canWrite) return;
         const state = useProjectStore.getState();
-        const issue = (state.reviewIssues[projectId] ?? []).find(item => item.id === issueId);
+        const issue = (state.reviewIssues[projectId] ?? []).find(item => item.id === issueId && item.reviewId === reviewId);
         const run = (state.reviewRuns[projectId] ?? []).find(item => item.id === reviewId);
         if (!issue || !run) return;
         let recordId = planningRecordId;
         const recordType = recordTypeForAction(action);
         if (recordType) {
-            const sourceFindings = (state.reviewFindings[projectId] ?? []).filter(finding => issue.findingIds.includes(finding.id));
+            const sourceFindings = (state.reviewFindings[projectId] ?? []).filter(
+                finding => finding.reviewId === reviewId && issue.findingIds.includes(finding.id),
+            );
             recordId = state.createPlanningRecord(projectId, {
                 type: recordType,
                 status: recordType === 'decision' ? 'proposed' : 'open',
@@ -428,10 +485,11 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
                 evidence: sourceFindings.flatMap(finding => finding.evidence),
                 sourceFindingIds: issue.findingIds,
                 sourceReviewIssueId: issue.id,
+                challengesRecordId: action === 'challenge_decision' ? planningRecordId : undefined,
                 createdBy: 'specialist_review',
             }).planningRecordId;
         }
-        state.applyReviewIssueDisposition(projectId, issueId, {
+        state.applyReviewIssueDisposition(projectId, reviewId, issueId, {
             action: dispositionForAction(action),
             contextSignature: run.sourceManifest.contextSignature,
             reason: note?.trim() || undefined,
@@ -440,7 +498,7 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
     };
 
     const issueViews = (reviewId: string): ReviewIssueView[] => issues.filter(issue => issue.reviewId === reviewId).map(issue => {
-        const sourceFindings = findings.filter(finding => issue.findingIds.includes(finding.id));
+        const sourceFindings = findings.filter(finding => finding.reviewId === reviewId && issue.findingIds.includes(finding.id));
         const latestDisposition = issue.dispositions.at(-1);
         const lead = sourceFindings[0];
         return {
@@ -497,17 +555,137 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
         issues: issueViews(run.id),
     }));
 
-    const planningViews: PlanningRecordView[] = planningRecords.map(record => ({
-        id: record.id,
-        type: record.type === 'open_question' ? 'question' : record.type,
-        title: record.title,
-        status: record.status === 'rejected' || record.status === 'deferred' || record.status === 'superseded' || record.status === 'invalidated'
-            ? 'dismissed'
-            : record.status,
-        description: record.statement,
-        sourceIssueIds: record.sourceReviewIssueId ? [record.sourceReviewIssueId] : [],
-        createdAt: record.createdAt,
-    }));
+    const planningViews: PlanningRecordView[] = planningRecords.map(record => {
+        const projection = projectDecision(record);
+        const assessment = record.assessments?.at(-1);
+        const storedPreview = assessment?.impactPreview;
+        const previewStale = storedPreview && latestSpine?.structuredPRD
+            ? isDecisionImpactStale(storedPreview, latestSpine.id, latestSpine.structuredPRD)
+                || storedPreview.decisionEventId !== projection.latestVerdictEventId
+            : false;
+        const option = record.decisionOptions?.find(item => item.id === projection.selectedOptionId);
+        return {
+            id: record.id,
+            type: record.type === 'open_question' ? 'question' : record.type,
+            title: record.title,
+            statement: record.statement,
+            whyItMatters: record.evidence[0]?.excerpt,
+            status: projection.status,
+            options: record.decisionOptions,
+            recommendation: record.recommendationDetail ?? (record.recommendation ? { summary: record.recommendation } : undefined),
+            resolution: option?.label ?? projection.answer,
+            rationale: projection.rationale,
+            sourceLabels: (record.sources ?? []).map(source => source.sourceType === 'prd_assumption'
+                ? 'PRD assumption'
+                : source.sourceType.replaceAll('_', ' ')),
+            sourceNotice: record.sourceState === 'changed'
+                ? `The source assumption changed to: ${record.currentSourceStatement}. Review this decision before relying on it.`
+                : record.sourceState === 'missing'
+                    ? 'The source assumption is no longer present in the current PRD. Review whether this decision is still valid.'
+                    : undefined,
+            sourceIssueIds: record.sourceReviewIssueId ? [record.sourceReviewIssueId] : [],
+            createdAt: record.createdAt,
+            history: (record.events ?? []).map(event => ({
+                id: event.id,
+                label: event.type.replaceAll('_', ' '),
+                at: event.at,
+                rationale: event.rationale,
+            })),
+            preview: storedPreview ? {
+                id: storedPreview.id,
+                status: previewStale ? 'stale' : storedPreview.status,
+                affectedPrdSections: storedPreview.affectedPrdSections,
+                affectedArtifactLabels: storedPreview.affectedArtifactSlots.map(slot => slot.replaceAll('_', ' ')),
+                beforeSummary: storedPreview.proposedPrdPatch?.[0]?.beforeSummary,
+                afterSummary: storedPreview.proposedPrdPatch?.[0]?.afterSummary,
+                explanation: storedPreview.explanation,
+                error: storedPreview.error,
+                canApply: !!storedPreview.proposedPrdPatch?.length && !!storedPreview.proposedResultHash,
+            } : undefined,
+        };
+    });
+
+    const handleDecisionAction = (recordId: string, action: import('./DecisionCenter').DecisionAction, value?: string, rationale?: string) => {
+        if (!canWrite) return;
+        const record = planningRecords.find(item => item.id === recordId);
+        if (!record) return;
+        const base = { id: uuidv4(), planningRecordId: recordId, actor: 'user' as const, at: Date.now(), rationale };
+        let event: DecisionEvent;
+        const projection = projectDecision(record);
+        if (action === 'reopen') event = { ...base, type: 'reopened' };
+        else if (action === 'defer') event = { ...base, type: 'deferred' };
+        else if (action === 'reject') event = { ...base, type: 'premise_rejected', reason: value?.trim() || 'The premise is not valid.' };
+        else if (action === 'invalidate') event = { ...base, type: 'invalidated', reason: value?.trim() || 'The decision is no longer valid.' };
+        else if (action === 'revise' && projection.latestVerdictEventId) event = {
+            ...base, type: 'revised', previousEventId: projection.latestVerdictEventId, answer: value?.trim(),
+        };
+        else if (action === 'confirm' && value && record.decisionOptions?.some(option => option.id === value)) {
+            event = { ...base, type: 'option_selected', optionId: value };
+        } else {
+            event = { ...base, type: 'custom_answered', answer: value?.trim() || record.statement };
+        }
+        const result = useProjectStore.getState().appendPlanningDecisionEvent(projectId, recordId, event);
+        if (!result.ok) useToastStore.getState().addToast({ type: 'error', title: 'Decision not saved', message: result.reason });
+    };
+
+    const handlePreviewImpact = (recordId: string) => {
+        if (!canWrite) return;
+        const record = useProjectStore.getState().planningRecords[projectId]?.find(item => item.id === recordId);
+        const spine = useProjectStore.getState().spineVersions[projectId]?.find(item => item.isLatest);
+        if (!record || !spine?.structuredPRD) return;
+        const result = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: spine.structuredPRD });
+        if (!result.ok) {
+            useToastStore.getState().addToast({ type: 'info', title: 'Impact preview needs more context', message: result.reason });
+            return;
+        }
+        useProjectStore.getState().addPlanningAssessment(projectId, recordId, result.assessment);
+    };
+
+    const handleApplyToPlan = (recordId: string) => {
+        if (!canWrite) return;
+        const state = useProjectStore.getState();
+        const record = state.planningRecords[projectId]?.find(item => item.id === recordId);
+        const spine = state.spineVersions[projectId]?.find(item => item.isLatest);
+        const assessment = record?.assessments?.at(-1);
+        const preview = assessment?.impactPreview;
+        if (!record || !spine?.structuredPRD || !assessment || !preview || preview.status !== 'ready') return;
+        if (isDecisionImpactStale(preview, spine.id, spine.structuredPRD)) {
+            state.addPlanningAssessment(projectId, recordId, {
+                ...assessment,
+                status: 'stale',
+                impactPreview: { ...preview, status: 'stale' },
+            });
+            return;
+        }
+        const impact = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: spine.structuredPRD });
+        if (!impact.ok || !impact.nextPrd || impact.preview.id !== preview.id) return;
+        const applied = state.compareAndAppendStructuredPRD(projectId, spine.id, impact.nextPrd, {
+            editSummary: `Applied decision: ${record.title}`,
+            expectedPrdHash: preview.baseline.spineContentHash,
+            decisionApplication: {
+                planningRecordId: record.id,
+                decisionEventId: preview.decisionEventId,
+                impactPreviewId: preview.id,
+                appliedEventId: uuidv4(),
+            },
+        });
+        const current = useProjectStore.getState().planningRecords[projectId]?.find(item => item.id === recordId);
+        const currentAssessment = current?.assessments?.find(item => item.id === assessment.id);
+        if (currentAssessment) {
+            useProjectStore.getState().addPlanningAssessment(projectId, recordId, {
+                ...currentAssessment,
+                status: applied.status === 'applied' ? 'fresh' : 'stale',
+                impactPreview: {
+                    ...preview,
+                    status: applied.status === 'applied' ? 'applied' : 'stale',
+                    ...(applied.status === 'applied' ? { appliedAt: Date.now(), resultingSpineVersionId: applied.newSpineId } : {}),
+                },
+            });
+        }
+        useToastStore.getState().addToast(applied.status === 'applied'
+            ? { type: 'success', title: 'Decision applied', message: 'A new PRD version was created. Existing assets were not changed.' }
+            : { type: 'info', title: 'Preview is stale', message: 'Refresh the impact preview before applying this decision.' });
+    };
 
     if (!project || !currentManifest) return <div className="p-6 text-sm text-neutral-500">Finalize a structured PRD before starting a specialist review.</div>;
     return <ReviewWorkspace
@@ -530,5 +708,9 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             if (record) useProjectStore.getState().updatePlanningRecordStatusByUser(projectId, recordId, record.type === 'decision' ? 'confirmed' : 'resolved');
         }}
         onReopenPlanningRecord={recordId => useProjectStore.getState().updatePlanningRecordStatusByUser(projectId, recordId, 'open')}
+        onDecidePlanningRecord={handleDecisionAction}
+        onPreviewPlanningRecordImpact={handlePreviewImpact}
+        onApplyPlanningRecordToPlan={handleApplyToPlan}
+        readOnly={!canPerformProjectAction(projectId, 'persist')}
     />;
 }

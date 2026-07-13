@@ -64,7 +64,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, editSpineStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -464,7 +464,7 @@ export function ProjectWorkspace() {
             // entry and stamped on the first ('generating') status emission.
             const nextRetryCount = (prdSectionStatus?.[id]?.retryCount ?? 0) + 1;
             let retryCountStamped = false;
-            const { structuredPRD, markdown, model, ms } = await regeneratePrdSection(
+            const { structuredPRD, model, ms } = await regeneratePrdSection(
                 id,
                 sourcePrompt,
                 activeSpine.structuredPRD,
@@ -484,8 +484,7 @@ export function ProjectWorkspace() {
             );
             // A section retry appends a new version (preserving the prior
             // content) rather than mutating the spine in place.
-            editSpineStructuredPRD(projectId, activeSpine.id, structuredPRD, {
-                responseText: markdown,
+            const appendResult = compareAndAppendStructuredPRD(projectId, activeSpine.id, structuredPRD, {
                 changeSource: 'ai_section_retry',
                 editSummary: `Regenerated section: ${title}`,
                 meta: {
@@ -503,6 +502,11 @@ export function ProjectWorkspace() {
                         : {}),
                 },
             });
+            if (appendResult.status === 'stale') {
+                setSectionStatus(projectId, id, { status: 'error', error: 'The PRD changed before this retry could be saved. Retry on the latest version.' });
+                appendPrdProgress(projectId, `↻ ${title} finished, but the PRD changed — run it again on the latest version.`);
+                return;
+            }
             if (id === 'product_basics' && (structuredPRD.productName || structuredPRD.productCategory)) {
                 updateProjectProductMetadata(projectId, {
                     productName: structuredPRD.productName,
@@ -1107,6 +1111,7 @@ export function ProjectWorkspace() {
                     currentStage={pipelineStage}
                     onStageChange={setPipelineStage}
                     hasPRD={!!activeSpine?.isFinal}
+                    canReview={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
                 />
             </div>
 
@@ -1143,7 +1148,7 @@ export function ProjectWorkspace() {
                         autoOpenIntent={finalizeAutoOpen}
                         onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
                     />
-                ) : pipelineStage === 'review' && activeSpine?.isFinal && activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
+                ) : pipelineStage === 'review' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
                     <ReviewWorkspaceContainer projectId={projectId} />
                 ) : (
                 <>

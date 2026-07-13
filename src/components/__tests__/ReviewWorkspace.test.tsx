@@ -138,6 +138,9 @@ describe('ReviewWorkspace', () => {
             type: 'decision',
             title: 'Choose the source-file retention period',
             status: 'proposed',
+            statement: 'Choose a retention period.',
+            sourceLabels: ['specialist review'],
+            history: [],
             sourceIssueIds: ['issue-1'],
             createdAt: 1_700_000_000_000,
         }];
@@ -148,5 +151,56 @@ describe('ReviewWorkspace', () => {
         expect(screen.getByText('proposed')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Confirm decision' }));
         expect(onConfirmPlanningRecord).toHaveBeenCalledWith('record-1');
+    });
+
+    it('starts a new version-linked review after a completed run', () => {
+        const onStartReview = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ runs: [completeRun()], onStartReview })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Review current plan' }));
+        expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));
+        expect(onStartReview).toHaveBeenCalled();
+    });
+
+    it('retries and resynthesizes incomplete coverage from partial results', () => {
+        const onRetrySynthesis = vi.fn();
+        const run = completeRun({
+            status: 'partial',
+            specialists: [
+                { ...panel[0], status: 'complete', findingCount: 1 },
+                { ...panel[1], status: 'failed', error: 'Timed out' },
+            ],
+        });
+        render(<ReviewWorkspace {...baseProps({ runs: [run], onRetrySynthesis })} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Retry failed coverage' }));
+        expect(onRetrySynthesis).toHaveBeenCalledWith(run.id);
+    });
+
+    it('keeps the public example review surface read-only', () => {
+        render(<ReviewWorkspace {...baseProps({ readOnly: true })} />);
+        expect(screen.getByRole('button', { name: 'Reviews are read-only in this example' })).toBeDisabled();
+    });
+
+    it('requires a confirmed decision when recording a challenge', () => {
+        const onActOnIssue = vi.fn();
+        const records: PlanningRecordView[] = [{
+            id: 'decision-1',
+            type: 'decision',
+            title: 'Retain files for 90 days',
+            statement: 'Files remain available for 90 days.',
+            status: 'confirmed',
+            sourceLabels: ['user'],
+            history: [],
+            sourceIssueIds: [],
+            createdAt: 1,
+        }];
+        render(<ReviewWorkspace {...baseProps({ runs: [completeRun()], planningRecords: records, onActOnIssue })} />);
+        fireEvent.click(screen.getByRole('button', { name: /Resolve/ }));
+        fireEvent.change(screen.getByLabelText('Action'), { target: { value: 'challenge_decision' } });
+        expect(screen.getByRole('button', { name: 'Save action' })).toBeDisabled();
+        fireEvent.change(screen.getByLabelText('Confirmed decision to challenge'), { target: { value: 'decision-1' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save action' }));
+        expect(onActOnIssue).toHaveBeenCalledWith('review-1', 'issue-1', 'challenge_decision', undefined, 'decision-1');
     });
 });

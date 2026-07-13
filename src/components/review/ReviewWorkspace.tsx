@@ -2,13 +2,11 @@ import { useMemo, useState } from 'react';
 import {
     AlertTriangle,
     ArrowRight,
-    Check,
     CheckCircle2,
     ChevronDown,
     ChevronRight,
     Circle,
     Clock3,
-    FileQuestion,
     History,
     Link2,
     Loader2,
@@ -17,6 +15,11 @@ import {
     Sparkles,
     X,
 } from 'lucide-react';
+import {
+    DecisionCenter,
+    type DecisionAction,
+    type DecisionCenterRecordView,
+} from './DecisionCenter';
 
 export type ReviewSpecialistOption = {
     id: string;
@@ -76,15 +79,7 @@ export type ReviewRunView = {
     error?: string;
 };
 
-export type PlanningRecordView = {
-    id: string;
-    type: 'decision' | 'assumption' | 'risk' | 'question' | 'conflict';
-    title: string;
-    status: 'proposed' | 'open' | 'confirmed' | 'resolved' | 'dismissed';
-    description?: string;
-    sourceIssueIds: string[];
-    createdAt: number;
-};
+export type PlanningRecordView = DecisionCenterRecordView & { sourceIssueIds: string[] };
 
 export type ReviewIssueAction =
     | 'propose_decision'
@@ -116,6 +111,10 @@ export interface ReviewWorkspaceProps {
     onActOnIssue: (runId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => void;
     onConfirmPlanningRecord: (recordId: string) => void;
     onReopenPlanningRecord: (recordId: string) => void;
+    onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
+    onPreviewPlanningRecordImpact?: (recordId: string) => void;
+    onApplyPlanningRecordToPlan?: (recordId: string) => void;
+    readOnly?: boolean;
 }
 
 const KIND_LABELS: Record<ReviewIssueView['kind'], string> = {
@@ -155,6 +154,7 @@ function ReviewSetup({
     sources,
     missingSources,
     busy,
+    readOnly,
     onStart,
 }: {
     projectName: string;
@@ -162,6 +162,7 @@ function ReviewSetup({
     sources: string[];
     missingSources: string[];
     busy?: boolean;
+    readOnly?: boolean;
     onStart: ReviewWorkspaceProps['onStartReview'];
 }) {
     const [selected, setSelected] = useState(() => new Set(panel.filter(p => p.recommended !== false).map(p => p.id)));
@@ -198,6 +199,7 @@ function ReviewSetup({
                                 type="checkbox"
                                 checked={selected.has(specialist.id)}
                                 onChange={() => toggle(specialist.id)}
+                                disabled={readOnly}
                                 className="mt-0.5 h-4 w-4 rounded border-neutral-300 text-indigo-600 focus:ring-indigo-500"
                             />
                             <span className="min-w-0 flex-1">
@@ -237,12 +239,12 @@ function ReviewSetup({
                 <p className="text-xs text-neutral-500">Findings remain suggestions until you explicitly act on them.</p>
                 <button
                     type="button"
-                    disabled={selected.size === 0 || busy}
+                    disabled={readOnly || selected.size === 0 || busy}
                     onClick={() => void onStart({ specialistIds: [...selected], focus: focus.trim() || undefined })}
                     className="inline-flex min-h-11 items-center justify-center gap-2 rounded-xl bg-indigo-600 px-5 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:cursor-not-allowed disabled:opacity-40"
                 >
                     {busy ? <Loader2 size={16} className="animate-spin" /> : <Sparkles size={16} />}
-                    Start specialist review
+                    {readOnly ? 'Reviews are read-only in this example' : 'Start specialist review'}
                 </button>
             </div>
         </div>
@@ -344,12 +346,16 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
                         {ACTIONS.map(item => <option key={item.id} value={item.id}>{item.label}</option>)}
                     </select>
                     <p className="text-xs leading-5 text-neutral-500">{selected.description}</p>
-                    {action === 'link_existing' && (
+                    {(action === 'link_existing' || action === 'challenge_decision') && (
                         <div>
-                            <label className="block text-sm font-medium text-neutral-800" htmlFor="planning-record">Decision Center record</label>
+                            <label className="block text-sm font-medium text-neutral-800" htmlFor="planning-record">
+                                {action === 'challenge_decision' ? 'Confirmed decision to challenge' : 'Decision Center record'}
+                            </label>
                             <select id="planning-record" value={recordId} onChange={e => setRecordId(e.target.value)} className="mt-2 min-h-11 w-full rounded-xl border border-neutral-200 bg-white px-3 text-sm">
                                 <option value="">Select a record</option>
-                                {planningRecords.map(record => <option key={record.id} value={record.id}>{record.title}</option>)}
+                                {planningRecords
+                                    .filter(record => action !== 'challenge_decision' || record.status === 'confirmed' || record.status === 'resolved')
+                                    .map(record => <option key={record.id} value={record.id}>{record.title}</option>)}
                             </select>
                         </div>
                     )}
@@ -361,14 +367,14 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
                 </div>
                 <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-neutral-100 bg-white p-4 sm:flex-row sm:justify-end">
                     <button type="button" onClick={onClose} className="min-h-11 rounded-xl px-4 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel</button>
-                    <button type="button" disabled={(noteRequired && !note.trim()) || (action === 'link_existing' && !recordId)} onClick={() => onSubmit(action, note.trim() || undefined, recordId || undefined)} className="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Save action</button>
+                    <button type="button" disabled={(noteRequired && !note.trim()) || ((action === 'link_existing' || action === 'challenge_decision') && !recordId)} onClick={() => onSubmit(action, note.trim() || undefined, recordId || undefined)} className="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Save action</button>
                 </div>
             </div>
         </div>
     );
 }
 
-function FindingCard({ issue, onResolve }: { issue: ReviewIssueView; onResolve: () => void }) {
+function FindingCard({ issue, onResolve, readOnly }: { issue: ReviewIssueView; onResolve: () => void; readOnly?: boolean }) {
     const [expanded, setExpanded] = useState(issue.severity === 'blocking');
     const isClosed = issue.status === 'dismissed' || issue.status === 'addressed';
     return (
@@ -386,7 +392,7 @@ function FindingCard({ issue, onResolve }: { issue: ReviewIssueView; onResolve: 
                         <p className="mt-2 text-sm leading-6 text-neutral-700">{issue.observation}</p>
                         <p className="mt-2 text-sm leading-6 text-neutral-600"><span className="font-semibold text-neutral-800">Why it matters:</span> {issue.consequence}</p>
                     </div>
-                    {issue.status === 'open' && (
+                    {issue.status === 'open' && !readOnly && (
                         <button type="button" onClick={onResolve} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
                             Resolve <ArrowRight size={14} />
                         </button>
@@ -432,10 +438,13 @@ function FindingCard({ issue, onResolve }: { issue: ReviewIssueView; onResolve: 
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct }: {
+function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCoverage, readOnly }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
+    onNewReview: () => void;
+    onRetryCoverage: () => void;
+    readOnly?: boolean;
 }) {
     const [statusFilter, setStatusFilter] = useState<'attention' | 'all' | 'closed'>('attention');
     const [actionIssue, setActionIssue] = useState<ReviewIssueView | null>(null);
@@ -456,7 +465,10 @@ function ReviewResults({ run, planningRecords, onAct }: {
             {run.status === 'partial' && (
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                    <span>Review complete with a coverage gap: {failed} specialist{failed === 1 ? '' : 's'} did not finish. Successful findings were still validated and synthesized.</span>
+                    <div className="flex-1">
+                        <span>Review complete with a coverage gap: {failed} specialist{failed === 1 ? '' : 's'} did not finish. Successful findings were still validated and synthesized.</span>
+                        {!readOnly && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
+                    </div>
                 </div>
             )}
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
@@ -465,10 +477,13 @@ function ReviewResults({ run, planningRecords, onAct }: {
                     <h1 className="mt-1 text-2xl font-bold tracking-tight text-neutral-950">Planning review</h1>
                     <p className="mt-1 text-sm text-neutral-500">Prioritized findings from {run.specialists.filter(s => s.status === 'complete').length} completed specialist reviews.</p>
                 </div>
+                <div className="space-y-2">
+                    {!readOnly && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
                 <div className="grid grid-cols-3 gap-2 text-center sm:flex">
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{open.length}</div><div className="text-[11px] text-neutral-500">Needs attention</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-amber-700">{blocking}</div><div className="text-[11px] text-neutral-500">Build blockers</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{deferred}</div><div className="text-[11px] text-neutral-500">Deferred</div></div>
+                </div>
                 </div>
             </div>
             <div className="mt-6 flex gap-1 overflow-x-auto border-b border-neutral-200">
@@ -477,7 +492,7 @@ function ReviewResults({ run, planningRecords, onAct }: {
                 ))}
             </div>
             <div className="mt-5 space-y-4">
-                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} onResolve={() => setActionIssue(issue)} />) : (
+                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} readOnly={readOnly} onResolve={() => setActionIssue(issue)} />) : (
                     <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-5 py-12 text-center">
                         <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
                         <h2 className="mt-3 font-semibold text-neutral-900">Nothing in this view</h2>
@@ -490,50 +505,10 @@ function ReviewResults({ run, planningRecords, onAct }: {
     );
 }
 
-function DecisionCenter({ records, onConfirm, onReopen }: {
-    records: PlanningRecordView[];
-    onConfirm: (id: string) => void;
-    onReopen: (id: string) => void;
-}) {
-    return (
-        <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
-            <h1 className="text-2xl font-bold tracking-tight text-neutral-950">Decision Center</h1>
-            <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-500">Consequential questions and planning records live here. Specialist proposals remain distinct from user-confirmed decisions.</p>
-            <div className="mt-6 space-y-3">
-                {records.length === 0 ? (
-                    <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-5 py-12 text-center">
-                        <FileQuestion size={28} className="mx-auto text-neutral-300" />
-                        <h2 className="mt-3 font-semibold text-neutral-900">No planning records yet</h2>
-                        <p className="mt-1 text-sm text-neutral-500">Resolve a review finding to propose a decision, assumption, risk, question, or conflict.</p>
-                    </div>
-                ) : records.map(record => (
-                    <article key={record.id} className="rounded-xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">
-                        <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
-                            <div className="min-w-0">
-                                <div className="flex flex-wrap items-center gap-2 text-xs">
-                                    <span className="font-semibold capitalize text-neutral-500">{record.type}</span>
-                                    <span className={`font-semibold capitalize ${record.status === 'confirmed' || record.status === 'resolved' ? 'text-emerald-700' : 'text-amber-700'}`}>{record.status}</span>
-                                </div>
-                                <h2 className="mt-1 font-semibold text-neutral-950">{record.title}</h2>
-                                {record.description && <p className="mt-1 text-sm leading-6 text-neutral-600">{record.description}</p>}
-                                <p className="mt-2 text-xs text-neutral-400">Linked to {record.sourceIssueIds.length} review finding{record.sourceIssueIds.length === 1 ? '' : 's'}</p>
-                            </div>
-                            {record.status === 'proposed' || record.status === 'open' ? (
-                                <button type="button" onClick={() => onConfirm(record.id)} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg bg-emerald-600 px-3 py-2 text-sm font-semibold text-white hover:bg-emerald-700"><Check size={14} /> {record.type === 'decision' ? 'Confirm decision' : 'Mark resolved'}</button>
-                            ) : record.status !== 'dismissed' ? (
-                                <button type="button" onClick={() => onReopen(record.id)} className="inline-flex min-h-10 items-center justify-center gap-1.5 rounded-lg border border-neutral-200 px-3 py-2 text-sm font-medium text-neutral-600 hover:bg-neutral-50"><RefreshCcw size={13} /> Reopen</button>
-                            ) : null}
-                        </div>
-                    </article>
-                ))}
-            </div>
-        </div>
-    );
-}
-
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     const [tab, setTab] = useState<'review' | 'decisions' | 'history'>('review');
-    const activeRun = props.runs.find(run => run.id === props.activeRunId) ?? props.runs[0];
+    const [startingNewReview, setStartingNewReview] = useState(false);
+    const activeRun = startingNewReview ? undefined : (props.runs.find(run => run.id === props.activeRunId) ?? props.runs[0]);
     const chronologicalRuns = useMemo(() => [...props.runs].sort((a, b) => b.capturedAt - a.capturedAt), [props.runs]);
     const isInProgress = activeRun && ['running', 'synthesizing', 'validating', 'interrupted', 'failed'].includes(activeRun.status);
 
@@ -548,7 +523,21 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
                 {tab === 'decisions' ? (
-                    <DecisionCenter records={props.planningRecords} onConfirm={props.onConfirmPlanningRecord} onReopen={props.onReopenPlanningRecord} />
+                    <DecisionCenter
+                        records={props.planningRecords}
+                        readOnly={props.readOnly}
+                        onDecide={(recordId, action, value, rationale) => {
+                            if (props.onDecidePlanningRecord) {
+                                props.onDecidePlanningRecord(recordId, action, value, rationale);
+                            } else if (action === 'reopen') {
+                                props.onReopenPlanningRecord(recordId);
+                            } else if (action === 'confirm' || action === 'custom') {
+                                props.onConfirmPlanningRecord(recordId);
+                            }
+                        }}
+                        onPreviewImpact={props.onPreviewPlanningRecordImpact ?? (() => {})}
+                        onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
+                    />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
                         <h1 className="text-2xl font-bold tracking-tight text-neutral-950">Review history</h1>
@@ -570,13 +559,13 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         </div>
                     </div>
                 ) : !activeRun ? (
-                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} onStart={props.onStartReview} />
+                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
                 ) : isInProgress ? (
                     <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
                 ) : activeRun.status === 'complete' || activeRun.status === 'partial' ? (
-                    <ReviewResults run={activeRun} planningRecords={props.planningRecords} onAct={props.onActOnIssue} />
+                    <ReviewResults run={activeRun} planningRecords={props.planningRecords} onAct={props.onActOnIssue} readOnly={props.readOnly} onNewReview={() => setStartingNewReview(true)} onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)} />
                 ) : (
-                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} onStart={props.onStartReview} />
+                    <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={props.onStartReview} />
                 )}
             </div>
         </div>
