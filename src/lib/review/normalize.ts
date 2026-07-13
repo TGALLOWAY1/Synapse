@@ -74,7 +74,12 @@ function sameUnderlyingIssue(left: ValidatedSpecialistFinding, right: ValidatedS
     const titleScore = similarity(tokens(left.title), tokens(right.title));
     const bodyScore = similarity(tokens(`${left.title} ${left.observation}`), tokens(`${right.title} ${right.observation}`));
     const anchoredTogether = sharesEvidence(left, right) || sharesFeature(left, right);
-    return titleScore >= 0.65 || (anchoredTogether && bodyScore >= 0.35);
+    // Generic titles such as "Missing requirement" are not sufficient evidence
+    // that two findings describe the same underlying issue. Unanchored findings
+    // need strong agreement in both title and substance; a shared source locator
+    // or feature permits a lower semantic threshold.
+    return (titleScore >= 0.65 && bodyScore >= 0.45)
+        || (anchoredTogether && (titleScore >= 0.4 || bodyScore >= 0.35));
 }
 
 const OPPOSING_TERMS: Array<[RegExp, RegExp]> = [

@@ -9,7 +9,7 @@ import type {
 } from './types';
 
 const FINDING_TYPES: ReviewFindingType[] = [
-    'contradiction', 'risk', 'missing_information', 'recommendation', 'optional_improvement', 'user_judgment',
+    'contradiction', 'risk', 'missing_information', 'assumption', 'recommendation', 'optional_improvement', 'user_judgment',
 ];
 const SEVERITIES: ReviewSeverity[] = ['low', 'medium', 'high', 'critical'];
 const CONFIDENCES: ReviewConfidence[] = ['low', 'medium', 'high'];

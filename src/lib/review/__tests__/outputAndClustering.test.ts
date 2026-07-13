@@ -20,6 +20,13 @@ describe('specialist output and clustering', () => {
             .toThrow(SpecialistOutputValidationError);
     });
 
+    it('accepts inferred assumptions as a distinct finding type', () => {
+        const manifest = makeManifest();
+        const locator = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const output = parseSpecialistOutput(validResponse(locator, { type: 'assumption' }));
+        expect(output.findings[0].type).toBe('assumption');
+    });
+
     it('clusters grounded duplicates while preserving conflicting perspectives', () => {
         const manifest = makeManifest();
         const locator = manifest.locators.find(item => item.path === 'prd.risks')!;
@@ -47,5 +54,22 @@ describe('specialist output and clustering', () => {
         expect(findings[0].grounded).toBe(false);
         expect(findings[0].validationWarnings[0]).toContain('excerpt_mismatch');
         expect(clusterGroundedFindings(findings)).toEqual([]);
+    });
+
+    it('does not merge unrelated findings solely because they share a generic title', () => {
+        const manifest = makeManifest();
+        const risk = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const vision = manifest.locators.find(item => item.path === 'prd.vision')!;
+        const accuracy = validateSpecialistFindings(manifest, 'product_scope', parseSpecialistOutput(validResponse(risk, {
+            title: 'Missing requirement',
+            observation: 'Summary accuracy has no acceptance threshold.',
+            affectedFeatureIds: [],
+        })).findings);
+        const retention = validateSpecialistFindings(manifest, 'security_privacy', parseSpecialistOutput(validResponse(vision, {
+            title: 'Missing requirement',
+            observation: 'Patient note retention has no deletion policy.',
+            affectedFeatureIds: [],
+        })).findings);
+        expect(clusterGroundedFindings([...accuracy, ...retention])).toHaveLength(2);
     });
 });

@@ -28,6 +28,10 @@ describe('adversarial review orchestration', () => {
         expect(result.coverage.completed).toEqual(['product_scope', 'ai_model_risk']);
         expect(result.coverage.failed).toEqual(['architecture']);
         expect(result.specialistResults.find(item => item.specialistId === 'product_scope')?.findings).toEqual([]);
+        expect(result.specialistResults.find(item => item.specialistId === 'product_scope')).toMatchObject({
+            coverageSummary: 'No material scope findings.',
+            resolvedAreas: ['Scope'],
+        });
         expect(result.clusters).toHaveLength(1);
         expect(maxActive).toBeLessThanOrEqual(2);
     });
@@ -46,6 +50,40 @@ describe('adversarial review orchestration', () => {
         expect(result.status).toBe('complete');
         expect(attempts).toEqual([1, 2]);
         expect(result.specialistResults[0].attempts).toBe(2);
+    });
+
+    it('repairs an output whose findings are wholly unsupported', async () => {
+        const manifest = makeManifest();
+        const locator = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const attempts: number[] = [];
+        const transport: SpecialistTransport = async ({ attempt, repair }) => {
+            attempts.push(attempt);
+            if (attempt === 1) {
+                return validResponse(locator, {
+                    evidence: [{
+                        sourceKey: locator.sourceKey,
+                        locatorId: locator.id,
+                        path: locator.path,
+                        excerpt: 'This requirement is invented and absent from the cited locator.',
+                    }],
+                });
+            }
+            expect(repair?.validationError).toContain('failed evidence validation');
+            return validResponse(locator);
+        };
+        const result = await runAdversarialReview(manifest, ['ai_model_risk'], { transport });
+        expect(result.status).toBe('complete');
+        expect(attempts).toEqual([1, 2]);
+        expect(result.specialistResults[0].findings[0].grounded).toBe(true);
+    });
+
+    it('fails a review when no selected specialist completes', async () => {
+        const result = await runAdversarialReview(makeManifest(), ['product_scope', 'architecture'], {
+            transport: async () => { throw new Error('provider unavailable'); },
+        });
+        expect(result.status).toBe('failed');
+        expect(result.coverage.completed).toEqual([]);
+        expect(result.coverage.failed).toEqual(['product_scope', 'architecture']);
     });
 
     it('cancels unstarted specialists without discarding completed result objects', async () => {

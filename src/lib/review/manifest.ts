@@ -16,40 +16,57 @@ const DEFAULT_ARTIFACTS: CoreArtifactSubtype[] = [
     'implementation_plan',
     'design_system',
 ];
-const MAX_EXCERPT_CHARS = 600;
+const MAX_LOCATOR_CHARS = 1_600;
+const MIN_EVIDENCE_CHARS = 24;
+const MIN_EVIDENCE_TOKENS = 3;
+const MIN_WHOLE_LOCATOR_CHARS = 12;
+const MIN_WHOLE_LOCATOR_TOKENS = 2;
 
-const excerptOf = (value: string): string => {
+function chunksOf(value: string): string[] {
     const normalized = normalizeEvidenceText(value);
-    return normalized.length <= MAX_EXCERPT_CHARS
-        ? normalized
-        : `${normalized.slice(0, MAX_EXCERPT_CHARS - 1).trimEnd()}…`;
-};
+    if (!normalized) return [];
+    const chunks: string[] = [];
+    let start = 0;
+    while (start < normalized.length) {
+        let end = Math.min(normalized.length, start + MAX_LOCATOR_CHARS);
+        if (end < normalized.length) {
+            const boundary = normalized.lastIndexOf(' ', end);
+            if (boundary > start + Math.floor(MAX_LOCATOR_CHARS * 0.7)) end = boundary;
+        }
+        chunks.push(normalized.slice(start, end).trim());
+        start = end;
+        while (normalized[start] === ' ') start++;
+    }
+    return chunks.filter(Boolean);
+}
 
 function locatorId(sourceKey: string, path: string): string {
     return `loc-${hashReviewValue(`${sourceKey}:${path}`)}`;
 }
 
-function makeLocator(
+function makeLocators(
     source: ReviewManifestSource,
     path: string,
     label: string,
     rawExcerpt: string,
-): ReviewSourceLocator | null {
-    const excerpt = excerptOf(rawExcerpt);
-    if (!excerpt) return null;
-    return {
-        id: locatorId(source.sourceKey, path),
-        sourceKey: source.sourceKey,
-        sourceType: source.sourceType,
-        spineVersionId: source.spineVersionId,
-        artifactId: source.artifactId,
-        artifactVersionId: source.artifactVersionId,
-        artifactSubtype: source.artifactSubtype,
-        path,
-        label,
-        excerpt,
-        excerptHash: hashEvidenceExcerpt(excerpt),
-    };
+): ReviewSourceLocator[] {
+    const chunks = chunksOf(rawExcerpt);
+    return chunks.map((excerpt, index) => {
+        const chunkPath = chunks.length === 1 ? path : `${path}.chunk-${index + 1}`;
+        return {
+            id: locatorId(source.sourceKey, chunkPath),
+            sourceKey: source.sourceKey,
+            sourceType: source.sourceType,
+            spineVersionId: source.spineVersionId,
+            artifactId: source.artifactId,
+            artifactVersionId: source.artifactVersionId,
+            artifactSubtype: source.artifactSubtype,
+            path: chunkPath,
+            label: chunks.length === 1 ? label : `${label} (part ${index + 1} of ${chunks.length})`,
+            excerpt,
+            excerptHash: hashEvidenceExcerpt(excerpt),
+        };
+    });
 }
 
 function structuredPrdLocators(source: ReviewManifestSource, prd: BuildReviewManifestInput['spine']['structuredPRD']): ReviewSourceLocator[] {
@@ -57,8 +74,7 @@ function structuredPrdLocators(source: ReviewManifestSource, prd: BuildReviewMan
     const add = (path: string, label: string, value: unknown) => {
         if (value === undefined || value === null) return;
         const text = typeof value === 'string' ? value : stableStringify(value);
-        const locator = makeLocator(source, path, label, text);
-        if (locator) locators.push(locator);
+        locators.push(...makeLocators(source, path, label, text));
     };
 
     add('prd.vision', 'Vision', prd.vision);
@@ -101,8 +117,7 @@ function markdownLocators(source: ReviewManifestSource): ReviewSourceLocator[] {
 
     return sections.flatMap((section, index) => {
         const path = `section.${index + 1}.line-${section.start}`;
-        const locator = makeLocator(source, path, section.heading, section.body.join('\n'));
-        return locator ? [locator] : [];
+        return makeLocators(source, path, section.heading, section.body.join('\n'));
     });
 }
 
@@ -140,8 +155,29 @@ export function buildReviewContextManifest(input: BuildReviewManifestInput): Rev
     const constraints = (input.spine.structuredPRD.constraints ?? []).filter(Boolean);
     const signaturePayload = {
         projectId: input.projectId,
+        projectName: input.projectName,
+        platform: input.platform,
+        productCategory: input.productCategory,
         spineVersionId: input.spine.versionId,
-        sources: sources.map(source => ({ key: source.sourceKey, hash: source.contentHash })),
+        prdSchemaVersion: input.spine.schemaVersion,
+        structuredPrdHash: hashReviewValue(input.spine.structuredPRD),
+        canonicalSpineHash: input.spine.canonicalSpine ? hashReviewValue(input.spine.canonicalSpine) : undefined,
+        sources: sources.map(source => ({
+            key: source.sourceKey,
+            hash: source.contentHash,
+            label: source.label,
+            artifactId: source.artifactId,
+            artifactVersionId: source.artifactVersionId,
+            artifactSubtype: source.artifactSubtype,
+        })),
+        locators: locators.map(locator => ({
+            id: locator.id,
+            sourceKey: locator.sourceKey,
+            path: locator.path,
+            excerptHash: locator.excerptHash,
+        })),
+        availableArtifacts,
+        missingArtifacts,
         constraints,
         safetyBoundaries: input.safetyBoundaries ?? [],
     };
@@ -186,17 +222,24 @@ export function verifyEvidenceRef(
     };
     if (!source) return { ...base, failureReason: 'unknown_source' };
     if (!requestedLocator) return { ...base, failureReason: 'unknown_locator' };
+    if (evidence.locatorId && evidence.path && evidence.path !== requestedLocator.path) {
+        return { ...base, failureReason: 'locator_mismatch' };
+    }
     if (evidence.excerptHash && evidence.excerptHash !== excerptHash) {
         return { ...base, failureReason: 'hash_mismatch' };
     }
-    const sourceText = normalizeEvidenceText(source.content);
     const excerptText = normalizeEvidenceText(evidence.excerpt);
-    const locatorText = normalizeEvidenceText(requestedLocator.excerpt).replace(/…$/, '');
-    const matches = Boolean(excerptText) && (
-        sourceText.includes(excerptText)
-        || locatorText.includes(excerptText)
-        || excerptText.includes(locatorText)
-    );
+    const locatorText = normalizeEvidenceText(requestedLocator.excerpt);
+    const tokenCount = excerptText.match(/[\p{L}\p{N}]+/gu)?.length ?? 0;
+    const isWholeLocator = excerptText === locatorText;
+    const meaningfulExcerpt = excerptText.length >= MIN_EVIDENCE_CHARS && tokenCount >= MIN_EVIDENCE_TOKENS;
+    const meaningfulWholeLocator = isWholeLocator
+        && excerptText.length >= MIN_WHOLE_LOCATOR_CHARS
+        && tokenCount >= MIN_WHOLE_LOCATOR_TOKENS;
+    if (!meaningfulExcerpt && !meaningfulWholeLocator) {
+        return { ...base, failureReason: 'excerpt_too_short' };
+    }
+    const matches = Boolean(excerptText) && locatorText.includes(excerptText);
     if (!matches) return { ...base, failureReason: 'excerpt_mismatch' };
     return {
         ...base,

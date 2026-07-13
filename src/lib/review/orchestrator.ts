@@ -78,6 +78,12 @@ export async function runSingleSpecialist(
             previousResponse = raw;
             const parsed = parseSpecialistOutput(raw);
             const findings = validateSpecialistFindings(manifest, specialistId, parsed.findings);
+            if (findings.length > 0 && findings.every(finding => !finding.grounded)) {
+                const reasons = findings.flatMap(finding => finding.validationWarnings).join('; ');
+                throw new SpecialistOutputValidationError(
+                    `All specialist findings failed evidence validation${reasons ? `: ${reasons}` : ''}`,
+                );
+            }
             options.onEvent?.({
                 type: 'specialist_completed',
                 specialistId,
@@ -86,7 +92,14 @@ export async function runSingleSpecialist(
                 groundedCount: findings.filter(finding => finding.grounded).length,
                 findings,
             });
-            return { specialistId, status: 'complete', attempts: attempt, findings };
+            return {
+                specialistId,
+                status: 'complete',
+                attempts: attempt,
+                findings,
+                coverageSummary: parsed.coverageSummary,
+                resolvedAreas: parsed.resolvedAreas,
+            };
         } catch (error) {
             if (options.signal?.aborted || isAbortError(error)) {
                 options.onEvent?.({ type: 'specialist_cancelled', specialistId });
@@ -137,7 +150,9 @@ export async function runAdversarialReview(
     const cancelled = settled.filter(result => result.status === 'cancelled').map(result => result.specialistId);
     const status: ReviewOrchestrationResult['status'] = cancelled.length > 0
         ? 'cancelled'
-        : failed.length > 0
+        : completed.length === 0
+            ? 'failed'
+            : failed.length > 0
             ? 'partial'
             : 'complete';
     return {

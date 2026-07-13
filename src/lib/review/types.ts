@@ -20,6 +20,7 @@ export type ReviewFindingType =
     | 'contradiction'
     | 'risk'
     | 'missing_information'
+    | 'assumption'
     | 'recommendation'
     | 'optional_improvement'
     | 'user_judgment';
@@ -109,7 +110,13 @@ export interface VerifiedEvidenceRef extends SpecialistEvidenceInput {
     path: string;
     excerptHash: string;
     verified: boolean;
-    failureReason?: 'unknown_source' | 'unknown_locator' | 'excerpt_mismatch' | 'hash_mismatch';
+    failureReason?:
+        | 'unknown_source'
+        | 'unknown_locator'
+        | 'locator_mismatch'
+        | 'excerpt_too_short'
+        | 'excerpt_mismatch'
+        | 'hash_mismatch';
 }
 
 export interface ParsedSpecialistFinding {
@@ -162,6 +169,8 @@ export interface SpecialistRunResult {
     status: 'complete' | 'failed' | 'cancelled';
     attempts: number;
     findings: ValidatedSpecialistFinding[];
+    coverageSummary?: string;
+    resolvedAreas?: string[];
     error?: string;
 }
 
@@ -180,7 +189,7 @@ export interface FindingCluster {
 }
 
 export interface ReviewOrchestrationResult {
-    status: 'complete' | 'partial' | 'cancelled';
+    status: 'complete' | 'partial' | 'failed' | 'cancelled';
     specialistResults: SpecialistRunResult[];
     clusters: FindingCluster[];
     coverage: {

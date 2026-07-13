@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hashEvidenceExcerpt } from '../hash';
 import { isManifestCurrent, toPersistedReviewContextManifest, verifyEvidenceRef } from '../manifest';
-import { makeManifest } from './reviewTestUtils';
+import { buildSpecialistPrompt } from '../prompt';
+import { makeManifest, structuredPRD } from './reviewTestUtils';
 
 describe('review context manifest', () => {
     it('freezes exact source versions and creates a stable signature', () => {
@@ -35,6 +36,81 @@ describe('review context manifest', () => {
         });
         expect(altered.verified).toBe(false);
         expect(altered.failureReason).toBe('excerpt_mismatch');
+    });
+
+    it('requires meaningful evidence from the specifically cited locator', () => {
+        const manifest = makeManifest();
+        const risk = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const vision = manifest.locators.find(item => item.path === 'prd.vision')!;
+
+        expect(verifyEvidenceRef(manifest, {
+            sourceKey: risk.sourceKey,
+            locatorId: risk.id,
+            path: risk.path,
+            excerpt: 'a',
+        }).failureReason).toBe('excerpt_too_short');
+
+        expect(verifyEvidenceRef(manifest, {
+            sourceKey: risk.sourceKey,
+            locatorId: risk.id,
+            path: risk.path,
+            excerpt: vision.excerpt,
+        }).failureReason).toBe('excerpt_mismatch');
+
+        expect(verifyEvidenceRef(manifest, {
+            sourceKey: risk.sourceKey,
+            locatorId: risk.id,
+            path: vision.path,
+            excerpt: risk.excerpt,
+        }).failureReason).toBe('locator_mismatch');
+    });
+
+    it('signs model-visible structured context, not only raw source text', () => {
+        const baseline = makeManifest();
+        const changedPlatform = makeManifest({ platform: 'app' });
+        const changedStructuredPrd = makeManifest({
+            structuredPRD: {
+                ...structuredPRD,
+                assumptions: [{ id: 'assumption-1', statement: 'Clinicians have reliable connectivity.', confidence: 'med' }],
+            },
+        });
+        expect(changedPlatform.sources.map(source => source.contentHash)).toEqual(baseline.sources.map(source => source.contentHash));
+        expect(changedPlatform.contextSignature).not.toBe(baseline.contextSignature);
+        expect(changedStructuredPrd.contextSignature).not.toBe(baseline.contextSignature);
+    });
+
+    it('chunks long sections instead of truncating their later content', () => {
+        const longBody = `${'Early planning detail. '.repeat(150)} FINAL_REQUIREMENT_MARKER`;
+        const manifest = makeManifest({
+            artifacts: [{
+                artifactId: 'implementation',
+                versionId: 'implementation-v1',
+                subtype: 'implementation_plan',
+                title: 'Implementation Plan',
+                content: `# Delivery\n${longBody}`,
+            }],
+        });
+        const delivery = manifest.locators.filter(locator => locator.sourceKey === 'artifact:implementation-v1');
+        expect(delivery.length).toBeGreaterThan(1);
+        expect(delivery.at(-1)?.excerpt).toContain('FINAL_REQUIREMENT_MARKER');
+    });
+
+    it('samples large sources across their full range instead of taking only the first 30 locators', () => {
+        const content = Array.from({ length: 55 }, (_, index) =>
+            `## Delivery section ${index + 1}\nRequirement content for delivery section ${index + 1}.`,
+        ).join('\n\n');
+        const manifest = makeManifest({
+            artifacts: [{
+                artifactId: 'implementation',
+                versionId: 'implementation-v2',
+                subtype: 'implementation_plan',
+                title: 'Implementation Plan',
+                content,
+            }],
+        });
+        const prompt = buildSpecialistPrompt(manifest, 'delivery_operations');
+        expect(prompt).toContain('Delivery section 1');
+        expect(prompt).toContain('Delivery section 55');
     });
 
     it('detects source version or content drift without mutating history', () => {

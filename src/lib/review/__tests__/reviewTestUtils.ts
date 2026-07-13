@@ -1,4 +1,4 @@
-import type { StructuredPRD } from '../../../types';
+import type { ProjectPlatform, StructuredPRD } from '../../../types';
 import { buildReviewContextManifest } from '../manifest';
 
 export const structuredPRD: StructuredPRD = {
@@ -21,19 +21,23 @@ export const structuredPRD: StructuredPRD = {
     }],
 };
 
-export const makeManifest = () => buildReviewContextManifest({
+export const makeManifest = (overrides: {
+    platform?: ProjectPlatform;
+    structuredPRD?: StructuredPRD;
+    artifacts?: Parameters<typeof buildReviewContextManifest>[0]['artifacts'];
+} = {}) => buildReviewContextManifest({
     projectId: 'project-1',
     projectName: 'Careful AI',
-    platform: 'web',
+    platform: overrides.platform ?? 'web',
     productCategory: 'health workflow',
     capturedAt: 100,
     spine: {
         versionId: 'spine-v2',
         schemaVersion: 2,
         content: '# PRD\n\n## Vision\nHelp clinicians summarize private patient notes with AI.\n\n## Feature f1\nGenerate a concise summary from a patient note.',
-        structuredPRD,
+        structuredPRD: overrides.structuredPRD ?? structuredPRD,
     },
-    artifacts: [
+    artifacts: overrides.artifacts ?? [
         {
             artifactId: 'screens',
             versionId: 'screens-v1',
