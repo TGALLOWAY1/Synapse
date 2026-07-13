@@ -58,7 +58,7 @@ describe('decision projection and invariants', () => {
         expect(current.events).toHaveLength(6);
     });
 
-    it('applies only confirmed decisions and deduplicates an impact preview', () => {
+    it('applies only resolved decisions and deduplicates an impact preview', () => {
         const apply: DecisionEvent = {
             id: 'apply-1', planningRecordId: 'd1', type: 'applied_to_plan', actor: 'user',
             impactPreviewId: 'preview-1', baselineSpineVersionId: 's1', resultingSpineVersionId: 's2', at: 3,

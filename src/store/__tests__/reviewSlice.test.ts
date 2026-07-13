@@ -81,6 +81,24 @@ describe('adversarial review domain', () => {
         });
     });
 
+    it('never treats a Synapse-authored recommendation as user-confirmed', () => {
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'decision',
+            status: 'confirmed',
+            title: 'Choose an onboarding model',
+            statement: 'Allow guest access',
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'synapse',
+            confirmedAt: 500,
+        });
+
+        expect(useProjectStore.getState().planningRecords.p1.find(record => record.id === planningRecordId)).toMatchObject({
+            status: 'proposed',
+            confirmedAt: undefined,
+        });
+    });
+
     it('records issue dispositions with user provenance and a context signature', () => {
         const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
             reviewId: 'review-1',
@@ -95,7 +113,7 @@ describe('adversarial review domain', () => {
             implementationImpact: 'resolve_before_build',
             relatedPlanningRecordIds: [],
         });
-        useProjectStore.getState().applyReviewIssueDisposition('p1', issueId, {
+        useProjectStore.getState().applyReviewIssueDisposition('p1', 'review-1', issueId, {
             action: 'dismiss',
             reason: 'Handled in an external security specification',
             contextSignature: manifest.contextSignature,
@@ -110,6 +128,49 @@ describe('adversarial review domain', () => {
                 contextSignature: 'context-hash',
             }],
         });
+    });
+
+    it('scopes dispositions by review when deterministic issue ids repeat', () => {
+        const issue = {
+            id: 'repeated-issue',
+            title: 'Repeated issue',
+            summary: 'The same issue appeared twice.',
+            kind: 'risk' as const,
+            findingIds: [],
+            specialistIds: ['reliability_qa'],
+            relationship: 'standalone' as const,
+            severity: 'medium' as const,
+            confidence: 'high' as const,
+            implementationImpact: 'deferrable' as const,
+            relatedPlanningRecordIds: [],
+        };
+        useProjectStore.getState().addReviewIssue('p1', { ...issue, reviewId: 'review-1' });
+        useProjectStore.getState().addReviewIssue('p1', { ...issue, reviewId: 'review-2' });
+
+        useProjectStore.getState().applyReviewIssueDisposition('p1', 'review-2', issue.id, {
+            action: 'dismiss',
+            reason: 'Dismiss only the second review.',
+            contextSignature: 'context-2',
+        });
+
+        const [first, second] = useProjectStore.getState().reviewIssues.p1;
+        expect(first.status).toBe('open');
+        expect(first.dispositions).toEqual([]);
+        expect(second.status).toBe('dismissed');
+    });
+
+    it('supersedes only obsolete open clusters during retry synthesis', () => {
+        const base = {
+            reviewId: 'review-1',
+            title: 'Issue', summary: 'Summary', kind: 'risk' as const,
+            findingIds: [], specialistIds: ['reliability_qa'], relationship: 'standalone' as const,
+            severity: 'medium' as const, confidence: 'high' as const,
+            implementationImpact: 'deferrable' as const, relatedPlanningRecordIds: [],
+        };
+        useProjectStore.getState().addReviewIssue('p1', { ...base, id: 'keep' });
+        useProjectStore.getState().addReviewIssue('p1', { ...base, id: 'replace' });
+        useProjectStore.getState().supersedeOpenReviewIssues('p1', 'review-1', ['keep']);
+        expect(useProjectStore.getState().reviewIssues.p1.map(issue => issue.status)).toEqual(['open', 'superseded']);
     });
 });
 

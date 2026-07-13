@@ -193,8 +193,8 @@ export function appendDecisionEvent(
     if (event.type === 'superseded' && event.supersededById === record.id) {
         return { ok: false, reason: 'A decision cannot supersede itself.' };
     }
-    if (event.type === 'applied_to_plan' && projectDecision(record).status !== 'confirmed') {
-        return { ok: false, reason: 'Only a confirmed decision may be applied to the plan.' };
+    if (event.type === 'applied_to_plan' && !['confirmed', 'rejected'].includes(projectDecision(record).status)) {
+        return { ok: false, reason: 'Only a resolved decision may be applied to the plan.' };
     }
     const withEvent: PlanningRecord = {
         ...record,

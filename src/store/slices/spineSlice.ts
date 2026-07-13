@@ -8,6 +8,7 @@ import type {
 import type { ProjectState, SpineGenerationMetaInput, CompareAndAppendStructuredPRDResult } from '../types';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
+import { appendDecisionEvent, planningContentHash, projectDecision } from '../../lib/planning';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -420,8 +421,67 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     status: 'stale',
                     expectedLatestSpineId,
                     ...(latest ? { actualLatestSpineId: latest.id } : {}),
+                    reason: 'spine_changed',
                 };
                 return state;
+            }
+            if (opts?.expectedPrdHash
+                && (!latest.structuredPRD || planningContentHash(latest.structuredPRD) !== opts.expectedPrdHash)) {
+                result = {
+                    status: 'stale',
+                    expectedLatestSpineId,
+                    actualLatestSpineId: latest.id,
+                    reason: 'content_changed',
+                };
+                return state;
+            }
+
+            let appliedPlanningRecord: import('../../types').PlanningRecord | undefined;
+            if (opts?.decisionApplication) {
+                const record = (state.planningRecords[projectId] ?? [])
+                    .find(item => item.id === opts.decisionApplication?.planningRecordId);
+                const assessment = record?.assessments?.find(item =>
+                    item.impactPreview?.id === opts.decisionApplication?.impactPreviewId,
+                );
+                const preview = assessment?.impactPreview;
+                const previewMatches = assessment?.status === 'fresh'
+                    && preview?.status === 'ready'
+                    && preview.decisionEventId === opts.decisionApplication.decisionEventId
+                    && preview.baseline.spineVersionId === expectedLatestSpineId
+                    && preview.baseline.spineContentHash === planningContentHash(latest.structuredPRD)
+                    && !!preview.proposedResultHash
+                    && preview.proposedResultHash === planningContentHash(nextStructuredPRD);
+                if (!record
+                    || projectDecision(record).latestVerdictEventId !== opts.decisionApplication.decisionEventId
+                    || !previewMatches) {
+                    result = {
+                        status: 'stale',
+                        expectedLatestSpineId,
+                        actualLatestSpineId: latest.id,
+                        reason: 'decision_changed',
+                    };
+                    return state;
+                }
+                const appended = appendDecisionEvent(record, {
+                    id: opts.decisionApplication.appliedEventId,
+                    planningRecordId: record.id,
+                    type: 'applied_to_plan',
+                    actor: 'user',
+                    impactPreviewId: opts.decisionApplication.impactPreviewId,
+                    baselineSpineVersionId: expectedLatestSpineId,
+                    resultingSpineVersionId: newSpineId,
+                    at: now,
+                });
+                if (!appended.ok) {
+                    result = {
+                        status: 'stale',
+                        expectedLatestSpineId,
+                        actualLatestSpineId: latest.id,
+                        reason: 'decision_changed',
+                    };
+                    return state;
+                }
+                appliedPlanningRecord = appended.record;
             }
 
             const project = state.projects[projectId];
@@ -481,6 +541,13 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     ...state.historyEvents,
                     [projectId]: [...(state.historyEvents[projectId] || []), historyEvent],
                 },
+                ...(appliedPlanningRecord ? {
+                    planningRecords: {
+                        ...state.planningRecords,
+                        [projectId]: (state.planningRecords[projectId] ?? []).map(record =>
+                            record.id === appliedPlanningRecord?.id ? appliedPlanningRecord : record),
+                    },
+                } : {}),
             };
         });
 

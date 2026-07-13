@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../projectStore';
 import type { StructuredPRD } from '../../types';
 import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
+import { planningContentHash } from '../../lib/planning';
 
 beforeEach(() => {
     useProjectStore.setState({
@@ -126,6 +127,7 @@ describe('compareAndAppendStructuredPRD', () => {
             status: 'stale',
             expectedLatestSpineId: v1.id,
             actualLatestSpineId: v2Id,
+            reason: 'spine_changed',
         });
         expect(useProjectStore.getState().spineVersions[projectId]).toBe(beforeSpines);
         expect(useProjectStore.getState().historyEvents[projectId]).toBe(beforeEvents);
@@ -165,6 +167,70 @@ describe('compareAndAppendStructuredPRD', () => {
                 description: 'Applied decision: onboarding mode',
             }),
         );
+    });
+
+    it('atomically records the applied decision and rejects a changed verdict', () => {
+        const store = useProjectStore.getState();
+        const { projectId } = store.createProject('P', 'idea');
+        const v1 = useProjectStore.getState().spineVersions[projectId][0];
+        store.updateSpineStructuredPRD(projectId, v1.id, prd('v1'), 'old markdown', {
+            generationMeta: { passes: [], totalMs: 1, revised: false, schemaVersion: 2 },
+        });
+        useProjectStore.setState({
+            planningRecords: {
+                [projectId]: [{
+                    id: 'decision-1', projectId, type: 'decision', status: 'confirmed', title: 'Guest access',
+                    statement: 'Allow guests?', evidence: [], sourceFindingIds: [], createdBy: 'user',
+                    createdAt: 1, updatedAt: 2, confirmedAt: 2,
+                    events: [{ id: 'verdict-1', planningRecordId: 'decision-1', type: 'custom_answered', actor: 'user', answer: 'Yes', at: 2 }],
+                    assessments: [{
+                        id: 'assessment-1', projectId, planningRecordId: 'decision-1', sourceSpineVersionId: v1.id,
+                        status: 'fresh', evidence: [], inferredAssumptions: [], possibleConflictRecordIds: [], createdAt: 3,
+                        impactPreview: {
+                            id: 'preview-1', projectId, planningRecordId: 'decision-1', decisionEventId: 'verdict-1',
+                            status: 'ready', baseline: { spineVersionId: v1.id, spineContentHash: planningContentHash(prd('v1')) },
+                            proposedResultHash: planningContentHash(prd('applied')), affectedPrdSections: ['Vision'],
+                            affectedArtifactSlots: [], possibleConflictRecordIds: [], createdAt: 3,
+                        },
+                    }],
+                }],
+            },
+        });
+
+        const tampered = useProjectStore.getState().compareAndAppendStructuredPRD(projectId, v1.id, prd('not-the-previewed-result'), {
+            expectedPrdHash: planningContentHash(prd('v1')),
+            decisionApplication: {
+                planningRecordId: 'decision-1', decisionEventId: 'verdict-1',
+                impactPreviewId: 'preview-1', appliedEventId: 'tampered-apply',
+            },
+        });
+        expect(tampered).toMatchObject({ status: 'stale', reason: 'decision_changed' });
+
+        const result = useProjectStore.getState().compareAndAppendStructuredPRD(projectId, v1.id, prd('applied'), {
+            expectedPrdHash: planningContentHash(prd('v1')),
+            decisionApplication: {
+                planningRecordId: 'decision-1', decisionEventId: 'verdict-1',
+                impactPreviewId: 'preview-1', appliedEventId: 'applied-1',
+            },
+        });
+        expect(result.status).toBe('applied');
+        const appliedRecord = useProjectStore.getState().planningRecords[projectId][0];
+        expect(appliedRecord.events?.at(-1)).toMatchObject({
+            type: 'applied_to_plan', impactPreviewId: 'preview-1',
+        });
+        if (result.status === 'applied') {
+            expect(appliedRecord.resultingSpineVersionId).toBe(result.newSpineId);
+        }
+
+        const before = useProjectStore.getState().spineVersions[projectId];
+        const stale = useProjectStore.getState().compareAndAppendStructuredPRD(projectId, result.status === 'applied' ? result.newSpineId : v1.id, prd('bad'), {
+            decisionApplication: {
+                planningRecordId: 'decision-1', decisionEventId: 'older-verdict',
+                impactPreviewId: 'preview-2', appliedEventId: 'applied-2',
+            },
+        });
+        expect(stale).toMatchObject({ status: 'stale', reason: 'decision_changed' });
+        expect(useProjectStore.getState().spineVersions[projectId]).toBe(before);
     });
 });
 

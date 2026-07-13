@@ -22,7 +22,25 @@ describe('lazy PRD assumption import', () => {
         expect(second.imported).toHaveLength(0);
         expect(second.existing).toHaveLength(1);
         expect(second.records[0].statement).toBe('Users accept email verification');
+        expect(second.records[0]).toMatchObject({
+            sourceState: 'changed',
+            currentSourceStatement: 'Reworded by retry',
+        });
         expect(second.records[0].events).toHaveLength(1);
+    });
+
+    it('marks a durable record when its source assumption disappears', () => {
+        const first = importPrdAssumptions({
+            projectId: 'p1', sourceSpineVersionId: 's1', structuredPRD: prd(), existingRecords: [], now: () => 10,
+        });
+        const withoutAssumptions = prd();
+        withoutAssumptions.assumptions = [];
+        const next = importPrdAssumptions({
+            projectId: 'p1', sourceSpineVersionId: 's2', structuredPRD: withoutAssumptions,
+            existingRecords: first.records, now: () => 20,
+        });
+        expect(next.records[0].sourceState).toBe('missing');
+        expect(next.records[0].events).toEqual(first.records[0].events);
     });
 
     it('skips malformed assumptions without disturbing existing records', () => {

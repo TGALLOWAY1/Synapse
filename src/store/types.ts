@@ -26,7 +26,12 @@ export interface SpineGenerationMetaInput {
 
 export type CompareAndAppendStructuredPRDResult =
     | { status: 'applied'; newSpineId: string }
-    | { status: 'stale'; expectedLatestSpineId: string; actualLatestSpineId?: string };
+    | {
+        status: 'stale';
+        expectedLatestSpineId: string;
+        actualLatestSpineId?: string;
+        reason?: 'spine_changed' | 'content_changed' | 'decision_changed';
+    };
 
 export interface ProjectState {
     projects: Record<string, Project>;
@@ -127,6 +132,13 @@ export interface ProjectState {
             editSummary?: string;
             changeSource?: import('../types').VersionChangeSource;
             meta?: SpineGenerationMetaInput;
+            expectedPrdHash?: string;
+            decisionApplication?: {
+                planningRecordId: string;
+                decisionEventId: string;
+                impactPreviewId: string;
+                appliedEventId: string;
+            };
         },
     ) => CompareAndAppendStructuredPRDResult;
     // Versioning: restore a historical spine by appending a new latest version
@@ -249,8 +261,10 @@ export interface ProjectState {
         issue: Omit<ReviewIssue, 'id' | 'projectId' | 'status' | 'dispositions' | 'createdAt' | 'updatedAt'>
             & { id?: string; createdAt?: number },
     ) => { issueId: string };
+    supersedeOpenReviewIssues: (projectId: string, reviewId: string, retainedIssueIds: string[]) => void;
     applyReviewIssueDisposition: (
         projectId: string,
+        reviewId: string,
         issueId: string,
         disposition: Omit<ReviewIssueDisposition, 'actor' | 'at'> & { at?: number },
     ) => void;

@@ -18,7 +18,7 @@ vi.mock('../geminiClient', () => ({
     getStrongModel: () => 'strong-model',
 }));
 
-import { regeneratePrdSection } from '../services/prdSectionRetry';
+import { preserveUserReviewState, regeneratePrdSection } from '../services/prdSectionRetry';
 
 const legacyPrd: StructuredPRD = {
     vision: 'Invoicing for freelancers',
@@ -46,5 +46,25 @@ describe('regeneratePrdSection retired-section back-compat', () => {
     it('still retries an active section', async () => {
         const result = await regeneratePrdSection('quality_risks', 'An invoicing app', legacyPrd);
         expect(result.structuredPRD.coreProblem).toBe('Manual invoicing is slow');
+    });
+});
+
+describe('preserveUserReviewState', () => {
+    it('keeps assumption verdicts and feature confirmations by stable id', () => {
+        const current: StructuredPRD = {
+            ...legacyPrd,
+            assumptions: [{ id: 'a1', statement: 'Old wording', confidence: 'med', decision: 'rejected', decisionNote: 'Corrected truth', decidedAt: 10 }],
+            features: [{ id: 'f1', name: 'Invoices', description: 'Old', userValue: 'Value', complexity: 'low', confirmed: true, confirmedAt: 11 }],
+        };
+        const generated: StructuredPRD = {
+            ...legacyPrd,
+            assumptions: [{ id: 'a1', statement: 'New wording', confidence: 'high' }],
+            features: [{ id: 'f1', name: 'Invoices', description: 'New', userValue: 'Value', complexity: 'medium' }],
+        };
+        const merged = preserveUserReviewState(current, generated);
+        expect(merged.assumptions?.[0]).toMatchObject({
+            statement: 'New wording', decision: 'rejected', decisionNote: 'Corrected truth', decidedAt: 10,
+        });
+        expect(merged.features[0]).toMatchObject({ description: 'New', confirmed: true, confirmedAt: 11 });
     });
 });

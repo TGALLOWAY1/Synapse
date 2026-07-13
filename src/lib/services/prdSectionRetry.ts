@@ -137,7 +137,7 @@ export const regeneratePrdSection = async (
             throw new Error(`Section "${sectionId}" returned unparseable JSON`);
         }
 
-        const structuredPRD = { ...currentPRD, ...parsed } as StructuredPRD;
+        const structuredPRD = preserveUserReviewState(currentPRD, { ...currentPRD, ...parsed } as StructuredPRD);
         // Repair a re-run ux_loops slice the same way the full merge does, so a
         // single-section retry can't reintroduce implementation-detail roles.
         if (structuredPRD.roles) structuredPRD.roles = sanitizeRolePermissions(structuredPRD.roles);
@@ -158,3 +158,29 @@ export const regeneratePrdSection = async (
         throw e;
     }
 };
+
+/** Model section schemas intentionally omit human review fields. Preserve
+ * those fields by stable entity id so retrying generated content can never
+ * erase explicit user authority. */
+export function preserveUserReviewState(current: StructuredPRD, generated: StructuredPRD): StructuredPRD {
+    const assumptionsById = new Map((current.assumptions ?? []).map(item => [item.id, item]));
+    const featuresById = new Map((current.features ?? []).map(item => [item.id, item]));
+    return {
+        ...generated,
+        assumptions: generated.assumptions?.map(item => {
+            const prior = assumptionsById.get(item.id);
+            if (!prior?.decision) return item;
+            return {
+                ...item,
+                decision: prior.decision,
+                decisionNote: prior.decisionNote,
+                decidedAt: prior.decidedAt,
+            };
+        }),
+        features: (generated.features ?? []).map(item => {
+            const prior = featuresById.get(item.id);
+            if (!prior?.confirmed) return item;
+            return { ...item, confirmed: true, confirmedAt: prior.confirmedAt };
+        }),
+    };
+}

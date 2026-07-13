@@ -1592,6 +1592,9 @@ export type DecisionImpactPreview = {
         afterSummary?: string;
         value?: unknown;
     }>;
+    /** Hash of the exact complete PRD represented by the patch. Required by
+     * the atomic apply boundary; absent for advisory-only previews. */
+    proposedResultHash?: string;
     affectedPrdSections: string[];
     affectedArtifactSlots: ArtifactSlotKey[];
     possibleConflictRecordIds: string[];
@@ -1648,6 +1651,10 @@ export type PlanningRecord = {
     relatedPlanningRecordIds?: string[];
     affectedFeatureIds?: string[];
     affectedArtifactSlots?: ArtifactSlotKey[];
+    /** Non-authoritative source drift signal. User verdict history is preserved
+     * until the user explicitly revises or invalidates it. */
+    sourceState?: 'current' | 'changed' | 'missing';
+    currentSourceStatement?: string;
     /** Append-only authority log. Legacy records derive from top-level fields. */
     events?: DecisionEvent[];
     /** Machine-authored analysis kept distinct from user-authored events. */

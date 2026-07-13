@@ -18,6 +18,7 @@ export type AssumptionImportResult = {
     records: PlanningRecord[];
     imported: PlanningRecord[];
     existing: PlanningRecord[];
+    updated: PlanningRecord[];
 };
 
 /** Stable across PRD versions and wording changes as long as assumption ID survives. */
@@ -90,6 +91,8 @@ const importOne = (
         resolution: assumption.decisionNote,
         schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
         sources: [source],
+        sourceState: 'current',
+        currentSourceStatement: assumption.statement,
         events: [{
             id: `${id}:imported`,
             planningRecordId: id,
@@ -103,13 +106,15 @@ const importOne = (
 
 /**
  * Lazily imports PRD assumptions without rewriting or duplicating existing
- * planning records. Existing records win completely, preserving user history.
+ * planning records. User history wins; source wording/version drift is tracked
+ * separately so Synapse can request review without fabricating a verdict.
  */
 export function importPrdAssumptions(input: AssumptionImportInput): AssumptionImportResult {
     const at = input.now?.() ?? Date.now();
     const records = [...input.existingRecords];
     const imported: PlanningRecord[] = [];
     const existing: PlanningRecord[] = [];
+    const updated: PlanningRecord[] = [];
     const knownKeys = new Map<string, PlanningRecord>();
     for (const record of records) {
         for (const source of record.sources ?? []) knownKeys.set(source.key, record);
@@ -121,7 +126,25 @@ export function importPrdAssumptions(input: AssumptionImportInput): AssumptionIm
         const prior = knownKeys.get(key)
             ?? records.find((record) => recordHasSource(record, key));
         if (prior) {
-            existing.push(prior);
+            const priorSource = (prior.sources ?? []).find(source => source.key === key);
+            const sourceChanged = (prior.currentSourceStatement ?? prior.statement) !== assumption.statement;
+            const next: PlanningRecord = {
+                ...prior,
+                sources: (prior.sources ?? []).map(source => source.key === key
+                    ? { ...source, sourceVersionId: input.sourceSpineVersionId }
+                    : source),
+                sourceState: sourceChanged || prior.sourceState === 'changed' ? 'changed' : 'current',
+                currentSourceStatement: assumption.statement,
+            };
+            const index = records.findIndex(record => record.id === prior.id);
+            if (index >= 0 && (sourceChanged || priorSource?.sourceVersionId !== input.sourceSpineVersionId || prior.sourceState === 'missing')) {
+                records[index] = next;
+                knownKeys.set(key, next);
+                updated.push(next);
+                existing.push(next);
+            } else {
+                existing.push(prior);
+            }
             continue;
         }
         const record = importOne(input.projectId, input.sourceSpineVersionId, assumption, at);
@@ -129,5 +152,17 @@ export function importPrdAssumptions(input: AssumptionImportInput): AssumptionIm
         imported.push(record);
         knownKeys.set(key, record);
     }
-    return { records, imported, existing };
+
+    const currentKeys = new Set((input.structuredPRD.assumptions ?? [])
+        .filter(assumption => assumption.id?.trim())
+        .map(assumption => assumptionSourceKey(assumption.id)));
+    for (let index = 0; index < records.length; index += 1) {
+        const record = records[index];
+        const source = record.sources?.find(item => item.sourceType === 'prd_assumption');
+        if (!source || currentKeys.has(source.key) || record.sourceState === 'missing') continue;
+        const next = { ...record, sourceState: 'missing' as const };
+        records[index] = next;
+        updated.push(next);
+    }
+    return { records, imported, existing, updated };
 }

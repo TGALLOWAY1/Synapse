@@ -42,6 +42,7 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'updateFeedbackStatus', 'saveTasks', 'setTaskStatus', 'removeProjectTask', 'recordTaskExports',
     'createReviewRun', 'updateReviewRun', 'createSpecialistRun', 'updateSpecialistRun',
     'addReviewFinding', 'addReviewIssue', 'applyReviewIssueDisposition', 'createPlanningRecord',
+    'supersedeOpenReviewIssues',
     'updatePlanningRecordStatusByUser', 'appendPlanningDecisionEvent', 'importPlanningAssumptions',
     'addPlanningAssessment',
 ]);

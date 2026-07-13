@@ -28,6 +28,7 @@ export type ReviewSlice = Pick<
     | 'updateSpecialistRun'
     | 'addReviewFinding'
     | 'addReviewIssue'
+    | 'supersedeOpenReviewIssues'
     | 'applyReviewIssueDisposition'
     | 'createPlanningRecord'
     | 'updatePlanningRecordStatusByUser'
@@ -42,7 +43,7 @@ const planningRecordInitialStatus = (
     // This is a domain invariant, not a UI convention: AI/review-originated
     // decisions are proposals and every other record is open. Callers cannot
     // smuggle a confirmed/resolved status through creation.
-    if (input.createdBy === 'specialist_review') {
+    if (input.createdBy === 'specialist_review' || input.createdBy === 'synapse') {
         return input.type === 'decision' ? 'proposed' : 'open';
     }
     return input.status;
@@ -121,20 +122,24 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
     addReviewFinding: (projectId, finding) => {
         const id = finding.id || uuidv4();
         const next: SpecialistFinding = { ...finding, id, projectId };
-        set((state) => ({
-            reviewFindings: {
-                ...state.reviewFindings,
-                [projectId]: [...(state.reviewFindings[projectId] ?? []), next],
-            },
-            specialistRuns: {
-                ...state.specialistRuns,
-                [projectId]: (state.specialistRuns[projectId] ?? []).map((run) =>
-                    run.id === next.specialistRunId && !run.findingIds.includes(id)
-                        ? { ...run, findingIds: [...run.findingIds, id] }
-                        : run,
-                ),
-            },
-        }));
+        set((state) => {
+            const findings = state.reviewFindings[projectId] ?? [];
+            const alreadyExists = findings.some(item => item.id === id && item.reviewId === next.reviewId);
+            return {
+                reviewFindings: alreadyExists ? state.reviewFindings : {
+                    ...state.reviewFindings,
+                    [projectId]: [...findings, next],
+                },
+                specialistRuns: {
+                    ...state.specialistRuns,
+                    [projectId]: (state.specialistRuns[projectId] ?? []).map((run) =>
+                        run.id === next.specialistRunId && !run.findingIds.includes(id)
+                            ? { ...run, findingIds: [...run.findingIds, id] }
+                            : run,
+                    ),
+                },
+            };
+        });
         return { findingId: id };
     },
 
@@ -160,7 +165,22 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
         return { issueId: id };
     },
 
-    applyReviewIssueDisposition: (projectId, issueId, disposition) => {
+    supersedeOpenReviewIssues: (projectId, reviewId, retainedIssueIds) => {
+        const now = Date.now();
+        const retained = new Set(retainedIssueIds);
+        set((state) => ({
+            reviewIssues: {
+                ...state.reviewIssues,
+                [projectId]: (state.reviewIssues[projectId] ?? []).map((issue) =>
+                    issue.reviewId === reviewId && issue.status === 'open' && !retained.has(issue.id)
+                        ? { ...issue, status: 'superseded', updatedAt: now }
+                        : issue,
+                ),
+            },
+        }));
+    },
+
+    applyReviewIssueDisposition: (projectId, reviewId, issueId, disposition) => {
         const nextDisposition: ReviewIssueDisposition = {
             ...disposition,
             actor: 'user',
@@ -179,7 +199,7 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             reviewIssues: {
                 ...state.reviewIssues,
                 [projectId]: (state.reviewIssues[projectId] ?? []).map((issue) => {
-                    if (issue.id !== issueId) return issue;
+                    if (issue.id !== issueId || issue.reviewId !== reviewId) return issue;
                     const recordIds = nextDisposition.planningRecordId
                         && !issue.relatedPlanningRecordIds.includes(nextDisposition.planningRecordId)
                         ? [...issue.relatedPlanningRecordIds, nextDisposition.planningRecordId]
@@ -216,7 +236,9 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             }],
             // Creation never confirms a review-derived record, even if a caller
             // supplied a timestamp along with an unsafe requested status.
-            confirmedAt: input.createdBy === 'specialist_review' ? undefined : input.confirmedAt,
+            confirmedAt: input.createdBy === 'specialist_review' || input.createdBy === 'synapse'
+                ? undefined
+                : input.confirmedAt,
         };
         set((state) => ({
             planningRecords: {
@@ -298,7 +320,7 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
                 existingRecords: state.planningRecords[projectId] ?? [],
             });
             counts = { imported: result.imported.length, existing: result.existing.length };
-            if (result.imported.length === 0) return state;
+            if (result.imported.length === 0 && result.updated.length === 0) return state;
             return {
                 planningRecords: { ...state.planningRecords, [projectId]: result.records },
             };
