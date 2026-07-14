@@ -96,6 +96,7 @@ const importOne = (
         resolution: assumption.decisionNote,
         materiality: assumption.materiality,
         affectedPrdSections: assumption.affectedPrdSections,
+        affectedPlanLocations: assumption.affectedPlanLocations,
         schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
         sources: [source],
         sourceState: 'current',
@@ -144,11 +145,14 @@ export function importPrdAssumptions(input: AssumptionImportInput): AssumptionIm
                 currentSourceStatement: assumption.statement,
                 materiality: assumption.materiality ?? prior.materiality,
                 affectedPrdSections: assumption.affectedPrdSections ?? prior.affectedPrdSections,
+                affectedPlanLocations: assumption.affectedPlanLocations ?? prior.affectedPlanLocations,
             };
             const index = records.findIndex(record => record.id === prior.id);
             const planningContextChanged = assumption.materiality !== undefined && assumption.materiality !== prior.materiality
                 || assumption.affectedPrdSections !== undefined
-                    && JSON.stringify(assumption.affectedPrdSections) !== JSON.stringify(prior.affectedPrdSections);
+                    && JSON.stringify(assumption.affectedPrdSections) !== JSON.stringify(prior.affectedPrdSections)
+                || assumption.affectedPlanLocations !== undefined
+                    && JSON.stringify(assumption.affectedPlanLocations) !== JSON.stringify(prior.affectedPlanLocations);
             if (index >= 0 && (sourceChanged || planningContextChanged || priorSource?.sourceVersionId !== input.sourceSpineVersionId || prior.sourceState === 'missing')) {
                 records[index] = next;
                 knownKeys.set(key, next);

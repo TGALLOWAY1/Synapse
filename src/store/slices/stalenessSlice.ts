@@ -1,12 +1,35 @@
 import type { StateCreator } from 'zustand';
 import type { StalenessState } from '../../types';
 import type { ProjectState } from '../types';
+import { deriveProjectOutputAlignment } from '../../lib/planning/outputAlignment';
 
 export type StalenessSlice = {
     getArtifactStaleness: ProjectState['getArtifactStaleness'];
+    getArtifactAlignment: ProjectState['getArtifactAlignment'];
+    getProjectOutputAlignment: ProjectState['getProjectOutputAlignment'];
 };
 
 export const createStalenessSlice: StateCreator<ProjectState, [], [], StalenessSlice> = (_set, get) => ({
+    getProjectOutputAlignment: (projectId) => {
+        const state = get();
+        return deriveProjectOutputAlignment({
+            artifacts: state.artifacts[projectId] || [],
+            artifactVersions: state.artifactVersions[projectId] || [],
+            spineVersions: state.spineVersions[projectId] || [],
+            job: state.jobs[projectId],
+        });
+    },
+
+    getArtifactAlignment: (projectId, artifactId) => {
+        const state = get();
+        return deriveProjectOutputAlignment({
+            artifacts: state.artifacts[projectId] || [],
+            artifactVersions: state.artifactVersions[projectId] || [],
+            spineVersions: state.spineVersions[projectId] || [],
+            job: state.jobs[projectId],
+        }).outputs.find(output => output.artifactId === artifactId);
+    },
+
     getArtifactStaleness: (projectId: string, artifactId: string): StalenessState => {
         const state = get();
         const artifact = (state.artifacts[projectId] || []).find(a => a.id === artifactId);

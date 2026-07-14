@@ -15,6 +15,7 @@ import type {
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { PrdSectionStatusEntry } from './slices/prdProgressSlice';
+import type { OutputAlignment, ProjectOutputAlignmentSummary } from '../lib/planning/outputAlignment';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -32,6 +33,13 @@ export type CompareAndAppendStructuredPRDResult =
         actualLatestSpineId?: string;
         reason?: 'spine_changed' | 'content_changed' | 'decision_changed';
     };
+
+export type EditSpineStructuredPRDResult = {
+    newSpineId: string;
+    /** Present only when a user-authored content edit ran the bounded
+     * consequential-edit recognizer. */
+    recognition?: import('../lib/planning/consequentialEditRecognition').ConsequentialPrdEditRecognition;
+};
 
 export interface ProjectState {
     projects: Record<string, Project>;
@@ -119,8 +127,11 @@ export interface ProjectState {
             editSummary?: string;
             changeSource?: import('../types').VersionChangeSource;
             meta?: SpineGenerationMetaInput;
+            /** Machine-generated merges can opt out even when they share the
+             * user-edit append path. */
+            recognizeConsequentialEdit?: boolean;
         },
-    ) => { newSpineId: string };
+    ) => EditSpineStructuredPRDResult;
     // Guarded append for changes prepared against a known PRD baseline (for
     // example, a future Decision Center impact preview). The latest-version
     // comparison and append happen in the same Zustand transaction.
@@ -326,6 +337,8 @@ export interface ProjectState {
 
     // Staleness
     getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;
+    getArtifactAlignment: (projectId: string, artifactId: string) => OutputAlignment | undefined;
+    getProjectOutputAlignment: (projectId: string) => ProjectOutputAlignmentSummary;
 
     // Background generation jobs (transient — excluded from persist)
     jobs: Record<string, ProjectJobState | undefined>;

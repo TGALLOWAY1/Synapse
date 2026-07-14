@@ -23,6 +23,8 @@ import {
     type DependencyNodeStatus,
 } from '../../lib/artifactDependencyGraph';
 import { findFeatureReferences, makeSpineChangeResolver } from '../../lib/spineChangeAnalysis';
+import { OutputAlignmentBadge } from '../OutputAlignmentStatus';
+import type { OutputAlignment } from '../../lib/planning/outputAlignment';
 import type {
     ArtifactSlotKey, GenerationStatus, ProjectPlatform, StructuredPRD,
 } from '../../types';
@@ -58,8 +60,8 @@ const ROW_GAP = 64;
 const STATUS_LABELS: Record<DependencyNodeStatus, string> = {
     source: 'Source of truth',
     up_to_date: 'Up to date',
-    needs_update: 'Needs update',
-    update_recommended: 'Update recommended',
+    needs_update: 'Review required',
+    update_recommended: 'Review recommended',
     generating: 'Generating…',
     error: 'Failed',
     missing: 'Not generated',
@@ -116,7 +118,7 @@ export function DependencyGraphView({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode,
 }: DependencyGraphViewProps) {
     const {
-        getArtifacts, getPreferredVersion, getSpineVersions, getArtifactVersions, getJob,
+        getArtifacts, getPreferredVersion, getSpineVersions, getArtifactVersions, getProjectOutputAlignment, getJob,
     } = useProjectStore();
 
     const graph = useMemo(() => buildArtifactDependencyGraph(), []);
@@ -138,6 +140,8 @@ export function DependencyGraphView({
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
     const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
     const currentDesign = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
+    const outputAlignment = getProjectOutputAlignment(projectId);
+    const alignmentByNode = new Map(outputAlignment.outputs.map(item => [item.nodeId, item]));
 
     const snapshots: DependencyEvaluationInput['snapshots'] = {};
     const slotStatus: Partial<Record<ArtifactSlotKey, GenerationStatus>> = {};
@@ -248,20 +252,25 @@ export function DependencyGraphView({
         !!evalOf(to)?.reasons.some(r => r.dependencyId === from);
 
     // Cheap (≤7 nodes) — recomputed per render from the live evaluations.
-    const summaryCounts = { stale: 0, ok: 0, missing: 0, generating: 0, error: 0 };
+    const summaryCounts = {
+        stale: outputAlignment.blockingCount,
+        review: outputAlignment.outputs.filter(item => item.state === 'possibly_affected' && !item.blocksBuildReadiness).length,
+        ok: outputAlignment.alignedCount,
+        missing: 0,
+        generating: 0,
+        error: 0,
+    };
     for (const node of graph.nodes) {
         if (node.id === 'prd') continue;
         const s = evalOf(node.id)?.status;
-        if (s === 'needs_update' || s === 'update_recommended') summaryCounts.stale++;
-        else if (s === 'up_to_date') summaryCounts.ok++;
-        else if (s === 'missing') summaryCounts.missing++;
+        if (s === 'missing') summaryCounts.missing++;
         else if (s === 'generating') summaryCounts.generating++;
         else if (s === 'error') summaryCounts.error++;
     }
 
     const selectedEval = selectedId ? evalOf(selectedId) : undefined;
 
-    // "Mark as up to date" — the user asserts the artifact is still valid for
+    // "Confirm aligned" — the user asserts the artifact is still valid for
     // the current PRD; the store appends a rebased clone (honest history).
     const canMarkCurrent = (id: DependencyNodeId): boolean => {
         const ev = evalOf(id);
@@ -337,8 +346,9 @@ export function DependencyGraphView({
                     {/* Health summary + batch action */}
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[11px] text-neutral-500">
-                            {summaryCounts.ok} up to date
-                            {summaryCounts.stale > 0 && ` · ${summaryCounts.stale} need${summaryCounts.stale === 1 ? 's' : ''} update`}
+                            {summaryCounts.ok} aligned
+                            {summaryCounts.stale > 0 && ` · ${summaryCounts.stale} require${summaryCounts.stale === 1 ? 's' : ''} review before build`}
+                            {summaryCounts.review > 0 && ` · ${summaryCounts.review} advisory`}
                             {summaryCounts.missing > 0 && ` · ${summaryCounts.missing} not generated`}
                             {summaryCounts.generating > 0 && ` · ${summaryCounts.generating} generating`}
                             {summaryCounts.error > 0 && ` · ${summaryCounts.error} failed`}
@@ -352,7 +362,9 @@ export function DependencyGraphView({
                                 title={jobActive ? 'Generation is already running' : undefined}
                             >
                                 <RefreshCcw size={12} />
-                                Update {recommendedUpdates.length} impacted
+                                {outputAlignment.outputs.length === 0
+                                    ? `Generate ${recommendedUpdates.length} outputs`
+                                    : `Review ${recommendedUpdates.length} affected`}
                             </button>
                         )}
                     </div>
@@ -371,7 +383,7 @@ export function DependencyGraphView({
                         </span>
                         <span className="inline-flex items-center gap-1.5">
                             <svg width="26" height="8" aria-hidden="true"><line x1="1" y1="4" x2="25" y2="4" stroke="#f59e0b" strokeWidth="1.5" strokeDasharray="4 3" /></svg>
-                            stale link — the upstream changed
+                            changed input — review the relationship
                         </span>
                     </div>
                 )}
@@ -418,6 +430,7 @@ export function DependencyGraphView({
                             const ev = evalOf(node.id);
                             const status = ev?.status ?? 'missing';
                             const impacted = status === 'up_to_date' && (ev?.impactedBy.length ?? 0) > 0;
+                            const alignment = node.id === 'prd' ? undefined : alignmentByNode.get(node.id as ArtifactSlotKey);
                             const Icon = NODE_ICONS[node.id] ?? Package;
                             const isSel = selectedId === node.id;
                             return (
@@ -449,7 +462,9 @@ export function DependencyGraphView({
                                     <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
                                         {node.id === 'prd'
                                             ? <StatusPill status="source" />
-                                            : impacted
+                                            : alignment
+                                                ? <OutputAlignmentBadge alignment={alignment} />
+                                                : impacted
                                                 ? <ImpactedPill />
                                                 : <StatusPill status={status} />}
                                     </div>
@@ -474,6 +489,7 @@ export function DependencyGraphView({
                     key={selectedId}
                     nodeId={selectedId}
                     evaluation={selectedEval}
+                    alignment={selectedId === 'prd' ? undefined : alignmentByNode.get(selectedId as ArtifactSlotKey)}
                     graph={graph}
                     evaluations={evaluations}
                     tab={detailTab}
@@ -530,7 +546,7 @@ export function DependencyGraphView({
                             <p className="text-sm text-neutral-700 mt-1">
                                 {updateConfirm.order.length === 1
                                     ? `Regenerates ${titleOf(updateConfirm.order[0])} as a new version.`
-                                    : 'Regenerates these artifacts in dependency order, so nothing rebuilds from a stale input:'}
+                                    : 'Regenerates these artifacts in dependency order, so each uses the reviewed upstream version:'}
                             </p>
                             {updateConfirm.order.length > 1 && (
                                 <ol className="mt-2 space-y-1">
@@ -661,7 +677,7 @@ function ImpactModePanel({ graph, evaluations, selectedId, onSelect, titleOf }: 
 
             {ev && ev.reasons.length > 0 && (
                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                    <div className="text-sm font-semibold text-amber-900 mb-1">Why update?</div>
+                    <div className="text-sm font-semibold text-amber-900 mb-1">Why review?</div>
                     <ul className="space-y-1.5">
                         {ev.reasons.map((r, i) => (
                             <li key={i} className="text-xs text-amber-800 leading-relaxed">
@@ -710,6 +726,7 @@ interface HistoryEntry {
 interface DetailPanelProps {
     nodeId: DependencyNodeId;
     evaluation: DependencyNodeEvaluation;
+    alignment?: OutputAlignment;
     graph: ReturnType<typeof buildArtifactDependencyGraph>;
     evaluations: Map<DependencyNodeId, DependencyNodeEvaluation>;
     tab: DetailTab;
@@ -739,7 +756,7 @@ const CHANGE_SOURCE_LABELS: Record<string, string> = {
 };
 
 function DetailPanel({
-    nodeId, evaluation, graph, evaluations, tab, onTabChange, onClose, onSelect,
+    nodeId, evaluation, alignment, graph, evaluations, tab, onTabChange, onClose, onSelect,
     onOpenNode, onUpdate, onUpdateImpacted, onMarkCurrent, removedFeatureRefs,
     jobActive, titleOf, history,
 }: DetailPanelProps) {
@@ -790,7 +807,8 @@ function DetailPanel({
                             <h3 className="text-sm font-bold text-neutral-900">{node?.title ?? nodeId}</h3>
                             {nodeId === 'prd'
                                 ? <StatusPill status="source" />
-                                : impacted ? <ImpactedPill /> : <StatusPill status={evaluation.status} />}
+                                : alignment ? <OutputAlignmentBadge alignment={alignment} />
+                                    : impacted ? <ImpactedPill /> : <StatusPill status={evaluation.status} />}
                             {evaluation.manuallyEdited && (
                                 <span className="inline-flex items-center gap-1 px-2 py-0.5 rounded-full border border-amber-200 bg-amber-50 text-amber-700 text-[11px] font-medium">
                                     <PencilLine size={11} /> Edited manually
@@ -815,7 +833,7 @@ function DetailPanel({
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 rounded-md hover:bg-emerald-100 transition"
                             title="Confirm this artifact is still valid for the current PRD without regenerating it"
                         >
-                            <ShieldCheck size={12} /> Mark up to date
+                            <ShieldCheck size={12} /> Confirm aligned
                         </button>
                     )}
                     {canUpdate && (
@@ -865,7 +883,7 @@ function DetailPanel({
                             <dl className="space-y-1.5">
                                 <div className="flex items-center justify-between gap-3">
                                     <dt className="text-xs text-neutral-500">Status</dt>
-                                    <dd>{nodeId === 'prd' ? <StatusPill status="source" /> : <StatusPill status={evaluation.status} />}</dd>
+                                    <dd>{nodeId === 'prd' ? <StatusPill status="source" /> : alignment ? <OutputAlignmentBadge alignment={alignment} /> : <StatusPill status={evaluation.status} />}</dd>
                                 </div>
                                 {evaluation.generatedAt !== undefined && (
                                     <div className="flex items-center justify-between gap-3">
@@ -891,8 +909,8 @@ function DetailPanel({
                                     <p className="text-xs text-blue-800 leading-relaxed">
                                         This artifact&rsquo;s own inputs match, but upstream{' '}
                                         {evaluation.impactedBy.map(titleOf).join(', ')}{' '}
-                                        {evaluation.impactedBy.length === 1 ? 'is' : 'are'} stale or missing —
-                                        update upstream first, then regenerate this.
+                                        {evaluation.impactedBy.length === 1 ? 'needs' : 'need'} review —
+                                        review upstream first, then decide whether this output also needs an update.
                                     </p>
                                 </div>
                             )}
@@ -900,7 +918,16 @@ function DetailPanel({
                         <div className="space-y-3">
                             {evaluation.reasons.length > 0 ? (
                                 <div className="rounded-lg border border-amber-200 bg-amber-50 p-3">
-                                    <div className="text-sm font-semibold text-amber-900 mb-1">Why update?</div>
+                                    <div className="text-sm font-semibold text-amber-900 mb-1">Why review?</div>
+                                    {alignment && alignment.state !== 'aligned' && (
+                                        <div className="mb-2 text-xs text-amber-900 leading-relaxed">
+                                            <p>{alignment.summary}</p>
+                                            <p className="mt-1 font-medium">Next: {alignment.nextAction}</p>
+                                            <p className="mt-1 text-amber-700">
+                                                This saved output remains useful for exploration while alignment is reviewed.
+                                            </p>
+                                        </div>
+                                    )}
                                     <ul className="space-y-1.5">
                                         {evaluation.reasons.map((r, i) => (
                                             <li key={i} className="text-xs text-amber-800 leading-relaxed">
@@ -923,7 +950,7 @@ function DetailPanel({
                                     {evaluation.likelyUnaffected && removedFeatureRefs.length === 0 && (
                                         <p className="mt-2 pt-2 border-t border-amber-200 text-xs text-neutral-600 leading-relaxed">
                                             The PRD sections this asset chiefly derives from did not change —
-                                            if it still looks right, you can <span className="font-medium">mark it up to date</span> instead
+                                            if it still looks right, you can <span className="font-medium">confirm it is aligned</span> instead
                                             of regenerating.
                                         </p>
                                     )}

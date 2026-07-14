@@ -1,8 +1,8 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../projectStore';
-import type { StructuredPRD } from '../../types';
+import type { PlanningRecord, StructuredPRD } from '../../types';
 import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
-import { planningContentHash } from '../../lib/planning';
+import { buildDecisionImpact, buildReviewedDecisionImpact, planningContentHash } from '../../lib/planning';
 
 beforeEach(() => {
     useProjectStore.setState({
@@ -231,6 +231,45 @@ describe('compareAndAppendStructuredPRD', () => {
         });
         expect(stale).toMatchObject({ status: 'stale', reason: 'decision_changed' });
         expect(useProjectStore.getState().spineVersions[projectId]).toBe(before);
+    });
+
+    it('applies only user-accepted alignment proposals for a general decision', () => {
+        const store = useProjectStore.getState();
+        const { projectId } = store.createProject('P', 'idea');
+        const spine = useProjectStore.getState().spineVersions[projectId][0];
+        const baseline = { ...prd('Serve enterprise teams'), targetUsers: ['Enterprise administrators'] };
+        store.updateSpineStructuredPRD(projectId, spine.id, baseline, 'baseline');
+        const record: PlanningRecord = {
+            id: 'audience-decision', projectId, type: 'decision', status: 'confirmed',
+            title: 'Primary audience', statement: 'Who should the first release serve?', evidence: [], sourceFindingIds: [],
+            createdBy: 'user', createdAt: 1, updatedAt: 2,
+            events: [{ id: 'audience-verdict', planningRecordId: 'audience-decision', type: 'custom_answered', actor: 'user', answer: 'Independent creators', at: 2 }],
+            alignmentHints: [{
+                target: { kind: 'claim', section: 'Target Users', label: 'Primary audience', jsonPath: '$.targetUsers', excerpt: 'Enterprise administrators' },
+                operation: 'replace', proposedValue: ['Independent creators'], proposedSummary: 'Serve independent creators first.',
+                reason: 'Reflect the selected audience.', confidence: 'definite',
+            }],
+        };
+        const impact = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: baseline, now: () => 3 });
+        if (!impact.ok) throw new Error(impact.reason);
+        useProjectStore.setState({ planningRecords: { [projectId]: [{ ...record, assessments: [impact.assessment] }] } });
+        const proposalId = impact.preview.alignmentProposals![0].id;
+        const reviewedEvent = useProjectStore.getState().appendPlanningDecisionEvent(projectId, record.id, {
+            id: 'accept-audience', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: impact.preview.id, proposalId, disposition: 'accepted', at: 4,
+        });
+        expect(reviewedEvent.ok).toBe(true);
+        const reviewedRecord = useProjectStore.getState().planningRecords[projectId][0];
+        const reviewed = buildReviewedDecisionImpact({ record: reviewedRecord, preview: impact.preview, structuredPRD: baseline });
+        if (!reviewed.nextPrd) throw new Error('Expected accepted change');
+        const applied = useProjectStore.getState().compareAndAppendStructuredPRD(projectId, spine.id, reviewed.nextPrd, {
+            expectedPrdHash: impact.preview.baseline.spineContentHash,
+            decisionApplication: {
+                planningRecordId: record.id, decisionEventId: 'audience-verdict', impactPreviewId: impact.preview.id, appliedEventId: 'apply-audience',
+            },
+        });
+        expect(applied.status).toBe('applied');
+        expect(useProjectStore.getState().spineVersions[projectId].find(item => item.isLatest)?.structuredPRD?.targetUsers).toEqual(['Independent creators']);
     });
 });
 

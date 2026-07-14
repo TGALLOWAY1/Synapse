@@ -95,6 +95,40 @@ function renderView(readOnly = false) {
 }
 
 describe('StructuredPRDView — section cleanup & ordering', () => {
+    it('surfaces a calm impact handoff after a consequential direct edit', () => {
+        const onOpenDecisions = vi.fn();
+        render(
+            <StructuredPRDView
+                projectId={PROJECT_ID}
+                spineId={SPINE_ID}
+                structuredPRD={prd}
+                readOnly={false}
+                onOpenDecisions={onOpenDecisions}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit target users' }));
+        fireEvent.change(screen.getByPlaceholderText('One item per line'), {
+            target: { value: 'Independent creators' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        expect(screen.getByText('Plan meaning updated')).toBeInTheDocument();
+        expect(screen.getByText(/related plan areas should be reviewed/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Review planning impact' }));
+        expect(onOpenDecisions).toHaveBeenCalledWith(expect.any(String));
+    });
+
+    it('does not interrupt a copy-only direct edit', () => {
+        renderView();
+        fireEvent.click(screen.getByRole('button', { name: 'Edit vision' }));
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'V.' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        expect(screen.queryByText('Plan meaning updated')).toBeNull();
+        expect(screen.queryByText('This edit may affect the plan')).toBeNull();
+    });
+
     it('renders Detailed Features before Feature Systems', () => {
         const { container } = renderView();
         const html = container.innerHTML;
@@ -132,12 +166,14 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
                     id: 'conflict-1', projectId: PROJECT_ID, type: 'conflict', status: 'open',
                     title: 'The target market conflicts with the pricing model', statement: 'Resolve the market conflict',
                     affectedPrdSections: ['Vision'], evidence: [], sourceFindingIds: [], createdBy: 'specialist_review',
+                    affectedPlanLocations: [{ kind: 'claim', section: 'Vision', label: 'Primary market promise', jsonPath: '$.vision' }],
                     createdAt: 1, updatedAt: 1,
                 }],
             },
         });
         const onOpenDecisions = vi.fn();
         render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+        expect(screen.getByText(/Affected: Primary market promise/)).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
         expect(onOpenDecisions).toHaveBeenCalledOnce();
     });

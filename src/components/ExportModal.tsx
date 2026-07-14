@@ -37,7 +37,7 @@ interface ExportModalProps {
 export function ExportModal({ projectId, planningReady, onClose }: ExportModalProps) {
     const {
         getProject, getLatestSpine, getArtifacts, getArtifactVersions,
-        getArtifactStaleness, getSpineVersions,
+        getArtifactStaleness, getProjectOutputAlignment, getSpineVersions,
     } = useProjectStore();
     const { addToast } = useToastStore();
     const syncInfo = useProjectSyncStore((s) => s.projects[projectId]);
@@ -100,8 +100,10 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
         const idx = spines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : undefined;
     };
+    const outputAlignment = getProjectOutputAlignment(projectId);
     const manifestEntries: ExportManifestEntry[] = [...orderedCoreArtifacts, ...mockupArtifacts].map(a => {
         const preferred = getArtifactVersions(projectId, a.id).find(v => v.isPreferred);
+        const alignment = outputAlignment.outputs.find(output => output.artifactId === a.id);
         return {
             title: displayTitle(a),
             versionNumber: preferred?.versionNumber,
@@ -109,6 +111,12 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
                 preferred?.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId,
             ),
             staleness: getArtifactStaleness(projectId, a.id),
+            alignmentState: alignment?.state,
+            alignmentConfidence: alignment?.confidence,
+            alignmentSummary: alignment?.summary,
+            alignmentNextAction: alignment?.nextAction,
+            usefulForExploration: alignment?.usefulForExploration,
+            blocksBuildReadiness: alignment?.blocksBuildReadiness,
         };
     });
     const manifest = buildExportManifest({
@@ -116,7 +124,9 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
         prdLabel: spineLabelOf(latestSpine?.id),
         entries: manifestEntries,
     });
-    const staleTitles = manifestEntries.filter(e => e.staleness !== 'current').map(e => e.title);
+    const reviewTitles = manifestEntries
+        .filter(entry => entry.alignmentState ? entry.alignmentState !== 'aligned' : entry.staleness !== 'current')
+        .map(entry => entry.title);
 
     const exportPRD = () => {
         if (!latestSpine) return;
@@ -149,6 +159,7 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
                     title: displayTitle(a),
                     content: preferred?.content || '',
                     versionNumber: preferred?.versionNumber,
+                    alignment: outputAlignment.outputs.find(output => output.artifactId === a.id),
                 };
             }),
         };
@@ -247,19 +258,21 @@ export function ExportModal({ projectId, planningReady, onClose }: ExportModalPr
                         </div>
                     )}
 
-                    {manifest.staleCount > 0 && (
+                    {manifest.reviewCount > 0 && (
                         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">
                             <div className="flex items-start gap-2">
                                 <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
                                 <div className="min-w-0 flex-1">
                                     <p className="text-sm font-medium">
-                                        {manifest.staleCount} asset{manifest.staleCount === 1 ? '' : 's'} may be out of
-                                        date with the current PRD
+                                        {manifest.blockingCount > 0
+                                            ? `${manifest.blockingCount} output${manifest.blockingCount === 1 ? '' : 's'} need alignment review before build`
+                                            : `${manifest.reviewCount} output${manifest.reviewCount === 1 ? '' : 's'} have advisory alignment notes`}
                                     </p>
                                     <p className="mt-0.5 text-xs text-amber-800">
-                                        {staleTitles.join(', ')} — exports include each asset&rsquo;s latest saved
-                                        version and note this in the export manifest. Review them in Project Map →
-                                        Dependency Graph first, or export anyway.
+                                        {reviewTitles.join(', ')} — exports preserve each saved version and explain
+                                        whether the impact is definite, possible, or unknown. The work remains useful
+                                        for exploration. Review it in Project Map → Dependency Graph before relying on
+                                        it for implementation, or export anyway.
                                     </p>
                                 </div>
                             </div>

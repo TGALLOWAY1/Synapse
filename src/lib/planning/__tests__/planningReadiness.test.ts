@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import type { PlanningRecord, ReviewIssue, StructuredPRD } from '../../../types';
-import { derivePlanningReadiness, reviewIssueNeedsResolutionBeforeBuild } from '../planningReadiness';
+import { derivePlanningReadiness, planningRecordNeedsAlignment, reviewIssueNeedsResolutionBeforeBuild } from '../planningReadiness';
 
 const prd: StructuredPRD = {
     vision: 'Help teams decide what to build', coreProblem: 'Teams build polished plans before resolving product uncertainty.',
@@ -75,6 +75,69 @@ describe('planning readiness', () => {
         expect(derivePlanningReadiness({ ...shared, planningRecords: [legacy] }).isReadyToBuild).toBe(false);
         expect(derivePlanningReadiness({ ...shared, planningRecords: [risk] }).isReadyToBuild).toBe(false);
         expect(derivePlanningReadiness({ ...shared, planningRecords: [deferred] }).isReadyToBuild).toBe(false);
+    });
+
+    it('blocks on unapplied or deferred propagation but allows explicit downstream not-affected reviews', () => {
+        const previewId = 'impact-1';
+        const proposal = (requiredForVerdictAlignment: boolean) => ({
+            id: 'proposal-1',
+            target: { kind: 'claim' as const, section: 'Target Users', label: 'Primary user', jsonPath: '$.targetUsers' },
+            operation: 'replace' as const,
+            proposedSummary: 'Independent creators', proposedValue: ['Independent creators'],
+            reason: 'Reflect the user verdict.', confidence: 'definite' as const,
+            requiredForVerdictAlignment,
+        });
+        const alignedRecord = (requiredForVerdictAlignment: boolean, disposition?: 'accepted' | 'rejected' | 'deferred', applied = false): PlanningRecord => ({
+            ...record('decision', 'confirmed'),
+            materiality: 'high',
+            events: [
+                { id: 'verdict', planningRecordId: 'decision-1', type: 'custom_answered', actor: 'user', at: 2, answer: 'Independent creators' },
+                ...(disposition ? [{
+                    id: `review-${disposition}`, planningRecordId: 'decision-1', type: 'alignment_change_reviewed' as const,
+                    actor: 'user' as const, at: 3, impactPreviewId: previewId, proposalId: 'proposal-1', disposition,
+                }] : []),
+                ...(applied ? [{
+                    id: 'applied', planningRecordId: 'decision-1', type: 'applied_to_plan' as const, actor: 'user' as const,
+                    at: 4, impactPreviewId: previewId, baselineSpineVersionId: 's1', resultingSpineVersionId: 's2',
+                }] : []),
+            ],
+            assessments: [{
+                id: 'assessment', projectId: 'p1', planningRecordId: 'decision-1', sourceSpineVersionId: 's1',
+                status: 'fresh', evidence: [], inferredAssumptions: [], possibleConflictRecordIds: [], createdAt: 2,
+                impactPreview: {
+                    id: previewId, projectId: 'p1', planningRecordId: 'decision-1', decisionEventId: 'verdict', status: applied ? 'applied' : 'ready',
+                    baseline: { spineVersionId: 's1', spineContentHash: 'hash' }, affectedPrdSections: ['Target Users'],
+                    affectedArtifactSlots: [], possibleConflictRecordIds: [], alignmentProposals: [proposal(requiredForVerdictAlignment)], createdAt: 2,
+                },
+            }],
+        });
+
+        expect(planningRecordNeedsAlignment(alignedRecord(true))).toBe(true);
+        expect(planningRecordNeedsAlignment(alignedRecord(true, 'accepted'))).toBe(true);
+        expect(planningRecordNeedsAlignment(alignedRecord(true, 'accepted', true))).toBe(false);
+        expect(planningRecordNeedsAlignment(alignedRecord(false, 'deferred'))).toBe(true);
+        expect(planningRecordNeedsAlignment(alignedRecord(false, 'rejected'))).toBe(false);
+        expect(planningRecordNeedsAlignment(alignedRecord(true, 'rejected'))).toBe(true);
+
+        const readiness = derivePlanningReadiness({
+            prd, planningRecords: [alignedRecord(true, 'accepted')], incompleteSectionCount: 0,
+            hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
+        });
+        expect(readiness.isReadyToBuild).toBe(false);
+        expect(readiness.nextAction).toMatchObject({ kind: 'align_plan', planningRecordId: 'decision-1' });
+    });
+
+    it('treats a material legacy verdict with affected context as unreviewed alignment', () => {
+        const legacy: PlanningRecord = {
+            ...record('decision', 'confirmed'),
+            affectedPrdSections: ['Target Users'],
+            events: [{
+                id: 'verdict', planningRecordId: 'decision-1', type: 'custom_answered', actor: 'user', at: 2,
+                answer: 'Independent creators',
+            }],
+        };
+        expect(planningRecordNeedsAlignment(legacy)).toBe(true);
+        expect(planningRecordNeedsAlignment({ ...legacy, materiality: 'low' })).toBe(false);
     });
 
     it('does not clear consequential findings through deferral or an unverified revision request', () => {

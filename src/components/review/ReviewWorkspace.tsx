@@ -105,6 +105,7 @@ export interface ReviewWorkspaceProps {
     planningRecords: PlanningRecordView[];
     activeRunId?: string;
     initialTab?: 'review' | 'decisions' | 'history';
+    initialDecisionId?: string;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
     onSelectRun: (runId: string) => void;
@@ -117,6 +118,7 @@ export interface ReviewWorkspaceProps {
     onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
     onPreviewPlanningRecordImpact?: (recordId: string) => void;
     onApplyPlanningRecordToPlan?: (recordId: string) => void;
+    onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred', editedValue?: string) => void;
     readOnly?: boolean;
 }
 
@@ -531,6 +533,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                 {tab === 'decisions' ? (
                     <DecisionCenter
                         records={props.planningRecords}
+                        initialSelectedId={props.initialDecisionId}
                         readOnly={props.readOnly}
                         onDecide={(recordId, action, value, rationale) => {
                             if (props.onDecidePlanningRecord) {
@@ -543,6 +546,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         }}
                         onPreviewImpact={props.onPreviewPlanningRecordImpact ?? (() => {})}
                         onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
+                        onReviewAlignmentProposal={props.onReviewAlignmentProposal}
                     />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">

@@ -74,12 +74,33 @@ model-authored reasoning to appear user-confirmed.
 
 ## Current release boundary
 
-This release introduces the readiness projection, working-plan guidance,
-progression reframe, direct Decision Center entry, contextual PRD uncertainty,
-immediate preflight/PRD signal import, materiality and affected-section context,
-durable inline assumption verdicts, exploratory-output framing, and an explicit
-commitment checkpoint. It deliberately does not add claim-level annotations,
-readiness scores, automatic cross-artifact rewriting, or a rigid wizard.
+The foundation release introduced the readiness projection, working-plan
+guidance, progression reframe, direct Decision Center entry, contextual PRD
+uncertainty, immediate preflight/PRD signal import, materiality, durable inline
+assumption verdicts, exploratory-output framing, and an explicit commitment
+checkpoint.
+
+The first refinement phase closes the gap between deciding and propagating:
+
+- a consequential verdict immediately creates a version-bound plan-alignment
+  review;
+- affected context can point to a claim, feature, requirement, behavior, scope
+  choice, flow step, constraint, success criterion, or data/API expectation;
+- proposed changes are reviewed individually and can be accepted, edited,
+  rejected, or deferred without changing the underlying verdict;
+- accepted changes are applied through the guarded PRD-version boundary and
+  never overwrite a newer working plan;
+- direct PRD edits are classified as copy-only, explicit structured meaning
+  changes, or bounded Synapse inferences, with different authority semantics;
+- downstream outputs distinguish aligned, possibly affected, and definitely
+  stale states, including why and what to review next;
+- unresolved plan propagation and consequential downstream alignment prevent a
+  project from appearing ready to build.
+
+The phase remains deliberately non-destructive. It does not silently rewrite
+confirmed prose, auto-regenerate artifacts, add a readiness score, or turn the
+planning flow into a wizard. Complex affected locations remain review targets
+when Synapse lacks enough structured evidence to propose a safe edit.
 
 ## Future planning intelligence
 
@@ -89,9 +110,10 @@ new approval systems:
 1. **Build-readiness review:** turn the current categorical projection into a
    version-pinned review that can explain missing evidence and challenge whether
    an override remains reasonable after the plan changes.
-2. **Decision impact analysis:** extend the existing before/apply preview across
-   precise PRD locations and artifact dependency paths, without silently
-   rewriting confirmed outputs.
+2. **Decision impact analysis:** extend the current version-bound, per-change
+   alignment review with stronger semantic proposal generation, dependency-path
+   evidence, and selective artifact update plans without silently rewriting
+   confirmed outputs.
 3. **Assumption validation:** let users attach evidence, validation methods, and
    outcomes to material assumptions; distinguish “confirmed by the user” from
    “supported by evidence.” This is explicitly a future task, not inferred from

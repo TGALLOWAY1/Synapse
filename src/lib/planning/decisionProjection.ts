@@ -54,6 +54,18 @@ export function validateDecisionEvent(event: DecisionEvent): DecisionEventValida
     if (event.type === 'revised' && !event.optionId && !event.answer?.trim()) {
         return { valid: false, reason: 'A revision requires an option or custom answer.' };
     }
+    if (event.type === 'alignment_change_reviewed') {
+        if (event.actor !== 'user') return { valid: false, reason: 'Only a user may review an alignment change.' };
+        if (!event.impactPreviewId || !event.proposalId) {
+            return { valid: false, reason: 'An alignment review must identify its preview and proposal.' };
+        }
+        if (event.disposition === 'edited' && event.editedValue === undefined) {
+            return { valid: false, reason: 'An edited alignment change requires a replacement value.' };
+        }
+        if (event.disposition === 'edited' && typeof event.editedValue === 'string' && !event.editedValue.trim()) {
+            return { valid: false, reason: 'An edited alignment change cannot be empty.' };
+        }
+    }
     return { valid: true };
 }
 
@@ -82,6 +94,7 @@ export function projectDecision(record: PlanningRecord): DecisionProjection {
             case 'created':
             case 'imported':
             case 'impact_preview_requested':
+            case 'alignment_change_reviewed':
                 break;
             case 'option_selected':
                 projection.status = 'confirmed';
@@ -159,6 +172,14 @@ export type AppendDecisionEventResult =
     | { ok: true; record: PlanningRecord; duplicate: boolean }
     | { ok: false; reason: string };
 
+const stableEventValue = (value: unknown): string => {
+    if (value === undefined) return 'undefined';
+    if (value === null || typeof value !== 'object') return JSON.stringify(value) ?? String(value);
+    if (Array.isArray(value)) return `[${value.map(stableEventValue).join(',')}]`;
+    const item = value as Record<string, unknown>;
+    return `{${Object.keys(item).sort().map(key => `${JSON.stringify(key)}:${stableEventValue(item[key])}`).join(',')}}`;
+};
+
 /** Validate, deduplicate, append, then refresh legacy projection fields. */
 export function appendDecisionEvent(
     record: PlanningRecord,
@@ -195,6 +216,33 @@ export function appendDecisionEvent(
     }
     if (event.type === 'applied_to_plan' && !['confirmed', 'rejected'].includes(projectDecision(record).status)) {
         return { ok: false, reason: 'Only a resolved decision may be applied to the plan.' };
+    }
+    if (event.type === 'alignment_change_reviewed') {
+        if (!['confirmed', 'rejected'].includes(projectDecision(record).status)) {
+            return { ok: false, reason: 'Resolve the decision before reviewing its plan alignment.' };
+        }
+        const assessment = (record.assessments ?? [])
+            .find(item => item.impactPreview?.id === event.impactPreviewId);
+        const preview = assessment?.impactPreview;
+        if (!preview?.alignmentProposals?.some(proposal => proposal.id === event.proposalId)) {
+            return { ok: false, reason: 'Alignment proposal does not belong to this decision preview.' };
+        }
+        if (assessment?.status !== 'fresh' || preview.status !== 'ready') {
+            return { ok: false, reason: 'Refresh the impact preview before reviewing its alignment changes.' };
+        }
+        if (preview.decisionEventId !== projectDecision(record).latestVerdictEventId) {
+            return { ok: false, reason: 'The decision changed after this impact preview was created.' };
+        }
+        const latestReview = [...(record.events ?? [])].reverse().find(existing => (
+            existing.type === 'alignment_change_reviewed'
+            && existing.impactPreviewId === event.impactPreviewId
+            && existing.proposalId === event.proposalId
+        ));
+        if (latestReview?.type === 'alignment_change_reviewed'
+            && latestReview.disposition === event.disposition
+            && stableEventValue(latestReview.editedValue) === stableEventValue(event.editedValue)) {
+            return { ok: true, record, duplicate: true };
+        }
     }
     const withEvent: PlanningRecord = {
         ...record,

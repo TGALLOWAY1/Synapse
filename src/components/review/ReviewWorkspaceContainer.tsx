@@ -30,7 +30,10 @@ import {
 import { useToastStore } from '../../store/toastStore';
 import { getStrongModel } from '../../lib/geminiClient';
 import {
+    alignmentProposalReviews,
     buildDecisionImpact,
+    buildResidualDecisionImpact,
+    buildReviewedDecisionImpact,
     isDecisionImpactStale,
     projectDecision,
 } from '../../lib/planning';
@@ -47,6 +50,7 @@ import {
 interface Props {
     projectId: string;
     initialTab?: 'review' | 'decisions';
+    initialRecordId?: string;
 }
 
 const activeControllers = new Map<string, AbortController>();
@@ -89,7 +93,7 @@ const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, ReviewIssueDisposition['a
 
 const dispositionForAction = (action: ReviewIssueAction): ReviewIssueDisposition['action'] => DISPOSITION_BY_ACTION[action];
 
-export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
+export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
     const spines = useProjectStore(state => state.spineVersions[projectId] ?? []);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? []);
@@ -572,6 +576,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
                 || storedPreview.decisionEventId !== projection.latestVerdictEventId
             : false;
         const option = record.decisionOptions?.find(item => item.id === projection.selectedOptionId);
+        const proposalReviews = storedPreview ? alignmentProposalReviews(record, storedPreview) : [];
         return {
             id: record.id,
             type: record.type === 'open_question' ? 'question' : record.type,
@@ -608,10 +613,39 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
                 afterSummary: storedPreview.proposedPrdPatch?.[0]?.afterSummary,
                 explanation: storedPreview.explanation,
                 error: storedPreview.error,
-                canApply: !!storedPreview.proposedPrdPatch?.length && !!storedPreview.proposedResultHash,
+                proposals: proposalReviews.map(review => ({
+                    id: review.proposal.id,
+                    targetLabel: review.proposal.target.label,
+                    targetKind: review.proposal.target.kind,
+                    section: review.proposal.target.section,
+                    beforeSummary: review.proposal.beforeSummary,
+                    proposedSummary: review.proposal.proposedSummary,
+                    reason: review.proposal.reason,
+                    confidence: review.proposal.confidence,
+                    requiresInput: review.proposal.requiresInput,
+                    requiredForVerdictAlignment: review.proposal.requiredForVerdictAlignment,
+                    disposition: review.disposition,
+                    editedSummary: review.editedSummary,
+                })),
+                canApply: proposalReviews.some(review =>
+                    ['accepted', 'edited'].includes(review.disposition)
+                    && !review.proposal.requiresInput
+                    && storedPreview.proposedPrdPatch?.some(patch => patch.proposalId === review.proposal.id),
+                ),
             } : undefined,
         };
     });
+
+    const createImpactReview = (recordId: string) => {
+        const state = useProjectStore.getState();
+        const record = state.planningRecords[projectId]?.find(item => item.id === recordId);
+        const spine = state.spineVersions[projectId]?.find(item => item.isLatest);
+        if (!record || !spine?.structuredPRD) return undefined;
+        const result = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: spine.structuredPRD });
+        if (!result.ok) return result;
+        state.addPlanningAssessment(projectId, recordId, result.assessment);
+        return result;
+    };
 
     const handleDecisionAction = (recordId: string, action: import('./DecisionCenter').DecisionAction, value?: string, rationale?: string) => {
         if (!canWrite) return;
@@ -634,19 +668,38 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
         }
         const result = useProjectStore.getState().appendPlanningDecisionEvent(projectId, recordId, event);
         if (!result.ok) useToastStore.getState().addToast({ type: 'error', title: 'Decision not saved', message: result.reason });
+        else if (!['defer', 'reopen', 'invalidate'].includes(action)) {
+            const impact = createImpactReview(recordId);
+            if (impact && !impact.ok) useToastStore.getState().addToast({
+                type: 'info', title: 'Decision saved', message: impact.reason,
+            });
+        }
     };
 
     const handlePreviewImpact = (recordId: string) => {
         if (!canWrite) return;
-        const record = useProjectStore.getState().planningRecords[projectId]?.find(item => item.id === recordId);
-        const spine = useProjectStore.getState().spineVersions[projectId]?.find(item => item.isLatest);
-        if (!record || !spine?.structuredPRD) return;
-        const result = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: spine.structuredPRD });
+        const result = createImpactReview(recordId);
+        if (!result) return;
         if (!result.ok) {
             useToastStore.getState().addToast({ type: 'info', title: 'Impact preview needs more context', message: result.reason });
             return;
         }
-        useProjectStore.getState().addPlanningAssessment(projectId, recordId, result.assessment);
+    };
+
+    const handleAlignmentProposalReview = (
+        recordId: string,
+        previewId: string,
+        proposalId: string,
+        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred',
+        editedValue?: string,
+    ) => {
+        if (!canWrite) return;
+        const result = useProjectStore.getState().appendPlanningDecisionEvent(projectId, recordId, {
+            id: uuidv4(), planningRecordId: recordId, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: previewId, proposalId, disposition, at: Date.now(),
+            ...(disposition === 'edited' ? { editedValue, editedSummary: editedValue } : {}),
+        });
+        if (!result.ok) useToastStore.getState().addToast({ type: 'error', title: 'Alignment review not saved', message: result.reason });
     };
 
     const handleApplyToPlan = (recordId: string) => {
@@ -665,10 +718,13 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
             });
             return;
         }
-        const impact = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: spine.structuredPRD });
-        if (!impact.ok || !impact.nextPrd || impact.preview.id !== preview.id) return;
-        const applied = state.compareAndAppendStructuredPRD(projectId, spine.id, impact.nextPrd, {
-            editSummary: `Recorded decision in PRD: ${record.title}`,
+        const reviewed = buildReviewedDecisionImpact({ record, preview, structuredPRD: spine.structuredPRD });
+        if (!reviewed.nextPrd || reviewed.acceptedProposalIds.length === 0) {
+            useToastStore.getState().addToast({ type: 'info', title: 'No accepted changes', message: 'Accept or edit at least one safe proposal before updating the working plan.' });
+            return;
+        }
+        const applied = state.compareAndAppendStructuredPRD(projectId, spine.id, reviewed.nextPrd, {
+            editSummary: `Aligned PRD with decision: ${record.title}`,
             expectedPrdHash: preview.baseline.spineContentHash,
             decisionApplication: {
                 planningRecordId: record.id,
@@ -690,8 +746,21 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
                 },
             });
         }
+        const residual = applied.status === 'applied' && applied.newSpineId
+            ? buildResidualDecisionImpact({
+                record: current ?? record,
+                preview,
+                structuredPRD: reviewed.nextPrd,
+                baselineSpineVersionId: applied.newSpineId,
+            })
+            : undefined;
+        if (residual) {
+            useProjectStore.getState().addPlanningAssessment(projectId, recordId, residual.assessment);
+        }
         useToastStore.getState().addToast(applied.status === 'applied'
-            ? { type: 'success', title: 'Decision recorded in PRD', message: 'A new PRD version preserved the verdict. Affected sections and existing outputs still require review; nothing was silently rewritten.' }
+            ? { type: 'success', title: 'Working plan updated', message: residual
+                ? `${residual.preview.alignmentProposals?.length ?? 0} alignment review${residual.preview.alignmentProposals?.length === 1 ? '' : 's'} remain. Nothing else was rewritten.`
+                : 'Accepted changes created a new PRD version. Nothing else was rewritten.' }
             : { type: 'info', title: 'Preview is stale', message: 'Refresh the impact preview before recording this decision in the PRD.' });
     };
 
@@ -699,6 +768,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
     return <ReviewWorkspace
         projectName={project.name}
         initialTab={initialTab}
+        initialDecisionId={initialRecordId}
         recommendedPanel={panel}
         sourcesInScope={currentManifest.sources.map(source => source.label)}
         missingSources={currentManifest.missingArtifacts.map(source => source.replaceAll('_', ' '))}
@@ -720,6 +790,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
         onDecidePlanningRecord={handleDecisionAction}
         onPreviewPlanningRecordImpact={handlePreviewImpact}
         onApplyPlanningRecordToPlan={handleApplyToPlan}
+        onReviewAlignmentProposal={handleAlignmentProposalReview}
         readOnly={!canPerformProjectAction(projectId, 'persist')}
     />;
 }

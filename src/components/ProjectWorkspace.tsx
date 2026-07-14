@@ -66,7 +66,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -111,6 +111,7 @@ export function ProjectWorkspace() {
     const [showIncompletePrdConfirm, setShowIncompletePrdConfirm] = useState(false);
     const [showReadinessConfirm, setShowReadinessConfirm] = useState(false);
     const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
+    const [reviewInitialRecordId, setReviewInitialRecordId] = useState<string>();
     // Carries an explicit generation request across the design-preset choice.
     const generateAfterPreset = useRef(false);
     // Update Assets plan — shown on the re-commit edge when downstream
@@ -275,9 +276,11 @@ export function ProjectWorkspace() {
     const generatedOutputs = getArtifacts(projectId).filter(artifact =>
         artifact.type !== 'prd' && artifact.status !== 'archived' && !!artifact.currentVersionId,
     );
-    const staleOutputCount = generatedOutputs.filter(artifact =>
-        getArtifactStaleness(projectId, artifact.id) !== 'current',
-    ).length;
+    // Readiness only counts consequential unresolved alignment. Historical
+    // version drift, legacy provenance gaps, and changes outside an output's
+    // main planning inputs stay visible for review without blocking build.
+    const outputAlignment = getProjectOutputAlignment(projectId);
+    const staleOutputCount = outputAlignment.blockingCount;
     const currentChallengeRuns = reviewRuns.filter(run =>
         run.sourceManifest.spineVersionId === activeSpine?.id
         && run.status === 'complete',
@@ -853,19 +856,21 @@ export function ProjectWorkspace() {
         startAssetGeneration();
     };
 
-    const openDecisionCenter = () => {
+    const openDecisionCenter = (recordId?: string) => {
         setReviewInitialTab('decisions');
+        setReviewInitialRecordId(recordId);
         setPipelineStage('review');
     };
 
     const openChallenge = () => {
         setReviewInitialTab('review');
+        setReviewInitialRecordId(undefined);
         setPipelineStage('review');
     };
 
     const handlePlanningNextAction = () => {
         const kind = planningReadiness.nextAction.kind;
-        if (kind === 'resolve_decision' || kind === 'review_source_change') return openDecisionCenter();
+        if (kind === 'resolve_decision' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId);
         if (kind === 'challenge_plan') return openChallenge();
         if (kind === 'align_outputs') return setPipelineStage('workspace');
         if (kind === 'commit_plan') return handleToggleFinal();
@@ -1233,7 +1238,7 @@ export function ProjectWorkspace() {
                         />
                     </div>
                 ) : pipelineStage === 'review' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
-                    <ReviewWorkspaceContainer projectId={projectId} initialTab={reviewInitialTab} />
+                    <ReviewWorkspaceContainer projectId={projectId} initialTab={reviewInitialTab} initialRecordId={reviewInitialRecordId} />
                 ) : (
                 <>
                 {/* Left: Main Content Column */}

@@ -59,6 +59,7 @@ describe('lazy PRD assumption import', () => {
             ...revised.assumptions![0],
             materiality: 'blocking',
             affectedPrdSections: ['coreProblem', 'features'],
+            affectedPlanLocations: [{ kind: 'feature', section: 'Features', label: 'Email verification', entityType: 'feature', entityId: 'email-verification' }],
         };
         const next = importPrdAssumptions({
             projectId: 'p1', sourceSpineVersionId: 's2', structuredPRD: revised,
@@ -69,6 +70,7 @@ describe('lazy PRD assumption import', () => {
             statement: 'Users accept email verification',
             materiality: 'blocking',
             affectedPrdSections: ['coreProblem', 'features'],
+            affectedPlanLocations: [{ kind: 'feature', section: 'Features', label: 'Email verification', entityType: 'feature', entityId: 'email-verification' }],
         });
         expect(next.records[0].events).toEqual(first.records[0].events);
     });

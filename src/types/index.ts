@@ -263,6 +263,7 @@ export type Assumption = {
     materiality?: 'blocking' | 'high' | 'normal' | 'low';
     whyItMatters?: string;
     affectedPrdSections?: string[];
+    affectedPlanLocations?: PlanningLocation[];
     // --- User review (all optional; legacy PRDs lack them) ---
     decision?: AssumptionDecision;
     decisionNote?: string;            // user clarification / correction
@@ -1570,6 +1571,17 @@ export type DecisionEvent =
         baselineSpineVersionId: string;
     })
     | (DecisionEventBase & {
+        type: 'alignment_change_reviewed';
+        actor: 'user';
+        impactPreviewId: string;
+        proposalId: string;
+        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred';
+        /** User wording is authoritative only for this proposed plan change;
+         * it does not revise the underlying decision verdict. */
+        editedValue?: unknown;
+        editedSummary?: string;
+    })
+    | (DecisionEventBase & {
         type: 'applied_to_plan';
         actor: 'user';
         impactPreviewId: string;
@@ -1578,6 +1590,47 @@ export type DecisionEvent =
     });
 
 export type DecisionImpactPreviewStatus = 'generating' | 'ready' | 'stale' | 'failed' | 'applied' | 'superseded';
+
+/** A stable, human-readable pointer to the smallest meaningful unit of plan
+ * content available. Legacy records can continue using broad section names. */
+export type PlanningLocation = {
+    kind: 'section' | 'claim' | 'feature' | 'requirement' | 'behavior' | 'scope' | 'flow_step' | 'business_rule' | 'success_criterion' | 'constraint' | 'data_expectation' | 'api_expectation';
+    section: string;
+    label: string;
+    jsonPath?: string;
+    entityType?: string;
+    entityId?: string;
+    excerpt?: string;
+};
+
+export type PlanningAlignmentHint = {
+    target: PlanningLocation;
+    operation: 'replace' | 'add' | 'remove';
+    proposedValue: unknown;
+    proposedSummary: string;
+    reason: string;
+    confidence?: 'definite' | 'likely' | 'possible';
+    /** True when leaving the current value in place would directly contradict
+     * the recorded verdict, rather than merely leave a downstream review open. */
+    requiredForVerdictAlignment?: boolean;
+};
+
+export type AlignmentProposal = {
+    id: string;
+    target: PlanningLocation;
+    operation: 'replace' | 'add' | 'remove' | 'review';
+    beforeSummary?: string;
+    proposedSummary?: string;
+    proposedValue?: unknown;
+    reason: string;
+    confidence: 'definite' | 'likely' | 'possible';
+    /** Rejecting an exact source-claim update preserves a known contradiction;
+     * rejecting a generic downstream review target may safely mean not affected. */
+    requiredForVerdictAlignment?: boolean;
+    /** A review-only target is useful context but cannot be applied until the
+     * user or a later reasoning pass supplies a safe structured value. */
+    requiresInput?: boolean;
+};
 
 export type DecisionImpactPreview = {
     id: string;
@@ -1591,9 +1644,11 @@ export type DecisionImpactPreview = {
         dependencySignature?: string;
     };
     proposedPrdPatch?: Array<{
+        proposalId?: string;
         section: string;
         operation: 'replace' | 'add' | 'remove';
         entityId?: string;
+        jsonPath?: string;
         beforeSummary?: string;
         afterSummary?: string;
         value?: unknown;
@@ -1602,6 +1657,7 @@ export type DecisionImpactPreview = {
      * the atomic apply boundary; absent for advisory-only previews. */
     proposedResultHash?: string;
     affectedPrdSections: string[];
+    alignmentProposals?: AlignmentProposal[];
     affectedArtifactSlots: ArtifactSlotKey[];
     possibleConflictRecordIds: string[];
     explanation?: string;
@@ -1658,6 +1714,10 @@ export type PlanningRecord = {
     affectedFeatureIds?: string[];
     materiality?: 'blocking' | 'high' | 'normal' | 'low';
     affectedPrdSections?: string[];
+    affectedPlanLocations?: PlanningLocation[];
+    /** Machine-authored candidate changes. They do not modify the plan until
+     * reviewed by the user and applied through a version guard. */
+    alignmentHints?: PlanningAlignmentHint[];
     affectedArtifactSlots?: ArtifactSlotKey[];
     /** Non-authoritative source drift signal. User verdict history is preserved
      * until the user explicitly revises or invalidates it. */

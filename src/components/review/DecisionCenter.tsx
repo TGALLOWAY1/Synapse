@@ -18,6 +18,20 @@ export type DecisionCenterPreviewView = {
     explanation?: string;
     error?: string;
     canApply?: boolean;
+    proposals?: Array<{
+        id: string;
+        targetLabel: string;
+        targetKind: string;
+        section: string;
+        beforeSummary?: string;
+        proposedSummary?: string;
+        reason: string;
+        confidence: 'definite' | 'likely' | 'possible';
+        requiresInput?: boolean;
+        requiredForVerdictAlignment?: boolean;
+        disposition: 'pending' | 'accepted' | 'rejected' | 'edited' | 'deferred';
+        editedSummary?: string;
+    }>;
 };
 
 export type DecisionCenterRecordView = {
@@ -42,21 +56,32 @@ export type DecisionAction = 'confirm' | 'custom' | 'defer' | 'reject' | 'reopen
 
 interface Props {
     records: DecisionCenterRecordView[];
+    initialSelectedId?: string;
     readOnly?: boolean;
     onDecide: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
     onPreviewImpact: (recordId: string) => void;
     onApplyToPlan: (recordId: string) => void;
+    onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred', editedValue?: string) => void;
 }
 
 const needsReview = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
+const previewStatusLabel: Record<DecisionCenterPreviewView['status'], string> = {
+    generating: 'Preparing impact', ready: 'Review changes', stale: 'Impact needs refresh',
+    failed: 'Impact unavailable', applied: 'Applied to working plan', superseded: 'Superseded',
+};
+const proposalDispositionLabel: Record<NonNullable<DecisionCenterPreviewView['proposals']>[number]['disposition'], string> = {
+    pending: 'Needs review', accepted: 'Will update', rejected: 'Keeping current', edited: 'Edited', deferred: 'Deferred',
+};
 
-export function DecisionCenter({ records, readOnly, onDecide, onPreviewImpact, onApplyToPlan }: Props) {
-    const [view, setView] = useState<'needs_review' | 'log'>(() => records.some(needsReview) ? 'needs_review' : 'log');
+export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan, onReviewAlignmentProposal }: Props) {
+    const initialRecord = records.find(record => record.id === initialSelectedId);
+    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsReview(initialRecord) ? 'needs_review' : 'log') : records.some(needsReview) ? 'needs_review' : 'log');
     const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsReview(record) : !needsReview(record)), [records, view]);
-    const [selectedId, setSelectedId] = useState<string>();
-    const [mobileDetailOpen, setMobileDetailOpen] = useState(false);
+    const [selectedId, setSelectedId] = useState<string | undefined>(initialRecord?.id);
+    const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialRecord));
     const [customAnswer, setCustomAnswer] = useState('');
     const [rationale, setRationale] = useState('');
+    const [proposalEdits, setProposalEdits] = useState<Record<string, string>>({});
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
     const unresolvedCount = records.filter(needsReview).length;
@@ -198,7 +223,7 @@ export function DecisionCenter({ records, readOnly, onDecide, onPreviewImpact, o
 
                             {selected.preview ? (
                                 <section className={`mt-6 rounded-xl border p-4 ${selected.preview.status === 'stale' || selected.preview.status === 'failed' ? 'border-amber-200 bg-amber-50' : 'border-indigo-200 bg-indigo-50/60'}`}>
-                                    <h3 className="text-sm font-semibold text-neutral-900">Impact preview · {selected.preview.status}</h3>
+                                    <h3 className="text-sm font-semibold text-neutral-900">Plan alignment · {previewStatusLabel[selected.preview.status]}</h3>
                                     {selected.preview.beforeSummary && <p className="mt-3 text-xs text-neutral-500">Before</p>}
                                     {selected.preview.beforeSummary && <p className="text-sm text-neutral-700">{selected.preview.beforeSummary}</p>}
                                     {selected.preview.afterSummary && <p className="mt-3 text-xs text-neutral-500">After</p>}
@@ -207,7 +232,51 @@ export function DecisionCenter({ records, readOnly, onDecide, onPreviewImpact, o
                                     <p className="mt-1 text-xs text-neutral-500">Assets to review: {selected.preview.affectedArtifactLabels.join(', ') || 'None identified'}</p>
                                     {selected.preview.explanation && <p className="mt-3 text-sm leading-6 text-neutral-700">{selected.preview.explanation}</p>}
                                     {selected.preview.error && <p className="mt-2 text-sm text-red-700">{selected.preview.error}</p>}
-                                    {!readOnly && selected.preview.status === 'ready' && selected.preview.canApply && <button type="button" onClick={() => onApplyToPlan(selected.id)} className="mt-4 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Record in working plan</button>}
+                                    {selected.preview.proposals && selected.preview.proposals.length > 0 && (
+                                        <div className="mt-4 space-y-3" aria-label="Proposed plan alignment changes">
+                                            {selected.preview.proposals.map(proposal => (
+                                                <article key={proposal.id} className="rounded-lg border border-indigo-100 bg-white p-3">
+                                                    <div className="flex flex-wrap items-center justify-between gap-2">
+                                                        <p className="text-xs font-semibold text-neutral-900">{proposal.targetLabel}</p>
+                                                        <span className="rounded-full bg-neutral-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">{proposalDispositionLabel[proposal.disposition]}</span>
+                                                    </div>
+                                                    <p className="mt-1 text-[11px] text-neutral-500">{proposal.targetKind.replace('_', ' ')} · {proposal.section} · {proposal.confidence} impact</p>
+                                                    {proposal.beforeSummary && <p className="mt-2 text-xs text-neutral-500">Current: {proposal.beforeSummary}</p>}
+                                                    {proposal.proposedSummary && <p className="mt-1 text-sm font-medium text-neutral-900">Proposed: {proposal.editedSummary || proposal.proposedSummary}</p>}
+                                                    <p className="mt-2 text-xs leading-5 text-neutral-600">{proposal.reason}</p>
+                                                    {proposal.requiredForVerdictAlignment && proposal.disposition === 'rejected' && (
+                                                        <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">Keeping this exact claim preserves a contradiction with your selected answer. The plan remains unaligned until you accept or edit this change.</div>
+                                                    )}
+                                                    {proposal.requiresInput ? (
+                                                        <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">Additional input is required before Synapse can safely propose an edit.</div>
+                                                    ) : !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal ? (
+                                                        <div className="mt-3">
+                                                            <input
+                                                                aria-label={`Edit proposed change for ${proposal.targetLabel}`}
+                                                                value={proposalEdits[proposal.id] ?? ''}
+                                                                onChange={event => setProposalEdits(current => ({ ...current, [proposal.id]: event.target.value }))}
+                                                                placeholder="Preserve your preferred wording (optional)"
+                                                                className="w-full rounded-md border border-neutral-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
+                                                            />
+                                                            <div className="mt-2 flex flex-wrap gap-2">
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'accepted')} className="min-h-9 rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white">Accept</button>
+                                                                <button type="button" disabled={!(proposalEdits[proposal.id] ?? '').trim()} onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'edited', proposalEdits[proposal.id].trim())} className="min-h-9 rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 disabled:opacity-40">Use my wording</button>
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">{proposal.requiredForVerdictAlignment ? 'Keep current (unaligned)' : 'Keep current'}</button>
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Defer</button>
+                                                            </div>
+                                                        </div>
+                                                    ) : null}
+                                                    {proposal.requiresInput && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal && (
+                                                        <div className="mt-2 flex flex-wrap gap-2">
+                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Not affected</button>
+                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Defer review</button>
+                                                        </div>
+                                                    )}
+                                                </article>
+                                            ))}
+                                        </div>
+                                    )}
+                                    {!readOnly && selected.preview.status === 'ready' && selected.preview.canApply && <button type="button" onClick={() => onApplyToPlan(selected.id)} className="mt-4 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Apply accepted changes</button>}
                                     {!readOnly && (selected.preview.status === 'stale' || selected.preview.status === 'failed') && <button type="button" onClick={() => onPreviewImpact(selected.id)} className="mt-4 min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800"><RefreshCcw size={14} className="mr-1 inline" /> Refresh preview</button>}
                                 </section>
                             ) : !readOnly && ['confirmed', 'rejected', 'resolved'].includes(selected.status) ? (

@@ -24,6 +24,7 @@ import { DecisionLogSection } from './prd/DecisionLogSection';
 import { splitAssumptions, deriveDecisionLog } from '../lib/derive/prdDecisions';
 import { assumptionSourceKey } from '../lib/planning/assumptionImport';
 import { projectDecision } from '../lib/planning/decisionProjection';
+import type { ConsequentialPrdEditRecognition } from '../lib/planning';
 import {
     deriveDeferredFeatureIds,
     deriveImplementationSummary,
@@ -53,7 +54,7 @@ interface StructuredPRDViewProps {
     spineId: string;
     structuredPRD: StructuredPRD;
     readOnly: boolean;
-    onOpenDecisions?: () => void;
+    onOpenDecisions?: (recordId?: string) => void;
 }
 
 const EMPTY_PLANNING_RECORDS: PlanningRecord[] = [];
@@ -84,6 +85,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     const [editValue, setEditValue] = useState('');
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editRecognition, setEditRecognition] = useState<ConsequentialPrdEditRecognition | null>(null);
     const contentRef = useRef<HTMLDivElement>(null);
 
     // On mobile, gate selection behind an explicit "Select text to edit" mode so
@@ -189,13 +191,19 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // Edits must NOT overwrite the current version in place — append a new
     // version (preserving history) via editSpineStructuredPRD. Each call site
     // passes a useful default summary; no manual entry required.
-    const savePRD = (updated: StructuredPRD, editSummary: string) => {
+    const savePRD = (
+        updated: StructuredPRD,
+        editSummary: string,
+        options?: { recognizeConsequentialEdit?: boolean },
+    ) => {
         const markdown = structuredPRDToMarkdown(updated);
-        editSpineStructuredPRD(projectId, spineId, updated, {
+        const result = editSpineStructuredPRD(projectId, spineId, updated, {
             responseText: markdown,
             changeSource: 'user_edit',
             editSummary,
+            recognizeConsequentialEdit: options?.recognizeConsequentialEdit,
         });
+        setEditRecognition(result.recognition?.classification === 'copy_edit' ? null : result.recognition ?? null);
     };
 
     const startEditing = (section: EditingSection, currentValue: string) => {
@@ -269,7 +277,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     ? regenerated.primaryActions
                     : structuredPRD.primaryActions,
             };
-            savePRD(merged, 'Updated grounding fields');
+            // Grounding backfill is generated assistance, not an explicit user
+            // decision about entities/actions. Preserve the version but do not
+            // attribute its interpretation to the user.
+            savePRD(merged, 'Updated grounding fields', { recognizeConsequentialEdit: false });
         } catch (e) {
             if (e instanceof SafetyBlockedError) {
                 setRefreshError(
@@ -431,7 +442,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     const normalizeSectionName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
     const assumptionsAffecting = (section: string) => {
         const target = normalizeSectionName(section);
-        return unresolvedAssumptions.filter(assumption => (assumption.affectedPrdSections ?? []).some(raw => {
+        return unresolvedAssumptions.filter(assumption => [
+            ...(assumption.affectedPrdSections ?? []),
+            ...(assumption.affectedPlanLocations ?? []).map(location => location.section),
+        ].some(raw => {
             const source = normalizeSectionName(raw);
             return source === target || source.includes(target) || target.includes(source);
         }));
@@ -444,7 +458,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             if (record.sources?.some(source => source.sourceType === 'prd_assumption')) return false;
             const status = projectDecision(record).status;
             if (status !== 'open' && status !== 'proposed' && !(record.type === 'conflict' && status === 'deferred')) return false;
-            return (record.affectedPrdSections ?? []).some(raw => {
+            return [
+                ...(record.affectedPrdSections ?? []),
+                ...(record.affectedPlanLocations ?? []).map(location => location.section),
+            ].some(raw => {
                 const source = normalizeSectionName(raw);
                 return source === target || source.includes(target) || target.includes(source);
             });
@@ -455,6 +472,15 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         const durableRecords = planningRecordsAffecting(section);
         const affectedCount = assumptions.length + durableRecords.length;
         if (affectedCount === 0) return null;
+        const preciseLabels = [...assumptions.flatMap(assumption =>
+            (assumption.affectedPlanLocations ?? [])
+                .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
+                .map(location => location.label),
+        ), ...durableRecords.flatMap(record =>
+            (record.affectedPlanLocations ?? [])
+                .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
+                .map(location => location.label),
+        )].filter((label, index, labels) => labels.indexOf(label) === index);
         return (
             <button
                 type="button"
@@ -464,7 +490,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 }}
                 className="mb-3 flex w-full items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
             >
-                <span className="text-xs leading-5"><strong>{affectedCount} planning item{affectedCount === 1 ? ' needs' : 's need'} review</strong> in this section.</span>
+                <span className="text-xs leading-5">
+                    <strong>{affectedCount} planning item{affectedCount === 1 ? ' needs' : 's need'} review</strong> in this section.
+                    {preciseLabels.length > 0 && <span className="mt-0.5 block text-amber-800">Affected: {preciseLabels.slice(0, 2).join(', ')}{preciseLabels.length > 2 ? ` +${preciseLabels.length - 2} more` : ''}</span>}
+                </span>
                 <span className="shrink-0 text-xs font-semibold underline underline-offset-2">Review</span>
             </button>
         );
@@ -819,9 +848,51 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         );
     };
 
+    const renderEditRecognition = () => {
+        if (!editRecognition) return null;
+        const definite = editRecognition.classification === 'meaning_changed';
+        const conflicts = editRecognition.possibleConflictRecordIds.length;
+        return (
+            <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50/70 p-4" role="status">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className="text-sm font-semibold text-indigo-950">
+                            {definite ? 'Plan meaning updated' : 'This edit may affect the plan'}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-indigo-800">
+                            {editRecognition.reason}{' '}
+                            {editRecognition.affectedPrdSections.length > 0
+                                ? `${editRecognition.affectedPrdSections.length} related plan area${editRecognition.affectedPrdSections.length === 1 ? '' : 's'} should be reviewed.`
+                                : ''}
+                            {conflicts > 0 ? ` Synapse also found ${conflicts} possible conflict${conflicts === 1 ? '' : 's'}.` : ''}
+                        </p>
+                        {onOpenDecisions && (
+                            <button
+                                type="button"
+                                onClick={() => onOpenDecisions(editRecognition.planningRecordIds[0])}
+                                className="mt-2 text-xs font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
+                            >
+                                Review planning impact
+                            </button>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setEditRecognition(null)}
+                        className="shrink-0 rounded p-1 text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"
+                        aria-label="Dismiss edit impact notice"
+                    >
+                        <X size={15} />
+                    </button>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="relative">
             <div ref={contentRef} className="space-y-2">
+                {renderEditRecognition()}
                 {renderGroundingBackfill()}
 
                 {/* Premium PRD top — present only on PRDs generated by the new pipeline */}

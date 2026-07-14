@@ -21,6 +21,7 @@ import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages'
 import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
 import { StalenessBadge } from './StalenessBadge';
+import { OutputAlignmentBadge, OutputAlignmentDot, OutputAlignmentNotice } from './OutputAlignmentStatus';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
@@ -52,6 +53,7 @@ import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
 import { makeSpineChangeResolver } from '../lib/spineChangeAnalysis';
+import type { OutputAlignment } from '../lib/planning/outputAlignment';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -252,7 +254,7 @@ export function ArtifactWorkspace({
 }: ArtifactWorkspaceProps) {
     const isMobile = useIsMobile();
     const {
-        getArtifacts, getPreferredVersion, getArtifactStaleness, getJob, getProject,
+        getArtifacts, getPreferredVersion, getArtifactStaleness, getProjectOutputAlignment, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
     } = useProjectStore();
@@ -348,6 +350,25 @@ export function ArtifactWorkspace({
     const flowsPreferred = flowsArtifact ? getPreferredVersion(projectId, flowsArtifact.id) : undefined;
     const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
     const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
+    const projectOutputAlignment = getProjectOutputAlignment(projectId);
+    const alignmentByNode = new Map(
+        projectOutputAlignment.outputs.map(output => [output.nodeId, output]),
+    );
+
+    const alignmentForSelection = (selection: WorkspaceSelection): OutputAlignment | undefined => {
+        if (selection === 'screens') {
+            const candidates = [alignmentByNode.get('screen_inventory'), alignmentByNode.get('mockup')]
+                .filter((item): item is OutputAlignment => Boolean(item));
+            return candidates.sort((a, b) => {
+                const weight = (item: OutputAlignment) => item.state === 'stale'
+                    ? 3
+                    : item.blocksBuildReadiness ? 2 : item.state === 'possibly_affected' ? 1 : 0;
+                return weight(b) - weight(a);
+            })[0];
+        }
+        if (selection === 'prd' || selection === 'dependency_graph') return undefined;
+        return alignmentByNode.get(selection as ArtifactSlotKey);
+    };
 
     // Phase 5B: Data Model + Implementation Plan content for the screen → artifact
     // trace bridge (read-only correlation on the Handoff tab). Resolved to their
@@ -797,44 +818,47 @@ export function ArtifactWorkspace({
         preferred: { sourceRefs: { sourceType: string; sourceArtifactVersionId: string }[] },
     ) => {
         const staleness = getArtifactStaleness(projectId, artifactId);
+        const alignment = projectOutputAlignment.outputs.find(output => output.artifactId === artifactId);
         const spineRef = preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
         const prdLabel = resolveSpineLabel(spineRef);
         const changeSummary = staleness !== 'current' && spineRef ? spineChangeFor(spineRef) : null;
         return (
-            <div className="flex items-center gap-2 flex-wrap">
-                {prdLabel && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-medium">
-                        Generated from PRD {prdLabel}
-                    </span>
-                )}
-                <StalenessBadge
-                    staleness={staleness}
-                    detail={changeSummary
-                        ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
-                        : undefined}
-                />
-                {changeSummary?.hasChanges && (
-                    <span className="text-[11px] text-amber-700 truncate max-w-full">
-                        Since {prdLabel ?? 'generation'}: {changeSummary.headline}
-                    </span>
-                )}
-                {staleness !== 'current' && latestSpineId && (
+            <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                    {prdLabel && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-medium">
+                            Generated from PRD {prdLabel}
+                        </span>
+                    )}
+                    {alignment ? (
+                        <OutputAlignmentBadge alignment={alignment} />
+                    ) : (
+                        <StalenessBadge
+                            staleness={staleness}
+                            detail={changeSummary
+                                ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
+                                : undefined}
+                        />
+                    )}
+                    {alignment && alignment.state !== 'aligned' && latestSpineId && (
+                        <button
+                            type="button"
+                            onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
+                            title="Confirm this output remains aligned with the current plan without regenerating it"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                        >
+                            <ShieldCheck size={12} /> Confirm aligned
+                        </button>
+                    )}
                     <button
                         type="button"
-                        onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
-                        title="Confirm this artifact is still valid for the current PRD without regenerating it"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                        onClick={() => setVersionHistoryArtifactId(artifactId)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
                     >
-                        <ShieldCheck size={12} /> Mark up to date
+                        <History size={12} /> Version history
                     </button>
-                )}
-                <button
-                    type="button"
-                    onClick={() => setVersionHistoryArtifactId(artifactId)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                >
-                    <History size={12} /> Version history
-                </button>
+                </div>
+                {alignment && <OutputAlignmentNotice alignment={alignment} />}
             </div>
         );
     };
@@ -1497,6 +1521,9 @@ export function ArtifactWorkspace({
                                                             {slot.key === 'screens' ? (
                                                                 <ScreensStatusDot inventory={status} mockup={mockupStatus} />
                                                             ) : slot.key !== 'dependency_graph' && <StatusDot status={status} />}
+                                                            {status === 'done' && (
+                                                                <OutputAlignmentDot alignment={alignmentForSelection(slot.key)} />
+                                                            )}
                                                             {status === 'done' && isLockedAsset(slot.key) && (
                                                                 <AssetLock />
                                                             )}
@@ -1537,6 +1564,9 @@ export function ArtifactWorkspace({
                                 <ScreensStatusDot inventory={slotStatusFor('screens')} mockup={slotStatusFor('mockup')} />
                             ) : (
                                 <StatusDot status={slotStatusFor(activeSelection)} />
+                            )}
+                            {slotStatusFor(activeSelection) === 'done' && (
+                                <OutputAlignmentDot alignment={alignmentForSelection(activeSelection)} />
                             )}
                             {slotStatusFor(activeSelection) === 'done' && isLockedAsset(activeSelection) && (
                                 <AssetLock />

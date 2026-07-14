@@ -19,6 +19,7 @@ const callbacks = () => ({
     onDecide: vi.fn(),
     onPreviewImpact: vi.fn(),
     onApplyToPlan: vi.fn(),
+    onReviewAlignmentProposal: vi.fn(),
 });
 
 describe('DecisionCenter', () => {
@@ -58,14 +59,60 @@ describe('DecisionCenter', () => {
             },
         };
         const { rerender } = render(<DecisionCenter records={[ready]} {...props} />);
-        fireEvent.click(screen.getByRole('button', { name: 'Record in working plan' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Apply accepted changes' }));
         expect(props.onApplyToPlan).toHaveBeenCalledWith('d1');
 
         rerender(<DecisionCenter records={[{ ...ready, preview: { ...ready.preview!, status: 'stale' } }]} {...props} />);
-        expect(screen.queryByRole('button', { name: 'Record in working plan' })).toBeNull();
-        const previewSection = screen.getByText(/Impact preview/).closest('section')!;
+        expect(screen.queryByRole('button', { name: 'Apply accepted changes' })).toBeNull();
+        const previewSection = screen.getByText(/Plan alignment/).closest('section')!;
         fireEvent.click(within(previewSection).getByRole('button', { name: /Refresh preview/ }));
         expect(props.onPreviewImpact).toHaveBeenCalledWith('d1');
+    });
+
+    it('supports accept, edit, reject, and defer without changing the decision itself', () => {
+        const props = callbacks();
+        const record: DecisionCenterRecordView = {
+            ...openRecord, status: 'confirmed', resolution: 'Independent creators',
+            preview: {
+                id: 'preview', status: 'ready', affectedPrdSections: ['Target Users'], affectedArtifactLabels: [],
+                canApply: false,
+                proposals: [{
+                    id: 'change-1', targetLabel: 'Primary user', targetKind: 'claim', section: 'Target Users',
+                    beforeSummary: 'Enterprise administrators', proposedSummary: 'Independent creators',
+                    reason: 'Reflect the selected audience.', confidence: 'definite', disposition: 'pending',
+                }],
+            },
+        };
+        render(<DecisionCenter records={[record]} {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+        expect(props.onReviewAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'change-1', 'accepted');
+
+        const wording = screen.getByLabelText('Edit proposed change for Primary user');
+        fireEvent.change(wording, { target: { value: 'Independent working creators' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Use my wording' }));
+        expect(props.onReviewAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'change-1', 'edited', 'Independent working creators');
+        fireEvent.click(screen.getByRole('button', { name: 'Keep current' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Defer' }));
+        expect(props.onDecide).not.toHaveBeenCalled();
+    });
+
+    it('makes keeping a verdict-defining source claim visibly unaligned', () => {
+        const record: DecisionCenterRecordView = {
+            ...openRecord, status: 'confirmed', resolution: 'Independent creators',
+            preview: {
+                id: 'preview', status: 'ready', affectedPrdSections: ['Target Users'], affectedArtifactLabels: [],
+                proposals: [{
+                    id: 'source-change', targetLabel: 'Primary user', targetKind: 'claim', section: 'Target Users',
+                    beforeSummary: 'Enterprise administrators', proposedSummary: 'Independent creators',
+                    reason: 'This exact claim records the selected audience.', confidence: 'definite',
+                    requiredForVerdictAlignment: true, disposition: 'rejected',
+                }],
+            },
+        };
+        render(<DecisionCenter records={[record]} {...callbacks()} />);
+
+        expect(screen.getByText(/preserves a contradiction with your selected answer/i)).toBeInTheDocument();
+        expect(screen.getByText('Keeping current')).toBeInTheDocument();
     });
 
     it('renders an explicit completed state and decision log', () => {
@@ -73,6 +120,14 @@ describe('DecisionCenter', () => {
         expect(screen.getByText('All current decisions reviewed')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Decision log' }));
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+    });
+
+    it('opens a linked resolved decision directly even when unresolved work also exists', () => {
+        const resolved = { ...openRecord, id: 'resolved', status: 'confirmed' as const, resolution: 'Independent creators' };
+        render(<DecisionCenter records={[openRecord, resolved]} initialSelectedId="resolved" {...callbacks()} />);
+
+        expect(screen.getByText('Selected answer')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: /Should guests start without an account/ })).toHaveAttribute('aria-current', 'true');
     });
 
     it('lets a user explicitly revise or invalidate a recorded decision', () => {

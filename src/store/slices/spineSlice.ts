@@ -8,7 +8,14 @@ import type {
 import type { ProjectState, SpineGenerationMetaInput, CompareAndAppendStructuredPRDResult } from '../types';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
-import { appendDecisionEvent, planningContentHash, projectDecision } from '../../lib/planning';
+import {
+    appendDecisionEvent,
+    buildReviewedDecisionImpact,
+    planningContentHash,
+    projectDecision,
+    recordConsequentialPrdEdit,
+    type ConsequentialPrdEditRecognition,
+} from '../../lib/planning';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -326,6 +333,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         const historyEventId = uuidv4();
         const changeSource = opts?.changeSource ?? 'user_edit';
         const editSummary = opts?.editSummary ?? 'Edited PRD';
+        let recognition: ConsequentialPrdEditRecognition | undefined;
 
         set((state) => {
             const currentVersions = state.spineVersions[projectId] || [];
@@ -385,13 +393,37 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
             };
 
+            const shouldRecognize = changeSource === 'user_edit'
+                && opts?.recognizeConsequentialEdit !== false
+                && !!src.structuredPRD;
+            let planningRecords = state.planningRecords;
+            if (shouldRecognize && src.structuredPRD) {
+                const recognitionAt = (state.planningRecords[projectId] ?? [])
+                    .flatMap(record => record.events ?? [])
+                    .reduce((latest, event) => Math.max(latest, event.at), now);
+                const result = recordConsequentialPrdEdit({
+                    projectId,
+                    sourceSpineVersionId: newSpineId,
+                    before: src.structuredPRD,
+                    after: nextStructuredPRD,
+                    existingRecords: state.planningRecords[projectId] ?? [],
+                    at: recognitionAt,
+                    idFactory: uuidv4,
+                });
+                recognition = result.recognition;
+                if (result.records !== state.planningRecords[projectId]) {
+                    planningRecords = { ...state.planningRecords, [projectId]: result.records };
+                }
+            }
+
             return {
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), editEvent] },
+                planningRecords,
             };
         });
 
-        return { newSpineId };
+        return { newSpineId, recognition };
     },
 
     // Compare-and-append is the write barrier for a structured PRD change
@@ -444,13 +476,21 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     item.impactPreview?.id === opts.decisionApplication?.impactPreviewId,
                 );
                 const preview = assessment?.impactPreview;
+                const reviewedImpact = record && preview && latest.structuredPRD
+                    ? buildReviewedDecisionImpact({ record, preview, structuredPRD: latest.structuredPRD })
+                    : undefined;
+                const reviewedResultMatches = preview?.alignmentProposals
+                    ? !!reviewedImpact?.nextPrd
+                        && reviewedImpact.acceptedProposalIds.length > 0
+                        && planningContentHash(reviewedImpact.nextPrd) === planningContentHash(nextStructuredPRD)
+                    : !!preview?.proposedResultHash
+                        && preview.proposedResultHash === planningContentHash(nextStructuredPRD);
                 const previewMatches = assessment?.status === 'fresh'
                     && preview?.status === 'ready'
                     && preview.decisionEventId === opts.decisionApplication.decisionEventId
                     && preview.baseline.spineVersionId === expectedLatestSpineId
                     && preview.baseline.spineContentHash === planningContentHash(latest.structuredPRD)
-                    && !!preview.proposedResultHash
-                    && preview.proposedResultHash === planningContentHash(nextStructuredPRD);
+                    && reviewedResultMatches;
                 if (!record
                     || projectDecision(record).latestVerdictEventId !== opts.decisionApplication.decisionEventId
                     || !previewMatches) {

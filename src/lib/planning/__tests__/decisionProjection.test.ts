@@ -75,4 +75,36 @@ describe('decision projection and invariants', () => {
         expect(applied.record.confirmedAt).toBe(2);
         expect(projectDecision(applied.record).resultingSpineVersionId).toBe('s2');
     });
+
+    it('keeps alignment review user-authored and scoped to a stored proposal', () => {
+        const resolved = appendDecisionEvent(record(), {
+            id: 'verdict', planningRecordId: 'd1', type: 'option_selected', actor: 'user', optionId: 'account', at: 2,
+        });
+        if (!resolved.ok) throw new Error(resolved.reason);
+        const withProposal = {
+            ...resolved.record,
+            assessments: [{
+                id: 'assessment', projectId: 'p1', planningRecordId: 'd1', sourceSpineVersionId: 's1', status: 'fresh' as const,
+                evidence: [], inferredAssumptions: [], possibleConflictRecordIds: [], createdAt: 3,
+                impactPreview: {
+                    id: 'preview', projectId: 'p1', planningRecordId: 'd1', decisionEventId: 'verdict', status: 'ready' as const,
+                    baseline: { spineVersionId: 's1', spineContentHash: 'hash' }, affectedPrdSections: ['Vision'],
+                    affectedArtifactSlots: [], possibleConflictRecordIds: [], createdAt: 3,
+                    alignmentProposals: [{
+                        id: 'proposal', target: { kind: 'claim' as const, section: 'Vision', label: 'Audience promise' },
+                        operation: 'replace' as const, proposedValue: 'New promise', proposedSummary: 'New promise',
+                        reason: 'Reflect the decision.', confidence: 'definite' as const,
+                    }],
+                },
+            }],
+        };
+        expect(appendDecisionEvent(withProposal, {
+            id: 'review', planningRecordId: 'd1', type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: 'preview', proposalId: 'proposal', disposition: 'accepted', at: 4,
+        }).ok).toBe(true);
+        expect(appendDecisionEvent(withProposal, {
+            id: 'unknown', planningRecordId: 'd1', type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: 'preview', proposalId: 'missing', disposition: 'accepted', at: 4,
+        })).toMatchObject({ ok: false, reason: 'Alignment proposal does not belong to this decision preview.' });
+    });
 });
