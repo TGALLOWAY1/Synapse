@@ -118,7 +118,7 @@ export interface ReviewWorkspaceProps {
     onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
     onPreviewPlanningRecordImpact?: (recordId: string) => void;
     onApplyPlanningRecordToPlan?: (recordId: string) => void;
-    onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred', editedValue?: string) => void;
+    onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable', editedValue?: string) => void;
     onRequestAlignmentProposal?: (
         recordId: string,
         previewId: string,

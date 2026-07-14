@@ -274,6 +274,7 @@ describe('Phase 1 adversarial release scenarios', () => {
         });
         if (!impact.ok) throw new Error(impact.reason);
         const proposalId = impact.preview.alignmentProposals?.[0].id;
+        const proposalContentHash = impact.preview.alignmentProposals?.[0].contract?.proposalContentHash;
         if (!proposalId) throw new Error('Expected a proposal');
         const withPreview: PlanningRecord = { ...decision, assessments: [impact.assessment] };
         const firstReview = appendDecisionEvent(withPreview, {
@@ -284,6 +285,7 @@ describe('Phase 1 adversarial release scenarios', () => {
             impactPreviewId: impact.preview.id,
             proposalId,
             disposition: 'accepted',
+            proposalContentHash,
             at: 4,
         });
         if (!firstReview.ok) throw new Error(firstReview.reason);
@@ -295,6 +297,7 @@ describe('Phase 1 adversarial release scenarios', () => {
             impactPreviewId: impact.preview.id,
             proposalId,
             disposition: 'accepted',
+            proposalContentHash,
             at: 5,
         });
         expect(repeatedReview).toMatchObject({ ok: true, duplicate: true });

@@ -1575,11 +1575,24 @@ export type DecisionEvent =
         actor: 'user';
         impactPreviewId: string;
         proposalId: string;
-        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred';
+        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable';
         /** User wording is authoritative only for this proposed plan change;
          * it does not revise the underlying decision verdict. */
         editedValue?: unknown;
         editedSummary?: string;
+        /** Canonical hash of the exact proposal revision the user reviewed.
+         * Required for model-authored Phase 2 proposals. */
+        proposalContentHash?: string;
+    })
+    | (DecisionEventBase & {
+        type: 'alignment_context_provided';
+        actor: 'user';
+        impactPreviewId: string;
+        proposalId: string;
+        requestKind: 'missing_info' | 'different_interpretation';
+        /** User-authored context for proposal reasoning. This is evidence, not
+         * a verdict and not acceptance of any generated interpretation. */
+        context: string;
     })
     | (DecisionEventBase & {
         type: 'applied_to_plan';
@@ -1610,6 +1623,10 @@ export type PlanningAlignmentHint = {
     proposedSummary?: string;
     reason: string;
     confidence?: 'definite' | 'likely' | 'possible';
+    /** Confidence in the model's reasoning, distinct from impact relevance. */
+    reasoningConfidence?: AlignmentReasoningConfidence;
+    /** How directly the cited evidence supports the interpretation. */
+    evidenceCharacter?: AlignmentEvidenceCharacter;
     analysisStatus?: AlignmentProposalAnalysisStatus;
     analysisMethod?: 'deterministic' | 'model';
     model?: string;
@@ -1626,12 +1643,18 @@ export type PlanningAlignmentHint = {
 export type AlignmentProposalAnalysisStatus =
     | 'advisory_candidate'
     | 'bounded_applicable'
+    | 'already_aligned'
+    | 'not_applicable'
     | 'needs_input'
     | 'rejected'
     | 'failed';
 
+export type AlignmentReasoningConfidence = 'high' | 'medium' | 'low';
+export type AlignmentEvidenceCharacter = 'direct' | 'supported_inference' | 'plausible_inference';
+
 export type AlignmentProposalEvidenceBinding = {
     refId: string;
+    source?: 'record_evidence' | 'user_context';
     sourceVersionId: string;
     contentHash: string;
 };
@@ -1650,7 +1673,12 @@ export type AlignmentProposalContract = {
     preservedContentHash?: string;
     evidence: AlignmentProposalEvidenceBinding[];
     maxTouchedTargets: 1;
+    /** Recomputed locally from the full proposal payload; also copied into the
+     * user review event so later joint proposal+patch tampering fails closed. */
+    proposalContentHash?: string;
     failureReason?: string;
+    reasoningConfidence?: AlignmentReasoningConfidence;
+    evidenceCharacter?: AlignmentEvidenceCharacter;
 };
 
 export type AlignmentProposal = {
@@ -1662,6 +1690,8 @@ export type AlignmentProposal = {
     proposedValue?: unknown;
     reason: string;
     confidence: 'definite' | 'likely' | 'possible';
+    reasoningConfidence?: AlignmentReasoningConfidence;
+    evidenceCharacter?: AlignmentEvidenceCharacter;
     ambiguity?: string;
     questions?: string[];
     evidenceSummary?: string[];

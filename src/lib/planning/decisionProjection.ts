@@ -5,6 +5,7 @@ import type {
     PlanningRecordStatus,
 } from '../../types';
 import { PLANNING_RECORD_SCHEMA_VERSION } from '../../types';
+import { alignmentProposalContentHash } from './proposalIntegrity';
 
 export type DecisionProjection = {
     status: PlanningRecordStatus;
@@ -56,6 +57,9 @@ export function validateDecisionEvent(event: DecisionEvent): DecisionEventValida
     }
     if (event.type === 'alignment_change_reviewed') {
         if (event.actor !== 'user') return { valid: false, reason: 'Only a user may review an alignment change.' };
+        if (!['accepted', 'rejected', 'edited', 'deferred', 'confirmed_aligned', 'confirmed_not_applicable'].includes(event.disposition)) {
+            return { valid: false, reason: 'Alignment review disposition is invalid.' };
+        }
         if (!event.impactPreviewId || !event.proposalId) {
             return { valid: false, reason: 'An alignment review must identify its preview and proposal.' };
         }
@@ -64,6 +68,12 @@ export function validateDecisionEvent(event: DecisionEvent): DecisionEventValida
         }
         if (event.disposition === 'edited' && typeof event.editedValue === 'string' && !event.editedValue.trim()) {
             return { valid: false, reason: 'An edited alignment change cannot be empty.' };
+        }
+    }
+    if (event.type === 'alignment_context_provided') {
+        if (event.actor !== 'user') return { valid: false, reason: 'Only a user may provide alignment context.' };
+        if (!event.impactPreviewId || !event.proposalId || !event.context.trim()) {
+            return { valid: false, reason: 'Alignment context must identify its preview, proposal, and non-empty context.' };
         }
     }
     return { valid: true };
@@ -95,6 +105,7 @@ export function projectDecision(record: PlanningRecord): DecisionProjection {
             case 'imported':
             case 'impact_preview_requested':
             case 'alignment_change_reviewed':
+            case 'alignment_context_provided':
                 break;
             case 'option_selected':
                 projection.status = 'confirmed';
@@ -233,6 +244,26 @@ export function appendDecisionEvent(
             && proposal.contract?.analysisStatus !== 'bounded_applicable') {
             return { ok: false, reason: 'Only a bounded applicable proposal can be accepted or edited.' };
         }
+        if (event.disposition === 'confirmed_aligned' && proposal.contract?.analysisStatus !== 'already_aligned') {
+            return { ok: false, reason: 'Only an already-aligned analysis can be confirmed as aligned.' };
+        }
+        if (event.disposition === 'confirmed_not_applicable' && proposal.contract?.analysisStatus !== 'not_applicable') {
+            return { ok: false, reason: 'Only a not-applicable analysis can be confirmed as not affected.' };
+        }
+        if (['accepted', 'edited', 'confirmed_aligned', 'confirmed_not_applicable'].includes(event.disposition)
+            && preview.proposalContractVersion === 1
+            && event.proposalContentHash !== alignmentProposalContentHash(proposal)) {
+            return { ok: false, reason: 'The proposal changed before this review could be recorded.' };
+        }
+        if (event.disposition === 'edited') {
+            const proposed = proposal.proposedValue;
+            const supportsWordingEdit = typeof proposed === 'string'
+                || (Array.isArray(proposed) && proposed.every(item => typeof item === 'string'))
+                || proposal.target.entityType === 'assumption';
+            if (!supportsWordingEdit) {
+                return { ok: false, reason: 'This proposal requires a typed value and cannot be replaced with free-text wording.' };
+            }
+        }
         if (assessment?.status !== 'fresh' || preview.status !== 'ready') {
             return { ok: false, reason: 'Refresh the impact preview before reviewing its alignment changes.' };
         }
@@ -246,8 +277,23 @@ export function appendDecisionEvent(
         ));
         if (latestReview?.type === 'alignment_change_reviewed'
             && latestReview.disposition === event.disposition
-            && stableEventValue(latestReview.editedValue) === stableEventValue(event.editedValue)) {
+            && stableEventValue(latestReview.editedValue) === stableEventValue(event.editedValue)
+            && latestReview.proposalContentHash === event.proposalContentHash) {
             return { ok: true, record, duplicate: true };
+        }
+    }
+    if (event.type === 'alignment_context_provided') {
+        if (!['confirmed', 'rejected'].includes(projectDecision(record).status)) {
+            return { ok: false, reason: 'Resolve the decision before adding plan-alignment context.' };
+        }
+        const assessment = (record.assessments ?? []).find(item => item.impactPreview?.id === event.impactPreviewId);
+        const preview = assessment?.impactPreview;
+        if (!preview?.alignmentProposals?.some(proposal => proposal.id === event.proposalId)) {
+            return { ok: false, reason: 'Alignment context does not belong to this decision preview.' };
+        }
+        if (assessment?.status !== 'fresh' || preview.status !== 'ready'
+            || preview.decisionEventId !== projectDecision(record).latestVerdictEventId) {
+            return { ok: false, reason: 'Refresh the impact preview before adding alignment context.' };
         }
     }
     const withEvent: PlanningRecord = {

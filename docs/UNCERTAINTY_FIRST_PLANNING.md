@@ -99,8 +99,43 @@ The first refinement phase closes the gap between deciding and propagating:
 
 The phase remains deliberately non-destructive. It does not silently rewrite
 confirmed prose, auto-regenerate artifacts, add a readiness score, or turn the
-planning flow into a wizard. Complex affected locations remain review targets
-when Synapse lacks enough structured evidence to propose a safe edit.
+planning flow into a wizard.
+
+The second refinement phase adds bounded reasoning for complex review targets:
+
+- a broad relevance signal (for example, a user-flow or data-model collection)
+  is expanded into locally enumerated scalar leaves before the model sees it;
+- the model must choose one supplied leaf, quote its exact current value, cite
+  the user verdict and target evidence, and either propose one same-type
+  replacement or explain why more information is needed;
+- ids, reference fields, user-confirmation fields, timestamps, and other
+  authority-bearing leaves are never offered as candidate targets;
+- every applicable proposal is rebound locally to the plan version, verdict,
+  target value, preserved surrounding content, evidence hashes, model, and
+  provider before it enters the existing per-change review;
+- the user's review event records a canonical hash of the exact proposal shown,
+  so changing a proposal and its patch together cannot reuse an earlier
+  acceptance;
+- users may request an initial interpretation, provide missing context, or ask
+  for a different interpretation; that context is preserved as user-authored
+  evidence but never treated as a verdict, and the result remains pending until
+  they separately accept or edit it;
+- model conclusions distinguish impact relevance, reasoning confidence, and
+  whether evidence is direct, a supported inference, or merely plausible;
+  plausible inference can identify a review target but cannot become an
+  applicable plan change;
+- already-aligned and not-applicable conclusions remain explicit review states
+  with their own hash-bound user confirmations, rather than being collapsed
+  into a rejection or a generated change; if the analysis changes, confirmation
+  returns to pending;
+- rejected, malformed, stale, redirected, overbroad, multi-leaf, or failed
+  analysis leaves the original Phase 1 review target intact.
+
+This remains a replace-only capability for existing scalar leaves. Adding or
+removing structured items, creating missing optional fields, changing identity
+or reference keys, and rewriting architecture prose across multiple claims stay
+review-only. Those limits are intentional: relevance and fluent wording are not
+permission to mutate the plan.
 
 ## Future planning intelligence
 
@@ -110,10 +145,10 @@ new approval systems:
 1. **Build-readiness review:** turn the current categorical projection into a
    version-pinned review that can explain missing evidence and challenge whether
    an override remains reasonable after the plan changes.
-2. **Decision impact analysis:** extend the current version-bound, per-change
-   alignment review with stronger semantic proposal generation, dependency-path
-   evidence, and selective artifact update plans without silently rewriting
-   confirmed outputs.
+2. **Selective downstream update planning:** extend the current version-bound,
+   per-change alignment review into dependency-path evidence and selective
+   artifact update plans without silently regenerating or rewriting confirmed
+   outputs.
 3. **Assumption validation:** let users attach evidence, validation methods, and
    outcomes to material assumptions; distinguish “confirmed by the user” from
    “supported by evidence.” This is explicitly a future task, not inferred from

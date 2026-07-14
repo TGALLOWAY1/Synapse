@@ -254,9 +254,10 @@ describe('compareAndAppendStructuredPRD', () => {
         if (!impact.ok) throw new Error(impact.reason);
         useProjectStore.setState({ planningRecords: { [projectId]: [{ ...record, assessments: [impact.assessment] }] } });
         const proposalId = impact.preview.alignmentProposals![0].id;
+        const proposalContentHash = impact.preview.alignmentProposals![0].contract?.proposalContentHash;
         const reviewedEvent = useProjectStore.getState().appendPlanningDecisionEvent(projectId, record.id, {
             id: 'accept-audience', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
-            impactPreviewId: impact.preview.id, proposalId, disposition: 'accepted', at: 4,
+            impactPreviewId: impact.preview.id, proposalId, disposition: 'accepted', proposalContentHash, at: 4,
         });
         expect(reviewedEvent.ok).toBe(true);
         const reviewedRecord = useProjectStore.getState().planningRecords[projectId][0];

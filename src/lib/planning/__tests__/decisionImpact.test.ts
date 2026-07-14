@@ -93,7 +93,7 @@ describe('decision impact preview', () => {
         const accepted = appendDecisionEvent(withAssessment, {
             id: 'accept-change', planningRecordId: decision.id, type: 'alignment_change_reviewed', actor: 'user',
             impactPreviewId: result.preview.id, proposalId: result.preview.alignmentProposals![0].id,
-            disposition: 'accepted', at: 11,
+            disposition: 'accepted', proposalContentHash: result.preview.alignmentProposals![0].contract?.proposalContentHash, at: 11,
         });
         if (!accepted.ok) throw new Error(accepted.reason);
         const reviewed = buildReviewedDecisionImpact({
@@ -106,7 +106,8 @@ describe('decision impact preview', () => {
         const edited = appendDecisionEvent(accepted.record, {
             id: 'edit-change', planningRecordId: decision.id, type: 'alignment_change_reviewed', actor: 'user',
             impactPreviewId: result.preview.id, proposalId: result.preview.alignmentProposals![0].id,
-            disposition: 'edited', editedValue: 'Independent professional creators', at: 12,
+            disposition: 'edited', editedValue: 'Independent professional creators',
+            proposalContentHash: result.preview.alignmentProposals![0].contract?.proposalContentHash, at: 12,
         });
         if (!edited.ok) throw new Error(edited.reason);
         expect(buildReviewedDecisionImpact({
@@ -166,6 +167,7 @@ describe('decision impact preview', () => {
             {
                 id: 'edit-source', planningRecordId: record.id, type: 'alignment_change_reviewed' as const, actor: 'user' as const,
                 impactPreviewId: result.preview.id, proposalId: proposals[0].id, disposition: 'edited' as const,
+                proposalContentHash: proposals[0].contract?.proposalContentHash,
                 editedValue: 'Allow one guest project before signup', editedSummary: 'Use the preferred guest-limit wording', at: 11,
             },
             {
@@ -199,6 +201,7 @@ describe('decision impact preview', () => {
             {
                 id: 'accept-source', planningRecordId: current.id, type: 'alignment_change_reviewed' as const, actor: 'user' as const,
                 impactPreviewId: result.preview.id, proposalId: proposals[0].id, disposition: 'accepted' as const, at: 11,
+                proposalContentHash: proposals[0].contract?.proposalContentHash,
             },
             {
                 id: 'defer-dependent', planningRecordId: current.id, type: 'alignment_change_reviewed' as const, actor: 'user' as const,
@@ -218,7 +221,7 @@ describe('decision impact preview', () => {
         if (!applied.ok) throw new Error(applied.reason);
         const residual = buildResidualDecisionImpact({
             record: applied.record, preview: result.preview, structuredPRD: reviewed.nextPrd,
-            baselineSpineVersionId: 's2', now: () => 14,
+            baselineSpineVersionId: 's2', appliedProposalIds: reviewed.acceptedProposalIds, now: () => 14,
         });
         if (!residual) throw new Error('Expected a residual review');
         expect(residual.preview.status).toBe('ready');

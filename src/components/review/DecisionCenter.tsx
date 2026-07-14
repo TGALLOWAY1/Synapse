@@ -27,10 +27,13 @@ export type DecisionCenterPreviewView = {
         proposedSummary?: string;
         reason: string;
         confidence: 'definite' | 'likely' | 'possible';
+        reasoningConfidence?: 'high' | 'medium' | 'low';
+        evidenceCharacter?: 'direct' | 'supported_inference' | 'plausible_inference';
         requiresInput?: boolean;
         requiredForVerdictAlignment?: boolean;
+        canEditWording?: boolean;
         canRequestReasoning?: boolean;
-        analysisStatus?: 'advisory_candidate' | 'bounded_applicable' | 'needs_input' | 'rejected' | 'failed';
+        analysisStatus?: 'advisory_candidate' | 'bounded_applicable' | 'already_aligned' | 'not_applicable' | 'needs_input' | 'rejected' | 'failed';
         analysisMethod?: 'deterministic' | 'model';
         analysisModel?: string;
         analysisProvider?: string;
@@ -40,7 +43,7 @@ export type DecisionCenterPreviewView = {
         analysisEvidence?: Array<{ label: string; excerpt?: string }>;
         analysisBusy?: boolean;
         analysisError?: string;
-        disposition: 'pending' | 'accepted' | 'rejected' | 'edited' | 'deferred';
+        disposition: 'pending' | 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable';
         editedSummary?: string;
     }>;
 };
@@ -72,7 +75,7 @@ interface Props {
     onDecide: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
     onPreviewImpact: (recordId: string) => void;
     onApplyToPlan: (recordId: string) => void;
-    onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred', editedValue?: string) => void;
+    onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable', editedValue?: string) => void;
     onRequestAlignmentProposal?: (
         recordId: string,
         previewId: string,
@@ -88,11 +91,16 @@ const previewStatusLabel: Record<DecisionCenterPreviewView['status'], string> = 
 };
 const proposalDispositionLabel: Record<NonNullable<DecisionCenterPreviewView['proposals']>[number]['disposition'], string> = {
     pending: 'Needs review', accepted: 'Will update', rejected: 'Keeping current', edited: 'Edited', deferred: 'Deferred',
+    confirmed_aligned: 'Confirmed aligned', confirmed_not_applicable: 'Confirmed not affected',
 };
 const proposalAnalysisLabel: Record<NonNullable<NonNullable<DecisionCenterPreviewView['proposals']>[number]['analysisStatus']>, string> = {
     advisory_candidate: 'Advisory target', bounded_applicable: 'Ready to review', needs_input: 'Needs context',
+    already_aligned: 'Appears already aligned', not_applicable: 'Appears not affected',
     rejected: 'No safe proposal', failed: 'Proposal unavailable',
 };
+const evidenceCharacterLabel = {
+    direct: 'Direct evidence', supported_inference: 'Supported inference', plausible_inference: 'Plausible inference',
+} as const;
 
 export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan, onReviewAlignmentProposal, onRequestAlignmentProposal }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
@@ -282,7 +290,7 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                         <p className="text-xs font-semibold text-neutral-900">{proposal.targetLabel}</p>
                                                         <span className="rounded-full bg-neutral-100 px-2 py-1 text-[10px] font-semibold uppercase tracking-wide text-neutral-600">{proposalDispositionLabel[proposal.disposition]}</span>
                                                     </div>
-                                                    <p className="mt-1 text-[11px] text-neutral-500">{proposal.targetKind.replace('_', ' ')} · {proposal.section} · {proposal.confidence} impact</p>
+                                                    <p className="mt-1 text-[11px] text-neutral-500">{proposal.targetKind.replace('_', ' ')} · {proposal.section} · {proposal.confidence} impact relevance</p>
                                                     {proposal.beforeSummary && <p className="mt-2 text-xs text-neutral-500">Current: {proposal.beforeSummary}</p>}
                                                     {proposal.proposedSummary && <p className="mt-1 text-sm font-medium text-neutral-900">Proposed: {proposal.editedSummary || proposal.proposedSummary}</p>}
                                                     <p className="mt-2 text-xs leading-5 text-neutral-600">{proposal.reason}</p>
@@ -290,7 +298,8 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                         <div className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-xs text-neutral-700" aria-label={`Proposal analysis for ${proposal.targetLabel}`}>
                                                             <div className="flex flex-wrap items-center gap-2">
                                                                 <span className="font-semibold text-neutral-900">{proposalAnalysisLabel[proposal.analysisStatus]}</span>
-                                                                <span>· {proposal.confidence} confidence</span>
+                                                                {proposal.reasoningConfidence && <span>· {proposal.reasoningConfidence} reasoning confidence</span>}
+                                                                {proposal.evidenceCharacter && <span>· {evidenceCharacterLabel[proposal.evidenceCharacter]}</span>}
                                                                 {proposal.analysisMethod && <span>· {proposal.analysisMethod === 'model' ? 'Synapse reasoning' : 'Verified rule'}</span>}
                                                             </div>
                                                             {(proposal.analysisAmbiguity || proposal.analysisFailureReason) && <p className="mt-1 leading-5"><span className="font-semibold">Ambiguity or limit:</span> {proposal.analysisAmbiguity || proposal.analysisFailureReason}</p>}
@@ -317,25 +326,31 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                         <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">Additional input is required before Synapse can safely propose an edit.</div>
                                                     ) : (!proposal.analysisStatus || proposal.analysisStatus === 'bounded_applicable') && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal ? (
                                                         <div className="mt-3">
-                                                            <input
+                                                            {proposal.canEditWording !== false && <input
                                                                 aria-label={`Edit proposed change for ${proposal.targetLabel}`}
                                                                 value={proposalEdits[proposal.id] ?? ''}
                                                                 onChange={event => setProposalEdits(current => ({ ...current, [proposal.id]: event.target.value }))}
                                                                 placeholder="Preserve your preferred wording (optional)"
                                                                 className="w-full rounded-md border border-neutral-200 px-3 py-2 text-xs outline-none focus:border-indigo-400"
-                                                            />
-                                                            <div className="mt-2 flex flex-wrap gap-2">
-                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'accepted')} className="min-h-9 rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white">Accept</button>
-                                                                <button type="button" disabled={!(proposalEdits[proposal.id] ?? '').trim()} onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'edited', proposalEdits[proposal.id].trim())} className="min-h-9 rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 disabled:opacity-40">Use my wording</button>
-                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">{proposal.requiredForVerdictAlignment ? 'Keep current (unaligned)' : 'Keep current'}</button>
-                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Defer</button>
+                                                            />}
+                                                            <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'accepted')} className="min-h-11 w-full rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white sm:w-auto">Accept</button>
+                                                                {proposal.canEditWording !== false && <button type="button" disabled={!(proposalEdits[proposal.id] ?? '').trim()} onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'edited', proposalEdits[proposal.id].trim())} className="min-h-11 w-full rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 disabled:opacity-40 sm:w-auto">Use my wording</button>}
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">{proposal.requiredForVerdictAlignment ? 'Keep current (unaligned)' : 'Keep current'}</button>
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Defer</button>
                                                             </div>
                                                         </div>
                                                     ) : null}
-                                                    {(proposal.requiresInput || (proposal.analysisStatus && proposal.analysisStatus !== 'bounded_applicable')) && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal && (
-                                                        <div className="mt-2 flex flex-wrap gap-2">
-                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Not affected</button>
-                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Defer review</button>
+                                                    {(proposal.analysisStatus === 'already_aligned' || proposal.analysisStatus === 'not_applicable') && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal && (
+                                                        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, proposal.analysisStatus === 'already_aligned' ? 'confirmed_aligned' : 'confirmed_not_applicable')} className="min-h-11 w-full rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 sm:w-auto">{proposal.analysisStatus === 'already_aligned' ? 'Confirm already aligned' : 'Confirm not affected'}</button>
+                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Defer review</button>
+                                                        </div>
+                                                    )}
+                                                    {(proposal.requiresInput || (proposal.analysisStatus && !['bounded_applicable', 'already_aligned', 'not_applicable'].includes(proposal.analysisStatus))) && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal && (
+                                                        <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Not affected</button>
+                                                            <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Defer review</button>
                                                         </div>
                                                     )}
                                                     {!readOnly && proposal.canRequestReasoning && selected.preview?.status === 'ready' && onRequestAlignmentProposal && (
@@ -366,7 +381,7 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                                             type="button"
                                                                             disabled={proposal.analysisBusy || ((proposalRequest.kind === 'different_interpretation' || (proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input')) && !proposalGuidance.trim())}
                                                                             onClick={() => { void requestAlignmentProposal(proposal.id); }}
-                                                                            className="min-h-11 rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white disabled:opacity-40"
+                                                                            className="min-h-11 w-full rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white disabled:opacity-40 sm:w-auto"
                                                                         >
                                                                             {proposal.analysisBusy
                                                                                 ? 'Preparing proposal…'
@@ -376,19 +391,19 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                                                         ? 'Try again with context'
                                                                                         : 'Prepare bounded proposal'}
                                                                         </button>
-                                                                        <button type="button" disabled={proposal.analysisBusy} onClick={() => { setProposalRequest(undefined); setProposalGuidance(''); }} className="min-h-11 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Cancel</button>
+                                                                        <button type="button" disabled={proposal.analysisBusy} onClick={() => { setProposalRequest(undefined); setProposalGuidance(''); }} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Cancel</button>
                                                                     </div>
                                                                 </div>
                                                             ) : (
                                                                 <button
                                                                     type="button"
                                                                     onClick={() => {
-                                                                        setProposalRequest({ proposalId: proposal.id, kind: proposal.analysisStatus === 'bounded_applicable' ? 'different_interpretation' : 'missing_info' });
+                                                                        setProposalRequest({ proposalId: proposal.id, kind: ['bounded_applicable', 'already_aligned', 'not_applicable'].includes(proposal.analysisStatus ?? '') ? 'different_interpretation' : 'missing_info' });
                                                                         setProposalGuidance('');
                                                                     }}
                                                                     className="min-h-11 w-full rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 sm:w-auto"
                                                                 >
-                                                                    {proposal.analysisStatus === 'bounded_applicable'
+                                                                    {['bounded_applicable', 'already_aligned', 'not_applicable'].includes(proposal.analysisStatus ?? '')
                                                                         ? 'Request different interpretation'
                                                                         : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
                                                                             ? 'Provide missing information'

@@ -85,7 +85,9 @@ describe('DecisionCenter', () => {
             },
         };
         render(<DecisionCenter records={[record]} {...props} />);
-        fireEvent.click(screen.getByRole('button', { name: 'Accept' }));
+        const accept = screen.getByRole('button', { name: 'Accept' });
+        expect(accept).toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
+        fireEvent.click(accept);
         expect(props.onReviewAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'change-1', 'accepted');
 
         const wording = screen.getByLabelText('Edit proposed change for Primary user');
@@ -199,6 +201,52 @@ describe('DecisionCenter', () => {
             kind: 'different_interpretation', guidance: 'Keep optional invitations, but remove administrator ownership.',
         });
         expect(props.onReviewAlignmentProposal).not.toHaveBeenCalled();
+    });
+
+    it('preserves aligned and not-applicable reasoning for user confirmation or reinterpretation', () => {
+        const props = callbacks();
+        const record: DecisionCenterRecordView = {
+            ...openRecord, status: 'confirmed', resolution: 'Independent creators',
+            preview: {
+                id: 'preview', status: 'ready', affectedPrdSections: ['Architecture', 'Constraints'], affectedArtifactLabels: [],
+                proposals: [
+                    {
+                        id: 'architecture-aligned', targetLabel: 'Architecture approach', targetKind: 'claim', section: 'Architecture',
+                        beforeSummary: 'Local-first application', reason: 'The current architecture already supports the decision.',
+                        confidence: 'likely', reasoningConfidence: 'high', evidenceCharacter: 'supported_inference',
+                        analysisStatus: 'already_aligned', analysisMethod: 'model', canRequestReasoning: false, disposition: 'pending',
+                    },
+                    {
+                        id: 'constraint-unaffected', targetLabel: 'Export retention', targetKind: 'constraint', section: 'Constraints',
+                        reason: 'The decision does not govern export retention.', confidence: 'possible', reasoningConfidence: 'medium',
+                        evidenceCharacter: 'direct', analysisStatus: 'not_applicable', analysisMethod: 'model',
+                        canRequestReasoning: true, disposition: 'pending',
+                    },
+                ],
+            },
+        };
+        render(<DecisionCenter records={[record]} {...props} />);
+
+        expect(screen.getByText('Appears already aligned')).toBeInTheDocument();
+        expect(screen.getByText('Appears not affected')).toBeInTheDocument();
+        expect(screen.getByText(/high reasoning confidence/i)).toBeInTheDocument();
+        expect(screen.getByText(/Supported inference/)).toBeInTheDocument();
+        const confirmAligned = screen.getByRole('button', { name: 'Confirm already aligned' });
+        expect(confirmAligned).toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
+        fireEvent.click(confirmAligned);
+        expect(props.onReviewAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'architecture-aligned', 'confirmed_aligned');
+        fireEvent.click(screen.getByRole('button', { name: 'Confirm not affected' }));
+        expect(props.onReviewAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'constraint-unaffected', 'confirmed_not_applicable');
+
+        expect(screen.getAllByRole('button', { name: 'Request different interpretation' })).toHaveLength(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Request different interpretation' }));
+        fireEvent.change(screen.getByLabelText('What should Synapse interpret differently?'), {
+            target: { value: 'Reconsider whether exports depend on project ownership.' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Prepare another interpretation' }));
+        expect(props.onRequestAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'constraint-unaffected', {
+            kind: 'different_interpretation', guidance: 'Reconsider whether exports depend on project ownership.',
+        });
     });
 
     it('makes keeping a verdict-defining source claim visibly unaligned', () => {

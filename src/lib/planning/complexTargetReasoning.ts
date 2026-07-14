@@ -17,6 +17,7 @@ import {
     validateAlignmentProposalContract,
 } from './decisionImpact';
 import { projectDecision } from './decisionProjection';
+import { alignmentContextContentHash, alignmentProposalContentHash } from './proposalIntegrity';
 
 export const COMPLEX_TARGET_KINDS = [
     'requirement',
@@ -31,6 +32,7 @@ export const COMPLEX_TARGET_KINDS = [
 export type ComplexTargetKind = typeof COMPLEX_TARGET_KINDS[number];
 export type ComplexReasoningApplicability = 'applicable' | 'already_aligned' | 'needs_input' | 'not_applicable';
 export type ComplexReasoningConfidence = 'high' | 'medium' | 'low';
+export type ComplexReasoningEvidenceCharacter = 'direct' | 'supported_inference' | 'plausible_inference';
 
 export type ComplexReasoningCause = {
     id: string;
@@ -82,6 +84,7 @@ export type ComplexPlanningTargetCandidate = {
     evidence: ComplexReasoningEvidence[];
     reasoning: string;
     confidence: ComplexReasoningConfidence;
+    evidenceCharacter: ComplexReasoningEvidenceCharacter;
     applicability: ComplexReasoningApplicability;
     operation?: 'replace' | 'add' | 'remove';
     proposedValue?: unknown;
@@ -151,6 +154,7 @@ export type ComplexTargetReasoningOptions = {
 
 const APPLICABILITIES: ComplexReasoningApplicability[] = ['applicable', 'already_aligned', 'needs_input', 'not_applicable'];
 const CONFIDENCES: ComplexReasoningConfidence[] = ['high', 'medium', 'low'];
+const EVIDENCE_CHARACTERS: ComplexReasoningEvidenceCharacter[] = ['direct', 'supported_inference', 'plausible_inference'];
 const OPERATIONS = ['replace', 'add', 'remove', 'none'] as const;
 
 /** Broad Phase 1 locations accepted as relevance scopes. The model never gets
@@ -186,13 +190,14 @@ export const complexTargetReasoningSchema = {
                     proposedSummary: { type: 'STRING' },
                     reasoning: { type: 'STRING' },
                     confidence: { type: 'STRING', enum: CONFIDENCES },
+                    evidenceCharacter: { type: 'STRING', enum: EVIDENCE_CHARACTERS },
                     ambiguity: { type: 'STRING' },
                     questions: { type: 'ARRAY', maxItems: 5, items: { type: 'STRING' } },
                 },
                 required: [
                     'targetId', 'leafRefId', 'currentValueJson', 'causeRefId', 'evidenceRefIds',
                     'applicability', 'operation', 'proposedValueJson', 'proposedSummary',
-                    'reasoning', 'confidence', 'ambiguity', 'questions',
+                    'reasoning', 'confidence', 'evidenceCharacter', 'ambiguity', 'questions',
                 ],
             },
         },
@@ -461,6 +466,7 @@ Authority and safety rules:
 - Use already_aligned when the current value already expresses the cause.
 - Do not infer user intent, invent requirements, broaden scope, or resolve ambiguity by guessing.
 - Do not claim a proposal is applicable merely because it sounds plausible.
+- Classify evidence as direct, supported_inference, or plausible_inference. Plausible inference may identify a review target, but it can never be applicable.
 - Return only the schema-conforming JSON object.`;
 
 function buildPrompt(
@@ -492,6 +498,7 @@ function buildPrompt(
         `Required causeRefId: cause:${input.cause.id}`,
         `Required user evidence refs: ${JSON.stringify(input.requiredEvidenceRefIds ?? [])}`,
         'Choose exactly one allowed scalar leaf per target. For applicability=applicable, operation must be replace and proposedValueJson must be a same-type scalar JSON value.',
+        'Evidence character must be direct, supported_inference, or plausible_inference. plausible_inference cannot be applicability=applicable.',
         'For already_aligned, needs_input, or not_applicable, operation must be none and proposedValueJson must be an empty string.',
     ].join('\n');
 }
@@ -580,10 +587,15 @@ function parseAndValidate(
         if (unknownEvidence.length) errors.push(`Candidate ${targetId} cites unsupported evidence: ${unknownEvidence.join(', ')}.`);
         const applicability = rawCandidate.applicability as ComplexReasoningApplicability;
         const confidence = rawCandidate.confidence as ComplexReasoningConfidence;
+        const evidenceCharacter = rawCandidate.evidenceCharacter as ComplexReasoningEvidenceCharacter;
         const operation = rawCandidate.operation as typeof OPERATIONS[number];
         const questions = trimStrings(rawCandidate.questions);
         if (!APPLICABILITIES.includes(applicability)) errors.push(`Candidate ${targetId} has invalid applicability.`);
         if (!CONFIDENCES.includes(confidence)) errors.push(`Candidate ${targetId} has invalid confidence.`);
+        if (!EVIDENCE_CHARACTERS.includes(evidenceCharacter)) errors.push(`Candidate ${targetId} has invalid evidence character.`);
+        if (applicability === 'applicable' && evidenceCharacter === 'plausible_inference') {
+            errors.push(`Applicable candidate ${targetId} cannot rely on plausible inference.`);
+        }
         if (!OPERATIONS.includes(operation)) errors.push(`Candidate ${targetId} has invalid operation.`);
         if (!questions || questions.length > 5) errors.push(`Candidate ${targetId} has invalid questions.`);
         if (!nonEmpty(rawCandidate.reasoning)) errors.push(`Candidate ${targetId} requires reasoning.`);
@@ -634,6 +646,7 @@ function parseAndValidate(
             evidence: evidenceRefIds.flatMap(id => evidenceById.get(id) ? [evidenceById.get(id)!] : []),
             reasoning: typeof rawCandidate.reasoning === 'string' ? rawCandidate.reasoning.trim() : '',
             confidence,
+            evidenceCharacter,
             applicability,
             ...(operation !== 'none' ? { operation } : {}),
             ...(proposedValue !== undefined ? { proposedValue } : {}),
@@ -720,9 +733,8 @@ export async function reasonAboutComplexPlanningTargets(
 
 /**
  * Safe bridge into Phase 1's impact builder. Only a validated, applicable
- * one-scalar replacement becomes a bounded hint. Ambiguity becomes a
- * non-applicable needs-input hint; aligned/not-applicable candidates create no
- * mutation candidate at all.
+ * one-scalar replacement becomes a bounded hint. Every other truthful model
+ * outcome remains review-only so the user can confirm or reinterpret it.
  */
 export function complexCandidateToAlignmentHint(
     candidate: ComplexPlanningTargetCandidate,
@@ -730,7 +742,24 @@ export function complexCandidateToAlignmentHint(
 ): PlanningAlignmentHint | undefined {
     const confidence: PlanningAlignmentHint['confidence'] = candidate.confidence === 'low' ? 'possible' : 'likely';
     const evidenceSummary = candidate.evidence.map(item => `${item.label ?? item.sourceType.replaceAll('_', ' ')}: ${item.excerpt}`);
-    if (candidate.applicability === 'already_aligned' || candidate.applicability === 'not_applicable') return undefined;
+    if (candidate.applicability === 'already_aligned' || candidate.applicability === 'not_applicable') {
+        return {
+            target: candidate.target.location,
+            operation: 'replace',
+            reason: candidate.reasoning,
+            confidence,
+            reasoningConfidence: candidate.confidence,
+            evidenceCharacter: candidate.evidenceCharacter,
+            analysisStatus: candidate.applicability,
+            analysisMethod: 'model',
+            model: provenance.model,
+            provider: provenance.provider ?? 'gemini',
+            ambiguity: candidate.ambiguity,
+            questions: candidate.questions,
+            evidenceSummary,
+            requiredForVerdictAlignment: false,
+        };
+    }
     if (candidate.applicability === 'needs_input') {
         const questionText = candidate.questions.length ? ` Questions: ${candidate.questions.join(' ')}` : '';
         return {
@@ -738,6 +767,8 @@ export function complexCandidateToAlignmentHint(
             operation: 'replace',
             reason: candidate.reasoning,
             confidence,
+            reasoningConfidence: candidate.confidence,
+            evidenceCharacter: candidate.evidenceCharacter,
             analysisStatus: 'needs_input',
             analysisMethod: 'model',
             model: provenance.model,
@@ -757,6 +788,8 @@ export function complexCandidateToAlignmentHint(
         proposedSummary: candidate.proposedSummary,
         reason: candidate.reasoning,
         confidence,
+        reasoningConfidence: candidate.confidence,
+        evidenceCharacter: candidate.evidenceCharacter,
         analysisStatus: 'bounded_applicable',
         analysisMethod: 'model',
         model: provenance.model,
@@ -783,6 +816,7 @@ export function integrateComplexCandidateIntoPreview(input: {
     candidate: ComplexPlanningTargetCandidate;
     record: PlanningRecord;
     structuredPRD: StructuredPRD;
+    currentSpineVersionId: string;
     model: string;
     provider?: string;
 }): IntegrateComplexCandidateResult {
@@ -806,6 +840,9 @@ export function integrateComplexCandidateIntoPreview(input: {
     if (input.preview.baseline.spineContentHash !== planningContentHash(input.structuredPRD)) {
         return { ok: false, reason: 'The working plan changed after this preview was created.' };
     }
+    if (input.preview.baseline.spineVersionId !== input.currentSpineVersionId) {
+        return { ok: false, reason: 'The working plan version changed after this preview was created.' };
+    }
     if (projectDecision(input.record).latestVerdictEventId !== input.preview.decisionEventId) {
         return { ok: false, reason: 'The decision changed after this preview was created.' };
     }
@@ -819,8 +856,8 @@ export function integrateComplexCandidateIntoPreview(input: {
         : input.candidate.applicability === 'needs_input'
             ? 'needs_input'
             : input.candidate.applicability === 'already_aligned'
-                ? 'advisory_candidate'
-                : 'rejected';
+                ? 'already_aligned'
+                : 'not_applicable';
     const mask = typeof current.value === 'string'
         ? '__synapse_preserved_target__'
         : typeof current.value === 'number'
@@ -842,12 +879,28 @@ export function integrateComplexCandidateIntoPreview(input: {
         decisionEventId: input.preview.decisionEventId,
         targetValueHash: planningContentHash(current.value),
         preservedContentHash: planningContentHash(masked),
-        evidence: input.record.evidence.map(evidence => ({
-            refId: evidence.id,
-            sourceVersionId: evidence.sourceVersionId,
-            contentHash: evidence.excerptHash ?? planningContentHash({ locator: evidence.locator, excerpt: evidence.excerpt }),
-        })),
+        evidence: [
+            ...input.record.evidence.map(evidence => ({
+                refId: evidence.id,
+                source: 'record_evidence' as const,
+                sourceVersionId: evidence.sourceVersionId,
+                contentHash: evidence.excerptHash ?? planningContentHash({ locator: evidence.locator, excerpt: evidence.excerpt }),
+            })),
+            ...(input.record.events ?? []).flatMap(event => (
+                event.type === 'alignment_context_provided'
+                && input.candidate.evidence.some(evidence => evidence.id === event.id)
+                    ? [{
+                        refId: event.id,
+                        source: 'user_context' as const,
+                        sourceVersionId: input.preview.baseline.spineVersionId,
+                        contentHash: alignmentContextContentHash(event),
+                    }]
+                    : []
+            )),
+        ],
         maxTouchedTargets: 1,
+        reasoningConfidence: input.candidate.confidence,
+        evidenceCharacter: input.candidate.evidenceCharacter,
         failureReason: input.candidate.applicability === 'needs_input'
             ? input.candidate.ambiguity
             : input.candidate.applicability === 'not_applicable' ? input.candidate.reasoning : undefined,
@@ -857,7 +910,7 @@ export function integrateComplexCandidateIntoPreview(input: {
     const applicable = input.candidate.applicability === 'applicable'
         && input.candidate.operation === 'replace'
         && input.candidate.proposedValue !== undefined;
-    const nextProposal: AlignmentProposal = {
+    const unboundProposal: AlignmentProposal = {
         id: proposalId,
         target: input.candidate.target.location,
         operation: applicable ? 'replace' : 'review',
@@ -866,12 +919,21 @@ export function integrateComplexCandidateIntoPreview(input: {
         proposedValue: applicable ? input.candidate.proposedValue : undefined,
         reason: input.candidate.reasoning,
         confidence: input.candidate.confidence === 'low' ? 'possible' : 'likely',
+        reasoningConfidence: input.candidate.confidence,
+        evidenceCharacter: input.candidate.evidenceCharacter,
         contract,
         requiredForVerdictAlignment: prior.requiredForVerdictAlignment,
         requiresInput: input.candidate.applicability === 'needs_input',
         ambiguity: input.candidate.ambiguity,
         questions: input.candidate.questions,
         evidenceSummary,
+    };
+    const nextProposal: AlignmentProposal = {
+        ...unboundProposal,
+        contract: {
+            ...contract,
+            proposalContentHash: alignmentProposalContentHash(unboundProposal),
+        },
     };
     const proposals = (input.preview.alignmentProposals ?? []).map(proposal =>
         proposal.id === input.replaceProposalId ? nextProposal : proposal,

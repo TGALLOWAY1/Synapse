@@ -3,12 +3,14 @@ import type { DecisionImpactPreview, PlanningAlignmentHint, PlanningRecord, Stru
 import { appendDecisionEvent } from '../decisionProjection';
 import {
     applyPlanningTargetValue,
+    alignmentProposalReviews,
     buildDecisionImpact,
     buildReviewedDecisionImpact,
     integrateAlignmentHintIntoPreview,
     readPlanningTargetValue,
     validateAlignmentProposalContract,
 } from '../decisionImpact';
+import { alignmentProposalContentHash } from '../proposalIntegrity';
 
 const prd: StructuredPRD = {
     vision: 'Help enterprise administrators plan.',
@@ -39,6 +41,7 @@ const exactModelHint = (): PlanningAlignmentHint => ({
     target: { kind: 'behavior', section: 'UX Pages', label: 'Home purpose', jsonPath: '$.uxPages[0].purpose', entityType: 'ux_page', entityId: 'home' },
     operation: 'replace', proposedValue: 'Manage local projects', proposedSummary: 'Manage local projects',
     reason: 'Shared-project wording conflicts with the local-only decision.', confidence: 'definite',
+    reasoningConfidence: 'high', evidenceCharacter: 'direct',
     analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini', analysisStatus: 'bounded_applicable',
 });
 
@@ -49,17 +52,23 @@ const build = (record: PlanningRecord) => {
 };
 
 describe('alignment proposal safety contract', () => {
-    it('separates bounded, needs-input, rejected, and failed analysis without model self-acceptance', () => {
+    it('separates bounded, aligned, not-applicable, needs-input, rejected, and failed analysis without model self-acceptance', () => {
         const result = build(makeRecord([
             exactModelHint(),
+            { target: { kind: 'claim', section: 'Architecture', label: 'Architecture', jsonPath: '$.architecture' }, operation: 'replace', reason: 'Current architecture already reflects the decision.', analysisStatus: 'already_aligned', analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini', reasoningConfidence: 'high', evidenceCharacter: 'supported_inference' },
+            { target: { kind: 'constraint', section: 'Constraints', label: 'Unrelated constraint', jsonPath: '$.constraints[0]' }, operation: 'replace', reason: 'This constraint is unrelated.', analysisStatus: 'not_applicable', analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini', reasoningConfidence: 'medium', evidenceCharacter: 'direct' },
             { target: { kind: 'constraint', section: 'Constraints', label: 'Constraint' }, operation: 'replace', reason: 'Missing target/value', analysisStatus: 'needs_input', analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini' },
             { target: { kind: 'section', section: 'Features', label: 'All features', jsonPath: '$.features' }, operation: 'replace', proposedValue: [], proposedSummary: 'Replace all features', reason: 'Too broad', analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini' },
             { target: { kind: 'api_expectation', section: 'Architecture', label: 'API rule', jsonPath: '$.architecture' }, operation: 'replace', reason: 'Provider failed', analysisStatus: 'failed', analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini', failureReason: 'Invalid response' },
         ]));
         expect(result.preview.proposalContractVersion).toBe(1);
-        expect(result.preview.alignmentProposals?.map(item => item.contract?.analysisStatus).slice(0, 4)).toEqual([
-            'bounded_applicable', 'needs_input', 'rejected', 'failed',
+        expect(result.preview.alignmentProposals?.map(item => item.contract?.analysisStatus).slice(0, 6)).toEqual([
+            'bounded_applicable', 'already_aligned', 'not_applicable', 'needs_input', 'rejected', 'failed',
         ]);
+        expect(result.preview.alignmentProposals?.[0]).toMatchObject({
+            reasoningConfidence: 'high', evidenceCharacter: 'direct',
+            contract: { reasoningConfidence: 'high', evidenceCharacter: 'direct' },
+        });
         expect(result.preview.proposedPrdPatch).toHaveLength(1);
 
         const withAssessment = { ...makeRecord(result.preview.alignmentProposals ? [exactModelHint()] : []), assessments: [result.assessment] };
@@ -74,6 +83,86 @@ describe('alignment proposal safety contract', () => {
         expect(validateAlignmentProposalContract({ record, preview: result.preview, proposal: { ...proposal, contract: undefined }, structuredPRD: prd })).toMatchObject({ ok: false });
         expect(validateAlignmentProposalContract({ record, preview: result.preview, proposal: { ...proposal, proposedValue: 'Tampered' }, structuredPRD: prd })).toMatchObject({ ok: false, reason: 'Proposal value was changed after analysis.' });
         expect(validateAlignmentProposalContract({ record, preview: result.preview, proposal: { ...proposal, contract: { ...proposal.contract!, baselineSpineContentHash: 'tampered' } }, structuredPRD: prd })).toMatchObject({ ok: false });
+    });
+
+    it('records aligned and not-affected confirmations explicitly and returns changed analysis to pending', () => {
+        const alignedHint: PlanningAlignmentHint = {
+            target: { kind: 'claim', section: 'Architecture', label: 'Architecture', jsonPath: '$.architecture' },
+            operation: 'replace', reason: 'The current architecture already reflects the decision.',
+            analysisStatus: 'already_aligned', analysisMethod: 'model', model: 'reasoner-pro', provider: 'gemini',
+            reasoningConfidence: 'high', evidenceCharacter: 'supported_inference',
+        };
+        const record = makeRecord([alignedHint]);
+        const result = build(record);
+        const proposal = result.preview.alignmentProposals![0];
+        const withAssessment: PlanningRecord = { ...record, assessments: [result.assessment] };
+        const wrongMeaning = appendDecisionEvent(withAssessment, {
+            id: 'wrong-meaning', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: result.preview.id, proposalId: proposal.id, disposition: 'confirmed_not_applicable',
+            proposalContentHash: proposal.contract?.proposalContentHash, at: 11,
+        });
+        expect(wrongMeaning).toMatchObject({ ok: false, reason: expect.stringMatching(/not-applicable analysis/i) });
+
+        const confirmed = appendDecisionEvent(withAssessment, {
+            id: 'confirm-aligned', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: result.preview.id, proposalId: proposal.id, disposition: 'confirmed_aligned',
+            proposalContentHash: proposal.contract?.proposalContentHash, at: 11,
+        });
+        if (!confirmed.ok) throw new Error(confirmed.reason);
+        expect(alignmentProposalReviews(confirmed.record, result.preview)[0].disposition).toBe('confirmed_aligned');
+
+        const changedBase = { ...proposal, reason: 'Changed reasoning after confirmation.' };
+        const changedProposal = {
+            ...changedBase,
+            contract: { ...proposal.contract!, proposalContentHash: alignmentProposalContentHash(changedBase) },
+        };
+        const changedPreview: DecisionImpactPreview = {
+            ...result.preview,
+            alignmentProposals: [changedProposal],
+        };
+        expect(alignmentProposalReviews(confirmed.record, changedPreview)[0].disposition).toBe('pending');
+
+        const changedRecord: PlanningRecord = {
+            ...confirmed.record,
+            assessments: confirmed.record.assessments?.map(assessment => assessment.impactPreview?.id === result.preview.id
+                ? { ...assessment, impactPreview: changedPreview }
+                : assessment),
+        };
+        const reconfirmed = appendDecisionEvent(changedRecord, {
+            id: 'reconfirm-aligned', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: changedPreview.id, proposalId: changedProposal.id, disposition: 'confirmed_aligned',
+            proposalContentHash: changedProposal.contract.proposalContentHash, at: 12,
+        });
+        if (!reconfirmed.ok) throw new Error(reconfirmed.reason);
+        expect(reconfirmed.duplicate).toBe(false);
+        expect(alignmentProposalReviews(reconfirmed.record, changedPreview)[0].disposition).toBe('confirmed_aligned');
+    });
+
+    it('binds acceptance to the exact reviewed proposal even when proposal and patch are changed together', () => {
+        const record = makeRecord([exactModelHint()]);
+        const result = build(record);
+        const proposal = result.preview.alignmentProposals![0];
+        const withAssessment: PlanningRecord = { ...record, assessments: [result.assessment] };
+        const accepted = appendDecisionEvent(withAssessment, {
+            id: 'accept-exact', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: result.preview.id, proposalId: proposal.id, disposition: 'accepted',
+            proposalContentHash: proposal.contract?.proposalContentHash, at: 11,
+        });
+        if (!accepted.ok) throw new Error(accepted.reason);
+
+        const changedBase = { ...proposal, proposedValue: 'Manage tampered projects', proposedSummary: 'Manage tampered projects' };
+        const changedProposal = {
+            ...changedBase,
+            contract: { ...proposal.contract!, proposalContentHash: alignmentProposalContentHash(changedBase) },
+        };
+        const changedPreview: DecisionImpactPreview = {
+            ...result.preview,
+            alignmentProposals: [changedProposal],
+            proposedPrdPatch: result.preview.proposedPrdPatch?.map(patch => ({ ...patch, value: 'Manage tampered projects' })),
+        };
+        const reviewed = buildReviewedDecisionImpact({ record: accepted.record, preview: changedPreview, structuredPRD: prd });
+        expect(reviewed.nextPrd).toBeUndefined();
+        expect(reviewed.rejectedProposalIds).toEqual([proposal.id]);
     });
 
     it('rejects stale evidence and changed verdicts at review/apply time', () => {
@@ -96,6 +185,8 @@ describe('alignment proposal safety contract', () => {
         expect(next?.uxPages?.[0]).toEqual({ ...prd.uxPages![0], purpose: 'Manage local projects' });
         expect(next?.constraints).toBe(prd.constraints);
         expect(applyPlanningTargetValue(prd, { ...location, jsonPath: '$.__proto__.polluted' }, 'yes')).toBeUndefined();
+        expect(applyPlanningTargetValue(prd, { ...location, jsonPath: '$.uxPages[0].id' }, 'tampered')).toBeUndefined();
+        expect(applyPlanningTargetValue({ ...prd, features: [{ id: 'f1', name: 'Feature', description: '', userValue: '', complexity: 'low', confirmed: true }] }, { ...location, jsonPath: '$.features[0].confirmed' }, false)).toBeUndefined();
         expect(applyPlanningTargetValue(prd, location, ['wrong type'])).toBeUndefined();
     });
 

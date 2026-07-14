@@ -7,6 +7,7 @@ import {
     planningContentHash,
 } from '../../lib/planning';
 import { useProjectStore } from '../projectStore';
+import { alignmentProposalContentHash } from '../../lib/planning/proposalIntegrity';
 
 const prd = (overrides: Partial<StructuredPRD> = {}): StructuredPRD => ({
     vision: 'Help teams coordinate.',
@@ -113,6 +114,7 @@ describe('Phase 1 guarded partial propagation', () => {
                 impactPreviewId: impact.preview.id,
                 proposalId: audienceProposal.id,
                 disposition: 'accepted' as const,
+                proposalContentHash: audienceProposal.contract?.proposalContentHash,
                 at: 4,
             },
             {
@@ -130,6 +132,62 @@ describe('Phase 1 guarded partial propagation', () => {
             if (!appended.ok) throw new Error(appended.reason);
             reviewedRecord = appended.record;
         }
+
+        // The store boundary must reject an otherwise-valid subset when a
+        // second accepted proposal was changed after the user's review.
+        const acceptedArchitecture = appendDecisionEvent(reviewedRecord, {
+            id: 'accept-architecture', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: impact.preview.id, proposalId: architectureProposal.id, disposition: 'accepted',
+            proposalContentHash: architectureProposal.contract?.proposalContentHash, at: 6,
+        });
+        if (!acceptedArchitecture.ok) throw new Error(acceptedArchitecture.reason);
+        const changedArchitectureBase = {
+            ...architectureProposal,
+            proposedValue: 'Tampered architecture wording.',
+            proposedSummary: 'Tampered architecture wording.',
+        };
+        const changedArchitecture = {
+            ...changedArchitectureBase,
+            contract: {
+                ...architectureProposal.contract!,
+                proposalContentHash: alignmentProposalContentHash(changedArchitectureBase),
+            },
+        };
+        const tamperedPreview = {
+            ...impact.preview,
+            alignmentProposals: [audienceProposal, changedArchitecture],
+            proposedPrdPatch: impact.preview.proposedPrdPatch?.map(patch => patch.proposalId === architectureProposal.id
+                ? { ...patch, value: 'Tampered architecture wording.' }
+                : patch),
+        };
+        const acceptedBothRecord: PlanningRecord = {
+            ...acceptedArchitecture.record,
+            assessments: acceptedArchitecture.record.assessments?.map(assessment => assessment.impactPreview?.id === impact.preview.id
+                ? { ...assessment, impactPreview: tamperedPreview }
+                : assessment),
+        };
+        useProjectStore.setState({ planningRecords: { [projectId]: [acceptedBothRecord] } });
+        const unsafeSubset = buildReviewedDecisionImpact({ record: acceptedBothRecord, preview: tamperedPreview, structuredPRD: baseline });
+        expect(unsafeSubset.acceptedProposalIds).toEqual([audienceProposal.id]);
+        expect(unsafeSubset.rejectedProposalIds).toEqual([architectureProposal.id]);
+        const beforeAtomicCheck = useProjectStore.getState().spineVersions[projectId];
+        const atomicResult = useProjectStore.getState().compareAndAppendStructuredPRD(projectId, spineId, unsafeSubset.nextPrd!, {
+            expectedPrdHash: planningContentHash(baseline),
+            decisionApplication: {
+                planningRecordId: record.id, decisionEventId: 'audience-verdict',
+                impactPreviewId: impact.preview.id, appliedEventId: 'unsafe-subset-apply',
+            },
+        });
+        expect(atomicResult).toMatchObject({ status: 'stale', reason: 'decision_changed' });
+        expect(useProjectStore.getState().spineVersions[projectId]).toBe(beforeAtomicCheck);
+        expect(useProjectStore.getState().planningRecords[projectId][0].events?.some(event => event.id === 'unsafe-subset-apply')).toBe(false);
+
+        const restoredDeferred = appendDecisionEvent(acceptedArchitecture.record, {
+            id: 'defer-architecture-again', planningRecordId: record.id, type: 'alignment_change_reviewed', actor: 'user',
+            impactPreviewId: impact.preview.id, proposalId: architectureProposal.id, disposition: 'deferred', at: 7,
+        });
+        if (!restoredDeferred.ok) throw new Error(restoredDeferred.reason);
+        reviewedRecord = restoredDeferred.record;
         useProjectStore.setState({ planningRecords: { [projectId]: [reviewedRecord] } });
 
         const reviewed = buildReviewedDecisionImpact({

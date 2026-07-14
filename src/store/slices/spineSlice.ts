@@ -482,6 +482,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 const reviewedResultMatches = preview?.alignmentProposals
                     ? !!reviewedImpact?.nextPrd
                         && reviewedImpact.acceptedProposalIds.length > 0
+                        && reviewedImpact.rejectedProposalIds.length === 0
                         && planningContentHash(reviewedImpact.nextPrd) === planningContentHash(nextStructuredPRD)
                     : !!preview?.proposedResultHash
                         && preview.proposedResultHash === planningContentHash(nextStructuredPRD);

@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from 'vitest';
 import type { DecisionImpactPreview, PlanningRecord } from '../../../types';
-import { planningContentHash, stablePlanningStringify } from '../decisionImpact';
+import { planningContentHash, stablePlanningStringify, validateAlignmentProposalContract } from '../decisionImpact';
 import {
     complexCandidateToAlignmentHint,
     integrateComplexCandidateIntoPreview,
@@ -35,6 +35,7 @@ const candidate = (overrides: Record<string, unknown> = {}) => ({
     proposedSummary: 'Make the planning loop explicitly single-user for the first release.',
     reasoning: 'The current action requires teammates, which directly contradicts the confirmed single-user first-release scope.',
     confidence: 'high',
+    evidenceCharacter: 'direct',
     ambiguity: '',
     questions: [],
     ...overrides,
@@ -52,6 +53,7 @@ const needsInputCandidate = () => ({
     proposedSummary: '',
     reasoning: 'The team-ownership premise conflicts with solo scope, but the evidence does not establish local versus cloud ownership.',
     confidence: 'medium',
+    evidenceCharacter: 'supported_inference',
     ambiguity: 'Project ownership and synchronization are separate choices.',
     questions: ['Should projects remain cloud-backed and owned by one creator, or be local-only?'],
 });
@@ -68,6 +70,7 @@ const alignedCandidate = () => ({
     proposedSummary: '',
     reasoning: 'The architecture already supports independent use and does not require team collaboration.',
     confidence: 'high',
+    evidenceCharacter: 'supported_inference',
     ambiguity: '',
     questions: [],
 });
@@ -125,14 +128,30 @@ describe('complex planning-target reasoning', () => {
         expect(hint?.failureReason).toContain('Should projects remain cloud-backed');
     });
 
-    it('represents already-aligned targets without creating a mutation hint', async () => {
+    it('preserves an already-aligned result as review-only analysis with distinct reasoning evidence', async () => {
         const result = await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, {
             transport: async () => validResponse(), model: 'strong-test',
         });
         expect(result.ok).toBe(true);
         if (!result.ok) throw new Error('expected success');
         expect(result.candidates[2].applicability).toBe('already_aligned');
-        expect(complexCandidateToAlignmentHint(result.candidates[2], { model: result.model })).toBeUndefined();
+        expect(complexCandidateToAlignmentHint(result.candidates[2], { model: result.model })).toMatchObject({
+            analysisStatus: 'already_aligned',
+            reasoningConfidence: 'high',
+            evidenceCharacter: 'supported_inference',
+        });
+    });
+
+    it('never allows plausible inference to become an applicable proposal', async () => {
+        const result = await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, {
+            transport: async () => JSON.stringify({
+                candidates: [candidate({ evidenceCharacter: 'plausible_inference' }), needsInputCandidate(), alignedCandidate()],
+            }),
+            model: 'strong-test', maxStructuredRepairAttempts: 0,
+        });
+        expect(result).toMatchObject({ ok: false, reason: 'invalid_response' });
+        if (result.ok) throw new Error('expected failure');
+        expect(result.errors.join(' ')).toMatch(/plausible inference/i);
     });
 
     it('fails closed on an overbroad replacement', async () => {
@@ -245,7 +264,7 @@ describe('complex planning-target reasoning', () => {
         };
         const integrated = integrateComplexCandidateIntoPreview({
             preview, replaceProposalId: 'planning-loop', candidate: reasoned.candidates[0], record,
-            structuredPRD: creatorWorkspacePrd, model: reasoned.model,
+            structuredPRD: creatorWorkspacePrd, currentSpineVersionId: 'spine-creators-v2', model: reasoned.model,
         });
         expect(integrated.ok).toBe(true);
         if (!integrated.ok) throw new Error(integrated.reason);
@@ -253,12 +272,15 @@ describe('complex planning-target reasoning', () => {
             target: { jsonPath: '$.userLoops[0].action' },
             proposedValue: 'Develop and challenge a product plan independently.',
             contract: { analysisStatus: 'bounded_applicable', maxTouchedTargets: 1 },
+            reasoningConfidence: 'high',
+            evidenceCharacter: 'direct',
         });
         expect(integrated.preview.proposedPrdPatch).toHaveLength(1);
         expect(creatorWorkspacePrd.userLoops?.[0].systemResponse).toBe('Synapse records decisions and highlights unresolved dependencies.');
 
         const redirected = integrateComplexCandidateIntoPreview({
-            preview, replaceProposalId: 'planning-loop', record, structuredPRD: creatorWorkspacePrd, model: reasoned.model,
+            preview, replaceProposalId: 'planning-loop', record, structuredPRD: creatorWorkspacePrd,
+            currentSpineVersionId: 'spine-creators-v2', model: reasoned.model,
             candidate: {
                 ...reasoned.candidates[0],
                 target: { ...reasoned.candidates[0].target, location: { ...reasoned.candidates[0].target.location, jsonPath: '$.uxPages[0].purpose' } },
@@ -293,8 +315,66 @@ describe('complex planning-target reasoning', () => {
                 impactPreviewId: preview.id, proposalId: 'planning-loop', disposition, at: 4,
             }],
         });
-        const input = { preview, replaceProposalId: 'planning-loop', candidate: reasoned.candidates[0], structuredPRD: creatorWorkspacePrd, model: reasoned.model };
+        const input = {
+            preview, replaceProposalId: 'planning-loop', candidate: reasoned.candidates[0],
+            structuredPRD: creatorWorkspacePrd, currentSpineVersionId: 'spine-creators-v2', model: reasoned.model,
+        };
         expect(integrateComplexCandidateIntoPreview({ ...input, record: reviewed('rejected') }).ok).toBe(true);
         expect(integrateComplexCandidateIntoPreview({ ...input, record: reviewed('accepted') })).toMatchObject({ ok: false, reason: expect.stringMatching(/accepted wording/i) });
+    });
+
+    it('binds cited user context and rejects identical-content reasoning from a different spine version', async () => {
+        const reasoned = await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, {
+            transport: async () => validResponse(), model: 'strong-test',
+        });
+        if (!reasoned.ok) throw new Error('expected success');
+        const contextEvent = {
+            id: 'context-event', planningRecordId: 'decision-solo-first', type: 'alignment_context_provided' as const,
+            actor: 'user' as const, impactPreviewId: 'preview', proposalId: 'planning-loop',
+            requestKind: 'different_interpretation' as const, context: 'Treat collaboration as post-MVP.', at: 3,
+        };
+        const record: PlanningRecord = {
+            id: 'decision-solo-first', projectId: 'p1', type: 'decision', status: 'confirmed',
+            title: 'Single-user first release', statement: 'Defer collaboration.', evidence: [], sourceFindingIds: [],
+            createdBy: 'user', createdAt: 1, updatedAt: 3,
+            events: [
+                { id: 'decision-solo-first-verdict', planningRecordId: 'decision-solo-first', type: 'custom_answered', actor: 'user', answer: 'Ship solo first.', at: 2 },
+                contextEvent,
+            ],
+        };
+        const preview: DecisionImpactPreview = {
+            id: 'preview', projectId: 'p1', planningRecordId: record.id,
+            decisionEventId: 'decision-solo-first-verdict', status: 'ready', proposalContractVersion: 1,
+            baseline: { spineVersionId: 'spine-creators-v2', spineContentHash: planningContentHash(creatorWorkspacePrd) },
+            affectedPrdSections: ['User Loops'], affectedArtifactSlots: [], possibleConflictRecordIds: [], createdAt: 3,
+            alignmentProposals: [{ id: 'planning-loop', target: creatorWorkspaceReasoningInput.targets[0].location, operation: 'review', reason: 'Review flow.', confidence: 'possible', requiresInput: true }],
+        };
+        const candidateWithContext = {
+            ...reasoned.candidates[0],
+            evidence: [...reasoned.candidates[0].evidence, {
+                id: contextEvent.id, label: 'Your requested interpretation', sourceType: 'planning_record' as const,
+                sourceId: record.id, sourceVersionId: 'spine-creators-v2', excerpt: contextEvent.context,
+            }],
+        };
+        expect(integrateComplexCandidateIntoPreview({
+            preview, replaceProposalId: 'planning-loop', candidate: candidateWithContext, record,
+            structuredPRD: creatorWorkspacePrd, currentSpineVersionId: 'identical-content-new-spine', model: reasoned.model,
+        })).toMatchObject({ ok: false, reason: expect.stringMatching(/version changed/i) });
+
+        const integrated = integrateComplexCandidateIntoPreview({
+            preview, replaceProposalId: 'planning-loop', candidate: candidateWithContext, record,
+            structuredPRD: creatorWorkspacePrd, currentSpineVersionId: 'spine-creators-v2', model: reasoned.model,
+        });
+        if (!integrated.ok) throw new Error(integrated.reason);
+        const proposal = integrated.preview.alignmentProposals![0];
+        expect(proposal.contract?.evidence).toEqual(expect.arrayContaining([expect.objectContaining({ refId: contextEvent.id, source: 'user_context' })]));
+        expect(validateAlignmentProposalContract({ record, preview: integrated.preview, proposal, structuredPRD: creatorWorkspacePrd })).toEqual({ ok: true, legacy: false });
+        const changedContext: PlanningRecord = {
+            ...record,
+            events: record.events?.map(event => event.id === contextEvent.id ? { ...contextEvent, context: 'Tampered context.' } : event),
+        };
+        expect(validateAlignmentProposalContract({ record: changedContext, preview: integrated.preview, proposal, structuredPRD: creatorWorkspacePrd })).toMatchObject({
+            ok: false, reason: 'User-provided proposal context is stale.',
+        });
     });
 });

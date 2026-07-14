@@ -41,6 +41,7 @@ import {
     COMPLEX_TARGET_KINDS,
 } from '../../lib/planning';
 import { canPerformProjectAction } from '../../lib/projectCapabilities';
+import { alignmentProposalContentHash } from '../../lib/planning/proposalIntegrity';
 import {
     ReviewWorkspace,
     type PlanningRecordView,
@@ -626,11 +627,17 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                     proposedSummary: review.proposal.proposedSummary,
                     reason: review.proposal.reason,
                     confidence: review.proposal.confidence,
+                    reasoningConfidence: review.proposal.reasoningConfidence ?? review.proposal.contract?.reasoningConfidence,
+                    evidenceCharacter: review.proposal.evidenceCharacter ?? review.proposal.contract?.evidenceCharacter,
                     requiresInput: review.proposal.requiresInput,
                     requiredForVerdictAlignment: review.proposal.requiredForVerdictAlignment,
+                    canEditWording: typeof review.proposal.proposedValue === 'string'
+                        || (Array.isArray(review.proposal.proposedValue) && review.proposal.proposedValue.every(item => typeof item === 'string'))
+                        || review.proposal.target.entityType === 'assumption',
                     canRequestReasoning: !['accepted', 'edited'].includes(review.disposition)
                         && COMPLEX_TARGET_KINDS.includes(review.proposal.target.kind as typeof COMPLEX_TARGET_KINDS[number])
-                        && Boolean(review.proposal.target.jsonPath),
+                        && Boolean(review.proposal.target.jsonPath)
+                        && review.proposal.target.jsonPath !== '$.architecture',
                     analysisStatus: review.proposal.contract?.analysisStatus,
                     analysisMethod: review.proposal.contract?.method,
                     analysisModel: review.proposal.contract?.model,
@@ -713,13 +720,17 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         recordId: string,
         previewId: string,
         proposalId: string,
-        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred',
+        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable',
         editedValue?: string,
     ) => {
         if (!canWrite) return;
+        const record = useProjectStore.getState().planningRecords[projectId]?.find(item => item.id === recordId);
+        const preview = record?.assessments?.find(item => item.impactPreview?.id === previewId)?.impactPreview;
+        const proposal = preview?.alignmentProposals?.find(item => item.id === proposalId);
         const result = useProjectStore.getState().appendPlanningDecisionEvent(projectId, recordId, {
             id: uuidv4(), planningRecordId: recordId, type: 'alignment_change_reviewed', actor: 'user',
             impactPreviewId: previewId, proposalId, disposition, at: Date.now(),
+            ...(proposal?.contract ? { proposalContentHash: alignmentProposalContentHash(proposal) } : {}),
             ...(disposition === 'edited' ? { editedValue, editedSummary: editedValue } : {}),
         });
         if (!result.ok) useToastStore.getState().addToast({ type: 'error', title: 'Alignment review not saved', message: result.reason });
@@ -761,7 +772,19 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         const projection = projectDecision(recordAtStart);
         const causeEvent = recordAtStart.events?.find(event => event.id === previewAtStart.decisionEventId);
         const guidance = request.guidance.trim();
-        const guidanceEvidenceId = `user-guidance:${proposalId}`;
+        let recordForReasoning = recordAtStart;
+        let guidanceEvidenceId: string | undefined;
+        if (guidance) {
+            const contextEvent: Extract<DecisionEvent, { type: 'alignment_context_provided' }> = {
+                id: uuidv4(), planningRecordId: recordId, type: 'alignment_context_provided', actor: 'user',
+                impactPreviewId: previewId, proposalId, requestKind: request.kind, context: guidance, at: Date.now(),
+            };
+            const saved = useProjectStore.getState().appendPlanningDecisionEvent(projectId, recordId, contextEvent);
+            if (!saved.ok) fail(`Your context could not be preserved: ${saved.reason}`);
+            guidanceEvidenceId = contextEvent.id;
+            recordForReasoning = useProjectStore.getState().planningRecords[projectId]?.find(item => item.id === recordId)
+                ?? fail('Your context was saved, but the planning record is no longer available.');
+        }
         const result = await reasonAboutComplexPlanningTargets({
             baselineSpineVersionId: spineAtStart.id,
             structuredPRD: initialPrd,
@@ -775,9 +798,9 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                 sourceSpineVersionId: spineAtStart.id,
             },
             targets: [{ id: proposalId, location: proposalAtStart.target }],
-            requiredEvidenceRefIds: guidance ? [guidanceEvidenceId] : undefined,
+            requiredEvidenceRefIds: guidanceEvidenceId ? [guidanceEvidenceId] : undefined,
             evidence: [
-                ...recordAtStart.evidence.flatMap(evidence => evidence.excerpt ? [{
+                ...recordForReasoning.evidence.flatMap(evidence => evidence.excerpt ? [{
                     id: evidence.id,
                     label: evidence.locator?.section ?? 'Planning evidence',
                     sourceType: evidence.sourceType === 'spine' ? 'prd' as const : 'review' as const,
@@ -794,7 +817,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                         excerpt: evidence.excerpt,
                     } : undefined,
                 }] : []),
-                ...(guidance ? [{
+                ...(guidance && guidanceEvidenceId ? [{
                     id: guidanceEvidenceId,
                     label: request.kind === 'different_interpretation' ? 'Your requested interpretation' : 'Your added context',
                     sourceType: 'planning_record' as const,
@@ -822,12 +845,16 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             : fail('The review changed while Synapse was preparing this proposal. Nothing was replaced.');
         const spineNow = currentSpine ?? fail('The working plan changed while Synapse was preparing this proposal. Nothing was replaced.');
         const currentPrd = spineNow.structuredPRD ?? fail('The working plan changed while Synapse was preparing this proposal. Nothing was replaced.');
+        if (isDecisionImpactStale(previewNow, spineNow.id, currentPrd)) {
+            fail('The working plan changed while Synapse was preparing this proposal. Nothing was replaced.');
+        }
         const integrated = integrateComplexCandidateIntoPreview({
             preview: previewNow,
             replaceProposalId: proposalId,
             candidate: reasoning.candidates[0],
             record: recordNow,
             structuredPRD: currentPrd,
+            currentSpineVersionId: spineNow.id,
             model: reasoning.model,
             provider: 'gemini',
         });
@@ -860,6 +887,14 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             return;
         }
         const reviewed = buildReviewedDecisionImpact({ record, preview, structuredPRD: spine.structuredPRD });
+        if (reviewed.rejectedProposalIds.length > 0) {
+            useToastStore.getState().addToast({
+                type: 'error',
+                title: 'Working plan not updated',
+                message: 'One or more accepted changes no longer match the proposal you reviewed. Refresh the impact preview and review them again.',
+            });
+            return;
+        }
         if (!reviewed.nextPrd || reviewed.acceptedProposalIds.length === 0) {
             useToastStore.getState().addToast({ type: 'info', title: 'No accepted changes', message: 'Accept or edit at least one safe proposal before updating the working plan.' });
             return;
@@ -893,6 +928,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                 preview,
                 structuredPRD: reviewed.nextPrd,
                 baselineSpineVersionId: applied.newSpineId,
+                appliedProposalIds: reviewed.acceptedProposalIds,
             })
             : undefined;
         if (residual) {

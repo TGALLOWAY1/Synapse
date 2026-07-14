@@ -18,28 +18,15 @@ import {
     getDirectDependents,
     type DependencyNodeId,
 } from '../artifactDependencyGraph';
+import { planningContentHash, stablePlanningStringify } from './planningHash';
+import { alignmentContextContentHash, alignmentProposalContentHash } from './proposalIntegrity';
+
+export { planningContentHash, stablePlanningStringify } from './planningHash';
 
 /** Derived from the generation pipeline's real PRD foundation edges. */
 function artifactSlotsDependingOnPrd(): ArtifactSlotKey[] {
     return getDirectDependents(buildArtifactDependencyGraph(), 'prd')
         .filter((id): id is ArtifactSlotKey => id !== 'prd');
-}
-
-export function stablePlanningStringify(value: unknown): string {
-    if (value === null || typeof value !== 'object') return JSON.stringify(value);
-    if (Array.isArray(value)) return `[${value.map(stablePlanningStringify).join(',')}]`;
-    const record = value as Record<string, unknown>;
-    return `{${Object.keys(record).sort().map(key => `${JSON.stringify(key)}:${stablePlanningStringify(record[key])}`).join(',')}}`;
-}
-
-export function planningContentHash(value: unknown): string {
-    const input = stablePlanningStringify(value);
-    let hash = 0x811c9dc5;
-    for (let index = 0; index < input.length; index += 1) {
-        hash ^= input.charCodeAt(index);
-        hash = Math.imul(hash, 0x01000193);
-    }
-    return (hash >>> 0).toString(36);
 }
 
 export type BuildDecisionImpactResult =
@@ -48,9 +35,10 @@ export type BuildDecisionImpactResult =
 
 export type AlignmentProposalReview = {
     proposal: AlignmentProposal;
-    disposition: 'pending' | 'accepted' | 'rejected' | 'edited' | 'deferred';
+    disposition: 'pending' | 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable';
     editedValue?: unknown;
     editedSummary?: string;
+    proposalContentHash?: string;
 };
 
 const MAX_ALIGNMENT_PROPOSALS = 8;
@@ -97,12 +85,19 @@ export function alignmentProposalReviews(record: PlanningRecord, preview: Decisi
         if (event.type === 'alignment_change_reviewed' && event.impactPreviewId === preview.id) latest.set(event.proposalId, event);
     }
     return (preview.alignmentProposals ?? []).map(proposal => {
-        const event = latest.get(proposal.id);
+        const candidateEvent = latest.get(proposal.id);
+        const confirmationChanged = candidateEvent
+            && ['confirmed_aligned', 'confirmed_not_applicable'].includes(candidateEvent.disposition)
+            && candidateEvent.proposalContentHash !== alignmentProposalContentHash(proposal);
+        const event = confirmationChanged
+            ? undefined
+            : candidateEvent;
         return {
             proposal,
             disposition: event?.disposition ?? 'pending',
             editedValue: event?.editedValue,
             editedSummary: event?.editedSummary,
+            proposalContentHash: event?.proposalContentHash,
         };
     });
 }
@@ -156,6 +151,13 @@ const SAFE_ROOTS = new Set([
     'roles', 'architectureFlows', 'mvpScope', 'successMetrics',
 ]);
 const UNSAFE_PATH_KEYS = new Set(['__proto__', 'prototype', 'constructor']);
+/** Identity, reference, authority, and lifecycle fields remain outside the
+ * bounded model-edit contract even when they are scalar leaves. */
+const PROTECTED_PATH_KEYS = new Set([
+    'id', 'name', 'entity', 'role', 'segment', 'featureIds', 'dependencies', 'nextStates',
+    'confirmed', 'confirmedAt', 'decision', 'decisionNote', 'decidedAt', 'createdAt',
+    'updatedAt', 'schemaVersion',
+]);
 
 function parseIndexedScalarPath(jsonPath: string | undefined): Array<string | number> | undefined {
     if (!jsonPath?.startsWith('$.')) return undefined;
@@ -171,7 +173,7 @@ function parseIndexedScalarPath(jsonPath: string | undefined): Array<string | nu
             return undefined;
         }
         const token = match[1] ?? Number(match[2]);
-        if (typeof token === 'string' && UNSAFE_PATH_KEYS.has(token)) return undefined;
+        if (typeof token === 'string' && (UNSAFE_PATH_KEYS.has(token) || PROTECTED_PATH_KEYS.has(token))) return undefined;
         if (typeof token === 'number' && (!Number.isSafeInteger(token) || token > 500)) return undefined;
         tokens.push(token);
         if (tokens.length > 12) return undefined;
@@ -350,6 +352,8 @@ function buildProposalContract(input: {
     model?: string;
     provider?: string;
     failureReason?: string;
+    reasoningConfidence?: PlanningAlignmentHint['reasoningConfidence'];
+    evidenceCharacter?: PlanningAlignmentHint['evidenceCharacter'];
 }): AlignmentProposalContract {
     const target = readPlanningTargetValue(input.structuredPRD, input.target);
     return {
@@ -367,6 +371,20 @@ function buildProposalContract(input: {
         evidence: evidenceBindings(input.record),
         maxTouchedTargets: 1,
         failureReason: input.failureReason,
+        reasoningConfidence: input.reasoningConfidence,
+        evidenceCharacter: input.evidenceCharacter,
+    };
+}
+
+function bindProposalContract<T extends AlignmentProposal>(proposal: T): T {
+    if (!proposal.contract) return proposal;
+    const bound = { ...proposal, contract: { ...proposal.contract, proposalContentHash: undefined } };
+    return {
+        ...proposal,
+        contract: {
+            ...proposal.contract,
+            proposalContentHash: alignmentProposalContentHash(bound),
+        },
     };
 }
 
@@ -403,6 +421,9 @@ export function validateAlignmentProposalContract(input: {
         return { ok: true, legacy: true };
     }
     if (contract.version !== 1 || contract.authoredBy !== 'synapse' || contract.maxTouchedTargets !== 1) return { ok: false, reason: 'Proposal contract is invalid.' };
+    if (!contract.proposalContentHash || contract.proposalContentHash !== alignmentProposalContentHash(proposal)) {
+        return { ok: false, reason: 'Proposal content changed after analysis.' };
+    }
     if (contract.analysisStatus !== 'bounded_applicable') return { ok: false, reason: `Proposal analysis is ${contract.analysisStatus.replaceAll('_', ' ')}.` };
     if (contract.method === 'model' && (!contract.model || !contract.provider)) return { ok: false, reason: 'Model-authored analysis lacks model provenance.' };
     if (contract.baselineSpineVersionId !== preview.baseline.spineVersionId
@@ -411,6 +432,19 @@ export function validateAlignmentProposalContract(input: {
     if (contract.targetValueHash !== planningContentHash(target.value)) return { ok: false, reason: 'Proposal target evidence is stale.' };
     if (contract.preservedContentHash !== preservedContentHash(structuredPRD, proposal.target)) return { ok: false, reason: 'Proposal preservation evidence is stale.' };
     for (const binding of contract.evidence) {
+        if (binding.source === 'user_context') {
+            const current = (record.events ?? []).find((event): event is Extract<DecisionEvent, { type: 'alignment_context_provided' }> => (
+                event.type === 'alignment_context_provided'
+                && event.id === binding.refId
+                && event.impactPreviewId === preview.id
+            ));
+            if (!current
+                || binding.sourceVersionId !== preview.baseline.spineVersionId
+                || alignmentContextContentHash(current) !== binding.contentHash) {
+                return { ok: false, reason: 'User-provided proposal context is stale.' };
+            }
+            continue;
+        }
         const current = record.evidence.find(item => item.id === binding.refId);
         const currentHash = current?.excerptHash ?? (current ? planningContentHash({ locator: current.locator, excerpt: current.excerpt }) : undefined);
         if (!current || current.sourceVersionId !== binding.sourceVersionId || currentHash !== binding.contentHash) {
@@ -444,6 +478,11 @@ export function buildReviewedDecisionImpact(input: {
             record: input.record, preview: input.preview, proposal: review.proposal, structuredPRD: input.structuredPRD,
         });
         if (!contract.ok) {
+            rejectedProposalIds.push(review.proposal.id);
+            continue;
+        }
+        if (review.proposal.contract
+            && review.proposalContentHash !== review.proposal.contract.proposalContentHash) {
             rejectedProposalIds.push(review.proposal.id);
             continue;
         }
@@ -487,17 +526,22 @@ export function buildResidualDecisionImpact(input: {
     preview: DecisionImpactPreview;
     structuredPRD: StructuredPRD;
     baselineSpineVersionId: string;
+    appliedProposalIds: string[];
     now?: () => number;
 }): { assessment: DecisionAssessment; preview: DecisionImpactPreview } | undefined {
-    const unresolved = alignmentProposalReviews(input.record, input.preview)
-        .filter(review => alignmentProposalNeedsResolution(review, true));
+    const appliedProposalIds = new Set(input.appliedProposalIds);
+    const unresolved = alignmentProposalReviews(input.record, input.preview).filter(review => {
+        if (review.disposition === 'pending' || review.disposition === 'deferred') return true;
+        if (review.disposition === 'accepted' || review.disposition === 'edited') return !appliedProposalIds.has(review.proposal.id);
+        return review.disposition === 'rejected' && review.proposal.requiredForVerdictAlignment === true;
+    });
     if (unresolved.length === 0) return undefined;
 
     const createdAt = input.now?.() ?? Date.now();
     const id = `impact-${input.record.id}-${planningContentHash(`${input.baselineSpineVersionId}:${input.preview.decisionEventId}:residual:${input.preview.id}`)}`;
     let proposedPrd = input.structuredPRD;
     const proposedPrdPatch: NonNullable<DecisionImpactPreview['proposedPrdPatch']> = [];
-    const alignmentProposals: AlignmentProposal[] = unresolved.map((review, index) => {
+    const alignmentProposals: AlignmentProposal[] = unresolved.map((review, index): AlignmentProposal => {
         const proposalId = `${id}-change-${index + 1}`;
         const oldPatch = input.preview.proposedPrdPatch?.find(patch => patch.proposalId === review.proposal.id);
         if (!oldPatch) return {
@@ -534,7 +578,7 @@ export function buildResidualDecisionImpact(input: {
                 status: 'bounded_applicable',
             }),
         };
-    });
+    }).map(bindProposalContract);
     const preview: DecisionImpactPreview = {
         ...input.preview,
         id,
@@ -609,6 +653,9 @@ function classifyAlignmentHint(hint: PlanningAlignmentHint, prd: StructuredPRD):
     if (hint.analysisStatus === 'failed' || hint.analysisStatus === 'rejected') {
         return { status: hint.analysisStatus, failureReason: hint.failureReason ?? hint.reason };
     }
+    if (hint.analysisStatus === 'already_aligned' || hint.analysisStatus === 'not_applicable') {
+        return { status: hint.analysisStatus, failureReason: hint.failureReason };
+    }
     if (hint.analysisStatus === 'needs_input' || hint.proposedValue === undefined) {
         return { status: 'needs_input', failureReason: hint.failureReason ?? 'Additional product input is required.' };
     }
@@ -673,7 +720,7 @@ export function integrateAlignmentHintIntoPreview(input: {
     if (analysis.status !== 'bounded_applicable') {
         return { ok: false, reason: analysis.failureReason ?? 'Model analysis is not safely applicable.', analysisStatus: analysis.status };
     }
-    const proposal: AlignmentProposal = {
+    const proposal: AlignmentProposal = bindProposalContract({
         id: `${preview.id}-model-${planningContentHash(`${targetProposalId}:${hint.target.jsonPath}:${stablePlanningStringify(hint.proposedValue)}`)}`,
         target: hint.target,
         operation: 'replace',
@@ -684,6 +731,8 @@ export function integrateAlignmentHintIntoPreview(input: {
         proposedValue: hint.proposedValue,
         reason: hint.reason,
         confidence: hint.confidence ?? 'likely',
+        reasoningConfidence: hint.reasoningConfidence,
+        evidenceCharacter: hint.evidenceCharacter,
         ambiguity: hint.ambiguity,
         questions: hint.questions,
         evidenceSummary: hint.evidenceSummary,
@@ -693,8 +742,9 @@ export function integrateAlignmentHintIntoPreview(input: {
             baselineSpineVersionId: preview.baseline.spineVersionId,
             decisionEventId: preview.decisionEventId,
             status: 'bounded_applicable', method: 'model', model: hint.model, provider: hint.provider,
+            reasoningConfidence: hint.reasoningConfidence, evidenceCharacter: hint.evidenceCharacter,
         }),
-    };
+    });
     const patch: NonNullable<DecisionImpactPreview['proposedPrdPatch']>[number] = {
         proposalId: proposal.id,
         section: hint.target.section,
@@ -759,7 +809,7 @@ export function buildDecisionImpact(input: {
         // general-decision patch; every generic locator remains review-only.
         const hintLocations = explicitHints.slice(0, MAX_ALIGNMENT_PROPOSALS);
         const previewId = `impact-${input.record.id}-${planningContentHash(`${input.baselineSpineVersionId}:${projection.latestVerdictEventId}`)}`;
-        const alignmentProposals: AlignmentProposal[] = hintLocations.map((hint, index) => {
+        let alignmentProposals: AlignmentProposal[] = hintLocations.map((hint, index) => {
             const analysis = classifyAlignmentHint(hint, input.structuredPRD);
             return {
                 id: `${previewId}-change-${index + 1}`,
@@ -769,6 +819,8 @@ export function buildDecisionImpact(input: {
                 proposedValue: hint.proposedValue,
                 reason: hint.reason,
                 confidence: hint.confidence ?? 'likely',
+                reasoningConfidence: hint.reasoningConfidence,
+                evidenceCharacter: hint.evidenceCharacter,
                 ambiguity: hint.ambiguity,
                 questions: hint.questions,
                 evidenceSummary: hint.evidenceSummary,
@@ -785,6 +837,8 @@ export function buildDecisionImpact(input: {
                     model: hint.model,
                     provider: hint.provider,
                     failureReason: analysis.failureReason,
+                    reasoningConfidence: hint.reasoningConfidence,
+                    evidenceCharacter: hint.evidenceCharacter,
                 }),
             };
         });
@@ -820,6 +874,7 @@ export function buildDecisionImpact(input: {
                 status: 'needs_input', failureReason: 'No precise dependency has been established.',
             }),
         });
+        alignmentProposals = alignmentProposals.map(bindProposalContract);
         const proposedPrdPatch = alignmentProposals.flatMap(proposal => {
             const hint = hintLocations.find(item => stablePlanningStringify(item.target) === stablePlanningStringify(proposal.target));
             if (!hint?.target.jsonPath || proposal.contract?.analysisStatus !== 'bounded_applicable') return [];
@@ -911,7 +966,7 @@ export function buildDecisionImpact(input: {
     const secondaryLocations = preciseLocations(input.record).filter(location =>
         !(location.entityType === 'assumption' && location.entityId === sourceAssumption.id),
     );
-    const alignmentProposals: AlignmentProposal[] = [{
+    const alignmentProposals: AlignmentProposal[] = ([{
         id: sourceProposalId,
         target: sourceTarget,
         operation: 'replace',
@@ -928,7 +983,7 @@ export function buildDecisionImpact(input: {
             baselineSpineVersionId: input.baselineSpineVersionId, decisionEventId: projection.latestVerdictEventId,
             status: 'bounded_applicable',
         }),
-    }, ...secondaryLocations.map((location, index): AlignmentProposal => ({
+    } as AlignmentProposal, ...secondaryLocations.map((location, index): AlignmentProposal => ({
         id: `${id}-review-${index + 1}`,
         target: location,
         operation: 'review',
@@ -941,7 +996,7 @@ export function buildDecisionImpact(input: {
             baselineSpineVersionId: input.baselineSpineVersionId, decisionEventId: projection.latestVerdictEventId!,
             status: 'needs_input', failureReason: 'A safe aligned value could not be established.',
         }),
-    }))];
+    }))]).map(bindProposalContract);
     const preview: DecisionImpactPreview = {
         id,
         projectId: input.projectId,
