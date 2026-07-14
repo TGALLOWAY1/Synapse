@@ -1606,13 +1606,51 @@ export type PlanningLocation = {
 export type PlanningAlignmentHint = {
     target: PlanningLocation;
     operation: 'replace' | 'add' | 'remove';
-    proposedValue: unknown;
-    proposedSummary: string;
+    proposedValue?: unknown;
+    proposedSummary?: string;
     reason: string;
     confidence?: 'definite' | 'likely' | 'possible';
+    analysisStatus?: AlignmentProposalAnalysisStatus;
+    analysisMethod?: 'deterministic' | 'model';
+    model?: string;
+    provider?: string;
+    failureReason?: string;
+    ambiguity?: string;
+    questions?: string[];
+    evidenceSummary?: string[];
     /** True when leaving the current value in place would directly contradict
      * the recorded verdict, rather than merely leave a downstream review open. */
     requiredForVerdictAlignment?: boolean;
+};
+
+export type AlignmentProposalAnalysisStatus =
+    | 'advisory_candidate'
+    | 'bounded_applicable'
+    | 'needs_input'
+    | 'rejected'
+    | 'failed';
+
+export type AlignmentProposalEvidenceBinding = {
+    refId: string;
+    sourceVersionId: string;
+    contentHash: string;
+};
+
+export type AlignmentProposalContract = {
+    version: 1;
+    analysisStatus: AlignmentProposalAnalysisStatus;
+    authoredBy: 'synapse';
+    method: 'deterministic' | 'model';
+    model?: string;
+    provider?: string;
+    baselineSpineVersionId: string;
+    baselineSpineContentHash: string;
+    decisionEventId: string;
+    targetValueHash?: string;
+    preservedContentHash?: string;
+    evidence: AlignmentProposalEvidenceBinding[];
+    maxTouchedTargets: 1;
+    failureReason?: string;
 };
 
 export type AlignmentProposal = {
@@ -1624,6 +1662,12 @@ export type AlignmentProposal = {
     proposedValue?: unknown;
     reason: string;
     confidence: 'definite' | 'likely' | 'possible';
+    ambiguity?: string;
+    questions?: string[];
+    evidenceSummary?: string[];
+    /** Machine-authored analysis contract. User authority is recorded only in
+     * DecisionEvent and can never be supplied here by a model/provider. */
+    contract?: AlignmentProposalContract;
     /** Rejecting an exact source-claim update preserves a known contradiction;
      * rejecting a generic downstream review target may safely mean not affected. */
     requiredForVerdictAlignment?: boolean;
@@ -1638,6 +1682,8 @@ export type DecisionImpactPreview = {
     planningRecordId: string;
     decisionEventId: string;
     status: DecisionImpactPreviewStatus;
+    /** Present on Phase 2+ previews. Missing denotes a legacy preview only. */
+    proposalContractVersion?: 1;
     baseline: {
         spineVersionId: string;
         spineContentHash: string;
@@ -1648,6 +1694,7 @@ export type DecisionImpactPreview = {
         section: string;
         operation: 'replace' | 'add' | 'remove';
         entityId?: string;
+        entityType?: string;
         jsonPath?: string;
         beforeSummary?: string;
         afterSummary?: string;

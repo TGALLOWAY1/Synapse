@@ -224,8 +224,14 @@ export function appendDecisionEvent(
         const assessment = (record.assessments ?? [])
             .find(item => item.impactPreview?.id === event.impactPreviewId);
         const preview = assessment?.impactPreview;
-        if (!preview?.alignmentProposals?.some(proposal => proposal.id === event.proposalId)) {
+        const proposal = preview?.alignmentProposals?.find(item => item.id === event.proposalId);
+        if (!preview || !proposal) {
             return { ok: false, reason: 'Alignment proposal does not belong to this decision preview.' };
+        }
+        if (preview.proposalContractVersion === 1
+            && (event.disposition === 'accepted' || event.disposition === 'edited')
+            && proposal.contract?.analysisStatus !== 'bounded_applicable') {
+            return { ok: false, reason: 'Only a bounded applicable proposal can be accepted or edited.' };
         }
         if (assessment?.status !== 'fresh' || preview.status !== 'ready') {
             return { ok: false, reason: 'Refresh the impact preview before reviewing its alignment changes.' };
