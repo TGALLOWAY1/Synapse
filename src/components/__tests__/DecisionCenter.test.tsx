@@ -128,6 +128,9 @@ describe('DecisionCenter', () => {
 
         expect(screen.getByText('Selected answer')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Should guests start without an account/ })).toHaveAttribute('aria-current', 'true');
+        fireEvent.click(screen.getByRole('button', { name: 'Back to decisions' }));
+        expect(screen.getByLabelText('Decision detail')).toHaveClass('hidden');
+        expect(screen.getByLabelText('Decision queue')).toHaveClass('flex');
     });
 
     it('lets a user explicitly revise or invalidate a recorded decision', () => {
