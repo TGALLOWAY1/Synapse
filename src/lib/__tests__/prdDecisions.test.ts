@@ -35,6 +35,14 @@ const basePRD = (overrides: Partial<StructuredPRD>): StructuredPRD => ({
 });
 
 describe('sortAssumptionsByConfidence', () => {
+    it('ranks consequence before plausibility', () => {
+        const sorted = sortAssumptionsByConfidence([
+            assumption({ id: 'easy', confidence: 'high', materiality: 'low' }),
+            assumption({ id: 'product-defining', confidence: 'low', materiality: 'blocking' }),
+        ]);
+        expect(sorted.map(a => a.id)).toEqual(['product-defining', 'easy']);
+    });
+
     it('orders high → med → low', () => {
         const sorted = sortAssumptionsByConfidence([
             assumption({ id: 'a1', confidence: 'low' }),

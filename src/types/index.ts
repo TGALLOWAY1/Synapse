@@ -259,6 +259,10 @@ export type Assumption = {
     id: string;
     statement: string;
     confidence: 'low' | 'med' | 'high';
+    /** Consequence if wrong, distinct from how plausible the inference seems. */
+    materiality?: 'blocking' | 'high' | 'normal' | 'low';
+    whyItMatters?: string;
+    affectedPrdSections?: string[];
     // --- User review (all optional; legacy PRDs lack them) ---
     decision?: AssumptionDecision;
     decisionNote?: string;            // user clarification / correction
@@ -1652,6 +1656,8 @@ export type PlanningRecord = {
     sources?: PlanningSourceRef[];
     relatedPlanningRecordIds?: string[];
     affectedFeatureIds?: string[];
+    materiality?: 'blocking' | 'high' | 'normal' | 'low';
+    affectedPrdSections?: string[];
     affectedArtifactSlots?: ArtifactSlotKey[];
     /** Non-authoritative source drift signal. User verdict history is preserved
      * until the user explicitly revises or invalidates it. */

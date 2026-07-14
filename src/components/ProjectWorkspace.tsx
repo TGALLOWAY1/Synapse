@@ -26,8 +26,6 @@ import { StructuredPRDView } from './StructuredPRDView';
 import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
-import { DesignSetupStep } from './setup/DesignSetupStep';
-import { shouldShowDesignSetup } from '../lib/designSetup';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
@@ -58,6 +56,10 @@ import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncSta
 import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
 import { resetDemoProject } from '../lib/demoRouteHydration';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
+import { derivePlanningReadiness, reviewIssueNeedsResolutionBeforeBuild } from '../lib/planning';
+import { PlanningStateBar } from './planning/PlanningStateBar';
+
+const EMPTY_PROJECT_LIST: never[] = [];
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
@@ -69,6 +71,16 @@ export function ProjectWorkspace() {
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
     const assetJob = useProjectStore((s) => (projectId ? s.jobs[projectId] : undefined));
+    const planningRecords = useProjectStore((s) => (projectId ? s.planningRecords[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const reviewRuns = useProjectStore((s) => (projectId ? s.reviewRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const reviewIssues = useProjectStore((s) => (projectId ? s.reviewIssues[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const planningSourceSpine = useProjectStore((s) => projectId
+        ? (s.spineVersions[projectId] ?? EMPTY_PROJECT_LIST).find(spine => spine.isLatest)
+        : undefined);
+    useEffect(() => {
+        if (!projectId || !planningSourceSpine?.structuredPRD || !canPerformProjectAction(projectId, 'persist')) return;
+        useProjectStore.getState().importPlanningAssumptions(projectId, planningSourceSpine.id, planningSourceSpine.structuredPRD, planningSourceSpine.preflightSession);
+    }, [planningSourceSpine?.id, planningSourceSpine?.structuredPRD, planningSourceSpine?.preflightSession, projectId]);
     const [isGenerating, setIsGenerating] = useState(false);
     const [isSettingsOpen, setIsSettingsOpen] = useState(false);
     const [consolidatingBranch, setConsolidatingBranch] = useState<Branch | null>(null);
@@ -87,25 +99,23 @@ export function ProjectWorkspace() {
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
     const [retryingStepId, setRetryingStepId] = useState<string | null>(null);
-    // Post-finalization transition. `showFinalizeSuccess` drives the success
-    // modal shown immediately after Mark Final; `finalizeAutoOpen` is the
-    // one-shot intent handed to ArtifactWorkspace so it auto-opens the panel
-    // and selects the first non-PRD artifact on arrival from finalize.
+    // Post-commitment transition. `showFinalizeSuccess` explains that output
+    // generation is a separate action; `finalizeAutoOpen` carries an explicit
+    // Review outputs navigation intent into ArtifactWorkspace.
     const [showFinalizeSuccess, setShowFinalizeSuccess] = useState(false);
     const [finalizeAutoOpen, setFinalizeAutoOpen] = useState(false);
-    // Gate shown on the finalize edge when the project hasn't picked a
-    // design-system direction yet. Choosing one stores it, then finalizes.
+    // Design direction is requested only when output generation begins.
     const [showPresetChoice, setShowPresetChoice] = useState(false);
-    // Gate shown when finalizing a PRD that has failed (incomplete) sections —
-    // requires explicit acknowledgement before generating downstream artifacts
-    // from partial source material.
+    // Incomplete working plans require an explicit acknowledgement before
+    // commitment. Generated outputs retain that provenance later.
     const [showIncompletePrdConfirm, setShowIncompletePrdConfirm] = useState(false);
-    // Carries the incomplete-PRD acknowledgement across the design-preset gate
-    // (which can interpose between acknowledgement and finalize).
-    const pendingIncompleteAck = useRef(false);
-    // Update Assets plan — shown on the re-finalize edge when downstream
+    const [showReadinessConfirm, setShowReadinessConfirm] = useState(false);
+    const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
+    // Carries an explicit generation request across the design-preset choice.
+    const generateAfterPreset = useRef(false);
+    // Update Assets plan — shown on the re-commit edge when downstream
     // assets already exist, replacing the old silent full regeneration.
-    // Cancel aborts the finalize entirely (the spine stays non-final).
+    // Cancel aborts commitment (the spine stays a working plan).
     const [updatePlan, setUpdatePlan] = useState<null | {
         rows: UpdatePlanRow[];
         changeHeadline?: string;
@@ -204,7 +214,7 @@ export function ProjectWorkspace() {
         const proj = store.getProject(projectId);
         const spine = store.getLatestSpine(projectId);
         if (!proj || proj.currentStage === 'workspace') return;
-        if (spine?.isFinal && spine.structuredPRD && spine.safetyReview?.status !== 'blocked') {
+        if (spine?.structuredPRD && spine.safetyReview?.status !== 'blocked') {
             store.setProjectStage(projectId, 'workspace');
         }
         // Mount-only by design (store read via getState, not deps): reacting
@@ -222,9 +232,14 @@ export function ProjectWorkspace() {
     const setPipelineStage = (stage: PipelineStage) => {
         if (projectId) setProjectStage(projectId, stage);
     };
+    const handlePipelineStageChange = (stage: PipelineStage) => {
+        if (stage === 'review') setReviewInitialTab('review');
+        setPipelineStage(stage);
+    };
 
     const activeSpine = viewedSpineId ? allSpines.find(s => s.id === viewedSpineId) || latestSpine : latestSpine;
     const isOldVersion = activeSpine?.id !== latestSpine?.id;
+
 
     const branches = activeSpine ? getBranchesForSpine(projectId, activeSpine.id) : [];
     const hasBranches = branches.length > 0;
@@ -257,6 +272,31 @@ export function ProjectWorkspace() {
     // refresh — it drives the incomplete-PRD banner with per-section retry.
     const persistedFailedSections = (activeSpine?.generationMeta?.failedSections ?? [])
         .filter((id): id is SectionId => id in SECTION_TITLES);
+    const generatedOutputs = getArtifacts(projectId).filter(artifact =>
+        artifact.type !== 'prd' && artifact.status !== 'archived' && !!artifact.currentVersionId,
+    );
+    const staleOutputCount = generatedOutputs.filter(artifact =>
+        getArtifactStaleness(projectId, artifact.id) !== 'current',
+    ).length;
+    const currentChallengeRuns = reviewRuns.filter(run =>
+        run.sourceManifest.spineVersionId === activeSpine?.id
+        && run.status === 'complete',
+    );
+    const currentChallengeIds = new Set(currentChallengeRuns.map(run => run.id));
+    const blockingReviewIssueCount = reviewIssues.filter(issue =>
+        currentChallengeIds.has(issue.reviewId)
+        && reviewIssueNeedsResolutionBeforeBuild(issue, activeSpine?.id),
+    ).length;
+    const planningReadiness = derivePlanningReadiness({
+        prd: activeSpine?.structuredPRD,
+        planningRecords,
+        incompleteSectionCount: persistedFailedSections.length,
+        hasCurrentChallenge: currentChallengeRuns.length > 0,
+        blockingReviewIssueCount,
+        generatedOutputCount: generatedOutputs.length,
+        staleOutputCount,
+        isCommitted: !!activeSpine?.isFinal,
+    });
 
     // Optional preflight clarification: while a non-completed session exists and
     // no PRD has been produced (and the request isn't blocked), the workspace
@@ -266,26 +306,6 @@ export function ProjectWorkspace() {
         && !activeSpine.structuredPRD
         && activeSpine.safetyReview?.status !== 'blocked';
 
-    // Setup-stage design selection: right after clarification (or immediately,
-    // on the Generate Immediately path), while PRD generation runs in the
-    // background, a fresh project picks its visual direction. Replaces the
-    // PRD/progress view until the user chooses or skips; never shown for
-    // legacy projects, the demo, blocked spines, or failed runs (see
-    // shouldShowDesignSetup). `hasFailedSection` additionally yields on a
-    // *transient* section failure (the live grid errors before the persisted
-    // failedSections meta lands on the spine) so the progress timeline's
-    // "Run again" affordance is never hidden behind the setup step.
-    const showDesignSetup = !showPreflight && !isOldVersion && !hasFailedSection
-        && shouldShowDesignSetup(project, activeSpine);
-
-    // Idea + clarification text feeding the rule-based preset recommendation.
-    const designRecommendationText = showDesignSetup
-        ? [
-            activeSpine?.promptText,
-            activeSpine?.preflightSession?.summary,
-            ...(activeSpine?.preflightSession?.questions.map((q) => q.answer ?? '') ?? []),
-        ].filter(Boolean).join('\n')
-        : '';
 
     // Human-friendly version label
     const getVersionLabel = (spineId: string) => {
@@ -534,15 +554,14 @@ export function ProjectWorkspace() {
         setIsBranchesVisible(true);
     };
 
-    // True once every build asset (the 7 core artifacts + mockups) already has
-    // a generated version — i.e. nothing is left to create. Drives the success
-    // modal's "ready" vs "being created" copy. Cheap presence check; safe to
-    // run each render.
+    // True once every build output already has a generated version. This is an
+    // output-completion signal only; it is intentionally unrelated to planning
+    // readiness.
     const assetsReady = !!activeSpine?.structuredPRD && (() => {
         // Hidden artifacts (generated for downstream use but not surfaced in the
         // assets list) must not gate readiness — the user has no row to see or
         // retry them, so a hidden slot erroring would otherwise leave the
-        // finalize success modal stuck reporting "assets are being created".
+        // output transition stuck reporting "outputs are being created".
         const coreReady = CORE_ARTIFACT_DISPLAY_ORDER
             // Retired subtypes (prompt_pack) no longer generate at all, so
             // they must not gate readiness either.
@@ -554,10 +573,8 @@ export function ProjectWorkspace() {
         return coreReady && mockupReady;
     })();
 
-    // Post-finalize status pill. Once a spine is final, the user can dismiss the
-    // success modal ("Stay on the PRD") and be stranded with no obvious path to
-    // the assets that are now building. Show a persistent affordance in the top
-    // bar whenever we're final but not already viewing the Assets stage.
+    // Post-commitment output affordance. Commitment alone creates no outputs;
+    // the user retains an explicit route to generate or inspect them.
     const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
         (s) => s.status === 'generating' || s.status === 'queued',
     );
@@ -569,18 +586,22 @@ export function ProjectWorkspace() {
 
     const handleToggleFinal = () => {
         if (!projectId || !canPerformProjectAction(projectId, 'persist') || !activeSpine) return;
-        // Blocked spines can never advance to the workspace / artifact stage.
+        // Safety-blocked spines can never be committed.
         if (activeSpine.safetyReview?.status === 'blocked') return;
         const next = !activeSpine.isFinal;
         if (!next) {
-            // Un-finalizing — just flip the flag, no generation involved.
+            // Return the committed version to working-plan status.
             markSpineFinal(projectId, activeSpine.id, false);
             return;
         }
 
-        // Incomplete PRD: some required sections failed. Do not silently
-        // finalize + generate downstream artifacts from partial source
-        // material — require an explicit acknowledgement first. Uses the raw
+        if (!planningReadiness.isReadyToBuild) {
+            setShowReadinessConfirm(true);
+            return;
+        }
+
+        // Incomplete PRD: some required sections failed. Do not silently commit
+        // partial source material — require explicit acknowledgement. Uses the raw
         // persisted list (not the SECTION_TITLES-filtered display list) so it
         // matches the code-level gate in artifactJobController.startAll.
         if ((activeSpine.generationMeta?.failedSections?.length ?? 0) > 0) {
@@ -591,19 +612,10 @@ export function ProjectWorkspace() {
         startFinalizeFlow(false);
     };
 
-    // Continues the finalize flow after the incomplete-PRD gate. If this real
-    // project will generate assets but hasn't picked a design-system direction
-    // yet, ask first — the choice steers the design system (and therefore
-    // mockups + copied prompts). The demo never generates and skips through.
-    // `ackIncomplete` records whether the user acknowledged generating from a
-    // partial PRD; it's carried across the preset gate.
+    // Continue commitment after the readiness/incomplete checkpoints. Visual
+    // direction belongs to output generation, not to product commitment.
     const startFinalizeFlow = (ackIncomplete: boolean) => {
         if (!projectId || !activeSpine) return;
-        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID && !project?.designSystemPreset) {
-            pendingIncompleteAck.current = ackIncomplete;
-            setShowPresetChoice(true);
-            return;
-        }
         finalizeAndGenerate(ackIncomplete);
     };
 
@@ -770,14 +782,14 @@ export function ProjectWorkspace() {
         setShowFinalizeSuccess(true);
     };
 
-    // Performs the actual finalize + asset kickoff. Split out so it can run
-    // either directly (preset already chosen / demo) or after the preset gate.
+    // Commit the working plan. Asset generation is a separate explicit action:
+    // commitment records intent; generating documents does not create intent.
     const finalizeAndGenerate = (ackIncomplete: boolean) => {
         if (!projectId || !activeSpine) return;
 
-        // Re-finalize with existing assets: route through the Update Assets
-        // plan instead of blindly regenerating everything. First finalize (no
-        // assets yet), the demo, and mid-run finalizes keep the direct path.
+        // Re-commit with existing outputs: route through the Update Assets plan
+        // so source drift is explicit. First commitment, the demo, and an active
+        // output run keep the direct path.
         if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
             const jobActive = !!assetJob && Object.values(assetJob.slots).some(
                 s => s && (s.status === 'generating' || s.status === 'queued'),
@@ -786,28 +798,29 @@ export function ProjectWorkspace() {
                 const ctx = buildUpdatePlanContext();
                 if (ctx && Object.keys(ctx.snapshots).length > 0) {
                     openUpdatePlan(ctx, ackIncomplete);
-                    return; // not finalized yet — the plan dialog owns it
+                    return; // not committed yet — the plan dialog owns it
                 }
             }
         }
 
         markSpineFinal(projectId, activeSpine.id, true);
 
-        // Kick off artifact generation immediately so assets are underway
-        // while the success modal is visible. We deliberately do NOT switch
-        // to the Assets stage yet — the modal owns the transition, and its
-        // "Open Assets" action performs the navigation + panel auto-open.
-        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
-            artifactJobController.startAll({
-                projectId,
-                spineVersionId: activeSpine.id,
-                prdContent: activeSpine.responseText,
-                structuredPRD: activeSpine.structuredPRD,
-                projectPlatform: project?.platform,
-                acknowledgeIncomplete: ackIncomplete,
-            });
-        }
         setShowFinalizeSuccess(true);
+    };
+
+    const startAssetGeneration = () => {
+        if (!projectId || !activeSpine?.structuredPRD || projectId === DEMO_PROJECT_ID) return;
+        artifactJobController.startAll({
+            projectId,
+            spineVersionId: activeSpine.id,
+            prdContent: activeSpine.responseText,
+            structuredPRD: activeSpine.structuredPRD,
+            projectPlatform: project?.platform,
+            acknowledgeIncomplete: (activeSpine.generationMeta?.failedSections?.length ?? 0) > 0,
+        });
+        setShowFinalizeSuccess(false);
+        setFinalizeAutoOpen(true);
+        setProjectStage(projectId, 'workspace');
     };
 
     const handleChooseDesignSystemPreset = (presetId: string) => {
@@ -816,8 +829,8 @@ export function ProjectWorkspace() {
         // off the project when design_system runs.
         setProjectDesignSystemPreset(projectId, presetId);
         setShowPresetChoice(false);
-        finalizeAndGenerate(pendingIncompleteAck.current);
-        pendingIncompleteAck.current = false;
+        if (generateAfterPreset.current) startAssetGeneration();
+        generateAfterPreset.current = false;
     };
 
     // "Open Assets" from the success modal: navigate to the Assets stage and
@@ -828,6 +841,36 @@ export function ProjectWorkspace() {
         setShowFinalizeSuccess(false);
         setFinalizeAutoOpen(true);
         setProjectStage(projectId, 'workspace');
+    };
+
+    const handleGenerateAssets = () => {
+        if (!projectId || !activeSpine?.structuredPRD || projectId === DEMO_PROJECT_ID) return handleOpenAssets();
+        if (!project?.designSystemPreset) {
+            generateAfterPreset.current = true;
+            setShowPresetChoice(true);
+            return;
+        }
+        startAssetGeneration();
+    };
+
+    const openDecisionCenter = () => {
+        setReviewInitialTab('decisions');
+        setPipelineStage('review');
+    };
+
+    const openChallenge = () => {
+        setReviewInitialTab('review');
+        setPipelineStage('review');
+    };
+
+    const handlePlanningNextAction = () => {
+        const kind = planningReadiness.nextAction.kind;
+        if (kind === 'resolve_decision' || kind === 'review_source_change') return openDecisionCenter();
+        if (kind === 'challenge_plan') return openChallenge();
+        if (kind === 'align_outputs') return setPipelineStage('workspace');
+        if (kind === 'commit_plan') return handleToggleFinal();
+        const anchor = kind === 'confirm_scope' ? 'prd-features' : 'prd-coreProblem';
+        document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
     };
 
     const handleExport = () => {
@@ -857,7 +900,7 @@ export function ProjectWorkspace() {
                                 ? 'Generation Failed'
                                 : isPRDActivelyGenerating
                                     ? 'Generating...'
-                                    : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(FINAL)' : ''}`
+                                    : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(COMMITTED)' : ''}`
                             : 'Initializing...'}
                     </span>
                     {projectId !== DEMO_PROJECT_ID && (
@@ -871,15 +914,15 @@ export function ProjectWorkspace() {
                 <div className="flex items-center gap-2 shrink-0">
                     {showAssetsPill && (
                         <button
-                            onClick={handleOpenAssets}
+                            onClick={assetsReady ? handleOpenAssets : handleGenerateAssets}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600/90 hover:bg-green-600 text-white rounded transition"
-                            title="Go to the build assets for this finalized PRD"
+                            title="Generate or review outputs from this committed plan"
                         >
                             {assetsBuilding
                                 ? <Loader2 size={14} className="animate-spin" />
                                 : <ArrowRight size={14} />}
                             <span className="hidden sm:inline">
-                                {assetsBuilding ? 'Building assets…' : 'Go to Assets'}
+                                {assetsBuilding ? 'Building outputs…' : assetsReady ? 'Review outputs' : planningReadiness.isReadyToBuild ? 'Build outputs' : 'Explore outputs'}
                             </span>
                         </button>
                     )}
@@ -895,10 +938,10 @@ export function ProjectWorkspace() {
                         <button
                             onClick={handleToggleFinal}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${activeSpine?.isFinal ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
-                            title={activeSpine?.isFinal ? "Unmark Final" : "Mark as Final"}
+                            title={activeSpine?.isFinal ? "Return this plan to working status" : "Review readiness and commit this plan"}
                         >
                             <CheckCircle size={14} />
-                            <span className="hidden md:inline">{activeSpine?.isFinal ? 'Final' : 'Mark Final'}</span>
+                            <span className="hidden md:inline">{activeSpine?.isFinal ? 'Committed' : 'Review readiness'}</span>
                         </button>
                     )}
 
@@ -999,18 +1042,44 @@ export function ProjectWorkspace() {
                 </div>
             </div>
 
+            {showReadinessConfirm && (
+                <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
+                    <div className="w-full max-w-lg rounded-2xl bg-white text-neutral-900 shadow-2xl">
+                        <div className="p-6">
+                            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Readiness checkpoint</p>
+                            <h3 className="mt-2 text-xl font-bold">This is still a working plan</h3>
+                            <p className="mt-2 text-sm leading-6 text-neutral-600">{planningReadiness.summary} Committing it records the current version as the intended implementation foundation; it does not make unresolved reasoning disappear.</p>
+                            <div className="mt-4 space-y-2">
+                                {planningReadiness.criteria.filter(item => item.status === 'attention').map(item => (
+                                    <div key={item.id} className="rounded-lg bg-amber-50 px-3 py-2">
+                                        <p className="text-sm font-semibold text-amber-950">{item.label}</p>
+                                        <p className="mt-0.5 text-xs leading-5 text-amber-800">{item.explanation}</p>
+                                    </div>
+                                ))}
+                            </div>
+                        </div>
+                        <div className="flex flex-col-reverse gap-2 border-t border-neutral-100 p-4 sm:flex-row sm:justify-end">
+                            <button type="button" onClick={() => { setShowReadinessConfirm(false); handlePlanningNextAction(); }} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-semibold text-neutral-700">Keep shaping the plan</button>
+                            <button type="button" onClick={() => {
+                                setShowReadinessConfirm(false);
+                                if (persistedFailedSections.length > 0) setShowIncompletePrdConfirm(true);
+                                else startFinalizeFlow(false);
+                            }} className="min-h-11 rounded-lg bg-neutral-950 px-4 text-sm font-semibold text-white">Commit working plan anyway</button>
+                        </div>
+                    </div>
+                </div>
+            )}
             {showIncompletePrdConfirm && (
                 <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
                     <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
                         <div className="flex items-start gap-3 p-5 border-b border-neutral-100">
                             <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
                             <div>
-                                <h3 className="font-semibold text-neutral-900">Generate assets from an incomplete PRD?</h3>
+                                <h3 className="font-semibold text-neutral-900">Commit an incomplete working plan?</h3>
                                 <p className="text-sm text-neutral-600 mt-1">
                                     {persistedFailedSections.length} PRD section{persistedFailedSections.length > 1 ? 's' : ''} failed
-                                    to generate. Downstream artifacts (screens, data model, mockups, and more) will be built
-                                    from partial source material and may be inconsistent or incomplete. They'll be tagged as
-                                    generated from an incomplete PRD.
+                                    to generate. The current specification is missing source material and should not be treated
+                                    as a complete implementation foundation.
                                 </p>
                                 <p className="text-sm text-neutral-600 mt-2">
                                     We recommend retrying the failed sections first.
@@ -1030,7 +1099,7 @@ export function ProjectWorkspace() {
                                 onClick={() => { setShowIncompletePrdConfirm(false); startFinalizeFlow(true); }}
                                 className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition"
                             >
-                                Generate anyway
+                                Commit anyway
                             </button>
                         </div>
                     </div>
@@ -1039,7 +1108,10 @@ export function ProjectWorkspace() {
             {showPresetChoice && (
                 <DesignSystemPresetChoice
                     onChoose={handleChooseDesignSystemPreset}
-                    onClose={() => setShowPresetChoice(false)}
+                    onClose={() => {
+                        generateAfterPreset.current = false;
+                        setShowPresetChoice(false);
+                    }}
                 />
             )}
             {updatePlan && activeSpine && (
@@ -1054,13 +1126,16 @@ export function ProjectWorkspace() {
             )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
-                    assetsReady={assetsReady}
+                    assetsGenerated={assetsReady}
+                    assetsBuilding={assetsBuilding}
+                    readyToBuild={planningReadiness.isReadyToBuild}
                     onOpenAssets={handleOpenAssets}
+                    onGenerateAssets={handleGenerateAssets}
                     onClose={() => setShowFinalizeSuccess(false)}
                 />
             )}
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
-            {isExportOpen && projectId && <ExportModal projectId={projectId} onClose={() => setIsExportOpen(false)} />}
+            {isExportOpen && projectId && <ExportModal projectId={projectId} planningReady={planningReadiness.isReadyToBuild} onClose={() => setIsExportOpen(false)} />}
             {showPrdHistory && (
                 <VersionHistoryPanel
                     title="PRD version history"
@@ -1109,8 +1184,9 @@ export function ProjectWorkspace() {
             <div className="shrink-0 z-10">
                 <PipelineStageBar
                     currentStage={pipelineStage}
-                    onStageChange={setPipelineStage}
-                    hasPRD={!!activeSpine?.isFinal}
+                    onStageChange={handlePipelineStageChange}
+                    canExploreOutputs={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
+                    isPlanCommitted={!!activeSpine?.isFinal && planningReadiness.isReadyToBuild}
                     canReview={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
                 />
             </div>
@@ -1138,18 +1214,26 @@ export function ProjectWorkspace() {
 
             {/* Main Workspace Area — flex-1 fills remaining height */}
             <div className="flex-1 flex overflow-hidden">
-                {pipelineStage === 'workspace' && activeSpine?.isFinal && activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
-                    <ArtifactWorkspace
-                        projectId={projectId}
-                        spineVersionId={activeSpine.id}
-                        prdContent={activeSpine.responseText}
-                        structuredPRD={activeSpine.structuredPRD}
-                        projectPlatform={project?.platform}
-                        autoOpenIntent={finalizeAutoOpen}
-                        onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
-                    />
+                {pipelineStage === 'workspace' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
+                    <div className="flex min-h-0 flex-1 flex-col">
+                        {!planningReadiness.isReadyToBuild && (
+                            <div className="shrink-0 border-b border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
+                                <span className="font-semibold">Exploratory outputs.</span> Use early screens, flows, or technical concepts to think—but they are not evidence that this plan is ready to build.
+                                <button type="button" onClick={() => setPipelineStage('prd')} className="ml-2 font-semibold underline underline-offset-2">Return to the plan</button>
+                            </div>
+                        )}
+                        <ArtifactWorkspace
+                            projectId={projectId}
+                            spineVersionId={activeSpine.id}
+                            prdContent={activeSpine.responseText}
+                            structuredPRD={activeSpine.structuredPRD}
+                            projectPlatform={project?.platform}
+                            autoOpenIntent={finalizeAutoOpen}
+                            onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
+                        />
+                    </div>
                 ) : pipelineStage === 'review' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
-                    <ReviewWorkspaceContainer projectId={projectId} />
+                    <ReviewWorkspaceContainer projectId={projectId} initialTab={reviewInitialTab} />
                 ) : (
                 <>
                 {/* Left: Main Content Column */}
@@ -1192,14 +1276,7 @@ export function ProjectWorkspace() {
                                 platform={project?.platform}
                             />
                         )}
-                        {pipelineStage === 'prd' && showDesignSetup && activeSpine && (
-                            <DesignSetupStep
-                                projectId={projectId}
-                                recommendationText={designRecommendationText}
-                                prdGenerating={isPRDActivelyGenerating}
-                            />
-                        )}
-                        {pipelineStage === 'prd' && !showPreflight && !showDesignSetup && (
+                        {pipelineStage === 'prd' && !showPreflight && (
                             <>
                                 {/* Feedback items from mockups/artifacts */}
                                 <FeedbackItemsList
@@ -1351,12 +1428,24 @@ export function ProjectWorkspace() {
                                                 </div>
                                             </div>
                                         ) : activeSpine.structuredPRD && showStructuredView ? (
-                                            <StructuredPRDView
-                                                projectId={projectId}
-                                                spineId={activeSpine.id}
-                                                structuredPRD={activeSpine.structuredPRD}
-                                                readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
-                                            />
+                                            <>
+                                                {!isOldVersion && (
+                                                    <PlanningStateBar
+                                                        readiness={planningReadiness}
+                                                        committed={activeSpine.isFinal}
+                                                        onNextAction={handlePlanningNextAction}
+                                                        onOpenDecisions={openDecisionCenter}
+                                                        onOpenChallenge={openChallenge}
+                                                    />
+                                                )}
+                                                <StructuredPRDView
+                                                    projectId={projectId}
+                                                    spineId={activeSpine.id}
+                                                    structuredPRD={activeSpine.structuredPRD}
+                                                    readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
+                                                    onOpenDecisions={openDecisionCenter}
+                                                />
+                                            </>
                                         ) : (
                                             <div className="prose prose-neutral max-w-none">
                                                 <SelectableSpine

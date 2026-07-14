@@ -133,6 +133,7 @@ export function buildDecisionImpact(input: {
     };
     const createdAt = input.now?.() ?? Date.now();
     const id = `impact-${input.record.id}-${planningContentHash(`${input.baselineSpineVersionId}:${projection.latestVerdictEventId}`)}`;
+    const affectedPrdSections = [...new Set(['Assumptions', ...(input.record.affectedPrdSections ?? [])])];
     const preview: DecisionImpactPreview = {
         id,
         projectId: input.projectId,
@@ -154,10 +155,10 @@ export function buildDecisionImpact(input: {
             value: nextAssumption,
         }],
         proposedResultHash: planningContentHash(nextPrd),
-        affectedPrdSections: ['Assumptions'],
+        affectedPrdSections,
         affectedArtifactSlots: artifactSlotsDependingOnPrd(),
         possibleConflictRecordIds: input.record.relatedPlanningRecordIds ?? [],
-        explanation: 'Applying this decision records the confirmed planning context in a new PRD version. Existing assets are not rewritten and will be evaluated for review.',
+        explanation: 'Recording this decision creates a new PRD version with the durable verdict. The affected sections listed above are review targets, not automatic rewrites; existing assets are also left unchanged and evaluated for alignment.',
         createdAt,
     };
     const assessment: DecisionAssessment = {

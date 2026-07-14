@@ -40,4 +40,10 @@ describe('buildAgentHandoff', () => {
         const out = buildAgentHandoff({ projectName: '', artifacts: [] });
         expect(out).toContain('This product — Build Handoff');
     });
+
+    it('labels an uncommitted plan as exploratory', () => {
+        const out = buildAgentHandoff({ projectName: 'Acme', artifacts: [], exploratory: true });
+        expect(out).toContain('Exploratory handoff');
+        expect(out).toContain('has not been committed as implementation-ready');
+    });
 });

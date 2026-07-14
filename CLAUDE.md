@@ -732,34 +732,17 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
     and the external copy-prompt, keeping the project visually consistent. The
     `DesignSystemRenderer` shows a banner explaining this coupling and that
     regenerating may shift downstream mockups/screen prompts.
-    - **Setup-stage selection (`src/components/setup/DesignSetupStep.tsx`) is
-      the primary picker.** New projects stamp `Project.needsDesignSetup: true`
-      in `createProject`; while that flag is set and no preset is chosen, the
-      workspace PRD stage renders `DesignSetupStep` **instead of** the PRD/
-      progress view — after the preflight clarification flow (if any) completes
-      and therefore exactly while PRD generation runs in the background (the
-      PRD run is untouched; the step is purely a view swap, so generation never
-      waits on the choice). Gating is the pure, unit-tested
-      `shouldShowDesignSetup` (`src/lib/designSetup.ts`): never for legacy
-      projects (no flag), the demo, blocked spines, or failed runs — full
-      (`generationError`) *and* partial (`generationMeta.failedSections`;
-      plus the transient `hasFailedSection` guard in `ProjectWorkspace`) —
-      because the error card / incomplete-PRD banner and their retry
-      affordances must stay reachable. The step shows static
-      `previewTokens`-driven preview cards (no AI/image calls), a rule-based
-      **Recommended** badge (`src/lib/designPresetRecommendation.ts` — keyword
-      scoring over idea + clarification answers, `saas_minimal` fallback), and
-      preselects the user's saved **default preset**
-      (`src/lib/designPresetPreference.ts`, localStorage
-      `SYNAPSE_DEFAULT_DESIGN_PRESET`, written only via the explicit "Use this
-      as my default" checkbox). Choosing calls `setProjectDesignSystemPreset`
-      (which also clears `needsDesignSetup` — from any picker); "Decide later"
-      calls `markDesignSetupComplete` and defers to the finalize gate.
-    - **The Mark-as-Final gate (`DesignSystemPresetChoice` in
-      `ProjectWorkspace`) is now the fallback**, still shown when a real
-      project reaches finalize with no preset (setup skipped, or a legacy
-      project) — so visual artifact generation still never starts without an
-      explicit preset decision.
+    - **Visual direction is requested at output generation, not during product
+      reasoning.** New projects may still carry the backward-compatible
+      `needsDesignSetup` flag, but the Plan stage never swaps the PRD/progress
+      view for design setup. When the user explicitly chooses **Generate build
+      foundation**, `DesignSystemPresetChoice` appears if no preset exists.
+      Choosing calls `setProjectDesignSystemPreset` (which also clears
+      `needsDesignSetup`) and then begins output generation. This prevents an
+      aesthetic decision from interrupting problem/scope reasoning while still
+      ensuring visual outputs have a deliberate direction. The reusable
+      `DesignSetupStep`, recommendation, and preference helpers remain for
+      other surfaces but are not a live-workspace gate.
     - **Post-finalization re-selection.** The preset is **no longer one-time**.
       Because the Mark-as-Final gate only fires once (and never for projects
       finalized before presets existed), the **Design System artifact** carries a
@@ -1413,9 +1396,6 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               Pass A streams structured JSON → onPartial paints draft
               ↓
               SpineVersion stored, currentStage='prd'
-              ↓ (new projects: needsDesignSetup)
-              DesignSetupStep — pick a visual direction while the PRD
-              generates in the background (see "Design System Presets")
               ↓
   PRD stage:       SelectableSpine / StructuredPRDView — text selection →
                    branch creation → AI conversation → consolidateBranch()
@@ -1423,16 +1403,17 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
                    ConsolidationModal). Selection → action dialog runs
                    through the shared touch-aware pipeline (see "PRD
                    highlight → branch selection pipeline" below).
-  Assets stage:    ArtifactWorkspace (bundle/individual gen, refine, validate)
+  Build stage:     ArtifactWorkspace (exploratory or committed outputs; bundle/
+                   individual gen, refine, validate)
                    + MockupsView (platform/fidelity/scope config)
                    + MarkupImageView (MarkupImageSpec → SVG via
                    MarkupImageRenderer). The `'workspace'` pipeline stage is
-                   labeled **"Assets"** in `PipelineStageBar` (label-only; the
-                   stage key/route is still `workspace`).
+                   labeled **"Explore"** for a working plan and **"Build"** for
+                   a committed plan (the stage key/route stays `workspace`).
   History stage:   HistoryView — chronological timeline with diffs
 ```
 
-### Post-finalization transition (Mark Final → Assets)
+### Post-commitment transition (Commit Plan → Build)
 
 The artifact sidebar is organized into four workflow-named sections —
 **Project Foundation** (PRD **and** Design System — the design system sits
@@ -1476,15 +1457,13 @@ separate generation-status panel on the right — per-slot status lives
 inline on each sidebar row (the `StatusDot` next to the title) and in
 the mobile header beside the selected artifact name.
 
-Marking a spine final must not dump the user back on something that looks like
-the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)
-starts artifact generation and shows `FinalizationSuccessModal` ("PRD
-Finalized" — *being created* vs *ready*, keyed off an `assetsReady` presence
-check of the non-hidden, non-retired core artifacts + mockups) **without**
-switching stage. Its
-**Open Assets** action (`handleOpenAssets`) switches `currentStage` to
-`workspace` and arms a one-shot `finalizeAutoOpen` flag passed to
-`ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
+Committing a spine records implementation intent but does not start artifact
+generation. `ProjectWorkspace.handleToggleFinal` first presents categorical
+planning readiness and any incomplete-source acknowledgement, then shows
+`FinalizationSuccessModal`. The modal makes **Generate build foundation** an
+explicit second action. Existing-output projects can instead **Review outputs**;
+that action switches `currentStage` to `workspace` and arms a one-shot
+`finalizeAutoOpen` flag passed to `ArtifactWorkspace`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
 `ARTIFACT_GROUPS` order (design_system → user_flows → screens → … →
@@ -2587,7 +2566,7 @@ ref would leave the graph still reporting `dependency_changed`; never do a
 partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph
 detail panel and the artifact-header strip when stale.
 
-**Re-finalize goes through the Update Assets plan.** When Mark-as-Final runs
+**Re-commit goes through the Update Assets plan.** When Commit Plan runs
 and downstream assets already exist (and no generation job is active),
 `ProjectWorkspace.finalizeAndGenerate` does NOT call `startAll` — it evaluates
 the dependency graph against the spine being finalized and opens
@@ -2599,8 +2578,9 @@ Regenerate / Mark up to date / Decide later — defaulted from
 `expandSelectionWithTroubledUpstreams` (a selected dependent must never rebuild
 from a stale unselected visible input; marked-current upstreams count as
 healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
-(spine stays non-final). First finalize / demo / job-active keep the direct
-`startAll` path. Do not reintroduce a blind full regeneration on re-finalize.
+(spine stays uncommitted). A first commitment never calls `startAll` directly:
+the success transition offers a separate **Generate build foundation** action.
+Do not reintroduce automatic output generation as a side effect of commitment.
 
 ### PRD highlight → branch selection pipeline
 
@@ -2733,9 +2713,10 @@ spine with no `structuredPRD`, or an incomplete spine that is neither
 acknowledged (`acknowledgeIncomplete`) nor already `isFinal` (the durable record
 of acknowledgement, so resume/retry after reload still work). `startAll` /
 `regenerateSlots` early-return when the gate disallows. On the finalize edge,
-`ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
-an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
-"Generate anyway" proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
+`ProjectWorkspace.handleToggleFinal` interposes readiness and explicit
+"Commit an incomplete working plan?" checkpoints before `markSpineFinal`.
+Output generation remains a later explicit action and passes
+`acknowledgeIncomplete`. Any artifact/mockup
 version generated while `failedSections` is non-empty is stamped
 `metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 
@@ -2822,8 +2803,9 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
   interaction must remain usable without animation.
 - **Screens** (`screens/`): Idea, SpecGeneration, Refine (reuses the
   Clarify/Expand/Specify/Alternative/Replace action set mirrored from
-  `SELECTION_ACTIONS`), Versions, Assets (the hero — Mark as Final →
-  sequential asset generation → `ArtifactDrawer` previews), Connections
+  `SELECTION_ACTIONS`), Versions, Assets (the hero — Commit Plan → explicit
+  Generate Build Foundation → sequential output generation → `ArtifactDrawer`
+  previews), Connections
   (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared
   pieces in `components/`: `ScreenShell`, `GenerationStep`, `RefineMenu`,
   `ArtifactDrawer` (mobile bottom-sheet / desktop side-drawer, mirrors
@@ -2874,13 +2856,33 @@ see the LLM layer) before this; the metrics layer makes that concurrency
 HistoryEvent, etc.). Keep optional fields optional even when only one
 code path uses them — legacy localStorage data may not have them.
 
-### Planning intelligence, adversarial review, and Decision Center
+### Uncertainty-first planning, adversarial review, and Decision Center
 
-The **Review** stage is available as soon as a safe structured PRD exists. It
-hosts specialist review findings, review history, and the first Planning
-Intelligence surface: the Decision Center. `src/components/review/ReviewWorkspaceContainer.tsx`
+The workspace progression is **Plan → Challenge → Build → History**. Challenge
+is available as soon as a safe structured working PRD exists and hosts
+specialist findings, review history, and the full Decision Center.
+`src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
 `ReviewWorkspace.tsx` and `DecisionCenter.tsx`.
+
+- `derivePlanningReadiness` (`planningReadiness.ts`) is the pure, categorical
+  project-readiness projection. It evaluates foundation clarity, intentional
+  scope, material open decisions/assumptions, current challenge coverage,
+  source drift, incomplete sections, and output alignment. Never replace it
+  with a percentage or artifact-count score. Missing outputs do not reduce
+  planning readiness.
+- `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
+  current readiness category, supporting criteria, and one highest-value next
+  action with direct entry to decisions or Challenge.
+- PRD assumptions are imported idempotently as soon as the latest structured
+  PRD exists; visiting Challenge is not a prerequisite for planning state.
+- Generated assumptions distinguish **confidence** (plausibility) from
+  **materiality** (consequence if wrong) and may identify affected PRD
+  sections. Ranking is materiality-first.
+- `isFinal` now reads as a committed plan version, not proof that every output
+  exists. Commitment and `artifactJobController.startAll` are separate user
+  actions. Before commitment, Build is available as an explicitly exploratory
+  surface and must never imply implementation readiness.
 
 - `PlanningRecord` is the shared durable aggregate for decisions, assumptions,
   risks, open questions, and semantic inconsistencies. Do not add a parallel

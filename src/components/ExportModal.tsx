@@ -30,10 +30,11 @@ function exportContentFor(artifact: Artifact, raw: string): string {
 
 interface ExportModalProps {
     projectId: string;
+    planningReady: boolean;
     onClose: () => void;
 }
 
-export function ExportModal({ projectId, onClose }: ExportModalProps) {
+export function ExportModal({ projectId, planningReady, onClose }: ExportModalProps) {
     const {
         getProject, getLatestSpine, getArtifacts, getArtifactVersions,
         getArtifactStaleness, getSpineVersions,
@@ -186,6 +187,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
             projectName: project?.name || 'This product',
             prdMarkdown: latestSpine?.responseText,
             manifestMarkdown: renderManifestMarkdown(manifest),
+            exploratory: !latestSpine?.isFinal || !planningReady,
             artifacts: orderedCoreArtifacts.map(a => ({
                 subtype: a.subtype ?? '',
                 title: displayTitle(a),
@@ -267,6 +269,12 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                     {/* --- EXPORT: whole-project bundles --- */}
                     <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Export</span>
 
+                    {(!latestSpine?.isFinal || !planningReady) && (
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                            <strong>Exploratory export.</strong> This plan is not ready to serve as a trusted implementation foundation. Exports retain that warning so polished documents do not imply settled reasoning.
+                        </div>
+                    )}
+
                     {/* Agent handoff — the build-companion preset */}
                     <div className="flex items-stretch gap-2">
                         <button
@@ -277,7 +285,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                             <Bot size={18} className="text-violet-600 shrink-0" />
                             <div className="min-w-0">
                                 <div className="text-sm font-medium text-violet-900">Copy for coding agent</div>
-                                <div className="text-xs text-violet-700">PRD + plan + prompts, ready to paste into Claude Code / Cursor</div>
+                                <div className="text-xs text-violet-700">{latestSpine?.isFinal && planningReady ? 'Committed plan + aligned implementation context' : 'Plan + explicit exploratory warning'}</div>
                             </div>
                             {copiedKey === 'handoff'
                                 ? <Check size={16} className="text-violet-600 shrink-0 ml-auto" />

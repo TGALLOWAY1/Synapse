@@ -75,6 +75,16 @@ export function DecisionCenter({ records, readOnly, onDecide, onPreviewImpact, o
     const submit = (action: DecisionAction, value?: string) => {
         if (!selected) return;
         onDecide(selected.id, action, value, rationale.trim() || undefined);
+        // A newly recorded answer should remain in view so the user can inspect
+        // its consequences and request an impact preview. Moving it out of the
+        // needs-review queue must not feel like the reasoning disappeared.
+        if (action === 'reopen') {
+            setView('needs_review');
+        } else if (needsReview(selected)) {
+            setView('log');
+        }
+        setSelectedId(selected.id);
+        setMobileDetailOpen(true);
         setCustomAnswer('');
         setRationale('');
     };
@@ -197,7 +207,7 @@ export function DecisionCenter({ records, readOnly, onDecide, onPreviewImpact, o
                                     <p className="mt-1 text-xs text-neutral-500">Assets to review: {selected.preview.affectedArtifactLabels.join(', ') || 'None identified'}</p>
                                     {selected.preview.explanation && <p className="mt-3 text-sm leading-6 text-neutral-700">{selected.preview.explanation}</p>}
                                     {selected.preview.error && <p className="mt-2 text-sm text-red-700">{selected.preview.error}</p>}
-                                    {!readOnly && selected.preview.status === 'ready' && selected.preview.canApply && <button type="button" onClick={() => onApplyToPlan(selected.id)} className="mt-4 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Apply to plan</button>}
+                                    {!readOnly && selected.preview.status === 'ready' && selected.preview.canApply && <button type="button" onClick={() => onApplyToPlan(selected.id)} className="mt-4 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Record in working plan</button>}
                                     {!readOnly && (selected.preview.status === 'stale' || selected.preview.status === 'failed') && <button type="button" onClick={() => onPreviewImpact(selected.id)} className="mt-4 min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800"><RefreshCcw size={14} className="mr-1 inline" /> Refresh preview</button>}
                                 </section>
                             ) : !readOnly && ['confirmed', 'rejected', 'resolved'].includes(selected.status) ? (

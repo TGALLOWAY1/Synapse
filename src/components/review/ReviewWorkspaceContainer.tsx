@@ -46,6 +46,7 @@ import {
 
 interface Props {
     projectId: string;
+    initialTab?: 'review' | 'decisions';
 }
 
 const activeControllers = new Map<string, AbortController>();
@@ -88,7 +89,7 @@ const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, ReviewIssueDisposition['a
 
 const dispositionForAction = (action: ReviewIssueAction): ReviewIssueDisposition['action'] => DISPOSITION_BY_ACTION[action];
 
-export function ReviewWorkspaceContainer({ projectId }: Props) {
+export function ReviewWorkspaceContainer({ projectId, initialTab }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
     const spines = useProjectStore(state => state.spineVersions[projectId] ?? []);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? []);
@@ -667,7 +668,7 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
         const impact = buildDecisionImpact({ projectId, record, baselineSpineVersionId: spine.id, structuredPRD: spine.structuredPRD });
         if (!impact.ok || !impact.nextPrd || impact.preview.id !== preview.id) return;
         const applied = state.compareAndAppendStructuredPRD(projectId, spine.id, impact.nextPrd, {
-            editSummary: `Applied decision: ${record.title}`,
+            editSummary: `Recorded decision in PRD: ${record.title}`,
             expectedPrdHash: preview.baseline.spineContentHash,
             decisionApplication: {
                 planningRecordId: record.id,
@@ -690,13 +691,14 @@ export function ReviewWorkspaceContainer({ projectId }: Props) {
             });
         }
         useToastStore.getState().addToast(applied.status === 'applied'
-            ? { type: 'success', title: 'Decision applied', message: 'A new PRD version was created. Existing assets were not changed.' }
-            : { type: 'info', title: 'Preview is stale', message: 'Refresh the impact preview before applying this decision.' });
+            ? { type: 'success', title: 'Decision recorded in PRD', message: 'A new PRD version preserved the verdict. Affected sections and existing outputs still require review; nothing was silently rewritten.' }
+            : { type: 'info', title: 'Preview is stale', message: 'Refresh the impact preview before recording this decision in the PRD.' });
     };
 
-    if (!project || !currentManifest) return <div className="p-6 text-sm text-neutral-500">Finalize a structured PRD before starting a specialist review.</div>;
+    if (!project || !currentManifest) return <div className="p-6 text-sm text-neutral-500">A structured working plan is needed before Synapse can challenge it.</div>;
     return <ReviewWorkspace
         projectName={project.name}
+        initialTab={initialTab}
         recommendedPanel={panel}
         sourcesInScope={currentManifest.sources.map(source => source.label)}
         missingSources={currentManifest.missingArtifacts.map(source => source.replaceAll('_', ' '))}

@@ -37,7 +37,7 @@ export const TOUR_SCREENS: TourScreenMeta[] = [
     { id: 'spec', title: 'AI builds the spec section by section', shortLabel: 'Generation' },
     { id: 'refine', title: 'Refine specific parts of the document', shortLabel: 'Refine' },
     { id: 'versions', title: 'Nothing gets lost — every change is versioned', shortLabel: 'Versions' },
-    { id: 'assets', title: 'One finalized PRD powers the entire workspace', shortLabel: 'Assets' },
+    { id: 'assets', title: 'Commit the reasoning, then generate outputs', shortLabel: 'Build' },
     { id: 'connections', title: 'Everything stays connected', shortLabel: 'Connected' },
 ];
 

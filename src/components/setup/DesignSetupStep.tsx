@@ -75,7 +75,7 @@ export function DesignSetupStep({ projectId, recommendationText, prdGenerating }
                 ) : (
                     <>
                         <CheckCircle2 size={16} className="shrink-0 text-emerald-500" />
-                        <span>Your PRD is ready. Choose a visual direction to continue.</span>
+                        <span>Your working plan is drafted. Choose a visual direction for exploratory screens.</span>
                     </>
                 )}
             </div>

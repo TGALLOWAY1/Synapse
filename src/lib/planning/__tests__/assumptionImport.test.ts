@@ -43,6 +43,53 @@ describe('lazy PRD assumption import', () => {
         expect(next.records[0].events).toEqual(first.records[0].events);
     });
 
+    it('refreshes planning context without replacing the durable statement or history', () => {
+        const initial = prd();
+        initial.assumptions![0] = {
+            ...initial.assumptions![0],
+            materiality: 'normal',
+            affectedPrdSections: ['vision'],
+        };
+        const first = importPrdAssumptions({
+            projectId: 'p1', sourceSpineVersionId: 's1', structuredPRD: initial,
+            existingRecords: [], now: () => 10,
+        });
+        const revised = prd();
+        revised.assumptions![0] = {
+            ...revised.assumptions![0],
+            materiality: 'blocking',
+            affectedPrdSections: ['coreProblem', 'features'],
+        };
+        const next = importPrdAssumptions({
+            projectId: 'p1', sourceSpineVersionId: 's2', structuredPRD: revised,
+            existingRecords: first.records, now: () => 20,
+        });
+        expect(next.updated).toHaveLength(1);
+        expect(next.records[0]).toMatchObject({
+            statement: 'Users accept email verification',
+            materiality: 'blocking',
+            affectedPrdSections: ['coreProblem', 'features'],
+        });
+        expect(next.records[0].events).toEqual(first.records[0].events);
+    });
+
+    it('brings preflight assumptions and unknowns into the same durable queue', () => {
+        const result = importPrdAssumptions({
+            projectId: 'p1', sourceSpineVersionId: 's1', structuredPRD: prd(), existingRecords: [], now: () => 10,
+            preflightSession: {
+                mode: 'quick', originalIdea: 'idea', questions: [], currentQuestionIndex: 0,
+                status: 'completed', completed: true,
+                assumptions: ['The buyer and daily user are the same person'],
+                unknowns: ['Which outcome makes the first release successful?'],
+            },
+        });
+        expect(result.records.map(record => record.type)).toEqual(['assumption', 'open_question', 'assumption']);
+        expect(result.records.filter(record => record.sources?.[0].sourceType === 'preflight')).toHaveLength(2);
+        expect(result.records.filter(record => record.sources?.[0].sourceType === 'preflight').every(record =>
+            record.events?.every(event => event.actor !== 'user'),
+        )).toBe(true);
+    });
+
     it('skips malformed assumptions without disturbing existing records', () => {
         const malformed = prd();
         malformed.assumptions = [{ id: '', statement: '', confidence: 'low' }];

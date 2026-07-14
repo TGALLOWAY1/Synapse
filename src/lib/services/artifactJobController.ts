@@ -154,6 +154,15 @@ function isSlotDoneForSpine(projectId: string, slot: ArtifactSlotKey, spineVersi
     );
 }
 
+/**
+ * Auto-resume is recovery for an explicitly started output run, not an entry
+ * side effect of opening Explore/Build. At least one completed current-spine
+ * output is the durable evidence that such a run had begun before reload.
+ */
+export function hasAnyCompletedSlotForSpine(projectId: string, spineVersionId: string): boolean {
+    return ALL_SLOT_KEYS.some(slot => isSlotDoneForSpine(projectId, slot, spineVersionId));
+}
+
 // Cap consecutive *failed* manual retries per slot. Without this a user can
 // hammer the retry button against a deterministic failure (bad key, exhausted
 // quota) and burn API calls indefinitely. A successful run clears the count;
@@ -917,6 +926,7 @@ export const artifactJobController = {
      */
     resumeIfNeeded(args: StartArgs): void {
         if (this.isActive(args.projectId)) return;
+        if (!hasAnyCompletedSlotForSpine(args.projectId, args.spineVersionId)) return;
         // Only auto-wake for *visible* pending slots. A hidden slot that errored
         // stays pending forever (no version), and without this filter every
         // workspace remount would spin up a run just to retry it — invisibly,

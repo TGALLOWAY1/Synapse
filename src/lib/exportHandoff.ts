@@ -20,6 +20,8 @@ export interface HandoffInput {
      * whether anything was stale at export time.
      */
     manifestMarkdown?: string;
+    /** True when the current working plan has not been committed. */
+    exploratory?: boolean;
 }
 
 const PREAMBLE = (projectName: string) =>
@@ -40,8 +42,12 @@ How to use this document:
  * is non-empty, so a partial project still produces a coherent document.
  */
 export function buildAgentHandoff(input: HandoffInput): string {
-    const { projectName, prdMarkdown, artifacts, manifestMarkdown } = input;
+    const { projectName, prdMarkdown, artifacts, manifestMarkdown, exploratory } = input;
     const parts: string[] = [PREAMBLE(projectName || 'This product')];
+
+    if (exploratory) {
+        parts.push('> **Exploratory handoff:** This working plan has not been committed as implementation-ready. Validate unresolved assumptions and decisions before building.\n\n---\n');
+    }
 
     if (manifestMarkdown && manifestMarkdown.trim()) {
         parts.push(manifestMarkdown.trim(), '\n---\n');

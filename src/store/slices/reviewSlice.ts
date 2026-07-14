@@ -310,13 +310,14 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
         return outcome;
     },
 
-    importPlanningAssumptions: (projectId, sourceSpineVersionId, structuredPRD) => {
+    importPlanningAssumptions: (projectId, sourceSpineVersionId, structuredPRD, preflightSession) => {
         let counts = { imported: 0, existing: 0 };
         set((state) => {
             const result = importPrdAssumptions({
                 projectId,
                 sourceSpineVersionId,
                 structuredPRD,
+                preflightSession,
                 existingRecords: state.planningRecords[projectId] ?? [],
             });
             counts = { imported: result.imported.length, existing: result.existing.length };

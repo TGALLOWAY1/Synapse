@@ -87,11 +87,11 @@ export function FeatureCard({ feature, onUpdate, onToggleConfirm, onBackToSummar
                         <button
                             onClick={onBackToSummary}
                             className="inline-flex items-center gap-1 px-1.5 py-0.5 rounded text-[11px] text-neutral-400 hover:text-indigo-600 hover:bg-indigo-50 transition"
-                            title="Back to Implementation Summary"
-                            aria-label={`Back to Implementation Summary from ${feature.name}`}
+                            title="Back to current proposed scope"
+                            aria-label={`Back to current proposed scope from ${feature.name}`}
                         >
                             <ArrowUp size={12} />
-                            Summary
+                            Scope
                         </button>
                     )}
                     {!readOnly && (

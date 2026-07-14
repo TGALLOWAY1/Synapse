@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectStore } from '../projectStore';
 import type { StructuredPRD } from '../../types';
 
@@ -15,6 +15,10 @@ const prd: StructuredPRD = {
 beforeEach(() => {
     vi.spyOn(Date, 'now').mockReturnValue(100);
     useProjectStore.setState({ planningRecords: {} });
+});
+
+afterEach(() => {
+    vi.restoreAllMocks();
 });
 
 describe('planning record decision actions', () => {

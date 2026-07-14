@@ -287,6 +287,7 @@ export interface ProjectState {
         projectId: string,
         sourceSpineVersionId: string,
         structuredPRD: StructuredPRD,
+        preflightSession?: import('../types').PreflightSession,
     ) => { imported: number; existing: number };
     addPlanningAssessment: (
         projectId: string,

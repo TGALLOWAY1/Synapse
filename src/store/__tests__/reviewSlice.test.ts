@@ -1,4 +1,4 @@
-import { beforeEach, describe, expect, it, vi } from 'vitest';
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
 import { useProjectStore } from '../projectStore';
 import { markInterruptedReviews } from '../interruptedReviews';
 import type { PersistedReviewContextManifest, ReviewRun, SpecialistRun } from '../../types';
@@ -22,6 +22,10 @@ beforeEach(() => {
         reviewIssues: {},
         planningRecords: {},
     });
+});
+
+afterEach(() => {
+    vi.restoreAllMocks();
 });
 
 describe('adversarial review domain', () => {

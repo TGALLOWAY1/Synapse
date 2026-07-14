@@ -25,6 +25,12 @@ function ConfidenceChip({ confidence }: { confidence?: string }) {
     );
 }
 
+function MaterialityLabel({ materiality }: { materiality?: Assumption['materiality'] }) {
+    if (!materiality || materiality === 'normal') return null;
+    const label = materiality === 'blocking' ? 'Shapes the whole plan' : materiality === 'high' ? 'High impact if wrong' : 'Low impact';
+    return <span className="text-[10px] font-bold uppercase tracking-wider text-amber-700">{label}</span>;
+}
+
 interface Props {
     /** Unresolved assumptions, already sorted by confidence (highest first). */
     assumptions: Assumption[];
@@ -69,8 +75,10 @@ export function ReviewConfirmSection({ assumptions, onConfirm, onReject, readOnl
                     <li key={a.id} className="rounded-lg border border-neutral-200 bg-white px-4 py-3">
                         <div className="flex items-start justify-between gap-3">
                             <div className="min-w-0 flex-1">
-                                <ConfidenceChip confidence={a.confidence} />
+                                <div className="flex flex-wrap items-center gap-2"><MaterialityLabel materiality={a.materiality} /><ConfidenceChip confidence={a.confidence} /></div>
                                 <p className="text-sm text-neutral-900 mt-1.5">{a.statement}</p>
+                                {a.whyItMatters && <p className="mt-1 text-xs leading-5 text-neutral-500">Why it matters: {a.whyItMatters}</p>}
+                                {a.affectedPrdSections && a.affectedPrdSections.length > 0 && <p className="mt-1 text-xs text-neutral-400">Affects {a.affectedPrdSections.join(', ')}</p>}
                             </div>
                             {!readOnly && rejectingId !== a.id && (
                                 <div className="flex items-center gap-1.5 shrink-0">

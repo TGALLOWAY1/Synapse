@@ -58,6 +58,7 @@ function seedStore() {
         artifacts: {},
         artifactVersions: {},
         feedbackItems: {},
+        planningRecords: {},
     });
 }
 
@@ -106,7 +107,7 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
 
     it('does not render a Defer bucket or the derived-from clutter line', () => {
         renderView();
-        expect(screen.getByText('Implementation Summary')).toBeInTheDocument();
+        expect(screen.getByText('Current proposed scope')).toBeInTheDocument();
         expect(screen.queryByText('Defer')).toBeNull();
         expect(screen.queryByText(/derived from features and assumptions/i)).toBeNull();
     });
@@ -122,6 +123,23 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
         renderView();
         expect(screen.queryByText('Assumptions')).toBeNull();
         expect(screen.getByText('Review & Confirm')).toBeInTheDocument();
+    });
+
+    it('surfaces durable decision-center conflicts in the affected PRD section', () => {
+        useProjectStore.setState({
+            planningRecords: {
+                [PROJECT_ID]: [{
+                    id: 'conflict-1', projectId: PROJECT_ID, type: 'conflict', status: 'open',
+                    title: 'The target market conflicts with the pricing model', statement: 'Resolve the market conflict',
+                    affectedPrdSections: ['Vision'], evidence: [], sourceFindingIds: [], createdBy: 'specialist_review',
+                    createdAt: 1, updatedAt: 1,
+                }],
+            },
+        });
+        const onOpenDecisions = vi.fn();
+        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+        fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
+        expect(onOpenDecisions).toHaveBeenCalledOnce();
     });
 
     it('renders no MVP Scope section — the Implementation Summary is the single scope surface', () => {
@@ -189,7 +207,7 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
         expect(link.getAttribute('href')).toBe('#prd-feature-f1');
         expect(document.getElementById('prd-feature-f1')).not.toBeNull();
         expect(
-            screen.getByRole('button', { name: 'Back to Implementation Summary from Quick Capture' }),
+            screen.getByRole('button', { name: 'Back to current proposed scope from Quick Capture' }),
         ).toBeInTheDocument();
     });
 });
@@ -212,6 +230,10 @@ describe('StructuredPRDView — assumption review flow', () => {
         expect(decided?.decision).toBe('confirmed');
         expect(decided?.decidedAt).toBeTypeOf('number');
         expect(spine.provenance?.editSummary).toContain('Confirmed assumption');
+        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
+            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
+        expect(record).toMatchObject({ status: 'confirmed' });
+        expect(record?.events?.at(-1)).toMatchObject({ type: 'custom_answered', actor: 'user' });
     });
 
     it('rejecting an assumption records the correction note', () => {
@@ -224,6 +246,14 @@ describe('StructuredPRDView — assumption review flow', () => {
         const decided = latestSpine().structuredPRD?.assumptions?.find(a => a.id === 'a1');
         expect(decided?.decision).toBe('rejected');
         expect(decided?.decisionNote).toBe('Desktop-first actually');
+        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
+            .find(item => item.sources?.some(source => source.sourceId === 'a1'));
+        expect(record?.status).toBe('rejected');
+        expect(record?.events?.at(-1)).toMatchObject({
+            type: 'premise_rejected',
+            actor: 'user',
+            reason: 'Desktop-first actually',
+        });
     });
 
     it('confirming a feature appends a version with confirmed set', () => {

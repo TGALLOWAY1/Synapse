@@ -104,6 +104,7 @@ export interface ReviewWorkspaceProps {
     runs: ReviewRunView[];
     planningRecords: PlanningRecordView[];
     activeRunId?: string;
+    initialTab?: 'review' | 'decisions' | 'history';
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
     onSelectRun: (runId: string) => void;
@@ -511,7 +512,7 @@ function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCovera
 }
 
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
-    const [tab, setTab] = useState<'review' | 'decisions' | 'history'>('review');
+    const [tab, setTab] = useState<'review' | 'decisions' | 'history'>(props.initialTab ?? 'review');
     const [startingNewReview, setStartingNewReview] = useState(false);
     const activeRun = startingNewReview ? undefined : (props.runs.find(run => run.id === props.activeRunId) ?? props.runs[0]);
     const chronologicalRuns = useMemo(() => [...props.runs].sort((a, b) => b.capturedAt - a.capturedAt), [props.runs]);
@@ -520,7 +521,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     return (
         <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-50 text-neutral-900">
             <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
-                <div className="mx-auto flex max-w-5xl items-center gap-1 overflow-x-auto">
+                <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-x-auto">
                     <button type="button" onClick={() => setTab('review')} className={`min-h-12 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}>Review findings</button>
                     <button type="button" onClick={() => setTab('decisions')} className={`min-h-12 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}>Decision Center {props.planningRecords.length > 0 && <span className="ml-1 text-xs text-neutral-400">{props.planningRecords.length}</span>}</button>
                     <button type="button" onClick={() => setTab('history')} className={`min-h-12 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}>Review history</button>

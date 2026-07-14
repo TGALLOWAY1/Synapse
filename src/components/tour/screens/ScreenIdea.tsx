@@ -102,7 +102,7 @@ export default function ScreenIdea({ isActive, reducedMotion }: ScreenProps) {
             <div className="mt-6 flex justify-center md:justify-start" aria-live="polite">
                 <span className="inline-flex items-center gap-2 rounded-full border border-indigo-500/30 px-4 py-2 text-sm text-indigo-200">
                     <Sparkles size={15} className={isBuilding && !reducedMotion ? 'animate-pulse' : ''} />
-                    {isDone ? 'Your PRD is ready' : isBuilding ? 'AI is building your PRD…' : 'Tap the idea to begin'}
+                    {isDone ? 'Your working plan is ready to review' : isBuilding ? 'AI is drafting a working plan…' : 'Tap the idea to begin'}
                 </span>
             </div>
         </ScreenShell>

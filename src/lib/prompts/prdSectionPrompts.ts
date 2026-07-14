@@ -39,7 +39,7 @@ const PLATFORM_NOTE: Record<ProjectPlatform, string> = {
 
 const SHARED_PREAMBLE = `${SAFETY_OVERRIDE}
 
-You are a senior product strategist and tech lead generating one section of a structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product.
+You are a senior product strategist and tech lead generating one section of a structured working PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Be concrete and implementation-useful without manufacturing certainty. Treat product intent the user did not provide as a working proposal, never as user-confirmed fact. Do not silently expand scope to make the document look complete.
 
 ${PROMPT_CONTRACT}
 
@@ -52,7 +52,7 @@ ${RUBRIC_DEFINITION}`;
 // empty the regenerated slice. A legacy retry must reproduce full detail.
 const RETIRED_SECTION_PREAMBLE = `${SAFETY_OVERRIDE}
 
-You are a senior product strategist and tech lead regenerating one section of an existing full-detail structured PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Every string value must be specific, definitive, and implementation-ready; write as a practitioner who has shipped this product. Produce the complete level of detail this section's schema asks for.
+You are a senior product strategist and tech lead regenerating one section of an existing full-detail structured working PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Be concrete and implementation-useful without manufacturing certainty or silently expanding scope. Produce the complete level of detail this section's schema asks for.
 
 ${PROMPT_CONTRACT}`;
 
@@ -140,7 +140,7 @@ Return JSON with:
         return {
             system: `${SHARED_PREAMBLE}
 
-You are generating the features slice: features, featureSystems. This is the most consequential section; be thorough, specific, and definitive. Every feature and system decision must include reasoning or a stated constraint that justifies it (user value, dependency, or scope rationale).
+You are generating the features slice: features, featureSystems. This is the most consequential section and a working scope proposal, not an approved backlog. Prefer the smallest coherent feature set that achieves the stated outcome. Every feature must trace to the core problem or a stated job; omit plausible extras that do not earn their implementation cost. Every feature and system proposal must include reasoning or a stated constraint that justifies it (user value, dependency, or scope rationale).
 ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
             user: `${note}Product idea:\n${ctx.idea}
 
@@ -148,7 +148,7 @@ Product basics: ${basics}
 ${hasThesis ? `Product thesis: ${thesis}` : ''}
 
 Return JSON with:
-- features: array of 8–14 features, each: { id (f1, f2…), name, description, userValue, complexity (low/medium/high), priority (must/should/could), acceptanceCriteria (≥2 success-path checks), system?, successCriteria?, edgeCases?, failureModes?, tier? (mvp/v1/later), dependencies? }
+- features: array of 3–8 necessary features (never invent features to hit the range), each: { id (f1, f2…), name, description, userValue, complexity (low/medium/high), priority (must/should/could), acceptanceCriteria (≥2 success-path checks), system?, successCriteria?, edgeCases?, failureModes?, tier? (mvp/v1/later), dependencies? }
 - featureSystems: array of 2–4 system groups, each: { id (s1…), name, purpose, featureIds, endToEndBehavior, dependencies?, edgeCases?, mvpVsLater? }
 
 For every must- and should-priority feature, populate successCriteria, edgeCases, and failureModes — treat these as expected, not optional. Stay at the product-requirement level: do NOT specify UI acceptance details or analytics/tracking events — the dedicated Screen Inventory and downstream artifacts own that detail.`,
@@ -246,7 +246,7 @@ ${hasArch ? `Architecture: ${arch}` : ''}
 Return JSON with:
 - risks: array of 4–8 risk strings (summary level)
 - risksDetailed: array of { risk, likelihood (low/med/high), impact, mitigation, owner? }
-- assumptions: array of { id (a1…), statement, confidence (low/med/high) } — 4–8 product assumptions. Record every fact you inferred rather than were told. Calibrate confidence: high = directly implied by the idea; med = reasonable industry default; low = speculative.`,
+- assumptions: array of { id (a1…), statement, confidence (low/med/high), materiality (blocking/high/normal/low), whyItMatters, affectedPrdSections (array) } — 4–8 product assumptions. Record every consequential fact you inferred rather than were told. Confidence means plausibility; materiality means how much the product would change if the assumption is wrong. Never use confidence as a proxy for importance. Use blocking sparingly for an inference that prevents credible scope, high for one that could materially change the primary user/outcome/core behavior, normal for meaningful design choices, and low for reversible detail. affectedPrdSections must use recognizable PRD section names.`,
         };
     },
 

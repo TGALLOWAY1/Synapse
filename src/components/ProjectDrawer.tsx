@@ -26,15 +26,14 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
 
     const stageBadges: Record<string, { label: string; color: string }> = {
         history: { label: 'History', color: 'bg-purple-900/30 text-purple-400 border-purple-800' },
-        artifacts: { label: 'Artifacts', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800' },
-        mockups: { label: 'Mockups', color: 'bg-blue-900/30 text-blue-400 border-blue-800' },
+        review: { label: 'Challenge', color: 'bg-indigo-900/30 text-indigo-400 border-indigo-800' },
+        workspace: { label: 'Exploring outputs', color: 'bg-sky-900/30 text-sky-400 border-sky-800' },
     };
 
     const getBadge = (projectId: string, stage: string) => {
         const spine = getLatestSpine(projectId);
-        return stageBadges[stage] || (spine?.isFinal
-            ? { label: 'PRD Final', color: 'bg-green-900/30 text-green-400 border-green-800' }
-            : { label: 'PRD', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' });
+        if (spine?.isFinal) return { label: 'Plan committed', color: 'bg-green-900/30 text-green-400 border-green-800' };
+        return stageBadges[stage] || { label: 'Working plan', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' };
     };
 
     return (

@@ -24,13 +24,15 @@ const callbacks = () => ({
 describe('DecisionCenter', () => {
     it('shows a calm queue/detail layout with recommendation distinct from user actions', () => {
         const props = callbacks();
-        render(<DecisionCenter records={[openRecord]} {...props} />);
+        const { rerender } = render(<DecisionCenter records={[openRecord]} {...props} />);
         expect(screen.getByLabelText('Decision queue')).toBeInTheDocument();
         expect(screen.getByLabelText('Decision detail')).toBeInTheDocument();
         expect(screen.getByText('Synapse recommendation')).toBeInTheDocument();
         expect(screen.getByText('1 needs review')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /Allow a limited guest session/ }));
         expect(props.onDecide).toHaveBeenCalledWith('d1', 'confirm', 'guest', undefined);
+        rerender(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Allow a limited guest session' }]} {...props} />);
+        expect(screen.getByRole('button', { name: 'Preview impact' })).toBeInTheDocument();
     });
 
     it('requires a correction before rejecting a premise', () => {
@@ -56,11 +58,11 @@ describe('DecisionCenter', () => {
             },
         };
         const { rerender } = render(<DecisionCenter records={[ready]} {...props} />);
-        fireEvent.click(screen.getByRole('button', { name: 'Apply to plan' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Record in working plan' }));
         expect(props.onApplyToPlan).toHaveBeenCalledWith('d1');
 
         rerender(<DecisionCenter records={[{ ...ready, preview: { ...ready.preview!, status: 'stale' } }]} {...props} />);
-        expect(screen.queryByRole('button', { name: 'Apply to plan' })).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Record in working plan' })).toBeNull();
         const previewSection = screen.getByText(/Impact preview/).closest('section')!;
         fireEvent.click(within(previewSection).getByRole('button', { name: /Refresh preview/ }));
         expect(props.onPreviewImpact).toHaveBeenCalledWith('d1');

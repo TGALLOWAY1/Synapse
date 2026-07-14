@@ -2,6 +2,7 @@ import type {
     Assumption,
     PlanningRecord,
     PlanningSourceRef,
+    PreflightSession,
     StructuredPRD,
 } from '../../types';
 import { PLANNING_RECORD_SCHEMA_VERSION } from '../../types';
@@ -10,6 +11,7 @@ export type AssumptionImportInput = {
     projectId: string;
     sourceSpineVersionId: string;
     structuredPRD: StructuredPRD;
+    preflightSession?: PreflightSession;
     existingRecords: PlanningRecord[];
     now?: () => number;
 };
@@ -36,6 +38,9 @@ const stableHash = (value: string): string => {
 
 const importedRecordId = (projectId: string, sourceKey: string): string =>
     `planning-assumption-${stableHash(`${projectId}:${sourceKey}`)}`;
+
+const planningSignalKey = (kind: 'assumption' | 'unknown', statement: string): string =>
+    `preflight:${kind}:${stableHash(statement.trim().toLowerCase())}`;
 
 const sourceFor = (assumption: Assumption, sourceSpineVersionId: string): PlanningSourceRef => ({
     key: assumptionSourceKey(assumption.id),
@@ -89,6 +94,8 @@ const importOne = (
         updatedAt: verdict.length ? verdictAt : at,
         confirmedAt: assumption.decision === 'confirmed' ? verdictAt : undefined,
         resolution: assumption.decisionNote,
+        materiality: assumption.materiality,
+        affectedPrdSections: assumption.affectedPrdSections,
         schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
         sources: [source],
         sourceState: 'current',
@@ -135,9 +142,14 @@ export function importPrdAssumptions(input: AssumptionImportInput): AssumptionIm
                     : source),
                 sourceState: sourceChanged || prior.sourceState === 'changed' ? 'changed' : 'current',
                 currentSourceStatement: assumption.statement,
+                materiality: assumption.materiality ?? prior.materiality,
+                affectedPrdSections: assumption.affectedPrdSections ?? prior.affectedPrdSections,
             };
             const index = records.findIndex(record => record.id === prior.id);
-            if (index >= 0 && (sourceChanged || priorSource?.sourceVersionId !== input.sourceSpineVersionId || prior.sourceState === 'missing')) {
+            const planningContextChanged = assumption.materiality !== undefined && assumption.materiality !== prior.materiality
+                || assumption.affectedPrdSections !== undefined
+                    && JSON.stringify(assumption.affectedPrdSections) !== JSON.stringify(prior.affectedPrdSections);
+            if (index >= 0 && (sourceChanged || planningContextChanged || priorSource?.sourceVersionId !== input.sourceSpineVersionId || prior.sourceState === 'missing')) {
                 records[index] = next;
                 knownKeys.set(key, next);
                 updated.push(next);
@@ -148,6 +160,41 @@ export function importPrdAssumptions(input: AssumptionImportInput): AssumptionIm
             continue;
         }
         const record = importOne(input.projectId, input.sourceSpineVersionId, assumption, at);
+        records.push(record);
+        imported.push(record);
+        knownKeys.set(key, record);
+    }
+
+    const preflightSignals = [
+        ...(input.preflightSession?.unknowns ?? []).map(statement => ({ statement, type: 'open_question' as const, kind: 'unknown' as const })),
+        ...(input.preflightSession?.assumptions ?? []).map(statement => ({ statement, type: 'assumption' as const, kind: 'assumption' as const })),
+    ];
+    for (const signal of preflightSignals) {
+        if (!signal.statement.trim()) continue;
+        const key = planningSignalKey(signal.kind, signal.statement);
+        const prior = knownKeys.get(key) ?? records.find(record => recordHasSource(record, key));
+        if (prior) {
+            existing.push(prior);
+            continue;
+        }
+        const id = importedRecordId(input.projectId, key);
+        const record: PlanningRecord = {
+            id,
+            projectId: input.projectId,
+            type: signal.type,
+            status: 'open',
+            title: signal.statement,
+            statement: signal.statement,
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'synapse',
+            createdAt: at,
+            updatedAt: at,
+            schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
+            materiality: 'normal',
+            sources: [{ key, sourceType: 'preflight', sourceId: key, sourceVersionId: input.sourceSpineVersionId }],
+            events: [{ id: `${id}:imported`, planningRecordId: id, type: 'imported', actor: 'synapse', at, sourceKey: key }],
+        };
         records.push(record);
         imported.push(record);
         knownKeys.set(key, record);

@@ -115,13 +115,13 @@ export function ImplementationSummarySection({
         <div id="prd-implementation-summary" className="mb-8 scroll-mt-24">
             <div className="mb-3 border-b border-neutral-200 pb-2">
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight whitespace-nowrap">
-                    Implementation Summary
+                    Current proposed scope
                 </h3>
             </div>
 
             {rationale && (
                 <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
-                    <span className="text-[10px] uppercase font-bold tracking-wider mr-2 px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900">Decision</span>
+                    <span className="text-[10px] uppercase font-bold tracking-wider mr-2 px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900">Synapse proposal</span>
                     {rationale}
                 </div>
             )}
@@ -130,7 +130,7 @@ export function ImplementationSummarySection({
                 <div className="bg-gradient-to-br from-indigo-50/40 to-white border border-indigo-100 rounded-xl p-4">
                     <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
                         <FeatureBucket
-                            title="Build First"
+                            title="Proposed first release"
                             icon={ListChecks}
                             accent="green"
                             features={summary.buildFirst}

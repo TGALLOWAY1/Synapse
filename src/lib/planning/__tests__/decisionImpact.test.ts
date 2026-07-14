@@ -12,6 +12,7 @@ const record: PlanningRecord = {
     title: 'Guest access', statement: 'Guests can start anonymously', evidence: [], sourceFindingIds: [],
     createdBy: 'migration', createdAt: 1, updatedAt: 2, confirmedAt: 2,
     sources: [{ key: 'prd_assumption:a1', sourceType: 'prd_assumption', sourceId: 'a1', sourceVersionId: 's1' }],
+    affectedPrdSections: ['Target Users', 'Features'],
     events: [
         { id: 'import', planningRecordId: 'd1', type: 'imported', actor: 'migration', at: 1 },
         { id: 'verdict', planningRecordId: 'd1', type: 'custom_answered', actor: 'user', at: 2, answer: 'Allow a limited guest session' },
@@ -31,7 +32,7 @@ describe('decision impact preview', () => {
         expect(result.preview).toMatchObject({
             status: 'ready',
             baseline: { spineVersionId: 's1' },
-            affectedPrdSections: ['Assumptions'],
+            affectedPrdSections: ['Assumptions', 'Target Users', 'Features'],
         });
         expect(result.preview.affectedArtifactSlots).toContain('implementation_plan');
     });
