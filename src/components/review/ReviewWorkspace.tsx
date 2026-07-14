@@ -119,6 +119,12 @@ export interface ReviewWorkspaceProps {
     onPreviewPlanningRecordImpact?: (recordId: string) => void;
     onApplyPlanningRecordToPlan?: (recordId: string) => void;
     onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred', editedValue?: string) => void;
+    onRequestAlignmentProposal?: (
+        recordId: string,
+        previewId: string,
+        proposalId: string,
+        request: { kind: 'missing_info' | 'different_interpretation'; guidance: string },
+    ) => void | Promise<void>;
     readOnly?: boolean;
 }
 
@@ -547,6 +553,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onPreviewImpact={props.onPreviewPlanningRecordImpact ?? (() => {})}
                         onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
                         onReviewAlignmentProposal={props.onReviewAlignmentProposal}
+                        onRequestAlignmentProposal={props.onRequestAlignmentProposal}
                     />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">

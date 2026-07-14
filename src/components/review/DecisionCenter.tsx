@@ -29,6 +29,17 @@ export type DecisionCenterPreviewView = {
         confidence: 'definite' | 'likely' | 'possible';
         requiresInput?: boolean;
         requiredForVerdictAlignment?: boolean;
+        canRequestReasoning?: boolean;
+        analysisStatus?: 'advisory_candidate' | 'bounded_applicable' | 'needs_input' | 'rejected' | 'failed';
+        analysisMethod?: 'deterministic' | 'model';
+        analysisModel?: string;
+        analysisProvider?: string;
+        analysisFailureReason?: string;
+        analysisAmbiguity?: string;
+        analysisQuestions?: string[];
+        analysisEvidence?: Array<{ label: string; excerpt?: string }>;
+        analysisBusy?: boolean;
+        analysisError?: string;
         disposition: 'pending' | 'accepted' | 'rejected' | 'edited' | 'deferred';
         editedSummary?: string;
     }>;
@@ -62,6 +73,12 @@ interface Props {
     onPreviewImpact: (recordId: string) => void;
     onApplyToPlan: (recordId: string) => void;
     onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred', editedValue?: string) => void;
+    onRequestAlignmentProposal?: (
+        recordId: string,
+        previewId: string,
+        proposalId: string,
+        request: { kind: 'missing_info' | 'different_interpretation'; guidance: string },
+    ) => void | Promise<void>;
 }
 
 const needsReview = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
@@ -72,8 +89,12 @@ const previewStatusLabel: Record<DecisionCenterPreviewView['status'], string> = 
 const proposalDispositionLabel: Record<NonNullable<DecisionCenterPreviewView['proposals']>[number]['disposition'], string> = {
     pending: 'Needs review', accepted: 'Will update', rejected: 'Keeping current', edited: 'Edited', deferred: 'Deferred',
 };
+const proposalAnalysisLabel: Record<NonNullable<NonNullable<DecisionCenterPreviewView['proposals']>[number]['analysisStatus']>, string> = {
+    advisory_candidate: 'Advisory target', bounded_applicable: 'Ready to review', needs_input: 'Needs context',
+    rejected: 'No safe proposal', failed: 'Proposal unavailable',
+};
 
-export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan, onReviewAlignmentProposal }: Props) {
+export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan, onReviewAlignmentProposal, onRequestAlignmentProposal }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsReview(initialRecord) ? 'needs_review' : 'log') : records.some(needsReview) ? 'needs_review' : 'log');
     const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsReview(record) : !needsReview(record)), [records, view]);
@@ -82,6 +103,8 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
     const [customAnswer, setCustomAnswer] = useState('');
     const [rationale, setRationale] = useState('');
     const [proposalEdits, setProposalEdits] = useState<Record<string, string>>({});
+    const [proposalRequest, setProposalRequest] = useState<{ proposalId: string; kind: 'missing_info' | 'different_interpretation' }>();
+    const [proposalGuidance, setProposalGuidance] = useState('');
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
     const unresolvedCount = records.filter(needsReview).length;
@@ -112,6 +135,25 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
         setMobileDetailOpen(true);
         setCustomAnswer('');
         setRationale('');
+    };
+
+    const requestAlignmentProposal = async (proposalId: string) => {
+        if (!selected?.preview || !proposalRequest || !onRequestAlignmentProposal) return;
+        const proposal = selected.preview.proposals?.find(item => item.id === proposalId);
+        const guidanceRequired = proposalRequest.kind === 'different_interpretation'
+            || (proposal?.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input');
+        if (guidanceRequired && !proposalGuidance.trim()) return;
+        try {
+            await onRequestAlignmentProposal(selected.id, selected.preview.id, proposalId, {
+                kind: proposalRequest.kind,
+                guidance: proposalGuidance.trim(),
+            });
+            setProposalRequest(undefined);
+            setProposalGuidance('');
+        } catch {
+            // The container exposes the bounded failure through analysisError.
+            // Keep the form and Phase 1 review target intact for a retry.
+        }
     };
 
     return (
@@ -244,12 +286,36 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                     {proposal.beforeSummary && <p className="mt-2 text-xs text-neutral-500">Current: {proposal.beforeSummary}</p>}
                                                     {proposal.proposedSummary && <p className="mt-1 text-sm font-medium text-neutral-900">Proposed: {proposal.editedSummary || proposal.proposedSummary}</p>}
                                                     <p className="mt-2 text-xs leading-5 text-neutral-600">{proposal.reason}</p>
+                                                    {proposal.analysisStatus && (proposal.analysisMethod === 'model' || proposal.analysisStatus !== 'bounded_applicable') && (
+                                                        <div className="mt-3 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-xs text-neutral-700" aria-label={`Proposal analysis for ${proposal.targetLabel}`}>
+                                                            <div className="flex flex-wrap items-center gap-2">
+                                                                <span className="font-semibold text-neutral-900">{proposalAnalysisLabel[proposal.analysisStatus]}</span>
+                                                                <span>· {proposal.confidence} confidence</span>
+                                                                {proposal.analysisMethod && <span>· {proposal.analysisMethod === 'model' ? 'Synapse reasoning' : 'Verified rule'}</span>}
+                                                            </div>
+                                                            {(proposal.analysisAmbiguity || proposal.analysisFailureReason) && <p className="mt-1 leading-5"><span className="font-semibold">Ambiguity or limit:</span> {proposal.analysisAmbiguity || proposal.analysisFailureReason}</p>}
+                                                            {proposal.analysisQuestions && proposal.analysisQuestions.length > 0 && (
+                                                                <div className="mt-1.5"><p className="font-semibold">Information still needed</p><ul className="mt-1 list-disc space-y-1 pl-4">{proposal.analysisQuestions.map(question => <li key={question}>{question}</li>)}</ul></div>
+                                                            )}
+                                                            {(proposal.analysisEvidence?.length || proposal.analysisModel) && (
+                                                                <details className="mt-1.5">
+                                                                    <summary className="cursor-pointer font-semibold">Reasoning basis{proposal.analysisEvidence?.length ? ` (${proposal.analysisEvidence.length})` : ''}</summary>
+                                                                    {proposal.analysisEvidence && proposal.analysisEvidence.length > 0 && (
+                                                                        <ul className="mt-1 space-y-1.5">
+                                                                            {proposal.analysisEvidence.map(item => <li key={`${item.label}:${item.excerpt ?? ''}`}><span className="font-medium">{item.label}</span>{item.excerpt && <span className="block text-neutral-500">{item.excerpt}</span>}</li>)}
+                                                                        </ul>
+                                                                    )}
+                                                                    {proposal.analysisModel && <p className="mt-2 text-[11px] text-neutral-500">Technical provenance: {proposal.analysisProvider ? `${proposal.analysisProvider} · ` : ''}{proposal.analysisModel}</p>}
+                                                                </details>
+                                                            )}
+                                                        </div>
+                                                    )}
                                                     {proposal.requiredForVerdictAlignment && proposal.disposition === 'rejected' && (
                                                         <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs font-medium text-amber-900">Keeping this exact claim preserves a contradiction with your selected answer. The plan remains unaligned until you accept or edit this change.</div>
                                                     )}
-                                                    {proposal.requiresInput ? (
+                                                    {(proposal.analysisStatus === 'needs_input' || (!proposal.analysisStatus && proposal.requiresInput)) ? (
                                                         <div className="mt-3 rounded-md bg-amber-50 px-3 py-2 text-xs text-amber-800">Additional input is required before Synapse can safely propose an edit.</div>
-                                                    ) : !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal ? (
+                                                    ) : (!proposal.analysisStatus || proposal.analysisStatus === 'bounded_applicable') && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal ? (
                                                         <div className="mt-3">
                                                             <input
                                                                 aria-label={`Edit proposed change for ${proposal.targetLabel}`}
@@ -266,10 +332,70 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                                             </div>
                                                         </div>
                                                     ) : null}
-                                                    {proposal.requiresInput && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal && (
+                                                    {(proposal.requiresInput || (proposal.analysisStatus && proposal.analysisStatus !== 'bounded_applicable')) && !readOnly && selected.preview?.status === 'ready' && onReviewAlignmentProposal && (
                                                         <div className="mt-2 flex flex-wrap gap-2">
                                                             <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Not affected</button>
                                                             <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-9 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Defer review</button>
+                                                        </div>
+                                                    )}
+                                                    {!readOnly && proposal.canRequestReasoning && selected.preview?.status === 'ready' && onRequestAlignmentProposal && (
+                                                        <div className="mt-3 border-t border-neutral-100 pt-3">
+                                                            {proposalRequest?.proposalId === proposal.id ? (
+                                                                <div className="space-y-2" aria-label={`Request proposal for ${proposal.targetLabel}`}>
+                                                                    <label className="block text-xs font-semibold text-neutral-800" htmlFor={`proposal-guidance-${proposal.id}`}>
+                                                                        {proposalRequest.kind === 'different_interpretation'
+                                                                            ? 'What should Synapse interpret differently?'
+                                                                            : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
+                                                                                ? 'What missing information should Synapse account for?'
+                                                                                : 'Add context for this proposal (optional)'}
+                                                                    </label>
+                                                                    <textarea
+                                                                        id={`proposal-guidance-${proposal.id}`}
+                                                                        rows={3}
+                                                                        value={proposalGuidance}
+                                                                        onChange={event => setProposalGuidance(event.target.value)}
+                                                                        placeholder={proposalRequest.kind === 'different_interpretation'
+                                                                            ? 'Describe the direction or meaning you want Synapse to reconsider.'
+                                                                            : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
+                                                                                ? 'Add the constraint, evidence, or product context needed to answer the question above.'
+                                                                                : 'Optional: add a constraint or product detail Synapse should account for.'}
+                                                                        className="w-full rounded-md border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100"
+                                                                    />
+                                                                    <div className="flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                                                                        <button
+                                                                            type="button"
+                                                                            disabled={proposal.analysisBusy || ((proposalRequest.kind === 'different_interpretation' || (proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input')) && !proposalGuidance.trim())}
+                                                                            onClick={() => { void requestAlignmentProposal(proposal.id); }}
+                                                                            className="min-h-11 rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white disabled:opacity-40"
+                                                                        >
+                                                                            {proposal.analysisBusy
+                                                                                ? 'Preparing proposal…'
+                                                                                : proposalRequest.kind === 'different_interpretation'
+                                                                                    ? 'Prepare another interpretation'
+                                                                                    : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
+                                                                                        ? 'Try again with context'
+                                                                                        : 'Prepare bounded proposal'}
+                                                                        </button>
+                                                                        <button type="button" disabled={proposal.analysisBusy} onClick={() => { setProposalRequest(undefined); setProposalGuidance(''); }} className="min-h-11 rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700">Cancel</button>
+                                                                    </div>
+                                                                </div>
+                                                            ) : (
+                                                                <button
+                                                                    type="button"
+                                                                    onClick={() => {
+                                                                        setProposalRequest({ proposalId: proposal.id, kind: proposal.analysisStatus === 'bounded_applicable' ? 'different_interpretation' : 'missing_info' });
+                                                                        setProposalGuidance('');
+                                                                    }}
+                                                                    className="min-h-11 w-full rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 sm:w-auto"
+                                                                >
+                                                                    {proposal.analysisStatus === 'bounded_applicable'
+                                                                        ? 'Request different interpretation'
+                                                                        : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
+                                                                            ? 'Provide missing information'
+                                                                            : 'Ask Synapse to propose wording'}
+                                                                </button>
+                                                            )}
+                                                            {proposal.analysisError && <p className="mt-2 text-xs leading-5 text-red-700" role="alert">{proposal.analysisError} The original review target remains unchanged.</p>}
                                                         </div>
                                                     )}
                                                 </article>

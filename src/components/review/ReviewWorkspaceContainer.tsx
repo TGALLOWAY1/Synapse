@@ -36,6 +36,9 @@ import {
     buildReviewedDecisionImpact,
     isDecisionImpactStale,
     projectDecision,
+    reasonAboutComplexPlanningTargets,
+    integrateComplexCandidateIntoPreview,
+    COMPLEX_TARGET_KINDS,
 } from '../../lib/planning';
 import { canPerformProjectAction } from '../../lib/projectCapabilities';
 import {
@@ -105,6 +108,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? []);
     const [activeRunId, setActiveRunId] = useState<string>();
     const [busy, setBusy] = useState(false);
+    const [alignmentAnalysis, setAlignmentAnalysis] = useState<Record<string, { busy: boolean; error?: string }>>({});
     const canWrite = canPerformProjectAction(projectId, 'persist');
     const manifests = useRef(new Map<string, ReviewContextManifest>());
 
@@ -624,12 +628,31 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                     confidence: review.proposal.confidence,
                     requiresInput: review.proposal.requiresInput,
                     requiredForVerdictAlignment: review.proposal.requiredForVerdictAlignment,
+                    canRequestReasoning: !['accepted', 'edited'].includes(review.disposition)
+                        && COMPLEX_TARGET_KINDS.includes(review.proposal.target.kind as typeof COMPLEX_TARGET_KINDS[number])
+                        && Boolean(review.proposal.target.jsonPath),
+                    analysisStatus: review.proposal.contract?.analysisStatus,
+                    analysisMethod: review.proposal.contract?.method,
+                    analysisModel: review.proposal.contract?.model,
+                    analysisProvider: review.proposal.contract?.provider,
+                    analysisFailureReason: review.proposal.contract?.failureReason,
+                    analysisAmbiguity: review.proposal.ambiguity,
+                    analysisQuestions: review.proposal.questions,
+                    analysisEvidence: review.proposal.evidenceSummary?.map(summary => {
+                        const separator = summary.indexOf(': ');
+                        return separator > 0
+                            ? { label: summary.slice(0, separator), excerpt: summary.slice(separator + 2) }
+                            : { label: 'Planning evidence', excerpt: summary };
+                    }),
+                    analysisBusy: alignmentAnalysis[`${record.id}:${storedPreview.id}:${review.proposal.id}`]?.busy,
+                    analysisError: alignmentAnalysis[`${record.id}:${storedPreview.id}:${review.proposal.id}`]?.error,
                     disposition: review.disposition,
                     editedSummary: review.editedSummary,
                 })),
                 canApply: proposalReviews.some(review =>
                     ['accepted', 'edited'].includes(review.disposition)
                     && !review.proposal.requiresInput
+                    && (storedPreview.proposalContractVersion !== 1 || review.proposal.contract?.analysisStatus === 'bounded_applicable')
                     && storedPreview.proposedPrdPatch?.some(patch => patch.proposalId === review.proposal.id),
                 ),
             } : undefined,
@@ -700,6 +723,124 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             ...(disposition === 'edited' ? { editedValue, editedSummary: editedValue } : {}),
         });
         if (!result.ok) useToastStore.getState().addToast({ type: 'error', title: 'Alignment review not saved', message: result.reason });
+    };
+
+    const handleRequestAlignmentProposal = async (
+        recordId: string,
+        previewId: string,
+        proposalId: string,
+        request: { kind: 'missing_info' | 'different_interpretation'; guidance: string },
+    ) => {
+        if (!canWrite) throw new Error('This project is read-only.');
+        const key = `${recordId}:${previewId}:${proposalId}`;
+        setAlignmentAnalysis(current => ({ ...current, [key]: { busy: true } }));
+        const fail = (message: string): never => {
+            setAlignmentAnalysis(current => ({ ...current, [key]: { busy: false, error: message } }));
+            throw new Error(message);
+        };
+
+        const initialState = useProjectStore.getState();
+        const initialRecord = initialState.planningRecords[projectId]?.find(item => item.id === recordId);
+        const initialAssessment = initialRecord?.assessments?.at(-1);
+        const initialPreview = initialAssessment?.impactPreview;
+        const initialSpine = initialState.spineVersions[projectId]?.find(item => item.isLatest);
+        const initialProposal = initialPreview?.alignmentProposals?.find(item => item.id === proposalId);
+        const recordAtStart = initialRecord ?? fail('This planning record is no longer current. Refresh the Decision Center.');
+        const previewAtStart = initialPreview?.id === previewId
+            ? initialPreview
+            : fail('This review target is no longer current. Refresh the impact preview.');
+        const proposalAtStart = initialProposal ?? fail('This review target is no longer current. Refresh the impact preview.');
+        const spineAtStart = initialSpine ?? fail('The current working plan is unavailable.');
+        const initialPrd = spineAtStart.structuredPRD ?? fail('The current working plan is unavailable.');
+        if (isDecisionImpactStale(previewAtStart, spineAtStart.id, initialPrd)) {
+            fail('The working plan changed. Refresh the impact preview before requesting wording.');
+        }
+        if (!COMPLEX_TARGET_KINDS.includes(proposalAtStart.target.kind as typeof COMPLEX_TARGET_KINDS[number])) {
+            fail('This target needs a more precise planning location before Synapse can propose wording.');
+        }
+        const projection = projectDecision(recordAtStart);
+        const causeEvent = recordAtStart.events?.find(event => event.id === previewAtStart.decisionEventId);
+        const guidance = request.guidance.trim();
+        const guidanceEvidenceId = `user-guidance:${proposalId}`;
+        const result = await reasonAboutComplexPlanningTargets({
+            baselineSpineVersionId: spineAtStart.id,
+            structuredPRD: initialPrd,
+            cause: {
+                id: previewAtStart.decisionEventId,
+                kind: recordAtStart.sources?.some(source => source.key.startsWith('prd_edit:')) ? 'direct_edit' : 'decision',
+                summary: `${recordAtStart.title}: ${recordAtStart.statement}`,
+                answer: projection.answer,
+                planningRecordId: recordAtStart.id,
+                decisionEventId: causeEvent?.id,
+                sourceSpineVersionId: spineAtStart.id,
+            },
+            targets: [{ id: proposalId, location: proposalAtStart.target }],
+            requiredEvidenceRefIds: guidance ? [guidanceEvidenceId] : undefined,
+            evidence: [
+                ...recordAtStart.evidence.flatMap(evidence => evidence.excerpt ? [{
+                    id: evidence.id,
+                    label: evidence.locator?.section ?? 'Planning evidence',
+                    sourceType: evidence.sourceType === 'spine' ? 'prd' as const : 'review' as const,
+                    sourceId: evidence.sourceId,
+                    sourceVersionId: evidence.sourceVersionId,
+                    excerpt: evidence.excerpt,
+                    location: evidence.locator?.section ? {
+                        kind: evidence.locator.entityType === 'feature' ? 'feature' as const : 'claim' as const,
+                        section: evidence.locator.section,
+                        label: evidence.locator.entityId ?? evidence.locator.section,
+                        jsonPath: evidence.locator.jsonPath,
+                        entityType: evidence.locator.entityType,
+                        entityId: evidence.locator.entityId,
+                        excerpt: evidence.excerpt,
+                    } : undefined,
+                }] : []),
+                ...(guidance ? [{
+                    id: guidanceEvidenceId,
+                    label: request.kind === 'different_interpretation' ? 'Your requested interpretation' : 'Your added context',
+                    sourceType: 'planning_record' as const,
+                    sourceId: recordAtStart.id,
+                    sourceVersionId: spineAtStart.id,
+                    excerpt: guidance,
+                }] : []),
+            ],
+        });
+        const reasoning = result.ok
+            ? result
+            : fail(result.errors[0] ?? 'Synapse could not produce a trustworthy bounded proposal.');
+
+        // The model call is outside the store transaction. Re-read every guard
+        // before integrating so concurrent edits or verdict changes fail closed.
+        const currentState = useProjectStore.getState();
+        const currentRecord = currentState.planningRecords[projectId]?.find(item => item.id === recordId);
+        const currentAssessment = currentRecord?.assessments?.at(-1);
+        const currentPreview = currentAssessment?.impactPreview;
+        const currentSpine = currentState.spineVersions[projectId]?.find(item => item.isLatest);
+        const recordNow = currentRecord ?? fail('The planning record changed while Synapse was preparing this proposal. Nothing was replaced.');
+        const assessmentNow = currentAssessment ?? fail('The impact assessment changed while Synapse was preparing this proposal. Nothing was replaced.');
+        const previewNow = currentPreview?.id === previewId
+            ? currentPreview
+            : fail('The review changed while Synapse was preparing this proposal. Nothing was replaced.');
+        const spineNow = currentSpine ?? fail('The working plan changed while Synapse was preparing this proposal. Nothing was replaced.');
+        const currentPrd = spineNow.structuredPRD ?? fail('The working plan changed while Synapse was preparing this proposal. Nothing was replaced.');
+        const integrated = integrateComplexCandidateIntoPreview({
+            preview: previewNow,
+            replaceProposalId: proposalId,
+            candidate: reasoning.candidates[0],
+            record: recordNow,
+            structuredPRD: currentPrd,
+            model: reasoning.model,
+            provider: 'gemini',
+        });
+        const acceptedIntegration = integrated.ok ? integrated : fail(integrated.reason);
+        currentState.addPlanningAssessment(projectId, recordId, {
+            ...assessmentNow,
+            impactPreview: acceptedIntegration.preview,
+        });
+        setAlignmentAnalysis(current => {
+            const next = { ...current };
+            delete next[key];
+            return next;
+        });
     };
 
     const handleApplyToPlan = (recordId: string) => {
@@ -791,6 +932,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onPreviewPlanningRecordImpact={handlePreviewImpact}
         onApplyPlanningRecordToPlan={handleApplyToPlan}
         onReviewAlignmentProposal={handleAlignmentProposalReview}
+        onRequestAlignmentProposal={handleRequestAlignmentProposal}
         readOnly={!canPerformProjectAction(projectId, 'persist')}
     />;
 }

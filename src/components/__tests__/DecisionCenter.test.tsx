@@ -20,6 +20,7 @@ const callbacks = () => ({
     onPreviewImpact: vi.fn(),
     onApplyToPlan: vi.fn(),
     onReviewAlignmentProposal: vi.fn(),
+    onRequestAlignmentProposal: vi.fn(),
 });
 
 describe('DecisionCenter', () => {
@@ -94,6 +95,110 @@ describe('DecisionCenter', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Keep current' }));
         fireEvent.click(screen.getByRole('button', { name: 'Defer' }));
         expect(props.onDecide).not.toHaveBeenCalled();
+    });
+
+    it('collects missing context for a bounded proposal without replacing Phase 1 fallback actions', async () => {
+        const props = callbacks();
+        const record: DecisionCenterRecordView = {
+            ...openRecord, status: 'confirmed', resolution: 'Local-only projects',
+            preview: {
+                id: 'preview', status: 'ready', affectedPrdSections: ['User Flows'], affectedArtifactLabels: [],
+                proposals: [{
+                    id: 'flow-review', targetLabel: 'Save project flow', targetKind: 'flow_step', section: 'User Flows',
+                    beforeSummary: 'Upload the project and sync it across devices.',
+                    reason: 'This flow may still depend on cloud synchronization.', confidence: 'possible',
+                    requiresInput: true, canRequestReasoning: true, disposition: 'pending', analysisStatus: 'needs_input',
+                    analysisMethod: 'model', analysisAmbiguity: 'The offline save behavior is not specified.',
+                    analysisQuestions: ['Should projects remain available on more than one device?'],
+                    analysisEvidence: [
+                        { label: 'Your decision', excerpt: 'Projects are local-only.' },
+                        { label: 'Current flow', excerpt: 'Upload and synchronize the project.' },
+                    ],
+                }],
+            },
+        };
+        render(<DecisionCenter records={[record]} {...props} />);
+
+        expect(screen.queryByRole('button', { name: 'Accept' })).toBeNull();
+        expect(screen.getByText('Needs context')).toBeInTheDocument();
+        expect(screen.getByText(/offline save behavior is not specified/i)).toBeInTheDocument();
+        expect(screen.getByText(/Should projects remain available/)).toBeInTheDocument();
+        fireEvent.click(screen.getByText(/Reasoning basis/));
+        expect(screen.getByText('Your decision')).toBeInTheDocument();
+
+        const openRequest = screen.getByRole('button', { name: 'Provide missing information' });
+        expect(openRequest).toHaveClass('w-full', 'min-h-11');
+        fireEvent.click(openRequest);
+        const guidance = screen.getByLabelText('What missing information should Synapse account for?');
+        fireEvent.change(guidance, { target: { value: 'Projects stay on one device and autosave locally.' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Try again with context' }));
+
+        expect(props.onRequestAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'flow-review', {
+            kind: 'missing_info', guidance: 'Projects stay on one device and autosave locally.',
+        });
+        expect(screen.getByRole('button', { name: 'Not affected' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Defer review' })).toBeInTheDocument();
+    });
+
+    it('can request an initial bounded interpretation without manufacturing extra user context', () => {
+        const props = callbacks();
+        const record: DecisionCenterRecordView = {
+            ...openRecord, status: 'confirmed', resolution: 'Local-only projects',
+            preview: {
+                id: 'preview', status: 'ready', affectedPrdSections: ['User Flows'], affectedArtifactLabels: [],
+                proposals: [{
+                    id: 'flow-review', targetLabel: 'Save flow', targetKind: 'flow_step', section: 'User Flows',
+                    reason: 'This flow may depend on synchronization.', confidence: 'possible', requiresInput: true,
+                    canRequestReasoning: true, disposition: 'pending', analysisStatus: 'needs_input', analysisMethod: 'deterministic',
+                }],
+            },
+        };
+        render(<DecisionCenter records={[record]} {...props} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Ask Synapse to propose wording' }));
+        expect(screen.getByLabelText('Add context for this proposal (optional)')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Prepare bounded proposal' }));
+        expect(props.onRequestAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'flow-review', {
+            kind: 'missing_info', guidance: '',
+        });
+    });
+
+    it('shows a bounded proposal and requests a different interpretation without encoding acceptance', () => {
+        const props = callbacks();
+        const record: DecisionCenterRecordView = {
+            ...openRecord, status: 'confirmed', resolution: 'Independent creators',
+            preview: {
+                id: 'preview', status: 'ready', affectedPrdSections: ['User Flows'], affectedArtifactLabels: [],
+                proposals: [{
+                    id: 'flow-change', targetLabel: 'Invitation flow', targetKind: 'flow_step', section: 'User Flows',
+                    beforeSummary: 'An administrator invites a team member.',
+                    proposedSummary: 'A creator starts a personal project without an invitation.',
+                    reason: 'The current flow assumes an enterprise administrator.', confidence: 'likely',
+                    canRequestReasoning: true, disposition: 'pending', analysisStatus: 'bounded_applicable', analysisMethod: 'model',
+                    analysisModel: 'reasoning-model', analysisProvider: 'provider',
+                    analysisEvidence: [{ label: 'Primary-user decision', excerpt: 'Independent creators' }],
+                }],
+            },
+        };
+        render(<DecisionCenter records={[record]} {...props} />);
+
+        expect(screen.getByText('Current: An administrator invites a team member.')).toBeInTheDocument();
+        expect(screen.getByText('Proposed: A creator starts a personal project without an invitation.')).toBeInTheDocument();
+        expect(screen.getByText('Ready to review')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Accept' })).toBeInTheDocument();
+        const basis = screen.getByText(/Reasoning basis/).closest('details')!;
+        expect(basis).not.toHaveAttribute('open');
+        expect(within(basis).getByText(/reasoning-model/)).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Request different interpretation' }));
+        fireEvent.change(screen.getByLabelText('What should Synapse interpret differently?'), {
+            target: { value: 'Keep optional invitations, but remove administrator ownership.' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Prepare another interpretation' }));
+        expect(props.onRequestAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'flow-change', {
+            kind: 'different_interpretation', guidance: 'Keep optional invitations, but remove administrator ownership.',
+        });
+        expect(props.onReviewAlignmentProposal).not.toHaveBeenCalled();
     });
 
     it('makes keeping a verdict-defining source claim visibly unaligned', () => {
