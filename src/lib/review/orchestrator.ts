@@ -100,10 +100,11 @@ export async function runSingleSpecialist(
                     `Coverage checks are missing grounded conclusions for: ${missingCoverage.join(', ')}`,
                 );
             }
-            if (findings.length > 0 && findings.every(finding => !finding.grounded)) {
-                const reasons = findings.flatMap(finding => finding.validationWarnings).join('; ');
+            if (findings.some(finding => !finding.grounded)) {
+                const reasons = findings.filter(finding => !finding.grounded)
+                    .flatMap(finding => finding.validationWarnings).join('; ');
                 throw new SpecialistOutputValidationError(
-                    `All specialist findings failed evidence validation${reasons ? `: ${reasons}` : ''}`,
+                    `One or more specialist findings failed evidence validation${reasons ? `: ${reasons}` : ''}`,
                 );
             }
             options.onEvent?.({

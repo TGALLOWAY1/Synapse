@@ -94,6 +94,34 @@ describe('adversarial review orchestration', () => {
         expect(result.specialistResults[0].findings[0].grounded).toBe(true);
     });
 
+    it('repairs mixed grounded and unsupported findings before marking a specialist complete', async () => {
+        const manifest = makeManifest();
+        const locator = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const attempts: number[] = [];
+        const transport: SpecialistTransport = async ({ attempt, repair }) => {
+            attempts.push(attempt);
+            if (attempt === 1) {
+                const mixed = JSON.parse(validResponse(locator)) as { findings: Array<Record<string, unknown>> };
+                mixed.findings.push({
+                    ...mixed.findings[0],
+                    title: 'Unsupported secondary claim',
+                    evidence: [{
+                        sourceKey: locator.sourceKey, locatorId: 'missing-locator', path: 'prd.missing',
+                        excerpt: 'This evidence does not exist in the reviewed plan.',
+                    }],
+                });
+                return JSON.stringify(mixed);
+            }
+            expect(repair?.validationError).toContain('One or more specialist findings failed evidence validation');
+            return validResponse(locator);
+        };
+        const result = await runAdversarialReview(manifest, ['ai_model_risk'], { transport });
+        expect(result.status).toBe('complete');
+        expect(attempts).toEqual([1, 2]);
+        expect(result.specialistResults[0].findings).toHaveLength(1);
+        expect(result.specialistResults[0].findings[0].grounded).toBe(true);
+    });
+
     it('fails a review when no selected specialist completes', async () => {
         const result = await runAdversarialReview(makeManifest(), ['product_scope', 'architecture'], {
             transport: async () => { throw new Error('provider unavailable'); },

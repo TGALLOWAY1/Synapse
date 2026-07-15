@@ -97,7 +97,7 @@ export type ReviewRunView = {
     untriagedFindings?: ReviewUntriagedFindingView[];
     focus?: string;
     contextChanged?: boolean;
-    readinessCoverage?: 'complete' | 'exploratory' | 'unverifiable';
+    readinessCoverage?: 'complete' | 'exploratory' | 'incomplete' | 'unverifiable';
     omittedRequiredSpecialistNames?: string[];
     error?: string;
 };
@@ -622,6 +622,12 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
                     <span>This legacy review did not record its required specialist panel, so it cannot support the current readiness checkpoint. Review the current plan again.</span>
                 </div>
             )}
+            {run.readinessCoverage === 'incomplete' && (
+                <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>This review completed with unsupported or incomplete specialist evidence, so it cannot support readiness. Retry the current review to restore source-grounded coverage.</span>
+                </div>
+            )}
             {run.contextChanged && (
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <Clock3 size={16} className="mt-0.5 shrink-0" />
@@ -735,8 +741,9 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                                             </span>
                                         )}
                                         {run.readinessCoverage === 'unverifiable' && <span className="mt-1 block text-xs font-medium text-amber-700">Readiness coverage not recorded</span>}
+                                        {run.readinessCoverage === 'incomplete' && <span className="mt-1 block text-xs font-medium text-amber-700">Specialist evidence incomplete</span>}
                                     </span>
-                                    <span className={`text-xs font-semibold capitalize ${run.status === 'complete' && run.readinessCoverage === 'complete' ? 'text-emerald-700' : run.status === 'partial' || run.readinessCoverage !== 'complete' ? 'text-amber-700' : 'text-neutral-500'}`}>{run.readinessCoverage === 'exploratory' ? 'exploratory' : run.status}</span>
+                                    <span className={`text-xs font-semibold capitalize ${run.status === 'complete' && run.readinessCoverage === 'complete' ? 'text-emerald-700' : run.status === 'partial' || run.readinessCoverage !== 'complete' ? 'text-amber-700' : 'text-neutral-500'}`}>{run.readinessCoverage === 'exploratory' ? 'exploratory' : run.readinessCoverage === 'incomplete' ? 'incomplete' : run.status}</span>
                                     {run.contextChanged && <span className="text-xs font-medium text-amber-700">Sources changed</span>}
                                 </button>
                             ))}

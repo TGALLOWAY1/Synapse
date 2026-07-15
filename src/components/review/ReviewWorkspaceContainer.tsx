@@ -618,6 +618,11 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     const runViews: ReviewRunView[] = reviewRuns.slice().reverse().map(run => {
         const selectedIds = new Set(run.selectedSpecialists.map(item => item.specialistId));
         const omittedRequiredIds = (run.requiredSpecialistIds ?? []).filter(id => !selectedIds.has(id));
+        const persistedSpecialists = specialistRuns.filter(item => item.reviewId === run.id);
+        const requiredCoverageIncomplete = (run.requiredSpecialistIds ?? []).some(id => {
+            const specialist = persistedSpecialists.find(item => item.specialistId === id);
+            return !specialist || specialist.status !== 'complete' || specialist.validation?.valid !== true;
+        });
         return ({
         id: run.id,
         label: `Review ${run.sequenceNumber}`,
@@ -628,7 +633,9 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         contextChanged: currentManifest?.contextSignature !== run.sourceManifest.contextSignature,
         readinessCoverage: !run.requiredSpecialistIds?.length
             ? 'unverifiable' as const
-            : omittedRequiredIds.length > 0 ? 'exploratory' as const : 'complete' as const,
+            : omittedRequiredIds.length > 0
+                ? 'exploratory' as const
+                : requiredCoverageIncomplete ? 'incomplete' as const : 'complete' as const,
         omittedRequiredSpecialistNames: omittedRequiredIds.map(id => (
             SPECIALIST_REGISTRY[id as ReviewSpecialistId]?.label ?? id
         )),

@@ -122,6 +122,16 @@ describe('ReviewWorkspace', () => {
         expect(screen.getByText('exploratory')).toHaveClass('text-amber-700');
     });
 
+    it('does not present a completed run with incomplete specialist evidence as readiness-complete', () => {
+        const run = completeRun({ readinessCoverage: 'incomplete' });
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id })} />);
+
+        expect(screen.getByText(/completed with unsupported or incomplete specialist evidence/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Review history' }));
+        expect(screen.getByText('Specialist evidence incomplete')).toBeInTheDocument();
+        expect(screen.getByText('incomplete')).toHaveClass('text-amber-700');
+    });
+
     it('shows durable specialist progress and retries only the failed specialist', () => {
         const run = completeRun({
             status: 'running',

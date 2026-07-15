@@ -165,6 +165,10 @@ treated as substantive challenge evidence. Coverage citations must use the
 structured PRD path family relevant to the claimed area, and readiness
 revalidates the locator id, path, excerpt, and excerpt hash against the exact
 reviewed PRD instead of trusting a persisted `verified` flag.
+Any unsupported finding triggers the same bounded specialist repair before a
+run can complete. Legacy or malformed completed runs with incomplete evidence
+remain visibly labeled as incomplete in results and history rather than
+appearing as readiness-supporting challenge coverage.
 
 Historical checkpoints preserve both the original evidence and a deterministic
 comparison with the current readiness projection. The comparison names newly
