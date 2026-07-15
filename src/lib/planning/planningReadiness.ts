@@ -66,9 +66,9 @@ export function planningRecordRequiresResolution(
         return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited);
     }
     if (state.status === 'invalidated') return material(record);
-    const legacyWithoutVerdictProvenance = record.schemaVersion === undefined
-        && !(record.events ?? []).some(event => event.actor === 'user');
-    if (legacyWithoutVerdictProvenance && material(record)) return true;
+    const settledWithoutVerdictProvenance = ['confirmed', 'rejected', 'resolved'].includes(state.status)
+        && !state.latestVerdictEventId;
+    if (settledWithoutVerdictProvenance && material(record)) return true;
     // Provenance drift is only a build blocker when the record itself is
     // consequential. Low-impact uncertainty stays visible without becoming a
     // procedural gate merely because its source moved or is unavailable.

@@ -152,6 +152,22 @@ describe('deterministic readiness review', () => {
         ]));
     });
 
+    it('fails closed for a current-schema settled projection without a user verdict event', () => {
+        const imported = record({
+            id: 'imported-projection', type: 'decision', status: 'confirmed', resolution: 'Web first',
+            materiality: 'high', schemaVersion: 1,
+            events: [{
+                id: 'created-only', planningRecordId: 'imported-projection', type: 'created',
+                actor: 'user', at: 1,
+            }],
+        });
+        const review = deriveReadinessReview(input({ planningRecords: [imported] }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'imported-projection' }) }),
+        ]));
+    });
+
     it('does not mistake a grounded internal excerpt for validation of a material assumption', () => {
         const assumption = record({
             id: 'grounded-assumption', type: 'assumption', status: 'confirmed', materiality: 'high', schemaVersion: 1,

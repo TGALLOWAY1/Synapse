@@ -95,6 +95,22 @@ describe('planning readiness', () => {
         expect(derivePlanningReadiness({ ...shared, planningRecords: [deferred] }).isReadyToBuild).toBe(false);
     });
 
+    it('fails closed for a material settled status without a durable user verdict event', () => {
+        const importedProjection = {
+            ...record('decision', 'confirmed'), schemaVersion: 1 as const, materiality: 'high' as const,
+            events: [{
+                id: 'created-only', planningRecordId: 'decision-1', type: 'created' as const,
+                actor: 'user' as const, at: 1,
+            }],
+        };
+        const result = derivePlanningReadiness({
+            prd, planningRecords: [importedProjection], incompleteSectionCount: 0,
+            hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
+        });
+        expect(result.isReadyToBuild).toBe(false);
+        expect(result.nextAction).toMatchObject({ kind: 'resolve_decision', planningRecordId: 'decision-1' });
+    });
+
     it('blocks on unapplied or deferred propagation but allows explicit downstream not-affected reviews', () => {
         const previewId = 'impact-1';
         const proposal = (requiredForVerdictAlignment: boolean) => ({
