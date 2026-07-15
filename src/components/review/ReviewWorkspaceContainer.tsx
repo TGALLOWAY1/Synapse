@@ -75,6 +75,12 @@ interface Props {
 
 const activeControllers = new Map<string, AbortController>();
 
+// Zustand selectors are consumed through React's useSyncExternalStore. Keep
+// the absent per-project snapshot referentially stable so projects that have
+// not created every review collection yet do not trigger an infinite render
+// loop under React 19.
+const EMPTY_PROJECT_COLLECTION: never[] = [];
+
 const specialistStatus = (status: string): 'queued' | 'running' | 'complete' | 'failed' | 'cancelled' => {
     if (status === 'running') return 'running';
     if (status === 'complete') return 'complete';
@@ -115,14 +121,14 @@ const dispositionForAction = (action: ReviewIssueAction): ReviewIssueDisposition
 
 export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
-    const spines = useProjectStore(state => state.spineVersions[projectId] ?? []);
-    const artifacts = useProjectStore(state => state.artifacts[projectId] ?? []);
-    const artifactVersions = useProjectStore(state => state.artifactVersions[projectId] ?? []);
-    const reviewRuns = useProjectStore(state => state.reviewRuns[projectId] ?? []);
-    const specialistRuns = useProjectStore(state => state.specialistRuns[projectId] ?? []);
-    const findings = useProjectStore(state => state.reviewFindings[projectId] ?? []);
-    const issues = useProjectStore(state => state.reviewIssues[projectId] ?? []);
-    const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? []);
+    const spines = useProjectStore(state => state.spineVersions[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const artifacts = useProjectStore(state => state.artifacts[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const artifactVersions = useProjectStore(state => state.artifactVersions[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const reviewRuns = useProjectStore(state => state.reviewRuns[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const specialistRuns = useProjectStore(state => state.specialistRuns[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const findings = useProjectStore(state => state.reviewFindings[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const issues = useProjectStore(state => state.reviewIssues[projectId] ?? EMPTY_PROJECT_COLLECTION);
+    const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_PROJECT_COLLECTION);
     const [activeRunId, setActiveRunId] = useState<string | undefined>(initialReviewId);
     const [busy, setBusy] = useState(false);
     const [alignmentAnalysis, setAlignmentAnalysis] = useState<Record<string, { busy: boolean; error?: string }>>({});
