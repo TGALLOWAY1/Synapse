@@ -53,7 +53,7 @@ describe('AssumptionValidationPanel', () => {
             revisitCondition: plan.revisitCondition, assumptionStatementHash: 'statement-hash',
             evidenceSetHash: 'empty-evidence', createdAt: 10, contentHash: 'proposal-hash',
         };
-        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ latestPlanProposal: proposal })} hasPlanImpact={false} {...handlers} />);
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ latestPlanProposal: proposal })} requiresValidation hasPlanImpact={false} consequence="Pricing may not sustain the product." {...handlers} />);
 
         expect(screen.getByText('Synapse proposal · not yet your plan')).toBeInTheDocument();
         expect(handlers.onRecordPlan).not.toHaveBeenCalled();
@@ -74,7 +74,7 @@ describe('AssumptionValidationPanel', () => {
         const handlers = callbacks();
         const duplicate = evidence({ id: 'evidence-duplicate', source: 'Copy of interview summary', contentHash: 'duplicate-hash' });
         const irrelevant = evidence({ id: 'evidence-irrelevant', source: 'General market report', sourceIdentity: 'report-1', sourceFingerprint: 'report-fingerprint', relation: 'irrelevant', observation: 'The report describes the market but does not test willingness to pay.', contentHash: 'irrelevant-hash' });
-        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ currentPlan: plan, workflowState: 'in_progress', activeEvidence: [duplicate, irrelevant], duplicateEvidenceIds: [duplicate.id] })} hasPlanImpact={false} {...handlers} />);
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ currentPlan: plan, workflowState: 'in_progress', activeEvidence: [duplicate, irrelevant], duplicateEvidenceIds: [duplicate.id] })} requiresValidation hasPlanImpact={false} {...handlers} />);
 
         fireEvent.click(screen.getByText(/2\. Add evidence/));
         const evidenceList = screen.getByRole('list', { name: 'Recorded evidence' });
@@ -106,22 +106,24 @@ describe('AssumptionValidationPanel', () => {
             validationPlanHash: plan.contentHash, evidenceSetHash: 'evidence-set', createdAt: 30,
             contentHash: 'interpretation-hash',
         };
-        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ currentPlan: plan, workflowState: 'in_progress', activeEvidence: [supporting, contradicting], latestInterpretation: interpretation })} hasPlanImpact={false} {...handlers} />);
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ currentPlan: plan, workflowState: 'in_progress', activeEvidence: [supporting, contradicting], latestInterpretation: interpretation })} requiresValidation hasPlanImpact={false} {...handlers} />);
 
         expect(screen.getByText('Synapse interpretation · advisory')).toBeInTheDocument();
         expect(handlers.onRecordOutcome).not.toHaveBeenCalled();
         fireEvent.click(screen.getByRole('button', { name: 'Use as my draft conclusion' }));
         expect(screen.getByLabelText('Your validation conclusion')).toHaveValue('inconclusive');
         expect(handlers.onRecordOutcome).not.toHaveBeenCalled();
+        fireEvent.change(screen.getByLabelText('Conclusion revisit on (optional)'), { target: { value: '2026-09-01' } });
         fireEvent.click(screen.getByRole('button', { name: 'Record my conclusion' }));
         expect(handlers.onRecordOutcome).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
             conclusion: 'inconclusive', sourceInterpretationId: 'interpretation-1',
+            revisitAt: new Date('2026-09-01T12:00:00').getTime(),
         }));
     });
 
     it('records proceeding under uncertainty separately and exposes a mobile-sized impact action', () => {
         const handlers = callbacks();
-        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ userTreatment: 'accepted_without_validation', treatmentRationale: 'Test demand during a limited beta.' })} hasPlanImpact={false} {...handlers} />);
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ userTreatment: 'accepted_without_validation', treatmentRationale: 'Test demand during a limited beta.' })} requiresValidation hasPlanImpact={false} {...handlers} />);
 
         expect(screen.getAllByText('Accepted without validation')[0]).toBeInTheDocument();
         expect(screen.queryByText('Supported')).not.toBeInTheDocument();
@@ -129,5 +131,42 @@ describe('AssumptionValidationPanel', () => {
         expect(impact).toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
         fireEvent.click(impact);
         expect(handlers.onPreviewImpact).toHaveBeenCalledWith('assumption-1');
+
+        fireEvent.click(screen.getByText('Proceed without validation'));
+        fireEvent.change(screen.getByLabelText('Why proceed?'), { target: { value: 'Run a limited beta first.' } });
+        fireEvent.change(screen.getByLabelText('Uncertainty revisit on (optional)'), { target: { value: '2026-10-01' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Record unresolved uncertainty' }));
+        expect(handlers.onRecordTreatment).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
+            revisitAt: new Date('2026-10-01T12:00:00').getTime(),
+        }));
+    });
+
+    it('records an explicit validation expiration date on a user-authored plan', () => {
+        const handlers = callbacks();
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} {...handlers} />);
+
+        fireEvent.change(screen.getByLabelText('Validation question'), { target: { value: plan.question } });
+        fireEvent.change(screen.getByLabelText('Validation expires on (optional)'), { target: { value: '2026-08-15' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Record my validation plan' }));
+        expect(handlers.onRecordPlan).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
+            expiresAt: new Date('2026-08-15T12:00:00').getTime(),
+        }));
+    });
+
+    it('shows consequence and exact dependencies before the validation workflow', () => {
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} consequence="The onboarding and pricing model would need to change." {...callbacks()} />);
+
+        const impact = screen.getByRole('region', { name: 'Potential plan impact' });
+        expect(impact).toHaveTextContent('The onboarding and pricing model would need to change.');
+        expect(impact).toHaveTextContent('Pricing · First-release scope');
+        const planStep = screen.getByText('1. Plan the smallest credible test');
+        expect(impact.compareDocumentPosition(planStep) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('frames formal validation as optional for a low-impact assumption', () => {
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation={false} hasPlanImpact={false} {...callbacks()} />);
+
+        expect(screen.getByText('Optional assumption validation')).toBeInTheDocument();
+        expect(screen.getByText(/not consequential enough to require a formal test/i)).toBeInTheDocument();
     });
 });

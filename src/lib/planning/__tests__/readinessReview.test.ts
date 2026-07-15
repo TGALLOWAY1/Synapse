@@ -11,10 +11,12 @@ import { buildReviewContextManifest } from '../../review/manifest';
 import type { ProjectOutputAlignmentSummary } from '../outputAlignment';
 import { appendDecisionEvent } from '../decisionProjection';
 import {
+    addAssumptionValidationPlanProposal,
     appendAssumptionValidationEvent,
     assumptionEvidenceSetHash,
     assumptionStatementHash,
     assumptionValidationDecisionEvent,
+    buildAssumptionValidationPlanProposal,
     projectAssumptionValidation,
     sealAssumptionEvidence,
     sealAssumptionValidationEvent,
@@ -110,7 +112,12 @@ const record = (overrides: Partial<PlanningRecord> = {}): PlanningRecord => ({
 });
 
 const evidenceValidatedRecord = (expiresAt?: number): PlanningRecord => {
-    let current = record({ status: 'open', materiality: 'high', events: [] });
+    const spineHash = hashReviewValue(prd);
+    const context = { currentSpineVersionId: 'spine-1', currentSpineContentHash: spineHash };
+    let current = record({
+        status: 'open', materiality: 'high', events: [],
+        sources: [{ key: 'prd_assumption:a1', sourceType: 'prd_assumption', sourceId: 'a1', sourceVersionId: 'spine-1' }],
+    });
     const plan = sealAssumptionValidationPlan({
         id: 'validation-plan', question: 'Will teams use the reasoning trace before implementation?',
         method: { kind: 'usability_observation', label: 'Observed planning session' },
@@ -120,30 +127,37 @@ const evidenceValidatedRecord = (expiresAt?: number): PlanningRecord => {
     const planned = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
         id: 'plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 10,
         assumptionStatementHash: assumptionStatementHash(current), plan, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
-    }));
+        expectedSpineVersionId: 'spine-1', expectedSpineContentHash: spineHash,
+    }), context);
     if (!planned.ok) throw new Error(planned.reason);
     current = planned.record;
-    const evidence = sealAssumptionEvidence({
-        id: 'observed-session', planningRecordId: current.id, sourceType: 'usability_observation',
-        source: 'Observed team session', sourceIdentity: 'session-1', observedAt: 19, recordedAt: 20,
-        observation: 'The team inspected decision reasoning before committing the implementation plan.',
-        validationQuestion: plan.question, limitations: ['One product team'], character: 'direct', relation: 'supports',
-        assumptionStatementHash: assumptionStatementHash(current), validationPlanHash: plan.contentHash, authoredBy: 'user',
-    });
-    const evidenced = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
-        id: 'evidence-event', planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 20,
-        assumptionStatementHash: assumptionStatementHash(current), evidence, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
-    }));
-    if (!evidenced.ok) throw new Error(evidenced.reason);
-    current = evidenced.record;
+    for (let index = 0; index < 2; index += 1) {
+        const before = projectAssumptionValidation(current, 20 + index);
+        const evidence = sealAssumptionEvidence({
+            id: `observed-session-${index}`, planningRecordId: current.id, sourceType: 'usability_observation',
+            source: `Observed team session ${index + 1}`, sourceIdentity: `session-${index + 1}`, observedAt: 19 + index, recordedAt: 20 + index,
+            observation: 'The team inspected decision reasoning before committing the implementation plan.',
+            validationQuestion: plan.question, scopeOrSample: 'One independent product team', limitations: [], character: 'direct', relation: 'supports',
+            assumptionStatementHash: assumptionStatementHash(current), validationPlanHash: plan.contentHash, authoredBy: 'user',
+        });
+        const evidenced = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+            id: `evidence-event-${index}`, planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 20 + index,
+            assumptionStatementHash: assumptionStatementHash(current), evidence,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(before.activeEvidence),
+            expectedSpineVersionId: 'spine-1', expectedSpineContentHash: spineHash,
+        }), context);
+        if (!evidenced.ok) throw new Error(evidenced.reason);
+        current = evidenced.record;
+    }
     const projection = projectAssumptionValidation(current, 30);
     const outcome = sealAssumptionValidationEvent({
         id: 'outcome-event', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 30,
         assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
         expectedValidationPlanHash: projection.currentPlan!.contentHash,
         expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        expectedSpineVersionId: 'spine-1', expectedSpineContentHash: spineHash,
     });
-    const concluded = appendAssumptionValidationEvent(current, outcome);
+    const concluded = appendAssumptionValidationEvent(current, outcome, context);
     if (!concluded.ok) throw new Error(concluded.reason);
     const verdict = appendDecisionEvent(concluded.record, assumptionValidationDecisionEvent(current, outcome)!);
     if (!verdict.ok) throw new Error(verdict.reason);
@@ -190,7 +204,11 @@ describe('deterministic readiness review', () => {
         expect(review.criteria.find(item => item.id === 'assumptions')).toMatchObject({ status: 'met', blocking: false });
         expect(review.criteria.find(item => item.id === 'assumptions')?.evidence).toEqual([
             expect.objectContaining({
-                sourceId: 'observed-session', sourceType: 'planning_record', quality: 'direct',
+                sourceId: 'observed-session-0', sourceType: 'planning_record', quality: 'direct',
+                contentHash: expect.any(String),
+            }),
+            expect.objectContaining({
+                sourceId: 'observed-session-1', sourceType: 'planning_record', quality: 'direct',
                 contentHash: expect.any(String),
             }),
         ]);
@@ -210,6 +228,21 @@ describe('deterministic readiness review', () => {
         expect(current.concerns).toEqual(expect.arrayContaining([
             expect.objectContaining({ kind: 'assumption', consequence: expect.stringContaining('historical or expired') }),
         ]));
+    });
+
+    it('does not make readiness historical for a machine-authored advisory proposal alone', () => {
+        const assumption = evidenceValidatedRecord();
+        const review = deriveReadinessReview(input({ planningRecords: [assumption], createdAt: 40 }));
+        const proposal = buildAssumptionValidationPlanProposal({
+            record: assumption, question: 'Should this validation be revisited?',
+            method: { kind: 'usability_observation', label: 'Additional observed session' },
+            supportSignals: ['Behavior repeats'], contradictionSignals: ['Behavior reverses'], createdAt: 41,
+        });
+        const added = addAssumptionValidationPlanProposal(assumption, proposal);
+        if (!added.ok) throw new Error(added.reason);
+        expect(compareReadinessReviewCurrentness(review, input({ planningRecords: [added.record], createdAt: 41 }))).toMatchObject({
+            current: true, historical: false,
+        });
     });
 
     it('does not treat invalidation, missing supersession, or a confirmed material risk as resolution', () => {

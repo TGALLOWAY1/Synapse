@@ -45,6 +45,7 @@ import {
     assumptionStatementHash,
     buildAssumptionInterpretationProposal,
     buildAssumptionValidationPlanProposal,
+    assumptionValidationReadiness,
     planningContentHash,
     projectAssumptionValidation,
     sealAssumptionEvidence,
@@ -760,6 +761,13 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             statement: record.statement,
             whyItMatters: record.evidence[0]?.excerpt,
             status: projection.status,
+            materiality: record.materiality,
+            requiresValidation: record.type === 'assumption'
+                && (record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high')
+                && !assumptionValidationReadiness(record, Date.now(), {
+                    currentSpineVersionId: latestSpine?.id,
+                    currentSpineContentHash,
+                }).ready,
             options: record.decisionOptions,
             recommendation: record.recommendationDetail ?? (record.recommendation ? { summary: record.recommendation } : undefined),
             resolution: option?.label ?? projection.answer,
@@ -941,6 +949,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             inconclusiveConditions: input.inconclusiveConditions,
             limitations: input.limitations,
             revisitCondition: input.revisitCondition,
+            expiresAt: input.expiresAt,
             authoredBy: 'user',
             createdAt: at,
         });
@@ -1025,6 +1034,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     const handleRecordAssumptionOutcome = (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
         caveats?: string;
+        revisitAt?: number;
         revisitCondition?: string;
         sourceInterpretationId?: string;
         sourceInterpretationContentHash?: string;
@@ -1046,6 +1056,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
             sourceInterpretationId: input.sourceInterpretationId,
             sourceInterpretationContentHash: input.sourceInterpretationContentHash,
+            revisitAt: input.revisitAt,
             revisitCondition: input.revisitCondition,
         });
         const result = state.appendAssumptionValidationEvent(projectId, recordId, event);
@@ -1056,6 +1067,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     const handleRecordAssumptionTreatment = (recordId: string, input: {
         treatment: AssumptionUncertaintyTreatment;
         rationale: string;
+        revisitAt?: number;
         revisitCondition?: string;
     }) => {
         if (!canWrite) return;
@@ -1071,6 +1083,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
             treatment: input.treatment,
             rationale: input.rationale,
+            revisitAt: input.revisitAt,
             revisitCondition: input.revisitCondition,
         });
         const result = state.appendAssumptionValidationEvent(projectId, recordId, event);

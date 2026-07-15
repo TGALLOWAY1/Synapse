@@ -47,7 +47,10 @@ const assumption = (): PlanningRecord => ({
 const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
     let current: PlanningRecord = {
         ...assumption(), status: 'open', events: [],
+        sources: [{ key: 'prd_assumption:a1', sourceType: 'prd_assumption', sourceId: 'a1', sourceVersionId: spineId }],
     };
+    const spineHash = hashReviewValue(prd);
+    const context = { currentSpineVersionId: spineId, currentSpineContentHash: spineHash };
     const plan = sealAssumptionValidationPlan({
         id: 'plan', question: 'Will users revisit operational warnings?',
         method: { kind: 'usability_observation', label: 'Observed planning session' }, supportSignals: ['User revisits warning'],
@@ -57,30 +60,37 @@ const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
     const planned = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
         id: 'plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 1_010,
         assumptionStatementHash: assumptionStatementHash(current), plan, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
-    }));
+        expectedSpineVersionId: spineId, expectedSpineContentHash: spineHash,
+    }), context);
     if (!planned.ok) throw new Error(planned.reason);
     current = planned.record;
-    const evidence = sealAssumptionEvidence({
-        id: 'evidence', planningRecordId: current.id, sourceType: 'usability_observation', source: 'Planning session',
-        sourceIdentity: 'session-1', observedAt: 1_019, recordedAt: 1_020,
-        observation: 'The user revisited the warning before committing.', validationQuestion: plan.question,
-        limitations: ['One team'], character: 'direct', relation: 'supports', assumptionStatementHash: assumptionStatementHash(current),
-        validationPlanHash: plan.contentHash, authoredBy: 'user',
-    });
-    const evidenced = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
-        id: 'evidence-event', planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 1_020,
-        assumptionStatementHash: assumptionStatementHash(current), evidence, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
-    }));
-    if (!evidenced.ok) throw new Error(evidenced.reason);
-    current = evidenced.record;
+    for (let index = 0; index < 2; index += 1) {
+        const before = projectAssumptionValidation(current, 1_020 + index);
+        const evidence = sealAssumptionEvidence({
+            id: `evidence-${index}`, planningRecordId: current.id, sourceType: 'usability_observation', source: `Planning session ${index + 1}`,
+            sourceIdentity: `session-${index + 1}`, observedAt: 1_019 + index, recordedAt: 1_020 + index,
+            observation: 'The user revisited the warning before committing.', validationQuestion: plan.question,
+            scopeOrSample: 'One independent product team', limitations: [], character: 'direct', relation: 'supports', assumptionStatementHash: assumptionStatementHash(current),
+            validationPlanHash: plan.contentHash, authoredBy: 'user',
+        });
+        const evidenced = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+            id: `evidence-event-${index}`, planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 1_020 + index,
+            assumptionStatementHash: assumptionStatementHash(current), evidence,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(before.activeEvidence),
+            expectedSpineVersionId: spineId, expectedSpineContentHash: spineHash,
+        }), context);
+        if (!evidenced.ok) throw new Error(evidenced.reason);
+        current = evidenced.record;
+    }
     const projection = projectAssumptionValidation(current, 1_030);
     const outcome = sealAssumptionValidationEvent({
         id: 'outcome', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 1_030,
         assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
         expectedValidationPlanHash: projection.currentPlan!.contentHash,
         expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        expectedSpineVersionId: spineId, expectedSpineContentHash: spineHash,
     });
-    const concluded = appendAssumptionValidationEvent(current, outcome);
+    const concluded = appendAssumptionValidationEvent(current, outcome, context);
     if (!concluded.ok) throw new Error(concluded.reason);
     const verdict = appendDecisionEvent(concluded.record, assumptionValidationDecisionEvent(current, outcome)!);
     if (!verdict.ok) throw new Error(verdict.reason);

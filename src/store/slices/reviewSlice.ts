@@ -390,7 +390,10 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
                 outcome = result;
                 return state;
             }
-            const decisionEvent = assumptionValidationDecisionEvent(normalized, event);
+            const canonicalEvent = result.record.assumptionValidation?.events.find(item => item.id === event.id);
+            const decisionEvent = canonicalEvent
+                ? assumptionValidationDecisionEvent(normalized, canonicalEvent)
+                : undefined;
             const synchronized = decisionEvent
                 ? appendDecisionEvent(result.record, decisionEvent)
                 : { ok: true as const, record: result.record, duplicate: true };

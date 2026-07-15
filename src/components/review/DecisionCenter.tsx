@@ -62,6 +62,10 @@ export type DecisionCenterRecordView = {
     statement?: string;
     whyItMatters?: string;
     status: 'proposed' | 'open' | 'confirmed' | 'rejected' | 'deferred' | 'resolved' | 'invalidated' | 'superseded';
+    materiality?: 'blocking' | 'high' | 'normal' | 'low';
+    /** A material assumption can have a recorded planning verdict and still
+     * need evidence-backed validation. This is attention, not a second verdict. */
+    requiresValidation?: boolean;
     options?: DecisionCenterOptionView[];
     recommendation?: { optionId?: string; summary: string; rationale?: string; confidence?: string };
     resolution?: string;
@@ -97,6 +101,7 @@ interface Props {
     onRecordAssumptionOutcome?: (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
         caveats?: string;
+        revisitAt?: number;
         revisitCondition?: string;
         sourceInterpretationId?: string;
         sourceInterpretationContentHash?: string;
@@ -104,11 +109,13 @@ interface Props {
     onRecordAssumptionTreatment?: (recordId: string, input: {
         treatment: AssumptionUncertaintyTreatment;
         rationale: string;
+        revisitAt?: number;
         revisitCondition?: string;
     }) => void;
 }
 
-const needsReview = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
+const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
+const needsAttention = (record: DecisionCenterRecordView) => needsVerdict(record) || Boolean(record.requiresValidation);
 const previewStatusLabel: Record<DecisionCenterPreviewView['status'], string> = {
     generating: 'Preparing impact', ready: 'Review changes', stale: 'Impact needs refresh',
     failed: 'Impact unavailable', applied: 'Applied to working plan', superseded: 'Superseded',
@@ -137,8 +144,8 @@ export function DecisionCenter({
     onRecordAssumptionTreatment = () => {},
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
-    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsReview(initialRecord) ? 'needs_review' : 'log') : records.some(needsReview) ? 'needs_review' : 'log');
-    const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsReview(record) : !needsReview(record)), [records, view]);
+    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsAttention(initialRecord) ? 'needs_review' : 'log') : records.some(needsAttention) ? 'needs_review' : 'log');
+    const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsAttention(record) : !needsAttention(record)), [records, view]);
     const [selectedId, setSelectedId] = useState<string | undefined>(initialRecord?.id);
     const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialRecord));
     const [customAnswer, setCustomAnswer] = useState('');
@@ -148,7 +155,10 @@ export function DecisionCenter({
     const [proposalGuidance, setProposalGuidance] = useState('');
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
-    const unresolvedCount = records.filter(needsReview).length;
+    const selectedHasCurrentAssumptionConclusion = selected?.type === 'assumption'
+        && selected.validation?.conclusionIsCurrent
+        && Boolean(selected.validation.acceptedConclusion);
+    const unresolvedCount = records.filter(needsAttention).length;
 
     useEffect(() => {
         if (mobileDetailOpen) detailHeadingRef.current?.focus();
@@ -169,8 +179,8 @@ export function DecisionCenter({
         // needs-review queue must not feel like the reasoning disappeared.
         if (action === 'reopen') {
             setView('needs_review');
-        } else if (needsReview(selected)) {
-            setView('log');
+        } else if (needsVerdict(selected)) {
+            setView(selected.requiresValidation ? 'needs_review' : 'log');
         }
         setSelectedId(selected.id);
         setMobileDetailOpen(true);
@@ -205,14 +215,14 @@ export function DecisionCenter({
                         <h1 className="text-xl font-bold tracking-tight text-neutral-950 sm:text-2xl">Decision Center</h1>
                         <p className="mt-1 text-sm text-neutral-500">Resolve consequential choices, preview their impact, then apply them explicitly.</p>
                     </div>
-                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" aria-label={`${unresolvedCount} decisions need review`}>
+                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" aria-label={`${unresolvedCount} planning items need attention`}>
                         {unresolvedCount} need{unresolvedCount === 1 ? 's' : ''} review
                     </div>
                 </div>
             </header>
             {unresolvedCount === 0 && records.length > 0 && (
                 <div className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 sm:px-6" role="status">
-                    All current decisions reviewed
+                    All current planning items reviewed
                 </div>
             )}
 
@@ -226,7 +236,7 @@ export function DecisionCenter({
                         {visible.length === 0 ? (
                             <div className="px-4 py-10 text-center">
                                 {view === 'needs_review' ? <Check className="mx-auto text-emerald-500" size={24} /> : <FileQuestion className="mx-auto text-neutral-300" size={24} />}
-                                <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'All current decisions reviewed' : 'No decision history yet'}</p>
+                                <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'All current planning items reviewed' : 'No decision history yet'}</p>
                                 <p className="mt-1 text-xs leading-5 text-neutral-500">{view === 'needs_review' ? 'New assumptions and review findings will appear here.' : 'Resolved and deferred choices remain available here.'}</p>
                             </div>
                         ) : visible.map(record => (
@@ -239,7 +249,7 @@ export function DecisionCenter({
                             >
                                 <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
                                     <span>{record.type === 'question' ? 'Open question' : record.type.replace('_', ' ')}</span>
-                                    <span>·</span><span>{record.status.replace('_', ' ')}</span>
+                                    <span>·</span><span>{record.requiresValidation && !needsVerdict(record) ? 'needs validation' : record.status.replace('_', ' ')}</span>
                                 </div>
                                 <p className="mt-1 text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
                                 {record.sourceLabels?.[0] && <p className="mt-1 truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</p>}
@@ -254,13 +264,13 @@ export function DecisionCenter({
                     ) : (
                         <div className="mx-auto max-w-3xl px-4 py-5 sm:px-7 sm:py-8">
                             <button type="button" onClick={() => setMobileDetailOpen(false)} className="mb-4 inline-flex min-h-10 items-center gap-2 text-sm font-medium text-neutral-600 md:hidden"><ArrowLeft size={16} /> Back to decisions</button>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">{selected.status.replace('_', ' ')} · {selected.type.replace('_', ' ')}</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">{selected.requiresValidation && !needsVerdict(selected) ? 'needs validation' : selected.status.replace('_', ' ')} · {selected.type.replace('_', ' ')}</div>
                             <h2 ref={detailHeadingRef} tabIndex={-1} className="mt-2 text-2xl font-bold leading-tight text-neutral-950">{selected.title}</h2>
                             {selected.statement && selected.statement !== selected.title && <p className="mt-2 text-sm leading-6 text-neutral-700">{selected.statement}</p>}
                             {selected.sourceNotice && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">{selected.sourceNotice}</div>}
                             {selected.whyItMatters && <section className="mt-6"><h3 className="text-sm font-semibold text-neutral-900">Why it matters</h3><p className="mt-1 text-sm leading-6 text-neutral-600">{selected.whyItMatters}</p></section>}
 
-                            {selected.options && selected.options.length > 0 && needsReview(selected) && (
+                            {selected.options && selected.options.length > 0 && needsVerdict(selected) && (
                                 <section className="mt-6 space-y-2" aria-label="Available options">
                                     {selected.options.map(option => (
                                         <button key={option.id} type="button" disabled={readOnly} onClick={() => submit('confirm', option.id)} className="w-full rounded-xl border border-neutral-200 bg-white p-4 text-left hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60">
@@ -286,6 +296,8 @@ export function DecisionCenter({
                                     recordId={selected.id}
                                     readOnly={readOnly}
                                     validation={selected.validation}
+                                    requiresValidation={Boolean(selected.requiresValidation)}
+                                    consequence={selected.whyItMatters}
                                     hasPlanImpact={Boolean(selected.preview)}
                                     onGeneratePlan={onGenerateAssumptionValidationPlan}
                                     onRecordPlan={onRecordAssumptionValidationPlan}
@@ -297,7 +309,7 @@ export function DecisionCenter({
                                 />
                             )}
 
-                            {!readOnly && needsReview(selected) && (
+                            {!readOnly && needsVerdict(selected) && (
                                 <section className="mt-6 rounded-xl border border-neutral-200 bg-white p-4">
                                     <label className="text-sm font-semibold text-neutral-900" htmlFor="decision-answer">Your answer</label>
                                     <textarea id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder={selected.type === 'assumption' ? 'Explain what should replace this premise' : 'Record the product choice in your own words'} className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
@@ -305,6 +317,7 @@ export function DecisionCenter({
                                     <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                         {selected.type !== 'assumption' && <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('custom', customAnswer.trim())} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
+                                        {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50">Accept for planning · not validated</button>}
                                         {selected.type === 'decision' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-emerald-200 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">Confirm decision</button>}
                                         {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
                                         <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('reject', customAnswer.trim())} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><X size={14} className="mr-1 inline" /> Reject premise</button>
@@ -312,11 +325,11 @@ export function DecisionCenter({
                                 </section>
                             )}
 
-                            {!needsReview(selected) && selected.status !== 'deferred' && selected.status !== 'invalidated' && (
-                                <section className="mt-6 rounded-xl border border-emerald-200 bg-emerald-50 p-4">
-                                    <h3 className="text-sm font-semibold text-emerald-900">Selected answer</h3>
-                                    <p className="mt-1 text-sm text-emerald-800">{selected.resolution || 'Decision recorded'}</p>
-                                    {selected.rationale && <p className="mt-1 text-xs text-emerald-700">Reason: {selected.rationale}</p>}
+                            {!needsVerdict(selected) && selected.status !== 'deferred' && selected.status !== 'invalidated' && (
+                                <section className={`mt-6 rounded-xl border p-4 ${selected.type === 'assumption' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
+                                    <h3 className={`text-sm font-semibold ${selected.type === 'assumption' ? 'text-amber-950' : 'text-emerald-900'}`}>{selected.type === 'assumption' ? selectedHasCurrentAssumptionConclusion ? 'Evidence outcome recorded' : 'Accepted for planning · not validated' : 'Selected answer'}</h3>
+                                    <p className={`mt-1 text-sm ${selected.type === 'assumption' ? 'text-amber-900' : 'text-emerald-800'}`}>{selected.resolution || 'Decision recorded'}</p>
+                                    {selected.rationale && <p className={`mt-1 text-xs ${selected.type === 'assumption' ? 'text-amber-800' : 'text-emerald-700'}`}>Reason: {selected.rationale}</p>}
                                 </section>
                             )}
 
@@ -492,7 +505,7 @@ export function DecisionCenter({
                                 </section>
                             )}
 
-                            {!readOnly && !needsReview(selected) && <button type="button" onClick={() => submit('reopen')} className="mt-6 min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-white"><RefreshCcw size={14} className="mr-1 inline" /> Reopen decision</button>}
+                            {!readOnly && !needsVerdict(selected) && <button type="button" onClick={() => submit('reopen')} className="mt-6 min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-white"><RefreshCcw size={14} className="mr-1 inline" /> Reopen decision</button>}
                         </div>
                     )}
                 </main>

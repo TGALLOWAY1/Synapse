@@ -21,6 +21,7 @@ export type AssumptionValidationPlanInput = {
     inconclusiveConditions: string[];
     limitations: string[];
     revisitCondition?: string;
+    expiresAt?: number;
     sourceProposalId?: string;
     sourceProposalContentHash?: string;
 };
@@ -60,6 +61,8 @@ interface Props {
     recordId: string;
     readOnly?: boolean;
     validation: AssumptionValidationView;
+    requiresValidation: boolean;
+    consequence?: string;
     hasPlanImpact: boolean;
     onGeneratePlan: (recordId: string) => void;
     onRecordPlan: (recordId: string, input: AssumptionValidationPlanInput) => void;
@@ -68,6 +71,7 @@ interface Props {
     onRecordOutcome: (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
         caveats?: string;
+        revisitAt?: number;
         revisitCondition?: string;
         sourceInterpretationId?: string;
         sourceInterpretationContentHash?: string;
@@ -75,6 +79,7 @@ interface Props {
     onRecordTreatment: (recordId: string, input: {
         treatment: AssumptionUncertaintyTreatment;
         rationale: string;
+        revisitAt?: number;
         revisitCondition?: string;
     }) => void;
     onPreviewImpact: (recordId: string) => void;
@@ -142,10 +147,35 @@ const todayInputValue = (): string => {
     return local.toISOString().slice(0, 10);
 };
 
+const dateInputValue = (timestamp?: number): string => {
+    if (timestamp === undefined) return '';
+    const date = new Date(timestamp);
+    const local = new Date(date.getTime() - date.getTimezoneOffset() * 60_000);
+    return local.toISOString().slice(0, 10);
+};
+
+const dateInputTimestamp = (value: string): number | undefined =>
+    value ? new Date(`${value}T12:00:00`).getTime() : undefined;
+
+const methodEvidenceGuidance = (method: AssumptionValidationMethodKind): string => {
+    if (['user_interviews', 'usability_observation', 'prototype'].includes(method)) {
+        return 'For readiness, record at least two independent direct observations from this method, including the scope or sample.';
+    }
+    if (['technical_test', 'analytics_measurement'].includes(method)) {
+        return 'For readiness, record at least one direct result from this method and compare it with the support and contradiction signals.';
+    }
+    if (method === 'direct_observation') {
+        return 'For readiness, record at least one direct observation with its scope and compare it with the support and contradiction signals.';
+    }
+    return 'This method can inform the project, but it cannot by itself establish evidence-backed readiness.';
+};
+
 export function AssumptionValidationPanel({
     recordId,
     readOnly,
     validation,
+    requiresValidation,
+    consequence,
     hasPlanImpact,
     onGeneratePlan,
     onRecordPlan,
@@ -164,6 +194,7 @@ export function AssumptionValidationPanel({
         inconclusiveConditions: validation.currentPlan?.inconclusiveConditions.join('\n') ?? '',
         limitations: validation.currentPlan?.limitations.join('\n') ?? '',
         revisitCondition: validation.currentPlan?.revisitCondition ?? '',
+        expiryDate: dateInputValue(validation.currentPlan?.expiresAt),
         sourceProposalId: undefined as string | undefined,
         sourceProposalContentHash: undefined as string | undefined,
     });
@@ -176,9 +207,11 @@ export function AssumptionValidationPanel({
     const [outcome, setOutcome] = useState<AssumptionEvidenceConclusion | ''>('');
     const [outcomeCaveats, setOutcomeCaveats] = useState('');
     const [outcomeRevisit, setOutcomeRevisit] = useState('');
+    const [outcomeRevisitDate, setOutcomeRevisitDate] = useState('');
     const [treatment, setTreatment] = useState<AssumptionUncertaintyTreatment>('temporarily_tolerated');
     const [treatmentRationale, setTreatmentRationale] = useState('');
     const [treatmentRevisit, setTreatmentRevisit] = useState('');
+    const [treatmentRevisitDate, setTreatmentRevisitDate] = useState('');
     const duplicateIds = new Set(validation.duplicateEvidenceIds);
 
     const useProposal = () => {
@@ -193,6 +226,7 @@ export function AssumptionValidationPanel({
             inconclusiveConditions: proposal.inconclusiveConditions.join('\n'),
             limitations: proposal.limitations.join('\n'),
             revisitCondition: proposal.revisitCondition ?? '',
+            expiryDate: dateInputValue(proposal.expiresAt),
             sourceProposalId: proposal.id,
             sourceProposalContentHash: proposal.contentHash,
         });
@@ -209,6 +243,7 @@ export function AssumptionValidationPanel({
             inconclusiveConditions: splitLines(planDraft.inconclusiveConditions),
             limitations: splitLines(planDraft.limitations),
             revisitCondition: planDraft.revisitCondition.trim() || undefined,
+            expiresAt: dateInputTimestamp(planDraft.expiryDate),
             sourceProposalId: planDraft.sourceProposalId,
             sourceProposalContentHash: planDraft.sourceProposalContentHash,
         });
@@ -220,7 +255,7 @@ export function AssumptionValidationPanel({
             sourceType: evidenceDraft.sourceType,
             source: evidenceDraft.source.trim(),
             sourceIdentity: evidenceDraft.sourceIdentity.trim(),
-            observedAt: new Date(`${evidenceDraft.observedDate}T12:00:00`).getTime(),
+            observedAt: dateInputTimestamp(evidenceDraft.observedDate)!,
             observation: evidenceDraft.observation.trim(),
             scopeOrSample: evidenceDraft.scopeOrSample.trim() || undefined,
             limitations: splitLines(evidenceDraft.limitations),
@@ -234,9 +269,9 @@ export function AssumptionValidationPanel({
         <section className="mt-6 rounded-xl border border-indigo-100 bg-white p-4 sm:p-5" aria-labelledby={`assumption-validation-${recordId}`}>
             <div className="flex flex-wrap items-start justify-between gap-3">
                 <div>
-                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-700"><FlaskConical size={14} /> Assumption validation</div>
-                    <h3 id={`assumption-validation-${recordId}`} className="mt-1 text-base font-semibold text-neutral-950">Replace belief with evidence</h3>
-                    <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">Acceptance lets planning continue. Validation requires evidence that answers a specific question.</p>
+                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-700"><FlaskConical size={14} /> {requiresValidation ? 'Assumption validation' : 'Optional assumption validation'}</div>
+                    <h3 id={`assumption-validation-${recordId}`} className="mt-1 text-base font-semibold text-neutral-950">{requiresValidation ? 'Replace belief with evidence' : 'Validate if it would improve the plan'}</h3>
+                    <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">{requiresValidation ? 'Acceptance lets planning continue but does not establish that the belief is true. Validation requires evidence that answers a specific question.' : 'This assumption is not consequential enough to require a formal test. You can still validate it if new evidence would change the plan.'}</p>
                 </div>
                 <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${validation.workflowState === 'completed' ? 'bg-emerald-50 text-emerald-700' : validation.workflowState === 'due_for_review' ? 'bg-amber-50 text-amber-800' : 'bg-neutral-100 text-neutral-700'}`}>
                     {workflowLabels[validation.workflowState]}
@@ -256,13 +291,22 @@ export function AssumptionValidationPanel({
                 </div>
             </div>
 
-            {validation.dependentLabels.length > 0 && (
-                <p className="mt-3 text-xs leading-5 text-neutral-600"><strong className="text-neutral-800">Plan areas depending on this:</strong> {validation.dependentLabels.join(' · ')}</p>
+            {validation.acceptedConclusion && requiresValidation && (
+                <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900" role="status">
+                    Your conclusion is recorded, but the current evidence does not yet satisfy this validation method or current planning version. The assumption remains unresolved for readiness.
+                </div>
             )}
 
-            {validation.revisitCondition && (
+            <section className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-3" aria-label="Potential plan impact">
+                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Potential plan impact</p>
+                {consequence && <p className="mt-1 text-sm leading-5 text-neutral-700"><strong className="text-neutral-900">If this is wrong:</strong> {consequence}</p>}
+                <p className="mt-1 text-xs leading-5 text-neutral-600"><strong className="text-neutral-800">Dependent areas:</strong> {validation.dependentLabels.length > 0 ? validation.dependentLabels.join(' · ') : 'No exact dependent areas have been identified.'}</p>
+                <p className="mt-1 text-xs leading-5 text-neutral-500">This is a read-only preview. Recording a conclusion will not change the plan; exact changes must use the guarded alignment review.</p>
+            </section>
+
+            {(validation.revisitCondition || validation.revisitAt) && (
                 <div className="mt-3 flex gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
-                    <Clock3 size={15} className="mt-0.5 shrink-0" /> <span><strong>Revisit when:</strong> {validation.revisitCondition}</span>
+                    <Clock3 size={15} className="mt-0.5 shrink-0" /> <span>{validation.revisitAt && <><strong>Review date:</strong> {formatDate(validation.revisitAt)}. </>}{validation.revisitCondition && <><strong>Revisit when:</strong> {validation.revisitCondition}</>}</span>
                 </div>
             )}
 
@@ -312,6 +356,9 @@ export function AssumptionValidationPanel({
                             <label className="mt-3 block text-xs font-medium text-neutral-600">Revisit when
                                 <input value={planDraft.revisitCondition} onChange={event => setPlanDraft(current => ({ ...current, revisitCondition: event.target.value, sourceProposalId: undefined, sourceProposalContentHash: undefined }))} placeholder="For example, before pricing is finalized" className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 px-3 text-sm font-normal" />
                             </label>
+                            <label className="mt-3 block text-xs font-medium text-neutral-600">Validation expires on (optional)
+                                <input type="date" value={planDraft.expiryDate} onChange={event => setPlanDraft(current => ({ ...current, expiryDate: event.target.value, sourceProposalId: undefined, sourceProposalContentHash: undefined }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal sm:w-auto" />
+                            </label>
                         </details>
                         <button type="button" disabled={!planDraft.question.trim() || !planDraft.methodLabel.trim()} onClick={savePlan} className="mt-3 min-h-11 w-full rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40 sm:w-auto">Record my validation plan</button>
                     </div>
@@ -323,6 +370,7 @@ export function AssumptionValidationPanel({
                     <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold text-neutral-900">2. Add evidence <span className="ml-1 font-normal text-neutral-500">({validation.activeEvidence.length})</span></summary>
                     <div className="border-t border-neutral-100 p-3">
                         <p className="text-sm font-medium text-neutral-900">Question: {validation.currentPlan.question}</p>
+                        <p className="mt-1 text-xs leading-5 text-neutral-500">{methodEvidenceGuidance(validation.currentPlan.method.kind)}</p>
                         {validation.activeEvidence.length > 0 && (
                             <ul className="mt-3 space-y-2" aria-label="Recorded evidence">
                                 {validation.activeEvidence.map(evidence => (
@@ -404,7 +452,10 @@ export function AssumptionValidationPanel({
                                 <label className="mt-3 block text-xs font-semibold text-neutral-700">Revisit when (optional)
                                     <input value={outcomeRevisit} onChange={event => setOutcomeRevisit(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 px-3 text-sm font-normal" />
                                 </label>
-                                <button type="button" disabled={!outcome} onClick={() => onRecordOutcome(recordId, { conclusion: outcome || 'inconclusive', caveats: outcomeCaveats.trim() || undefined, revisitCondition: outcomeRevisit.trim() || undefined, sourceInterpretationId: validation.latestInterpretation?.id, sourceInterpretationContentHash: validation.latestInterpretation?.contentHash })} className="mt-3 min-h-11 w-full rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-40 sm:w-auto">Record my conclusion</button>
+                                <label className="mt-3 block text-xs font-semibold text-neutral-700">Conclusion revisit on (optional)
+                                    <input type="date" value={outcomeRevisitDate} onChange={event => setOutcomeRevisitDate(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal sm:w-auto" />
+                                </label>
+                                <button type="button" disabled={!outcome} onClick={() => onRecordOutcome(recordId, { conclusion: outcome || 'inconclusive', caveats: outcomeCaveats.trim() || undefined, revisitAt: dateInputTimestamp(outcomeRevisitDate), revisitCondition: outcomeRevisit.trim() || undefined, sourceInterpretationId: validation.latestInterpretation?.id, sourceInterpretationContentHash: validation.latestInterpretation?.contentHash })} className="mt-3 min-h-11 w-full rounded-lg bg-emerald-600 px-4 text-sm font-semibold text-white disabled:opacity-40 sm:w-auto">Record my conclusion</button>
                             </div>
                         )}
                     </div>
@@ -425,7 +476,10 @@ export function AssumptionValidationPanel({
                         <label className="mt-3 block text-xs font-semibold text-neutral-700">Revisit when (optional)
                             <input value={treatmentRevisit} onChange={event => setTreatmentRevisit(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 px-3 text-sm font-normal" />
                         </label>
-                        <button type="button" disabled={!treatmentRationale.trim()} onClick={() => onRecordTreatment(recordId, { treatment, rationale: treatmentRationale.trim(), revisitCondition: treatmentRevisit.trim() || undefined })} className="mt-3 min-h-11 w-full rounded-lg border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900 disabled:opacity-40 sm:w-auto">Record unresolved uncertainty</button>
+                        <label className="mt-3 block text-xs font-semibold text-neutral-700">Uncertainty revisit on (optional)
+                            <input type="date" value={treatmentRevisitDate} onChange={event => setTreatmentRevisitDate(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal sm:w-auto" />
+                        </label>
+                        <button type="button" disabled={!treatmentRationale.trim()} onClick={() => onRecordTreatment(recordId, { treatment, rationale: treatmentRationale.trim(), revisitAt: dateInputTimestamp(treatmentRevisitDate), revisitCondition: treatmentRevisit.trim() || undefined })} className="mt-3 min-h-11 w-full rounded-lg border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900 disabled:opacity-40 sm:w-auto">Record unresolved uncertainty</button>
                     </div>
                 </details>
             )}

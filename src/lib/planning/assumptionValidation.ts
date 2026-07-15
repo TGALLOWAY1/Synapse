@@ -28,6 +28,8 @@ export type AssumptionValidationAppendContext = {
     currentSpineContentHash?: string;
 };
 
+export type AssumptionValidationCurrentContext = AssumptionValidationAppendContext;
+
 export type AssumptionValidationProjection = {
     workflowState: AssumptionValidationWorkflowState;
     currentPlan?: AssumptionValidationPlan;
@@ -53,7 +55,7 @@ export type AssumptionValidationReadiness = {
     competingEvidence: AssumptionEvidenceRecord[];
     reason: 'current_supported' | 'current_partially_supported' | 'current_contradicted'
         | 'missing_current_conclusion' | 'insufficient_support' | 'competing_evidence'
-        | 'missing_caveats' | 'verdict_not_synchronized';
+        | 'missing_caveats' | 'stale_planning_context' | 'verdict_not_synchronized';
 };
 
 const CREDIBLE_DIRECT_SOURCE_TYPES = new Set<AssumptionEvidenceSourceType>([
@@ -64,6 +66,18 @@ const CREDIBLE_DIRECT_SOURCE_TYPES = new Set<AssumptionEvidenceSourceType>([
     'analytics_measurement',
     'direct_observation',
 ]);
+
+const methodEvidenceTypes: Partial<Record<AssumptionValidationMethod['kind'], AssumptionEvidenceSourceType[]>> = {
+    user_interviews: ['user_interview'],
+    usability_observation: ['usability_observation'],
+    technical_test: ['technical_test'],
+    prototype: ['prototype'],
+    analytics_measurement: ['analytics_measurement'],
+    direct_observation: ['direct_observation'],
+};
+
+const minimumIndependentSources = (method: AssumptionValidationMethod['kind']): number =>
+    ['user_interviews', 'usability_observation', 'prototype'].includes(method) ? 2 : 1;
 
 const isCredibleDirectEvidence = (evidence: AssumptionEvidenceRecord): boolean =>
     evidence.character === 'direct' && CREDIBLE_DIRECT_SOURCE_TYPES.has(evidence.sourceType);
@@ -374,6 +388,7 @@ export function projectAssumptionValidation(
 export function assumptionValidationReadiness(
     record: PlanningRecord,
     now = Date.now(),
+    context?: AssumptionValidationCurrentContext,
 ): AssumptionValidationReadiness {
     const projection = projectAssumptionValidation(record, now);
     const conclusion = projection.acceptedConclusion;
@@ -390,43 +405,73 @@ export function assumptionValidationReadiness(
         ),
     );
     const decision = projectDecision(record);
+    if (!outcome?.expectedSpineVersionId || !outcome.expectedSpineContentHash) {
+        return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: [], reason: 'stale_planning_context' };
+    }
+    const currentVersionId = context?.currentSpineVersionId
+        ?? record.sources?.find(source => source.sourceVersionId)?.sourceVersionId;
+    if (!currentVersionId
+        || currentVersionId !== outcome.expectedSpineVersionId
+        || (context?.currentSpineContentHash !== undefined
+            && context.currentSpineContentHash !== outcome.expectedSpineContentHash)) {
+        return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: [], reason: 'stale_planning_context' };
+    }
+    const plan = projection.currentPlan;
+    const allowedTypes = plan ? methodEvidenceTypes[plan.method.kind] : undefined;
+    const methodComplete = Boolean(
+        plan
+        && plan.supportSignals.length > 0
+        && plan.contradictionSignals.length > 0
+        && allowedTypes?.length,
+    );
+    const methodEvidence = methodComplete
+        ? credible.filter(evidence => (
+            allowedTypes!.includes(evidence.sourceType)
+            && (['technical_test', 'analytics_measurement'].includes(evidence.sourceType)
+                || Boolean(evidence.scopeOrSample?.trim()))
+        ))
+        : [];
+    const methodSupporting = methodEvidence.filter(evidence => evidence.relation === 'supports');
+    const methodContradicting = methodEvidence.filter(evidence => evidence.relation === 'contradicts');
+    const expectedVerdictId = `assumption-validation-verdict-${outcome.id}`;
 
     if (conclusion === 'supported' || conclusion === 'partially_supported') {
-        if (supporting.length === 0) {
+        if (!methodComplete || methodSupporting.length < minimumIndependentSources(plan!.method.kind)) {
             return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: contradicting, reason: 'insufficient_support' };
         }
-        if (conclusion === 'supported' && contradicting.length > 0) {
-            return { ready: false, conclusion, qualifyingEvidence: supporting, competingEvidence: contradicting, reason: 'competing_evidence' };
+        if (contradicting.length > 0) {
+            return { ready: false, conclusion, qualifyingEvidence: methodSupporting, competingEvidence: contradicting, reason: 'competing_evidence' };
         }
-        if (conclusion === 'partially_supported' && !outcome?.caveats?.trim()) {
-            return { ready: false, conclusion, qualifyingEvidence: supporting, competingEvidence: contradicting, reason: 'missing_caveats' };
+        if ((conclusion === 'partially_supported' || methodSupporting.some(evidence => evidence.limitations.length > 0))
+            && !outcome.caveats?.trim()) {
+            return { ready: false, conclusion, qualifyingEvidence: methodSupporting, competingEvidence: contradicting, reason: 'missing_caveats' };
         }
-        if (decision.status !== 'confirmed' || !decision.latestVerdictEventId) {
-            return { ready: false, conclusion, qualifyingEvidence: supporting, competingEvidence: contradicting, reason: 'verdict_not_synchronized' };
+        if (decision.status !== 'confirmed' || decision.latestVerdictEventId !== expectedVerdictId) {
+            return { ready: false, conclusion, qualifyingEvidence: methodSupporting, competingEvidence: contradicting, reason: 'verdict_not_synchronized' };
         }
         return {
             ready: true,
             conclusion,
-            qualifyingEvidence: supporting,
+            qualifyingEvidence: methodSupporting,
             competingEvidence: contradicting,
             reason: conclusion === 'supported' ? 'current_supported' : 'current_partially_supported',
         };
     }
 
     if (conclusion === 'contradicted') {
-        if (contradicting.length === 0) {
+        if (!methodComplete || methodContradicting.length === 0) {
             return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: supporting, reason: 'insufficient_support' };
         }
         if (supporting.length > 0) {
             return { ready: false, conclusion, qualifyingEvidence: contradicting, competingEvidence: supporting, reason: 'competing_evidence' };
         }
-        if (decision.status !== 'rejected' || !decision.latestVerdictEventId) {
-            return { ready: false, conclusion, qualifyingEvidence: contradicting, competingEvidence: supporting, reason: 'verdict_not_synchronized' };
+        if (decision.status !== 'rejected' || decision.latestVerdictEventId !== expectedVerdictId) {
+            return { ready: false, conclusion, qualifyingEvidence: methodContradicting, competingEvidence: supporting, reason: 'verdict_not_synchronized' };
         }
         return {
             ready: true,
             conclusion,
-            qualifyingEvidence: contradicting,
+            qualifyingEvidence: methodContradicting,
             competingEvidence: supporting,
             reason: 'current_contradicted',
         };
@@ -444,6 +489,9 @@ export function assumptionValidationDecisionEvent(
     record: PlanningRecord,
     event: AssumptionValidationEvent,
 ): DecisionEvent | undefined {
+    if (event.actor !== 'user'
+        || event.integrityHash !== assumptionValidationEventIntegrityHash(event)
+        || event.assumptionStatementHash !== assumptionStatementHash(record)) return undefined;
     const base = {
         id: `assumption-validation-verdict-${event.id}`,
         planningRecordId: record.id,
@@ -608,7 +656,14 @@ export function appendAssumptionValidationEvent(
     context: AssumptionValidationAppendContext = {},
 ): AppendAssumptionValidationEventResult {
     const state = validationState(record);
-    if (state.events.some(existing => existing.id === event.id)) return { ok: true, record, duplicate: true };
+    const existing = state.events.find(candidate => candidate.id === event.id);
+    if (existing) {
+        if (existing.integrityHash !== event.integrityHash
+            || assumptionValidationEventIntegrityHash(existing) !== assumptionValidationEventIntegrityHash(event)) {
+            return { ok: false, reason: 'Validation event id was already used for different content.' };
+        }
+        return { ok: true, record, duplicate: true };
+    }
     const validation = validateAssumptionValidationEvent(record, event, context);
     if (!validation.valid) return { ok: false, reason: validation.reason };
     const projection = projectAssumptionValidation(record, event.at);

@@ -271,16 +271,54 @@ describe('DecisionCenter', () => {
 
     it('renders an explicit completed state and decision log', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...callbacks()} />);
-        expect(screen.getByText('All current decisions reviewed')).toBeInTheDocument();
+        expect(screen.getByText('All current planning items reviewed')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: 'Decision log' }));
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+    });
+
+    it('keeps a material accepted-but-unvalidated assumption in the attention queue', () => {
+        render(<DecisionCenter records={[{
+            ...openRecord,
+            status: 'confirmed',
+            resolution: openRecord.statement,
+            materiality: 'high',
+            requiresValidation: true,
+            validation: {
+                workflowState: 'not_planned', activeEvidence: [], duplicateEvidenceIds: [],
+                evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false,
+                hasHistoricalValidation: false, dependentLabels: ['Onboarding'], history: [],
+            },
+        }]} {...callbacks()} />);
+
+        expect(screen.getByText('1 needs review')).toBeInTheDocument();
+        expect(screen.queryByText('All current planning items reviewed')).toBeNull();
+        expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
+        expect(screen.getAllByText('needs validation').length).toBeGreaterThan(0);
+        expect(screen.getByText('Replace belief with evidence')).toBeInTheDocument();
+    });
+
+    it('does not imply that a low-impact open assumption requires formal validation', () => {
+        render(<DecisionCenter records={[{
+            ...openRecord,
+            options: undefined,
+            materiality: 'low',
+            requiresValidation: false,
+            validation: {
+                workflowState: 'not_planned', activeEvidence: [], duplicateEvidenceIds: [],
+                evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false,
+                hasHistoricalValidation: false, dependentLabels: [], history: [],
+            },
+        }]} {...callbacks()} />);
+
+        expect(screen.getByText('Optional assumption validation')).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Accept for planning · not validated' })).toBeInTheDocument();
     });
 
     it('opens a linked resolved decision directly even when unresolved work also exists', () => {
         const resolved = { ...openRecord, id: 'resolved', status: 'confirmed' as const, resolution: 'Independent creators' };
         render(<DecisionCenter records={[openRecord, resolved]} initialSelectedId="resolved" {...callbacks()} />);
 
-        expect(screen.getByText('Selected answer')).toBeInTheDocument();
+        expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Should guests start without an account/ })).toHaveAttribute('aria-current', 'true');
         fireEvent.click(screen.getByRole('button', { name: 'Back to decisions' }));
         expect(screen.getByLabelText('Decision detail')).toHaveClass('hidden');

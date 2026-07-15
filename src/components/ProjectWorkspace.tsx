@@ -382,6 +382,8 @@ export function ProjectWorkspace() {
         generatedOutputCount: generatedOutputs.length,
         staleOutputCount,
         isCommitted: displaysCurrentCommitment,
+        currentSpineVersionId: activeSpine?.id,
+        currentSpineContentHash: activeSpine ? hashReviewValue(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     });
     const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput

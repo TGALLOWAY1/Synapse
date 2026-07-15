@@ -23,6 +23,7 @@ import { buildReviewContextManifest, verifyEvidenceRef } from '../review/manifes
 import { coveragePathSupports, PRODUCT_READINESS_COVERAGE_AREAS } from '../review/coverage';
 import type { ProjectOutputAlignmentSummary } from './outputAlignment';
 import { assumptionValidationReadiness, projectAssumptionValidation } from './assumptionValidation';
+import type { AssumptionValidationCurrentContext } from './assumptionValidation';
 import { projectDecision } from './decisionProjection';
 import {
     derivePlanningReadiness,
@@ -97,14 +98,22 @@ const concernId = (
 const isMaterial = (record: PlanningRecord): boolean =>
     record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high';
 
-const isAcceptedUnvalidatedAssumption = (record: PlanningRecord, evaluatedAt = Date.now()): boolean =>
+const isAcceptedUnvalidatedAssumption = (
+    record: PlanningRecord,
+    evaluatedAt: number,
+    context: AssumptionValidationCurrentContext,
+): boolean =>
     record.type === 'assumption'
     && projectDecision(record).status === 'confirmed'
     && isMaterial(record)
-    && !assumptionValidationReadiness(record, evaluatedAt).ready;
+    && !assumptionValidationReadiness(record, evaluatedAt, context).ready;
 
-const assumptionConcernExplanation = (record: PlanningRecord, evaluatedAt: number): string => {
-    const validation = assumptionValidationReadiness(record, evaluatedAt);
+const assumptionConcernExplanation = (
+    record: PlanningRecord,
+    evaluatedAt: number,
+    context: AssumptionValidationCurrentContext,
+): string => {
+    const validation = assumptionValidationReadiness(record, evaluatedAt, context);
     const projection = projectAssumptionValidation(record, evaluatedAt);
     if (projection.workflowState === 'due_for_review') {
         return 'Earlier validation is historical or expired and no longer supports the current assumption.';
@@ -117,6 +126,9 @@ const assumptionConcernExplanation = (record: PlanningRecord, evaluatedAt: numbe
     }
     if (validation.reason === 'missing_caveats') {
         return 'A partially supported conclusion needs explicit caveats before it can safely qualify the plan.';
+    }
+    if (validation.reason === 'stale_planning_context') {
+        return 'The validation conclusion belongs to an earlier planning version and must be reviewed against the current plan.';
     }
     if (validation.reason === 'verdict_not_synchronized') {
         return 'The validation outcome is not bound to a current user verdict, so its plan consequences cannot be reviewed safely.';
@@ -243,6 +255,10 @@ function hasValidIssueDisposition(issue: ReviewIssue, run: ReviewRun): boolean {
 
 export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
     const evaluatedAt = input.createdAt ?? Date.now();
+    const validationContext = {
+        currentSpineVersionId: input.spine.versionId,
+        currentSpineContentHash: hashReviewValue(input.spine.structuredPRD ?? input.spine.content),
+    };
     const spineContentHash = hashReviewValue(input.spine.content);
     const exactRuns = exactChallengeRuns(input, spineContentHash);
     const substantiveRuns = exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns, input));
@@ -268,7 +284,7 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
             // closed instead of allowing a relationship id to manufacture it.
             return issue.relatedPlanningRecordIds.some(id => {
                 const linked = input.planningRecords.find(record => record.id === id);
-                return !linked || planningRecordRequiresResolution(linked, input.planningRecords, new Set(), evaluatedAt);
+                return !linked || planningRecordRequiresResolution(linked, input.planningRecords, new Set(), evaluatedAt, validationContext);
             });
         })
         : [];
@@ -297,6 +313,10 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
 
 function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): ReadinessReviewSnapshotHashes {
     const evaluatedAt = input.createdAt ?? Date.now();
+    const validationContext = {
+        currentSpineVersionId: input.spine.versionId,
+        currentSpineContentHash: hashReviewValue(input.spine.structuredPRD ?? input.spine.content),
+    };
     const spineIdentity = hashReviewValue({ projectId: input.projectId, spineVersionId: input.spine.versionId });
     const spineContent = hashReviewValue(input.spine.content);
     const applicableChallengeRuns = exactChallengeRuns(input, spineContent);
@@ -305,12 +325,26 @@ function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): R
         prd: input.spine.structuredPRD,
         incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
         safetyReview: input.spine.safetyReview,
-        records: byId(input.planningRecords),
+        records: byId(input.planningRecords.map(record => record.assumptionValidation ? {
+            ...record,
+            // updatedAt also moves when an advisory proposal is stored. The
+            // authoritative fields and append-only events below carry the
+            // meaningful state change, so the wall-clock timestamp is not a
+            // readiness dependency by itself.
+            updatedAt: record.createdAt,
+            assumptionValidation: {
+                ...record.assumptionValidation,
+                // Advisory proposals have no user authority and must not make
+                // an otherwise unchanged readiness checkpoint historical.
+                planProposals: [],
+                interpretationProposals: [],
+            },
+        } : record)),
         assumptionValidationProjection: byId(input.planningRecords
             .filter(record => record.type === 'assumption')
             .map(record => {
                 const projection = projectAssumptionValidation(record, evaluatedAt);
-                const readiness = assumptionValidationReadiness(record, evaluatedAt);
+                const readiness = assumptionValidationReadiness(record, evaluatedAt, validationContext);
                 return {
                     id: record.id,
                     workflowState: projection.workflowState,
@@ -424,6 +458,10 @@ export function validateReadinessReviewIntegrity(review: ReadinessReview): boole
 
 export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessReview {
     const evaluatedAt = input.createdAt ?? Date.now();
+    const validationContext = {
+        currentSpineVersionId: input.spine.versionId,
+        currentSpineContentHash: hashReviewValue(input.spine.structuredPRD ?? input.spine.content),
+    };
     const hashes = snapshotHashes(input, READINESS_CRITERIA_VERSION);
     const challenge = deriveReadinessChallengeState(input);
     const base = derivePlanningReadiness({
@@ -436,6 +474,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         staleOutputCount: input.outputAlignment.blockingCount,
         isCommitted: input.spine.isCommitted,
         evaluatedAt,
+        ...validationContext,
     });
 
     const concerns: ReadinessReviewConcern[] = [];
@@ -482,16 +521,16 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         { id: 'assumptions', records: input.planningRecords.filter(record => record.type === 'assumption') },
         { id: 'risks', records: input.planningRecords.filter(record => record.type === 'risk') },
     ];
-    const acceptedUnvalidated = input.planningRecords.filter(record => isAcceptedUnvalidatedAssumption(record, evaluatedAt));
+    const acceptedUnvalidated = input.planningRecords.filter(record => isAcceptedUnvalidatedAssumption(record, evaluatedAt, validationContext));
     for (const group of recordGroups) {
-        const unresolved = group.records.filter(record => planningRecordRequiresResolution(record, input.planningRecords, new Set(), evaluatedAt)
-            || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record, evaluatedAt)));
+        const unresolved = group.records.filter(record => planningRecordRequiresResolution(record, input.planningRecords, new Set(), evaluatedAt, validationContext)
+            || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record, evaluatedAt, validationContext)));
         const blocking = unresolved.length > 0;
         const label = group.id === 'decisions' ? 'Material choices resolved' : group.id === 'assumptions' ? 'Material assumptions validated' : 'Material risks addressed';
         const explanation = blocking ? `${unresolved.length} material ${group.id} item${unresolved.length === 1 ? '' : 's'} still needs attention.` : `${label}.`;
         const validatedAssumptionEvidence = group.id === 'assumptions'
             ? group.records.flatMap(record => {
-                const validation = assumptionValidationReadiness(record, evaluatedAt);
+                const validation = assumptionValidationReadiness(record, evaluatedAt, validationContext);
                 if (!validation.ready) return [];
                 return validation.qualifyingEvidence.map(item => makeEvidence(
                     group.id,
@@ -531,7 +570,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
             concerns.push(makeConcern({
                 criterionId: group.id, kind, title: record.title,
                 consequence: record.type === 'assumption'
-                    ? assumptionConcernExplanation(record, evaluatedAt)
+                    ? assumptionConcernExplanation(record, evaluatedAt, validationContext)
                     : isAcceptedMaterialRisk(record)
                         ? 'The user acknowledged this material risk, but the planning record does not prove mitigation or resolution.'
                         : record.statement,

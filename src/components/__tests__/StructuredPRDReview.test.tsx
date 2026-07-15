@@ -259,13 +259,13 @@ describe('StructuredPRDView — assumption review flow', () => {
 
     it('confirming an assumption appends a new spine version with the decision', () => {
         renderView();
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm assumption: Weekly cadence works' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Accept for planning, not validated: Weekly cadence works' }));
         const spine = latestSpine();
         expect(spine.id).not.toBe(SPINE_ID);
         const decided = spine.structuredPRD?.assumptions?.find(a => a.id === 'a2');
         expect(decided?.decision).toBe('confirmed');
         expect(decided?.decidedAt).toBeTypeOf('number');
-        expect(spine.provenance?.editSummary).toContain('Confirmed assumption');
+        expect(spine.provenance?.editSummary).toContain('Accepted assumption for planning');
         const record = useProjectStore.getState().planningRecords[PROJECT_ID]
             .find(item => item.sources?.some(source => source.sourceId === 'a2'));
         expect(record).toMatchObject({ status: 'confirmed' });
@@ -303,8 +303,19 @@ describe('StructuredPRDView — assumption review flow', () => {
 
     it('hides confirm/reject actions in read-only mode', () => {
         renderView(true);
-        expect(screen.queryByRole('button', { name: /Confirm assumption/ })).toBeNull();
+        expect(screen.queryByRole('button', { name: /Accept for planning, not validated/ })).toBeNull();
         expect(screen.queryByRole('button', { name: /Confirm feature/ })).toBeNull();
+    });
+
+    it('opens the exact material assumption record for validation', () => {
+        const onOpenDecisions = vi.fn();
+        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for assumption: Weekly cadence works' }));
+        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
+            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
+        expect(record).toBeDefined();
+        expect(onOpenDecisions).toHaveBeenCalledWith(record?.id);
     });
 });
 
@@ -336,12 +347,44 @@ describe('ReviewConfirmSection / DecisionLogSection units', () => {
         );
         expect(screen.getByText('Decision Log')).toBeInTheDocument();
         expect(screen.getByText('Marked incorrect')).toBeInTheDocument();
-        expect(screen.getByText('Confirmed')).toBeInTheDocument();
+        expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
         expect(screen.getByText('Feature confirmed')).toBeInTheDocument();
         expect(screen.getByText(/Teams too/)).toBeInTheDocument();
 
         fireEvent.click(screen.getByRole('button', { name: 'Undo decision: Solo users only' }));
         expect(onUndoAssumption).toHaveBeenCalledWith('a1');
+    });
+
+    it('keeps an exact validation action beside a material accepted assumption', () => {
+        const onPlanValidation = vi.fn();
+        const entries = deriveDecisionLog({
+            ...prd,
+            assumptions: [{ id: 'a1', statement: 'Creators will pay', confidence: 'low', materiality: 'high', decision: 'confirmed' }],
+        });
+        render(<DecisionLogSection entries={entries} onUndoAssumption={() => {}} onPlanValidation={onPlanValidation} onUndoFeature={() => {}} readOnly={false} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for accepted assumption: Creators will pay' }));
+        expect(onPlanValidation).toHaveBeenCalledWith('a1');
+    });
+
+    it('keeps low-impact acceptance lightweight while material assumptions offer validation planning', () => {
+        const onPlanValidation = vi.fn();
+        render(
+            <ReviewConfirmSection
+                assumptions={[
+                    { id: 'material', statement: 'Creators will pay', confidence: 'low', materiality: 'high' },
+                    { id: 'low', statement: 'Users prefer rounded cards', confidence: 'med', materiality: 'low' },
+                ]}
+                onConfirm={() => {}}
+                onPlanValidation={onPlanValidation}
+                onReject={() => {}}
+                readOnly={false}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: 'Plan validation for assumption: Creators will pay' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Plan validation for assumption: Users prefer rounded cards' })).toBeNull();
+        expect(screen.getAllByText('Accept for planning')).toHaveLength(2);
     });
 
     it('splitAssumptions keeps unresolved and decided visually separable inputs', () => {

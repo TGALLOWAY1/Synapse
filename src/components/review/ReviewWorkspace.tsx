@@ -158,6 +158,7 @@ export interface ReviewWorkspaceProps {
     onRecordAssumptionOutcome?: (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
         caveats?: string;
+        revisitAt?: number;
         revisitCondition?: string;
         sourceInterpretationId?: string;
         sourceInterpretationContentHash?: string;
@@ -165,6 +166,7 @@ export interface ReviewWorkspaceProps {
     onRecordAssumptionTreatment?: (recordId: string, input: {
         treatment: AssumptionUncertaintyTreatment;
         rationale: string;
+        revisitAt?: number;
         revisitCondition?: string;
     }) => void;
     readOnly?: boolean;

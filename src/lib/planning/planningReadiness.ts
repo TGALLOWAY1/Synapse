@@ -2,6 +2,7 @@ import type { PlanningRecord, ReviewIssue, StructuredPRD } from '../../types';
 import { alignmentProposalNeedsResolution, alignmentProposalReviews } from './decisionImpact';
 import { projectDecision } from './decisionProjection';
 import { assumptionValidationReadiness } from './assumptionValidation';
+import type { AssumptionValidationCurrentContext } from './assumptionValidation';
 
 export type PlanningReadinessPhase =
     | 'exploring'
@@ -45,6 +46,8 @@ export type PlanningReadinessInput = {
     staleOutputCount: number;
     isCommitted?: boolean;
     evaluatedAt?: number;
+    currentSpineVersionId?: string;
+    currentSpineContentHash?: string;
 };
 
 const meaningful = (value?: string): boolean => !!value && value.trim().length >= 12;
@@ -60,13 +63,14 @@ export function planningRecordRequiresResolution(
     allRecords: PlanningRecord[] = [record],
     visited = new Set<string>(),
     evaluatedAt = Date.now(),
+    validationContext?: AssumptionValidationCurrentContext,
 ): boolean {
     if (visited.has(record.id)) return true;
     const nextVisited = new Set(visited).add(record.id);
     const state = projectDecision(record);
     if (state.status === 'superseded') {
         const replacement = allRecords.find(item => item.id === state.supersededById);
-        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited, evaluatedAt);
+        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited, evaluatedAt, validationContext);
     }
     if (state.status === 'invalidated') return material(record);
     const settledWithoutVerdictProvenance = ['confirmed', 'rejected', 'resolved'].includes(state.status)
@@ -81,7 +85,7 @@ export function planningRecordRequiresResolution(
         // choices. A current user verdict alone is not validation; only a
         // current evidence-backed conclusion synchronized to that verdict can
         // clear the assumption criterion.
-        return !assumptionValidationReadiness(record, evaluatedAt).ready;
+        return !assumptionValidationReadiness(record, evaluatedAt, validationContext).ready;
     }
     if (state.status === 'open' || state.status === 'proposed') {
         if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
@@ -147,11 +151,15 @@ export function reviewIssueNeedsResolutionBeforeBuild(issue: ReviewIssue, curren
 }
 
 export function derivePlanningReadiness(input: PlanningReadinessInput): PlanningReadiness {
+    const validationContext = {
+        currentSpineVersionId: input.currentSpineVersionId,
+        currentSpineContentHash: input.currentSpineContentHash,
+    };
     const prd = input.prd;
     const projected = input.planningRecords.map(record => ({ record, state: projectDecision(record) }));
     const unresolved = projected.filter(({ state }) => state.status === 'open' || state.status === 'proposed');
     const needsResolution = projected.filter(({ record }) => (
-        planningRecordRequiresResolution(record, input.planningRecords, new Set(), input.evaluatedAt)
+        planningRecordRequiresResolution(record, input.planningRecords, new Set(), input.evaluatedAt, validationContext)
     ));
     const conflicts = needsResolution.filter(({ record }) => record.type === 'conflict');
     const keyDecisions = needsResolution.filter(({ record }) => record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict');

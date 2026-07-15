@@ -10,15 +10,22 @@ import { isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
 // section presents features outside the MVP/V1 phases. Derived read-side
 // (deriveDecisionLog); never persisted as its own structure.
 
-function VerdictIcon({ verdict }: { verdict: DecisionLogEntry['verdict'] }) {
-    if (verdict === 'confirmed') {
+function VerdictIcon({ entry }: { entry: DecisionLogEntry }) {
+    if (entry.verdict === 'confirmed' && entry.kind === 'feature') {
         return (
             <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-emerald-100 shrink-0">
                 <Check size={13} className="text-emerald-700" aria-hidden />
             </span>
         );
     }
-    if (verdict === 'deferred') {
+    if (entry.verdict === 'confirmed') {
+        return (
+            <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-amber-100 shrink-0">
+                <Check size={13} className="text-amber-700" aria-hidden />
+            </span>
+        );
+    }
+    if (entry.verdict === 'deferred') {
         return (
             <span className="inline-flex items-center justify-center h-5 w-5 rounded-full bg-neutral-100 shrink-0">
                 <Clock size={13} className="text-neutral-500" aria-hidden />
@@ -46,19 +53,25 @@ function ReferenceBadge({ entry }: { entry: DecisionLogEntry }) {
 const verdictLabel = (entry: DecisionLogEntry): string => {
     if (entry.verdict === 'deferred') return 'Deferred';
     if (entry.kind === 'feature') return 'Feature confirmed';
-    return entry.verdict === 'confirmed' ? 'Confirmed' : 'Marked incorrect';
+    return entry.verdict === 'confirmed' ? 'Accepted for planning · not validated' : 'Marked incorrect';
 };
 
 interface Props {
     entries: DecisionLogEntry[];
     /** Reopen an assumption decision (back to Review & Confirm). */
     onUndoAssumption: (assumptionId: string) => void;
+    /** Open durable validation for a consequential accepted assumption. */
+    onPlanValidation?: (assumptionId: string) => void;
     /** Clear a feature confirmation. */
     onUndoFeature: (featureId: string) => void;
     readOnly: boolean;
 }
 
-export function DecisionLogSection({ entries, onUndoAssumption, onUndoFeature, readOnly }: Props) {
+const requiresValidation = (entry: DecisionLogEntry): boolean => entry.kind === 'assumption'
+    && entry.verdict === 'confirmed'
+    && (entry.materiality === undefined || entry.materiality === 'blocking' || entry.materiality === 'high');
+
+export function DecisionLogSection({ entries, onUndoAssumption, onPlanValidation, onUndoFeature, readOnly }: Props) {
     if (entries.length === 0) return null;
     return (
         <div id="prd-decision-log" className="mb-8 scroll-mt-24">
@@ -74,7 +87,7 @@ export function DecisionLogSection({ entries, onUndoAssumption, onUndoFeature, r
                         key={`${entry.kind}-${entry.verdict}-${entry.id}`}
                         className="flex items-start gap-2.5 rounded-lg border border-neutral-200 bg-neutral-50 px-4 py-2.5"
                     >
-                        <VerdictIcon verdict={entry.verdict} />
+                        <VerdictIcon entry={entry} />
                         <div className="min-w-0 flex-1">
                             <div className="flex items-center gap-2 flex-wrap">
                                 <ReferenceBadge entry={entry} />
@@ -94,22 +107,25 @@ export function DecisionLogSection({ entries, onUndoAssumption, onUndoFeature, r
                                 </p>
                             )}
                         </div>
-                        {/* Deferred entries are scope records, not undoable user
-                            decisions — no undo affordance. */}
-                        {!readOnly && entry.verdict !== 'deferred' && (
-                            <button
-                                type="button"
-                                onClick={() =>
-                                    entry.kind === 'feature'
-                                        ? onUndoFeature(entry.id)
-                                        : onUndoAssumption(entry.id)
-                                }
-                                className="p-1 text-neutral-300 hover:text-neutral-500 transition shrink-0"
-                                title="Undo decision"
-                                aria-label={`Undo decision: ${entry.statement}`}
-                            >
-                                <Undo2 size={14} />
-                            </button>
+                        {!readOnly && (
+                            <div className="flex shrink-0 flex-col items-end gap-1">
+                                {requiresValidation(entry) && onPlanValidation && (
+                                    <button type="button" onClick={() => onPlanValidation(entry.id)} className="min-h-11 rounded-md px-2 text-xs font-semibold text-indigo-700 hover:bg-indigo-50" aria-label={`Plan validation for accepted assumption: ${entry.statement}`}>Plan validation</button>
+                                )}
+                                {/* Deferred entries are scope records, not undoable
+                                    user decisions — no undo affordance. */}
+                                {entry.verdict !== 'deferred' && (
+                                    <button
+                                        type="button"
+                                        onClick={() => entry.kind === 'feature' ? onUndoFeature(entry.id) : onUndoAssumption(entry.id)}
+                                        className="inline-flex min-h-11 min-w-11 items-center justify-center text-neutral-300 transition hover:text-neutral-500"
+                                        title="Undo decision"
+                                        aria-label={`Undo decision: ${entry.statement}`}
+                                    >
+                                        <Undo2 size={14} />
+                                    </button>
+                                )}
+                            </div>
                         )}
                     </li>
                 ))}

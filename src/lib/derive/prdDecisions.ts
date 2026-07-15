@@ -60,6 +60,7 @@ export type DecisionLogEntry = {
     statement: string;
     note?: string;
     decidedAt?: number;
+    materiality?: Assumption['materiality'];
 };
 
 /**
@@ -84,6 +85,7 @@ export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
             statement: a.statement,
             note: a.decisionNote || undefined,
             decidedAt: a.decidedAt,
+            materiality: a.materiality,
         });
     });
 

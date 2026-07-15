@@ -324,23 +324,27 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         savePRD(updated, editSummary);
     };
 
-    const appendAssumptionVerdict = (
-        assumptionId: string,
-        event: Parameters<ReturnType<typeof useProjectStore.getState>['appendPlanningDecisionEvent']>[2],
-    ): number | undefined => {
+    const findOrImportAssumptionRecord = (assumptionId: string): PlanningRecord | undefined => {
         const state = useProjectStore.getState();
         const sourceKey = assumptionSourceKey(assumptionId);
         let record = (state.planningRecords[projectId] ?? []).find(item =>
             (item.sources ?? []).some(source => source.key === sourceKey),
         );
-        // The workspace normally imports these records before the PRD renders.
-        // Keep the action self-contained for old projects and direct deep links.
+        // Keep legacy projects and direct PRD deep links self-contained.
         if (!record) {
             state.importPlanningAssumptions(projectId, spineId, structuredPRD);
             record = (useProjectStore.getState().planningRecords[projectId] ?? []).find(item =>
                 (item.sources ?? []).some(source => source.key === sourceKey),
             );
         }
+        return record;
+    };
+
+    const appendAssumptionVerdict = (
+        assumptionId: string,
+        event: Parameters<ReturnType<typeof useProjectStore.getState>['appendPlanningDecisionEvent']>[2],
+    ): number | undefined => {
+        const record = findOrImportAssumptionRecord(assumptionId);
         if (record) {
             // Persisted projects can contain future-skewed timestamps (and
             // tests deliberately pin clocks). Preserve append-only ordering
@@ -376,8 +380,13 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         patchAssumption(
             assumptionId,
             { decision: 'confirmed', decisionNote: undefined, decidedAt: recordedAt },
-            `Confirmed assumption: ${truncate(a.statement)}`,
+            `Accepted assumption for planning: ${truncate(a.statement)}`,
         );
+    };
+
+    const handlePlanAssumptionValidation = (assumptionId: string) => {
+        const record = findOrImportAssumptionRecord(assumptionId);
+        if (record && onOpenDecisions) onOpenDecisions(record.id);
     };
 
     const handleRejectAssumption = (assumptionId: string, note: string) => {
@@ -916,6 +925,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 <ReviewConfirmSection
                     assumptions={unresolvedAssumptions}
                     onConfirm={handleConfirmAssumption}
+                    onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
                     onReject={handleRejectAssumption}
                     readOnly={readOnly}
                 />
@@ -923,6 +933,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 <DecisionLogSection
                     entries={decisionLog}
                     onUndoAssumption={handleUndoAssumption}
+                    onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
                     onUndoFeature={(featureId) => {
                         const f = structuredPRD.features.find(x => x.id === featureId);
                         if (f) handleToggleFeatureConfirm(f);

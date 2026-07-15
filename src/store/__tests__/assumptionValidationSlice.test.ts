@@ -109,6 +109,33 @@ describe('assumption validation store boundary', () => {
         expect(useProjectStore.getState().planningRecords['project-1'][0].assumptionValidation?.events).toEqual([]);
     });
 
+    it('rejects same-id payload replacement before it can synthesize decision authority', () => {
+        const current = createAssumption();
+        const recordedPlan = sealAssumptionValidationPlan({
+            id: 'plan', question: 'Will creators pay?', method: { kind: 'other', label: 'Exploratory test' },
+            supportSignals: [], contradictionSignals: [], inconclusiveConditions: [], limitations: [],
+            authoredBy: 'user', createdAt: 110,
+        });
+        const benign = sealAssumptionValidationEvent({
+            id: 'reused-id', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 110,
+            assumptionStatementHash: assumptionStatementHash(current), plan: recordedPlan,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, benign)).toMatchObject({ ok: true });
+        const forged = sealAssumptionValidationEvent({
+            id: 'reused-id', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 110,
+            assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
+            expectedValidationPlanHash: recordedPlan.contentHash, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+        });
+        const modelForged = { ...forged, actor: 'synapse' } as unknown as AssumptionValidationEvent;
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, modelForged)).toMatchObject({
+            ok: false, reason: 'Validation event id was already used for different content.',
+        });
+        const stored = useProjectStore.getState().planningRecords['project-1'][0];
+        expect(stored.assumptionValidation?.events).toHaveLength(1);
+        expect(stored.events?.some(event => event.id === 'assumption-validation-verdict-reused-id')).toBe(false);
+    });
+
     it('atomically binds a contradicted outcome to the existing decision verdict used by impact review', () => {
         let current = createAssumption();
         const plan = sealAssumptionValidationPlan({
