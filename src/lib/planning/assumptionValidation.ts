@@ -384,9 +384,11 @@ export function assumptionValidationReadiness(
     const credible = projection.independentEvidence.filter(isCredibleDirectEvidence);
     const supporting = credible.filter(evidence => evidence.relation === 'supports');
     const contradicting = credible.filter(evidence => evidence.relation === 'contradicts');
-    const outcome = validationState(record).events.find(event => (
-        event.id === projection.latestOutcomeEventId && event.type === 'validation_outcome_recorded'
-    ));
+    const outcome = validationState(record).events.find(
+        (event): event is Extract<AssumptionValidationEvent, { type: 'validation_outcome_recorded' }> => (
+            event.id === projection.latestOutcomeEventId && event.type === 'validation_outcome_recorded'
+        ),
+    );
     const decision = projectDecision(record);
 
     if (conclusion === 'supported' || conclusion === 'partially_supported') {

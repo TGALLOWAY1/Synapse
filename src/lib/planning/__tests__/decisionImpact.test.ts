@@ -136,7 +136,7 @@ describe('decision impact preview', () => {
                 { kind: 'behavior', section: 'Features', label: 'Cross-origin workflow branch', entityType: 'feature', entityId: 'f-browser', jsonPath: '$.features' },
                 { kind: 'claim', section: 'Architecture', label: 'Browser integration approach', jsonPath: '$.architecture' },
             ],
-            affectedArtifactSlots: ['user_flows', 'architecture'],
+            affectedArtifactSlots: ['user_flows'],
         };
         const result = buildDecisionImpact({
             projectId: 'p1', record: contradicted, baselineSpineVersionId: 's1',
