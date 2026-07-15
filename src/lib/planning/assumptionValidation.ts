@@ -53,11 +53,13 @@ const validationState = (record: PlanningRecord): AssumptionValidationState => r
 
 const withoutContentHash = <T extends { contentHash: string }>(value: T): Omit<T, 'contentHash'> => {
     const { contentHash: _contentHash, ...payload } = value;
+    void _contentHash;
     return payload;
 };
 
 const withoutIntegrityHash = (event: AssumptionValidationEvent): AssumptionValidationEventDraft => {
     const { integrityHash: _integrityHash, ...payload } = event;
+    void _integrityHash;
     return payload as AssumptionValidationEventDraft;
 };
 
@@ -584,7 +586,7 @@ export function buildAssumptionValidationPlanProposal(
     const base = {
         id: '',
         planningRecordId: input.record.id,
-        contractVersion: ASSUMPTION_VALIDATION_CONTRACT_VERSION,
+        contractVersion: ASSUMPTION_VALIDATION_CONTRACT_VERSION as typeof ASSUMPTION_VALIDATION_CONTRACT_VERSION,
         authoredBy: 'synapse' as const,
         question: normalizeEvidenceText(input.question),
         method: input.method,
@@ -663,7 +665,7 @@ export function buildAssumptionInterpretationProposal(
     const base = {
         id: '',
         planningRecordId: input.record.id,
-        contractVersion: ASSUMPTION_VALIDATION_CONTRACT_VERSION,
+        contractVersion: ASSUMPTION_VALIDATION_CONTRACT_VERSION as typeof ASSUMPTION_VALIDATION_CONTRACT_VERSION,
         authoredBy: 'synapse' as const,
         recommendedConclusion,
         reasoning: normalizeEvidenceText(input.reasoning),

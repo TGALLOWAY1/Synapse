@@ -187,6 +187,7 @@ describe('assumption validation domain', () => {
     it('fails safely when the assumption or exact plan version changes', () => {
         const initial = record();
         const { integrityHash: _integrityHash, ...draft } = planEvent(initial);
+        void _integrityHash;
         const event = sealAssumptionValidationEvent({
             ...draft,
             id: 'version-plan',
@@ -271,6 +272,7 @@ describe('assumption validation domain', () => {
     it('makes expired conclusions due for review without deleting the historical outcome', () => {
         const initial = record();
         const { contentHash: _contentHash, ...planDraft } = plan(10);
+        void _contentHash;
         const sealedExpiring = sealAssumptionValidationPlan({ ...planDraft, expiresAt: 50 });
         let current = append(initial, planEvent(initial, 10, sealedExpiring));
         const first = evidence(current, 'evidence-1', 'test-1', 'supports', 20);

@@ -40,6 +40,7 @@ describe('DecisionCenter', () => {
     it('requires a correction before rejecting a premise', () => {
         const props = callbacks();
         render(<DecisionCenter records={[openRecord]} {...props} />);
+        expect(screen.queryByRole('button', { name: 'Confirm as true' })).toBeNull();
         const reject = screen.getByRole('button', { name: /Reject premise/ });
         expect(reject).toBeDisabled();
         fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: 'Guests may browse but must sign in before saving' } });

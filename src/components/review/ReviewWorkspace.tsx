@@ -20,6 +20,8 @@ import {
     type DecisionAction,
     type DecisionCenterRecordView,
 } from './DecisionCenter';
+import type { AssumptionEvidenceInput, AssumptionValidationPlanInput } from './AssumptionValidationPanel';
+import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 
 export type ReviewSpecialistOption = {
     id: string;
@@ -149,6 +151,22 @@ export interface ReviewWorkspaceProps {
         proposalId: string,
         request: { kind: 'missing_info' | 'different_interpretation'; guidance: string },
     ) => void | Promise<void>;
+    onGenerateAssumptionValidationPlan?: (recordId: string) => void;
+    onRecordAssumptionValidationPlan?: (recordId: string, input: AssumptionValidationPlanInput) => void;
+    onAddAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceInput) => void;
+    onInterpretAssumptionEvidence?: (recordId: string) => void;
+    onRecordAssumptionOutcome?: (recordId: string, input: {
+        conclusion: AssumptionEvidenceConclusion;
+        caveats?: string;
+        revisitCondition?: string;
+        sourceInterpretationId?: string;
+        sourceInterpretationContentHash?: string;
+    }) => void;
+    onRecordAssumptionTreatment?: (recordId: string, input: {
+        treatment: AssumptionUncertaintyTreatment;
+        rationale: string;
+        revisitCondition?: string;
+    }) => void;
     readOnly?: boolean;
 }
 
@@ -722,6 +740,12 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
                         onReviewAlignmentProposal={props.onReviewAlignmentProposal}
                         onRequestAlignmentProposal={props.onRequestAlignmentProposal}
+                        onGenerateAssumptionValidationPlan={props.onGenerateAssumptionValidationPlan}
+                        onRecordAssumptionValidationPlan={props.onRecordAssumptionValidationPlan}
+                        onAddAssumptionEvidence={props.onAddAssumptionEvidence}
+                        onInterpretAssumptionEvidence={props.onInterpretAssumptionEvidence}
+                        onRecordAssumptionOutcome={props.onRecordAssumptionOutcome}
+                        onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
                     />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { v4 as uuidv4 } from 'uuid';
 import { useProjectStore } from '../../store/projectStore';
 import type {
+    AssumptionEvidenceConclusion,
+    AssumptionUncertaintyTreatment,
     PlanningRecord,
     ReviewEvidenceRef,
     ReviewIssue,
@@ -39,6 +41,15 @@ import {
     reasonAboutComplexPlanningTargets,
     integrateComplexCandidateIntoPreview,
     COMPLEX_TARGET_KINDS,
+    assumptionEvidenceSetHash,
+    assumptionStatementHash,
+    buildAssumptionInterpretationProposal,
+    buildAssumptionValidationPlanProposal,
+    planningContentHash,
+    projectAssumptionValidation,
+    sealAssumptionEvidence,
+    sealAssumptionValidationEvent,
+    sealAssumptionValidationPlan,
 } from '../../lib/planning';
 import { canPerformProjectAction } from '../../lib/projectCapabilities';
 import { alignmentProposalContentHash } from '../../lib/planning/proposalIntegrity';
@@ -50,6 +61,7 @@ import {
     type ReviewRunView,
     type ReviewSpecialistOption,
 } from './ReviewWorkspace';
+import type { AssumptionEvidenceInput, AssumptionValidationPlanInput } from './AssumptionValidationPanel';
 
 interface Props {
     projectId: string;
@@ -709,6 +721,30 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
 
     const planningViews: PlanningRecordView[] = planningRecords.map(record => {
         const projection = projectDecision(record);
+        const validationProjection = record.type === 'assumption' ? projectAssumptionValidation(record) : undefined;
+        const currentSpineContentHash = latestSpine
+            ? planningContentHash(latestSpine.structuredPRD ?? latestSpine.responseText)
+            : undefined;
+        const evidenceSetHash = validationProjection
+            ? assumptionEvidenceSetHash(validationProjection.activeEvidence)
+            : undefined;
+        const latestPlanProposal = [...(record.assumptionValidation?.planProposals ?? [])].reverse().find(proposal => (
+            proposal.assumptionStatementHash === assumptionStatementHash(record)
+            && proposal.evidenceSetHash === evidenceSetHash
+            && (!proposal.sourceSpineVersionId || (
+                proposal.sourceSpineVersionId === latestSpine?.id
+                && proposal.sourceSpineContentHash === currentSpineContentHash
+            ))
+        ));
+        const latestInterpretation = [...(record.assumptionValidation?.interpretationProposals ?? [])].reverse().find(proposal => (
+            proposal.assumptionStatementHash === assumptionStatementHash(record)
+            && proposal.validationPlanHash === validationProjection?.currentPlan?.contentHash
+            && proposal.evidenceSetHash === evidenceSetHash
+            && (!proposal.sourceSpineVersionId || (
+                proposal.sourceSpineVersionId === latestSpine?.id
+                && proposal.sourceSpineContentHash === currentSpineContentHash
+            ))
+        ));
         const assessment = record.assessments?.at(-1);
         const storedPreview = assessment?.impactPreview;
         const previewStale = storedPreview && latestSpine?.structuredPRD
@@ -744,6 +780,42 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                 at: event.at,
                 rationale: event.rationale,
             })),
+            validation: validationProjection ? {
+                workflowState: validationProjection.workflowState,
+                currentPlan: validationProjection.currentPlan,
+                latestPlanProposal,
+                activeEvidence: validationProjection.activeEvidence,
+                duplicateEvidenceIds: validationProjection.duplicateEvidenceIds,
+                evidenceFromAnotherQuestionIds: validationProjection.evidenceFromAnotherQuestionIds,
+                latestInterpretation,
+                acceptedConclusion: validationProjection.acceptedConclusion,
+                conclusionIsCurrent: validationProjection.conclusionIsCurrent,
+                userTreatment: validationProjection.userTreatment,
+                treatmentRationale: validationProjection.treatmentRationale,
+                revisitAt: validationProjection.revisitAt,
+                revisitCondition: validationProjection.revisitCondition,
+                hasHistoricalValidation: validationProjection.hasHistoricalValidation,
+                dependentLabels: [...new Set([
+                    ...(record.affectedPrdSections ?? []),
+                    ...(record.affectedArtifactSlots ?? []).map(slot => slot.replaceAll('_', ' ')),
+                    ...(record.affectedPlanLocations ?? []).map(location => location.label),
+                ])],
+                history: (record.assumptionValidation?.events ?? []).map(event => ({
+                    id: event.id,
+                    label: event.type === 'validation_plan_recorded' ? 'Validation plan recorded'
+                        : event.type === 'validation_evidence_recorded' ? 'Evidence recorded'
+                            : event.type === 'validation_evidence_retracted' ? 'Evidence retracted'
+                                : event.type === 'validation_outcome_recorded' ? `Conclusion: ${event.conclusion.replaceAll('_', ' ')}`
+                                    : event.type === 'validation_outcome_reopened' ? 'Conclusion reopened'
+                                        : `Uncertainty ${event.treatment.replaceAll('_', ' ')}`,
+                    at: event.at,
+                    detail: event.type === 'validation_outcome_recorded' ? event.caveats
+                        : event.type === 'validation_evidence_recorded' ? event.evidence.source
+                            : event.type === 'validation_uncertainty_treatment_recorded' ? event.rationale
+                                : event.type === 'validation_evidence_retracted' || event.type === 'validation_outcome_reopened' ? event.reason
+                                    : undefined,
+                })),
+            } : undefined,
             preview: storedPreview ? {
                 id: storedPreview.id,
                 status: previewStale ? 'stale' : storedPreview.status,
@@ -810,6 +882,200 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         if (!result.ok) return result;
         state.addPlanningAssessment(projectId, recordId, result.assessment);
         return result;
+    };
+
+    const currentAssumptionContext = (recordId: string) => {
+        const state = useProjectStore.getState();
+        const record = state.planningRecords[projectId]?.find(item => item.id === recordId);
+        const spine = state.spineVersions[projectId]?.find(item => item.isLatest)
+            ?? state.spineVersions[projectId]?.at(-1);
+        return {
+            state,
+            record,
+            spine,
+            spineContentHash: spine ? planningContentHash(spine.structuredPRD ?? spine.responseText) : undefined,
+        };
+    };
+
+    const showValidationError = (title: string, reason: string) => {
+        useToastStore.getState().addToast({ type: 'error', title, message: reason });
+    };
+
+    const handleGenerateAssumptionValidationPlan = (recordId: string) => {
+        if (!canWrite) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const technical = record.affectedPrdSections?.some(section => /architecture|technical|constraint/i.test(section));
+        const proposal = buildAssumptionValidationPlanProposal({
+            record,
+            question: `What observable result would show that “${record.statement}” is reliable enough to plan around?`,
+            method: technical
+                ? { kind: 'technical_test', label: 'Small technical test' }
+                : { kind: 'user_interviews', label: 'Focused user interviews' },
+            supportSignals: ['A directly observed result answers the validation question in the expected direction.'],
+            contradictionSignals: ['A directly observed result shows the assumption does not hold in the relevant context.'],
+            inconclusiveConditions: ['The source does not answer this exact question or the scope is too narrow to guide the plan.'],
+            limitations: ['One method can reduce uncertainty without proving the assumption in every context.'],
+            revisitCondition: 'New contradictory evidence appears or the dependent plan changes.',
+            sourceSpineVersionId: spine?.id,
+            sourceSpineContentHash: spineContentHash,
+            model: 'bounded-validation-plan-v1',
+            provider: 'synapse',
+        });
+        const result = state.addAssumptionValidationPlanProposal(projectId, recordId, proposal);
+        if (!result.ok) showValidationError('Validation plan not prepared', result.reason);
+    };
+
+    const handleRecordAssumptionValidationPlan = (recordId: string, input: AssumptionValidationPlanInput) => {
+        if (!canWrite) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const at = Date.now();
+        const projection = projectAssumptionValidation(record, at);
+        const plan = sealAssumptionValidationPlan({
+            id: uuidv4(),
+            question: input.question,
+            method: { kind: input.methodKind, label: input.methodLabel },
+            supportSignals: input.supportSignals,
+            contradictionSignals: input.contradictionSignals,
+            inconclusiveConditions: input.inconclusiveConditions,
+            limitations: input.limitations,
+            revisitCondition: input.revisitCondition,
+            authoredBy: 'user',
+            createdAt: at,
+        });
+        const event = sealAssumptionValidationEvent({
+            id: uuidv4(), planningRecordId: recordId, type: 'validation_plan_recorded', actor: 'user', at,
+            assumptionStatementHash: assumptionStatementHash(record),
+            expectedSpineVersionId: spine?.id,
+            expectedSpineContentHash: spineContentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+            plan,
+            sourceProposalId: input.sourceProposalId,
+            sourceProposalContentHash: input.sourceProposalContentHash,
+        });
+        const result = state.appendAssumptionValidationEvent(projectId, recordId, event);
+        if (!result.ok) showValidationError('Validation plan not saved', result.reason);
+        else useToastStore.getState().addToast({ type: 'success', title: 'Validation plan recorded', message: 'This user-authored plan now defines what evidence belongs to the assumption.' });
+    };
+
+    const handleAddAssumptionEvidence = (recordId: string, input: AssumptionEvidenceInput) => {
+        if (!canWrite) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const at = Date.now();
+        const projection = projectAssumptionValidation(record, at);
+        if (!projection.currentPlan) {
+            showValidationError('Evidence not saved', 'Record a validation plan before adding evidence.');
+            return;
+        }
+        const evidence = sealAssumptionEvidence({
+            id: uuidv4(), planningRecordId: recordId,
+            sourceType: input.sourceType, source: input.source, sourceIdentity: input.sourceIdentity,
+            observedAt: input.observedAt, recordedAt: at, observation: input.observation,
+            validationQuestion: projection.currentPlan.question,
+            scopeOrSample: input.scopeOrSample, limitations: input.limitations,
+            character: input.character, relation: input.relation,
+            assumptionStatementHash: assumptionStatementHash(record),
+            validationPlanHash: projection.currentPlan.contentHash,
+            authoredBy: 'user',
+        });
+        const event = sealAssumptionValidationEvent({
+            id: uuidv4(), planningRecordId: recordId, type: 'validation_evidence_recorded', actor: 'user', at,
+            assumptionStatementHash: assumptionStatementHash(record),
+            expectedSpineVersionId: spine?.id,
+            expectedSpineContentHash: spineContentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+            evidence,
+        });
+        const result = state.appendAssumptionValidationEvent(projectId, recordId, event);
+        if (!result.ok) showValidationError('Evidence not saved', result.reason);
+        else if (result.duplicateEvidenceOf) useToastStore.getState().addToast({ type: 'info', title: 'Duplicate source preserved', message: 'This record is visible, but will not count as independent corroboration.' });
+        else useToastStore.getState().addToast({ type: 'success', title: 'Evidence recorded', message: 'The observation remains separate from any interpretation or conclusion.' });
+    };
+
+    const handleInterpretAssumptionEvidence = (recordId: string) => {
+        if (!canWrite) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const projection = projectAssumptionValidation(record);
+        if (!projection.currentPlan || projection.activeEvidence.length === 0) {
+            showValidationError('Interpretation unavailable', 'Record a current validation plan and at least one evidence source first.');
+            return;
+        }
+        const relations = new Set(projection.independentEvidence.map(item => item.relation));
+        const proposal = buildAssumptionInterpretationProposal({
+            record,
+            reasoning: relations.has('supports') && relations.has('contradicts')
+                ? 'Current independent evidence points in conflicting directions, so the assumption should remain inconclusive unless the user records a more qualified outcome.'
+                : `Synapse compared ${projection.independentEvidence.length} independent source${projection.independentEvidence.length === 1 ? '' : 's'} with the validation question and excluded duplicate sources from corroboration.`,
+            limitations: [
+                'This interpretation summarizes user-recorded evidence relationships; it does not verify that a source is truthful or representative.',
+                ...(projection.activeEvidence.some(item => item.character === 'interpretation') ? ['Some records are interpretations rather than direct observations.'] : []),
+            ],
+            sourceSpineVersionId: spine?.id,
+            sourceSpineContentHash: spineContentHash,
+            model: 'bounded-evidence-interpretation-v1',
+            provider: 'synapse',
+        });
+        const result = state.addAssumptionInterpretationProposal(projectId, recordId, proposal);
+        if (!result.ok) showValidationError('Interpretation not prepared', result.reason);
+    };
+
+    const handleRecordAssumptionOutcome = (recordId: string, input: {
+        conclusion: AssumptionEvidenceConclusion;
+        caveats?: string;
+        revisitCondition?: string;
+        sourceInterpretationId?: string;
+        sourceInterpretationContentHash?: string;
+    }) => {
+        if (!canWrite) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const at = Date.now();
+        const projection = projectAssumptionValidation(record, at);
+        if (!projection.currentPlan) return;
+        const event = sealAssumptionValidationEvent({
+            id: uuidv4(), planningRecordId: recordId, type: 'validation_outcome_recorded', actor: 'user', at,
+            assumptionStatementHash: assumptionStatementHash(record),
+            expectedSpineVersionId: spine?.id,
+            expectedSpineContentHash: spineContentHash,
+            conclusion: input.conclusion,
+            caveats: input.caveats,
+            expectedValidationPlanHash: projection.currentPlan.contentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+            sourceInterpretationId: input.sourceInterpretationId,
+            sourceInterpretationContentHash: input.sourceInterpretationContentHash,
+            revisitCondition: input.revisitCondition,
+        });
+        const result = state.appendAssumptionValidationEvent(projectId, recordId, event);
+        if (!result.ok) showValidationError('Conclusion not saved', result.reason);
+        else useToastStore.getState().addToast({ type: 'success', title: 'Your conclusion was recorded', message: 'Synapse’s interpretation remains advisory and separate in history.' });
+    };
+
+    const handleRecordAssumptionTreatment = (recordId: string, input: {
+        treatment: AssumptionUncertaintyTreatment;
+        rationale: string;
+        revisitCondition?: string;
+    }) => {
+        if (!canWrite) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const at = Date.now();
+        const projection = projectAssumptionValidation(record, at);
+        const event = sealAssumptionValidationEvent({
+            id: uuidv4(), planningRecordId: recordId, type: 'validation_uncertainty_treatment_recorded', actor: 'user', at,
+            assumptionStatementHash: assumptionStatementHash(record),
+            expectedSpineVersionId: spine?.id,
+            expectedSpineContentHash: spineContentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+            treatment: input.treatment,
+            rationale: input.rationale,
+            revisitCondition: input.revisitCondition,
+        });
+        const result = state.appendAssumptionValidationEvent(projectId, recordId, event);
+        if (!result.ok) showValidationError('Uncertainty treatment not saved', result.reason);
+        else useToastStore.getState().addToast({ type: 'info', title: 'Unresolved uncertainty recorded', message: 'The assumption remains unvalidated.' });
     };
 
     const handleDecisionAction = (recordId: string, action: import('./DecisionCenter').DecisionAction, value?: string, rationale?: string) => {
@@ -1107,6 +1373,12 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onApplyPlanningRecordToPlan={handleApplyToPlan}
         onReviewAlignmentProposal={handleAlignmentProposalReview}
         onRequestAlignmentProposal={handleRequestAlignmentProposal}
+        onGenerateAssumptionValidationPlan={handleGenerateAssumptionValidationPlan}
+        onRecordAssumptionValidationPlan={handleRecordAssumptionValidationPlan}
+        onAddAssumptionEvidence={handleAddAssumptionEvidence}
+        onInterpretAssumptionEvidence={handleInterpretAssumptionEvidence}
+        onRecordAssumptionOutcome={handleRecordAssumptionOutcome}
+        onRecordAssumptionTreatment={handleRecordAssumptionTreatment}
         readOnly={!canPerformProjectAction(projectId, 'persist')}
     />;
 }

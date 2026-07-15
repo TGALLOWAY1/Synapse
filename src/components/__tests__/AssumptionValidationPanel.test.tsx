@@ -1,0 +1,133 @@
+import { fireEvent, render, screen, within } from '@testing-library/react';
+import { describe, expect, it, vi } from 'vitest';
+import type { AssumptionEvidenceRecord, AssumptionValidationPlan } from '../../types';
+import {
+    AssumptionValidationPanel,
+    type AssumptionValidationView,
+} from '../review/AssumptionValidationPanel';
+
+const plan: AssumptionValidationPlan = {
+    id: 'plan-1',
+    question: 'Will independent creators pay $20 per month after trying the core workflow?',
+    method: { kind: 'user_interviews', label: 'Five focused user interviews' },
+    supportSignals: ['Creators describe the problem as urgent and accept the price after a trial.'],
+    contradictionSignals: ['Creators will only use a permanently free tier.'],
+    inconclusiveConditions: ['Participants discuss intent without making a realistic choice.'],
+    limitations: ['A small sample cannot estimate market-wide conversion.'],
+    revisitCondition: 'Before pricing is finalized',
+    authoredBy: 'user',
+    createdAt: 10,
+    contentHash: 'plan-hash',
+};
+
+const evidence = (overrides: Partial<AssumptionEvidenceRecord> = {}): AssumptionEvidenceRecord => ({
+    id: 'evidence-1', planningRecordId: 'assumption-1', sourceType: 'user_interview',
+    source: 'Creator interview 1', sourceIdentity: 'session-1', observedAt: 20, recordedAt: 21,
+    observation: 'The creator would pay after completing the core workflow.',
+    validationQuestion: plan.question, scopeOrSample: 'One independent creator', limitations: ['Self-reported intent'],
+    character: 'direct', relation: 'supports', assumptionStatementHash: 'statement-hash',
+    validationPlanHash: plan.contentHash, sourceFingerprint: 'source-fingerprint', authoredBy: 'user',
+    contentHash: 'evidence-hash', ...overrides,
+});
+
+const baseValidation = (overrides: Partial<AssumptionValidationView> = {}): AssumptionValidationView => ({
+    workflowState: 'not_planned', activeEvidence: [], duplicateEvidenceIds: [],
+    evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false, hasHistoricalValidation: false,
+    dependentLabels: ['Pricing', 'First-release scope'], history: [], ...overrides,
+});
+
+const callbacks = () => ({
+    onGeneratePlan: vi.fn(), onRecordPlan: vi.fn(), onAddEvidence: vi.fn(),
+    onInterpretEvidence: vi.fn(), onRecordOutcome: vi.fn(), onRecordTreatment: vi.fn(),
+    onPreviewImpact: vi.fn(),
+});
+
+describe('AssumptionValidationPanel', () => {
+    it('keeps a generated validation plan advisory until the user records an editable draft', () => {
+        const handlers = callbacks();
+        const proposal = {
+            id: 'proposal-1', planningRecordId: 'assumption-1', contractVersion: 1 as const,
+            authoredBy: 'synapse' as const, question: plan.question, method: plan.method,
+            supportSignals: plan.supportSignals, contradictionSignals: plan.contradictionSignals,
+            inconclusiveConditions: plan.inconclusiveConditions, limitations: plan.limitations,
+            revisitCondition: plan.revisitCondition, assumptionStatementHash: 'statement-hash',
+            evidenceSetHash: 'empty-evidence', createdAt: 10, contentHash: 'proposal-hash',
+        };
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ latestPlanProposal: proposal })} hasPlanImpact={false} {...handlers} />);
+
+        expect(screen.getByText('Synapse proposal · not yet your plan')).toBeInTheDocument();
+        expect(handlers.onRecordPlan).not.toHaveBeenCalled();
+        expect(handlers.onRecordOutcome).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Use suggestion as a draft' }));
+        expect(screen.getByLabelText('Validation question')).toHaveValue(plan.question);
+        fireEvent.click(screen.getByRole('button', { name: 'Record my validation plan' }));
+
+        expect(handlers.onRecordPlan).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
+            question: plan.question,
+            sourceProposalId: 'proposal-1',
+            sourceProposalContentHash: 'proposal-hash',
+        }));
+        expect(handlers.onRecordOutcome).not.toHaveBeenCalled();
+    });
+
+    it('shows duplicate and irrelevant evidence without treating either as independent support', () => {
+        const handlers = callbacks();
+        const duplicate = evidence({ id: 'evidence-duplicate', source: 'Copy of interview summary', contentHash: 'duplicate-hash' });
+        const irrelevant = evidence({ id: 'evidence-irrelevant', source: 'General market report', sourceIdentity: 'report-1', sourceFingerprint: 'report-fingerprint', relation: 'irrelevant', observation: 'The report describes the market but does not test willingness to pay.', contentHash: 'irrelevant-hash' });
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ currentPlan: plan, workflowState: 'in_progress', activeEvidence: [duplicate, irrelevant], duplicateEvidenceIds: [duplicate.id] })} hasPlanImpact={false} {...handlers} />);
+
+        fireEvent.click(screen.getByText(/2\. Add evidence/));
+        const evidenceList = screen.getByRole('list', { name: 'Recorded evidence' });
+        expect(within(evidenceList).getByText(/Duplicate source/)).toBeInTheDocument();
+        expect(within(evidenceList).getByText(/does not count as support/)).toBeInTheDocument();
+        fireEvent.change(screen.getByLabelText('Source'), { target: { value: 'Prototype checkout test' } });
+        fireEvent.change(screen.getByLabelText('Source identity'), { target: { value: 'prototype-run-7' } });
+        fireEvent.change(screen.getByLabelText('Observed on'), { target: { value: '2026-06-10' } });
+        fireEvent.change(screen.getByLabelText('Observation or result'), { target: { value: 'Three participants abandoned at checkout.' } });
+        const add = screen.getByRole('button', { name: 'Add evidence' });
+        expect(add).toHaveClass('min-h-11', 'w-full');
+        fireEvent.click(add);
+        expect(handlers.onAddEvidence).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
+            sourceIdentity: 'prototype-run-7',
+            observedAt: new Date('2026-06-10T12:00:00').getTime(),
+        }));
+    });
+
+    it('allows contradictory evidence to remain inconclusive and never turns advisory interpretation into authority', () => {
+        const handlers = callbacks();
+        const supporting = evidence();
+        const contradicting = evidence({ id: 'evidence-2', source: 'Observed checkout test', sourceIdentity: 'prototype-test-1', sourceFingerprint: 'prototype-fingerprint', relation: 'contradicts', observation: 'Participants abandoned when the price appeared.', contentHash: 'evidence-2-hash' });
+        const interpretation = {
+            id: 'interpretation-1', planningRecordId: 'assumption-1', contractVersion: 1 as const,
+            authoredBy: 'synapse' as const, recommendedConclusion: 'inconclusive' as const,
+            reasoning: 'Independent evidence points in conflicting directions.', supportingEvidenceIds: [supporting.id],
+            contradictingEvidenceIds: [contradicting.id], inconclusiveEvidenceIds: [], irrelevantEvidenceIds: [],
+            duplicateEvidenceIds: [], limitations: ['The sample is small.'], assumptionStatementHash: 'statement-hash',
+            validationPlanHash: plan.contentHash, evidenceSetHash: 'evidence-set', createdAt: 30,
+            contentHash: 'interpretation-hash',
+        };
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ currentPlan: plan, workflowState: 'in_progress', activeEvidence: [supporting, contradicting], latestInterpretation: interpretation })} hasPlanImpact={false} {...handlers} />);
+
+        expect(screen.getByText('Synapse interpretation · advisory')).toBeInTheDocument();
+        expect(handlers.onRecordOutcome).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Use as my draft conclusion' }));
+        expect(screen.getByLabelText('Your validation conclusion')).toHaveValue('inconclusive');
+        expect(handlers.onRecordOutcome).not.toHaveBeenCalled();
+        fireEvent.click(screen.getByRole('button', { name: 'Record my conclusion' }));
+        expect(handlers.onRecordOutcome).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
+            conclusion: 'inconclusive', sourceInterpretationId: 'interpretation-1',
+        }));
+    });
+
+    it('records proceeding under uncertainty separately and exposes a mobile-sized impact action', () => {
+        const handlers = callbacks();
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ userTreatment: 'accepted_without_validation', treatmentRationale: 'Test demand during a limited beta.' })} hasPlanImpact={false} {...handlers} />);
+
+        expect(screen.getAllByText('Accepted without validation')[0]).toBeInTheDocument();
+        expect(screen.queryByText('Supported')).not.toBeInTheDocument();
+        const impact = screen.getByRole('button', { name: 'Review plan impact' });
+        expect(impact).toHaveClass('min-h-11', 'w-full', 'sm:w-auto');
+        fireEvent.click(impact);
+        expect(handlers.onPreviewImpact).toHaveBeenCalledWith('assumption-1');
+    });
+});

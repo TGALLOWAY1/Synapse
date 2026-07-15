@@ -1,5 +1,12 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, ChevronDown, Clock3, FileQuestion, RefreshCcw, Sparkles, X } from 'lucide-react';
+import {
+    AssumptionValidationPanel,
+    type AssumptionEvidenceInput,
+    type AssumptionValidationPlanInput,
+    type AssumptionValidationView,
+} from './AssumptionValidationPanel';
+import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 
 export type DecisionCenterOptionView = {
     id: string;
@@ -63,6 +70,7 @@ export type DecisionCenterRecordView = {
     sourceNotice?: string;
     createdAt: number;
     history?: Array<{ id: string; label: string; at: number; rationale?: string }>;
+    validation?: AssumptionValidationView;
     preview?: DecisionCenterPreviewView;
 };
 
@@ -82,6 +90,22 @@ interface Props {
         proposalId: string,
         request: { kind: 'missing_info' | 'different_interpretation'; guidance: string },
     ) => void | Promise<void>;
+    onGenerateAssumptionValidationPlan?: (recordId: string) => void;
+    onRecordAssumptionValidationPlan?: (recordId: string, input: AssumptionValidationPlanInput) => void;
+    onAddAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceInput) => void;
+    onInterpretAssumptionEvidence?: (recordId: string) => void;
+    onRecordAssumptionOutcome?: (recordId: string, input: {
+        conclusion: AssumptionEvidenceConclusion;
+        caveats?: string;
+        revisitCondition?: string;
+        sourceInterpretationId?: string;
+        sourceInterpretationContentHash?: string;
+    }) => void;
+    onRecordAssumptionTreatment?: (recordId: string, input: {
+        treatment: AssumptionUncertaintyTreatment;
+        rationale: string;
+        revisitCondition?: string;
+    }) => void;
 }
 
 const needsReview = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
@@ -102,7 +126,16 @@ const evidenceCharacterLabel = {
     direct: 'Direct evidence', supported_inference: 'Supported inference', plausible_inference: 'Plausible inference',
 } as const;
 
-export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan, onReviewAlignmentProposal, onRequestAlignmentProposal }: Props) {
+export function DecisionCenter({
+    records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan,
+    onReviewAlignmentProposal, onRequestAlignmentProposal,
+    onGenerateAssumptionValidationPlan = () => {},
+    onRecordAssumptionValidationPlan = () => {},
+    onAddAssumptionEvidence = () => {},
+    onInterpretAssumptionEvidence = () => {},
+    onRecordAssumptionOutcome = () => {},
+    onRecordAssumptionTreatment = () => {},
+}: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsReview(initialRecord) ? 'needs_review' : 'log') : records.some(needsReview) ? 'needs_review' : 'log');
     const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsReview(record) : !needsReview(record)), [records, view]);
@@ -247,17 +280,33 @@ export function DecisionCenter({ records, initialSelectedId, readOnly, onDecide,
                                 </section>
                             )}
 
+                            {selected.type === 'assumption' && selected.validation && (
+                                <AssumptionValidationPanel
+                                    key={selected.id}
+                                    recordId={selected.id}
+                                    readOnly={readOnly}
+                                    validation={selected.validation}
+                                    hasPlanImpact={Boolean(selected.preview)}
+                                    onGeneratePlan={onGenerateAssumptionValidationPlan}
+                                    onRecordPlan={onRecordAssumptionValidationPlan}
+                                    onAddEvidence={onAddAssumptionEvidence}
+                                    onInterpretEvidence={onInterpretAssumptionEvidence}
+                                    onRecordOutcome={onRecordAssumptionOutcome}
+                                    onRecordTreatment={onRecordAssumptionTreatment}
+                                    onPreviewImpact={onPreviewImpact}
+                                />
+                            )}
+
                             {!readOnly && needsReview(selected) && (
                                 <section className="mt-6 rounded-xl border border-neutral-200 bg-white p-4">
                                     <label className="text-sm font-semibold text-neutral-900" htmlFor="decision-answer">Your answer</label>
-                                    <textarea id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder="Record the product choice in your own words" className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                    <textarea id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder={selected.type === 'assumption' ? 'Explain what should replace this premise' : 'Record the product choice in your own words'} className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <label className="mt-3 block text-xs font-medium text-neutral-600" htmlFor="decision-rationale">Why? (optional)</label>
                                     <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                                        <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('custom', customAnswer.trim())} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>
+                                        {selected.type !== 'assumption' && <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('custom', customAnswer.trim())} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
                                         {selected.type === 'decision' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-emerald-200 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">Confirm decision</button>}
-                                        {selected.type === 'assumption' && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-emerald-200 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">Confirm as true</button>}
-                                        <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>
+                                        {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
                                         <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('reject', customAnswer.trim())} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><X size={14} className="mr-1 inline" /> Reject premise</button>
                                     </div>
                                 </section>
