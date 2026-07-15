@@ -159,7 +159,7 @@ const dateInputTimestamp = (value: string): number | undefined =>
     value ? new Date(`${value}T12:00:00`).getTime() : undefined;
 
 const consequenceWithoutPrefix = (value: string): string =>
-    value.replace(/^\s*if\s+this\s+is\s+wrong\s*[:—–-]?\s*/i, '').trim();
+    value.replace(/^\s*if\s+this\s+is\s+wrong\s*[:,—–-]?\s*/i, '').trim();
 
 const methodEvidenceGuidance = (method: AssumptionValidationMethodKind): string => {
     if (['user_interviews', 'usability_observation', 'prototype'].includes(method)) {

@@ -164,11 +164,11 @@ describe('AssumptionValidationPanel', () => {
     });
 
     it('does not repeat an existing consequence prefix', () => {
-        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} consequence="If this is wrong: onboarding and pricing must change." {...callbacks()} />);
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} consequence="If this is wrong, onboarding and pricing must change." {...callbacks()} />);
 
         const impact = screen.getByRole('region', { name: 'Potential plan impact' });
         expect(impact).toHaveTextContent('If this is wrong: onboarding and pricing must change.');
-        expect(impact).not.toHaveTextContent('If this is wrong: If this is wrong:');
+        expect(impact).not.toHaveTextContent('If this is wrong: If this is wrong,');
     });
 
     it('requires a reason before reopening a current conclusion', () => {
