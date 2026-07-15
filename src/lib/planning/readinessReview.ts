@@ -18,8 +18,8 @@ import {
     READINESS_CRITERIA_VERSION,
     READINESS_REVIEW_SCHEMA_VERSION,
 } from '../../types';
-import { hashEvidenceExcerpt, hashReviewValue, normalizeEvidenceText } from '../review/hash';
-import { buildReviewContextManifest } from '../review/manifest';
+import { hashReviewValue } from '../review/hash';
+import { buildReviewContextManifest, verifyEvidenceRef } from '../review/manifest';
 import { coveragePathSupports, PRODUCT_READINESS_COVERAGE_AREAS } from '../review/coverage';
 import type { ProjectOutputAlignmentSummary } from './outputAlignment';
 import { projectDecision } from './decisionProjection';
@@ -152,6 +152,26 @@ function isSubstantiveChallenge(
         artifacts: [],
         safetyBoundaries: [],
     });
+    const persistedCoverageEvidenceIsCurrent = (
+        specialistId: string,
+        area: NonNullable<SpecialistRun['coverageChecks']>[number]['area'],
+        evidence: NonNullable<SpecialistRun['coverageChecks']>[number]['evidence'][number],
+    ): boolean => {
+        const path = evidence.locator?.jsonPath;
+        if (!evidence.verified
+            || evidence.sourceType !== 'spine'
+            || evidence.sourceId !== input.spine.versionId
+            || evidence.sourceVersionId !== input.spine.versionId
+            || typeof path !== 'string'
+            || !coveragePathSupports(specialistId, area, path)) return false;
+        return verifyEvidenceRef(currentPrdManifest, {
+            sourceKey: `spine:${input.spine.versionId}`,
+            locatorId: evidence.id,
+            path,
+            excerpt: evidence.excerpt ?? '',
+            excerptHash: evidence.excerptHash,
+        }).verified;
+    };
     return run.selectedSpecialists.every(selection => {
         const specialist = latest(specialistRuns.filter(item => (
             item.reviewId === run.id && item.specialistId === selection.specialistId
@@ -165,21 +185,8 @@ function isSubstantiveChallenge(
             check.area === area
             && check.conclusion.trim().length >= 20
             && check.evidence.length > 0
-            && check.evidence.every(evidence => (
-                evidence.verified
-                && evidence.sourceType === 'spine'
-                && evidence.sourceId === input.spine.versionId
-                && evidence.sourceVersionId === input.spine.versionId
-                && typeof evidence.locator?.jsonPath === 'string'
-                && coveragePathSupports(selection.specialistId, check.area, evidence.locator.jsonPath)
-                && currentPrdManifest.locators.some(locator => (
-                    locator.sourceKey === `spine:${input.spine.versionId}`
-                    && locator.id === evidence.id
-                    && locator.path === evidence.locator?.jsonPath
-                    && locator.excerptHash === evidence.excerptHash
-                    && locator.excerptHash === hashEvidenceExcerpt(evidence.excerpt ?? '')
-                    && normalizeEvidenceText(locator.excerpt) === normalizeEvidenceText(evidence.excerpt ?? '')
-                ))
+            && check.evidence.every(evidence => persistedCoverageEvidenceIsCurrent(
+                selection.specialistId, check.area, evidence,
             ))
         )));
         return specialist?.status === 'complete'

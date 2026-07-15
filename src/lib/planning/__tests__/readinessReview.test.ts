@@ -6,7 +6,7 @@ import type {
     SpecialistRun,
     StructuredPRD,
 } from '../../../types';
-import { hashReviewValue } from '../../review/hash';
+import { hashEvidenceExcerpt, hashReviewValue } from '../../review/hash';
 import { buildReviewContextManifest } from '../../review/manifest';
 import type { ProjectOutputAlignmentSummary } from '../outputAlignment';
 import {
@@ -312,6 +312,25 @@ describe('deterministic readiness review', () => {
         expect(deriveReadinessReview(input({
             specialistRuns: [specialistRun({ coverageChecks: fabricated })],
         })).conclusion).toBe('not_ready');
+    });
+
+    it('revalidates a meaningful bounded locator excerpt with the same rules used during challenge execution', () => {
+        const excerpt = 'Teams commit implementation effort before resolving consequential uncertainty.';
+        const boundedCoverage = productCoverageChecks.map(check => check.area === 'problem'
+            ? {
+                ...check,
+                evidence: check.evidence.map(evidence => ({
+                    ...evidence, excerpt, excerptHash: hashEvidenceExcerpt(excerpt),
+                })),
+            }
+            : check);
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ coverageChecks: boundedCoverage })],
+        }));
+        expect(review.conclusion).toBe('ready_to_build');
+        expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({
+            status: 'met', blocking: false,
+        });
     });
 
     it('keeps an earlier exact-current unresolved finding after a newer empty challenge run', () => {
