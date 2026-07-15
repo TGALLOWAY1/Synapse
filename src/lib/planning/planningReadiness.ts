@@ -106,6 +106,10 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
             if (record.type === 'risk') return record.materiality !== 'low';
             if (record.type === 'assumption') return materialOrUnclassified;
         }
+        // User acceptance records authority, not validation. A material
+        // assumption without verified evidence remains implementation risk.
+        if (record.type === 'assumption' && state.status === 'confirmed'
+            && materialOrUnclassified && !record.evidence.some(item => item.verified)) return true;
         // Deferral is a planning choice, not proof that a consequential issue
         // is safe to carry into implementation. Explicitly normal/low items may
         // remain deferred; conflicts and unclassified legacy records may not.

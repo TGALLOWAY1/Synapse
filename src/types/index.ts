@@ -1806,6 +1806,142 @@ export type PlanningRecord = {
     assessments?: DecisionAssessment[];
 };
 
+// --- Deterministic build-readiness review ---------------------------------
+// A readiness review is a persistable, version-pinned explanation of whether
+// the current planning foundation is ready to drive implementation. It is a
+// deterministic projection over existing project state; no model-authored
+// value in this contract can confer user approval.
+
+export const READINESS_REVIEW_SCHEMA_VERSION = 1;
+export const READINESS_CRITERIA_VERSION = 1;
+
+export type ReadinessReviewConclusion = 'ready_to_build' | 'not_ready';
+export type ReadinessReviewCriterionId =
+    | 'problem'
+    | 'user'
+    | 'outcome'
+    | 'scope'
+    | 'decisions'
+    | 'assumptions'
+    | 'risks'
+    | 'plan_alignment'
+    | 'challenge'
+    | 'downstream_alignment';
+
+export type ReadinessCriterionEvidenceQuality = 'direct' | 'inferred' | 'incomplete';
+
+export type ReadinessCriterionEvidence = {
+    id: string;
+    quality: ReadinessCriterionEvidenceQuality;
+    summary: string;
+    sourceType: 'prd' | 'planning_record' | 'challenge' | 'alignment' | 'downstream' | 'generation';
+    sourceId?: string;
+    sourceVersionId?: string;
+    contentHash?: string;
+};
+
+export type ReadinessActionTarget =
+    | { kind: 'prd'; section: 'problem' | 'user' | 'outcome' }
+    | { kind: 'feature'; featureId?: string }
+    | { kind: 'planning_record'; planningRecordId: string }
+    | { kind: 'challenge'; reviewId?: string; issueId?: string }
+    | { kind: 'output'; artifactId: string; nodeId: ArtifactSlotKey };
+
+export type ReadinessReviewCriterion = {
+    id: ReadinessReviewCriterionId;
+    label: string;
+    status: 'met' | 'attention' | 'not_started';
+    blocking: boolean;
+    explanation: string;
+    evidence: ReadinessCriterionEvidence[];
+    actionTarget?: ReadinessActionTarget;
+};
+
+export type ReadinessConcernKind =
+    | 'decision'
+    | 'assumption'
+    | 'conflict'
+    | 'risk'
+    | 'propagation'
+    | 'challenge'
+    | 'downstream'
+    | 'foundation'
+    | 'scope';
+
+export type ReadinessConcernSource = {
+    type: ReadinessCriterionEvidence['sourceType'];
+    sourceId?: string;
+    sourceVersionId?: string;
+};
+
+export type ReadinessReviewConcern = {
+    id: string;
+    criterionId: ReadinessReviewCriterionId;
+    kind: ReadinessConcernKind;
+    title: string;
+    consequence: string;
+    blocking: boolean;
+    evidenceQuality: ReadinessCriterionEvidenceQuality;
+    source: ReadinessConcernSource;
+    actionTarget: ReadinessActionTarget;
+};
+
+export type ReadinessReviewSnapshotHashes = {
+    spineIdentity: string;
+    spineContent: string;
+    planningState: string;
+    challenge: string;
+    alignment: string;
+    downstream: string;
+    aggregate: string;
+};
+
+export type ReadinessReview = {
+    id: string;
+    projectId: string;
+    schemaVersion: typeof READINESS_REVIEW_SCHEMA_VERSION;
+    criteriaVersion: typeof READINESS_CRITERIA_VERSION;
+    conclusion: ReadinessReviewConclusion;
+    spineVersionId: string;
+    snapshotHashes: ReadinessReviewSnapshotHashes;
+    criteria: ReadinessReviewCriterion[];
+    concerns: ReadinessReviewConcern[];
+    caveats: string[];
+    createdAt: number;
+    /** Hash of every persisted field above. Recomputed locally on restore. */
+    integrityHash: string;
+};
+
+type ReadinessCommitmentEventBase = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    actor: 'user';
+    at: number;
+    spineVersionId: string;
+    /** Exact immutable review snapshot the event authorizes or references. */
+    snapshotHash: string;
+    integrityHash: string;
+    aggregateHash: string;
+};
+
+export type ReadinessCommitmentEvent =
+    | (ReadinessCommitmentEventBase & {
+        type: 'commit_authorized';
+        acceptedConcernIds: string[];
+        rationale: string;
+        containmentPlan?: string;
+    })
+    | (ReadinessCommitmentEventBase & {
+        type: 'plan_committed';
+        authorizationEventId: string;
+    })
+    | (ReadinessCommitmentEventBase & {
+        type: 'plan_reopened';
+        priorCommitEventId: string;
+        reason?: string;
+    });
+
 // --- Persisted implementation tasks --------------------------------------
 // `ImplementationTask` (src/types/tasks.ts) is the *transient* extraction
 // shape produced from an Implementation Plan. `ProjectTask` is its persisted
@@ -2060,7 +2196,10 @@ export type HistoryEventType =
     | 'GenerationFailed'
     | 'Edited'
     | 'Reverted'
-    | 'MarkedCurrent';
+    | 'MarkedCurrent'
+    | 'ReadinessReviewed'
+    | 'PlanCommitted'
+    | 'PlanReopened';
 
 // --- Version provenance ----------------------------------------------------
 // Attribution for "who/what produced this version". Attached to both
@@ -2090,6 +2229,7 @@ export type HistoryEvent = {
     spineVersionId?: string;
     artifactId?: string;
     artifactVersionId?: string;
+    readinessReviewId?: string;
     type: HistoryEventType;
     description: string;
     diff?: {

@@ -1,0 +1,458 @@
+import type {
+    PlanningRecord,
+    ReadinessActionTarget,
+    ReadinessConcernKind,
+    ReadinessCriterionEvidence,
+    ReadinessReview,
+    ReadinessReviewConcern,
+    ReadinessReviewCriterion,
+    ReadinessReviewCriterionId,
+    ReadinessReviewSnapshotHashes,
+    ReviewIssue,
+    ReviewRun,
+    SpecialistRun,
+    StructuredPRD,
+} from '../../types';
+import {
+    READINESS_CRITERIA_VERSION,
+    READINESS_REVIEW_SCHEMA_VERSION,
+} from '../../types';
+import { hashReviewValue } from '../review/hash';
+import type { ProjectOutputAlignmentSummary } from './outputAlignment';
+import { projectDecision } from './decisionProjection';
+import {
+    derivePlanningReadiness,
+    planningRecordNeedsAlignment,
+    reviewIssueNeedsResolutionBeforeBuild,
+} from './planningReadiness';
+
+export type ReadinessReviewInput = {
+    projectId: string;
+    spine: {
+        versionId: string;
+        content: string;
+        structuredPRD?: StructuredPRD;
+        incompleteSectionCount?: number;
+        isCommitted?: boolean;
+    };
+    planningRecords: PlanningRecord[];
+    reviewRuns: ReviewRun[];
+    specialistRuns: SpecialistRun[];
+    reviewIssues: ReviewIssue[];
+    outputAlignment: ProjectOutputAlignmentSummary;
+    /** Exact preferred output identities at assessment time. Content hashes
+     * use the same review hash as challenge manifests. */
+    currentArtifactRefs?: Array<{
+        artifactId: string;
+        artifactVersionId: string;
+        contentHash: string;
+    }>;
+    currentChallengeContextSignature?: string;
+    createdAt?: number;
+};
+
+export type ReadinessReviewCurrentnessReason =
+    | 'integrity_mismatch'
+    | 'schema_changed'
+    | 'criteria_changed'
+    | 'spine_identity_changed'
+    | 'spine_content_changed'
+    | 'planning_state_changed'
+    | 'challenge_changed'
+    | 'alignment_changed'
+    | 'downstream_changed';
+
+export type ReadinessReviewCurrentness = {
+    current: boolean;
+    historical: boolean;
+    integrityValid: boolean;
+    reasons: ReadinessReviewCurrentnessReason[];
+};
+
+const byId = <T extends { id: string }>(items: T[]): T[] =>
+    [...items].sort((a, b) => a.id.localeCompare(b.id));
+
+const evidenceId = (criterionId: ReadinessReviewCriterionId, sourceId: string, summary: string): string =>
+    `readiness-evidence-${hashReviewValue({ criterionId, sourceId, summary })}`;
+
+const concernId = (
+    criterionId: ReadinessReviewCriterionId,
+    kind: ReadinessConcernKind,
+    sourceId: string,
+    consequence: string,
+): string => `readiness-concern-${hashReviewValue({ criterionId, kind, sourceId, consequence })}`;
+
+const isMaterial = (record: PlanningRecord): boolean =>
+    record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high';
+
+const recordNeedsResolution = (record: PlanningRecord): boolean => {
+    const status = projectDecision(record).status;
+    if (status === 'open' || status === 'proposed') {
+        if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
+        if (record.type === 'risk') return record.materiality !== 'low';
+        if (record.type === 'assumption') return isMaterial(record);
+    }
+    if (status === 'deferred') {
+        if (record.type === 'conflict') return true;
+        if (record.type === 'decision' || record.type === 'open_question' || record.type === 'risk' || record.type === 'assumption') {
+            return isMaterial(record);
+        }
+    }
+    return record.sourceState === 'changed' || record.sourceState === 'missing';
+};
+
+const isAcceptedUnvalidatedAssumption = (record: PlanningRecord): boolean =>
+    record.type === 'assumption'
+    && projectDecision(record).status === 'confirmed'
+    && isMaterial(record)
+    && !record.evidence.some(item => item.verified);
+
+const latest = <T extends { createdAt: number; completedAt?: number }>(items: T[]): T | undefined =>
+    [...items].sort((a, b) => (b.completedAt ?? b.createdAt) - (a.completedAt ?? a.createdAt))[0];
+
+function exactChallengeRuns(input: ReadinessReviewInput, spineContentHash: string): ReviewRun[] {
+    return input.reviewRuns.filter(run => (
+        run.sourceManifest.spineVersionId === input.spine.versionId
+        && run.sourceManifest.spineContentHash === spineContentHash
+        && (!input.currentChallengeContextSignature
+            || run.sourceManifest.contextSignature === input.currentChallengeContextSignature)
+        && run.sourceManifest.artifactRefs.every(reviewed => input.currentArtifactRefs?.some(current => (
+            current.artifactId === reviewed.artifactId
+            && current.artifactVersionId === reviewed.artifactVersionId
+            && current.contentHash === reviewed.contentHash
+        )) === true)
+    ));
+}
+
+function isSubstantiveChallenge(run: ReviewRun, specialistRuns: SpecialistRun[]): boolean {
+    if (run.scope.kind !== 'project' || run.status !== 'complete' || run.synthesisStatus !== 'complete') return false;
+    if (!run.selectedSpecialists.some(item => item.specialistId === 'product_scope')) return false;
+    if (run.selectedSpecialists.length === 0) return false;
+    return run.selectedSpecialists.every(selection => {
+        const specialist = latest(specialistRuns.filter(item => (
+            item.reviewId === run.id && item.specialistId === selection.specialistId
+        )));
+        return specialist?.status === 'complete'
+            && specialist.validation?.valid === true
+            && Boolean(specialist.coverageSummary?.trim());
+    });
+}
+
+export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
+    const spineContentHash = hashReviewValue(input.spine.content);
+    const exactRuns = exactChallengeRuns(input, spineContentHash);
+    const substantive = latest(exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns)));
+    const shallow = latest(exactRuns);
+    const blockingIssues = substantive
+        ? input.reviewIssues.filter(issue => {
+            if (issue.reviewId !== substantive.id) return false;
+            if (reviewIssueNeedsResolutionBeforeBuild(issue, input.spine.versionId)) return true;
+            if (issue.implementationImpact === 'deferrable' || issue.status !== 'acted') return false;
+            // A dangling or still-open linked record is not resolution. Fail
+            // closed instead of allowing a relationship id to manufacture it.
+            return issue.relatedPlanningRecordIds.some(id => {
+                const linked = input.planningRecords.find(record => record.id === id);
+                return !linked || recordNeedsResolution(linked);
+            });
+        })
+        : [];
+    return { substantive, shallow, blockingIssues };
+}
+
+function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): ReadinessReviewSnapshotHashes {
+    const spineIdentity = hashReviewValue({ projectId: input.projectId, spineVersionId: input.spine.versionId });
+    const spineContent = hashReviewValue(input.spine.content);
+    const planningState = hashReviewValue({
+        prd: input.spine.structuredPRD,
+        incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
+        records: byId(input.planningRecords),
+    });
+    const challenge = hashReviewValue({
+        runs: byId(input.reviewRuns),
+        specialists: byId(input.specialistRuns),
+        issues: byId(input.reviewIssues),
+        currentArtifactRefs: [...(input.currentArtifactRefs ?? [])].sort((a, b) => (
+            a.artifactId.localeCompare(b.artifactId)
+            || a.artifactVersionId.localeCompare(b.artifactVersionId)
+        )),
+        currentChallengeContextSignature: input.currentChallengeContextSignature,
+    });
+    const alignment = hashReviewValue(byId(input.planningRecords.filter(planningRecordNeedsAlignment)));
+    const downstream = hashReviewValue({
+        ...input.outputAlignment,
+        outputs: [...input.outputAlignment.outputs].sort((a, b) => a.artifactId.localeCompare(b.artifactId)),
+        artifactRefs: [...(input.currentArtifactRefs ?? [])].sort((a, b) => (
+            a.artifactId.localeCompare(b.artifactId)
+            || a.artifactVersionId.localeCompare(b.artifactVersionId)
+        )),
+    });
+    const aggregate = hashReviewValue({
+        schemaVersion: READINESS_REVIEW_SCHEMA_VERSION,
+        criteriaVersion,
+        spineIdentity,
+        spineContent,
+        planningState,
+        challenge,
+        alignment,
+        downstream,
+    });
+    return { spineIdentity, spineContent, planningState, challenge, alignment, downstream, aggregate };
+}
+
+const makeEvidence = (
+    criterionId: ReadinessReviewCriterionId,
+    quality: ReadinessCriterionEvidence['quality'],
+    summary: string,
+    sourceType: ReadinessCriterionEvidence['sourceType'],
+    sourceId: string,
+    sourceVersionId?: string,
+    contentHash?: string,
+): ReadinessCriterionEvidence => ({
+    id: evidenceId(criterionId, sourceId, summary),
+    quality,
+    summary,
+    sourceType,
+    sourceId,
+    sourceVersionId,
+    contentHash,
+});
+
+const makeConcern = (input: {
+    criterionId: ReadinessReviewCriterionId;
+    kind: ReadinessConcernKind;
+    title: string;
+    consequence: string;
+    blocking: boolean;
+    evidenceQuality: ReadinessReviewConcern['evidenceQuality'];
+    sourceType: ReadinessReviewConcern['source']['type'];
+    sourceId: string;
+    sourceVersionId?: string;
+    actionTarget: ReadinessActionTarget;
+}): ReadinessReviewConcern => ({
+    id: concernId(input.criterionId, input.kind, input.sourceId, input.consequence),
+    criterionId: input.criterionId,
+    kind: input.kind,
+    title: input.title,
+    consequence: input.consequence,
+    blocking: input.blocking,
+    evidenceQuality: input.evidenceQuality,
+    source: { type: input.sourceType, sourceId: input.sourceId, sourceVersionId: input.sourceVersionId },
+    actionTarget: input.actionTarget,
+});
+
+function reviewPayload(review: Omit<ReadinessReview, 'integrityHash'>): unknown {
+    return review;
+}
+
+function expectedAggregate(review: ReadinessReview): string {
+    const hashes = review.snapshotHashes;
+    return hashReviewValue({
+        schemaVersion: review.schemaVersion,
+        criteriaVersion: review.criteriaVersion,
+        spineIdentity: hashes.spineIdentity,
+        spineContent: hashes.spineContent,
+        planningState: hashes.planningState,
+        challenge: hashes.challenge,
+        alignment: hashes.alignment,
+        downstream: hashes.downstream,
+    });
+}
+
+export function validateReadinessReviewIntegrity(review: ReadinessReview): boolean {
+    const { integrityHash, ...payload } = review;
+    return review.snapshotHashes.aggregate === expectedAggregate(review)
+        && integrityHash === hashReviewValue(reviewPayload(payload));
+}
+
+export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessReview {
+    const hashes = snapshotHashes(input, READINESS_CRITERIA_VERSION);
+    const challenge = deriveReadinessChallengeState(input);
+    const base = derivePlanningReadiness({
+        prd: input.spine.structuredPRD,
+        planningRecords: input.planningRecords,
+        incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
+        hasCurrentChallenge: Boolean(challenge.substantive),
+        blockingReviewIssueCount: challenge.blockingIssues.length,
+        generatedOutputCount: input.outputAlignment.outputs.length,
+        staleOutputCount: input.outputAlignment.blockingCount,
+        isCommitted: input.spine.isCommitted,
+    });
+
+    const concerns: ReadinessReviewConcern[] = [];
+    const criteria: ReadinessReviewCriterion[] = [];
+    const baseById = new Map(base.criteria.map(item => [item.id, item]));
+    const foundation = [
+        ['problem', 'problem'] as const,
+        ['user', 'user'] as const,
+        ['outcome', 'outcome'] as const,
+    ];
+    for (const [id, section] of foundation) {
+        const source = baseById.get(id)!;
+        const blocking = source.status !== 'met';
+        const summary = blocking ? source.explanation : `Current PRD evidence supports ${source.label.toLowerCase()}.`;
+        const evidence = makeEvidence(id, blocking ? 'incomplete' : 'direct', summary, 'prd', section, input.spine.versionId, hashes.spineContent);
+        const actionTarget: ReadinessActionTarget = { kind: 'prd', section };
+        criteria.push({ ...source, id, blocking, evidence: [evidence], actionTarget: blocking ? actionTarget : undefined });
+        if (blocking) concerns.push(makeConcern({
+            criterionId: id, kind: 'foundation', title: source.label, consequence: source.explanation,
+            blocking: true, evidenceQuality: 'incomplete', sourceType: 'prd', sourceId: section,
+            sourceVersionId: input.spine.versionId, actionTarget,
+        }));
+    }
+
+    const scopeSource = baseById.get('scope')!;
+    const firstUnconfirmed = input.spine.structuredPRD?.features.find(feature => (
+        (feature.tier === 'mvp' || feature.tier === undefined) && !feature.confirmed
+    ));
+    const scopeBlocking = scopeSource.status !== 'met';
+    const scopeTarget: ReadinessActionTarget = { kind: 'feature', featureId: firstUnconfirmed?.id };
+    criteria.push({
+        ...scopeSource, id: 'scope', blocking: scopeBlocking,
+        evidence: [makeEvidence('scope', scopeBlocking ? 'incomplete' : 'direct', scopeSource.explanation, 'prd', firstUnconfirmed?.id ?? 'features', input.spine.versionId, hashes.spineContent)],
+        actionTarget: scopeBlocking ? scopeTarget : undefined,
+    });
+    if (scopeBlocking) concerns.push(makeConcern({
+        criterionId: 'scope', kind: 'scope', title: scopeSource.label, consequence: scopeSource.explanation,
+        blocking: true, evidenceQuality: 'incomplete', sourceType: 'prd', sourceId: firstUnconfirmed?.id ?? 'features',
+        sourceVersionId: input.spine.versionId, actionTarget: scopeTarget,
+    }));
+
+    const recordGroups: Array<{ id: 'decisions' | 'assumptions' | 'risks'; records: PlanningRecord[] }> = [
+        { id: 'decisions', records: input.planningRecords.filter(record => record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') },
+        { id: 'assumptions', records: input.planningRecords.filter(record => record.type === 'assumption') },
+        { id: 'risks', records: input.planningRecords.filter(record => record.type === 'risk') },
+    ];
+    const acceptedUnvalidated = input.planningRecords.filter(isAcceptedUnvalidatedAssumption);
+    for (const group of recordGroups) {
+        const unresolved = group.records.filter(record => recordNeedsResolution(record)
+            || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record)));
+        const blocking = unresolved.length > 0;
+        const label = group.id === 'decisions' ? 'Material choices resolved' : group.id === 'assumptions' ? 'Material assumptions validated' : 'Material risks addressed';
+        const explanation = blocking ? `${unresolved.length} material ${group.id} item${unresolved.length === 1 ? '' : 's'} still needs attention.` : `${label}.`;
+        const evidence = unresolved.length > 0
+            ? unresolved.map(record => makeEvidence(group.id, 'incomplete', record.title, 'planning_record', record.id, record.sources?.[0]?.sourceVersionId))
+            : [makeEvidence(group.id, challenge.substantive ? 'direct' : 'inferred', explanation, 'planning_record', `${group.id}:none`)];
+        const actionTarget = unresolved[0] ? { kind: 'planning_record' as const, planningRecordId: unresolved[0].id } : undefined;
+        criteria.push({ id: group.id, label, status: blocking ? 'attention' : 'met', blocking, explanation, evidence, actionTarget });
+        for (const record of unresolved) {
+            const kind: ReadinessConcernKind = record.type === 'conflict' ? 'conflict'
+                : record.type === 'assumption' ? 'assumption' : record.type === 'risk' ? 'risk' : 'decision';
+            concerns.push(makeConcern({
+                criterionId: group.id, kind, title: record.title,
+                consequence: isAcceptedUnvalidatedAssumption(record) ? 'The user accepted this material assumption, but no verified evidence validates it.' : record.statement,
+                blocking: true, evidenceQuality: 'incomplete', sourceType: 'planning_record', sourceId: record.id,
+                sourceVersionId: record.sources?.[0]?.sourceVersionId,
+                actionTarget: { kind: 'planning_record', planningRecordId: record.id },
+            }));
+        }
+    }
+
+    const propagationRecords = input.planningRecords.filter(planningRecordNeedsAlignment);
+    const propagationBlocking = propagationRecords.length > 0;
+    const propagationExplanation = propagationBlocking
+        ? `${propagationRecords.length} resolved choice${propagationRecords.length === 1 ? '' : 's'} still needs plan propagation.`
+        : 'Resolved choices are reflected in the current plan.';
+    criteria.push({
+        id: 'plan_alignment', label: 'Decisions propagated into the plan', status: propagationBlocking ? 'attention' : 'met',
+        blocking: propagationBlocking, explanation: propagationExplanation,
+        evidence: propagationRecords.length
+            ? propagationRecords.map(record => makeEvidence('plan_alignment', 'incomplete', record.title, 'alignment', record.id))
+            : [makeEvidence('plan_alignment', 'direct', propagationExplanation, 'alignment', 'current')],
+        actionTarget: propagationRecords[0] ? { kind: 'planning_record', planningRecordId: propagationRecords[0].id } : undefined,
+    });
+    for (const record of propagationRecords) concerns.push(makeConcern({
+        criterionId: 'plan_alignment', kind: 'propagation', title: record.title,
+        consequence: 'The recorded verdict and current plan are not yet demonstrably aligned.', blocking: true,
+        evidenceQuality: 'incomplete', sourceType: 'alignment', sourceId: record.id,
+        actionTarget: { kind: 'planning_record', planningRecordId: record.id },
+    }));
+
+    const challengeBlocking = !challenge.substantive || challenge.blockingIssues.length > 0;
+    const challengeExplanation = !challenge.substantive
+        ? 'No current, substantive project challenge has complete validated specialist coverage.'
+        : challenge.blockingIssues.length > 0
+            ? `${challenge.blockingIssues.length} consequential challenge finding${challenge.blockingIssues.length === 1 ? '' : 's'} remains.`
+            : 'The exact current plan has complete, validated project-scope challenge coverage.';
+    const challengeTarget = { kind: 'challenge' as const, reviewId: challenge.shallow?.id };
+    criteria.push({
+        id: 'challenge', label: 'Current plan challenged', status: !challenge.substantive ? 'not_started' : challengeBlocking ? 'attention' : 'met',
+        blocking: challengeBlocking, explanation: challengeExplanation,
+        evidence: [makeEvidence('challenge', challengeBlocking ? 'incomplete' : 'direct', challengeExplanation, 'challenge', challenge.substantive?.id ?? challenge.shallow?.id ?? 'missing', input.spine.versionId, hashes.challenge)],
+        actionTarget: challengeBlocking ? challengeTarget : undefined,
+    });
+    if (!challenge.substantive) concerns.push(makeConcern({
+        criterionId: 'challenge', kind: 'challenge', title: 'Run a substantive planning challenge', consequence: challengeExplanation,
+        blocking: true, evidenceQuality: 'incomplete', sourceType: 'challenge', sourceId: challenge.shallow?.id ?? 'missing',
+        sourceVersionId: input.spine.versionId, actionTarget: challengeTarget,
+    }));
+    for (const issue of challenge.blockingIssues) concerns.push(makeConcern({
+        criterionId: 'challenge', kind: issue.kind === 'risk' ? 'risk' : issue.kind === 'contradiction' ? 'conflict' : 'challenge',
+        title: issue.title, consequence: issue.summary, blocking: true, evidenceQuality: 'direct', sourceType: 'challenge',
+        sourceId: issue.id, sourceVersionId: input.spine.versionId,
+        actionTarget: { kind: 'challenge', reviewId: issue.reviewId, issueId: issue.id },
+    }));
+
+    const blockingOutputs = input.outputAlignment.outputs.filter(output => output.blocksBuildReadiness);
+    const outputCaveats = input.outputAlignment.outputs.filter(output => output.state === 'possibly_affected' && !output.blocksBuildReadiness);
+    const downstreamBlocking = blockingOutputs.length > 0;
+    const downstreamExplanation = downstreamBlocking
+        ? `${blockingOutputs.length} downstream output${blockingOutputs.length === 1 ? '' : 's'} requires alignment.`
+        : outputCaveats.length > 0 ? 'No output blocks implementation, but some remain possibly affected.'
+            : input.outputAlignment.outputs.length === 0 ? 'No downstream output exists; this does not reduce planning readiness.'
+                : 'Downstream outputs are aligned with the current plan.';
+    criteria.push({
+        id: 'downstream_alignment', label: 'Downstream outputs aligned', status: downstreamBlocking ? 'attention' : input.outputAlignment.outputs.length === 0 ? 'not_started' : 'met',
+        blocking: downstreamBlocking, explanation: downstreamExplanation,
+        evidence: input.outputAlignment.outputs.length === 0
+            ? [makeEvidence('downstream_alignment', 'direct', downstreamExplanation, 'downstream', 'none')]
+            : input.outputAlignment.outputs.map(output => makeEvidence('downstream_alignment', output.blocksBuildReadiness ? 'incomplete' : output.state === 'possibly_affected' ? 'inferred' : 'direct', output.summary, 'downstream', output.artifactId, output.generatedFromSpineId)),
+        actionTarget: blockingOutputs[0] ? { kind: 'output', artifactId: blockingOutputs[0].artifactId, nodeId: blockingOutputs[0].nodeId } : undefined,
+    });
+    for (const output of [...blockingOutputs, ...outputCaveats]) concerns.push(makeConcern({
+        criterionId: 'downstream_alignment', kind: 'downstream', title: output.title, consequence: output.summary,
+        blocking: output.blocksBuildReadiness, evidenceQuality: output.blocksBuildReadiness ? 'incomplete' : 'inferred',
+        sourceType: 'downstream', sourceId: output.artifactId, sourceVersionId: output.generatedFromSpineId,
+        actionTarget: { kind: 'output', artifactId: output.artifactId, nodeId: output.nodeId },
+    }));
+
+    const caveats = outputCaveats.map(output => `${output.title}: ${output.summary}`);
+    const conclusion = base.isReadyToBuild && acceptedUnvalidated.length === 0 && !criteria.some(item => item.blocking)
+        ? 'ready_to_build' as const : 'not_ready' as const;
+    const createdAt = input.createdAt ?? Date.now();
+    const withoutIntegrity: Omit<ReadinessReview, 'integrityHash'> = {
+        id: `readiness-review-${hashReviewValue({ aggregate: hashes.aggregate, createdAt })}`,
+        projectId: input.projectId,
+        schemaVersion: READINESS_REVIEW_SCHEMA_VERSION,
+        criteriaVersion: READINESS_CRITERIA_VERSION,
+        conclusion,
+        spineVersionId: input.spine.versionId,
+        snapshotHashes: hashes,
+        criteria,
+        concerns,
+        caveats,
+        createdAt,
+    };
+    return { ...withoutIntegrity, integrityHash: hashReviewValue(reviewPayload(withoutIntegrity)) };
+}
+
+export function compareReadinessReviewCurrentness(
+    review: ReadinessReview,
+    input: ReadinessReviewInput,
+    options: { criteriaVersion?: number; schemaVersion?: number } = {},
+): ReadinessReviewCurrentness {
+    const criteriaVersion = options.criteriaVersion ?? READINESS_CRITERIA_VERSION;
+    const schemaVersion = options.schemaVersion ?? READINESS_REVIEW_SCHEMA_VERSION;
+    const current = snapshotHashes(input, criteriaVersion);
+    const reasons: ReadinessReviewCurrentnessReason[] = [];
+    const integrityValid = validateReadinessReviewIntegrity(review);
+    if (!integrityValid) reasons.push('integrity_mismatch');
+    if (review.schemaVersion !== schemaVersion) reasons.push('schema_changed');
+    if (review.criteriaVersion !== criteriaVersion) reasons.push('criteria_changed');
+    if (review.snapshotHashes.spineIdentity !== current.spineIdentity) reasons.push('spine_identity_changed');
+    if (review.snapshotHashes.spineContent !== current.spineContent) reasons.push('spine_content_changed');
+    if (review.snapshotHashes.planningState !== current.planningState) reasons.push('planning_state_changed');
+    if (review.snapshotHashes.challenge !== current.challenge) reasons.push('challenge_changed');
+    if (review.snapshotHashes.alignment !== current.alignment) reasons.push('alignment_changed');
+    if (review.snapshotHashes.downstream !== current.downstream) reasons.push('downstream_changed');
+    return { current: reasons.length === 0, historical: reasons.length > 0 && integrityValid, integrityValid, reasons };
+}
