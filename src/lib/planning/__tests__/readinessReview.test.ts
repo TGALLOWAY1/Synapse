@@ -125,6 +125,21 @@ describe('deterministic readiness review', () => {
         ]));
     });
 
+    it('allows a superseded choice only when its durable replacement is resolved', () => {
+        const superseded = record({
+            id: 'superseded', type: 'decision', status: 'confirmed', materiality: 'high', schemaVersion: 1,
+            sourceState: 'changed',
+            events: [{ id: 'superseded-event', planningRecordId: 'superseded', type: 'superseded', actor: 'user', at: 2, supersededById: 'replacement' }],
+        });
+        const replacement = record({
+            id: 'replacement', type: 'decision', status: 'confirmed', materiality: 'high', schemaVersion: 1,
+            events: [{ id: 'replacement-answer', planningRecordId: 'replacement', type: 'custom_answered', actor: 'user', at: 3, answer: 'Use the replacement direction.' }],
+        });
+        const review = deriveReadinessReview(input({ planningRecords: [superseded, replacement] }));
+        expect(review.criteria.find(item => item.id === 'decisions')).toMatchObject({ blocking: false });
+        expect(review.concerns.some(item => item.source.sourceId === 'superseded')).toBe(false);
+    });
+
     it('fails closed for a material legacy verdict without durable user provenance', () => {
         const legacy = record({
             id: 'legacy', type: 'decision', status: 'confirmed', resolution: 'Web first',
@@ -194,6 +209,20 @@ describe('deterministic readiness review', () => {
         expect(review.conclusion).toBe('not_ready');
         expect(review.concerns).toEqual(expect.arrayContaining([
             expect.objectContaining({ source: expect.objectContaining({ sourceId: 'issue-1' }) }),
+        ]));
+    });
+
+    it('blocks a consequential specialist finding that never entered durable issue triage', () => {
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ findingIds: ['orphan-finding'] })],
+            reviewIssues: [],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({
+                title: 'Untriaged challenge finding',
+                source: expect.objectContaining({ sourceId: 'orphan-finding' }),
+            }),
         ]));
     });
 
@@ -289,12 +318,41 @@ describe('deterministic readiness review', () => {
         expect(comparison.current).toBe(false);
     });
 
+    it('binds challenge freshness to applicable runs without invalidating on unrelated history', () => {
+        const review = deriveReadinessReview(input());
+        const unrelated = reviewRun({
+            id: 'review-old-spine',
+            sourceManifest: {
+                spineVersionId: 'spine-old', spineContentHash: 'old-content', artifactRefs: [],
+                capturedAt: 1, contextSignature: 'old-context',
+            },
+        });
+        const comparison = compareReadinessReviewCurrentness(review, input({
+            reviewRuns: [reviewRun(), unrelated],
+            specialistRuns: [
+                specialistRun(),
+                specialistRun({ id: 'specialist-old', reviewId: 'review-old-spine' }),
+            ],
+        }));
+        expect(comparison.current).toBe(true);
+        expect(comparison.reasons).not.toContain('challenge_changed');
+    });
+
     it('fails closed when a persisted review is tampered', () => {
         const review = deriveReadinessReview(input());
         const tampered = { ...review, conclusion: 'not_ready' as const };
         expect(validateReadinessReviewIntegrity(tampered)).toBe(false);
         expect(compareReadinessReviewCurrentness(tampered, input())).toMatchObject({
             current: false, historical: false, integrityValid: false,
+        });
+    });
+
+    it('preserves integrity through the JSON persistence boundary', () => {
+        const review = deriveReadinessReview(input());
+        const restored = JSON.parse(JSON.stringify(review)) as typeof review;
+        expect(validateReadinessReviewIntegrity(restored)).toBe(true);
+        expect(compareReadinessReviewCurrentness(restored, input())).toMatchObject({
+            current: true, historical: false, integrityValid: true,
         });
     });
 });

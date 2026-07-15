@@ -42,7 +42,7 @@ export function FinalizationSuccessModal({
                     <CheckCircle2 size={30} className="text-green-600" />
                 </div>
                 <h2 id="finalize-success-title" className="text-xl font-bold mb-2">
-                    {readyToBuild ? 'Plan committed' : 'Working plan committed with open questions'}
+                    {readyToBuild ? 'Plan committed' : 'Committed with open questions'}
                 </h2>
                 <p className="text-neutral-600 text-sm mb-6 flex items-center justify-center gap-1.5">
                     {assetsBuilding ? (

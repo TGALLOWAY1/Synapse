@@ -4,6 +4,7 @@ import type { PlanningReadiness } from '../../lib/planning';
 interface Props {
     readiness: PlanningReadiness;
     committed: boolean;
+    legacyCommitted?: boolean;
     onNextAction: () => void;
     onReviewReadiness: () => void;
     onOpenDecisions: () => void;
@@ -18,7 +19,7 @@ const phaseTone: Record<PlanningReadiness['phase'], string> = {
     ready_to_build: 'border-emerald-200 bg-emerald-50 text-emerald-950',
 };
 
-export function PlanningStateBar({ readiness, committed, onNextAction, onReviewReadiness, onOpenDecisions, onOpenChallenge }: Props) {
+export function PlanningStateBar({ readiness, committed, legacyCommitted = false, onNextAction, onReviewReadiness, onOpenDecisions, onOpenChallenge }: Props) {
     const nextGoesToChallenge = readiness.nextAction.kind === 'challenge_plan';
     return (
         <section className={`mb-5 rounded-2xl border p-4 sm:p-5 ${phaseTone[readiness.phase]}`} aria-labelledby="planning-state-heading">
@@ -26,10 +27,12 @@ export function PlanningStateBar({ readiness, committed, onNextAction, onReviewR
                 <div className="min-w-0">
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-1 text-[11px] font-bold uppercase tracking-wider">
-                            {committed ? <CheckCircle2 size={12} /> : <Compass size={12} />}
-                            {committed
-                                ? readiness.isReadyToBuild ? 'Committed foundation' : 'Committed with open questions'
-                                : 'Working plan'}
+                            {committed || legacyCommitted ? <CheckCircle2 size={12} /> : <Compass size={12} />}
+                            {legacyCommitted
+                                ? 'Legacy commitment · readiness not recorded'
+                                : committed
+                                    ? readiness.isReadyToBuild ? 'Plan committed' : 'Committed with open questions'
+                                    : 'Working plan'}
                         </span>
                         {readiness.unresolvedCount > 0 && <span className="text-xs font-semibold">{readiness.unresolvedCount} unresolved</span>}
                         {readiness.conflictCount > 0 && <span className="text-xs font-semibold">{readiness.conflictCount} conflict{readiness.conflictCount === 1 ? '' : 's'}</span>}

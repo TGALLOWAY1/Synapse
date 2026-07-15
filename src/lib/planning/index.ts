@@ -7,3 +7,4 @@ export * from './complexTargetReasoning';
 export * from './outputAlignment';
 export * from './readinessReview';
 export * from './readinessCommitment';
+export * from './readinessReviewComparison';

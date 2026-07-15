@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertTriangle,
     ArrowRight,
@@ -41,6 +41,7 @@ export type ReadinessCheckpointCommitmentView = {
     rationale?: string;
     containment?: string;
     acceptedConcernCount?: number;
+    reopenedAt?: number;
 };
 
 export type ReadinessCheckpointView = {
@@ -49,11 +50,13 @@ export type ReadinessCheckpointView = {
     capturedAt: number;
     conclusion: 'ready_to_build' | 'not_ready';
     isCurrent: boolean;
+    integrityValid: boolean;
     currentnessReasons?: string[];
     concerns: ReadinessCheckpointConcernView[];
     criteria: ReadinessCheckpointCriterionView[];
     caveats: string[];
     commitment?: ReadinessCheckpointCommitmentView;
+    priorCommitment?: ReadinessCheckpointCommitmentView;
     comparisonSummary?: string[];
 };
 
@@ -97,6 +100,8 @@ export function ReadinessCheckpoint({
     const [rationale, setRationale] = useState('');
     const [containment, setContainment] = useState('');
     const [attemptedSubmit, setAttemptedSubmit] = useState(false);
+    const overrideSectionRef = useRef<HTMLElement>(null);
+    const rationaleRef = useRef<HTMLTextAreaElement>(null);
 
     const requiresContainment = useMemo(
         () => review.concerns.some(concern => concern.severity === 'blocker'),
@@ -105,8 +110,18 @@ export function ReadinessCheckpoint({
     const rationaleValid = rationale.trim().length >= MIN_RATIONALE_LENGTH;
     const containmentValid = !requiresContainment || containment.trim().length >= MIN_RATIONALE_LENGTH;
     const nextConcern = review.concerns[0];
-    const historical = readOnly || !review.isCurrent;
+    const historical = readOnly || !review.isCurrent || !review.integrityValid;
     const ready = review.conclusion === 'ready_to_build';
+
+    useEffect(() => {
+        if (!showOverride) return;
+        window.requestAnimationFrame(() => {
+            if (typeof overrideSectionRef.current?.scrollIntoView === 'function') {
+                overrideSectionRef.current.scrollIntoView({ block: 'start', behavior: 'smooth' });
+            }
+            rationaleRef.current?.focus({ preventScroll: true });
+        });
+    }, [showOverride]);
 
     const submitOverride = () => {
         setAttemptedSubmit(true);
@@ -117,10 +132,20 @@ export function ReadinessCheckpoint({
         });
     };
 
-    const outcomeLabel = review.commitment?.kind === 'with_open_questions'
+    const outcomeLabel = !review.integrityValid
+        ? 'Checkpoint unverifiable'
+        : !review.isCurrent
+            ? review.commitment?.kind === 'with_open_questions'
+                ? 'Previously committed with open questions'
+                : review.commitment?.kind === 'ready'
+                    ? 'Previously committed'
+                    : ready
+                        ? 'Previously ready to build'
+                        : 'Previously not ready'
+        : review.commitment?.kind === 'with_open_questions'
         ? 'Committed with open questions'
         : review.commitment?.kind === 'ready'
-            ? 'Committed foundation'
+            ? 'Plan committed'
             : ready
                 ? 'Ready to build'
                 : 'Not ready';
@@ -145,7 +170,11 @@ export function ReadinessCheckpoint({
                             <span>Readiness checkpoint</span>
                             <span aria-hidden="true">·</span>
                             <span>{review.versionLabel}</span>
-                            {!review.isCurrent && (
+                            {!review.integrityValid ? (
+                                <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-red-700">
+                                    <ShieldAlert size={12} /> Unverifiable
+                                </span>
+                            ) : !review.isCurrent && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-1 text-neutral-600">
                                     <History size={12} /> Historical
                                 </span>
@@ -170,7 +199,19 @@ export function ReadinessCheckpoint({
                 </header>
 
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
-                    {!review.isCurrent && (
+                    {!review.integrityValid ? (
+                        <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-red-950">
+                            <p className="font-semibold">This checkpoint cannot be verified.</p>
+                            <p className="mt-1 text-sm leading-6 text-red-800">
+                                Its stored contents no longer match the integrity signature. Synapse will not treat its conclusion or commitment as authoritative.
+                            </p>
+                            {(review.currentnessReasons?.length ?? 0) > 0 && (
+                                <ul className="mt-2 space-y-1 text-sm text-red-800">
+                                    {review.currentnessReasons!.map(reason => <li key={reason}>• {reason}</li>)}
+                                </ul>
+                            )}
+                        </div>
+                    ) : !review.isCurrent && (
                         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
                             <p className="font-semibold">This checkpoint no longer represents the current plan.</p>
                             <p className="mt-1 text-sm leading-6 text-amber-800">
@@ -195,7 +236,7 @@ export function ReadinessCheckpoint({
                         <details className="group mb-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4">
                             <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold text-neutral-800">
                                 <ChevronDown size={15} className="transition group-open:rotate-180" />
-                                What changed since the previous checkpoint
+                                What changed after this checkpoint
                             </summary>
                             <ul className="mt-2 space-y-2 text-sm leading-6 text-neutral-600">
                                 {review.comparisonSummary.map(item => <li key={item}>• {item}</li>)}
@@ -277,6 +318,18 @@ export function ReadinessCheckpoint({
                         </section>
                     )}
 
+                    {review.priorCommitment && (
+                        <section className="mt-5 rounded-xl border border-neutral-200 bg-neutral-50 p-4" aria-labelledby="prior-commitment-heading">
+                            <h3 id="prior-commitment-heading" className="font-semibold text-neutral-900">Previously committed, then reopened</h3>
+                            <p className="mt-1 text-xs text-neutral-500">
+                                Reopened {review.priorCommitment.reopenedAt ? new Date(review.priorCommitment.reopenedAt).toLocaleString() : 'after this commitment'}.
+                            </p>
+                            {review.priorCommitment.rationale && (
+                                <p className="mt-3 text-sm leading-6 text-neutral-700">{review.priorCommitment.rationale}</p>
+                            )}
+                        </section>
+                    )}
+
                     {review.caveats.length > 0 && (
                         <section className="mt-5 rounded-xl bg-neutral-50 p-4" aria-labelledby="readiness-caveats-heading">
                             <h3 id="readiness-caveats-heading" className="text-sm font-semibold text-neutral-800">Known limits of this review</h3>
@@ -319,13 +372,14 @@ export function ReadinessCheckpoint({
                     </details>
 
                     {!historical && !ready && showOverride && (
-                        <section className="mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4" aria-labelledby="override-heading">
+                        <section ref={overrideSectionRef} className="scroll-mt-4 mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4" aria-labelledby="override-heading">
                             <h3 id="override-heading" className="font-semibold text-amber-950">Commit with open questions</h3>
                             <p className="mt-1 text-sm leading-6 text-amber-800">
                                 This records your decision to proceed. It does not resolve the {review.concerns.length} open item{review.concerns.length === 1 ? '' : 's'} above.
                             </p>
                             <label className="mt-4 block text-sm font-semibold text-amber-950" htmlFor="readiness-rationale">Why proceed now?</label>
                             <textarea
+                                ref={rationaleRef}
                                 id="readiness-rationale"
                                 value={rationale}
                                 onChange={event => setRationale(event.target.value)}
@@ -408,7 +462,7 @@ export function ReadinessCheckpoint({
                     </footer>
                 )}
 
-                {!review.isCurrent && onRefresh && !readOnly && (
+                {(!review.isCurrent || !review.integrityValid) && onRefresh && !readOnly && (
                     <footer className="sticky bottom-0 z-10 shrink-0 border-t border-neutral-100 bg-white p-4 sm:px-6">
                         <button type="button" onClick={onRefresh} className="min-h-11 w-full rounded-xl bg-neutral-950 px-4 text-sm font-semibold text-white hover:bg-neutral-800">
                             Review current plan

@@ -137,25 +137,49 @@ or reference keys, and rewriting architecture prose across multiple claims stay
 review-only. Those limits are intentional: relevance and fluent wording are not
 permission to mutate the plan.
 
+## Phase 3: version-pinned build-readiness review
+
+Build readiness now has two complementary layers. The live categorical
+projection continues to tell the user what planning action matters next. When
+the user chooses **Review readiness**, Synapse records a durable checkpoint for
+the exact plan and planning state being assessed.
+
+Each checkpoint is bound to the PRD version and content, planning records,
+challenge context and findings, propagation state, downstream-output state,
+readiness schema, and criteria version. Its conclusion is derived from those
+durable sources; model narrative is not evidence and cannot confer authority.
+Material changes make the checkpoint historical instead of silently reusing
+its conclusion.
+
+Historical checkpoints preserve both the original evidence and a deterministic
+comparison with the current readiness projection. The comparison names newly
+introduced or resolved concerns, criterion changes, changed evidence support,
+and the plan version involved. Large comparisons prioritize the conclusion,
+blockers, and criterion state rather than becoming an unbounded diff report.
+
+A favorable checkpoint does not commit the plan. Commitment remains an
+append-only user action bound to the exact checkpoint. If the user proceeds
+with unresolved material concerns, Synapse requires explicit rationale and,
+where needed, a containment plan. That authorization preserves the concern as
+accepted uncertainty; it never relabels the issue as resolved or the evidence
+as validated.
+
 ## Future planning intelligence
 
 The next phases should build on the same durable records rather than introducing
 new approval systems:
 
-1. **Build-readiness review:** turn the current categorical projection into a
-   version-pinned review that can explain missing evidence and challenge whether
-   an override remains reasonable after the plan changes.
-2. **Selective downstream update planning:** extend the current version-bound,
+1. **Selective downstream update planning:** extend the current version-bound,
    per-change alignment review into dependency-path evidence and selective
    artifact update plans without silently regenerating or rewriting confirmed
    outputs.
-3. **Assumption validation:** let users attach evidence, validation methods, and
+2. **Assumption validation:** let users attach evidence, validation methods, and
    outcomes to material assumptions; distinguish “confirmed by the user” from
    “supported by evidence.” This is explicitly a future task, not inferred from
    today’s confidence label.
-4. **Scenario exploration:** compare a small number of consequential alternative
+3. **Scenario exploration:** compare a small number of consequential alternative
    decisions against scope, risks, and implementation cost while keeping the
    committed plan unchanged.
-5. **Adversarial critique:** deepen Challenge with contradiction, necessity,
+4. **Adversarial critique:** deepen Challenge with contradiction, necessity,
    feasibility, and missing-case specialists that reference the same decision
    and readiness context.

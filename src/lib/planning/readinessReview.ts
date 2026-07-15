@@ -11,6 +11,7 @@ import type {
     ReviewIssue,
     ReviewRun,
     SpecialistRun,
+    SpecialistFinding,
     StructuredPRD,
 } from '../../types';
 import {
@@ -45,6 +46,7 @@ export type ReadinessReviewInput = {
     planningRecords: PlanningRecord[];
     reviewRuns: ReviewRun[];
     specialistRuns: SpecialistRun[];
+    reviewFindings?: SpecialistFinding[];
     reviewIssues: ReviewIssue[];
     outputAlignment: ProjectOutputAlignmentSummary;
     /** Exact preferred output identities at assessment time. Content hashes
@@ -97,6 +99,11 @@ const isAcceptedUnvalidatedAssumption = (record: PlanningRecord): boolean =>
     && projectDecision(record).status === 'confirmed'
     && isMaterial(record)
     && !record.evidence.some(item => item.verified);
+
+const isAcceptedMaterialRisk = (record: PlanningRecord): boolean =>
+    record.type === 'risk'
+    && projectDecision(record).status === 'confirmed'
+    && isMaterial(record);
 
 const latest = <T extends { createdAt: number; completedAt?: number }>(items: T[]): T | undefined =>
     [...items].sort((a, b) => (b.completedAt ?? b.createdAt) - (a.completedAt ?? a.createdAt))[0];
@@ -157,12 +164,32 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
         : [];
     const blockingKeys = new Set(blockingIssues.map(issue => `${issue.reviewId}:${issue.id}`));
     const addressedIssues = applicableIssues.filter(issue => !blockingKeys.has(`${issue.reviewId}:${issue.id}`));
-    return { substantive, substantiveRuns, shallow, blockingIssues, addressedIssues };
+    const representedFindingIds = new Set(applicableIssues.flatMap(issue => issue.findingIds));
+    const findingsById = new Map((input.reviewFindings ?? []).map(finding => [finding.id, finding]));
+    const untriagedFindings = substantiveRuns.flatMap(run => (
+        input.specialistRuns
+            .filter(specialist => specialist.reviewId === run.id && specialist.status === 'complete')
+            .flatMap(specialist => specialist.findingIds)
+            .filter(findingId => !representedFindingIds.has(findingId))
+            .flatMap(findingId => {
+                const finding = findingsById.get(findingId);
+                if (finding?.implementationImpact === 'deferrable') return [];
+                return [{
+                    id: findingId,
+                    reviewId: run.id,
+                    title: finding?.title ?? 'Untriaged challenge finding',
+                    summary: finding?.whyItMatters ?? 'A specialist finding has not been reviewed into durable project state.',
+                }];
+            })
+    ));
+    return { substantive, substantiveRuns, shallow, blockingIssues, addressedIssues, untriagedFindings };
 }
 
 function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): ReadinessReviewSnapshotHashes {
     const spineIdentity = hashReviewValue({ projectId: input.projectId, spineVersionId: input.spine.versionId });
     const spineContent = hashReviewValue(input.spine.content);
+    const applicableChallengeRuns = exactChallengeRuns(input, spineContent);
+    const applicableChallengeRunIds = new Set(applicableChallengeRuns.map(run => run.id));
     const planningState = hashReviewValue({
         prd: input.spine.structuredPRD,
         incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
@@ -170,9 +197,10 @@ function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): R
         records: byId(input.planningRecords),
     });
     const challenge = hashReviewValue({
-        runs: byId(input.reviewRuns),
-        specialists: byId(input.specialistRuns),
-        issues: byId(input.reviewIssues),
+        runs: byId(applicableChallengeRuns),
+        specialists: byId(input.specialistRuns.filter(run => applicableChallengeRunIds.has(run.reviewId))),
+        findings: byId((input.reviewFindings ?? []).filter(finding => applicableChallengeRunIds.has(finding.reviewId))),
+        issues: byId(input.reviewIssues.filter(issue => applicableChallengeRunIds.has(issue.reviewId))),
         currentArtifactRefs: [...(input.currentArtifactRefs ?? [])].sort((a, b) => (
             a.artifactId.localeCompare(b.artifactId)
             || a.artifactVersionId.localeCompare(b.artifactVersionId)
@@ -243,7 +271,10 @@ const makeConcern = (input: {
 });
 
 function reviewPayload(review: Omit<ReadinessReview, 'integrityHash'>): unknown {
-    return review;
+    // Persistence and cloud transport are JSON boundaries. Hash the same
+    // representation they preserve so optional `undefined` fields cannot make
+    // an otherwise untouched checkpoint fail integrity after reload.
+    return JSON.parse(JSON.stringify(review)) as unknown;
 }
 
 function expectedAggregate(review: ReadinessReview): string {
@@ -274,7 +305,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         planningRecords: input.planningRecords,
         incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
         hasCurrentChallenge: Boolean(challenge.substantive),
-        blockingReviewIssueCount: challenge.blockingIssues.length,
+        blockingReviewIssueCount: challenge.blockingIssues.length + challenge.untriagedFindings.length,
         generatedOutputCount: input.outputAlignment.outputs.length,
         staleOutputCount: input.outputAlignment.blockingCount,
         isCommitted: input.spine.isCommitted,
@@ -341,7 +372,11 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
                 : record.type === 'assumption' ? 'assumption' : record.type === 'risk' ? 'risk' : 'decision';
             concerns.push(makeConcern({
                 criterionId: group.id, kind, title: record.title,
-                consequence: isAcceptedUnvalidatedAssumption(record) ? 'The user accepted this material assumption, but no verified evidence validates it.' : record.statement,
+                consequence: isAcceptedUnvalidatedAssumption(record)
+                    ? 'The user accepted this material assumption, but no verified evidence validates it.'
+                    : isAcceptedMaterialRisk(record)
+                        ? 'The user acknowledged this material risk, but the planning record does not prove mitigation or resolution.'
+                        : record.statement,
                 blocking: true, evidenceQuality: 'incomplete', sourceType: 'planning_record', sourceId: record.id,
                 sourceVersionId: record.sources?.[0]?.sourceVersionId,
                 actionTarget: { kind: 'planning_record', planningRecordId: record.id },
@@ -369,11 +404,13 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         actionTarget: { kind: 'planning_record', planningRecordId: record.id },
     }));
 
-    const challengeBlocking = !challenge.substantive || challenge.blockingIssues.length > 0;
+    const challengeBlocking = !challenge.substantive
+        || challenge.blockingIssues.length > 0
+        || challenge.untriagedFindings.length > 0;
     const challengeExplanation = !challenge.substantive
         ? 'No current, substantive project challenge has complete validated specialist coverage.'
-        : challenge.blockingIssues.length > 0
-            ? `${challenge.blockingIssues.length} consequential challenge finding${challenge.blockingIssues.length === 1 ? '' : 's'} remains.`
+        : challenge.blockingIssues.length + challenge.untriagedFindings.length > 0
+            ? `${challenge.blockingIssues.length + challenge.untriagedFindings.length} consequential challenge finding${challenge.blockingIssues.length + challenge.untriagedFindings.length === 1 ? '' : 's'} remains.`
             : 'The exact current plan has complete, validated project-scope challenge coverage.';
     const challengeTarget = { kind: 'challenge' as const, reviewId: challenge.shallow?.id };
     criteria.push({
@@ -400,6 +437,12 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         title: issue.title, consequence: issue.summary, blocking: true, evidenceQuality: 'direct', sourceType: 'challenge',
         sourceId: issue.id, sourceVersionId: input.spine.versionId,
         actionTarget: { kind: 'challenge', reviewId: issue.reviewId, issueId: issue.id },
+    }));
+    for (const finding of challenge.untriagedFindings) concerns.push(makeConcern({
+        criterionId: 'challenge', kind: 'challenge', title: finding.title, consequence: finding.summary,
+        blocking: true, evidenceQuality: 'incomplete', sourceType: 'challenge', sourceId: finding.id,
+        sourceVersionId: input.spine.versionId,
+        actionTarget: { kind: 'challenge', reviewId: finding.reviewId },
     }));
 
     const blockingOutputs = input.outputAlignment.outputs.filter(output => output.blocksBuildReadiness);

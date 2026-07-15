@@ -113,6 +113,7 @@ export function buildReadinessReviewInputFromState(
         planningRecords: state.planningRecords[projectId] ?? [],
         reviewRuns: state.reviewRuns[projectId] ?? [],
         specialistRuns: state.specialistRuns[projectId] ?? [],
+        reviewFindings: state.reviewFindings[projectId] ?? [],
         reviewIssues: state.reviewIssues[projectId] ?? [],
         outputAlignment,
         currentArtifactRefs,
@@ -322,7 +323,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 return state;
             }
             const review = (state.readinessReviews[projectId] ?? []).find(item => item.id === commitment.reviewId);
-            if (!review || !bindingMatches(commitment, review)) {
+            if (!review || !validateReadinessReviewIntegrity(review) || !bindingMatches(commitment, review)) {
                 result = { status: 'rejected', reason: 'tampered' };
                 return state;
             }

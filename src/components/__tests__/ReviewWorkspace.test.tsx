@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
     ReviewWorkspace,
@@ -202,5 +202,25 @@ describe('ReviewWorkspace', () => {
         fireEvent.change(screen.getByLabelText('Confirmed decision to challenge'), { target: { value: 'decision-1' } });
         fireEvent.click(screen.getByRole('button', { name: 'Save action' }));
         expect(onActOnIssue).toHaveBeenCalledWith('review-1', 'issue-1', 'challenge_decision', undefined, 'decision-1');
+    });
+
+    it('focuses and expands the exact readiness-linked finding', async () => {
+        const first = completeRun().issues[0];
+        const target = {
+            ...first,
+            id: 'issue-exact',
+            title: 'Exact readiness-linked finding',
+            severity: 'advisory' as const,
+            recommendedAction: 'Inspect this exact issue before committing.',
+        };
+        const run = completeRun({ issues: [first, target] });
+        render(<ReviewWorkspace {...baseProps({
+            runs: [run], activeRunId: run.id, initialIssueId: target.id,
+        })} />);
+
+        const article = document.getElementById('review-issue-issue-exact');
+        expect(article).toHaveClass('ring-2');
+        await waitFor(() => expect(article).toHaveFocus());
+        expect(screen.getByText('Inspect this exact issue before committing.')).toBeInTheDocument();
     });
 });

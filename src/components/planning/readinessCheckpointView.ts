@@ -1,16 +1,17 @@
-import type {
-    ReadinessActionTarget,
-    ReadinessCommitmentEvent,
-    ReadinessReview,
-} from '../../types';
+import type { ArtifactSlotKey, ReadinessActionTarget, ReadinessCommitmentEvent, ReadinessReview } from '../../types';
 import type {
     ReadinessReviewCurrentness,
     ReadinessReviewCurrentnessReason,
 } from '../../lib/planning/readinessReview';
+import {
+    deriveReadinessCommitmentState,
+    type ReadinessCommitmentState,
+} from '../../lib/planning/readinessCommitment';
 import type {
     ReadinessCheckpointCommitmentView,
     ReadinessCheckpointView,
 } from './ReadinessCheckpoint';
+import { featureDetailAnchorId } from '../../lib/derive/implementationSummary';
 
 const sourceLabel = (sourceType: ReadinessReview['criteria'][number]['evidence'][number]['sourceType']): string => {
     const labels: Record<typeof sourceType, string> = {
@@ -47,57 +48,48 @@ export function readinessActionLabel(target: ReadinessActionTarget): string {
     return 'Review affected output';
 }
 
-export type ReadinessCommitmentState = {
-    activeCommit?: Extract<ReadinessCommitmentEvent, { type: 'plan_committed' }>;
-    latestCommit?: Extract<ReadinessCommitmentEvent, { type: 'plan_committed' }>;
-    authorization?: Extract<ReadinessCommitmentEvent, { type: 'commit_authorized' }>;
-    reopenedAt?: number;
-};
+export type ReadinessNavigationDestination =
+    | { stage: 'prd'; anchorId: string }
+    | { stage: 'review'; tab: 'decisions'; planningRecordId: string }
+    | { stage: 'review'; tab: 'review'; reviewId?: string; issueId?: string }
+    | { stage: 'workspace'; artifactId: string; nodeId: ArtifactSlotKey };
 
-/** Project append-only events remain the authority source. A legacy
- * SpineVersion.isFinal flag never manufactures a review commitment. */
-export function readinessCommitmentState(
-    review: ReadinessReview,
-    events: ReadinessCommitmentEvent[],
-): ReadinessCommitmentState {
-    const reviewEvents = events
-        .filter(event => event.reviewId === review.id)
-        .slice()
-        .sort((a, b) => a.at - b.at);
-    const commits = reviewEvents.filter((event): event is Extract<ReadinessCommitmentEvent, { type: 'plan_committed' }> => (
-        event.type === 'plan_committed'
-    ));
-    const latestCommit = commits.at(-1);
-    if (!latestCommit) return {};
-    const reopened = reviewEvents
-        .filter((event): event is Extract<ReadinessCommitmentEvent, { type: 'plan_reopened' }> => (
-            event.type === 'plan_reopened' && event.priorCommitEventId === latestCommit.id
-        ))
-        .at(-1);
-    const authorization = reviewEvents.find((event): event is Extract<ReadinessCommitmentEvent, { type: 'commit_authorized' }> => (
-        event.type === 'commit_authorized' && event.id === latestCommit.authorizationEventId
-    ));
-    return {
-        latestCommit,
-        ...(!reopened && { activeCommit: latestCommit }),
-        authorization,
-        reopenedAt: reopened?.at,
-    };
+export function readinessNavigationDestination(target: ReadinessActionTarget): ReadinessNavigationDestination {
+    if (target.kind === 'planning_record') {
+        return { stage: 'review', tab: 'decisions', planningRecordId: target.planningRecordId };
+    }
+    if (target.kind === 'challenge') {
+        return { stage: 'review', tab: 'review', reviewId: target.reviewId, issueId: target.issueId };
+    }
+    if (target.kind === 'output') {
+        return { stage: 'workspace', artifactId: target.artifactId, nodeId: target.nodeId };
+    }
+    if (target.kind === 'feature') {
+        return { stage: 'prd', anchorId: target.featureId ? featureDetailAnchorId(target.featureId) : 'prd-features' };
+    }
+    const anchorId = target.section === 'problem'
+        ? 'prd-coreProblem'
+        : target.section === 'user' ? 'prd-targetUsers' : 'prd-successMetrics';
+    return { stage: 'prd', anchorId };
 }
 
 function commitmentView(
     review: ReadinessReview,
-    events: ReadinessCommitmentEvent[],
+    state: ReadinessCommitmentState,
+    useActive: boolean,
 ): ReadinessCheckpointCommitmentView | undefined {
-    const state = readinessCommitmentState(review, events);
-    if (!state.latestCommit) return undefined;
+    const commit = useActive ? state.activeCommit : state.latestCommit;
+    if (!commit) return undefined;
     const acceptedCount = state.authorization?.acceptedConcernIds.length ?? 0;
     return {
-        kind: acceptedCount > 0 ? 'with_open_questions' : 'ready',
-        committedAt: state.latestCommit.at,
+        // Advisory concerns can remain on a review that is categorically ready.
+        // They do not turn a ready user commitment into an override.
+        kind: review.conclusion === 'ready_to_build' ? 'ready' : 'with_open_questions',
+        committedAt: commit.at,
         rationale: state.authorization?.rationale,
         containment: state.authorization?.containmentPlan,
         acceptedConcernCount: acceptedCount,
+        ...(!useActive && state.reopenedAt ? { reopenedAt: state.reopenedAt } : {}),
     };
 }
 
@@ -108,12 +100,15 @@ export function buildReadinessCheckpointView(
     versionLabel: string,
     comparisonSummary?: string[],
 ): ReadinessCheckpointView {
+    const commitmentState = deriveReadinessCommitmentState(review, events);
+    const integrityValid = currentness.integrityValid;
     return {
         id: review.id,
         versionLabel,
         capturedAt: review.createdAt,
         conclusion: review.conclusion,
         isCurrent: currentness.current,
+        integrityValid,
         currentnessReasons: currentness.reasons.map(describeCurrentnessReason),
         concerns: review.concerns.map(concern => {
             const criterion = review.criteria.find(item => item.id === concern.criterionId);
@@ -139,7 +134,12 @@ export function buildReadinessCheckpointView(
             })),
         })),
         caveats: review.caveats,
-        commitment: commitmentView(review, events),
+        // Never project a commitment as authoritative when the review it was
+        // bound to fails integrity validation.
+        commitment: integrityValid ? commitmentView(review, commitmentState, true) : undefined,
+        priorCommitment: integrityValid && !commitmentState.activeCommit
+            ? commitmentView(review, commitmentState, false)
+            : undefined,
         comparisonSummary,
     };
 }

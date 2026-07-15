@@ -55,6 +55,8 @@ interface Props {
     projectId: string;
     initialTab?: 'review' | 'decisions';
     initialRecordId?: string;
+    initialReviewId?: string;
+    initialIssueId?: string;
 }
 
 const activeControllers = new Map<string, AbortController>();
@@ -97,7 +99,7 @@ const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, ReviewIssueDisposition['a
 
 const dispositionForAction = (action: ReviewIssueAction): ReviewIssueDisposition['action'] => DISPOSITION_BY_ACTION[action];
 
-export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId }: Props) {
+export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
     const spines = useProjectStore(state => state.spineVersions[projectId] ?? []);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? []);
@@ -107,11 +109,17 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     const findings = useProjectStore(state => state.reviewFindings[projectId] ?? []);
     const issues = useProjectStore(state => state.reviewIssues[projectId] ?? []);
     const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? []);
-    const [activeRunId, setActiveRunId] = useState<string>();
+    const [activeRunId, setActiveRunId] = useState<string | undefined>(initialReviewId);
     const [busy, setBusy] = useState(false);
     const [alignmentAnalysis, setAlignmentAnalysis] = useState<Record<string, { busy: boolean; error?: string }>>({});
     const canWrite = canPerformProjectAction(projectId, 'persist');
     const manifests = useRef(new Map<string, ReviewContextManifest>());
+
+    useEffect(() => {
+        if (initialReviewId && reviewRuns.some(run => run.id === initialReviewId)) {
+            setActiveRunId(initialReviewId);
+        }
+    }, [initialReviewId, reviewRuns]);
 
     const latestSpine = spines.find(spine => spine.isLatest) ?? spines.at(-1);
     useEffect(() => {
@@ -946,6 +954,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         projectName={project.name}
         initialTab={initialTab}
         initialDecisionId={initialRecordId}
+        initialIssueId={initialIssueId}
         recommendedPanel={panel}
         sourcesInScope={currentManifest.sources.map(source => source.label)}
         missingSources={currentManifest.missingArtifacts.map(source => source.replaceAll('_', ' '))}

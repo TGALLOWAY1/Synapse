@@ -39,16 +39,23 @@ import { BranchCanvas } from './BranchCanvas';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { SectionId } from '../lib/schemas/prdSchemas';
-import type { Branch, PipelineStage, FeedbackItem, ReadinessActionTarget } from '../types';
+import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem, ReadinessActionTarget } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
 import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
 import { resetDemoProject } from '../lib/demoRouteHydration';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
-import { compareReadinessReviewCurrentness, derivePlanningReadiness, deriveReadinessChallengeState } from '../lib/planning';
+import {
+    compareReadinessReviewCurrentness,
+    compareReadinessReviewProjections,
+    derivePlanningReadiness,
+    deriveReadinessChallengeState,
+    deriveReadinessCommitmentState,
+    deriveReadinessReview,
+} from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
-import { buildReadinessCheckpointView, readinessCommitmentState } from './planning/readinessCheckpointView';
+import { buildReadinessCheckpointView, readinessNavigationDestination } from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
 
@@ -68,6 +75,7 @@ export function ProjectWorkspace() {
     const reviewRuns = useProjectStore((s) => (projectId ? s.reviewRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const specialistRuns = useProjectStore((s) => (projectId ? s.specialistRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const reviewIssues = useProjectStore((s) => (projectId ? s.reviewIssues[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const reviewFindings = useProjectStore((s) => (projectId ? s.reviewFindings[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const readinessReviews = useProjectStore((s) => (projectId ? s.readinessReviews[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const readinessCommitmentEvents = useProjectStore((s) => (projectId ? s.readinessCommitmentEvents[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const planningSourceSpine = useProjectStore((s) => projectId
@@ -107,6 +115,10 @@ export function ProjectWorkspace() {
     const [isReadinessSubmitting, setIsReadinessSubmitting] = useState(false);
     const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
     const [reviewInitialRecordId, setReviewInitialRecordId] = useState<string>();
+    const [reviewInitialRunId, setReviewInitialRunId] = useState<string>();
+    const [reviewInitialIssueId, setReviewInitialIssueId] = useState<string>();
+    const [workspaceInitialNode, setWorkspaceInitialNode] = useState<ArtifactSlotKey>();
+    const [workspaceInitialArtifactId, setWorkspaceInitialArtifactId] = useState<string>();
     // Carries an explicit generation request across the design-preset choice.
     const generateAfterPreset = useRef(false);
     const overflowRef = useRef<HTMLDivElement>(null);
@@ -317,11 +329,18 @@ export function ProjectWorkspace() {
             structuredPRD: activeSpine.structuredPRD,
             incompleteSectionCount: activeSpine.generationMeta?.failedSections?.length ?? 0,
             isCommitted: activeSpine.isFinal,
+            safetyReview: activeSpine.safetyReview && {
+                status: activeSpine.safetyReview.status,
+                classification: activeSpine.safetyReview.classification,
+                detectedConcerns: activeSpine.safetyReview.detectedConcerns,
+                reviewedAt: activeSpine.safetyReview.reviewedAt,
+            },
         },
         planningRecords,
         reviewRuns,
         specialistRuns,
         reviewIssues,
+        reviewFindings,
         outputAlignment,
         currentArtifactRefs: currentReadinessArtifactRefs,
         currentChallengeContextSignature,
@@ -330,14 +349,14 @@ export function ProjectWorkspace() {
         ? readinessReviews.map(review => ({
             review,
             currentness: compareReadinessReviewCurrentness(review, readinessReviewInput),
-            commitment: readinessCommitmentState(review, readinessCommitmentEvents),
+            commitment: deriveReadinessCommitmentState(review, readinessCommitmentEvents),
         }))
         : [];
     const currentCommittedReadiness = readinessWithCurrentness
         .filter(item => item.currentness.current && item.commitment.activeCommit)
         .sort((a, b) => b.commitment.activeCommit!.at - a.commitment.activeCommit!.at)[0];
     const isCurrentPlanCommitted = !!currentCommittedReadiness;
-    const hasReadinessCommitmentHistory = readinessCommitmentEvents.some(event => event.type === 'plan_committed');
+    const hasReadinessCommitmentHistory = readinessWithCurrentness.some(item => item.commitment.latestCommit);
     const isLegacyPlanCommitted = !!activeSpine?.isFinal && !hasReadinessCommitmentHistory;
     const displaysCurrentCommitment = isCurrentPlanCommitted || isLegacyPlanCommitted;
     const strictChallenge = readinessReviewInput
@@ -348,7 +367,9 @@ export function ProjectWorkspace() {
         planningRecords,
         incompleteSectionCount: persistedFailedSections.length,
         hasCurrentChallenge: !!strictChallenge?.substantive,
-        blockingReviewIssueCount: strictChallenge?.blockingIssues.length ?? 0,
+        blockingReviewIssueCount:
+            (strictChallenge?.blockingIssues.length ?? 0)
+            + (strictChallenge?.untriagedFindings.length ?? 0),
         generatedOutputCount: generatedOutputs.length,
         staleOutputCount,
         isCommitted: displaysCurrentCommitment,
@@ -357,15 +378,37 @@ export function ProjectWorkspace() {
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput
         ? compareReadinessReviewCurrentness(selectedReadinessReview, readinessReviewInput)
         : undefined;
+    const selectedReadinessVersionLabel = selectedReadinessReview
+        ? (() => {
+            const index = allSpines.findIndex(spine => spine.id === selectedReadinessReview.spineVersionId);
+            return index >= 0 ? `Version ${index + 1}` : selectedReadinessReview.spineVersionId;
+        })()
+        : undefined;
+    const readinessComparisonSummary = selectedReadinessReview
+        && selectedReadinessCurrentness
+        && !selectedReadinessCurrentness.current
+        && selectedReadinessCurrentness.integrityValid
+        && readinessReviewInput
+        && activeSpine
+        ? compareReadinessReviewProjections(
+            selectedReadinessReview,
+            deriveReadinessReview({ ...readinessReviewInput, createdAt: selectedReadinessReview.createdAt }),
+            {
+                reviewedVersionLabel: selectedReadinessVersionLabel,
+                currentVersionLabel: (() => {
+                    const index = allSpines.findIndex(spine => spine.id === activeSpine.id);
+                    return index >= 0 ? `Version ${index + 1}` : activeSpine.id;
+                })(),
+            },
+        )
+        : undefined;
     const selectedReadinessView = selectedReadinessReview && selectedReadinessCurrentness
         ? buildReadinessCheckpointView(
             selectedReadinessReview,
             selectedReadinessCurrentness,
             readinessCommitmentEvents,
-            (() => {
-                const index = allSpines.findIndex(spine => spine.id === selectedReadinessReview.spineVersionId);
-                return index >= 0 ? `Version ${index + 1}` : selectedReadinessReview.spineVersionId;
-            })(),
+            selectedReadinessVersionLabel ?? selectedReadinessReview.spineVersionId,
+            readinessComparisonSummary,
         )
         : undefined;
 
@@ -659,6 +702,7 @@ export function ProjectWorkspace() {
         if (reason === 'stale') return 'The plan or its evidence changed. Review the current plan before committing.';
         if (reason === 'tampered' || reason === 'hash_mismatch') return 'This checkpoint no longer passes its integrity check. Create a fresh checkpoint.';
         if (reason === 'accepted_concerns_mismatch') return 'The set of open items changed. Create a fresh checkpoint before committing.';
+        if (reason === 'authorization_consumed') return 'That commitment authorization was already used. Review and authorize this checkpoint again.';
         if (reason === 'rationale_required') return 'Explain why proceeding is worth the remaining uncertainty.';
         if (reason === 'containment_required') return 'Describe how the remaining implementation risk will be contained.';
         if (reason === 'safety_blocked') return 'A safety-blocked plan cannot be committed.';
@@ -776,32 +820,36 @@ export function ProjectWorkspace() {
     const openDecisionCenter = (recordId?: string) => {
         setReviewInitialTab('decisions');
         setReviewInitialRecordId(recordId);
+        setReviewInitialRunId(undefined);
+        setReviewInitialIssueId(undefined);
         setPipelineStage('review');
     };
 
-    const openChallenge = () => {
+    const openChallenge = (reviewId?: string, issueId?: string) => {
         setReviewInitialTab('review');
         setReviewInitialRecordId(undefined);
+        setReviewInitialRunId(reviewId);
+        setReviewInitialIssueId(issueId);
         setPipelineStage('review');
     };
 
     const navigateReadinessTarget = (target: ReadinessActionTarget) => {
         setSelectedReadinessReviewId(null);
         setReadinessSubmitError(null);
-        if (target.kind === 'planning_record') return openDecisionCenter(target.planningRecordId);
-        if (target.kind === 'challenge') return openChallenge();
-        if (target.kind === 'output') {
-            setFinalizeAutoOpen(true);
+        const destination = readinessNavigationDestination(target);
+        if (destination.stage === 'review' && destination.tab === 'decisions') {
+            return openDecisionCenter(destination.planningRecordId);
+        }
+        if (destination.stage === 'review') return openChallenge(destination.reviewId, destination.issueId);
+        if (destination.stage === 'workspace') {
+            setFinalizeAutoOpen(false);
+            setWorkspaceInitialNode(destination.nodeId);
+            setWorkspaceInitialArtifactId(destination.artifactId);
             return setPipelineStage('workspace');
         }
         setPipelineStage('prd');
-        const anchor = target.kind === 'feature'
-            ? 'prd-features'
-            : target.section === 'problem' ? 'prd-coreProblem'
-                : target.section === 'user' ? 'prd-targetUsers'
-                    : 'prd-successMetrics';
         window.requestAnimationFrame(() => {
-            document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            document.getElementById(destination.anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
         });
     };
 
@@ -847,7 +895,13 @@ export function ProjectWorkspace() {
                                 ? 'Generation Failed'
                                 : isPRDActivelyGenerating
                                     ? 'Generating...'
-                                    : `${getVersionLabel(activeSpine.id)} ${displaysCurrentCommitment ? isLegacyPlanCommitted ? '(COMMITTED · READINESS NOT RECORDED)' : '(COMMITTED)' : ''}`
+                                    : `${getVersionLabel(activeSpine.id)} ${displaysCurrentCommitment
+                                        ? isLegacyPlanCommitted
+                                            ? '(LEGACY COMMITMENT · READINESS NOT RECORDED)'
+                                            : currentCommittedReadiness?.review.conclusion === 'not_ready'
+                                                ? '(COMMITTED WITH OPEN QUESTIONS)'
+                                                : '(PLAN COMMITTED)'
+                                        : ''}`
                             : 'Initializing...'}
                     </span>
                     {projectId !== DEMO_PROJECT_ID && (
@@ -885,10 +939,10 @@ export function ProjectWorkspace() {
                         <button
                             onClick={handleToggleFinal}
                             className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
-                            title={displaysCurrentCommitment ? "Return this plan to working status" : "Review readiness and commit this plan"}
+                            title={displaysCurrentCommitment ? "Reopen this plan for changes" : "Review readiness and commit this plan"}
                         >
                             <CheckCircle size={14} />
-                            <span className="hidden md:inline">{displaysCurrentCommitment ? 'Committed' : 'Review readiness'}</span>
+                            <span className="hidden md:inline">{displaysCurrentCommitment ? 'Reopen plan' : 'Review readiness'}</span>
                         </button>
                     )}
 
@@ -1119,10 +1173,22 @@ export function ProjectWorkspace() {
                             projectPlatform={project?.platform}
                             autoOpenIntent={finalizeAutoOpen}
                             onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
+                            initialSelection={workspaceInitialNode}
+                            initialArtifactId={workspaceInitialArtifactId}
+                            onInitialSelectionConsumed={() => {
+                                setWorkspaceInitialNode(undefined);
+                                setWorkspaceInitialArtifactId(undefined);
+                            }}
                         />
                     </div>
                 ) : pipelineStage === 'review' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
-                    <ReviewWorkspaceContainer projectId={projectId} initialTab={reviewInitialTab} initialRecordId={reviewInitialRecordId} />
+                    <ReviewWorkspaceContainer
+                        projectId={projectId}
+                        initialTab={reviewInitialTab}
+                        initialRecordId={reviewInitialRecordId}
+                        initialReviewId={reviewInitialRunId}
+                        initialIssueId={reviewInitialIssueId}
+                    />
                 ) : (
                 <>
                 {/* Left: Main Content Column */}
@@ -1322,6 +1388,7 @@ export function ProjectWorkspace() {
                                                     <PlanningStateBar
                                                         readiness={planningReadiness}
                                                         committed={isCurrentPlanCommitted}
+                                                        legacyCommitted={isLegacyPlanCommitted}
                                                         onNextAction={handlePlanningNextAction}
                                                         onReviewReadiness={openCurrentReadinessCheckpoint}
                                                         onOpenDecisions={openDecisionCenter}

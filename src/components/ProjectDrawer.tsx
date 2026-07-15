@@ -5,7 +5,7 @@ import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
 import { useProjectSyncStore } from '../store/projectSyncStore';
-import { compareReadinessReviewCurrentness } from '../lib/planning';
+import { compareReadinessReviewCurrentness, deriveReadinessCommitmentState } from '../lib/planning';
 import { buildReadinessReviewInputFromState } from '../store/slices/readinessSlice';
 
 interface ProjectDrawerProps {
@@ -37,22 +37,26 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
         const spine = getLatestSpine(projectId);
         const input = buildReadinessReviewInputFromState(store, projectId);
         const events = store.readinessCommitmentEvents[projectId] ?? [];
-        const currentReview = input && (store.readinessReviews[projectId] ?? []).find(review => {
-            if (!compareReadinessReviewCurrentness(review, input).current) return false;
-            return events.some(event => event.type === 'plan_committed' && event.reviewId === review.id
-                && !events.some(reopen => reopen.type === 'plan_reopened' && reopen.priorCommitEventId === event.id));
-        });
+        const reviewStates = (store.readinessReviews[projectId] ?? []).map(review => ({
+            review,
+            currentness: input ? compareReadinessReviewCurrentness(review, input) : undefined,
+            commitment: deriveReadinessCommitmentState(review, events),
+        }));
+        const currentReview = reviewStates.find(item => item.currentness?.current && item.commitment.activeCommit)?.review;
         if (currentReview?.conclusion === 'ready_to_build') {
             return { label: 'Plan committed', color: 'bg-green-900/30 text-green-400 border-green-800' };
         }
         if (currentReview) {
-            return { label: 'Committed with questions', color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
+            return { label: 'Committed with open questions', color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
         }
-        if (events.some(event => event.type === 'plan_committed')) {
+        if (reviewStates.some(item => item.currentness && !item.currentness.integrityValid)) {
+            return { label: 'Readiness unverifiable', color: 'bg-red-900/30 text-red-300 border-red-800' };
+        }
+        if (reviewStates.some(item => item.commitment.latestCommit)) {
             return { label: 'Changed since commitment', color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
         }
         if (spine?.isFinal) {
-            return { label: 'Legacy commitment', color: 'bg-neutral-700 text-neutral-300 border-neutral-600' };
+            return { label: 'Legacy · readiness not recorded', color: 'bg-neutral-700 text-neutral-300 border-neutral-600' };
         }
         return stageBadges[stage] || { label: 'Working plan', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' };
     };

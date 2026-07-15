@@ -2,7 +2,11 @@ import { Clock, FileText, Package, MessageSquare, CheckCircle, XCircle, Pencil, 
 import { useState } from 'react';
 import { useProjectStore } from '../store/projectStore';
 import type { HistoryEventType } from '../types';
-import { compareReadinessReviewCurrentness } from '../lib/planning';
+import {
+    compareReadinessReviewCurrentness,
+    compareReadinessReviewProjections,
+    deriveReadinessReview,
+} from '../lib/planning';
 import { ReadinessCheckpoint } from './planning/ReadinessCheckpoint';
 import { buildReadinessCheckpointView } from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
@@ -33,7 +37,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
     const {
         getHistoryEvents, getSpineVersions, getProjectOutputAlignment, getProject,
         readinessReviews, readinessCommitmentEvents, planningRecords,
-        reviewRuns, specialistRuns, reviewIssues, artifacts, artifactVersions,
+        reviewRuns, specialistRuns, reviewIssues, reviewFindings, artifacts, artifactVersions,
     } = useProjectStore();
     const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
     const events = getHistoryEvents(projectId);
@@ -90,29 +94,55 @@ export function HistoryView({ projectId }: HistoryViewProps) {
         const idx = spines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : spineId;
     };
+    const currentReadinessInput = latestSpine ? {
+        projectId,
+        spine: {
+            versionId: latestSpine.id,
+            content: latestSpine.responseText,
+            structuredPRD: latestSpine.structuredPRD,
+            incompleteSectionCount: latestSpine.generationMeta?.failedSections?.length ?? 0,
+            isCommitted: latestSpine.isFinal,
+            safetyReview: latestSpine.safetyReview && {
+                status: latestSpine.safetyReview.status,
+                classification: latestSpine.safetyReview.classification,
+                detectedConcerns: latestSpine.safetyReview.detectedConcerns,
+                reviewedAt: latestSpine.safetyReview.reviewedAt,
+            },
+        },
+        planningRecords: planningRecords[projectId] ?? [],
+        reviewRuns: reviewRuns[projectId] ?? [],
+        specialistRuns: specialistRuns[projectId] ?? [],
+        reviewIssues: reviewIssues[projectId] ?? [],
+        reviewFindings: reviewFindings[projectId] ?? [],
+        outputAlignment: getProjectOutputAlignment(projectId),
+        currentArtifactRefs,
+        currentChallengeContextSignature,
+    } : undefined;
+    const selectedReadinessCurrentness = selectedReadinessReview && currentReadinessInput
+        ? compareReadinessReviewCurrentness(selectedReadinessReview, currentReadinessInput)
+        : undefined;
+    const readinessComparisonSummary = selectedReadinessReview
+        && selectedReadinessCurrentness
+        && !selectedReadinessCurrentness.current
+        && selectedReadinessCurrentness.integrityValid
+        && currentReadinessInput
+        && latestSpine
+        ? compareReadinessReviewProjections(
+            selectedReadinessReview,
+            deriveReadinessReview({ ...currentReadinessInput, createdAt: selectedReadinessReview.createdAt }),
+            {
+                reviewedVersionLabel: spineLabel(selectedReadinessReview.spineVersionId),
+                currentVersionLabel: spineLabel(latestSpine.id),
+            },
+        )
+        : undefined;
     const selectedReadinessView = selectedReadinessReview ? buildReadinessCheckpointView(
         selectedReadinessReview,
-        latestSpine
-            ? compareReadinessReviewCurrentness(selectedReadinessReview, {
-                projectId,
-                spine: {
-                    versionId: latestSpine.id,
-                    content: latestSpine.responseText,
-                    structuredPRD: latestSpine.structuredPRD,
-                    incompleteSectionCount: latestSpine.generationMeta?.failedSections?.length ?? 0,
-                    isCommitted: latestSpine.isFinal,
-                },
-                planningRecords: planningRecords[projectId] ?? [],
-                reviewRuns: reviewRuns[projectId] ?? [],
-                specialistRuns: specialistRuns[projectId] ?? [],
-                reviewIssues: reviewIssues[projectId] ?? [],
-                outputAlignment: getProjectOutputAlignment(projectId),
-                currentArtifactRefs,
-                currentChallengeContextSignature,
-            })
-            : { current: false, historical: true, integrityValid: true, reasons: ['spine_identity_changed'] },
+        selectedReadinessCurrentness
+            ?? { current: false, historical: true, integrityValid: true, reasons: ['spine_identity_changed'] },
         readinessCommitmentEvents[projectId] ?? [],
         spineLabel(selectedReadinessReview.spineVersionId),
+        readinessComparisonSummary,
     ) : undefined;
 
     // Group events by date

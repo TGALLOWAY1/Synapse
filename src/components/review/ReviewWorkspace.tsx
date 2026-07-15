@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     AlertTriangle,
     ArrowRight,
@@ -106,6 +106,7 @@ export interface ReviewWorkspaceProps {
     activeRunId?: string;
     initialTab?: 'review' | 'decisions' | 'history';
     initialDecisionId?: string;
+    initialIssueId?: string;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
     onSelectRun: (runId: string) => void;
@@ -388,11 +389,18 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
     );
 }
 
-function FindingCard({ issue, onResolve, readOnly }: { issue: ReviewIssueView; onResolve: () => void; readOnly?: boolean }) {
-    const [expanded, setExpanded] = useState(issue.severity === 'blocking');
+const reviewIssueAnchorId = (issueId: string): string => `review-issue-${issueId}`;
+
+function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: ReviewIssueView; onResolve: () => void; readOnly?: boolean; highlighted?: boolean }) {
+    const [expanded, setExpanded] = useState(issue.severity === 'blocking' || highlighted);
+    const isExpanded = expanded || highlighted;
     const isClosed = issue.status === 'dismissed' || issue.status === 'addressed';
     return (
-        <article className={`rounded-2xl border bg-white shadow-sm ${issue.severity === 'blocking' && !isClosed ? 'border-amber-300' : 'border-neutral-200'}`}>
+        <article
+            id={reviewIssueAnchorId(issue.id)}
+            tabIndex={-1}
+            className={`scroll-mt-4 rounded-2xl border bg-white shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 ${highlighted ? 'ring-2 ring-indigo-300' : ''} ${issue.severity === 'blocking' && !isClosed ? 'border-amber-300' : 'border-neutral-200'}`}
+        >
             <div className="p-4 sm:p-5">
                 <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                     <div className="min-w-0 flex-1">
@@ -415,12 +423,12 @@ function FindingCard({ issue, onResolve, readOnly }: { issue: ReviewIssueView; o
                 <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-neutral-100 pt-3 text-xs text-neutral-500">
                     <span>{issue.specialistNames.length > 1 ? `Raised independently by ${issue.specialistNames.join(' + ')}` : `Raised by ${issue.specialistNames[0]}`}</span>
                     <span>{issue.affectedSources.join(' · ')}</span>
-                    <button type="button" onClick={() => setExpanded(v => !v)} aria-expanded={expanded} className="ml-auto inline-flex min-h-8 items-center gap-1 font-medium text-neutral-700 hover:text-neutral-950">
-                        {expanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Evidence and recommendation
+                    <button type="button" onClick={() => setExpanded(v => !v)} aria-expanded={isExpanded} className="ml-auto inline-flex min-h-8 items-center gap-1 font-medium text-neutral-700 hover:text-neutral-950">
+                        {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Evidence and recommendation
                     </button>
                 </div>
             </div>
-            {expanded && (
+            {isExpanded && (
                 <div className="space-y-5 border-t border-neutral-100 bg-neutral-50/70 p-4 sm:p-5">
                     <div>
                         <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-500">Recommended next action</h4>
@@ -452,13 +460,14 @@ function FindingCard({ issue, onResolve, readOnly }: { issue: ReviewIssueView; o
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCoverage, readOnly }: {
+function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCoverage, readOnly, initialIssueId }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
     onNewReview: () => void;
     onRetryCoverage: () => void;
     readOnly?: boolean;
+    initialIssueId?: string;
 }) {
     const [statusFilter, setStatusFilter] = useState<'attention' | 'all' | 'closed'>('attention');
     const [actionIssue, setActionIssue] = useState<ReviewIssueView | null>(null);
@@ -467,6 +476,29 @@ function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCovera
     const deferred = run.issues.filter(i => i.status === 'deferred').length;
     const visible = run.issues.filter(i => statusFilter === 'all' || (statusFilter === 'attention' ? i.status === 'open' || i.status === 'linked' : i.status === 'dismissed' || i.status === 'addressed' || i.status === 'deferred'));
     const failed = run.specialists.filter(s => s.status === 'failed').length;
+
+    useEffect(() => {
+        const target = initialIssueId
+            ? run.issues.find(issue => issue.id === initialIssueId)
+            : undefined;
+        if (!target) return;
+        const targetVisible = statusFilter === 'all'
+            || (statusFilter === 'attention'
+                ? target.status === 'open' || target.status === 'linked'
+                : target.status === 'dismissed' || target.status === 'addressed' || target.status === 'deferred');
+        const frame = window.requestAnimationFrame(() => {
+            if (!targetVisible) {
+                setStatusFilter('all');
+                return;
+            }
+            const element = document.getElementById(reviewIssueAnchorId(target.id));
+            if (typeof element?.scrollIntoView === 'function') {
+                element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+            }
+            element?.focus({ preventScroll: true });
+        });
+        return () => window.cancelAnimationFrame(frame);
+    }, [initialIssueId, run.issues, statusFilter]);
 
     return (
         <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
@@ -506,7 +538,7 @@ function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCovera
                 ))}
             </div>
             <div className="mt-5 space-y-4">
-                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} readOnly={readOnly} onResolve={() => setActionIssue(issue)} />) : (
+                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} highlighted={issue.id === initialIssueId} readOnly={readOnly} onResolve={() => setActionIssue(issue)} />) : (
                     <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-5 py-12 text-center">
                         <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
                         <h2 className="mt-3 font-semibold text-neutral-900">Nothing in this view</h2>
@@ -580,7 +612,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                 ) : isInProgress ? (
                     <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
                 ) : activeRun.status === 'complete' || activeRun.status === 'partial' ? (
-                    <ReviewResults run={activeRun} planningRecords={props.planningRecords} onAct={props.onActOnIssue} readOnly={props.readOnly} onNewReview={() => setStartingNewReview(true)} onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)} />
+                    <ReviewResults run={activeRun} planningRecords={props.planningRecords} onAct={props.onActOnIssue} readOnly={props.readOnly} initialIssueId={props.initialIssueId} onNewReview={() => setStartingNewReview(true)} onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)} />
                 ) : (
                     <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={props.onStartReview} />
                 )}

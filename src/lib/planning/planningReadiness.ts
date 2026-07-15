@@ -61,6 +61,11 @@ export function planningRecordRequiresResolution(
     if (visited.has(record.id)) return true;
     const nextVisited = new Set(visited).add(record.id);
     const state = projectDecision(record);
+    if (state.status === 'superseded') {
+        const replacement = allRecords.find(item => item.id === state.supersededById);
+        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited);
+    }
+    if (state.status === 'invalidated') return material(record);
     const legacyWithoutVerdictProvenance = record.schemaVersion === undefined
         && !(record.events ?? []).some(event => event.actor === 'user');
     if (legacyWithoutVerdictProvenance && material(record)) return true;
@@ -77,11 +82,6 @@ export function planningRecordRequiresResolution(
     if (record.type === 'assumption' && state.status === 'confirmed'
         && material(record) && !record.evidence.some(item => item.verified)) return true;
     if (record.type === 'risk' && state.status === 'confirmed' && material(record)) return true;
-    if (state.status === 'invalidated') return material(record);
-    if (state.status === 'superseded') {
-        const replacement = allRecords.find(item => item.id === state.supersededById);
-        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited);
-    }
     return false;
 }
 

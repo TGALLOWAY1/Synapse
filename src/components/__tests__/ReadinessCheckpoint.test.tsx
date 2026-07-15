@@ -1,4 +1,4 @@
-import { fireEvent, render, screen } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
 import {
     ReadinessCheckpoint,
@@ -11,6 +11,7 @@ const baseReview = (overrides: Partial<ReadinessCheckpointView> = {}): Readiness
     capturedAt: 1_720_000_000_000,
     conclusion: 'not_ready',
     isCurrent: true,
+    integrityValid: true,
     concerns: [{
         id: 'decision-auth',
         title: 'Decide when an account is required',
@@ -145,7 +146,7 @@ describe('ReadinessCheckpoint', () => {
             {...props}
         />);
 
-        expect(screen.getByText('Committed with open questions')).toBeInTheDocument();
+        expect(screen.getByText('Previously committed with open questions')).toBeInTheDocument();
         expect(screen.getByText(/The planning decisions changed/)).toBeInTheDocument();
         expect(screen.getByText(/committed a contained prototype/i)).toBeInTheDocument();
         expect(screen.getByText(/No production data/i)).toBeInTheDocument();
@@ -165,5 +166,46 @@ describe('ReadinessCheckpoint', () => {
         expect(screen.queryByRole('button', { name: 'Commit with open questions' })).toBeNull();
         fireEvent.click(screen.getByRole('button', { name: 'Review current plan' }));
         expect(props.onRefresh).toHaveBeenCalledTimes(1);
+    });
+
+    it('labels an integrity-invalid checkpoint as unverifiable and suppresses commitment claims', () => {
+        const props = callbacks();
+        render(<ReadinessCheckpoint review={baseReview({
+            integrityValid: false,
+            isCurrent: false,
+            currentnessReasons: ['The stored checkpoint no longer matches its integrity signature.'],
+            commitment: {
+                kind: 'ready',
+                committedAt: 100,
+            },
+        })} {...props} />);
+
+        expect(screen.getByRole('heading', { name: 'Checkpoint unverifiable' })).toBeInTheDocument();
+        expect(screen.getByRole('alert')).toHaveTextContent(/cannot be verified/i);
+        expect(screen.queryByText('Plan committed')).toBeNull();
+        expect(screen.queryByRole('button', { name: 'Commit plan' })).toBeNull();
+    });
+
+    it('shows a reopened checkpoint as recommittable instead of actively committed', () => {
+        const props = callbacks();
+        render(<ReadinessCheckpoint review={baseReview({
+            priorCommitment: {
+                kind: 'with_open_questions',
+                committedAt: 100,
+                reopenedAt: 200,
+                rationale: 'We previously proceeded with a contained prototype.',
+            },
+        })} {...props} />);
+
+        expect(screen.getByText('Previously committed, then reopened')).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Not ready' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: 'Commit with open questions' })).toBeInTheDocument();
+    });
+
+    it('moves focus to the mobile override rationale when the form is revealed', async () => {
+        const props = callbacks();
+        render(<ReadinessCheckpoint review={baseReview()} {...props} />);
+        fireEvent.click(screen.getByRole('button', { name: 'Commit with open questions' }));
+        await waitFor(() => expect(screen.getByLabelText('Why proceed now?')).toHaveFocus());
     });
 });

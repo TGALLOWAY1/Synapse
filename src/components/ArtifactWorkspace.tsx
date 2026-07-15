@@ -80,6 +80,11 @@ interface ArtifactWorkspaceProps {
     // so closing the drawer never triggers a reopen.
     autoOpenIntent?: boolean;
     onAutoOpenConsumed?: () => void;
+    /** Exact readiness target. Unlike autoOpenIntent, this must not pick a
+     * different output merely because it is earlier in display order. */
+    initialSelection?: ArtifactSlotKey;
+    initialArtifactId?: string;
+    onInitialSelectionConsumed?: () => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -250,11 +255,11 @@ function AssetLock() {
 
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
-    autoOpenIntent, onAutoOpenConsumed,
+    autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId, onInitialSelectionConsumed,
 }: ArtifactWorkspaceProps) {
     const isMobile = useIsMobile();
     const {
-        getArtifacts, getPreferredVersion, getArtifactStaleness, getProjectOutputAlignment, getJob, getProject,
+        getArtifacts, getArtifact, getPreferredVersion, getArtifactStaleness, getProjectOutputAlignment, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
     } = useProjectStore();
@@ -273,6 +278,20 @@ export function ArtifactWorkspace({
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
+    const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
+
+    useEffect(() => {
+        if (!initialSelection) return;
+        const target: WorkspaceSelection = initialSelection === 'screen_inventory' || initialSelection === 'mockup'
+            ? 'screens'
+            : initialSelection;
+        if (target === 'screens' || slotMetas.some(meta => meta.key === target)) {
+            setSelected(target);
+            setSelectedArtifactId(initialArtifactId);
+            if (isMobile) setMobileSidebarOpen(false);
+        }
+        onInitialSelectionConsumed?.();
+    }, [initialSelection, initialArtifactId, isMobile, onInitialSelectionConsumed, slotMetas]);
     // The scrollable content pane. Reset to the top whenever the user switches
     // pages so a new artifact never inherits the previous page's scroll offset.
     const mainRef = useRef<HTMLElement>(null);
@@ -344,11 +363,18 @@ export function ArtifactWorkspace({
     // objects are stable references in the store until a new version lands,
     // so they are safe useMemo dependencies.
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
-    const invArtifact = coreArtifacts.find(a => a.subtype === 'screen_inventory');
+    const exactSelectedArtifact = selectedArtifactId ? getArtifact(projectId, selectedArtifactId) : undefined;
+    const invArtifact = exactSelectedArtifact?.type === 'core_artifact' && exactSelectedArtifact.subtype === 'screen_inventory'
+        ? exactSelectedArtifact
+        : coreArtifacts.find(a => a.subtype === 'screen_inventory');
     const invPreferred = invArtifact ? getPreferredVersion(projectId, invArtifact.id) : undefined;
-    const flowsArtifact = coreArtifacts.find(a => a.subtype === 'user_flows');
+    const flowsArtifact = exactSelectedArtifact?.type === 'core_artifact' && exactSelectedArtifact.subtype === 'user_flows'
+        ? exactSelectedArtifact
+        : coreArtifacts.find(a => a.subtype === 'user_flows');
     const flowsPreferred = flowsArtifact ? getPreferredVersion(projectId, flowsArtifact.id) : undefined;
-    const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
+    const mockupArtifact = exactSelectedArtifact?.type === 'mockup'
+        ? exactSelectedArtifact
+        : getArtifacts(projectId, 'mockup')[0];
     const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
     const projectOutputAlignment = getProjectOutputAlignment(projectId);
     const alignmentByNode = new Map(
@@ -1231,7 +1257,9 @@ export function ArtifactWorkspace({
 
         // Core artifact done state.
         const subtype = activeSelection;
-        const artifact = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
+        const artifact = exactSelectedArtifact?.type === 'core_artifact' && exactSelectedArtifact.subtype === subtype
+            ? exactSelectedArtifact
+            : getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
         const preferred = artifact ? getPreferredVersion(projectId, artifact.id) : undefined;
         if (!artifact || !preferred) {
             return <EmptyState message="Not generated yet" />;
@@ -1428,6 +1456,7 @@ export function ArtifactWorkspace({
     const selectedMeta = slotMetas.find(s => s.key === activeSelection);
     const handleSelect = (key: WorkspaceSelection) => {
         setSelected(key);
+        setSelectedArtifactId(undefined);
         // Any sidebar selection (including re-clicking "Screens") lands on the
         // top of that view, closing an open Screen Detail (clears the URL
         // params, so Back can return to the screen).

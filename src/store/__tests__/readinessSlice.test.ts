@@ -219,6 +219,31 @@ describe('durable readiness authority boundary', () => {
         })).toMatchObject({ status: 'rejected', reason: 'tampered' });
     });
 
+    it('cannot reopen authority from a review whose persisted payload was tampered', () => {
+        const created = useProjectStore.getState().createReadinessReview(projectId);
+        if (created.status !== 'created') throw new Error('expected review');
+        const authorized = useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            expectedIntegrityHash: created.review.integrityHash,
+            expectedAggregateHash: created.review.snapshotHashes.aggregate,
+            acceptedConcernIds: [],
+        });
+        if (authorized.status !== 'authorized') throw new Error('expected authorization');
+        const committed = useProjectStore.getState().commitReadinessReview(
+            projectId, created.reviewId, authorized.authorizationEventId,
+        );
+        if (committed.status !== 'committed') throw new Error('expected commitment');
+        useProjectStore.setState(state => ({
+            readinessReviews: {
+                ...state.readinessReviews,
+                [projectId]: [{ ...created.review, conclusion: 'not_ready' }],
+            },
+        }));
+
+        expect(useProjectStore.getState().reopenReadinessCommitment(projectId, committed.commitmentEventId))
+            .toMatchObject({ status: 'rejected', reason: 'tampered' });
+        expect(useProjectStore.getState().spineVersions[projectId][0].isFinal).toBe(true);
+    });
+
     it('does not silently reuse a review for identical text on a different planning spine', () => {
         const created = useProjectStore.getState().createReadinessReview(projectId);
         if (created.status !== 'created') throw new Error('expected review');
