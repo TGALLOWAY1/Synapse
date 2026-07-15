@@ -25,6 +25,7 @@ import type {
     ScreenInventoryImageRecord, ProjectTask, WorkflowRun,
     MockupVariantImageRecord,
     ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
+    ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
 import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
@@ -70,6 +71,8 @@ export type SnapshotProjectBundle = {
     reviewFindings?: SpecialistFinding[];
     reviewIssues?: ReviewIssue[];
     planningRecords?: PlanningRecord[];
+    readinessReviews?: ReadinessReview[];
+    readinessCommitmentEvents?: ReadinessCommitmentEvent[];
     // Phase 3D: per-variant mockup images (the Screens Mockups-tab variant
     // gallery) live in a dedicated IndexedDB store. They ride INSIDE the bundle
     // (which the server persists verbatim) in their WIRE form — image bytes are
@@ -184,6 +187,8 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
         reviewFindings: state.reviewFindings[projectId] ?? [],
         reviewIssues: state.reviewIssues[projectId] ?? [],
         planningRecords: state.planningRecords[projectId] ?? [],
+        readinessReviews: state.readinessReviews[projectId] ?? [],
+        readinessCommitmentEvents: state.readinessCommitmentEvents[projectId] ?? [],
     };
 };
 
@@ -641,6 +646,11 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
         reviewFindings: { ...state.reviewFindings, [projectId]: bundle.reviewFindings ?? [] },
         reviewIssues: { ...state.reviewIssues, [projectId]: bundle.reviewIssues ?? [] },
         planningRecords: { ...state.planningRecords, [projectId]: bundle.planningRecords ?? [] },
+        readinessReviews: { ...state.readinessReviews, [projectId]: bundle.readinessReviews ?? [] },
+        readinessCommitmentEvents: {
+            ...state.readinessCommitmentEvents,
+            [projectId]: bundle.readinessCommitmentEvents ?? [],
+        },
     }));
 
     return projectId;
@@ -765,6 +775,11 @@ export const restoreSnapshotAs = async (
         reviewFindings: { ...state.reviewFindings, [targetProjectId]: remapped.reviewFindings ?? [] },
         reviewIssues: { ...state.reviewIssues, [targetProjectId]: remapped.reviewIssues ?? [] },
         planningRecords: { ...state.planningRecords, [targetProjectId]: remapped.planningRecords ?? [] },
+        readinessReviews: { ...state.readinessReviews, [targetProjectId]: remapped.readinessReviews ?? [] },
+        readinessCommitmentEvents: {
+            ...state.readinessCommitmentEvents,
+            [targetProjectId]: remapped.readinessCommitmentEvents ?? [],
+        },
     }));
 
     return targetProjectId;

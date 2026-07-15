@@ -84,7 +84,7 @@ describe('projectStore', () => {
     });
 
     describe('markSpineFinal', () => {
-        it('marks a spine as final', () => {
+        it('cannot manufacture commitment authority by toggling a boolean', () => {
             const store = useProjectStore.getState();
             const { projectId, spineId } = store.createProject('Test', 'prompt');
 
@@ -92,14 +92,21 @@ describe('projectStore', () => {
 
             const spines = useProjectStore.getState().spineVersions[projectId];
             const spine = spines.find(s => s.id === spineId);
-            expect(spine?.isFinal).toBe(true);
+            expect(spine?.isFinal).toBe(false);
         });
 
-        it('can unmark a spine as final', () => {
+        it('can reopen a legacy spine that was already final', () => {
             const store = useProjectStore.getState();
             const { projectId, spineId } = store.createProject('Test', 'prompt');
 
-            useProjectStore.getState().markSpineFinal(projectId, spineId, true);
+            useProjectStore.setState(state => ({
+                spineVersions: {
+                    ...state.spineVersions,
+                    [projectId]: state.spineVersions[projectId].map(spine => (
+                        spine.id === spineId ? { ...spine, isFinal: true } : spine
+                    )),
+                },
+            }));
             useProjectStore.getState().markSpineFinal(projectId, spineId, false);
 
             const spines = useProjectStore.getState().spineVersions[projectId];

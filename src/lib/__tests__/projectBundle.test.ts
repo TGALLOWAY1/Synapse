@@ -24,6 +24,8 @@ function emptySource(): BundleSource {
     reviewFindings: {},
     reviewIssues: {},
     planningRecords: {},
+    readinessReviews: {},
+    readinessCommitmentEvents: {},
   };
 }
 
@@ -47,6 +49,8 @@ describe('extractProjectBundle', () => {
     expect(bundle!.workflowRuns).toEqual([]);
     expect(bundle!.reviewRuns).toEqual([]);
     expect(bundle!.planningRecords).toEqual([]);
+    expect(bundle!.readinessReviews).toEqual([]);
+    expect(bundle!.readinessCommitmentEvents).toEqual([]);
   });
 
   it('returns null for an unknown project', () => {
@@ -90,6 +94,12 @@ describe('projectSlicesChanged', () => {
   it('detects review-domain changes for cloud sync', () => {
     const a = sourceWith('p1');
     const b: BundleSource = { ...a, reviewIssues: { ...a.reviewIssues, p1: [] } };
+    expect(projectSlicesChanged(a, b, 'p1')).toBe(true);
+  });
+
+  it('detects readiness lifecycle changes for cloud sync', () => {
+    const a = sourceWith('p1');
+    const b: BundleSource = { ...a, readinessCommitmentEvents: { ...a.readinessCommitmentEvents, p1: [] } };
     expect(projectSlicesChanged(a, b, 'p1')).toBe(true);
   });
 

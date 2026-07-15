@@ -114,6 +114,10 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newReviewIssues[projectId];
             const newPlanningRecords = { ...state.planningRecords };
             delete newPlanningRecords[projectId];
+            const newReadinessReviews = { ...state.readinessReviews };
+            delete newReadinessReviews[projectId];
+            const newReadinessCommitmentEvents = { ...state.readinessCommitmentEvents };
+            delete newReadinessCommitmentEvents[projectId];
             return {
                 projects: newProjects,
                 spineVersions: newSpines,
@@ -129,6 +133,8 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 reviewFindings: newReviewFindings,
                 reviewIssues: newReviewIssues,
                 planningRecords: newPlanningRecords,
+                readinessReviews: newReadinessReviews,
+                readinessCommitmentEvents: newReadinessCommitmentEvents,
             };
         });
     },
@@ -204,6 +210,7 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 'projects', 'spineVersions', 'historyEvents', 'branches', 'artifacts',
                 'artifactVersions', 'feedbackItems', 'reviewRuns', 'specialistRuns',
                 'reviewFindings', 'reviewIssues', 'planningRecords', 'tasks', 'workflowRuns',
+                'readinessReviews', 'readinessCommitmentEvents',
             ] as const;
             const next: Record<string, unknown> = {};
             for (const key of keys) {

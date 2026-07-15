@@ -68,6 +68,8 @@ function bundleSourceOf(state: ReturnType<typeof useProjectStore.getState>): Bun
     reviewFindings: state.reviewFindings,
     reviewIssues: state.reviewIssues,
     planningRecords: state.planningRecords,
+    readinessReviews: state.readinessReviews,
+    readinessCommitmentEvents: state.readinessCommitmentEvents,
   };
 }
 

@@ -127,6 +127,11 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => {
+        // Phase 3 authority boundary: only commitReadinessReview may project a
+        // reviewed user commitment onto `isFinal`. Keep this legacy action for
+        // reopening old persisted commitments, but never let a caller create
+        // new authority by toggling a boolean directly.
+        if (isFinal) return;
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>

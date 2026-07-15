@@ -40,6 +40,8 @@ function emptyPersistedState() {
     reviewFindings: {},
     reviewIssues: {},
     planningRecords: {},
+    readinessReviews: {},
+    readinessCommitmentEvents: {},
   };
 }
 
@@ -74,6 +76,8 @@ function repersistCurrentState(): void {
     reviewFindings: s.reviewFindings,
     reviewIssues: s.reviewIssues,
     planningRecords: s.planningRecords,
+    readinessReviews: s.readinessReviews,
+    readinessCommitmentEvents: s.readinessCommitmentEvents,
   });
 }
 

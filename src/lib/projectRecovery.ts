@@ -41,6 +41,8 @@ function bundleSourceOfStore(): BundleSource {
     reviewFindings: state.reviewFindings,
     reviewIssues: state.reviewIssues,
     planningRecords: state.planningRecords,
+    readinessReviews: state.readinessReviews,
+    readinessCommitmentEvents: state.readinessCommitmentEvents,
   };
 }
 

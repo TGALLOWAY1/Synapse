@@ -14,6 +14,7 @@ import { createPrdProgressSlice } from './slices/prdProgressSlice';
 import { createTasksSlice } from './slices/tasksSlice';
 import { createMetricsSlice } from './slices/metricsSlice';
 import { createReviewSlice } from './slices/reviewSlice';
+import { createReadinessSlice } from './slices/readinessSlice';
 import { markInterruptedGenerations } from './interruptedGeneration';
 import { markInterruptedReviews } from './interruptedReviews';
 import { guardProjectStoreActions } from '../lib/projectCapabilities';
@@ -34,6 +35,7 @@ export const useProjectStore = create<ProjectState>()(
             ...createTasksSlice(...a),
             ...createMetricsSlice(...a),
             ...createReviewSlice(...a),
+            ...createReadinessSlice(...a),
         }),
         {
             name: 'synapse-projects-storage',

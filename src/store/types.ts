@@ -11,6 +11,7 @@ import type {
     ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue,
     ReviewIssueDisposition, PlanningRecord, PlanningRecordStatus,
     DecisionEvent, DecisionAssessment,
+    ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
@@ -41,6 +42,37 @@ export type EditSpineStructuredPRDResult = {
     recognition?: import('../lib/planning/consequentialEditRecognition').ConsequentialPrdEditRecognition;
 };
 
+export type ReadinessMutationFailureReason =
+    | 'project_not_found'
+    | 'review_not_found'
+    | 'authorization_not_found'
+    | 'commitment_not_found'
+    | 'stale'
+    | 'tampered'
+    | 'hash_mismatch'
+    | 'accepted_concerns_mismatch'
+    | 'rationale_required'
+    | 'containment_required'
+    | 'safety_blocked'
+    | 'already_committed'
+    | 'not_committed';
+
+export type CreateReadinessReviewResult =
+    | { status: 'created'; reviewId: string; review: ReadinessReview }
+    | { status: 'rejected'; reason: 'project_not_found' | 'safety_blocked' | 'stale' };
+
+export type AuthorizeReadinessCommitmentResult =
+    | { status: 'authorized'; authorizationEventId: string }
+    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
+export type CommitReadinessReviewResult =
+    | { status: 'committed'; commitmentEventId: string }
+    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
+export type ReopenReadinessCommitmentResult =
+    | { status: 'reopened'; reopenEventId: string }
+    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
 export interface ProjectState {
     projects: Record<string, Project>;
     spineVersions: Record<string, SpineVersion[]>;
@@ -59,6 +91,8 @@ export interface ProjectState {
     reviewFindings: Record<string, SpecialistFinding[]>;
     reviewIssues: Record<string, ReviewIssue[]>;
     planningRecords: Record<string, PlanningRecord[]>;
+    readinessReviews: Record<string, ReadinessReview[]>;
+    readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
 
     // Persisted implementation tasks, keyed by projectId.
     tasks: Record<string, ProjectTask[]>;
@@ -305,6 +339,31 @@ export interface ProjectState {
         planningRecordId: string,
         assessment: DecisionAssessment,
     ) => void;
+
+    // Durable readiness checkpoints. Reviews are immutable snapshots; user
+    // authority is recorded separately as append-only commitment events.
+    createReadinessReview: (projectId: string) => CreateReadinessReviewResult;
+    authorizeReadinessCommitment: (
+        projectId: string,
+        reviewId: string,
+        input: {
+            expectedIntegrityHash: string;
+            expectedAggregateHash: string;
+            acceptedConcernIds: string[];
+            rationale?: string;
+            containmentPlan?: string;
+        },
+    ) => AuthorizeReadinessCommitmentResult;
+    commitReadinessReview: (
+        projectId: string,
+        reviewId: string,
+        authorizationEventId: string,
+    ) => CommitReadinessReviewResult;
+    reopenReadinessCommitment: (
+        projectId: string,
+        commitmentEventId: string,
+        reason?: string,
+    ) => ReopenReadinessCommitmentResult;
 
     // Implementation task tracking. `saveTasks` persists an extracted set for a
     // given Implementation Plan artifact, replacing any prior set for that

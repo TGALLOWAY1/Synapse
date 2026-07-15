@@ -12,6 +12,7 @@ import type {
   Project, SpineVersion, HistoryEvent, Branch,
   Artifact, ArtifactVersion, FeedbackItem, ProjectTask, WorkflowRun,
   ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
+  ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 
 export interface ProjectBundle {
@@ -30,6 +31,8 @@ export interface ProjectBundle {
   reviewFindings?: SpecialistFinding[];
   reviewIssues?: ReviewIssue[];
   planningRecords?: PlanningRecord[];
+  readinessReviews?: ReadinessReview[];
+  readinessCommitmentEvents?: ReadinessCommitmentEvent[];
 }
 
 /** The persisted, project-id-keyed slices a bundle is assembled from. */
@@ -48,6 +51,8 @@ export interface BundleSource {
   reviewFindings: Record<string, SpecialistFinding[]>;
   reviewIssues: Record<string, ReviewIssue[]>;
   planningRecords: Record<string, PlanningRecord[]>;
+  readinessReviews: Record<string, ReadinessReview[]>;
+  readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
 }
 
 // Array-valued collections (everything except the `projects` map).
@@ -65,6 +70,8 @@ const ARRAY_COLLECTIONS = [
   'reviewFindings',
   'reviewIssues',
   'planningRecords',
+  'readinessReviews',
+  'readinessCommitmentEvents',
 ] as const;
 
 /**
@@ -116,6 +123,8 @@ export function mergeBundlesIntoSource(
     reviewFindings: { ...source.reviewFindings },
     reviewIssues: { ...source.reviewIssues },
     planningRecords: { ...source.planningRecords },
+    readinessReviews: { ...source.readinessReviews },
+    readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
   };
   const addedIds: string[] = [];
   for (const bundle of bundles) {
@@ -159,6 +168,8 @@ export function overwriteBundlesIntoSource(
     reviewFindings: { ...source.reviewFindings },
     reviewIssues: { ...source.reviewIssues },
     planningRecords: { ...source.planningRecords },
+    readinessReviews: { ...source.readinessReviews },
+    readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
   };
   const replacedIds: string[] = [];
   for (const bundle of bundles) {
