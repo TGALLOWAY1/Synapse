@@ -1,7 +1,19 @@
-import { beforeEach, describe, expect, it } from 'vitest';
+import { beforeEach, describe, expect, it, vi } from 'vitest';
 import type { PlanningRecord, StructuredPRD } from '../../types';
 import { hashReviewValue } from '../../lib/review/hash';
 import { buildReviewContextManifest } from '../../lib/review/manifest';
+import {
+    appendAssumptionValidationEvent,
+    appendDecisionEvent,
+    assumptionEvidenceSetHash,
+    assumptionStatementHash,
+    assumptionValidationDecisionEvent,
+    compareReadinessReviewCurrentness,
+    projectAssumptionValidation,
+    sealAssumptionEvidence,
+    sealAssumptionValidationEvent,
+    sealAssumptionValidationPlan,
+} from '../../lib/planning';
 import { useProjectStore } from '../projectStore';
 
 const projectId = 'readiness-project';
@@ -31,6 +43,49 @@ const assumption = (): PlanningRecord => ({
         at: 2, answer: 'Proceed with the premise for now.',
     }],
 });
+
+const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
+    let current: PlanningRecord = {
+        ...assumption(), status: 'open', events: [],
+    };
+    const plan = sealAssumptionValidationPlan({
+        id: 'plan', question: 'Will users revisit operational warnings?',
+        method: { kind: 'usability_observation', label: 'Observed planning session' }, supportSignals: ['User revisits warning'],
+        contradictionSignals: ['Warning is ignored'], inconclusiveConditions: [], limitations: ['One team'],
+        expiresAt, authoredBy: 'user', createdAt: 1_010,
+    });
+    const planned = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+        id: 'plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 1_010,
+        assumptionStatementHash: assumptionStatementHash(current), plan, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+    }));
+    if (!planned.ok) throw new Error(planned.reason);
+    current = planned.record;
+    const evidence = sealAssumptionEvidence({
+        id: 'evidence', planningRecordId: current.id, sourceType: 'usability_observation', source: 'Planning session',
+        sourceIdentity: 'session-1', observedAt: 1_019, recordedAt: 1_020,
+        observation: 'The user revisited the warning before committing.', validationQuestion: plan.question,
+        limitations: ['One team'], character: 'direct', relation: 'supports', assumptionStatementHash: assumptionStatementHash(current),
+        validationPlanHash: plan.contentHash, authoredBy: 'user',
+    });
+    const evidenced = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+        id: 'evidence-event', planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 1_020,
+        assumptionStatementHash: assumptionStatementHash(current), evidence, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+    }));
+    if (!evidenced.ok) throw new Error(evidenced.reason);
+    current = evidenced.record;
+    const projection = projectAssumptionValidation(current, 1_030);
+    const outcome = sealAssumptionValidationEvent({
+        id: 'outcome', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 1_030,
+        assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
+        expectedValidationPlanHash: projection.currentPlan!.contentHash,
+        expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+    });
+    const concluded = appendAssumptionValidationEvent(current, outcome);
+    if (!concluded.ok) throw new Error(concluded.reason);
+    const verdict = appendDecisionEvent(concluded.record, assumptionValidationDecisionEvent(current, outcome)!);
+    if (!verdict.ok) throw new Error(verdict.reason);
+    return verdict.record;
+};
 
 const challengeManifest = buildReviewContextManifest({
     projectId,
@@ -278,5 +333,49 @@ describe('durable readiness authority boundary', () => {
             expectedAggregateHash: created.review.snapshotHashes.aggregate,
             acceptedConcernIds: [],
         })).toMatchObject({ status: 'rejected', reason: 'stale' });
+    });
+
+    it('rejects authorization and commitment after validation expires without a record mutation', () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(1_040);
+            useProjectStore.setState({ planningRecords: { [projectId]: [expiringValidatedAssumption(1_050)] } });
+            const created = useProjectStore.getState().createReadinessReview(projectId);
+            if (created.status !== 'created') throw new Error('expected review');
+            expect(created.review.conclusion).toBe('ready_to_build');
+
+            const authorized = useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+                expectedIntegrityHash: created.review.integrityHash,
+                expectedAggregateHash: created.review.snapshotHashes.aggregate,
+                acceptedConcernIds: [],
+            });
+            if (authorized.status !== 'authorized') throw new Error('expected authorization');
+
+            vi.setSystemTime(1_051);
+            expect(useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+                expectedIntegrityHash: created.review.integrityHash,
+                expectedAggregateHash: created.review.snapshotHashes.aggregate,
+                acceptedConcernIds: [],
+            })).toMatchObject({ status: 'rejected', reason: 'stale' });
+            expect(useProjectStore.getState().commitReadinessReview(
+                projectId, created.reviewId, authorized.authorizationEventId,
+            )).toMatchObject({ status: 'rejected', reason: 'stale' });
+
+            const state = useProjectStore.getState();
+            const currentInput = {
+                projectId,
+                spine: { versionId: spineId, content, structuredPRD: prd, incompleteSectionCount: 0, isCommitted: false },
+                planningRecords: state.planningRecords[projectId],
+                reviewRuns: state.reviewRuns[projectId], specialistRuns: state.specialistRuns[projectId],
+                reviewIssues: state.reviewIssues[projectId], reviewFindings: state.reviewFindings[projectId],
+                outputAlignment: { outputs: [], alignedCount: 0, possiblyAffectedCount: 0, staleCount: 0, blockingCount: 0 },
+                currentChallengeContextSignature: challengeContextSignature, createdAt: 1_051,
+            };
+            expect(compareReadinessReviewCurrentness(created.review, currentInput)).toMatchObject({
+                current: false, historical: true, reasons: expect.arrayContaining(['planning_state_changed']),
+            });
+        } finally {
+            vi.useRealTimers();
+        }
     });
 });

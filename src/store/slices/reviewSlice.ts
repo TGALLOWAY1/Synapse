@@ -19,6 +19,7 @@ import {
     addAssumptionInterpretationProposal as addInterpretationProposal,
     addAssumptionValidationPlanProposal as addValidationPlanProposal,
     appendAssumptionValidationEvent as appendValidationEvent,
+    assumptionValidationDecisionEvent,
     appendDecisionEvent,
     importPrdAssumptions,
     normalizePlanningRecord,
@@ -383,21 +384,30 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             const records = state.planningRecords[projectId] ?? [];
             const record = records.find(item => item.id === planningRecordId);
             if (!record) return state;
-            const result = appendValidationEvent(record, event, currentPlanningContext(state, projectId));
+            const normalized = normalizePlanningRecord(record);
+            const result = appendValidationEvent(normalized, event, currentPlanningContext(state, projectId));
             if (!result.ok) {
                 outcome = result;
                 return state;
             }
+            const decisionEvent = assumptionValidationDecisionEvent(normalized, event);
+            const synchronized = decisionEvent
+                ? appendDecisionEvent(result.record, decisionEvent)
+                : { ok: true as const, record: result.record, duplicate: true };
+            if (!synchronized.ok) {
+                outcome = { ok: false, reason: `The validation outcome could not be bound to plan impact: ${synchronized.reason}` };
+                return state;
+            }
             outcome = {
                 ok: true,
-                duplicate: result.duplicate,
+                duplicate: result.duplicate && synchronized.duplicate,
                 ...(result.duplicateEvidenceOf ? { duplicateEvidenceOf: result.duplicateEvidenceOf } : {}),
             };
-            if (result.duplicate) return state;
+            if (result.duplicate && synchronized.duplicate) return state;
             return {
                 planningRecords: {
                     ...state.planningRecords,
-                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
+                    [projectId]: records.map(item => item.id === planningRecordId ? synchronized.record : item),
                 },
             };
         });

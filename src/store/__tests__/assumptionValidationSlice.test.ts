@@ -4,6 +4,7 @@ import {
     assumptionEvidenceSetHash,
     assumptionStatementHash,
     projectAssumptionValidation,
+    projectDecision,
     sealAssumptionEvidence,
     sealAssumptionValidationEvent,
     sealAssumptionValidationPlan,
@@ -106,5 +107,67 @@ describe('assumption validation store boundary', () => {
             ok: false,
         });
         expect(useProjectStore.getState().planningRecords['project-1'][0].assumptionValidation?.events).toEqual([]);
+    });
+
+    it('atomically binds a contradicted outcome to the existing decision verdict used by impact review', () => {
+        let current = createAssumption();
+        const plan = sealAssumptionValidationPlan({
+            id: 'technical-plan', question: 'Can the required browser workflow run?',
+            method: { kind: 'technical_test', label: 'Browser spike' }, supportSignals: ['Workflow completes'],
+            contradictionSignals: ['Browser security prevents the workflow'], inconclusiveConditions: [],
+            limitations: ['Tested in current browser versions'], authoredBy: 'user', createdAt: 110,
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, sealAssumptionValidationEvent({
+            id: 'technical-plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 110,
+            assumptionStatementHash: assumptionStatementHash(current), plan, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+        }))).toMatchObject({ ok: true });
+        current = useProjectStore.getState().planningRecords['project-1'][0];
+        const evidence = sealAssumptionEvidence({
+            id: 'technical-evidence', planningRecordId: current.id, sourceType: 'technical_test', source: 'Browser spike',
+            sourceIdentity: 'spike-run-1', observedAt: 119, recordedAt: 120,
+            observation: 'The browser security model prevents the required cross-origin workflow.', validationQuestion: plan.question,
+            limitations: [], character: 'direct', relation: 'contradicts', assumptionStatementHash: assumptionStatementHash(current),
+            validationPlanHash: plan.contentHash, authoredBy: 'user',
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, sealAssumptionValidationEvent({
+            id: 'technical-evidence-event', planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 120,
+            assumptionStatementHash: assumptionStatementHash(current), evidence, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+        }))).toMatchObject({ ok: true });
+        current = useProjectStore.getState().planningRecords['project-1'][0];
+        const projection = projectAssumptionValidation(current, 130);
+        const outcome = sealAssumptionValidationEvent({
+            id: 'technical-outcome', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 130,
+            assumptionStatementHash: assumptionStatementHash(current), conclusion: 'contradicted',
+            caveats: 'The required workflow is infeasible in supported browsers.',
+            expectedValidationPlanHash: projection.currentPlan!.contentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, outcome)).toEqual({
+            ok: true, duplicate: false,
+        });
+        current = useProjectStore.getState().planningRecords['project-1'][0];
+        expect(projectDecision(current)).toMatchObject({
+            status: 'rejected', latestVerdictEventId: 'assumption-validation-verdict-technical-outcome',
+        });
+        expect(current.events?.at(-1)).toMatchObject({
+            id: 'assumption-validation-verdict-technical-outcome', type: 'premise_rejected', actor: 'user',
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, outcome)).toEqual({
+            ok: true, duplicate: true,
+        });
+
+        expect(useProjectStore.getState().appendPlanningDecisionEvent('project-1', current.id, {
+            id: 'concurrent-verdict', planningRecordId: current.id, actor: 'user', type: 'custom_answered',
+            answer: 'A newer concurrent product conclusion.', at: 200,
+        })).toMatchObject({ ok: true });
+        current = useProjectStore.getState().planningRecords['project-1'][0];
+        const staleOutcome = sealAssumptionValidationEvent({
+            id: 'stale-outcome', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 140,
+            assumptionStatementHash: assumptionStatementHash(current), conclusion: 'inconclusive',
+            expectedValidationPlanHash: projection.currentPlan!.contentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, staleOutcome)).toMatchObject({ ok: false });
+        expect(useProjectStore.getState().planningRecords['project-1'][0].assumptionValidation?.events.some(event => event.id === 'stale-outcome')).toBe(false);
     });
 });

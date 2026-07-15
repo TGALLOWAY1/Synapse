@@ -1,6 +1,7 @@
 import type { PlanningRecord, ReviewIssue, StructuredPRD } from '../../types';
 import { alignmentProposalNeedsResolution, alignmentProposalReviews } from './decisionImpact';
 import { projectDecision } from './decisionProjection';
+import { assumptionValidationReadiness } from './assumptionValidation';
 
 export type PlanningReadinessPhase =
     | 'exploring'
@@ -27,7 +28,7 @@ export type PlanningReadiness = {
     changedSourceCount: number;
     isReadyToBuild: boolean;
     nextAction: {
-        kind: 'clarify_foundation' | 'resolve_decision' | 'review_source_change' | 'align_plan' | 'confirm_scope' | 'challenge_plan' | 'align_outputs' | 'commit_plan';
+        kind: 'clarify_foundation' | 'resolve_decision' | 'validate_assumption' | 'review_source_change' | 'align_plan' | 'confirm_scope' | 'challenge_plan' | 'align_outputs' | 'commit_plan';
         label: string;
         detail: string;
         planningRecordId?: string;
@@ -43,6 +44,7 @@ export type PlanningReadinessInput = {
     generatedOutputCount: number;
     staleOutputCount: number;
     isCommitted?: boolean;
+    evaluatedAt?: number;
 };
 
 const meaningful = (value?: string): boolean => !!value && value.trim().length >= 12;
@@ -57,13 +59,14 @@ export function planningRecordRequiresResolution(
     record: PlanningRecord,
     allRecords: PlanningRecord[] = [record],
     visited = new Set<string>(),
+    evaluatedAt = Date.now(),
 ): boolean {
     if (visited.has(record.id)) return true;
     const nextVisited = new Set(visited).add(record.id);
     const state = projectDecision(record);
     if (state.status === 'superseded') {
         const replacement = allRecords.find(item => item.id === state.supersededById);
-        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited);
+        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited, evaluatedAt);
     }
     if (state.status === 'invalidated') return material(record);
     const settledWithoutVerdictProvenance = ['confirmed', 'rejected', 'resolved'].includes(state.status)
@@ -73,6 +76,13 @@ export function planningRecordRequiresResolution(
     // consequential. Low-impact uncertainty stays visible without becoming a
     // procedural gate merely because its source moved or is unavailable.
     if (record.sourceState === 'changed' || record.sourceState === 'missing') return material(record);
+    if (record.type === 'assumption' && material(record)) {
+        // Assumptions have a stronger resolution boundary than ordinary
+        // choices. A current user verdict alone is not validation; only a
+        // current evidence-backed conclusion synchronized to that verdict can
+        // clear the assumption criterion.
+        return !assumptionValidationReadiness(record, evaluatedAt).ready;
+    }
     if (state.status === 'open' || state.status === 'proposed') {
         if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
         if (record.type === 'risk') return record.materiality !== 'low';
@@ -86,7 +96,6 @@ export function planningRecordRequiresResolution(
     // durable project content. They do not validate the real-world premise.
     // Until an explicit validation provenance exists, accepting a material
     // assumption must remain accepted-but-unvalidated.
-    if (record.type === 'assumption' && state.status === 'confirmed' && material(record)) return true;
     if (record.type === 'risk' && state.status === 'confirmed' && material(record)) return true;
     return false;
 }
@@ -142,7 +151,7 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     const projected = input.planningRecords.map(record => ({ record, state: projectDecision(record) }));
     const unresolved = projected.filter(({ state }) => state.status === 'open' || state.status === 'proposed');
     const needsResolution = projected.filter(({ record }) => (
-        planningRecordRequiresResolution(record, input.planningRecords)
+        planningRecordRequiresResolution(record, input.planningRecords, new Set(), input.evaluatedAt)
     ));
     const conflicts = needsResolution.filter(({ record }) => record.type === 'conflict');
     const keyDecisions = needsResolution.filter(({ record }) => record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict');
@@ -154,7 +163,8 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     ));
     const alignmentRecords = input.planningRecords.filter(planningRecordNeedsAlignment);
     const alignmentRecord = alignmentRecords[0];
-    const nextRecord = conflicts[0]?.record ?? keyDecisions[0]?.record ?? materialRisks[0]?.record ?? materialAssumptions[0]?.record;
+    const nextRecord = conflicts[0]?.record ?? keyDecisions[0]?.record ?? materialRisks[0]?.record;
+    const nextAssumption = materialAssumptions[0]?.record;
 
     const problemClear = meaningful(prd?.coreProblem);
     const userClear = (prd?.targetUsers?.filter(item => meaningful(item)).length ?? 0) > 0 || (prd?.jtbd?.length ?? 0) > 0;
@@ -186,6 +196,7 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     if (!foundationClear) nextAction = { kind: 'clarify_foundation', label: 'Strengthen the foundation', detail: 'Clarify the problem, primary user, and desired outcome in the PRD.' };
     else if (changedSources.length > 0) nextAction = { kind: 'review_source_change', label: 'Revisit a changed decision', detail: changedSources[0].title, planningRecordId: changedSources[0].id };
     else if (nextRecord) nextAction = { kind: 'resolve_decision', label: conflicts.length > 0 ? 'Resolve the leading conflict' : 'Resolve the next key decision', detail: nextRecord.title, planningRecordId: nextRecord.id };
+    else if (nextAssumption) nextAction = { kind: 'validate_assumption', label: 'Validate the leading assumption', detail: nextAssumption.title, planningRecordId: nextAssumption.id };
     else if (alignmentRecord) nextAction = { kind: 'align_plan', label: 'Align the working plan', detail: alignmentRecord.title, planningRecordId: alignmentRecord.id };
     else if (!scopeConfirmed) nextAction = { kind: 'confirm_scope', label: 'Confirm intentional scope', detail: 'Decide which proposed feature is genuinely necessary for the first release.' };
     else if (!input.hasCurrentChallenge || input.blockingReviewIssueCount > 0) nextAction = { kind: 'challenge_plan', label: input.hasCurrentChallenge ? 'Address challenge findings' : 'Challenge the working plan', detail: 'Look for weak assumptions, contradictions, unnecessary scope, and feasibility risks.' };

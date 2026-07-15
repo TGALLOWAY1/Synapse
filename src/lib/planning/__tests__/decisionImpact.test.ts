@@ -116,6 +116,50 @@ describe('decision impact preview', () => {
         }).nextPrd?.targetUsers).toEqual(['Independent professional creators']);
     });
 
+    it('binds a technical contradiction verdict to only its exact workflow and architecture targets', () => {
+        const contradicted: PlanningRecord = {
+            ...record,
+            id: 'browser-workflow-assumption',
+            title: 'Browser automation is feasible',
+            statement: 'The browser can complete the cross-origin workflow.',
+            sources: [{
+                key: 'prd_assumption:a1', sourceType: 'prd_assumption', sourceId: 'a1', sourceVersionId: 's1',
+                locator: { section: 'Assumptions', entityType: 'assumption', entityId: 'a1', jsonPath: '$.assumptions' },
+            }],
+            events: [{
+                id: 'assumption-validation-verdict-technical-outcome', planningRecordId: 'browser-workflow-assumption',
+                type: 'premise_rejected', actor: 'user', at: 30,
+                reason: 'A technical spike proved browser security prevents the workflow.',
+            }],
+            affectedPrdSections: [],
+            affectedPlanLocations: [
+                { kind: 'behavior', section: 'Features', label: 'Cross-origin workflow branch', entityType: 'feature', entityId: 'f-browser', jsonPath: '$.features' },
+                { kind: 'claim', section: 'Architecture', label: 'Browser integration approach', jsonPath: '$.architecture' },
+            ],
+            affectedArtifactSlots: ['user_flows', 'architecture'],
+        };
+        const result = buildDecisionImpact({
+            projectId: 'p1', record: contradicted, baselineSpineVersionId: 's1',
+            structuredPRD: {
+                ...prd,
+                assumptions: [{ id: 'a1', statement: contradicted.statement, confidence: 'med' }],
+                features: [{ id: 'f-browser', name: 'Browser workflow', description: 'Complete the cross-origin branch.', userValue: 'Automation', complexity: 'high' }],
+                architecture: 'Browser-only cross-origin automation.',
+            },
+            now: () => 40,
+        });
+        if (!result.ok) throw new Error(result.reason);
+        expect(result.preview.decisionEventId).toBe('assumption-validation-verdict-technical-outcome');
+        expect(result.preview.alignmentProposals?.map(item => item.target.jsonPath)).toEqual(expect.arrayContaining([
+            '$.assumptions', '$.features', '$.architecture',
+        ]));
+        expect(result.preview.alignmentProposals?.some(item => item.target.jsonPath === '$.dataModel')).toBe(false);
+        expect(result.preview.affectedArtifactSlots).toEqual(['user_flows']);
+        expect(result.preview.affectedArtifactSlots).not.toContain('data_model');
+        expect(result.nextPrd?.assumptions?.[0]).toMatchObject({ decision: 'rejected' });
+        expect(result.nextPrd?.architecture).toBe('Browser-only cross-origin automation.');
+    });
+
     it('never turns a broad affected location into an automatic rewrite', () => {
         const decision: PlanningRecord = {
             ...record,

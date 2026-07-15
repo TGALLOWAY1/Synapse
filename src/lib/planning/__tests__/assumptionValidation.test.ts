@@ -246,6 +246,41 @@ describe('assumption validation domain', () => {
         expect(projectAssumptionValidation(added.record, 31).acceptedConclusion).toBeUndefined();
     });
 
+    it('rejects a stale interpretation after evidence changes without writing the proposal', () => {
+        const initial = record();
+        let current = append(initial, planEvent(initial));
+        const first = evidence(current, 'evidence-1', 'interview-1', 'supports', 20);
+        current = append(current, evidenceEvent(current, first, 20));
+        const stale = buildAssumptionInterpretationProposal({
+            record: current, reasoning: 'The first observation supports the assumption.', createdAt: 30,
+        });
+        const later = evidence(current, 'evidence-2', 'observation-2', 'contradicts', 31);
+        current = append(current, evidenceEvent(current, later, 31));
+        expect(addAssumptionInterpretationProposal(current, stale)).toMatchObject({ ok: false, reason: 'Interpretation is stale.' });
+        expect(current.assumptionValidation?.interpretationProposals).toEqual([]);
+    });
+
+    it('treats a sole stakeholder assertion as context rather than validated demand', () => {
+        const initial = record();
+        let current = append(initial, planEvent(initial));
+        const projection = projectAssumptionValidation(current, 20);
+        const stakeholder = sealAssumptionEvidence({
+            id: 'stakeholder', planningRecordId: current.id, sourceType: 'stakeholder_statement',
+            source: 'Sales stakeholder', sourceIdentity: 'stakeholder-1', observedAt: 19, recordedAt: 20,
+            observation: 'One stakeholder believes customers will pay.', validationQuestion: projection.currentPlan!.question,
+            limitations: ['No customer behavior observed'], character: 'direct', relation: 'supports',
+            assumptionStatementHash: assumptionStatementHash(current), validationPlanHash: projection.currentPlan!.contentHash,
+            authoredBy: 'user',
+        });
+        current = append(current, evidenceEvent(current, stakeholder, 20));
+        const interpretation = buildAssumptionInterpretationProposal({
+            record: current, reasoning: 'The statement is context, not observed customer demand.', createdAt: 30,
+        });
+        expect(interpretation).toMatchObject({
+            recommendedConclusion: 'inconclusive', supportingEvidenceIds: [], inconclusiveEvidenceIds: ['stakeholder'],
+        });
+    });
+
     it('invalidates a recorded outcome when evidence changes while preserving history', () => {
         const initial = record();
         let current = append(initial, planEvent(initial));
@@ -288,6 +323,30 @@ describe('assumption validation domain', () => {
             workflowState: 'due_for_review',
             conclusionIsCurrent: false,
             latestOutcomeEventId: 'outcome-1',
+        });
+    });
+
+    it('does not let a later uncertainty treatment retain an earlier validated conclusion', () => {
+        const initial = record();
+        let current = append(initial, planEvent(initial));
+        current = append(current, evidenceEvent(current, evidence(current, 'evidence-1', 'interview-1', 'supports', 20), 20));
+        let projection = projectAssumptionValidation(current, 30);
+        current = append(current, sealAssumptionValidationEvent({
+            id: 'outcome', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 30,
+            assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
+            expectedValidationPlanHash: projection.currentPlan!.contentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        }));
+        projection = projectAssumptionValidation(current, 40);
+        current = append(current, sealAssumptionValidationEvent({
+            id: 'treatment', planningRecordId: current.id, actor: 'user', type: 'validation_uncertainty_treatment_recorded', at: 40,
+            assumptionStatementHash: assumptionStatementHash(current), treatment: 'temporarily_tolerated',
+            rationale: 'Proceed through a bounded beta while gathering stronger evidence.',
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        }));
+        expect(projectAssumptionValidation(current, 41)).toMatchObject({
+            conclusionIsCurrent: false, acceptedConclusion: undefined,
+            userTreatment: 'temporarily_tolerated', workflowState: 'due_for_review',
         });
     });
 

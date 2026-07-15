@@ -22,6 +22,7 @@ import { hashReviewValue } from '../review/hash';
 import { buildReviewContextManifest, verifyEvidenceRef } from '../review/manifest';
 import { coveragePathSupports, PRODUCT_READINESS_COVERAGE_AREAS } from '../review/coverage';
 import type { ProjectOutputAlignmentSummary } from './outputAlignment';
+import { assumptionValidationReadiness, projectAssumptionValidation } from './assumptionValidation';
 import { projectDecision } from './decisionProjection';
 import {
     derivePlanningReadiness,
@@ -96,10 +97,35 @@ const concernId = (
 const isMaterial = (record: PlanningRecord): boolean =>
     record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high';
 
-const isAcceptedUnvalidatedAssumption = (record: PlanningRecord): boolean =>
+const isAcceptedUnvalidatedAssumption = (record: PlanningRecord, evaluatedAt = Date.now()): boolean =>
     record.type === 'assumption'
     && projectDecision(record).status === 'confirmed'
-    && isMaterial(record);
+    && isMaterial(record)
+    && !assumptionValidationReadiness(record, evaluatedAt).ready;
+
+const assumptionConcernExplanation = (record: PlanningRecord, evaluatedAt: number): string => {
+    const validation = assumptionValidationReadiness(record, evaluatedAt);
+    const projection = projectAssumptionValidation(record, evaluatedAt);
+    if (projection.workflowState === 'due_for_review') {
+        return 'Earlier validation is historical or expired and no longer supports the current assumption.';
+    }
+    if (validation.reason === 'competing_evidence') {
+        return 'Current independent evidence points in competing directions; the recorded conclusion does not resolve that contradiction.';
+    }
+    if (validation.reason === 'insufficient_support') {
+        return 'The recorded conclusion is not supported by current, independent first-hand evidence that answers the validation question.';
+    }
+    if (validation.reason === 'missing_caveats') {
+        return 'A partially supported conclusion needs explicit caveats before it can safely qualify the plan.';
+    }
+    if (validation.reason === 'verdict_not_synchronized') {
+        return 'The validation outcome is not bound to a current user verdict, so its plan consequences cannot be reviewed safely.';
+    }
+    if (projection.userTreatment) {
+        return 'The user recorded how to proceed under uncertainty, but the assumption remains unvalidated.';
+    }
+    return 'This material assumption has no current evidence-supported user conclusion.';
+};
 
 const isAcceptedMaterialRisk = (record: PlanningRecord): boolean =>
     record.type === 'risk'
@@ -216,6 +242,7 @@ function hasValidIssueDisposition(issue: ReviewIssue, run: ReviewRun): boolean {
 }
 
 export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
+    const evaluatedAt = input.createdAt ?? Date.now();
     const spineContentHash = hashReviewValue(input.spine.content);
     const exactRuns = exactChallengeRuns(input, spineContentHash);
     const substantiveRuns = exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns, input));
@@ -241,7 +268,7 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
             // closed instead of allowing a relationship id to manufacture it.
             return issue.relatedPlanningRecordIds.some(id => {
                 const linked = input.planningRecords.find(record => record.id === id);
-                return !linked || planningRecordRequiresResolution(linked, input.planningRecords);
+                return !linked || planningRecordRequiresResolution(linked, input.planningRecords, new Set(), evaluatedAt);
             });
         })
         : [];
@@ -269,6 +296,7 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
 }
 
 function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): ReadinessReviewSnapshotHashes {
+    const evaluatedAt = input.createdAt ?? Date.now();
     const spineIdentity = hashReviewValue({ projectId: input.projectId, spineVersionId: input.spine.versionId });
     const spineContent = hashReviewValue(input.spine.content);
     const applicableChallengeRuns = exactChallengeRuns(input, spineContent);
@@ -278,6 +306,20 @@ function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): R
         incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
         safetyReview: input.spine.safetyReview,
         records: byId(input.planningRecords),
+        assumptionValidationProjection: byId(input.planningRecords
+            .filter(record => record.type === 'assumption')
+            .map(record => {
+                const projection = projectAssumptionValidation(record, evaluatedAt);
+                const readiness = assumptionValidationReadiness(record, evaluatedAt);
+                return {
+                    id: record.id,
+                    workflowState: projection.workflowState,
+                    conclusionIsCurrent: projection.conclusionIsCurrent,
+                    acceptedConclusion: projection.acceptedConclusion,
+                    readiness: readiness.ready,
+                    readinessReason: readiness.reason,
+                };
+            })),
     });
     const challenge = hashReviewValue({
         runs: byId(applicableChallengeRuns),
@@ -381,6 +423,7 @@ export function validateReadinessReviewIntegrity(review: ReadinessReview): boole
 }
 
 export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessReview {
+    const evaluatedAt = input.createdAt ?? Date.now();
     const hashes = snapshotHashes(input, READINESS_CRITERIA_VERSION);
     const challenge = deriveReadinessChallengeState(input);
     const base = derivePlanningReadiness({
@@ -392,6 +435,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         generatedOutputCount: input.outputAlignment.outputs.length,
         staleOutputCount: input.outputAlignment.blockingCount,
         isCommitted: input.spine.isCommitted,
+        evaluatedAt,
     });
 
     const concerns: ReadinessReviewConcern[] = [];
@@ -438,16 +482,47 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         { id: 'assumptions', records: input.planningRecords.filter(record => record.type === 'assumption') },
         { id: 'risks', records: input.planningRecords.filter(record => record.type === 'risk') },
     ];
-    const acceptedUnvalidated = input.planningRecords.filter(isAcceptedUnvalidatedAssumption);
+    const acceptedUnvalidated = input.planningRecords.filter(record => isAcceptedUnvalidatedAssumption(record, evaluatedAt));
     for (const group of recordGroups) {
-        const unresolved = group.records.filter(record => planningRecordRequiresResolution(record, input.planningRecords)
-            || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record)));
+        const unresolved = group.records.filter(record => planningRecordRequiresResolution(record, input.planningRecords, new Set(), evaluatedAt)
+            || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record, evaluatedAt)));
         const blocking = unresolved.length > 0;
         const label = group.id === 'decisions' ? 'Material choices resolved' : group.id === 'assumptions' ? 'Material assumptions validated' : 'Material risks addressed';
         const explanation = blocking ? `${unresolved.length} material ${group.id} item${unresolved.length === 1 ? '' : 's'} still needs attention.` : `${label}.`;
+        const validatedAssumptionEvidence = group.id === 'assumptions'
+            ? group.records.flatMap(record => {
+                const validation = assumptionValidationReadiness(record, evaluatedAt);
+                if (!validation.ready) return [];
+                return validation.qualifyingEvidence.map(item => makeEvidence(
+                    group.id,
+                    'direct',
+                    `${record.title}: ${item.observation}`,
+                    'planning_record',
+                    item.id,
+                    record.sources?.[0]?.sourceVersionId,
+                    item.contentHash,
+                ));
+            })
+            : [];
+        const unresolvedAssumptionEvidence = group.id === 'assumptions'
+            ? unresolved.flatMap(record => projectAssumptionValidation(record, evaluatedAt).independentEvidence.map(item => makeEvidence(
+                group.id,
+                'incomplete',
+                `${record.title}: ${item.observation}`,
+                'planning_record',
+                item.id,
+                record.sources?.[0]?.sourceVersionId,
+                item.contentHash,
+            )))
+            : [];
         const evidence = unresolved.length > 0
-            ? unresolved.map(record => makeEvidence(group.id, 'incomplete', record.title, 'planning_record', record.id, record.sources?.[0]?.sourceVersionId))
-            : [makeEvidence(group.id, challenge.substantive ? 'direct' : 'inferred', explanation, 'planning_record', `${group.id}:none`)];
+            ? [
+                ...unresolved.map(record => makeEvidence(group.id, 'incomplete', record.title, 'planning_record', record.id, record.sources?.[0]?.sourceVersionId)),
+                ...unresolvedAssumptionEvidence,
+            ]
+            : validatedAssumptionEvidence.length > 0
+                ? validatedAssumptionEvidence
+                : [makeEvidence(group.id, challenge.substantive ? 'direct' : 'inferred', explanation, 'planning_record', `${group.id}:none`)];
         const actionTarget = unresolved[0] ? { kind: 'planning_record' as const, planningRecordId: unresolved[0].id } : undefined;
         criteria.push({ id: group.id, label, status: blocking ? 'attention' : 'met', blocking, explanation, evidence, actionTarget });
         for (const record of unresolved) {
@@ -455,8 +530,8 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
                 : record.type === 'assumption' ? 'assumption' : record.type === 'risk' ? 'risk' : 'decision';
             concerns.push(makeConcern({
                 criterionId: group.id, kind, title: record.title,
-                consequence: isAcceptedUnvalidatedAssumption(record)
-                    ? 'The user accepted this material assumption, but grounded project excerpts do not validate the real-world premise.'
+                consequence: record.type === 'assumption'
+                    ? assumptionConcernExplanation(record, evaluatedAt)
                     : isAcceptedMaterialRisk(record)
                         ? 'The user acknowledged this material risk, but the planning record does not prove mitigation or resolution.'
                         : record.statement,
@@ -554,7 +629,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
     const caveats = outputCaveats.map(output => `${output.title}: ${output.summary}`);
     const conclusion = base.isReadyToBuild && acceptedUnvalidated.length === 0 && !criteria.some(item => item.blocking)
         ? 'ready_to_build' as const : 'not_ready' as const;
-    const createdAt = input.createdAt ?? Date.now();
+    const createdAt = evaluatedAt;
     const withoutIntegrity: Omit<ReadinessReview, 'integrityHash'> = {
         id: `readiness-review-${hashReviewValue({ aggregate: hashes.aggregate, createdAt })}`,
         projectId: input.projectId,

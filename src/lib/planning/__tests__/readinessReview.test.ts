@@ -9,6 +9,17 @@ import type {
 import { hashEvidenceExcerpt, hashReviewValue } from '../../review/hash';
 import { buildReviewContextManifest } from '../../review/manifest';
 import type { ProjectOutputAlignmentSummary } from '../outputAlignment';
+import { appendDecisionEvent } from '../decisionProjection';
+import {
+    appendAssumptionValidationEvent,
+    assumptionEvidenceSetHash,
+    assumptionStatementHash,
+    assumptionValidationDecisionEvent,
+    projectAssumptionValidation,
+    sealAssumptionEvidence,
+    sealAssumptionValidationEvent,
+    sealAssumptionValidationPlan,
+} from '../assumptionValidation';
 import {
     compareReadinessReviewCurrentness,
     deriveReadinessReview,
@@ -98,6 +109,47 @@ const record = (overrides: Partial<PlanningRecord> = {}): PlanningRecord => ({
     ...overrides,
 });
 
+const evidenceValidatedRecord = (expiresAt?: number): PlanningRecord => {
+    let current = record({ status: 'open', materiality: 'high', events: [] });
+    const plan = sealAssumptionValidationPlan({
+        id: 'validation-plan', question: 'Will teams use the reasoning trace before implementation?',
+        method: { kind: 'usability_observation', label: 'Observed planning session' },
+        supportSignals: ['Team reviews the trace before committing'], contradictionSignals: ['Team bypasses the trace'],
+        inconclusiveConditions: [], limitations: ['One product team'], expiresAt, authoredBy: 'user', createdAt: 10,
+    });
+    const planned = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+        id: 'plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 10,
+        assumptionStatementHash: assumptionStatementHash(current), plan, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+    }));
+    if (!planned.ok) throw new Error(planned.reason);
+    current = planned.record;
+    const evidence = sealAssumptionEvidence({
+        id: 'observed-session', planningRecordId: current.id, sourceType: 'usability_observation',
+        source: 'Observed team session', sourceIdentity: 'session-1', observedAt: 19, recordedAt: 20,
+        observation: 'The team inspected decision reasoning before committing the implementation plan.',
+        validationQuestion: plan.question, limitations: ['One product team'], character: 'direct', relation: 'supports',
+        assumptionStatementHash: assumptionStatementHash(current), validationPlanHash: plan.contentHash, authoredBy: 'user',
+    });
+    const evidenced = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+        id: 'evidence-event', planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 20,
+        assumptionStatementHash: assumptionStatementHash(current), evidence, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+    }));
+    if (!evidenced.ok) throw new Error(evidenced.reason);
+    current = evidenced.record;
+    const projection = projectAssumptionValidation(current, 30);
+    const outcome = sealAssumptionValidationEvent({
+        id: 'outcome-event', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 30,
+        assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
+        expectedValidationPlanHash: projection.currentPlan!.contentHash,
+        expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+    });
+    const concluded = appendAssumptionValidationEvent(current, outcome);
+    if (!concluded.ok) throw new Error(concluded.reason);
+    const verdict = appendDecisionEvent(concluded.record, assumptionValidationDecisionEvent(current, outcome)!);
+    if (!verdict.ok) throw new Error(verdict.reason);
+    return verdict.record;
+};
+
 const reviewIssue = (overrides: Partial<ReviewIssue> = {}): ReviewIssue => ({
     id: 'issue-1', projectId: 'p1', reviewId: 'review-1', title: 'Operational recovery is undefined',
     summary: 'The plan does not define how failed work is recovered.', kind: 'risk', findingIds: ['finding-1'],
@@ -130,6 +182,33 @@ describe('deterministic readiness review', () => {
         expect(review.criteria.find(item => item.id === 'assumptions')).toMatchObject({ status: 'attention', blocking: true });
         expect(review.concerns).toEqual(expect.arrayContaining([
             expect.objectContaining({ kind: 'assumption', blocking: true, evidenceQuality: 'incomplete' }),
+        ]));
+    });
+
+    it('records the exact validation evidence that supports a ready assumption', () => {
+        const review = deriveReadinessReview(input({ planningRecords: [evidenceValidatedRecord()], createdAt: 40 }));
+        expect(review.criteria.find(item => item.id === 'assumptions')).toMatchObject({ status: 'met', blocking: false });
+        expect(review.criteria.find(item => item.id === 'assumptions')?.evidence).toEqual([
+            expect.objectContaining({
+                sourceId: 'observed-session', sourceType: 'planning_record', quality: 'direct',
+                contentHash: expect.any(String),
+            }),
+        ]);
+        expect(review.conclusion).toBe('ready_to_build');
+        expect(validateReadinessReviewIntegrity(review)).toBe(true);
+    });
+
+    it('makes a review historical when validation expires even though raw project records did not change', () => {
+        const assumption = evidenceValidatedRecord(50);
+        const review = deriveReadinessReview(input({ planningRecords: [assumption], createdAt: 40 }));
+        expect(review.conclusion).toBe('ready_to_build');
+        const comparison = compareReadinessReviewCurrentness(review, input({ planningRecords: [assumption], createdAt: 51 }));
+        expect(comparison).toMatchObject({ current: false, historical: true });
+        expect(comparison.reasons).toContain('planning_state_changed');
+        const current = deriveReadinessReview(input({ planningRecords: [assumption], createdAt: 51 }));
+        expect(current.conclusion).toBe('not_ready');
+        expect(current.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ kind: 'assumption', consequence: expect.stringContaining('historical or expired') }),
         ]));
     });
 

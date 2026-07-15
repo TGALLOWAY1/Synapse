@@ -1,5 +1,16 @@
 import { describe, expect, it } from 'vitest';
-import type { PlanningRecord, ReviewIssue, StructuredPRD } from '../../../types';
+import type { AssumptionEvidenceConclusion, AssumptionEvidenceSourceType, PlanningRecord, ReviewIssue, StructuredPRD } from '../../../types';
+import {
+    appendAssumptionValidationEvent,
+    appendDecisionEvent,
+    assumptionEvidenceSetHash,
+    assumptionStatementHash,
+    assumptionValidationDecisionEvent,
+    projectAssumptionValidation,
+    sealAssumptionEvidence,
+    sealAssumptionValidationEvent,
+    sealAssumptionValidationPlan,
+} from '..';
 import { derivePlanningReadiness, planningRecordNeedsAlignment, reviewIssueNeedsResolutionBeforeBuild } from '../planningReadiness';
 
 const prd: StructuredPRD = {
@@ -13,6 +24,59 @@ const record = (type: PlanningRecord['type'], status: PlanningRecord['status']):
     id: `${type}-1`, projectId: 'p1', type, status, title: `Open ${type}`, statement: 'A consequential choice',
     evidence: [], sourceFindingIds: [], createdBy: 'user', createdAt: 1, updatedAt: 1,
 });
+
+const validatedAssumption = (options: {
+    conclusion?: AssumptionEvidenceConclusion;
+    sourceType?: AssumptionEvidenceSourceType;
+    relation?: 'supports' | 'contradicts' | 'inconclusive' | 'irrelevant';
+    character?: 'direct' | 'interpretation';
+    caveats?: string;
+    expiresAt?: number;
+} = {}): PlanningRecord => {
+    let current: PlanningRecord = {
+        ...record('assumption', 'open'), id: 'validated-assumption', materiality: 'high', events: [],
+        title: 'Creators will complete checkout', statement: 'Independent creators will pay $20 per month.',
+    };
+    const plan = sealAssumptionValidationPlan({
+        id: 'plan', question: 'Will creators complete checkout at $20?',
+        method: { kind: 'prototype', label: 'Price-tested checkout prototype' },
+        supportSignals: ['A creator attempts checkout'], contradictionSignals: ['Creators abandon at price'],
+        inconclusiveConditions: ['Verbal interest without behavior'], limitations: ['Prototype does not collect payment'],
+        expiresAt: options.expiresAt, authoredBy: 'user', createdAt: 10,
+    });
+    const planResult = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+        id: 'plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 10,
+        assumptionStatementHash: assumptionStatementHash(current), plan, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+    }));
+    if (!planResult.ok) throw new Error(planResult.reason);
+    current = planResult.record;
+    const evidence = sealAssumptionEvidence({
+        id: 'evidence', planningRecordId: current.id, sourceType: options.sourceType ?? 'prototype',
+        source: 'Checkout prototype session', sourceIdentity: 'checkout-session-1', observedAt: 19, recordedAt: 20,
+        observation: 'A participant attempted checkout after seeing the price.', validationQuestion: plan.question,
+        limitations: ['No payment collected'], character: options.character ?? 'direct', relation: options.relation ?? 'supports',
+        assumptionStatementHash: assumptionStatementHash(current), validationPlanHash: plan.contentHash, authoredBy: 'user',
+    });
+    const evidenceResult = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
+        id: 'evidence-event', planningRecordId: current.id, actor: 'user', type: 'validation_evidence_recorded', at: 20,
+        assumptionStatementHash: assumptionStatementHash(current), evidence, expectedEvidenceSetHash: assumptionEvidenceSetHash([]),
+    }));
+    if (!evidenceResult.ok) throw new Error(evidenceResult.reason);
+    current = evidenceResult.record;
+    const projection = projectAssumptionValidation(current, 30);
+    const outcome = sealAssumptionValidationEvent({
+        id: 'outcome-event', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_recorded', at: 30,
+        assumptionStatementHash: assumptionStatementHash(current), conclusion: options.conclusion ?? 'supported',
+        caveats: options.caveats, expectedValidationPlanHash: projection.currentPlan!.contentHash,
+        expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+    });
+    const outcomeResult = appendAssumptionValidationEvent(current, outcome);
+    if (!outcomeResult.ok) throw new Error(outcomeResult.reason);
+    const verdict = assumptionValidationDecisionEvent(current, outcome)!;
+    const verdictResult = appendDecisionEvent(outcomeResult.record, verdict);
+    if (!verdictResult.ok) throw new Error(verdictResult.reason);
+    return verdictResult.record;
+};
 
 describe('planning readiness', () => {
     it('prioritizes unresolved decisions over artifact completion', () => {
@@ -65,6 +129,47 @@ describe('planning readiness', () => {
         const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };
         expect(derivePlanningReadiness({ ...shared, planningRecords: [high] }).isReadyToBuild).toBe(false);
         expect(derivePlanningReadiness({ ...shared, planningRecords: [low] }).isReadyToBuild).toBe(true);
+    });
+
+    it('routes a material assumption to validation and clears it only with credible synchronized evidence', () => {
+        const open = { ...record('assumption', 'open'), id: 'assumption-to-validate', materiality: 'high' as const };
+        const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0, evaluatedAt: 40 };
+        expect(derivePlanningReadiness({ ...shared, planningRecords: [open] }).nextAction).toMatchObject({
+            kind: 'validate_assumption', planningRecordId: 'assumption-to-validate',
+        });
+        expect(derivePlanningReadiness({ ...shared, planningRecords: [validatedAssumption()] }).isReadyToBuild).toBe(true);
+    });
+
+    it('does not mistake a sole stakeholder assertion, irrelevant source, or interpretation for validation', () => {
+        const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0, evaluatedAt: 40 };
+        const weak = validatedAssumption({ sourceType: 'stakeholder_statement' });
+        const irrelevant = validatedAssumption({ relation: 'irrelevant' });
+        const interpreted = validatedAssumption({ character: 'interpretation' });
+        for (const assumption of [weak, irrelevant, interpreted]) {
+            const readiness = derivePlanningReadiness({ ...shared, planningRecords: [assumption] });
+            expect(readiness.isReadyToBuild).toBe(false);
+            expect(readiness.nextAction.kind).toBe('validate_assumption');
+        }
+    });
+
+    it('supports a qualified usability conclusion while preserving contradictory uncertainty', () => {
+        const qualified = validatedAssumption({
+            conclusion: 'partially_supported', sourceType: 'usability_observation', caveats: 'The core flow worked, but onboarding caused a serious failure.',
+        });
+        const noCaveat = validatedAssumption({ conclusion: 'partially_supported', sourceType: 'usability_observation' });
+        const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0, evaluatedAt: 40 };
+        expect(derivePlanningReadiness({ ...shared, planningRecords: [qualified] }).isReadyToBuild).toBe(true);
+        expect(derivePlanningReadiness({ ...shared, planningRecords: [noCaveat] }).isReadyToBuild).toBe(false);
+    });
+
+    it('makes expired validation historical instead of silently retaining readiness', () => {
+        const expires = validatedAssumption({ expiresAt: 50 });
+        const shared = { prd, planningRecords: [expires], incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };
+        expect(derivePlanningReadiness({ ...shared, evaluatedAt: 49 }).isReadyToBuild).toBe(true);
+        expect(derivePlanningReadiness({ ...shared, evaluatedAt: 51 })).toMatchObject({
+            isReadyToBuild: false,
+            nextAction: { kind: 'validate_assumption', planningRecordId: 'validated-assumption' },
+        });
     });
 
     it('keeps low-impact provenance drift visible without turning it into a blocker', () => {

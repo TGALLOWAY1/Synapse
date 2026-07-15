@@ -10,6 +10,7 @@ import type {
     AssumptionValidationPlanProposal,
     AssumptionValidationState,
     AssumptionValidationWorkflowState,
+    DecisionEvent,
     PlanningRecord,
 } from '../../types';
 import {
@@ -17,6 +18,7 @@ import {
     ASSUMPTION_VALIDATION_SCHEMA_VERSION,
 } from '../../types';
 import { hashReviewValue, normalizeEvidenceText } from '../review/hash';
+import { projectDecision } from './decisionProjection';
 
 type DistributiveOmit<T, K extends PropertyKey> = T extends unknown ? Omit<T, K> : never;
 export type AssumptionValidationEventDraft = DistributiveOmit<AssumptionValidationEvent, 'integrityHash'>;
@@ -43,6 +45,28 @@ export type AssumptionValidationProjection = {
     invalidEventIds: string[];
     hasHistoricalValidation: boolean;
 };
+
+export type AssumptionValidationReadiness = {
+    ready: boolean;
+    conclusion?: AssumptionEvidenceConclusion;
+    qualifyingEvidence: AssumptionEvidenceRecord[];
+    competingEvidence: AssumptionEvidenceRecord[];
+    reason: 'current_supported' | 'current_partially_supported' | 'current_contradicted'
+        | 'missing_current_conclusion' | 'insufficient_support' | 'competing_evidence'
+        | 'missing_caveats' | 'verdict_not_synchronized';
+};
+
+const CREDIBLE_DIRECT_SOURCE_TYPES = new Set<AssumptionEvidenceSourceType>([
+    'user_interview',
+    'usability_observation',
+    'technical_test',
+    'prototype',
+    'analytics_measurement',
+    'direct_observation',
+]);
+
+const isCredibleDirectEvidence = (evidence: AssumptionEvidenceRecord): boolean =>
+    evidence.character === 'direct' && CREDIBLE_DIRECT_SOURCE_TYPES.has(evidence.sourceType);
 
 const validationState = (record: PlanningRecord): AssumptionValidationState => record.assumptionValidation ?? {
     schemaVersion: ASSUMPTION_VALIDATION_SCHEMA_VERSION,
@@ -153,6 +177,7 @@ type ReplayState = {
     evidence: Map<string, AssumptionEvidenceRecord>;
     lastOutcome?: Extract<AssumptionValidationEvent, { type: 'validation_outcome_recorded' }>;
     outcomeReopened: boolean;
+    lastReopenedAt?: number;
     treatment?: Extract<AssumptionValidationEvent, { type: 'validation_uncertainty_treatment_recorded' }>;
     invalidEventIds: string[];
 };
@@ -240,6 +265,7 @@ const replayValidation = (record: PlanningRecord): ReplayState => {
                 break;
             case 'validation_outcome_reopened':
                 replay.outcomeReopened = true;
+                replay.lastReopenedAt = event.at;
                 break;
             case 'validation_uncertainty_treatment_recorded':
                 replay.treatment = event;
@@ -290,6 +316,7 @@ export function projectAssumptionValidation(
     const conclusionIsCurrent = Boolean(
         outcome
         && !replay.outcomeReopened
+        && (!replay.treatment || outcome.at > replay.treatment.at)
         && outcome.assumptionStatementHash === currentStatementHash
         && outcome.expectedValidationPlanHash === applicablePlan?.contentHash
         && outcome.expectedEvidenceSetHash === currentEvidenceHash,
@@ -299,6 +326,11 @@ export function projectAssumptionValidation(
         || (outcome?.revisitAt !== undefined && outcome.revisitAt <= now),
     );
     const hasHistoricalValidation = validationState(record).events.length > 0;
+    const treatmentIsCurrent = Boolean(
+        replay.treatment
+        && replay.treatment.at > (outcome?.at ?? -Infinity)
+        && replay.treatment.at > (replay.lastReopenedAt ?? -Infinity),
+    );
     let workflowState: AssumptionValidationWorkflowState;
     if (conclusionIsCurrent && !expired) workflowState = 'completed';
     else if (outcome || hasHistoricalValidation && !applicablePlan) workflowState = 'due_for_review';
@@ -321,13 +353,130 @@ export function projectAssumptionValidation(
         acceptedConclusion: conclusionIsCurrent && !expired ? outcome?.conclusion : undefined,
         conclusionIsCurrent: conclusionIsCurrent && !expired,
         latestOutcomeEventId: outcome?.id,
-        userTreatment: replay.treatment?.treatment ?? (legacyAccepted ? 'accepted_without_validation' : undefined),
-        treatmentRationale: replay.treatment?.rationale,
-        revisitAt: replay.treatment?.revisitAt ?? outcome?.revisitAt ?? applicablePlan?.expiresAt,
-        revisitCondition: replay.treatment?.revisitCondition ?? outcome?.revisitCondition ?? applicablePlan?.revisitCondition,
+        userTreatment: treatmentIsCurrent ? replay.treatment?.treatment : legacyAccepted ? 'accepted_without_validation' : undefined,
+        treatmentRationale: treatmentIsCurrent ? replay.treatment?.rationale : undefined,
+        revisitAt: treatmentIsCurrent ? replay.treatment?.revisitAt : outcome?.revisitAt ?? applicablePlan?.expiresAt,
+        revisitCondition: treatmentIsCurrent ? replay.treatment?.revisitCondition : outcome?.revisitCondition ?? applicablePlan?.revisitCondition,
         invalidEventIds: replay.invalidEventIds,
         hasHistoricalValidation,
     };
+}
+
+/**
+ * Conservative boundary used by both live and durable readiness. A user's
+ * conclusion is necessary, but it is not sufficient: the conclusion must
+ * still be current, be supported by independent first-hand evidence that
+ * answers the active question, and have a synchronized user verdict so any
+ * plan consequence can only travel through the existing alignment flow.
+ * Contextual documents and stakeholder assertions remain useful evidence,
+ * but cannot manufacture validation on their own.
+ */
+export function assumptionValidationReadiness(
+    record: PlanningRecord,
+    now = Date.now(),
+): AssumptionValidationReadiness {
+    const projection = projectAssumptionValidation(record, now);
+    const conclusion = projection.acceptedConclusion;
+    if (!projection.conclusionIsCurrent || !conclusion) {
+        return { ready: false, qualifyingEvidence: [], competingEvidence: [], reason: 'missing_current_conclusion' };
+    }
+
+    const credible = projection.independentEvidence.filter(isCredibleDirectEvidence);
+    const supporting = credible.filter(evidence => evidence.relation === 'supports');
+    const contradicting = credible.filter(evidence => evidence.relation === 'contradicts');
+    const outcome = validationState(record).events.find(event => (
+        event.id === projection.latestOutcomeEventId && event.type === 'validation_outcome_recorded'
+    ));
+    const decision = projectDecision(record);
+
+    if (conclusion === 'supported' || conclusion === 'partially_supported') {
+        if (supporting.length === 0) {
+            return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: contradicting, reason: 'insufficient_support' };
+        }
+        if (conclusion === 'supported' && contradicting.length > 0) {
+            return { ready: false, conclusion, qualifyingEvidence: supporting, competingEvidence: contradicting, reason: 'competing_evidence' };
+        }
+        if (conclusion === 'partially_supported' && !outcome?.caveats?.trim()) {
+            return { ready: false, conclusion, qualifyingEvidence: supporting, competingEvidence: contradicting, reason: 'missing_caveats' };
+        }
+        if (decision.status !== 'confirmed' || !decision.latestVerdictEventId) {
+            return { ready: false, conclusion, qualifyingEvidence: supporting, competingEvidence: contradicting, reason: 'verdict_not_synchronized' };
+        }
+        return {
+            ready: true,
+            conclusion,
+            qualifyingEvidence: supporting,
+            competingEvidence: contradicting,
+            reason: conclusion === 'supported' ? 'current_supported' : 'current_partially_supported',
+        };
+    }
+
+    if (conclusion === 'contradicted') {
+        if (contradicting.length === 0) {
+            return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: supporting, reason: 'insufficient_support' };
+        }
+        if (supporting.length > 0) {
+            return { ready: false, conclusion, qualifyingEvidence: contradicting, competingEvidence: supporting, reason: 'competing_evidence' };
+        }
+        if (decision.status !== 'rejected' || !decision.latestVerdictEventId) {
+            return { ready: false, conclusion, qualifyingEvidence: contradicting, competingEvidence: supporting, reason: 'verdict_not_synchronized' };
+        }
+        return {
+            ready: true,
+            conclusion,
+            qualifyingEvidence: contradicting,
+            competingEvidence: supporting,
+            reason: 'current_contradicted',
+        };
+    }
+
+    return { ready: false, conclusion, qualifyingEvidence: [], competingEvidence: [], reason: 'insufficient_support' };
+}
+
+/**
+ * Translate a user-recorded validation outcome into the existing decision
+ * authority log. This does not apply plan changes. It only gives the existing
+ * Phase 1/2 impact review an exact causal verdict to bind to.
+ */
+export function assumptionValidationDecisionEvent(
+    record: PlanningRecord,
+    event: AssumptionValidationEvent,
+): DecisionEvent | undefined {
+    const base = {
+        id: `assumption-validation-verdict-${event.id}`,
+        planningRecordId: record.id,
+        actor: 'user' as const,
+        at: event.at,
+    };
+    const prior = projectDecision(record);
+    const reopen = (): DecisionEvent => ({ ...base, type: 'reopened' });
+
+    if (event.type === 'validation_outcome_reopened') return reopen();
+    if (event.type === 'validation_uncertainty_treatment_recorded') {
+        return event.treatment === 'deferred'
+            ? { ...base, type: 'deferred', rationale: event.rationale }
+            : reopen();
+    }
+    if (event.type !== 'validation_outcome_recorded') return undefined;
+
+    if (event.conclusion === 'contradicted') {
+        return {
+            ...base,
+            type: 'premise_rejected',
+            reason: event.caveats?.trim() || 'Current validation evidence contradicts this assumption.',
+            rationale: event.caveats,
+        };
+    }
+    if (event.conclusion === 'supported' || event.conclusion === 'partially_supported') {
+        const qualification = event.conclusion === 'partially_supported' && event.caveats?.trim()
+            ? ` Qualification: ${event.caveats.trim()}`
+            : '';
+        const answer = `${record.statement}${qualification}`;
+        return prior.latestVerdictEventId
+            ? { ...base, type: 'revised', previousEventId: prior.latestVerdictEventId, answer, rationale: event.caveats }
+            : { ...base, type: 'custom_answered', answer, rationale: event.caveats };
+    }
+    return reopen();
 }
 
 export type AssumptionValidationEventValidation = { valid: true } | { valid: false; reason: string };
@@ -652,7 +801,13 @@ export function buildAssumptionInterpretationProposal(
         irrelevant: [] as string[],
     };
     for (const classification of classifications) {
-        if (!duplicate.has(classification.evidenceId)) buckets[classification.relation].push(classification.evidenceId);
+        if (duplicate.has(classification.evidenceId)) continue;
+        const evidence = active.get(classification.evidenceId)!;
+        const relation = (classification.relation === 'supports' || classification.relation === 'contradicts')
+            && !isCredibleDirectEvidence(evidence)
+            ? 'inconclusive'
+            : classification.relation;
+        buckets[relation].push(classification.evidenceId);
     }
     let recommendedConclusion: AssumptionEvidenceConclusion;
     if (buckets.supports.length && buckets.contradicts.length) recommendedConclusion = 'inconclusive';

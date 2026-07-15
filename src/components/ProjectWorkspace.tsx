@@ -871,7 +871,7 @@ export function ProjectWorkspace() {
 
     const handlePlanningNextAction = () => {
         const kind = planningReadiness.nextAction.kind;
-        if (kind === 'resolve_decision' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId);
+        if (kind === 'resolve_decision' || kind === 'validate_assumption' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId);
         if (kind === 'challenge_plan') return openChallenge();
         if (kind === 'align_outputs') return setPipelineStage('workspace');
         if (kind === 'commit_plan') return handleToggleFinal();

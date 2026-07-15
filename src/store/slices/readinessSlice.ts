@@ -187,7 +187,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'hash_mismatch' };
                 return state;
             }
-            const currentInput = buildReadinessReviewInputFromState(state, projectId, review.createdAt);
+            const currentInput = buildReadinessReviewInputFromState(state, projectId, Date.now());
             if (!currentInput || !compareReadinessReviewCurrentness(review, currentInput).current) {
                 result = { status: 'rejected', reason: 'stale' };
                 return state;
@@ -268,7 +268,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'safety_blocked' };
                 return state;
             }
-            const currentInput = buildReadinessReviewInputFromState(state, projectId, review.createdAt);
+            const currentInput = buildReadinessReviewInputFromState(state, projectId, Date.now());
             if (!currentInput || !compareReadinessReviewCurrentness(review, currentInput).current) {
                 result = { status: 'rejected', reason: 'stale' };
                 return state;
