@@ -47,6 +47,44 @@ export type PlanningReadinessInput = {
 
 const meaningful = (value?: string): boolean => !!value && value.trim().length >= 12;
 
+const material = (record: PlanningRecord): boolean =>
+    record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high';
+
+/** Shared conservative resolution boundary for live guidance and durable
+ * readiness checkpoints. User acknowledgement is not validation, invalidated
+ * choices require a replacement, and incomplete legacy authority fails closed. */
+export function planningRecordRequiresResolution(
+    record: PlanningRecord,
+    allRecords: PlanningRecord[] = [record],
+    visited = new Set<string>(),
+): boolean {
+    if (visited.has(record.id)) return true;
+    const nextVisited = new Set(visited).add(record.id);
+    const state = projectDecision(record);
+    const legacyWithoutVerdictProvenance = record.schemaVersion === undefined
+        && !(record.events ?? []).some(event => event.actor === 'user');
+    if (legacyWithoutVerdictProvenance && material(record)) return true;
+    if (record.sourceState === 'changed' || record.sourceState === 'missing') return true;
+    if (state.status === 'open' || state.status === 'proposed') {
+        if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
+        if (record.type === 'risk') return record.materiality !== 'low';
+        if (record.type === 'assumption') return material(record);
+    }
+    if (state.status === 'deferred') {
+        if (record.type === 'conflict') return true;
+        if (['decision', 'open_question', 'risk', 'assumption'].includes(record.type)) return material(record);
+    }
+    if (record.type === 'assumption' && state.status === 'confirmed'
+        && material(record) && !record.evidence.some(item => item.verified)) return true;
+    if (record.type === 'risk' && state.status === 'confirmed' && material(record)) return true;
+    if (state.status === 'invalidated') return material(record);
+    if (state.status === 'superseded') {
+        const replacement = allRecords.find(item => item.id === state.supersededById);
+        return !replacement || planningRecordRequiresResolution(replacement, allRecords, nextVisited);
+    }
+    return false;
+}
+
 /** A verdict and its plan propagation are separate user actions. Readiness
  * remains blocked while a current proposal is pending/deferred, while an
  * accepted edit has not been applied, or while the user kept an exact source
@@ -97,28 +135,9 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     const prd = input.prd;
     const projected = input.planningRecords.map(record => ({ record, state: projectDecision(record) }));
     const unresolved = projected.filter(({ state }) => state.status === 'open' || state.status === 'proposed');
-    const needsResolution = projected.filter(({ record, state }) => {
-        const materialOrUnclassified = record.materiality === undefined
-            || record.materiality === 'blocking'
-            || record.materiality === 'high';
-        if (state.status === 'open' || state.status === 'proposed') {
-            if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
-            if (record.type === 'risk') return record.materiality !== 'low';
-            if (record.type === 'assumption') return materialOrUnclassified;
-        }
-        // User acceptance records authority, not validation. A material
-        // assumption without verified evidence remains implementation risk.
-        if (record.type === 'assumption' && state.status === 'confirmed'
-            && materialOrUnclassified && !record.evidence.some(item => item.verified)) return true;
-        // Deferral is a planning choice, not proof that a consequential issue
-        // is safe to carry into implementation. Explicitly normal/low items may
-        // remain deferred; conflicts and unclassified legacy records may not.
-        if (state.status === 'deferred') {
-            if (record.type === 'conflict') return true;
-            if (['decision', 'open_question', 'risk', 'assumption'].includes(record.type)) return materialOrUnclassified;
-        }
-        return false;
-    });
+    const needsResolution = projected.filter(({ record }) => (
+        planningRecordRequiresResolution(record, input.planningRecords)
+    ));
     const conflicts = needsResolution.filter(({ record }) => record.type === 'conflict');
     const keyDecisions = needsResolution.filter(({ record }) => record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict');
     const assumptions = unresolved.filter(({ record }) => record.type === 'assumption');

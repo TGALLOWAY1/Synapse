@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { ArtifactVersion, ReadinessCommitmentEvent, ReadinessReview } from '../../types';
+import type { ArtifactVersion, ReadinessCommitmentEvent } from '../../types';
 import type { ProjectState } from '../types';
 import { hashReviewValue } from '../../lib/review/hash';
 import {
@@ -10,8 +10,13 @@ import {
     type ReadinessReviewInput,
 } from '../../lib/planning/readinessReview';
 import { deriveProjectOutputAlignment } from '../../lib/planning/outputAlignment';
-import { planningContentHash } from '../../lib/planning/planningHash';
 import { buildReviewContextManifest } from '../../lib/review/manifest';
+import {
+    deriveReadinessCommitmentState,
+    readinessAuthorizationMatchesReview,
+    readinessEventMatchesReview,
+    readinessReviewSnapshotHash,
+} from '../../lib/planning/readinessCommitment';
 
 export type ReadinessSlice = Pick<ProjectState,
     | 'readinessReviews'
@@ -98,6 +103,12 @@ export function buildReadinessReviewInputFromState(
             structuredPRD: spine.structuredPRD,
             incompleteSectionCount: spine.generationMeta?.failedSections?.length ?? 0,
             isCommitted: spine.isFinal,
+            safetyReview: spine.safetyReview && {
+                status: spine.safetyReview.status,
+                classification: spine.safetyReview.classification,
+                detectedConcerns: spine.safetyReview.detectedConcerns,
+                reviewedAt: spine.safetyReview.reviewedAt,
+            },
         },
         planningRecords: state.planningRecords[projectId] ?? [],
         reviewRuns: state.reviewRuns[projectId] ?? [],
@@ -110,16 +121,7 @@ export function buildReadinessReviewInputFromState(
     };
 }
 
-const reviewSnapshotHash = (review: ReadinessReview): string => planningContentHash(review.snapshotHashes);
-const bindingMatches = (event: ReadinessCommitmentEvent, review: ReadinessReview): boolean => (
-    event.actor === 'user'
-    &&
-    event.reviewId === review.id
-    && event.spineVersionId === review.spineVersionId
-    && event.snapshotHash === reviewSnapshotHash(review)
-    && event.integrityHash === review.integrityHash
-    && event.aggregateHash === review.snapshotHashes.aggregate
-);
+const bindingMatches = readinessEventMatchesReview;
 
 export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessSlice> = (set) => ({
     readinessReviews: {},
@@ -211,7 +213,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
             const event: Extract<ReadinessCommitmentEvent, { type: 'commit_authorized' }> = {
                 id: uuidv4(), projectId, reviewId, actor: 'user', type: 'commit_authorized', at: Date.now(),
                 spineVersionId: review.spineVersionId,
-                snapshotHash: reviewSnapshotHash(review), integrityHash: review.integrityHash,
+                snapshotHash: readinessReviewSnapshotHash(review), integrityHash: review.integrityHash,
                 aggregateHash: review.snapshotHashes.aggregate,
                 acceptedConcernIds,
                 rationale: input.rationale?.trim() ?? '',
@@ -245,8 +247,20 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'authorization_not_found' };
                 return state;
             }
-            if (!bindingMatches(authorization, review)) {
+            if (!readinessAuthorizationMatchesReview(authorization, review)) {
                 result = { status: 'rejected', reason: 'hash_mismatch' };
+                return state;
+            }
+            if (events.some(event => event.type === 'plan_committed'
+                && event.authorizationEventId === authorizationEventId)) {
+                result = { status: 'rejected', reason: 'authorization_consumed' };
+                return state;
+            }
+            const spine = (state.spineVersions[projectId] ?? []).find(item => (
+                item.id === review.spineVersionId && item.isLatest
+            ));
+            if (spine?.safetyReview?.status === 'blocked') {
+                result = { status: 'rejected', reason: 'safety_blocked' };
                 return state;
             }
             const currentInput = buildReadinessReviewInputFromState(state, projectId, review.createdAt);
@@ -254,10 +268,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'stale' };
                 return state;
             }
-            const activeCommit = [...events].reverse().find(event => event.type === 'plan_committed'
-                && event.reviewId === review.id
-                && bindingMatches(event, review)
-                && !events.some(reopen => reopen.type === 'plan_reopened' && reopen.priorCommitEventId === event.id));
+            const activeCommit = deriveReadinessCommitmentState(review, events).activeCommit;
             if (activeCommit) {
                 result = { status: 'rejected', reason: 'already_committed' };
                 return state;
@@ -265,7 +276,7 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
             const event: Extract<ReadinessCommitmentEvent, { type: 'plan_committed' }> = {
                 id: uuidv4(), projectId, reviewId, actor: 'user', type: 'plan_committed', at: Date.now(),
                 spineVersionId: review.spineVersionId,
-                snapshotHash: reviewSnapshotHash(review), integrityHash: review.integrityHash,
+                snapshotHash: readinessReviewSnapshotHash(review), integrityHash: review.integrityHash,
                 aggregateHash: review.snapshotHashes.aggregate,
                 authorizationEventId,
             };
@@ -312,6 +323,11 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
             }
             const review = (state.readinessReviews[projectId] ?? []).find(item => item.id === commitment.reviewId);
             if (!review || !bindingMatches(commitment, review)) {
+                result = { status: 'rejected', reason: 'tampered' };
+                return state;
+            }
+            const authoritative = deriveReadinessCommitmentState(review, events).activeCommit;
+            if (authoritative?.id !== commitmentEventId) {
                 result = { status: 'rejected', reason: 'tampered' };
                 return state;
             }

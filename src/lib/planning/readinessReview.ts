@@ -22,6 +22,7 @@ import type { ProjectOutputAlignmentSummary } from './outputAlignment';
 import { projectDecision } from './decisionProjection';
 import {
     derivePlanningReadiness,
+    planningRecordRequiresResolution,
     planningRecordNeedsAlignment,
     reviewIssueNeedsResolutionBeforeBuild,
 } from './planningReadiness';
@@ -34,6 +35,12 @@ export type ReadinessReviewInput = {
         structuredPRD?: StructuredPRD;
         incompleteSectionCount?: number;
         isCommitted?: boolean;
+        safetyReview?: {
+            status: 'generated' | 'restricted' | 'blocked';
+            classification: string;
+            detectedConcerns: string[];
+            reviewedAt: number;
+        };
     };
     planningRecords: PlanningRecord[];
     reviewRuns: ReviewRun[];
@@ -85,22 +92,6 @@ const concernId = (
 const isMaterial = (record: PlanningRecord): boolean =>
     record.materiality === undefined || record.materiality === 'blocking' || record.materiality === 'high';
 
-const recordNeedsResolution = (record: PlanningRecord): boolean => {
-    const status = projectDecision(record).status;
-    if (status === 'open' || status === 'proposed') {
-        if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
-        if (record.type === 'risk') return record.materiality !== 'low';
-        if (record.type === 'assumption') return isMaterial(record);
-    }
-    if (status === 'deferred') {
-        if (record.type === 'conflict') return true;
-        if (record.type === 'decision' || record.type === 'open_question' || record.type === 'risk' || record.type === 'assumption') {
-            return isMaterial(record);
-        }
-    }
-    return record.sourceState === 'changed' || record.sourceState === 'missing';
-};
-
 const isAcceptedUnvalidatedAssumption = (record: PlanningRecord): boolean =>
     record.type === 'assumption'
     && projectDecision(record).status === 'confirmed'
@@ -132,31 +123,41 @@ function isSubstantiveChallenge(run: ReviewRun, specialistRuns: SpecialistRun[])
         const specialist = latest(specialistRuns.filter(item => (
             item.reviewId === run.id && item.specialistId === selection.specialistId
         )));
+        const coverageSummary = specialist?.coverageSummary?.trim() ?? '';
+        const hasAuditableCoverage = (specialist?.findingIds.length ?? 0) > 0
+            || (specialist?.resolvedAreas ?? []).some(area => area.trim().length >= 12);
         return specialist?.status === 'complete'
             && specialist.validation?.valid === true
-            && Boolean(specialist.coverageSummary?.trim());
+            && coverageSummary.length >= 24
+            && hasAuditableCoverage;
     });
 }
 
 export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
     const spineContentHash = hashReviewValue(input.spine.content);
     const exactRuns = exactChallengeRuns(input, spineContentHash);
-    const substantive = latest(exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns)));
+    const substantiveRuns = exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns));
+    const substantive = latest(substantiveRuns);
     const shallow = latest(exactRuns);
+    const substantiveRunIds = new Set(substantiveRuns.map(run => run.id));
+    const applicableIssues = input.reviewIssues.filter(issue => substantiveRunIds.has(issue.reviewId));
     const blockingIssues = substantive
-        ? input.reviewIssues.filter(issue => {
-            if (issue.reviewId !== substantive.id) return false;
+        ? applicableIssues.filter(issue => {
+            if ((issue.status === 'dismissed' || issue.status === 'already_addressed')
+                && (issue.dispositions.at(-1)?.reason?.trim().length ?? 0) < 12) return true;
             if (reviewIssueNeedsResolutionBeforeBuild(issue, input.spine.versionId)) return true;
             if (issue.implementationImpact === 'deferrable' || issue.status !== 'acted') return false;
             // A dangling or still-open linked record is not resolution. Fail
             // closed instead of allowing a relationship id to manufacture it.
             return issue.relatedPlanningRecordIds.some(id => {
                 const linked = input.planningRecords.find(record => record.id === id);
-                return !linked || recordNeedsResolution(linked);
+                return !linked || planningRecordRequiresResolution(linked, input.planningRecords);
             });
         })
         : [];
-    return { substantive, shallow, blockingIssues };
+    const blockingKeys = new Set(blockingIssues.map(issue => `${issue.reviewId}:${issue.id}`));
+    const addressedIssues = applicableIssues.filter(issue => !blockingKeys.has(`${issue.reviewId}:${issue.id}`));
+    return { substantive, substantiveRuns, shallow, blockingIssues, addressedIssues };
 }
 
 function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): ReadinessReviewSnapshotHashes {
@@ -165,6 +166,7 @@ function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): R
     const planningState = hashReviewValue({
         prd: input.spine.structuredPRD,
         incompleteSectionCount: input.spine.incompleteSectionCount ?? 0,
+        safetyReview: input.spine.safetyReview,
         records: byId(input.planningRecords),
     });
     const challenge = hashReviewValue({
@@ -324,7 +326,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
     ];
     const acceptedUnvalidated = input.planningRecords.filter(isAcceptedUnvalidatedAssumption);
     for (const group of recordGroups) {
-        const unresolved = group.records.filter(record => recordNeedsResolution(record)
+        const unresolved = group.records.filter(record => planningRecordRequiresResolution(record, input.planningRecords)
             || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record)));
         const blocking = unresolved.length > 0;
         const label = group.id === 'decisions' ? 'Material choices resolved' : group.id === 'assumptions' ? 'Material assumptions validated' : 'Material risks addressed';
@@ -377,7 +379,15 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
     criteria.push({
         id: 'challenge', label: 'Current plan challenged', status: !challenge.substantive ? 'not_started' : challengeBlocking ? 'attention' : 'met',
         blocking: challengeBlocking, explanation: challengeExplanation,
-        evidence: [makeEvidence('challenge', challengeBlocking ? 'incomplete' : 'direct', challengeExplanation, 'challenge', challenge.substantive?.id ?? challenge.shallow?.id ?? 'missing', input.spine.versionId, hashes.challenge)],
+        evidence: [
+            makeEvidence('challenge', challengeBlocking ? 'incomplete' : 'direct', challengeExplanation, 'challenge', challenge.substantive?.id ?? challenge.shallow?.id ?? 'missing', input.spine.versionId, hashes.challenge),
+            ...challenge.addressedIssues.map(issue => {
+                const disposition = issue.dispositions.at(-1);
+                const reason = disposition?.reason?.trim();
+                const summary = `${issue.title}: ${issue.status.replace('_', ' ')}${reason ? ` — ${reason}` : ''}.`;
+                return makeEvidence('challenge', 'direct', summary, 'challenge', issue.id, input.spine.versionId);
+            }),
+        ],
         actionTarget: challengeBlocking ? challengeTarget : undefined,
     });
     if (!challenge.substantive) concerns.push(makeConcern({

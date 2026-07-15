@@ -14,6 +14,7 @@ import {
     planningContentHash,
     projectDecision,
     recordConsequentialPrdEdit,
+    deriveReadinessCommitmentState,
     type ConsequentialPrdEditRecognition,
 } from '../../lib/planning';
 
@@ -133,6 +134,14 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         // new authority by toggling a boolean directly.
         if (isFinal) return;
         set((state) => {
+            const hasDurableCommitment = (state.readinessReviews[projectId] ?? []).some(review => (
+                review.spineVersionId === spineId
+                && Boolean(deriveReadinessCommitmentState(
+                    review,
+                    state.readinessCommitmentEvents[projectId] ?? [],
+                ).activeCommit)
+            ));
+            if (hasDurableCommitment) return state;
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
                 s.id === spineId ? { ...s, isFinal } : s

@@ -46,6 +46,7 @@ export type ReadinessMutationFailureReason =
     | 'project_not_found'
     | 'review_not_found'
     | 'authorization_not_found'
+    | 'authorization_consumed'
     | 'commitment_not_found'
     | 'stale'
     | 'tampered'

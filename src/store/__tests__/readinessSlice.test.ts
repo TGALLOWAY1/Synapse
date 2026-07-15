@@ -64,6 +64,7 @@ beforeEach(() => {
             responsibility: 'Challenge scope and assumptions.', boundaries: [], contextRefIds: [],
             status: 'complete', attemptCount: 1, findingIds: [],
             coverageSummary: 'Reviewed product scope and material assumptions.',
+            resolvedAreas: ['The problem, primary user, outcome, and first-release scope are explicit.'],
             validation: { valid: true, unsupportedEvidenceIds: [], warnings: [] }, createdAt: 3, completedAt: 4,
         }] },
         reviewIssues: { [projectId]: [] }, reviewFindings: { [projectId]: [] },
@@ -98,6 +99,21 @@ describe('durable readiness authority boundary', () => {
         expect(useProjectStore.getState().spineVersions[projectId][0].isFinal).toBe(false);
         expect(useProjectStore.getState().readinessCommitmentEvents[projectId].map(event => event.type))
             .toEqual(['commit_authorized', 'plan_committed', 'plan_reopened']);
+
+        expect(useProjectStore.getState().commitReadinessReview(
+            projectId, created.reviewId, authorized.authorizationEventId,
+        )).toMatchObject({ status: 'rejected', reason: 'authorization_consumed' });
+
+        const reauthorized = useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            expectedIntegrityHash: created.review.integrityHash,
+            expectedAggregateHash: created.review.snapshotHashes.aggregate,
+            acceptedConcernIds: [],
+        });
+        expect(reauthorized.status).toBe('authorized');
+        if (reauthorized.status !== 'authorized') return;
+        expect(useProjectStore.getState().commitReadinessReview(
+            projectId, created.reviewId, reauthorized.authorizationEventId,
+        ).status).toBe('committed');
     });
 
     it('preserves not-ready evidence and requires exact accepted concerns, rationale, and containment', () => {
@@ -146,6 +162,45 @@ describe('durable readiness authority boundary', () => {
         expect(useProjectStore.getState().commitReadinessReview(projectId, created.reviewId, authorized.authorizationEventId))
             .toMatchObject({ status: 'rejected', reason: 'stale' });
         expect(useProjectStore.getState().spineVersions[projectId][0].isFinal).toBe(false);
+    });
+
+    it('rejects commitment when the safety boundary becomes blocked after authorization', () => {
+        const created = useProjectStore.getState().createReadinessReview(projectId);
+        if (created.status !== 'created') throw new Error('expected review');
+        const authorized = useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            expectedIntegrityHash: created.review.integrityHash,
+            expectedAggregateHash: created.review.snapshotHashes.aggregate,
+            acceptedConcernIds: [],
+        });
+        if (authorized.status !== 'authorized') throw new Error('expected authorization');
+        useProjectStore.setState(state => ({
+            spineVersions: { [projectId]: state.spineVersions[projectId].map(spine => ({
+                ...spine,
+                safetyReview: {
+                    classification: 'disallowed', status: 'blocked', detectedConcerns: ['unsafe'],
+                    userFacingReason: 'This plan cannot be used.', safeAlternatives: [], reviewedAt: 10,
+                },
+            })) },
+        }));
+        expect(useProjectStore.getState().commitReadinessReview(projectId, created.reviewId, authorized.authorizationEventId))
+            .toMatchObject({ status: 'rejected', reason: 'safety_blocked' });
+        expect(useProjectStore.getState().spineVersions[projectId][0].isFinal).toBe(false);
+    });
+
+    it('does not let the legacy finality toggle reopen a durable readiness commitment', () => {
+        const created = useProjectStore.getState().createReadinessReview(projectId);
+        if (created.status !== 'created') throw new Error('expected review');
+        const authorized = useProjectStore.getState().authorizeReadinessCommitment(projectId, created.reviewId, {
+            expectedIntegrityHash: created.review.integrityHash,
+            expectedAggregateHash: created.review.snapshotHashes.aggregate,
+            acceptedConcernIds: [],
+        });
+        if (authorized.status !== 'authorized') throw new Error('expected authorization');
+        expect(useProjectStore.getState().commitReadinessReview(projectId, created.reviewId, authorized.authorizationEventId).status)
+            .toBe('committed');
+
+        useProjectStore.getState().markSpineFinal(projectId, spineId, false);
+        expect(useProjectStore.getState().spineVersions[projectId][0].isFinal).toBe(true);
     });
 
     it('rejects tampered reviews and non-user authorization records', () => {

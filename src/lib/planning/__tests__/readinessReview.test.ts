@@ -1,6 +1,7 @@
 import { describe, expect, it } from 'vitest';
 import type {
     PlanningRecord,
+    ReviewIssue,
     ReviewRun,
     SpecialistRun,
     StructuredPRD,
@@ -45,6 +46,7 @@ const specialistRun = (overrides: Partial<SpecialistRun> = {}): SpecialistRun =>
     id: 'specialist-1', projectId: 'p1', reviewId: 'review-1', specialistId: 'product_scope',
     responsibility: 'Test scope and assumptions.', boundaries: [], contextRefIds: [], status: 'complete',
     attemptCount: 1, findingIds: [], coverageSummary: 'Reviewed product scope and material uncertainty.',
+    resolvedAreas: ['Problem, primary user, outcome, and first-release scope were reviewed.'],
     validation: { valid: true, unsupportedEvidenceIds: [], warnings: [] }, createdAt: 10, completedAt: 20,
     ...overrides,
 });
@@ -65,6 +67,15 @@ const record = (overrides: Partial<PlanningRecord> = {}): PlanningRecord => ({
     id: 'record-1', projectId: 'p1', type: 'assumption', status: 'open', title: 'Material assumption',
     statement: 'Teams will trust generated recommendations without seeing their basis.', evidence: [],
     sourceFindingIds: [], createdBy: 'user', createdAt: 1, updatedAt: 1,
+    ...overrides,
+});
+
+const reviewIssue = (overrides: Partial<ReviewIssue> = {}): ReviewIssue => ({
+    id: 'issue-1', projectId: 'p1', reviewId: 'review-1', title: 'Operational recovery is undefined',
+    summary: 'The plan does not define how failed work is recovered.', kind: 'risk', findingIds: ['finding-1'],
+    specialistIds: ['product_scope'], relationship: 'standalone', severity: 'high', confidence: 'high',
+    implementationImpact: 'resolve_before_build', status: 'open', dispositions: [],
+    relatedPlanningRecordIds: [], createdAt: 11, updatedAt: 11,
     ...overrides,
 });
 
@@ -91,6 +102,38 @@ describe('deterministic readiness review', () => {
         expect(review.criteria.find(item => item.id === 'assumptions')).toMatchObject({ status: 'attention', blocking: true });
         expect(review.concerns).toEqual(expect.arrayContaining([
             expect.objectContaining({ kind: 'assumption', blocking: true, evidenceQuality: 'incomplete' }),
+        ]));
+    });
+
+    it('does not treat invalidation, missing supersession, or a confirmed material risk as resolution', () => {
+        const invalidated = record({
+            id: 'invalidated', type: 'decision', status: 'confirmed', materiality: 'blocking', schemaVersion: 1,
+            events: [{ id: 'invalidated-event', planningRecordId: 'invalidated', type: 'invalidated', actor: 'user', at: 2, reason: 'The premise changed.' }],
+        });
+        const superseded = record({
+            id: 'superseded', type: 'decision', status: 'confirmed', materiality: 'high', schemaVersion: 1,
+            events: [{ id: 'superseded-event', planningRecordId: 'superseded', type: 'superseded', actor: 'user', at: 2, supersededById: 'missing' }],
+        });
+        const acceptedRisk = record({
+            id: 'risk', type: 'risk', status: 'confirmed', materiality: 'high', schemaVersion: 1,
+            events: [{ id: 'risk-answer', planningRecordId: 'risk', type: 'custom_answered', actor: 'user', at: 2, answer: 'We accept the exposure.' }],
+        });
+        const review = deriveReadinessReview(input({ planningRecords: [invalidated, superseded, acceptedRisk] }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns.map(item => item.source.sourceId)).toEqual(expect.arrayContaining([
+            'invalidated', 'superseded', 'risk',
+        ]));
+    });
+
+    it('fails closed for a material legacy verdict without durable user provenance', () => {
+        const legacy = record({
+            id: 'legacy', type: 'decision', status: 'confirmed', resolution: 'Web first',
+            materiality: undefined, schemaVersion: undefined, events: undefined,
+        });
+        const review = deriveReadinessReview(input({ planningRecords: [legacy] }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'legacy' }) }),
         ]));
     });
 
@@ -128,6 +171,57 @@ describe('deterministic readiness review', () => {
         }));
         expect(review.conclusion).toBe('not_ready');
         expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({ status: 'not_started', blocking: true });
+    });
+
+    it('rejects ceremonial challenge coverage with no finding or auditable resolved area', () => {
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ coverageSummary: 'This looks sufficiently covered.', resolvedAreas: [], findingIds: [] })],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({ blocking: true });
+    });
+
+    it('keeps an earlier exact-current unresolved finding after a newer empty challenge run', () => {
+        const newerRun = reviewRun({ id: 'review-2', sequenceNumber: 2, createdAt: 30, completedAt: 40 });
+        const review = deriveReadinessReview(input({
+            reviewRuns: [reviewRun(), newerRun],
+            specialistRuns: [
+                specialistRun({ id: 'specialist-1', reviewId: 'review-1', findingIds: ['finding-1'] }),
+                specialistRun({ id: 'specialist-2', reviewId: 'review-2', createdAt: 30, completedAt: 40 }),
+            ],
+            reviewIssues: [reviewIssue()],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'issue-1' }) }),
+        ]));
+    });
+
+    it('preserves a challenge dismissal rationale as direct review evidence', () => {
+        const dismissed = reviewIssue({
+            status: 'dismissed',
+            dispositions: [{ action: 'dismiss', actor: 'user', at: 15, contextSignature: 'context-1', reason: 'The first release never persists failed work.' }],
+        });
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ findingIds: ['finding-1'] })],
+            reviewIssues: [dismissed],
+        }));
+        const evidence = review.criteria.find(item => item.id === 'challenge')?.evidence ?? [];
+        expect(evidence).toEqual(expect.arrayContaining([
+            expect.objectContaining({ quality: 'direct', summary: expect.stringContaining('never persists failed work') }),
+        ]));
+    });
+
+    it('does not let a legacy dismissal without rationale satisfy challenge readiness', () => {
+        const dismissed = reviewIssue({ status: 'dismissed', dispositions: [] });
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ findingIds: ['finding-1'] })],
+            reviewIssues: [dismissed],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'issue-1' }) }),
+        ]));
     });
 
     it('blocks a definite stale downstream output', () => {
@@ -170,6 +264,20 @@ describe('deterministic readiness review', () => {
         const review = deriveReadinessReview(input());
         const comparison = compareReadinessReviewCurrentness(review, input({
             planningRecords: [record({ id: 'low-risk', type: 'risk', materiality: 'low' })],
+        }));
+        expect(comparison.reasons).toContain('planning_state_changed');
+    });
+
+    it('makes a review historical when the safety boundary changes', () => {
+        const review = deriveReadinessReview(input({
+            spine: { versionId: 'spine-1', content, structuredPRD: prd, safetyReview: {
+                status: 'generated', classification: 'allowed', detectedConcerns: [], reviewedAt: 1,
+            } },
+        }));
+        const comparison = compareReadinessReviewCurrentness(review, input({
+            spine: { versionId: 'spine-1', content, structuredPRD: prd, safetyReview: {
+                status: 'blocked', classification: 'disallowed', detectedConcerns: ['unsafe'], reviewedAt: 2,
+            } },
         }));
         expect(comparison.reasons).toContain('planning_state_changed');
     });
