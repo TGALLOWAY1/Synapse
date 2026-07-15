@@ -169,6 +169,7 @@ export interface ReviewWorkspaceProps {
         revisitAt?: number;
         revisitCondition?: string;
     }) => void;
+    onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
     readOnly?: boolean;
 }
 
@@ -717,10 +718,10 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     return (
         <div className="flex h-full min-w-0 flex-1 flex-col bg-neutral-50 text-neutral-900">
             <div className="shrink-0 border-b border-neutral-200 bg-white px-3 sm:px-5">
-                <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-x-auto">
-                    <button type="button" onClick={() => setTab('review')} className={`min-h-12 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}>Review findings</button>
-                    <button type="button" onClick={() => setTab('decisions')} className={`min-h-12 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}>Decision Center {props.planningRecords.length > 0 && <span className="ml-1 text-xs text-neutral-400">{props.planningRecords.length}</span>}</button>
-                    <button type="button" onClick={() => setTab('history')} className={`min-h-12 whitespace-nowrap border-b-2 px-3 text-sm font-semibold ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}>Review history</button>
+                <div className="mx-auto flex w-full min-w-0 max-w-5xl items-center gap-1 overflow-hidden sm:overflow-x-auto">
+                    <button type="button" aria-label="Review findings" onClick={() => setTab('review')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'review' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">Findings</span><span aria-hidden="true" className="hidden sm:inline">Review findings</span></button>
+                    <button type="button" aria-label={props.planningRecords.length > 0 ? `Decision Center, ${props.planningRecords.length} records` : 'Decision Center'} onClick={() => setTab('decisions')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'decisions' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">Decisions</span><span aria-hidden="true" className="hidden sm:inline">Decision Center</span> {props.planningRecords.length > 0 && <span aria-hidden="true" className="ml-1 text-xs text-neutral-400">{props.planningRecords.length}</span>}</button>
+                    <button type="button" aria-label="Review history" onClick={() => setTab('history')} className={`min-h-12 min-w-0 flex-1 whitespace-nowrap border-b-2 px-1 text-xs font-semibold sm:flex-none sm:px-3 sm:text-sm ${tab === 'history' ? 'border-indigo-600 text-indigo-700' : 'border-transparent text-neutral-500'}`}><span aria-hidden="true" className="sm:hidden">History</span><span aria-hidden="true" className="hidden sm:inline">Review history</span></button>
                 </div>
             </div>
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -748,6 +749,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onInterpretAssumptionEvidence={props.onInterpretAssumptionEvidence}
                         onRecordAssumptionOutcome={props.onRecordAssumptionOutcome}
                         onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
+                        onReopenAssumptionOutcome={props.onReopenAssumptionOutcome}
                     />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">

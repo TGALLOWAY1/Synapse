@@ -80,6 +80,20 @@ const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
 });
 
 describe('ReviewWorkspace', () => {
+    it('keeps all three navigation targets reachable at mobile width', () => {
+        render(<ReviewWorkspace {...baseProps()} />);
+
+        const findings = screen.getByRole('button', { name: 'Review findings' });
+        const decisions = screen.getByRole('button', { name: 'Decision Center' });
+        const history = screen.getByRole('button', { name: 'Review history' });
+        for (const tab of [findings, decisions, history]) {
+            expect(tab).toHaveClass('min-h-12', 'flex-1', 'min-w-0', 'sm:flex-none');
+        }
+        expect(findings).toHaveTextContent('Findings');
+        expect(decisions).toHaveTextContent('Decisions');
+        expect(history).toHaveTextContent('History');
+    });
+
     it('starts a recommended review with the selected panel and optional focus', () => {
         const onStartReview = vi.fn();
         render(<ReviewWorkspace {...baseProps({ onStartReview })} />);

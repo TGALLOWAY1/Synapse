@@ -1097,6 +1097,28 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         else useToastStore.getState().addToast({ type: 'info', title: 'Unresolved uncertainty recorded', message: 'The assumption remains unvalidated.' });
     };
 
+    const handleReopenAssumptionOutcome = (recordId: string, reason: string) => {
+        if (!canWrite || !reason.trim()) return;
+        const { state, record, spine, spineContentHash } = currentAssumptionContext(recordId);
+        if (!record || record.type !== 'assumption') return;
+        const at = Date.now();
+        const projection = projectAssumptionValidation(record, at);
+        if (!projection.latestOutcomeEventId || !projection.currentPlan) return;
+        const event = sealAssumptionValidationEvent({
+            id: uuidv4(), planningRecordId: recordId, type: 'validation_outcome_reopened', actor: 'user', at,
+            assumptionStatementHash: assumptionStatementHash(record),
+            expectedSpineVersionId: spine?.id,
+            expectedSpineContentHash: spineContentHash,
+            previousOutcomeEventId: projection.latestOutcomeEventId,
+            reason: reason.trim(),
+            expectedValidationPlanHash: projection.currentPlan.contentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        });
+        const result = state.appendAssumptionValidationEvent(projectId, recordId, event);
+        if (!result.ok) showValidationError('Conclusion not reopened', result.reason);
+        else useToastStore.getState().addToast({ type: 'info', title: 'Conclusion reopened', message: 'The earlier outcome remains in history while this assumption returns to active review.' });
+    };
+
     const handleDecisionAction = (recordId: string, action: import('./DecisionCenter').DecisionAction, value?: string, rationale?: string) => {
         if (!canWrite) return;
         const record = planningRecords.find(item => item.id === recordId);
@@ -1398,6 +1420,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onInterpretAssumptionEvidence={handleInterpretAssumptionEvidence}
         onRecordAssumptionOutcome={handleRecordAssumptionOutcome}
         onRecordAssumptionTreatment={handleRecordAssumptionTreatment}
+        onReopenAssumptionOutcome={handleReopenAssumptionOutcome}
         readOnly={!canPerformProjectAction(projectId, 'persist')}
     />;
 }

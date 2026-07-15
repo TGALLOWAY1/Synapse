@@ -82,6 +82,7 @@ interface Props {
         revisitAt?: number;
         revisitCondition?: string;
     }) => void;
+    onReopenOutcome: (recordId: string, reason: string) => void;
     onPreviewImpact: (recordId: string) => void;
 }
 
@@ -157,6 +158,9 @@ const dateInputValue = (timestamp?: number): string => {
 const dateInputTimestamp = (value: string): number | undefined =>
     value ? new Date(`${value}T12:00:00`).getTime() : undefined;
 
+const consequenceWithoutPrefix = (value: string): string =>
+    value.replace(/^\s*if\s+this\s+is\s+wrong\s*[:—–-]?\s*/i, '').trim();
+
 const methodEvidenceGuidance = (method: AssumptionValidationMethodKind): string => {
     if (['user_interviews', 'usability_observation', 'prototype'].includes(method)) {
         return 'For readiness, record at least two independent direct observations from this method, including the scope or sample.';
@@ -183,6 +187,7 @@ export function AssumptionValidationPanel({
     onInterpretEvidence,
     onRecordOutcome,
     onRecordTreatment,
+    onReopenOutcome,
     onPreviewImpact,
 }: Props) {
     const [planDraft, setPlanDraft] = useState({
@@ -212,7 +217,9 @@ export function AssumptionValidationPanel({
     const [treatmentRationale, setTreatmentRationale] = useState('');
     const [treatmentRevisit, setTreatmentRevisit] = useState('');
     const [treatmentRevisitDate, setTreatmentRevisitDate] = useState('');
+    const [reopenReason, setReopenReason] = useState('');
     const duplicateIds = new Set(validation.duplicateEvidenceIds);
+    const consequenceDetail = consequence ? consequenceWithoutPrefix(consequence) : '';
 
     const useProposal = () => {
         const proposal = validation.latestPlanProposal;
@@ -299,7 +306,7 @@ export function AssumptionValidationPanel({
 
             <section className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-3" aria-label="Potential plan impact">
                 <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Potential plan impact</p>
-                {consequence && <p className="mt-1 text-sm leading-5 text-neutral-700"><strong className="text-neutral-900">If this is wrong:</strong> {consequence}</p>}
+                {consequenceDetail && <p className="mt-1 text-sm leading-5 text-neutral-700"><strong className="text-neutral-900">If this is wrong:</strong> {consequenceDetail}</p>}
                 <p className="mt-1 text-xs leading-5 text-neutral-600"><strong className="text-neutral-800">Dependent areas:</strong> {validation.dependentLabels.length > 0 ? validation.dependentLabels.join(' · ') : 'No exact dependent areas have been identified.'}</p>
                 <p className="mt-1 text-xs leading-5 text-neutral-500">This is a read-only preview. Recording a conclusion will not change the plan; exact changes must use the guarded alignment review.</p>
             </section>
@@ -480,6 +487,19 @@ export function AssumptionValidationPanel({
                             <input type="date" value={treatmentRevisitDate} onChange={event => setTreatmentRevisitDate(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal sm:w-auto" />
                         </label>
                         <button type="button" disabled={!treatmentRationale.trim()} onClick={() => onRecordTreatment(recordId, { treatment, rationale: treatmentRationale.trim(), revisitAt: dateInputTimestamp(treatmentRevisitDate), revisitCondition: treatmentRevisit.trim() || undefined })} className="mt-3 min-h-11 w-full rounded-lg border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900 disabled:opacity-40 sm:w-auto">Record unresolved uncertainty</button>
+                    </div>
+                </details>
+            )}
+
+            {!readOnly && validation.acceptedConclusion && validation.conclusionIsCurrent && (
+                <details className="mt-3 rounded-lg border border-neutral-200">
+                    <summary className="min-h-11 cursor-pointer px-3 py-3 text-sm font-semibold text-neutral-700">Reopen this conclusion</summary>
+                    <div className="border-t border-neutral-100 p-3">
+                        <p className="text-xs leading-5 text-neutral-600">Reopening preserves this outcome in history and returns the assumption to active review. It does not remove evidence.</p>
+                        <label className="mt-3 block text-xs font-semibold text-neutral-700">Why reopen this conclusion?
+                            <textarea value={reopenReason} onChange={event => setReopenReason(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm font-normal" />
+                        </label>
+                        <button type="button" disabled={!reopenReason.trim()} onClick={() => { onReopenOutcome(recordId, reopenReason.trim()); setReopenReason(''); }} className="mt-3 min-h-11 w-full rounded-lg border border-amber-300 bg-amber-50 px-4 text-sm font-semibold text-amber-900 disabled:opacity-40 sm:w-auto">Reopen conclusion</button>
                     </div>
                 </details>
             )}

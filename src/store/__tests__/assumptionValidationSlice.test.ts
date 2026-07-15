@@ -183,6 +183,31 @@ describe('assumption validation store boundary', () => {
             ok: true, duplicate: true,
         });
 
+        const currentProjection = projectAssumptionValidation(current, 131);
+        const reopened = sealAssumptionValidationEvent({
+            id: 'technical-outcome-reopened', planningRecordId: current.id, actor: 'user', type: 'validation_outcome_reopened', at: 131,
+            assumptionStatementHash: assumptionStatementHash(current),
+            previousOutcomeEventId: currentProjection.latestOutcomeEventId!,
+            reason: 'A new browser test produced contradictory evidence.',
+            expectedValidationPlanHash: currentProjection.currentPlan!.contentHash,
+            expectedEvidenceSetHash: assumptionEvidenceSetHash(currentProjection.activeEvidence),
+        });
+        expect(useProjectStore.getState().appendAssumptionValidationEvent('project-1', current.id, reopened)).toEqual({
+            ok: true, duplicate: false,
+        });
+        current = useProjectStore.getState().planningRecords['project-1'][0];
+        expect(projectAssumptionValidation(current, 132)).toMatchObject({
+            acceptedConclusion: undefined,
+            hasHistoricalValidation: true,
+        });
+        expect(projectDecision(current)).toMatchObject({
+            status: 'open', latestVerdictEventId: 'assumption-validation-verdict-technical-outcome-reopened',
+        });
+        expect(current.assumptionValidation?.events.at(-1)).toMatchObject({
+            type: 'validation_outcome_reopened',
+            reason: 'A new browser test produced contradictory evidence.',
+        });
+
         expect(useProjectStore.getState().appendPlanningDecisionEvent('project-1', current.id, {
             id: 'concurrent-verdict', planningRecordId: current.id, actor: 'user', type: 'custom_answered',
             answer: 'A newer concurrent product conclusion.', at: 200,

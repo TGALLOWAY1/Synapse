@@ -112,6 +112,7 @@ interface Props {
         revisitAt?: number;
         revisitCondition?: string;
     }) => void;
+    onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
 }
 
 const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
@@ -142,6 +143,7 @@ export function DecisionCenter({
     onInterpretAssumptionEvidence = () => {},
     onRecordAssumptionOutcome = () => {},
     onRecordAssumptionTreatment = () => {},
+    onReopenAssumptionOutcome = () => {},
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsAttention(initialRecord) ? 'needs_review' : 'log') : records.some(needsAttention) ? 'needs_review' : 'log');
@@ -305,6 +307,7 @@ export function DecisionCenter({
                                     onInterpretEvidence={onInterpretAssumptionEvidence}
                                     onRecordOutcome={onRecordAssumptionOutcome}
                                     onRecordTreatment={onRecordAssumptionTreatment}
+                                    onReopenOutcome={onReopenAssumptionOutcome}
                                     onPreviewImpact={onPreviewImpact}
                                 />
                             )}

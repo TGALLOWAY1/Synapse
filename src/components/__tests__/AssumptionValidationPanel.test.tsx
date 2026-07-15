@@ -39,7 +39,7 @@ const baseValidation = (overrides: Partial<AssumptionValidationView> = {}): Assu
 const callbacks = () => ({
     onGeneratePlan: vi.fn(), onRecordPlan: vi.fn(), onAddEvidence: vi.fn(),
     onInterpretEvidence: vi.fn(), onRecordOutcome: vi.fn(), onRecordTreatment: vi.fn(),
-    onPreviewImpact: vi.fn(),
+    onReopenOutcome: vi.fn(), onPreviewImpact: vi.fn(),
 });
 
 describe('AssumptionValidationPanel', () => {
@@ -161,6 +161,34 @@ describe('AssumptionValidationPanel', () => {
         expect(impact).toHaveTextContent('Pricing · First-release scope');
         const planStep = screen.getByText('1. Plan the smallest credible test');
         expect(impact.compareDocumentPosition(planStep) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('does not repeat an existing consequence prefix', () => {
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} consequence="If this is wrong: onboarding and pricing must change." {...callbacks()} />);
+
+        const impact = screen.getByRole('region', { name: 'Potential plan impact' });
+        expect(impact).toHaveTextContent('If this is wrong: onboarding and pricing must change.');
+        expect(impact).not.toHaveTextContent('If this is wrong: If this is wrong:');
+    });
+
+    it('requires a reason before reopening a current conclusion', () => {
+        const handlers = callbacks();
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({
+            currentPlan: plan,
+            workflowState: 'completed',
+            activeEvidence: [evidence()],
+            acceptedConclusion: 'supported',
+            conclusionIsCurrent: true,
+            hasHistoricalValidation: true,
+        })} requiresValidation={false} hasPlanImpact={false} {...handlers} />);
+
+        fireEvent.click(screen.getByText('Reopen this conclusion'));
+        const reopen = screen.getByRole('button', { name: 'Reopen conclusion' });
+        expect(reopen).toBeDisabled();
+        fireEvent.change(screen.getByLabelText('Why reopen this conclusion?'), { target: { value: 'A new technical test contradicts the earlier result.' } });
+        fireEvent.click(reopen);
+
+        expect(handlers.onReopenOutcome).toHaveBeenCalledWith('assumption-1', 'A new technical test contradicts the earlier result.');
     });
 
     it('frames formal validation as optional for a low-impact assumption', () => {
