@@ -24,6 +24,7 @@ import { coveragePathSupports, PRODUCT_READINESS_COVERAGE_AREAS } from '../revie
 import type { ProjectOutputAlignmentSummary } from './outputAlignment';
 import { assumptionValidationReadiness, projectAssumptionValidation } from './assumptionValidation';
 import type { AssumptionValidationCurrentContext } from './assumptionValidation';
+import { planningContentHash } from './planningHash';
 import { projectDecision } from './decisionProjection';
 import {
     derivePlanningReadiness,
@@ -257,7 +258,7 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
     const evaluatedAt = input.createdAt ?? Date.now();
     const validationContext = {
         currentSpineVersionId: input.spine.versionId,
-        currentSpineContentHash: hashReviewValue(input.spine.structuredPRD ?? input.spine.content),
+        currentSpineContentHash: planningContentHash(input.spine.structuredPRD ?? input.spine.content),
     };
     const spineContentHash = hashReviewValue(input.spine.content);
     const exactRuns = exactChallengeRuns(input, spineContentHash);
@@ -315,7 +316,7 @@ function snapshotHashes(input: ReadinessReviewInput, criteriaVersion: number): R
     const evaluatedAt = input.createdAt ?? Date.now();
     const validationContext = {
         currentSpineVersionId: input.spine.versionId,
-        currentSpineContentHash: hashReviewValue(input.spine.structuredPRD ?? input.spine.content),
+        currentSpineContentHash: planningContentHash(input.spine.structuredPRD ?? input.spine.content),
     };
     const spineIdentity = hashReviewValue({ projectId: input.projectId, spineVersionId: input.spine.versionId });
     const spineContent = hashReviewValue(input.spine.content);
@@ -460,7 +461,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
     const evaluatedAt = input.createdAt ?? Date.now();
     const validationContext = {
         currentSpineVersionId: input.spine.versionId,
-        currentSpineContentHash: hashReviewValue(input.spine.structuredPRD ?? input.spine.content),
+        currentSpineContentHash: planningContentHash(input.spine.structuredPRD ?? input.spine.content),
     };
     const hashes = snapshotHashes(input, READINESS_CRITERIA_VERSION);
     const challenge = deriveReadinessChallengeState(input);

@@ -53,6 +53,7 @@ import {
     deriveReadinessCommitmentState,
     deriveReadinessReview,
     hasReadinessProvenanceForSpine,
+    planningContentHash,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
@@ -383,7 +384,7 @@ export function ProjectWorkspace() {
         staleOutputCount,
         isCommitted: displaysCurrentCommitment,
         currentSpineVersionId: activeSpine?.id,
-        currentSpineContentHash: activeSpine ? hashReviewValue(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
+        currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     });
     const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput

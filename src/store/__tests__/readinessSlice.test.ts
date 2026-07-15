@@ -9,6 +9,8 @@ import {
     assumptionStatementHash,
     assumptionValidationDecisionEvent,
     compareReadinessReviewCurrentness,
+    derivePlanningReadiness,
+    planningContentHash,
     projectAssumptionValidation,
     sealAssumptionEvidence,
     sealAssumptionValidationEvent,
@@ -49,7 +51,7 @@ const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
         ...assumption(), status: 'open', events: [],
         sources: [{ key: 'prd_assumption:a1', sourceType: 'prd_assumption', sourceId: 'a1', sourceVersionId: spineId }],
     };
-    const spineHash = hashReviewValue(prd);
+    const spineHash = planningContentHash(prd);
     const context = { currentSpineVersionId: spineId, currentSpineContentHash: spineHash };
     const plan = sealAssumptionValidationPlan({
         id: 'plan', question: 'Will users revisit operational warnings?',
@@ -158,6 +160,35 @@ beforeEach(() => {
 });
 
 describe('durable readiness authority boundary', () => {
+    it('uses the production spine hash consistently from stored validation through live readiness', () => {
+        vi.useFakeTimers();
+        try {
+            vi.setSystemTime(1_040);
+            useProjectStore.setState({ planningRecords: { [projectId]: [expiringValidatedAssumption(2_000)] } });
+            const state = useProjectStore.getState();
+            const currentSpine = state.spineVersions[projectId].find(spine => spine.isLatest)!;
+            const live = derivePlanningReadiness({
+                prd: currentSpine.structuredPRD,
+                planningRecords: state.planningRecords[projectId],
+                incompleteSectionCount: 0,
+                hasCurrentChallenge: true,
+                blockingReviewIssueCount: 0,
+                generatedOutputCount: 0,
+                staleOutputCount: 0,
+                evaluatedAt: Date.now(),
+                currentSpineVersionId: currentSpine.id,
+                currentSpineContentHash: planningContentHash(currentSpine.structuredPRD ?? currentSpine.responseText),
+            });
+            expect(live.isReadyToBuild).toBe(true);
+            expect(state.createReadinessReview(projectId)).toMatchObject({
+                status: 'created',
+                review: { conclusion: 'ready_to_build' },
+            });
+        } finally {
+            vi.useRealTimers();
+        }
+    });
+
     it('commits only through an exact current reviewed snapshot and can reopen append-only', () => {
         const created = useProjectStore.getState().createReadinessReview(projectId);
         expect(created.status).toBe('created');

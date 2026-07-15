@@ -9,7 +9,10 @@ const prd: StructuredPRD = {
     features: [],
     architecture: 'Local-first',
     risks: [],
-    assumptions: [{ id: 'a1', statement: 'Users want guest access', confidence: 'med' }],
+    assumptions: [{
+        id: 'a1', statement: 'Users want guest access', confidence: 'med',
+        whyItMatters: 'If this is wrong, onboarding and account recovery must change.',
+    }],
 };
 
 beforeEach(() => {
@@ -29,6 +32,7 @@ describe('planning record decision actions', () => {
         expect(second).toEqual({ imported: 0, existing: 1 });
 
         const record = useProjectStore.getState().planningRecords.p1[0];
+        expect(record.whyItMatters).toBe('If this is wrong, onboarding and account recovery must change.');
         useProjectStore.getState().updatePlanningRecordStatusByUser('p1', record.id, 'confirmed', {
             resolution: 'Allow a limited guest session',
             rationale: 'Reduce onboarding friction',

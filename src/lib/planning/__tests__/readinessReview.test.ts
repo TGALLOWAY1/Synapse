@@ -22,6 +22,7 @@ import {
     sealAssumptionValidationEvent,
     sealAssumptionValidationPlan,
 } from '../assumptionValidation';
+import { planningContentHash } from '../planningHash';
 import {
     compareReadinessReviewCurrentness,
     deriveReadinessReview,
@@ -112,7 +113,7 @@ const record = (overrides: Partial<PlanningRecord> = {}): PlanningRecord => ({
 });
 
 const evidenceValidatedRecord = (expiresAt?: number): PlanningRecord => {
-    const spineHash = hashReviewValue(prd);
+    const spineHash = planningContentHash(prd);
     const context = { currentSpineVersionId: 'spine-1', currentSpineContentHash: spineHash };
     let current = record({
         status: 'open', materiality: 'high', events: [],

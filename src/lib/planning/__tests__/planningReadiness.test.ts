@@ -195,6 +195,24 @@ describe('planning readiness', () => {
         }).isReadyToBuild).toBe(false);
     });
 
+    it('rejects a tampered validation-derived verdict even when its id and status still look synchronized', () => {
+        const validated = validatedAssumption();
+        const expectedId = validated.events?.at(-1)?.id;
+        const tampered: PlanningRecord = {
+            ...validated,
+            events: validated.events?.map(event => event.id === expectedId && event.type === 'custom_answered'
+                ? { ...event, answer: 'A different premise injected after persistence.' }
+                : event),
+        };
+        const result = derivePlanningReadiness({
+            prd, planningRecords: [tampered], incompleteSectionCount: 0, hasCurrentChallenge: true,
+            blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
+            currentSpineVersionId: 'spine-1', currentSpineContentHash: 'spine-content-hash',
+        });
+        expect(result.isReadyToBuild).toBe(false);
+        expect(result.nextAction).toMatchObject({ kind: 'validate_assumption', planningRecordId: validated.id });
+    });
+
     it('makes expired validation historical instead of silently retaining readiness', () => {
         const expires = validatedAssumption({ expiresAt: 50 });
         const shared = { prd, planningRecords: [expires], incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };

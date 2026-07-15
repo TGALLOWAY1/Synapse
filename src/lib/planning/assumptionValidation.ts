@@ -434,6 +434,16 @@ export function assumptionValidationReadiness(
     const methodSupporting = methodEvidence.filter(evidence => evidence.relation === 'supports');
     const methodContradicting = methodEvidence.filter(evidence => evidence.relation === 'contradicts');
     const expectedVerdictId = `assumption-validation-verdict-${outcome.id}`;
+    const actualVerdict = record.events?.find(event => event.id === expectedVerdictId);
+    const expectedVerdict = assumptionValidationDecisionEvent({
+        ...record,
+        events: record.events?.filter(event => event.id !== expectedVerdictId),
+    }, outcome);
+    const verdictIsExact = Boolean(
+        actualVerdict
+        && expectedVerdict
+        && hashReviewValue(actualVerdict) === hashReviewValue(expectedVerdict),
+    );
 
     if (conclusion === 'supported' || conclusion === 'partially_supported') {
         if (!methodComplete || methodSupporting.length < minimumIndependentSources(plan!.method.kind)) {
@@ -446,7 +456,7 @@ export function assumptionValidationReadiness(
             && !outcome.caveats?.trim()) {
             return { ready: false, conclusion, qualifyingEvidence: methodSupporting, competingEvidence: contradicting, reason: 'missing_caveats' };
         }
-        if (decision.status !== 'confirmed' || decision.latestVerdictEventId !== expectedVerdictId) {
+        if (decision.status !== 'confirmed' || decision.latestVerdictEventId !== expectedVerdictId || !verdictIsExact) {
             return { ready: false, conclusion, qualifyingEvidence: methodSupporting, competingEvidence: contradicting, reason: 'verdict_not_synchronized' };
         }
         return {
@@ -465,7 +475,7 @@ export function assumptionValidationReadiness(
         if (supporting.length > 0) {
             return { ready: false, conclusion, qualifyingEvidence: contradicting, competingEvidence: supporting, reason: 'competing_evidence' };
         }
-        if (decision.status !== 'rejected' || decision.latestVerdictEventId !== expectedVerdictId) {
+        if (decision.status !== 'rejected' || decision.latestVerdictEventId !== expectedVerdictId || !verdictIsExact) {
             return { ready: false, conclusion, qualifyingEvidence: methodContradicting, competingEvidence: supporting, reason: 'verdict_not_synchronized' };
         }
         return {

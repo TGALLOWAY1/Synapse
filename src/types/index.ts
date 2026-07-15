@@ -2014,6 +2014,9 @@ export type PlanningRecord = {
     relatedPlanningRecordIds?: string[];
     affectedFeatureIds?: string[];
     materiality?: 'blocking' | 'high' | 'normal' | 'low';
+    /** Consequence if this planning premise is wrong. Preserved separately
+     * from evidence so an imported assumption does not present rationale as proof. */
+    whyItMatters?: string;
     affectedPrdSections?: string[];
     affectedPlanLocations?: PlanningLocation[];
     /** Machine-authored candidate changes. They do not modify the plan until

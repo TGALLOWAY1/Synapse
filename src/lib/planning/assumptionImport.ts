@@ -95,6 +95,7 @@ const importOne = (
         confirmedAt: assumption.decision === 'confirmed' ? verdictAt : undefined,
         resolution: assumption.decisionNote,
         materiality: assumption.materiality,
+        whyItMatters: assumption.whyItMatters,
         affectedPrdSections: assumption.affectedPrdSections,
         affectedPlanLocations: assumption.affectedPlanLocations,
         schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
@@ -144,11 +145,13 @@ export function importPrdAssumptions(input: AssumptionImportInput): AssumptionIm
                 sourceState: sourceChanged || prior.sourceState === 'changed' ? 'changed' : 'current',
                 currentSourceStatement: assumption.statement,
                 materiality: assumption.materiality ?? prior.materiality,
+                whyItMatters: assumption.whyItMatters ?? prior.whyItMatters,
                 affectedPrdSections: assumption.affectedPrdSections ?? prior.affectedPrdSections,
                 affectedPlanLocations: assumption.affectedPlanLocations ?? prior.affectedPlanLocations,
             };
             const index = records.findIndex(record => record.id === prior.id);
             const planningContextChanged = assumption.materiality !== undefined && assumption.materiality !== prior.materiality
+                || assumption.whyItMatters !== undefined && assumption.whyItMatters !== prior.whyItMatters
                 || assumption.affectedPrdSections !== undefined
                     && JSON.stringify(assumption.affectedPrdSections) !== JSON.stringify(prior.affectedPrdSections)
                 || assumption.affectedPlanLocations !== undefined

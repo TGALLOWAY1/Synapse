@@ -759,7 +759,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             type: record.type === 'open_question' ? 'question' : record.type,
             title: record.title,
             statement: record.statement,
-            whyItMatters: record.evidence[0]?.excerpt,
+            whyItMatters: record.whyItMatters ?? record.evidence[0]?.excerpt,
             status: projection.status,
             materiality: record.materiality,
             requiresValidation: record.type === 'assumption'
