@@ -1,7 +1,7 @@
 import { useParams, useNavigate } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
@@ -31,18 +31,7 @@ import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
 import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
-import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, UpdateAssetsPlanModal, type VersionEntry, type UpdatePlanChoice, type UpdatePlanRow } from './versions';
-import {
-    buildArtifactDependencyGraph,
-    computeRecommendedUpdates,
-    evaluateDependencyGraph,
-    expandSelectionWithTroubledUpstreams,
-    type DependencyEvaluationInput,
-    type DependencyNodeId,
-    type DependencyNodeStatus,
-} from '../lib/artifactDependencyGraph';
-import { findFeatureReferences, makeSpineChangeResolver, summarizeSpineChange } from '../lib/spineChangeAnalysis';
-import { selectPreferredDesignSystem } from '../lib/designTokens';
+import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
 import { ExportModal } from './ExportModal';
 import { SnapshotsPanel } from './SnapshotsPanel';
 import { FeedbackItemsList } from './FeedbackItemsList';
@@ -50,14 +39,18 @@ import { BranchCanvas } from './BranchCanvas';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { SectionId } from '../lib/schemas/prdSchemas';
-import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem } from '../types';
+import type { Branch, PipelineStage, FeedbackItem, ReadinessActionTarget } from '../types';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
 import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
 import { resetDemoProject } from '../lib/demoRouteHydration';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
-import { derivePlanningReadiness, reviewIssueNeedsResolutionBeforeBuild } from '../lib/planning';
+import { compareReadinessReviewCurrentness, derivePlanningReadiness, deriveReadinessChallengeState } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
+import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
+import { buildReadinessCheckpointView, readinessCommitmentState } from './planning/readinessCheckpointView';
+import { hashReviewValue } from '../lib/review/hash';
+import { buildReviewContextManifest } from '../lib/review/manifest';
 
 const EMPTY_PROJECT_LIST: never[] = [];
 
@@ -66,14 +59,17 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, markSpineFinal, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus, markArtifactCurrentForSpine } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
     const assetJob = useProjectStore((s) => (projectId ? s.jobs[projectId] : undefined));
     const planningRecords = useProjectStore((s) => (projectId ? s.planningRecords[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const reviewRuns = useProjectStore((s) => (projectId ? s.reviewRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const specialistRuns = useProjectStore((s) => (projectId ? s.specialistRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const reviewIssues = useProjectStore((s) => (projectId ? s.reviewIssues[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const readinessReviews = useProjectStore((s) => (projectId ? s.readinessReviews[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const readinessCommitmentEvents = useProjectStore((s) => (projectId ? s.readinessCommitmentEvents[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const planningSourceSpine = useProjectStore((s) => projectId
         ? (s.spineVersions[projectId] ?? EMPTY_PROJECT_LIST).find(spine => spine.isLatest)
         : undefined);
@@ -106,23 +102,13 @@ export function ProjectWorkspace() {
     const [finalizeAutoOpen, setFinalizeAutoOpen] = useState(false);
     // Design direction is requested only when output generation begins.
     const [showPresetChoice, setShowPresetChoice] = useState(false);
-    // Incomplete working plans require an explicit acknowledgement before
-    // commitment. Generated outputs retain that provenance later.
-    const [showIncompletePrdConfirm, setShowIncompletePrdConfirm] = useState(false);
-    const [showReadinessConfirm, setShowReadinessConfirm] = useState(false);
+    const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
+    const [readinessSubmitError, setReadinessSubmitError] = useState<string | null>(null);
+    const [isReadinessSubmitting, setIsReadinessSubmitting] = useState(false);
     const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
     const [reviewInitialRecordId, setReviewInitialRecordId] = useState<string>();
     // Carries an explicit generation request across the design-preset choice.
     const generateAfterPreset = useRef(false);
-    // Update Assets plan — shown on the re-commit edge when downstream
-    // assets already exist, replacing the old silent full regeneration.
-    // Cancel aborts commitment (the spine stays a working plan).
-    const [updatePlan, setUpdatePlan] = useState<null | {
-        rows: UpdatePlanRow[];
-        changeHeadline?: string;
-        baselineLabel?: string;
-        ack: boolean;
-    }>(null);
     const overflowRef = useRef<HTMLDivElement>(null);
     const overflowButtonRef = useRef<HTMLButtonElement>(null);
     const overflowMenuRef = useRef<HTMLDivElement>(null);
@@ -273,33 +259,115 @@ export function ProjectWorkspace() {
     // refresh — it drives the incomplete-PRD banner with per-section retry.
     const persistedFailedSections = (activeSpine?.generationMeta?.failedSections ?? [])
         .filter((id): id is SectionId => id in SECTION_TITLES);
-    const generatedOutputs = getArtifacts(projectId).filter(artifact =>
+    const projectArtifacts = getArtifacts(projectId);
+    const generatedOutputs = projectArtifacts.filter(artifact =>
         artifact.type !== 'prd' && artifact.status !== 'archived' && !!artifact.currentVersionId,
     );
+    const currentReadinessArtifactRefs = projectArtifacts
+        .filter(artifact => artifact.status !== 'archived')
+        .flatMap(artifact => {
+            const versions = getArtifactVersions(projectId, artifact.id);
+            const version = artifact.currentVersionId
+                ? versions.find(item => item.id === artifact.currentVersionId)
+                : versions.find(item => item.isPreferred);
+            return version ? [{
+                artifactId: artifact.id,
+                artifactVersionId: version.id,
+                contentHash: hashReviewValue(version.content),
+            }] : [];
+        });
+    const currentReviewArtifacts = projectArtifacts.flatMap(artifact => {
+        if (artifact.type !== 'core_artifact' || !artifact.subtype || !artifact.currentVersionId) return [];
+        const version = getArtifactVersions(projectId, artifact.id).find(item => item.id === artifact.currentVersionId);
+        return version ? [{
+            artifactId: artifact.id,
+            versionId: version.id,
+            subtype: artifact.subtype,
+            title: artifact.title,
+            content: version.content,
+        }] : [];
+    });
+    const currentChallengeContextSignature = project && activeSpine?.structuredPRD
+        ? buildReviewContextManifest({
+            projectId,
+            projectName: project.name,
+            platform: project.platform,
+            productCategory: project.productCategory,
+            spine: {
+                versionId: activeSpine.id,
+                schemaVersion: activeSpine.prdVersion,
+                content: activeSpine.responseText,
+                structuredPRD: activeSpine.structuredPRD,
+                canonicalSpine: activeSpine.canonicalSpine,
+            },
+            artifacts: currentReviewArtifacts,
+            safetyBoundaries: activeSpine.safetyReview?.detectedConcerns ?? [],
+        }).contextSignature
+        : undefined;
     // Readiness only counts consequential unresolved alignment. Historical
     // version drift, legacy provenance gaps, and changes outside an output's
     // main planning inputs stay visible for review without blocking build.
     const outputAlignment = getProjectOutputAlignment(projectId);
     const staleOutputCount = outputAlignment.blockingCount;
-    const currentChallengeRuns = reviewRuns.filter(run =>
-        run.sourceManifest.spineVersionId === activeSpine?.id
-        && run.status === 'complete',
-    );
-    const currentChallengeIds = new Set(currentChallengeRuns.map(run => run.id));
-    const blockingReviewIssueCount = reviewIssues.filter(issue =>
-        currentChallengeIds.has(issue.reviewId)
-        && reviewIssueNeedsResolutionBeforeBuild(issue, activeSpine?.id),
-    ).length;
+    const readinessReviewInput = activeSpine ? {
+        projectId,
+        spine: {
+            versionId: activeSpine.id,
+            content: activeSpine.responseText,
+            structuredPRD: activeSpine.structuredPRD,
+            incompleteSectionCount: activeSpine.generationMeta?.failedSections?.length ?? 0,
+            isCommitted: activeSpine.isFinal,
+        },
+        planningRecords,
+        reviewRuns,
+        specialistRuns,
+        reviewIssues,
+        outputAlignment,
+        currentArtifactRefs: currentReadinessArtifactRefs,
+        currentChallengeContextSignature,
+    } : undefined;
+    const readinessWithCurrentness = readinessReviewInput
+        ? readinessReviews.map(review => ({
+            review,
+            currentness: compareReadinessReviewCurrentness(review, readinessReviewInput),
+            commitment: readinessCommitmentState(review, readinessCommitmentEvents),
+        }))
+        : [];
+    const currentCommittedReadiness = readinessWithCurrentness
+        .filter(item => item.currentness.current && item.commitment.activeCommit)
+        .sort((a, b) => b.commitment.activeCommit!.at - a.commitment.activeCommit!.at)[0];
+    const isCurrentPlanCommitted = !!currentCommittedReadiness;
+    const hasReadinessCommitmentHistory = readinessCommitmentEvents.some(event => event.type === 'plan_committed');
+    const isLegacyPlanCommitted = !!activeSpine?.isFinal && !hasReadinessCommitmentHistory;
+    const displaysCurrentCommitment = isCurrentPlanCommitted || isLegacyPlanCommitted;
+    const strictChallenge = readinessReviewInput
+        ? deriveReadinessChallengeState(readinessReviewInput)
+        : undefined;
     const planningReadiness = derivePlanningReadiness({
         prd: activeSpine?.structuredPRD,
         planningRecords,
         incompleteSectionCount: persistedFailedSections.length,
-        hasCurrentChallenge: currentChallengeRuns.length > 0,
-        blockingReviewIssueCount,
+        hasCurrentChallenge: !!strictChallenge?.substantive,
+        blockingReviewIssueCount: strictChallenge?.blockingIssues.length ?? 0,
         generatedOutputCount: generatedOutputs.length,
         staleOutputCount,
-        isCommitted: !!activeSpine?.isFinal,
+        isCommitted: displaysCurrentCommitment,
     });
+    const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
+    const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput
+        ? compareReadinessReviewCurrentness(selectedReadinessReview, readinessReviewInput)
+        : undefined;
+    const selectedReadinessView = selectedReadinessReview && selectedReadinessCurrentness
+        ? buildReadinessCheckpointView(
+            selectedReadinessReview,
+            selectedReadinessCurrentness,
+            readinessCommitmentEvents,
+            (() => {
+                const index = allSpines.findIndex(spine => spine.id === selectedReadinessReview.spineVersionId);
+                return index >= 0 ? `Version ${index + 1}` : selectedReadinessReview.spineVersionId;
+            })(),
+        )
+        : undefined;
 
     // Optional preflight clarification: while a non-completed session exists and
     // no PRD has been produced (and the request isn't blocked), the workspace
@@ -581,234 +649,83 @@ export function ProjectWorkspace() {
     const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
         (s) => s.status === 'generating' || s.status === 'queued',
     );
-    const showAssetsPill = !!activeSpine?.isFinal
+    const showAssetsPill = displaysCurrentCommitment
         && !!activeSpine?.structuredPRD
         && activeSpine?.safetyReview?.status !== 'blocked'
         && !isOldVersion
         && pipelineStage !== 'workspace';
 
+    const readinessFailureMessage = (reason: string): string => {
+        if (reason === 'stale') return 'The plan or its evidence changed. Review the current plan before committing.';
+        if (reason === 'tampered' || reason === 'hash_mismatch') return 'This checkpoint no longer passes its integrity check. Create a fresh checkpoint.';
+        if (reason === 'accepted_concerns_mismatch') return 'The set of open items changed. Create a fresh checkpoint before committing.';
+        if (reason === 'rationale_required') return 'Explain why proceeding is worth the remaining uncertainty.';
+        if (reason === 'containment_required') return 'Describe how the remaining implementation risk will be contained.';
+        if (reason === 'safety_blocked') return 'A safety-blocked plan cannot be committed.';
+        if (reason === 'already_committed') return 'A current plan commitment already exists.';
+        return 'Synapse could not record this commitment. Review the current plan and try again.';
+    };
+
+    const openCurrentReadinessCheckpoint = () => {
+        if (!projectId || !activeSpine || !canPerformProjectAction(projectId, 'persist')) return;
+        setReadinessSubmitError(null);
+        const result = createReadinessReview(projectId);
+        if (result.status === 'created') {
+            setSelectedReadinessReviewId(result.reviewId);
+            return;
+        }
+        setReadinessSubmitError(readinessFailureMessage(result.reason));
+    };
+
+    const commitSelectedReadiness = (override?: ReadinessOverrideInput) => {
+        if (!projectId || !selectedReadinessReview) return;
+        setIsReadinessSubmitting(true);
+        setReadinessSubmitError(null);
+        try {
+            const authorization = authorizeReadinessCommitment(projectId, selectedReadinessReview.id, {
+                expectedIntegrityHash: selectedReadinessReview.integrityHash,
+                expectedAggregateHash: selectedReadinessReview.snapshotHashes.aggregate,
+                acceptedConcernIds: selectedReadinessReview.concerns.map(concern => concern.id),
+                rationale: override?.rationale,
+                containmentPlan: override?.containment,
+            });
+            if (authorization.status === 'rejected') {
+                setReadinessSubmitError(readinessFailureMessage(authorization.reason));
+                return;
+            }
+            const commitment = commitReadinessReview(
+                projectId,
+                selectedReadinessReview.id,
+                authorization.authorizationEventId,
+            );
+            if (commitment.status === 'rejected') {
+                setReadinessSubmitError(readinessFailureMessage(commitment.reason));
+                return;
+            }
+            setSelectedReadinessReviewId(null);
+            setShowFinalizeSuccess(true);
+        } finally {
+            setIsReadinessSubmitting(false);
+        }
+    };
+
     const handleToggleFinal = () => {
         if (!projectId || !canPerformProjectAction(projectId, 'persist') || !activeSpine) return;
         // Safety-blocked spines can never be committed.
         if (activeSpine.safetyReview?.status === 'blocked') return;
-        const next = !activeSpine.isFinal;
-        if (!next) {
-            // Return the committed version to working-plan status.
+        const activeCommit = currentCommittedReadiness?.commitment.activeCommit;
+        if (activeCommit) {
+            const result = reopenReadinessCommitment(projectId, activeCommit.id);
+            if (result.status === 'rejected') setReadinessSubmitError(readinessFailureMessage(result.reason));
+            return;
+        }
+        if (activeSpine.isFinal && !hasReadinessCommitmentHistory) {
+            // Legacy commitments remain reversible without fabricating a
+            // readiness review or user rationale that never existed.
             markSpineFinal(projectId, activeSpine.id, false);
             return;
         }
-
-        if (!planningReadiness.isReadyToBuild) {
-            setShowReadinessConfirm(true);
-            return;
-        }
-
-        // Incomplete PRD: some required sections failed. Do not silently commit
-        // partial source material — require explicit acknowledgement. Uses the raw
-        // persisted list (not the SECTION_TITLES-filtered display list) so it
-        // matches the code-level gate in artifactJobController.startAll.
-        if ((activeSpine.generationMeta?.failedSections?.length ?? 0) > 0) {
-            setShowIncompletePrdConfirm(true);
-            return;
-        }
-
-        startFinalizeFlow(false);
-    };
-
-    // Continue commitment after the readiness/incomplete checkpoints. Visual
-    // direction belongs to output generation, not to product commitment.
-    const startFinalizeFlow = (ackIncomplete: boolean) => {
-        if (!projectId || !activeSpine) return;
-        finalizeAndGenerate(ackIncomplete);
-    };
-
-    // --- Update Assets plan (re-finalize with existing assets) --------------
-    // Evaluate the dependency graph against the spine being finalized, exactly
-    // like DependencyGraphView does, so the plan dialog shows the same
-    // statuses/reasons the Project Map would.
-    const buildUpdatePlanContext = () => {
-        if (!projectId || !activeSpine?.structuredPRD) return null;
-        const store = useProjectStore.getState();
-        const graph = buildArtifactDependencyGraph();
-        const spines = store.spineVersions[projectId] || [];
-        const projectArtifacts = store.artifacts[projectId] || [];
-        const mockupArtifact = projectArtifacts.find(a => a.type === 'mockup');
-
-        const snapshots: DependencyEvaluationInput['snapshots'] = {};
-        const artifactIdBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
-        const contentBySlot: Partial<Record<ArtifactSlotKey, string>> = {};
-        for (const node of graph.nodes) {
-            if (node.id === 'prd') continue;
-            const slotKey = node.id as ArtifactSlotKey;
-            const artifact = slotKey === 'mockup'
-                ? mockupArtifact
-                : projectArtifacts.find(a => a.type === 'core_artifact' && a.subtype === slotKey && a.status !== 'archived');
-            const preferred = artifact ? store.getPreferredVersion(projectId, artifact.id) : undefined;
-            if (artifact && preferred) {
-                artifactIdBySlot[slotKey] = artifact.id;
-                contentBySlot[slotKey] = preferred.content;
-                snapshots[slotKey] = {
-                    artifactId: artifact.id,
-                    version: {
-                        id: preferred.id,
-                        versionNumber: preferred.versionNumber,
-                        createdAt: preferred.createdAt,
-                        sourceRefs: preferred.sourceRefs,
-                        provenance: preferred.provenance,
-                        metadata: preferred.metadata,
-                    },
-                };
-            }
-        }
-
-        const evaluations = evaluateDependencyGraph(graph, {
-            spineVersionIds: spines.map(s => s.id),
-            latestSpineId: activeSpine.id,
-            currentDesignTokensHash: selectPreferredDesignSystem(store, projectId)?.tokensHash,
-            snapshots,
-            spineChangeFor: makeSpineChangeResolver(spines, activeSpine.id),
-        });
-
-        return { graph, evaluations, snapshots, artifactIdBySlot, contentBySlot, spines };
-    };
-
-    const PLAN_STATUS_LABELS: Record<DependencyNodeStatus, string> = {
-        source: 'Source of truth',
-        up_to_date: 'Up to date',
-        needs_update: 'Needs update',
-        update_recommended: 'Update recommended',
-        generating: 'Generating…',
-        error: 'Failed',
-        missing: 'Not generated',
-    };
-
-    const openUpdatePlan = (ctx: NonNullable<ReturnType<typeof buildUpdatePlanContext>>, ack: boolean) => {
-        if (!activeSpine) return;
-        const recommended = new Set(computeRecommendedUpdates(ctx.graph, ctx.evaluations));
-        const rows: UpdatePlanRow[] = ctx.graph.nodes
-            .filter(n => n.id !== 'prd')
-            .map(node => {
-                const ev = ctx.evaluations.get(node.id);
-                const status = ev?.status ?? 'missing';
-                const summary = ev?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary;
-                const content = ctx.contentBySlot[node.id as ArtifactSlotKey] ?? '';
-                const removedFeatureNames = summary && content
-                    ? summary.features.removed
-                        .filter(f => findFeatureReferences(f, [{ artifactId: node.id, title: node.title, content }]).length > 0)
-                        .map(f => f.name)
-                    : [];
-                return {
-                    id: node.id,
-                    title: node.title,
-                    statusLabel: PLAN_STATUS_LABELS[status],
-                    isStale: recommended.has(node.id),
-                    changeHeadline: summary
-                        ? `Since ${ev?.prdVersionLabel ?? 'generation'}: ${summary.headline}`
-                        : undefined,
-                    removedFeatureNames,
-                    likelyUnaffected: ev?.likelyUnaffected,
-                    defaultChoice: recommended.has(node.id) ? 'update' as const : 'skip' as const,
-                    canMarkCurrent: !!ctx.artifactIdBySlot[node.id as ArtifactSlotKey]
-                        && (status === 'needs_update' || status === 'update_recommended'),
-                };
-            });
-
-        // Header "what changed": compare against the newest spine any asset was
-        // generated from (assets can span several baselines after repeated edits).
-        let baselineIdx = -1;
-        for (const snap of Object.values(ctx.snapshots)) {
-            const refId = snap?.version.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
-            if (!refId) continue;
-            const idx = ctx.spines.findIndex(s => s.id === refId);
-            if (idx > baselineIdx && ctx.spines[idx]?.id !== activeSpine.id) baselineIdx = idx;
-        }
-        const baselineSpine = baselineIdx >= 0 ? ctx.spines[baselineIdx] : undefined;
-        const headerSummary = baselineSpine
-            ? summarizeSpineChange(baselineSpine.structuredPRD, activeSpine.structuredPRD)
-            : null;
-
-        setUpdatePlan({
-            rows,
-            changeHeadline: headerSummary?.headline,
-            baselineLabel: baselineSpine ? `since Version ${baselineIdx + 1}` : undefined,
-            ack,
-        });
-    };
-
-    const handleUpdatePlanConfirm = (choices: Record<string, UpdatePlanChoice>) => {
-        if (!projectId || !activeSpine?.structuredPRD || !updatePlan) return;
-        // Finalize first — the durable record every path below depends on.
-        markSpineFinal(projectId, activeSpine.id, true);
-
-        // Re-evaluate against fresh store state (the dialog may have been open
-        // a while), then apply mark-current BEFORE regeneration so a confirmed
-        // upstream is healthy when its dependents regenerate.
-        const ctx = buildUpdatePlanContext();
-        if (ctx) {
-            const marked = Object.entries(choices)
-                .filter(([, c]) => c === 'mark_current')
-                .map(([id]) => id as DependencyNodeId);
-            for (const slot of marked) {
-                const artifactId = ctx.artifactIdBySlot[slot as ArtifactSlotKey];
-                if (!artifactId) continue;
-                try {
-                    markArtifactCurrentForSpine(projectId, artifactId, activeSpine.id);
-                } catch {
-                    // No preferred version — nothing to confirm; leave as-is.
-                }
-            }
-
-            const selected = Object.entries(choices)
-                .filter(([, c]) => c === 'update')
-                .map(([id]) => id as DependencyNodeId);
-            if (selected.length > 0) {
-                // Pull in troubled visible upstreams the user left unselected —
-                // regenerating a dependent against a stale input would rebuild
-                // from stale context (marked-current upstreams count as healed).
-                const batch = expandSelectionWithTroubledUpstreams(
-                    ctx.graph, ctx.evaluations, selected, new Set(marked),
-                );
-                artifactJobController.regenerateSlots(
-                    batch.filter((id): id is ArtifactSlotKey => id !== 'prd'),
-                    {
-                        projectId,
-                        spineVersionId: activeSpine.id,
-                        prdContent: activeSpine.responseText,
-                        structuredPRD: activeSpine.structuredPRD,
-                        projectPlatform: project?.platform,
-                        acknowledgeIncomplete: updatePlan.ack,
-                    },
-                );
-            }
-        }
-        setUpdatePlan(null);
-        setShowFinalizeSuccess(true);
-    };
-
-    // Commit the working plan. Asset generation is a separate explicit action:
-    // commitment records intent; generating documents does not create intent.
-    const finalizeAndGenerate = (ackIncomplete: boolean) => {
-        if (!projectId || !activeSpine) return;
-
-        // Re-commit with existing outputs: route through the Update Assets plan
-        // so source drift is explicit. First commitment, the demo, and an active
-        // output run keep the direct path.
-        if (activeSpine.structuredPRD && projectId !== DEMO_PROJECT_ID) {
-            const jobActive = !!assetJob && Object.values(assetJob.slots).some(
-                s => s && (s.status === 'generating' || s.status === 'queued'),
-            );
-            if (!jobActive) {
-                const ctx = buildUpdatePlanContext();
-                if (ctx && Object.keys(ctx.snapshots).length > 0) {
-                    openUpdatePlan(ctx, ackIncomplete);
-                    return; // not committed yet — the plan dialog owns it
-                }
-            }
-        }
-
-        markSpineFinal(projectId, activeSpine.id, true);
-
-        setShowFinalizeSuccess(true);
+        openCurrentReadinessCheckpoint();
     };
 
     const startAssetGeneration = () => {
@@ -868,6 +785,31 @@ export function ProjectWorkspace() {
         setPipelineStage('review');
     };
 
+    const navigateReadinessTarget = (target: ReadinessActionTarget) => {
+        setSelectedReadinessReviewId(null);
+        setReadinessSubmitError(null);
+        if (target.kind === 'planning_record') return openDecisionCenter(target.planningRecordId);
+        if (target.kind === 'challenge') return openChallenge();
+        if (target.kind === 'output') {
+            setFinalizeAutoOpen(true);
+            return setPipelineStage('workspace');
+        }
+        setPipelineStage('prd');
+        const anchor = target.kind === 'feature'
+            ? 'prd-features'
+            : target.section === 'problem' ? 'prd-coreProblem'
+                : target.section === 'user' ? 'prd-targetUsers'
+                    : 'prd-successMetrics';
+        window.requestAnimationFrame(() => {
+            document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        });
+    };
+
+    const handleReadinessConcern = (concernId: string) => {
+        const concern = selectedReadinessReview?.concerns.find(item => item.id === concernId);
+        if (concern) navigateReadinessTarget(concern.actionTarget);
+    };
+
     const handlePlanningNextAction = () => {
         const kind = planningReadiness.nextAction.kind;
         if (kind === 'resolve_decision' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId);
@@ -897,7 +839,7 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : activeSpine?.isFinal ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : displaysCurrentCommitment ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine
                             ? activeSpine.safetyReview?.status === 'blocked'
                                 ? 'Blocked'
@@ -905,7 +847,7 @@ export function ProjectWorkspace() {
                                 ? 'Generation Failed'
                                 : isPRDActivelyGenerating
                                     ? 'Generating...'
-                                    : `${getVersionLabel(activeSpine.id)} ${activeSpine.isFinal ? '(COMMITTED)' : ''}`
+                                    : `${getVersionLabel(activeSpine.id)} ${displaysCurrentCommitment ? isLegacyPlanCommitted ? '(COMMITTED · READINESS NOT RECORDED)' : '(COMMITTED)' : ''}`
                             : 'Initializing...'}
                     </span>
                     {projectId !== DEMO_PROJECT_ID && (
@@ -942,11 +884,11 @@ export function ProjectWorkspace() {
                     {!isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
                         <button
                             onClick={handleToggleFinal}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${activeSpine?.isFinal ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
-                            title={activeSpine?.isFinal ? "Return this plan to working status" : "Review readiness and commit this plan"}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
+                            title={displaysCurrentCommitment ? "Return this plan to working status" : "Review readiness and commit this plan"}
                         >
                             <CheckCircle size={14} />
-                            <span className="hidden md:inline">{activeSpine?.isFinal ? 'Committed' : 'Review readiness'}</span>
+                            <span className="hidden md:inline">{displaysCurrentCommitment ? 'Committed' : 'Review readiness'}</span>
                         </button>
                     )}
 
@@ -1047,68 +989,20 @@ export function ProjectWorkspace() {
                 </div>
             </div>
 
-            {showReadinessConfirm && (
-                <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
-                    <div className="w-full max-w-lg rounded-2xl bg-white text-neutral-900 shadow-2xl">
-                        <div className="p-6">
-                            <p className="text-xs font-bold uppercase tracking-wider text-amber-700">Readiness checkpoint</p>
-                            <h3 className="mt-2 text-xl font-bold">This is still a working plan</h3>
-                            <p className="mt-2 text-sm leading-6 text-neutral-600">{planningReadiness.summary} Committing it records the current version as the intended implementation foundation; it does not make unresolved reasoning disappear.</p>
-                            <div className="mt-4 space-y-2">
-                                {planningReadiness.criteria.filter(item => item.status === 'attention').map(item => (
-                                    <div key={item.id} className="rounded-lg bg-amber-50 px-3 py-2">
-                                        <p className="text-sm font-semibold text-amber-950">{item.label}</p>
-                                        <p className="mt-0.5 text-xs leading-5 text-amber-800">{item.explanation}</p>
-                                    </div>
-                                ))}
-                            </div>
-                        </div>
-                        <div className="flex flex-col-reverse gap-2 border-t border-neutral-100 p-4 sm:flex-row sm:justify-end">
-                            <button type="button" onClick={() => { setShowReadinessConfirm(false); handlePlanningNextAction(); }} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-semibold text-neutral-700">Keep shaping the plan</button>
-                            <button type="button" onClick={() => {
-                                setShowReadinessConfirm(false);
-                                if (persistedFailedSections.length > 0) setShowIncompletePrdConfirm(true);
-                                else startFinalizeFlow(false);
-                            }} className="min-h-11 rounded-lg bg-neutral-950 px-4 text-sm font-semibold text-white">Commit working plan anyway</button>
-                        </div>
-                    </div>
-                </div>
-            )}
-            {showIncompletePrdConfirm && (
-                <div className="fixed inset-0 z-[1100] flex items-center justify-center bg-black/50 p-4">
-                    <div className="w-full max-w-md rounded-xl bg-white shadow-2xl">
-                        <div className="flex items-start gap-3 p-5 border-b border-neutral-100">
-                            <AlertTriangle size={20} className="mt-0.5 shrink-0 text-amber-500" />
-                            <div>
-                                <h3 className="font-semibold text-neutral-900">Commit an incomplete working plan?</h3>
-                                <p className="text-sm text-neutral-600 mt-1">
-                                    {persistedFailedSections.length} PRD section{persistedFailedSections.length > 1 ? 's' : ''} failed
-                                    to generate. The current specification is missing source material and should not be treated
-                                    as a complete implementation foundation.
-                                </p>
-                                <p className="text-sm text-neutral-600 mt-2">
-                                    We recommend retrying the failed sections first.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="flex items-center justify-end gap-2 p-4">
-                            <button
-                                type="button"
-                                onClick={() => setShowIncompletePrdConfirm(false)}
-                                className="px-3 py-1.5 text-sm rounded-lg bg-neutral-100 hover:bg-neutral-200 text-neutral-700 transition"
-                            >
-                                Retry sections first
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => { setShowIncompletePrdConfirm(false); startFinalizeFlow(true); }}
-                                className="px-3 py-1.5 text-sm rounded-lg bg-amber-600 hover:bg-amber-700 text-white transition"
-                            >
-                                Commit anyway
-                            </button>
-                        </div>
-                    </div>
-                </div>
+            {selectedReadinessView && (
+                <ReadinessCheckpoint
+                    review={selectedReadinessView}
+                    submitting={isReadinessSubmitting}
+                    submitError={readinessSubmitError}
+                    onClose={() => {
+                        setSelectedReadinessReviewId(null);
+                        setReadinessSubmitError(null);
+                    }}
+                    onAddressConcern={handleReadinessConcern}
+                    onRefresh={openCurrentReadinessCheckpoint}
+                    onCommitReady={() => commitSelectedReadiness()}
+                    onCommitWithOpenQuestions={commitSelectedReadiness}
+                />
             )}
             {showPresetChoice && (
                 <DesignSystemPresetChoice
@@ -1119,28 +1013,18 @@ export function ProjectWorkspace() {
                     }}
                 />
             )}
-            {updatePlan && activeSpine && (
-                <UpdateAssetsPlanModal
-                    prdLabel={getVersionLabel(activeSpine.id)}
-                    changeHeadline={updatePlan.changeHeadline}
-                    baselineLabel={updatePlan.baselineLabel}
-                    rows={updatePlan.rows}
-                    onConfirm={handleUpdatePlanConfirm}
-                    onCancel={() => setUpdatePlan(null)}
-                />
-            )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
                     assetsGenerated={assetsReady}
                     assetsBuilding={assetsBuilding}
-                    readyToBuild={planningReadiness.isReadyToBuild}
+                    readyToBuild={currentCommittedReadiness?.review.conclusion === 'ready_to_build'}
                     onOpenAssets={handleOpenAssets}
                     onGenerateAssets={handleGenerateAssets}
                     onClose={() => setShowFinalizeSuccess(false)}
                 />
             )}
             {isSettingsOpen && <SettingsModal onClose={() => setIsSettingsOpen(false)} />}
-            {isExportOpen && projectId && <ExportModal projectId={projectId} planningReady={planningReadiness.isReadyToBuild} onClose={() => setIsExportOpen(false)} />}
+            {isExportOpen && projectId && <ExportModal projectId={projectId} planningReady={currentCommittedReadiness?.review.conclusion === 'ready_to_build'} onClose={() => setIsExportOpen(false)} />}
             {showPrdHistory && (
                 <VersionHistoryPanel
                     title="PRD version history"
@@ -1191,7 +1075,7 @@ export function ProjectWorkspace() {
                     currentStage={pipelineStage}
                     onStageChange={handlePipelineStageChange}
                     canExploreOutputs={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
-                    isPlanCommitted={!!activeSpine?.isFinal && planningReadiness.isReadyToBuild}
+                    isPlanCommitted={isCurrentPlanCommitted}
                     canReview={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
                 />
             </div>
@@ -1437,8 +1321,9 @@ export function ProjectWorkspace() {
                                                 {!isOldVersion && (
                                                     <PlanningStateBar
                                                         readiness={planningReadiness}
-                                                        committed={activeSpine.isFinal}
+                                                        committed={isCurrentPlanCommitted}
                                                         onNextAction={handlePlanningNextAction}
+                                                        onReviewReadiness={openCurrentReadinessCheckpoint}
                                                         onOpenDecisions={openDecisionCenter}
                                                         onOpenChallenge={openChallenge}
                                                     />

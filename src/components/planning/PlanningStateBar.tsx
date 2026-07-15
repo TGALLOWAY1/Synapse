@@ -5,6 +5,7 @@ interface Props {
     readiness: PlanningReadiness;
     committed: boolean;
     onNextAction: () => void;
+    onReviewReadiness: () => void;
     onOpenDecisions: () => void;
     onOpenChallenge: () => void;
 }
@@ -17,7 +18,7 @@ const phaseTone: Record<PlanningReadiness['phase'], string> = {
     ready_to_build: 'border-emerald-200 bg-emerald-50 text-emerald-950',
 };
 
-export function PlanningStateBar({ readiness, committed, onNextAction, onOpenDecisions, onOpenChallenge }: Props) {
+export function PlanningStateBar({ readiness, committed, onNextAction, onReviewReadiness, onOpenDecisions, onOpenChallenge }: Props) {
     const nextGoesToChallenge = readiness.nextAction.kind === 'challenge_plan';
     return (
         <section className={`mb-5 rounded-2xl border p-4 sm:p-5 ${phaseTone[readiness.phase]}`} aria-labelledby="planning-state-heading">
@@ -58,6 +59,7 @@ export function PlanningStateBar({ readiness, committed, onNextAction, onOpenDec
                 </div>
             </details>
             <div className="mt-3 flex flex-wrap gap-3 text-xs font-semibold">
+                <button type="button" onClick={onReviewReadiness} className="underline decoration-current/30 underline-offset-4 hover:decoration-current">Review readiness</button>
                 <button type="button" onClick={onOpenDecisions} className="underline decoration-current/30 underline-offset-4 hover:decoration-current">Open all decisions</button>
                 <button type="button" onClick={onOpenChallenge} className="inline-flex items-center gap-1 underline decoration-current/30 underline-offset-4 hover:decoration-current"><ShieldCheck size={12} /> Challenge this plan</button>
             </div>
