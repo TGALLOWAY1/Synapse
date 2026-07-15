@@ -213,6 +213,16 @@ describe('planning readiness', () => {
         expect(result.nextAction).toMatchObject({ kind: 'validate_assumption', planningRecordId: validated.id });
     });
 
+    it('preserves evidence-backed readiness across ordinary JSON persistence', () => {
+        const restored = JSON.parse(JSON.stringify(validatedAssumption())) as PlanningRecord;
+        const result = derivePlanningReadiness({
+            prd, planningRecords: [restored], incompleteSectionCount: 0, hasCurrentChallenge: true,
+            blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
+            currentSpineVersionId: 'spine-1', currentSpineContentHash: 'spine-content-hash',
+        });
+        expect(result.isReadyToBuild).toBe(true);
+    });
+
     it('makes expired validation historical instead of silently retaining readiness', () => {
         const expires = validatedAssumption({ expiresAt: 50 });
         const shared = { prd, planningRecords: [expires], incompleteSectionCount: 0, hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };

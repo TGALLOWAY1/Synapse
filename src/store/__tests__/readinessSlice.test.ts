@@ -57,7 +57,7 @@ const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
         id: 'plan', question: 'Will users revisit operational warnings?',
         method: { kind: 'usability_observation', label: 'Observed planning session' }, supportSignals: ['User revisits warning'],
         contradictionSignals: ['Warning is ignored'], inconclusiveConditions: [], limitations: ['One team'],
-        expiresAt, authoredBy: 'user', createdAt: 1_010,
+        revisitCondition: undefined, expiresAt, authoredBy: 'user', createdAt: 1_010,
     });
     const planned = appendAssumptionValidationEvent(current, sealAssumptionValidationEvent({
         id: 'plan-event', planningRecordId: current.id, actor: 'user', type: 'validation_plan_recorded', at: 1_010,
@@ -90,6 +90,8 @@ const expiringValidatedAssumption = (expiresAt: number): PlanningRecord => {
         assumptionStatementHash: assumptionStatementHash(current), conclusion: 'supported',
         expectedValidationPlanHash: projection.currentPlan!.contentHash,
         expectedEvidenceSetHash: assumptionEvidenceSetHash(projection.activeEvidence),
+        caveats: undefined, sourceInterpretationId: undefined, sourceInterpretationContentHash: undefined,
+        revisitAt: undefined, revisitCondition: undefined,
         expectedSpineVersionId: spineId, expectedSpineContentHash: spineHash,
     });
     const concluded = appendAssumptionValidationEvent(current, outcome, context);
@@ -164,7 +166,8 @@ describe('durable readiness authority boundary', () => {
         vi.useFakeTimers();
         try {
             vi.setSystemTime(1_040);
-            useProjectStore.setState({ planningRecords: { [projectId]: [expiringValidatedAssumption(2_000)] } });
+            const persistedRecord = JSON.parse(JSON.stringify(expiringValidatedAssumption(2_000))) as PlanningRecord;
+            useProjectStore.setState({ planningRecords: { [projectId]: [persistedRecord] } });
             const state = useProjectStore.getState();
             const currentSpine = state.spineVersions[projectId].find(spine => spine.isLatest)!;
             const live = derivePlanningReadiness({

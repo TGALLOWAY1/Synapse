@@ -101,32 +101,37 @@ const withoutIntegrityHash = (event: AssumptionValidationEvent): AssumptionValid
     return payload as AssumptionValidationEventDraft;
 };
 
+/** Persistence is JSON-backed. Canonicalize hash inputs through the same
+ * representation so optional undefined fields cannot invalidate a record
+ * merely because it was saved and restored. */
+const persistedHashValue = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
+
 export const assumptionStatementHash = (record: Pick<PlanningRecord, 'statement'>): string =>
     hashReviewValue(normalizeEvidenceText(record.statement));
 
 export const assumptionValidationPlanContentHash = (
     plan: Omit<AssumptionValidationPlan, 'contentHash'> | AssumptionValidationPlan,
-): string => hashReviewValue('contentHash' in plan ? withoutContentHash(plan) : plan);
+): string => hashReviewValue(persistedHashValue('contentHash' in plan ? withoutContentHash(plan) : plan));
 
 export const assumptionEvidenceContentHash = (
     evidence: Omit<AssumptionEvidenceRecord, 'contentHash'> | AssumptionEvidenceRecord,
-): string => hashReviewValue('contentHash' in evidence ? withoutContentHash(evidence) : evidence);
+): string => hashReviewValue(persistedHashValue('contentHash' in evidence ? withoutContentHash(evidence) : evidence));
 
 export const assumptionPlanProposalContentHash = (
     proposal: Omit<AssumptionValidationPlanProposal, 'contentHash'> | AssumptionValidationPlanProposal,
-): string => hashReviewValue('contentHash' in proposal ? withoutContentHash(proposal) : proposal);
+): string => hashReviewValue(persistedHashValue('contentHash' in proposal ? withoutContentHash(proposal) : proposal));
 
 export const assumptionInterpretationContentHash = (
     proposal: Omit<AssumptionInterpretationProposal, 'contentHash'> | AssumptionInterpretationProposal,
-): string => hashReviewValue('contentHash' in proposal ? withoutContentHash(proposal) : proposal);
+): string => hashReviewValue(persistedHashValue('contentHash' in proposal ? withoutContentHash(proposal) : proposal));
 
 export const assumptionValidationEventIntegrityHash = (
     event: AssumptionValidationEventDraft | AssumptionValidationEvent,
-): string => hashReviewValue('integrityHash' in event ? withoutIntegrityHash(event) : event);
+): string => hashReviewValue(persistedHashValue('integrityHash' in event ? withoutIntegrityHash(event) : event));
 
 export const sealAssumptionValidationEvent = <T extends AssumptionValidationEventDraft>(event: T): AssumptionValidationEvent => ({
     ...event,
-    integrityHash: hashReviewValue(event),
+    integrityHash: assumptionValidationEventIntegrityHash(event),
 }) as AssumptionValidationEvent;
 
 export const sealAssumptionValidationPlan = (
@@ -442,7 +447,7 @@ export function assumptionValidationReadiness(
     const verdictIsExact = Boolean(
         actualVerdict
         && expectedVerdict
-        && hashReviewValue(actualVerdict) === hashReviewValue(expectedVerdict),
+        && hashReviewValue(persistedHashValue(actualVerdict)) === hashReviewValue(persistedHashValue(expectedVerdict)),
     );
 
     if (conclusion === 'supported' || conclusion === 'partially_supported') {
