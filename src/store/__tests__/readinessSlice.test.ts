@@ -13,7 +13,7 @@ const prd: StructuredPRD = {
     coreProblem: 'Teams begin implementation while consequential planning uncertainty remains hidden.',
     targetUsers: ['Product teams preparing an implementation-ready plan.'],
     architecture: 'A versioned planning workspace.',
-    risks: [],
+    risks: ['Implementation may rely on an unvalidated operating assumption.'],
     successMetrics: [{ name: 'Confident implementation starts' }],
     features: [{
         id: 'f1', name: 'Readiness checkpoint', description: 'Explain the exact planning condition.',
@@ -32,13 +32,14 @@ const assumption = (): PlanningRecord => ({
     }],
 });
 
-const challengeContextSignature = buildReviewContextManifest({
+const challengeManifest = buildReviewContextManifest({
     projectId,
     projectName: 'Readiness project',
     spine: { versionId: spineId, content, structuredPRD: prd },
     artifacts: [],
     safetyBoundaries: [],
-}).contextSignature;
+});
+const challengeContextSignature = challengeManifest.contextSignature;
 
 beforeEach(() => {
     useProjectStore.setState({
@@ -71,10 +72,18 @@ beforeEach(() => {
             ].map(area => ({
                 area: area as 'problem' | 'primary_user' | 'intended_outcome' | 'first_release_scope' | 'material_assumptions',
                 conclusion: `The ${area.replaceAll('_', ' ')} is explicit in this exact plan version.`,
-                evidence: [{
-                    id: `coverage-${area}`, sourceType: 'spine' as const, sourceId: spineId, sourceVersionId: spineId,
-                    excerpt: 'A durable implementation foundation.', excerptHash: 'coverage-hash', verified: true,
-                }],
+                evidence: [(() => {
+                    const paths = {
+                        problem: 'prd.coreProblem', primary_user: 'prd.targetUsers', intended_outcome: 'prd.successMetrics',
+                        first_release_scope: 'prd.features.f1', material_assumptions: 'prd.risks',
+                    } as const;
+                    const locator = challengeManifest.locators.find(item => item.path === paths[area as keyof typeof paths])!;
+                    return {
+                        id: locator.id, sourceType: 'spine' as const, sourceId: spineId, sourceVersionId: spineId,
+                        locator: { section: locator.label, jsonPath: locator.path },
+                        excerpt: locator.excerpt, excerptHash: locator.excerptHash, verified: true,
+                    };
+                })()],
             })),
             validation: { valid: true, unsupportedEvidenceIds: [], warnings: [] }, createdAt: 3, completedAt: 4,
         }] },

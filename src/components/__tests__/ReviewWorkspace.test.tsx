@@ -50,6 +50,7 @@ const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
     sourceLabel: 'PRD Version 3 + 1 artifact',
     capturedAt: 1_700_000_000_000,
     status: 'complete',
+    readinessCoverage: 'complete',
     specialists: panel.map(s => ({ ...s, status: 'complete', findingCount: 1 })),
     issues: [{
         id: 'issue-1',
@@ -102,6 +103,23 @@ describe('ReviewWorkspace', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));
         expect(onStartReview).toHaveBeenCalledWith({ specialistIds: ['product'], focus: undefined });
+    });
+
+    it('preserves exploratory coverage and omitted specialists in results and history', () => {
+        const run = completeRun({
+            readinessCoverage: 'exploratory',
+            omittedRequiredSpecialistNames: ['Security & Privacy'],
+            specialists: [{ ...panel[0], status: 'complete', findingCount: 0 }],
+            issues: [],
+        });
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id })} />);
+
+        expect(screen.getByRole('heading', { name: 'Exploratory planning review' })).toBeInTheDocument();
+        expect(screen.getByText(/Missing required review: Security & Privacy/i)).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Review history' }));
+        expect(screen.getByText(/Exploratory · omitted Security & Privacy/i)).toBeInTheDocument();
+        expect(screen.getByText('exploratory')).toHaveClass('text-amber-700');
     });
 
     it('shows durable specialist progress and retries only the failed specialist', () => {

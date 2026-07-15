@@ -62,6 +62,7 @@ export function buildSpecialistPrompt(
         specialistId === 'product_scope'
             ? '- Return one evidence-grounded coverageChecks entry for each of: problem, primary_user, intended_outcome, first_release_scope, material_assumptions.'
             : '- Return an evidence-grounded coverageChecks entry for specialist_boundary.',
+        '- Coverage checks must cite the relevant structured PRD locator for that exact area. Do not reuse an unrelated locator or cite downstream artifacts for coverage checks.',
         '- A coverage check is not a finding or proof that the plan is correct. It records the exact source basis for a no-finding or sufficiently-covered conclusion.',
         '- If the needed information is absent, report missing information; do not invent a requirement or fact.',
         '- Explain the consequence and the concrete decision, clarification, or next action required.',

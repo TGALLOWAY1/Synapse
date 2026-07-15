@@ -97,6 +97,8 @@ export type ReviewRunView = {
     untriagedFindings?: ReviewUntriagedFindingView[];
     focus?: string;
     contextChanged?: boolean;
+    readinessCoverage?: 'complete' | 'exploratory' | 'unverifiable';
+    omittedRequiredSpecialistNames?: string[];
     error?: string;
 };
 
@@ -605,6 +607,21 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
 
     return (
         <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
+            {run.readinessCoverage === 'exploratory' && (
+                <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>
+                        This completed review was intentionally exploratory and does not satisfy build-readiness coverage.
+                        Missing required review: {(run.omittedRequiredSpecialistNames ?? []).join(', ')}. Review the current plan with the full panel to close this gap.
+                    </span>
+                </div>
+            )}
+            {run.readinessCoverage === 'unverifiable' && (
+                <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
+                    <AlertTriangle size={16} className="mt-0.5 shrink-0" />
+                    <span>This legacy review did not record its required specialist panel, so it cannot support the current readiness checkpoint. Review the current plan again.</span>
+                </div>
+            )}
             {run.contextChanged && (
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <Clock3 size={16} className="mt-0.5 shrink-0" />
@@ -623,7 +640,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
             <div className="flex flex-col gap-4 sm:flex-row sm:items-end sm:justify-between">
                 <div>
                     <p className="text-xs font-semibold uppercase tracking-wider text-neutral-400">{run.label} · {run.sourceLabel}</p>
-                    <h1 className="mt-1 text-2xl font-bold tracking-tight text-neutral-950">Planning review</h1>
+                    <h1 className="mt-1 text-2xl font-bold tracking-tight text-neutral-950">{run.readinessCoverage === 'exploratory' ? 'Exploratory planning review' : 'Planning review'}</h1>
                     <p className="mt-1 text-sm text-neutral-500">Prioritized findings from {run.specialists.filter(s => s.status === 'complete').length} completed specialist reviews.</p>
                 </div>
                 <div className="space-y-2">
@@ -712,8 +729,14 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                                         <span className="block text-sm font-semibold text-neutral-900">{run.label}</span>
                                         <span className="mt-0.5 block text-xs text-neutral-500">{run.sourceLabel} · {new Date(run.capturedAt).toLocaleString()}</span>
                                         {run.focus && <span className="mt-1 block truncate text-xs text-neutral-400">Focus: {run.focus}</span>}
+                                        {run.readinessCoverage === 'exploratory' && (
+                                            <span className="mt-1 block text-xs font-medium text-amber-700">
+                                                Exploratory · omitted {(run.omittedRequiredSpecialistNames ?? []).join(', ')}
+                                            </span>
+                                        )}
+                                        {run.readinessCoverage === 'unverifiable' && <span className="mt-1 block text-xs font-medium text-amber-700">Readiness coverage not recorded</span>}
                                     </span>
-                                    <span className={`text-xs font-semibold capitalize ${run.status === 'complete' ? 'text-emerald-700' : run.status === 'partial' ? 'text-amber-700' : 'text-neutral-500'}`}>{run.status}</span>
+                                    <span className={`text-xs font-semibold capitalize ${run.status === 'complete' && run.readinessCoverage === 'complete' ? 'text-emerald-700' : run.status === 'partial' || run.readinessCoverage !== 'complete' ? 'text-amber-700' : 'text-neutral-500'}`}>{run.readinessCoverage === 'exploratory' ? 'exploratory' : run.status}</span>
                                     {run.contextChanged && <span className="text-xs font-medium text-amber-700">Sources changed</span>}
                                 </button>
                             ))}

@@ -1,6 +1,7 @@
 export * from './types';
 export * from './hash';
 export * from './manifest';
+export * from './coverage';
 export * from './specialists';
 export * from './specialistOutput';
 export * from './prompt';

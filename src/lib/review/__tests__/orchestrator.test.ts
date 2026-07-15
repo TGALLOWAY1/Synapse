@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runAdversarialReview, type SpecialistTransport } from '../orchestrator';
-import { makeManifest, validCoverageChecks, validResponse } from './reviewTestUtils';
+import { makeManifest, validCoverageChecks, validProductCoverageChecks, validResponse } from './reviewTestUtils';
 
 describe('adversarial review orchestration', () => {
     it('isolates failure, preserves zero-finding success, and bounds concurrency', async () => {
@@ -17,7 +17,7 @@ describe('adversarial review orchestration', () => {
             if (specialist.id === 'product_scope') {
                 return JSON.stringify({
                     coverageSummary: 'No material scope findings.', resolvedAreas: ['Scope'],
-                    coverageChecks: validCoverageChecks(locator), findings: [],
+                    coverageChecks: validProductCoverageChecks(manifest), findings: [],
                 });
             }
             return validResponse(locator);
@@ -37,6 +37,20 @@ describe('adversarial review orchestration', () => {
         });
         expect(result.clusters).toHaveLength(1);
         expect(maxActive).toBeLessThanOrEqual(2);
+    });
+
+    it('rejects product coverage that reuses one unrelated exact locator for every area', async () => {
+        const manifest = makeManifest();
+        const risk = manifest.locators.find(item => item.path === 'prd.risks')!;
+        const result = await runAdversarialReview(manifest, ['product_scope'], {
+            transport: async () => JSON.stringify({
+                coverageSummary: 'Everything appears sufficiently reviewed.', resolvedAreas: [], findings: [],
+                coverageChecks: ['problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions']
+                    .map(area => ({ ...validCoverageChecks(risk)[0], area })),
+            }),
+        });
+        expect(result.status).toBe('failed');
+        expect(result.coverage.failed).toEqual(['product_scope']);
     });
 
     it('performs one bounded structured repair attempt', async () => {

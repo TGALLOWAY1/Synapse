@@ -154,12 +154,17 @@ its conclusion.
 A completed challenge supports readiness only when it preserves the full
 project-specific specialist panel that was recommended when the run started.
 Users may deliberately run a narrower exploratory review, but the interface
-labels that limitation and the run cannot satisfy the readiness checkpoint.
+labels that limitation before execution and preserves the exploratory label,
+omitted specialist names, and reason in results and history; the run cannot
+satisfy the readiness checkpoint.
 For no-finding conclusions, every specialist must return structured coverage
 checks grounded in exact source locators; Product & Scope must explicitly cover
 the problem, primary user, intended outcome, first-release scope, and material
 assumptions. Freeform summaries and automatically assigned source IDs are not
-treated as substantive challenge evidence.
+treated as substantive challenge evidence. Coverage citations must use the
+structured PRD path family relevant to the claimed area, and readiness
+revalidates the locator id, path, excerpt, and excerpt hash against the exact
+reviewed PRD instead of trusting a persisted `verified` flag.
 
 Historical checkpoints preserve both the original evidence and a deterministic
 comparison with the current readiness projection. The comparison names newly

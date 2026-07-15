@@ -6,7 +6,7 @@ export const structuredPRD: StructuredPRD = {
     productCategory: 'health workflow',
     vision: 'Help clinicians summarize private patient notes with AI.',
     coreProblem: 'Clinical notes take too long to review.',
-    targetUsers: ['Clinicians'],
+    targetUsers: ['Clinicians reviewing complex patient notes during time-sensitive care workflows'],
     architecture: 'A web client calls an authenticated API and an LLM provider.',
     risks: ['Generated summaries may be inaccurate.'],
     constraints: ['Patient notes must remain private.'],
@@ -56,9 +56,7 @@ export const makeManifest = (overrides: {
     safetyBoundaries: ['Do not provide autonomous diagnosis.'],
 });
 
-export const validCoverageChecks = (locator: ReturnType<typeof makeManifest>['locators'][number]) => [
-    'problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions', 'specialist_boundary',
-].map(area => ({
+const coverageCheck = (area: string, locator: ReturnType<typeof makeManifest>['locators'][number]) => ({
     area,
     conclusion: `The ${area.replaceAll('_', ' ')} was explicitly evaluated against the cited plan context.`,
     evidence: [{
@@ -68,7 +66,22 @@ export const validCoverageChecks = (locator: ReturnType<typeof makeManifest>['lo
         excerpt: locator.excerpt,
         excerptHash: locator.excerptHash,
     }],
-}));
+});
+
+export const validCoverageChecks = (locator: ReturnType<typeof makeManifest>['locators'][number]) => [
+    coverageCheck('specialist_boundary', locator),
+];
+
+export const validProductCoverageChecks = (manifest: ReturnType<typeof makeManifest>) => {
+    const paths = {
+        problem: 'prd.coreProblem', primary_user: 'prd.targetUsers', intended_outcome: 'prd.vision',
+        first_release_scope: 'prd.features.f1', material_assumptions: 'prd.risks',
+    } as const;
+    return Object.entries(paths).map(([area, path]) => coverageCheck(
+        area,
+        manifest.locators.find(locator => locator.path === path)!,
+    ));
+};
 
 export function validResponse(locator: ReturnType<typeof makeManifest>['locators'][number], overrides: Record<string, unknown> = {}): string {
     return JSON.stringify({

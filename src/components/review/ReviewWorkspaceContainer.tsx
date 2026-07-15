@@ -615,7 +615,10 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         };
     });
 
-    const runViews: ReviewRunView[] = reviewRuns.slice().reverse().map(run => ({
+    const runViews: ReviewRunView[] = reviewRuns.slice().reverse().map(run => {
+        const selectedIds = new Set(run.selectedSpecialists.map(item => item.specialistId));
+        const omittedRequiredIds = (run.requiredSpecialistIds ?? []).filter(id => !selectedIds.has(id));
+        return ({
         id: run.id,
         label: `Review ${run.sequenceNumber}`,
         sourceLabel: `PRD version ${spines.findIndex(spine => spine.id === run.sourceManifest.spineVersionId) + 1 || run.sourceManifest.spineVersionId}`,
@@ -623,6 +626,12 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         status: runStatus(run.status),
         focus: run.scope.focus,
         contextChanged: currentManifest?.contextSignature !== run.sourceManifest.contextSignature,
+        readinessCoverage: !run.requiredSpecialistIds?.length
+            ? 'unverifiable' as const
+            : omittedRequiredIds.length > 0 ? 'exploratory' as const : 'complete' as const,
+        omittedRequiredSpecialistNames: omittedRequiredIds.map(id => (
+            SPECIALIST_REGISTRY[id as ReviewSpecialistId]?.label ?? id
+        )),
         specialists: specialistRuns.filter(item => item.reviewId === run.id).map(item => ({
             id: item.specialistId,
             name: SPECIALIST_REGISTRY[item.specialistId as ReviewSpecialistId]?.label ?? item.specialistId,
@@ -688,7 +697,8 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                     })),
                 };
             }),
-    }));
+        });
+    });
 
     const planningViews: PlanningRecordView[] = planningRecords.map(record => {
         const projection = projectDecision(record);

@@ -18,7 +18,9 @@ import {
     READINESS_CRITERIA_VERSION,
     READINESS_REVIEW_SCHEMA_VERSION,
 } from '../../types';
-import { hashReviewValue } from '../review/hash';
+import { hashEvidenceExcerpt, hashReviewValue, normalizeEvidenceText } from '../review/hash';
+import { buildReviewContextManifest } from '../review/manifest';
+import { coveragePathSupports, PRODUCT_READINESS_COVERAGE_AREAS } from '../review/coverage';
 import type { ProjectOutputAlignmentSummary } from './outputAlignment';
 import { projectDecision } from './decisionProjection';
 import {
@@ -128,17 +130,28 @@ function expectedChallengeContextRefs(run: ReviewRun): string[] {
     ];
 }
 
-function isSubstantiveChallenge(run: ReviewRun, specialistRuns: SpecialistRun[]): boolean {
+function isSubstantiveChallenge(
+    run: ReviewRun,
+    specialistRuns: SpecialistRun[],
+    input: ReadinessReviewInput,
+): boolean {
     if (run.scope.kind !== 'project' || run.status !== 'complete' || run.synthesisStatus !== 'complete') return false;
     const requiredSpecialistIds = run.requiredSpecialistIds ?? [];
     if (!requiredSpecialistIds.includes('product_scope') || requiredSpecialistIds.length === 0) return false;
     const selectedIds = new Set(run.selectedSpecialists.map(item => item.specialistId));
     if (requiredSpecialistIds.some(id => !selectedIds.has(id))) return false;
     const expectedContextRefs = expectedChallengeContextRefs(run);
-    const expectedSourceVersionIds = new Set([
-        run.sourceManifest.spineVersionId,
-        ...run.sourceManifest.artifactRefs.map(ref => ref.artifactVersionId),
-    ]);
+    const currentPrdManifest = buildReviewContextManifest({
+        projectId: input.projectId,
+        projectName: 'Readiness evidence validation',
+        spine: {
+            versionId: input.spine.versionId,
+            content: input.spine.content,
+            structuredPRD: input.spine.structuredPRD ?? {} as StructuredPRD,
+        },
+        artifacts: [],
+        safetyBoundaries: [],
+    });
     return run.selectedSpecialists.every(selection => {
         const specialist = latest(specialistRuns.filter(item => (
             item.reviewId === run.id && item.specialistId === selection.specialistId
@@ -146,14 +159,27 @@ function isSubstantiveChallenge(run: ReviewRun, specialistRuns: SpecialistRun[])
         const reviewedContextRefs = new Set(specialist?.contextRefIds ?? []);
         const hasExactSourceCoverage = expectedContextRefs.every(ref => reviewedContextRefs.has(ref));
         const requiredAreas = selection.specialistId === 'product_scope'
-            ? ['problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions']
+            ? PRODUCT_READINESS_COVERAGE_AREAS
             : ['specialist_boundary'];
         const hasAuditableCoverage = requiredAreas.every(area => specialist?.coverageChecks?.some(check => (
             check.area === area
             && check.conclusion.trim().length >= 20
             && check.evidence.length > 0
             && check.evidence.every(evidence => (
-                evidence.verified && expectedSourceVersionIds.has(evidence.sourceVersionId)
+                evidence.verified
+                && evidence.sourceType === 'spine'
+                && evidence.sourceId === input.spine.versionId
+                && evidence.sourceVersionId === input.spine.versionId
+                && typeof evidence.locator?.jsonPath === 'string'
+                && coveragePathSupports(selection.specialistId, check.area, evidence.locator.jsonPath)
+                && currentPrdManifest.locators.some(locator => (
+                    locator.sourceKey === `spine:${input.spine.versionId}`
+                    && locator.id === evidence.id
+                    && locator.path === evidence.locator?.jsonPath
+                    && locator.excerptHash === evidence.excerptHash
+                    && locator.excerptHash === hashEvidenceExcerpt(evidence.excerpt ?? '')
+                    && normalizeEvidenceText(locator.excerpt) === normalizeEvidenceText(evidence.excerpt ?? '')
+                ))
             ))
         )));
         return specialist?.status === 'complete'
@@ -185,7 +211,7 @@ function hasValidIssueDisposition(issue: ReviewIssue, run: ReviewRun): boolean {
 export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
     const spineContentHash = hashReviewValue(input.spine.content);
     const exactRuns = exactChallengeRuns(input, spineContentHash);
-    const substantiveRuns = exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns));
+    const substantiveRuns = exactRuns.filter(run => isSubstantiveChallenge(run, input.specialistRuns, input));
     const substantive = latest(substantiveRuns);
     const shallow = latest(exactRuns);
     const substantiveRunIds = new Set(substantiveRuns.map(run => run.id));
@@ -461,7 +487,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         ? 'No current, substantive project challenge has complete validated specialist coverage.'
         : challenge.blockingIssues.length + challenge.untriagedFindings.length > 0
             ? `${challenge.blockingIssues.length + challenge.untriagedFindings.length} consequential challenge finding${challenge.blockingIssues.length + challenge.untriagedFindings.length === 1 ? '' : 's'} remains.`
-            : 'The exact current plan has complete, validated project-scope challenge coverage.';
+            : 'The exact current plan has complete, source-grounded project-scope challenge coverage.';
     const challengeTarget = { kind: 'challenge' as const, reviewId: challenge.shallow?.id };
     criteria.push({
         id: 'challenge', label: 'Current plan challenged', status: !challenge.substantive ? 'not_started' : challengeBlocking ? 'attention' : 'met',

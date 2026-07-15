@@ -16,6 +16,7 @@ import type {
     ValidatedSpecialistFinding,
 } from './types';
 import { verifyEvidenceRef } from './manifest';
+import { coveragePathSupports, PRODUCT_READINESS_COVERAGE_AREAS } from './coverage';
 
 export interface SpecialistTransportInput {
     specialist: SpecialistDefinition;
@@ -84,13 +85,15 @@ export async function runSingleSpecialist(
                 evidence: check.evidence.map(item => verifyEvidenceRef(manifest, item)),
             }));
             const requiredCoverageAreas = specialistId === 'product_scope'
-                ? ['problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions'] as const
+                ? PRODUCT_READINESS_COVERAGE_AREAS
                 : ['specialist_boundary'] as const;
             const missingCoverage = requiredCoverageAreas.filter(area => !coverageChecks.some(check => (
                 check.area === area
                 && check.conclusion.trim().length >= 20
                 && check.evidence.length > 0
-                && check.evidence.every(item => item.verified)
+                && check.evidence.every(item => (
+                    item.verified && coveragePathSupports(specialistId, check.area, item.path)
+                ))
             )));
             if (missingCoverage.length > 0) {
                 throw new SpecialistOutputValidationError(

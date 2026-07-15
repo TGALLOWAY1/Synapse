@@ -7,6 +7,7 @@ import type {
     StructuredPRD,
 } from '../../../types';
 import { hashReviewValue } from '../../review/hash';
+import { buildReviewContextManifest } from '../../review/manifest';
 import type { ProjectOutputAlignmentSummary } from '../outputAlignment';
 import {
     compareReadinessReviewCurrentness,
@@ -22,7 +23,7 @@ const prd: StructuredPRD = {
     coreProblem: 'Teams commit implementation effort before resolving consequential uncertainty.',
     targetUsers: ['Product teams preparing a consequential implementation plan.'],
     architecture: 'A versioned planning workspace.',
-    risks: [],
+    risks: ['Teams may rely on an unvalidated product assumption.'],
     successMetrics: [{ name: 'Validated plans', target: 'Material uncertainty resolved before implementation.' }],
     features: [{
         id: 'f1', name: 'Decision workflow', description: 'Resolve consequential choices.',
@@ -43,17 +44,29 @@ const reviewRun = (overrides: Partial<ReviewRun> = {}): ReviewRun => ({
     ...overrides,
 });
 
-const coverageEvidence = {
-    id: 'coverage-evidence', sourceType: 'spine' as const, sourceId: 'spine-1', sourceVersionId: 'spine-1',
-    excerpt: 'A complete visible planning foundation.', excerptHash: 'coverage-hash', verified: true,
-};
+const coverageManifest = buildReviewContextManifest({
+    projectId: 'p1', projectName: 'Readiness project',
+    spine: { versionId: 'spine-1', content, structuredPRD: prd }, artifacts: [],
+});
+
+const coveragePathByArea = {
+    problem: 'prd.coreProblem', primary_user: 'prd.targetUsers', intended_outcome: 'prd.successMetrics',
+    first_release_scope: 'prd.features.f1', material_assumptions: 'prd.risks',
+} as const;
 
 const productCoverageChecks: NonNullable<SpecialistRun['coverageChecks']> = [
     'problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions',
 ].map(area => ({
     area: area as NonNullable<SpecialistRun['coverageChecks']>[number]['area'],
     conclusion: `The ${area.replaceAll('_', ' ')} is explicitly represented in the reviewed plan.`,
-    evidence: [{ ...coverageEvidence, id: `coverage-${area}` }],
+    evidence: [(() => {
+        const locator = coverageManifest.locators.find(item => item.path === coveragePathByArea[area as keyof typeof coveragePathByArea])!;
+        return {
+            id: locator.id, sourceType: 'spine' as const, sourceId: 'spine-1', sourceVersionId: 'spine-1',
+            locator: { section: locator.label, jsonPath: locator.path },
+            excerpt: locator.excerpt, excerptHash: locator.excerptHash, verified: true,
+        };
+    })()],
 }));
 
 const specialistRun = (overrides: Partial<SpecialistRun> = {}): SpecialistRun => ({
@@ -274,6 +287,31 @@ describe('deterministic readiness review', () => {
         expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({
             status: 'not_started', blocking: true,
         });
+    });
+
+    it('revalidates persisted coverage relevance and locator integrity against the exact PRD', () => {
+        const riskLocator = coverageManifest.locators.find(item => item.path === 'prd.risks')!;
+        const unrelatedCoverage = productCoverageChecks.map(check => ({
+            ...check,
+            evidence: [{
+                id: riskLocator.id, sourceType: 'spine' as const, sourceId: 'spine-1', sourceVersionId: 'spine-1',
+                locator: { section: riskLocator.label, jsonPath: riskLocator.path },
+                excerpt: riskLocator.excerpt, excerptHash: riskLocator.excerptHash, verified: true,
+            }],
+        }));
+        expect(deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ coverageChecks: unrelatedCoverage })],
+        })).conclusion).toBe('not_ready');
+
+        const fabricated = productCoverageChecks.map(check => ({
+            ...check,
+            evidence: check.evidence.map(evidence => ({
+                ...evidence, id: 'fabricated-locator', excerptHash: 'fabricated-hash', verified: true,
+            })),
+        }));
+        expect(deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ coverageChecks: fabricated })],
+        })).conclusion).toBe('not_ready');
     });
 
     it('keeps an earlier exact-current unresolved finding after a newer empty challenge run', () => {
