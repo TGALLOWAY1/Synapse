@@ -151,6 +151,16 @@ durable sources; model narrative is not evidence and cannot confer authority.
 Material changes make the checkpoint historical instead of silently reusing
 its conclusion.
 
+A completed challenge supports readiness only when it preserves the full
+project-specific specialist panel that was recommended when the run started.
+Users may deliberately run a narrower exploratory review, but the interface
+labels that limitation and the run cannot satisfy the readiness checkpoint.
+For no-finding conclusions, every specialist must return structured coverage
+checks grounded in exact source locators; Product & Scope must explicitly cover
+the problem, primary user, intended outcome, first-release scope, and material
+assumptions. Freeform summaries and automatically assigned source IDs are not
+treated as substantive challenge evidence.
+
 Historical checkpoints preserve both the original evidence and a deterministic
 comparison with the current readiness projection. The comparison names newly
 introduced or resolved concerns, criterion changes, changed evidence support,
@@ -163,6 +173,11 @@ with unresolved material concerns, Synapse requires explicit rationale and,
 where needed, a containment plan. That authorization preserves the concern as
 accepted uncertainty; it never relabels the issue as resolved or the evidence
 as validated.
+
+Commitment events carry a versioned integrity hash over their complete payload
+and are validated as an ordered authorization → commitment → reopening chain.
+Malformed or pre-integrity Phase 3 events remain historical/unverifiable and
+cannot fall back to legacy commitment semantics.
 
 ## Future planning intelligence
 

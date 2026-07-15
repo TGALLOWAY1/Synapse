@@ -38,15 +38,30 @@ const reviewRun = (overrides: Partial<ReviewRun> = {}): ReviewRun => ({
         capturedAt: 10, contextSignature: 'context-1',
     },
     selectedSpecialists: [{ specialistId: 'product_scope', label: 'Product & Scope', reason: 'Required coverage.' }],
+    requiredSpecialistIds: ['product_scope'],
     status: 'complete', synthesisStatus: 'complete', createdAt: 10, completedAt: 20,
     ...overrides,
 });
+
+const coverageEvidence = {
+    id: 'coverage-evidence', sourceType: 'spine' as const, sourceId: 'spine-1', sourceVersionId: 'spine-1',
+    excerpt: 'A complete visible planning foundation.', excerptHash: 'coverage-hash', verified: true,
+};
+
+const productCoverageChecks: NonNullable<SpecialistRun['coverageChecks']> = [
+    'problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions',
+].map(area => ({
+    area: area as NonNullable<SpecialistRun['coverageChecks']>[number]['area'],
+    conclusion: `The ${area.replaceAll('_', ' ')} is explicitly represented in the reviewed plan.`,
+    evidence: [{ ...coverageEvidence, id: `coverage-${area}` }],
+}));
 
 const specialistRun = (overrides: Partial<SpecialistRun> = {}): SpecialistRun => ({
     id: 'specialist-1', projectId: 'p1', reviewId: 'review-1', specialistId: 'product_scope',
     responsibility: 'Test scope and assumptions.', boundaries: [], contextRefIds: ['spine:spine-1'], status: 'complete',
     attemptCount: 1, findingIds: [], coverageSummary: 'Reviewed product scope and material uncertainty.',
     resolvedAreas: ['Problem, primary user, outcome, and first-release scope were reviewed.'],
+    coverageChecks: productCoverageChecks,
     validation: { valid: true, unsupportedEvidenceIds: [], warnings: [] }, createdAt: 10, completedAt: 20,
     ...overrides,
 });
@@ -226,7 +241,9 @@ describe('deterministic readiness review', () => {
 
     it('rejects ceremonial challenge coverage with no finding or auditable resolved area', () => {
         const review = deriveReadinessReview(input({
-            specialistRuns: [specialistRun({ coverageSummary: 'This looks sufficiently covered.', resolvedAreas: [], findingIds: [] })],
+            specialistRuns: [specialistRun({
+                coverageSummary: 'This looks sufficiently covered.', resolvedAreas: [], findingIds: [], coverageChecks: [],
+            })],
         }));
         expect(review.conclusion).toBe('not_ready');
         expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({ blocking: true });
@@ -239,7 +256,19 @@ describe('deterministic readiness review', () => {
                 coverageSummary: 'Everything in the product area appears sufficiently covered.',
                 resolvedAreas: ['Everything appears sufficiently resolved.'],
                 findingIds: [],
+                coverageChecks: [],
             })],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({
+            status: 'not_started', blocking: true,
+        });
+    });
+
+    it('does not let a user omit an applicable specialist from readiness coverage', () => {
+        const review = deriveReadinessReview(input({
+            reviewRuns: [reviewRun({ requiredSpecialistIds: ['product_scope', 'security_privacy'] })],
+            specialistRuns: [specialistRun()],
         }));
         expect(review.conclusion).toBe('not_ready');
         expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({

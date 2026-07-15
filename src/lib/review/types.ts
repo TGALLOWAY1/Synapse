@@ -27,6 +27,13 @@ export type ReviewFindingType =
 
 export type ReviewSeverity = 'low' | 'medium' | 'high' | 'critical';
 export type ReviewConfidence = 'low' | 'medium' | 'high';
+export type ReviewCoverageArea =
+    | 'problem'
+    | 'primary_user'
+    | 'intended_outcome'
+    | 'first_release_scope'
+    | 'material_assumptions'
+    | 'specialist_boundary';
 
 export interface ReviewSourceLocator {
     id: string;
@@ -138,8 +145,19 @@ export interface ParsedSpecialistFinding {
 export interface ParsedSpecialistOutput {
     coverageSummary: string;
     resolvedAreas: string[];
+    coverageChecks: Array<{
+        area: ReviewCoverageArea;
+        conclusion: string;
+        evidence: SpecialistEvidenceInput[];
+    }>;
     findings: ParsedSpecialistFinding[];
 }
+
+export type ValidatedCoverageCheck = {
+    area: ReviewCoverageArea;
+    conclusion: string;
+    evidence: VerifiedEvidenceRef[];
+};
 
 export interface ValidatedSpecialistFinding extends Omit<ParsedSpecialistFinding, 'evidence'> {
     specialistId: ReviewSpecialistId;
@@ -171,6 +189,7 @@ export interface SpecialistRunResult {
     findings: ValidatedSpecialistFinding[];
     coverageSummary?: string;
     resolvedAreas?: string[];
+    coverageChecks?: ValidatedCoverageCheck[];
     error?: string;
 }
 

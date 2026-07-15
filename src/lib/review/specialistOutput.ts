@@ -2,6 +2,7 @@ import { hashReviewValue } from './hash';
 import type {
     ParsedSpecialistFinding,
     ParsedSpecialistOutput,
+    ReviewCoverageArea,
     ReviewConfidence,
     ReviewFindingType,
     ReviewSeverity,
@@ -13,12 +14,40 @@ const FINDING_TYPES: ReviewFindingType[] = [
 ];
 const SEVERITIES: ReviewSeverity[] = ['low', 'medium', 'high', 'critical'];
 const CONFIDENCES: ReviewConfidence[] = ['low', 'medium', 'high'];
+const COVERAGE_AREAS: ReviewCoverageArea[] = [
+    'problem', 'primary_user', 'intended_outcome', 'first_release_scope',
+    'material_assumptions', 'specialist_boundary',
+];
+
+const evidenceSchema = {
+    type: 'ARRAY',
+    items: {
+        type: 'OBJECT',
+        properties: {
+            sourceKey: { type: 'STRING' }, locatorId: { type: 'STRING' },
+            path: { type: 'STRING' }, excerpt: { type: 'STRING' }, excerptHash: { type: 'STRING' },
+        },
+        required: ['sourceKey', 'locatorId', 'path', 'excerpt'],
+    },
+};
 
 export const specialistOutputSchema = {
     type: 'OBJECT',
     properties: {
         coverageSummary: { type: 'STRING' },
         resolvedAreas: { type: 'ARRAY', items: { type: 'STRING' } },
+        coverageChecks: {
+            type: 'ARRAY',
+            items: {
+                type: 'OBJECT',
+                properties: {
+                    area: { type: 'STRING', enum: COVERAGE_AREAS },
+                    conclusion: { type: 'STRING' },
+                    evidence: evidenceSchema,
+                },
+                required: ['area', 'conclusion', 'evidence'],
+            },
+        },
         findings: {
             type: 'ARRAY',
             maxItems: 12,
@@ -36,20 +65,7 @@ export const specialistOutputSchema = {
                     decisionOrClarification: { type: 'STRING' },
                     recommendedAction: { type: 'STRING' },
                     affectedFeatureIds: { type: 'ARRAY', items: { type: 'STRING' } },
-                    evidence: {
-                        type: 'ARRAY',
-                        items: {
-                            type: 'OBJECT',
-                            properties: {
-                                sourceKey: { type: 'STRING' },
-                                locatorId: { type: 'STRING' },
-                                path: { type: 'STRING' },
-                                excerpt: { type: 'STRING' },
-                                excerptHash: { type: 'STRING' },
-                            },
-                            required: ['sourceKey', 'locatorId', 'path', 'excerpt'],
-                        },
-                    },
+                    evidence: evidenceSchema,
                 },
                 required: [
                     'title', 'observation', 'type', 'severity', 'confidence',
@@ -59,7 +75,7 @@ export const specialistOutputSchema = {
             },
         },
     },
-    required: ['coverageSummary', 'resolvedAreas', 'findings'],
+    required: ['coverageSummary', 'resolvedAreas', 'coverageChecks', 'findings'],
 };
 
 export class SpecialistOutputValidationError extends Error {
@@ -91,20 +107,20 @@ const requiredBoolean = (record: Record<string, unknown>, key: string): boolean 
     return record[key];
 };
 
-function parseEvidence(value: unknown, findingIndex: number): SpecialistEvidenceInput[] {
+function parseEvidence(value: unknown, fieldPath: string): SpecialistEvidenceInput[] {
     if (!Array.isArray(value)) {
-        throw new SpecialistOutputValidationError(`findings[${findingIndex}].evidence must be an array`);
+        throw new SpecialistOutputValidationError(`${fieldPath} must be an array`);
     }
     return value.map((item, evidenceIndex) => {
         if (!isRecord(item)) {
-            throw new SpecialistOutputValidationError(`findings[${findingIndex}].evidence[${evidenceIndex}] must be an object`);
+            throw new SpecialistOutputValidationError(`${fieldPath}[${evidenceIndex}] must be an object`);
         }
         const sourceKey = requiredString(item, 'sourceKey');
         const excerpt = requiredString(item, 'excerpt');
         const locatorId = typeof item.locatorId === 'string' && item.locatorId.trim() ? item.locatorId.trim() : undefined;
         const path = typeof item.path === 'string' && item.path.trim() ? item.path.trim() : undefined;
         if (!locatorId && !path) {
-            throw new SpecialistOutputValidationError(`findings[${findingIndex}].evidence[${evidenceIndex}] needs locatorId or path`);
+            throw new SpecialistOutputValidationError(`${fieldPath}[${evidenceIndex}] needs locatorId or path`);
         }
         return {
             sourceKey,
@@ -138,7 +154,7 @@ function parseFinding(value: unknown, index: number): ParsedSpecialistFinding {
         decisionOrClarification: requiredString(value, 'decisionOrClarification'),
         recommendedAction: requiredString(value, 'recommendedAction'),
         affectedFeatureIds: strings(value.affectedFeatureIds, `findings[${index}].affectedFeatureIds`),
-        evidence: parseEvidence(value.evidence, index),
+        evidence: parseEvidence(value.evidence, `findings[${index}].evidence`),
     };
 }
 
@@ -151,10 +167,23 @@ export function parseSpecialistOutput(raw: string): ParsedSpecialistOutput {
     }
     if (!isRecord(parsed)) throw new SpecialistOutputValidationError('Specialist response must be an object');
     if (!Array.isArray(parsed.findings)) throw new SpecialistOutputValidationError('findings must be an array');
+    if (!Array.isArray(parsed.coverageChecks) || parsed.coverageChecks.length === 0) {
+        throw new SpecialistOutputValidationError('coverageChecks must be a non-empty array');
+    }
     if (parsed.findings.length > 12) throw new SpecialistOutputValidationError('findings exceeds the limit of 12');
     return {
         coverageSummary: requiredString(parsed, 'coverageSummary'),
         resolvedAreas: strings(parsed.resolvedAreas, 'resolvedAreas'),
+        coverageChecks: parsed.coverageChecks.map((value, index) => {
+            if (!isRecord(value)) throw new SpecialistOutputValidationError(`coverageChecks[${index}] must be an object`);
+            const area = requiredString(value, 'area') as ReviewCoverageArea;
+            if (!COVERAGE_AREAS.includes(area)) throw new SpecialistOutputValidationError(`coverageChecks[${index}].area is invalid`);
+            return {
+                area,
+                conclusion: requiredString(value, 'conclusion'),
+                evidence: parseEvidence(value.evidence, `coverageChecks[${index}].evidence`),
+            };
+        }),
         findings: parsed.findings.map(parseFinding),
     };
 }

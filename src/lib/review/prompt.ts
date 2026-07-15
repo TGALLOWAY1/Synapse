@@ -59,6 +59,10 @@ export function buildSpecialistPrompt(
         '- Actively test the plan, but never manufacture criticism. Zero findings is valid.',
         '- Distinguish definite contradictions, likely risks, missing information, subjective recommendations, optional improvements, and questions requiring user judgment.',
         '- Every finding must cite at least one supplied locator using its exact sourceKey, locatorId, path, and a verbatim excerpt from that locator.',
+        specialistId === 'product_scope'
+            ? '- Return one evidence-grounded coverageChecks entry for each of: problem, primary_user, intended_outcome, first_release_scope, material_assumptions.'
+            : '- Return an evidence-grounded coverageChecks entry for specialist_boundary.',
+        '- A coverage check is not a finding or proof that the plan is correct. It records the exact source basis for a no-finding or sufficiently-covered conclusion.',
         '- If the needed information is absent, report missing information; do not invent a requirement or fact.',
         '- Explain the consequence and the concrete decision, clarification, or next action required.',
         '- Do not rewrite any artifact and do not represent a recommendation as user-approved.',

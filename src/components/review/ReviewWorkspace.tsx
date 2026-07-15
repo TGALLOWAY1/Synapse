@@ -200,6 +200,7 @@ function ReviewSetup({
 }) {
     const [selected, setSelected] = useState(() => new Set(panel.filter(p => p.recommended !== false).map(p => p.id)));
     const [focus, setFocus] = useState('');
+    const omittedRecommended = panel.filter(option => option.recommended !== false && !selected.has(option.id));
 
     const toggle = (id: string) => setSelected(prev => {
         const next = new Set(prev);
@@ -243,6 +244,15 @@ function ReviewSetup({
                         </label>
                     ))}
                 </div>
+                {omittedRecommended.length > 0 && (
+                    <div className="flex items-start gap-2 border-t border-amber-200 bg-amber-50 px-4 py-3 text-xs leading-5 text-amber-900 sm:px-5">
+                        <AlertTriangle size={14} className="mt-0.5 shrink-0" />
+                        <span>
+                            This narrower review remains useful for exploration, but it will not satisfy build-readiness coverage.
+                            Restore {omittedRecommended.map(option => option.name).join(', ')} for a complete checkpoint challenge.
+                        </span>
+                    </div>
+                )}
             </section>
 
             <section className="mt-5 rounded-2xl border border-neutral-200 bg-white p-4 shadow-sm sm:p-5">

@@ -57,6 +57,7 @@ beforeEach(() => {
                 capturedAt: 3, contextSignature: challengeContextSignature,
             },
             selectedSpecialists: [{ specialistId: 'product_scope', label: 'Product & Scope', reason: 'Required.' }],
+            requiredSpecialistIds: ['product_scope'],
             status: 'complete', synthesisStatus: 'complete', createdAt: 3, completedAt: 4,
         }] },
         specialistRuns: { [projectId]: [{
@@ -65,6 +66,16 @@ beforeEach(() => {
             status: 'complete', attemptCount: 1, findingIds: [],
             coverageSummary: 'Reviewed product scope and material assumptions.',
             resolvedAreas: ['The problem, primary user, outcome, and first-release scope are explicit.'],
+            coverageChecks: [
+                'problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions',
+            ].map(area => ({
+                area: area as 'problem' | 'primary_user' | 'intended_outcome' | 'first_release_scope' | 'material_assumptions',
+                conclusion: `The ${area.replaceAll('_', ' ')} is explicit in this exact plan version.`,
+                evidence: [{
+                    id: `coverage-${area}`, sourceType: 'spine' as const, sourceId: spineId, sourceVersionId: spineId,
+                    excerpt: 'A durable implementation foundation.', excerptHash: 'coverage-hash', verified: true,
+                }],
+            })),
             validation: { valid: true, unsupportedEvidenceIds: [], warnings: [] }, createdAt: 3, completedAt: 4,
         }] },
         reviewIssues: { [projectId]: [] }, reviewFindings: { [projectId]: [] },

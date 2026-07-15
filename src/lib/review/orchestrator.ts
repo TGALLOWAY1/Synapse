@@ -15,6 +15,7 @@ import type {
     SpecialistRunResult,
     ValidatedSpecialistFinding,
 } from './types';
+import { verifyEvidenceRef } from './manifest';
 
 export interface SpecialistTransportInput {
     specialist: SpecialistDefinition;
@@ -78,6 +79,24 @@ export async function runSingleSpecialist(
             previousResponse = raw;
             const parsed = parseSpecialistOutput(raw);
             const findings = validateSpecialistFindings(manifest, specialistId, parsed.findings);
+            const coverageChecks = parsed.coverageChecks.map(check => ({
+                ...check,
+                evidence: check.evidence.map(item => verifyEvidenceRef(manifest, item)),
+            }));
+            const requiredCoverageAreas = specialistId === 'product_scope'
+                ? ['problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions'] as const
+                : ['specialist_boundary'] as const;
+            const missingCoverage = requiredCoverageAreas.filter(area => !coverageChecks.some(check => (
+                check.area === area
+                && check.conclusion.trim().length >= 20
+                && check.evidence.length > 0
+                && check.evidence.every(item => item.verified)
+            )));
+            if (missingCoverage.length > 0) {
+                throw new SpecialistOutputValidationError(
+                    `Coverage checks are missing grounded conclusions for: ${missingCoverage.join(', ')}`,
+                );
+            }
             if (findings.length > 0 && findings.every(finding => !finding.grounded)) {
                 const reasons = findings.flatMap(finding => finding.validationWarnings).join('; ');
                 throw new SpecialistOutputValidationError(
@@ -99,6 +118,7 @@ export async function runSingleSpecialist(
                 findings,
                 coverageSummary: parsed.coverageSummary,
                 resolvedAreas: parsed.resolvedAreas,
+                coverageChecks,
             };
         } catch (error) {
             if (options.signal?.aborted || isAbortError(error)) {

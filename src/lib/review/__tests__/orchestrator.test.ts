@@ -1,6 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { runAdversarialReview, type SpecialistTransport } from '../orchestrator';
-import { makeManifest, validResponse } from './reviewTestUtils';
+import { makeManifest, validCoverageChecks, validResponse } from './reviewTestUtils';
 
 describe('adversarial review orchestration', () => {
     it('isolates failure, preserves zero-finding success, and bounds concurrency', async () => {
@@ -15,7 +15,10 @@ describe('adversarial review orchestration', () => {
             active--;
             if (specialist.id === 'architecture') throw new Error('model unavailable');
             if (specialist.id === 'product_scope') {
-                return JSON.stringify({ coverageSummary: 'No material scope findings.', resolvedAreas: ['Scope'], findings: [] });
+                return JSON.stringify({
+                    coverageSummary: 'No material scope findings.', resolvedAreas: ['Scope'],
+                    coverageChecks: validCoverageChecks(locator), findings: [],
+                });
             }
             return validResponse(locator);
         };

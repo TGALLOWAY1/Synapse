@@ -1353,6 +1353,10 @@ export type ReviewRun = {
     };
     sourceManifest: PersistedReviewContextManifest;
     selectedSpecialists: ReviewSpecialistSelection[];
+    /** Deterministic project-specific coverage required when the run started.
+     * A user may run a narrower exploratory review, but it cannot satisfy
+     * build readiness by omitting an applicable specialist boundary. */
+    requiredSpecialistIds?: string[];
     status: ReviewRunStatus;
     synthesisStatus: ReviewSynthesisStatus;
     previousReviewId?: string;
@@ -1387,6 +1391,13 @@ export type SpecialistRun = {
     findingIds: string[];
     coverageSummary?: string;
     resolvedAreas?: string[];
+    /** Structured, evidence-grounded no-finding/coverage conclusions. Freeform
+     * summaries alone never satisfy build-readiness challenge coverage. */
+    coverageChecks?: Array<{
+        area: 'problem' | 'primary_user' | 'intended_outcome' | 'first_release_scope' | 'material_assumptions' | 'specialist_boundary';
+        conclusion: string;
+        evidence: ReviewEvidenceRef[];
+    }>;
     validation?: {
         valid: boolean;
         unsupportedEvidenceIds: string[];

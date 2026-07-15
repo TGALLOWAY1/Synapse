@@ -360,19 +360,46 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         const state = useProjectStore.getState();
         const run = (state.specialistRuns[projectId] ?? []).find(item => item.reviewId === reviewId && item.specialistId === result.specialistId);
         if (!run) return;
+        const manifest = manifests.current.get(reviewId);
+        const coverageChecks = result.coverageChecks?.map(check => ({
+            area: check.area,
+            conclusion: check.conclusion,
+            evidence: check.evidence.map(item => {
+                const locator = manifest?.locators.find(candidate => candidate.id === item.locatorId);
+                const source = manifest?.sources.find(candidate => candidate.sourceKey === item.sourceKey);
+                return {
+                    id: item.locatorId || `${run.id}:coverage:${hashReviewValue(item)}`,
+                    sourceType: source?.sourceType ?? 'spine',
+                    sourceId: source?.artifactId ?? source?.spineVersionId ?? manifest?.spineVersionId ?? '',
+                    sourceVersionId: source?.artifactVersionId ?? source?.spineVersionId ?? manifest?.spineVersionId ?? '',
+                    artifactSubtype: source?.artifactSubtype,
+                    locator: { section: locator?.label, jsonPath: item.path },
+                    excerpt: item.excerpt,
+                    excerptHash: item.excerptHash,
+                    verified: item.verified,
+                } satisfies ReviewEvidenceRef;
+            }),
+        }));
+        const coverageEvidence = result.coverageChecks?.flatMap(check => check.evidence) ?? [];
         for (const finding of result.findings) persistFinding(reviewId, run.id, finding);
         state.updateSpecialistRun(projectId, run.id, {
             status: result.status === 'complete' ? 'complete' : result.status,
             attemptCount: result.attempts,
             completedAt: Date.now(),
             validation: {
-                valid: result.findings.every(finding => finding.grounded),
-                unsupportedEvidenceIds: result.findings.flatMap(finding => finding.evidence.filter(item => !item.verified).map(item => item.locatorId)),
+                valid: result.findings.every(finding => finding.grounded)
+                    && coverageEvidence.length > 0
+                    && coverageEvidence.every(item => item.verified),
+                unsupportedEvidenceIds: [
+                    ...result.findings.flatMap(finding => finding.evidence.filter(item => !item.verified).map(item => item.locatorId)),
+                    ...coverageEvidence.filter(item => !item.verified).map(item => item.locatorId),
+                ],
                 warnings: result.findings.flatMap(finding => finding.validationWarnings),
             },
             error: result.error ? { message: result.error } : undefined,
             coverageSummary: result.coverageSummary,
             resolvedAreas: result.resolvedAreas,
+            coverageChecks,
         });
     };
 
@@ -427,6 +454,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             scope: { kind: focus ? 'focus' : 'project', focus },
             sourceManifest: toPersistedReviewContextManifest(currentManifest),
             selectedSpecialists: selected.map(id => ({ specialistId: id, label: SPECIALIST_REGISTRY[id].label, reason: panel.find(option => option.id === id)?.selectionReason ?? 'Selected by the user.' })),
+            requiredSpecialistIds: panel.filter(option => option.recommended).map(option => option.id),
             modelPolicyVersion: 1,
         });
         manifests.current.set(reviewId, currentManifest);

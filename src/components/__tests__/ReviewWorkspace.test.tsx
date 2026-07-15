@@ -92,6 +92,18 @@ describe('ReviewWorkspace', () => {
         });
     });
 
+    it('labels an intentionally narrowed specialist review as exploratory rather than readiness-complete', () => {
+        const onStartReview = vi.fn();
+        render(<ReviewWorkspace {...baseProps({ onStartReview })} />);
+
+        fireEvent.click(screen.getByRole('checkbox', { name: /Security & Privacy/i }));
+        expect(screen.getByText(/will not satisfy build-readiness coverage/i)).toBeInTheDocument();
+        expect(screen.getByText(/Restore Security & Privacy/i)).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Start specialist review' }));
+        expect(onStartReview).toHaveBeenCalledWith({ specialistIds: ['product'], focus: undefined });
+    });
+
     it('shows durable specialist progress and retries only the failed specialist', () => {
         const run = completeRun({
             status: 'running',

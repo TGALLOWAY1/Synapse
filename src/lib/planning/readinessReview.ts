@@ -130,21 +130,34 @@ function expectedChallengeContextRefs(run: ReviewRun): string[] {
 
 function isSubstantiveChallenge(run: ReviewRun, specialistRuns: SpecialistRun[]): boolean {
     if (run.scope.kind !== 'project' || run.status !== 'complete' || run.synthesisStatus !== 'complete') return false;
-    if (!run.selectedSpecialists.some(item => item.specialistId === 'product_scope')) return false;
-    if (run.selectedSpecialists.length === 0) return false;
+    const requiredSpecialistIds = run.requiredSpecialistIds ?? [];
+    if (!requiredSpecialistIds.includes('product_scope') || requiredSpecialistIds.length === 0) return false;
+    const selectedIds = new Set(run.selectedSpecialists.map(item => item.specialistId));
+    if (requiredSpecialistIds.some(id => !selectedIds.has(id))) return false;
     const expectedContextRefs = expectedChallengeContextRefs(run);
+    const expectedSourceVersionIds = new Set([
+        run.sourceManifest.spineVersionId,
+        ...run.sourceManifest.artifactRefs.map(ref => ref.artifactVersionId),
+    ]);
     return run.selectedSpecialists.every(selection => {
         const specialist = latest(specialistRuns.filter(item => (
             item.reviewId === run.id && item.specialistId === selection.specialistId
         )));
-        const coverageSummary = specialist?.coverageSummary?.trim() ?? '';
         const reviewedContextRefs = new Set(specialist?.contextRefIds ?? []);
         const hasExactSourceCoverage = expectedContextRefs.every(ref => reviewedContextRefs.has(ref));
-        const hasAuditableCoverage = (specialist?.findingIds.length ?? 0) > 0
-            || (specialist?.resolvedAreas ?? []).some(area => area.trim().length >= 12);
+        const requiredAreas = selection.specialistId === 'product_scope'
+            ? ['problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions']
+            : ['specialist_boundary'];
+        const hasAuditableCoverage = requiredAreas.every(area => specialist?.coverageChecks?.some(check => (
+            check.area === area
+            && check.conclusion.trim().length >= 20
+            && check.evidence.length > 0
+            && check.evidence.every(evidence => (
+                evidence.verified && expectedSourceVersionIds.has(evidence.sourceVersionId)
+            ))
+        )));
         return specialist?.status === 'complete'
             && specialist.validation?.valid === true
-            && coverageSummary.length >= 24
             && hasExactSourceCoverage
             && hasAuditableCoverage;
     });
@@ -454,7 +467,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         id: 'challenge', label: 'Current plan challenged', status: !challenge.substantive ? 'not_started' : challengeBlocking ? 'attention' : 'met',
         blocking: challengeBlocking, explanation: challengeExplanation,
         evidence: [
-            makeEvidence('challenge', challengeBlocking ? 'incomplete' : 'direct', challengeExplanation, 'challenge', challenge.substantive?.id ?? challenge.shallow?.id ?? 'missing', input.spine.versionId, hashes.challenge),
+            makeEvidence('challenge', challengeBlocking ? 'incomplete' : 'inferred', challengeExplanation, 'challenge', challenge.substantive?.id ?? challenge.shallow?.id ?? 'missing', input.spine.versionId, hashes.challenge),
             ...challenge.addressedIssues.map(issue => {
                 const disposition = issue.dispositions.at(-1);
                 const reason = disposition?.reason?.trim();

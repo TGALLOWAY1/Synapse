@@ -1,13 +1,16 @@
 import { describe, expect, it } from 'vitest';
 import { clusterGroundedFindings, validateSpecialistFindings } from '../normalize';
 import { parseSpecialistOutput, SpecialistOutputValidationError } from '../specialistOutput';
-import { makeManifest, validResponse } from './reviewTestUtils';
+import { makeManifest, validCoverageChecks, validResponse } from './reviewTestUtils';
 
 describe('specialist output and clustering', () => {
     it('accepts a strong plan with zero findings', () => {
+        const manifest = makeManifest();
+        const locator = manifest.locators.find(item => item.path === 'prd.risks')!;
         const output = parseSpecialistOutput(JSON.stringify({
             coverageSummary: 'The reviewed area is sufficiently resolved.',
             resolvedAreas: ['Error recovery is explicit.'],
+            coverageChecks: validCoverageChecks(locator),
             findings: [],
         }));
         expect(output.findings).toEqual([]);

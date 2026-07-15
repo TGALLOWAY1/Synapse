@@ -56,10 +56,25 @@ export const makeManifest = (overrides: {
     safetyBoundaries: ['Do not provide autonomous diagnosis.'],
 });
 
+export const validCoverageChecks = (locator: ReturnType<typeof makeManifest>['locators'][number]) => [
+    'problem', 'primary_user', 'intended_outcome', 'first_release_scope', 'material_assumptions', 'specialist_boundary',
+].map(area => ({
+    area,
+    conclusion: `The ${area.replaceAll('_', ' ')} was explicitly evaluated against the cited plan context.`,
+    evidence: [{
+        sourceKey: locator.sourceKey,
+        locatorId: locator.id,
+        path: locator.path,
+        excerpt: locator.excerpt,
+        excerptHash: locator.excerptHash,
+    }],
+}));
+
 export function validResponse(locator: ReturnType<typeof makeManifest>['locators'][number], overrides: Record<string, unknown> = {}): string {
     return JSON.stringify({
         coverageSummary: 'Reviewed the supplied plan within the specialist boundary.',
         resolvedAreas: [],
+        coverageChecks: validCoverageChecks(locator),
         findings: [{
             title: 'Summary accuracy lacks an evaluation decision',
             observation: 'The plan identifies inaccurate summaries as a risk but provides no evaluation threshold.',
