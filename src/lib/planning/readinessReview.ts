@@ -97,8 +97,7 @@ const isMaterial = (record: PlanningRecord): boolean =>
 const isAcceptedUnvalidatedAssumption = (record: PlanningRecord): boolean =>
     record.type === 'assumption'
     && projectDecision(record).status === 'confirmed'
-    && isMaterial(record)
-    && !record.evidence.some(item => item.verified);
+    && isMaterial(record);
 
 const isAcceptedMaterialRisk = (record: PlanningRecord): boolean =>
     record.type === 'risk'
@@ -122,22 +121,52 @@ function exactChallengeRuns(input: ReadinessReviewInput, spineContentHash: strin
     ));
 }
 
+function expectedChallengeContextRefs(run: ReviewRun): string[] {
+    return [
+        `spine:${run.sourceManifest.spineVersionId}`,
+        ...run.sourceManifest.artifactRefs.map(ref => `artifact:${ref.artifactVersionId}`),
+    ];
+}
+
 function isSubstantiveChallenge(run: ReviewRun, specialistRuns: SpecialistRun[]): boolean {
     if (run.scope.kind !== 'project' || run.status !== 'complete' || run.synthesisStatus !== 'complete') return false;
     if (!run.selectedSpecialists.some(item => item.specialistId === 'product_scope')) return false;
     if (run.selectedSpecialists.length === 0) return false;
+    const expectedContextRefs = expectedChallengeContextRefs(run);
     return run.selectedSpecialists.every(selection => {
         const specialist = latest(specialistRuns.filter(item => (
             item.reviewId === run.id && item.specialistId === selection.specialistId
         )));
         const coverageSummary = specialist?.coverageSummary?.trim() ?? '';
+        const reviewedContextRefs = new Set(specialist?.contextRefIds ?? []);
+        const hasExactSourceCoverage = expectedContextRefs.every(ref => reviewedContextRefs.has(ref));
         const hasAuditableCoverage = (specialist?.findingIds.length ?? 0) > 0
             || (specialist?.resolvedAreas ?? []).some(area => area.trim().length >= 12);
         return specialist?.status === 'complete'
             && specialist.validation?.valid === true
             && coverageSummary.length >= 24
+            && hasExactSourceCoverage
             && hasAuditableCoverage;
     });
+}
+
+const validDispositionActionsByStatus: Partial<Record<ReviewIssue['status'], Set<ReviewIssue['dispositions'][number]['action']>>> = {
+    acted: new Set(['propose_record', 'link_existing', 'challenge_existing', 'request_revision']),
+    dismissed: new Set(['dismiss']),
+    already_addressed: new Set(['already_addressed']),
+};
+
+function hasValidIssueDisposition(issue: ReviewIssue, run: ReviewRun): boolean {
+    const allowedActions = validDispositionActionsByStatus[issue.status];
+    if (!allowedActions) return false;
+    const disposition = Array.isArray(issue.dispositions) ? issue.dispositions.at(-1) : undefined;
+    if (!disposition
+        || disposition.actor !== 'user'
+        || !allowedActions.has(disposition.action)
+        || disposition.contextSignature !== run.sourceManifest.contextSignature) return false;
+    if ((issue.status === 'dismissed' || issue.status === 'already_addressed')
+        && (disposition.reason?.trim().length ?? 0) < 12) return false;
+    return true;
 }
 
 export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
@@ -147,13 +176,21 @@ export function deriveReadinessChallengeState(input: ReadinessReviewInput) {
     const substantive = latest(substantiveRuns);
     const shallow = latest(exactRuns);
     const substantiveRunIds = new Set(substantiveRuns.map(run => run.id));
-    const applicableIssues = input.reviewIssues.filter(issue => substantiveRunIds.has(issue.reviewId));
+    const substantiveRunsById = new Map(substantiveRuns.map(run => [run.id, run]));
+    const applicableIssues = input.reviewIssues.filter(issue => (
+        issue.projectId === input.projectId && substantiveRunIds.has(issue.reviewId)
+    ));
     const blockingIssues = substantive
         ? applicableIssues.filter(issue => {
-            if ((issue.status === 'dismissed' || issue.status === 'already_addressed')
-                && (issue.dispositions.at(-1)?.reason?.trim().length ?? 0) < 12) return true;
+            if (issue.implementationImpact === 'deferrable') return false;
+            const run = substantiveRunsById.get(issue.reviewId);
+            if (!run) return true;
+            // Open/deferred issues and bare legacy supersession remain
+            // unresolved. Every state that claims an issue was handled must
+            // carry an exact-context, runtime-validated user disposition.
+            if (!hasValidIssueDisposition(issue, run)) return true;
             if (reviewIssueNeedsResolutionBeforeBuild(issue, input.spine.versionId)) return true;
-            if (issue.implementationImpact === 'deferrable' || issue.status !== 'acted') return false;
+            if (issue.status !== 'acted') return false;
             // A dangling or still-open linked record is not resolution. Fail
             // closed instead of allowing a relationship id to manufacture it.
             return issue.relatedPlanningRecordIds.some(id => {
@@ -373,7 +410,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
             concerns.push(makeConcern({
                 criterionId: group.id, kind, title: record.title,
                 consequence: isAcceptedUnvalidatedAssumption(record)
-                    ? 'The user accepted this material assumption, but no verified evidence validates it.'
+                    ? 'The user accepted this material assumption, but grounded project excerpts do not validate the real-world premise.'
                     : isAcceptedMaterialRisk(record)
                         ? 'The user acknowledged this material risk, but the planning record does not prove mitigation or resolution.'
                         : record.statement,
@@ -442,7 +479,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         criterionId: 'challenge', kind: 'challenge', title: finding.title, consequence: finding.summary,
         blocking: true, evidenceQuality: 'incomplete', sourceType: 'challenge', sourceId: finding.id,
         sourceVersionId: input.spine.versionId,
-        actionTarget: { kind: 'challenge', reviewId: finding.reviewId },
+        actionTarget: { kind: 'challenge', reviewId: finding.reviewId, findingId: finding.id },
     }));
 
     const blockingOutputs = input.outputAlignment.outputs.filter(output => output.blocksBuildReadiness);

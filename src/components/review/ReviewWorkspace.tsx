@@ -66,6 +66,24 @@ export type ReviewIssueView = {
     disagreement?: boolean;
     dispositionNote?: string;
     planningRecordId?: string;
+    sourceFindingIds?: string[];
+};
+
+export type ReviewUntriagedFindingView = {
+    id: string;
+    title: string;
+    observation: string;
+    consequence: string;
+    recommendedAction: string;
+    severity: 'blocking' | 'important' | 'advisory';
+    confidence: 'high' | 'medium' | 'low';
+    specialistName: string;
+    affectedSources: string[];
+    evidence: ReviewEvidenceItem[];
+    /** False when a specialist run references a finding whose persisted detail
+     * is unavailable. The exact gap remains visible, but must be re-reviewed
+     * rather than converted into evidence-free durable issue state. */
+    canTriage?: boolean;
 };
 
 export type ReviewRunView = {
@@ -76,6 +94,7 @@ export type ReviewRunView = {
     status: 'draft' | 'running' | 'synthesizing' | 'validating' | 'complete' | 'partial' | 'cancelled' | 'interrupted' | 'failed';
     specialists: ReviewSpecialistProgress[];
     issues: ReviewIssueView[];
+    untriagedFindings?: ReviewUntriagedFindingView[];
     focus?: string;
     contextChanged?: boolean;
     error?: string;
@@ -107,6 +126,7 @@ export interface ReviewWorkspaceProps {
     initialTab?: 'review' | 'decisions' | 'history';
     initialDecisionId?: string;
     initialIssueId?: string;
+    initialFindingId?: string;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
     onSelectRun: (runId: string) => void;
@@ -114,6 +134,7 @@ export interface ReviewWorkspaceProps {
     onRetrySpecialist: (runId: string, specialistId: string) => void;
     onRetrySynthesis: (runId: string) => void;
     onActOnIssue: (runId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => void;
+    onTriageFinding: (runId: string, findingId: string) => void;
     onConfirmPlanningRecord: (recordId: string) => void;
     onReopenPlanningRecord: (recordId: string) => void;
     onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
@@ -390,6 +411,57 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
 }
 
 const reviewIssueAnchorId = (issueId: string): string => `review-issue-${issueId}`;
+const reviewFindingAnchorId = (findingId: string): string => `review-finding-${findingId}`;
+
+function UntriagedFindingCard({
+    finding,
+    onTriage,
+    onReviewAgain,
+    readOnly,
+    highlighted,
+}: {
+    finding: ReviewUntriagedFindingView;
+    onTriage: () => void;
+    onReviewAgain: () => void;
+    readOnly?: boolean;
+    highlighted?: boolean;
+}) {
+    return (
+        <article
+            id={reviewFindingAnchorId(finding.id)}
+            tabIndex={-1}
+            className={`scroll-mt-4 rounded-2xl border border-amber-300 bg-amber-50/40 p-4 shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 sm:p-5 ${highlighted ? 'ring-2 ring-indigo-300' : ''}`}
+        >
+            <div className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
+                <div className="min-w-0 flex-1">
+                    <div className="flex flex-wrap items-center gap-2 text-xs font-semibold">
+                        <span className="text-amber-800">Needs challenge triage</span>
+                        {finding.severity === 'blocking' && <span className="text-red-700">Resolve before building</span>}
+                    </div>
+                    <h3 className="mt-2 text-base font-bold leading-6 text-neutral-950">{finding.title}</h3>
+                    <p className="mt-2 text-sm leading-6 text-neutral-700">{finding.observation}</p>
+                    <p className="mt-2 text-sm leading-6 text-neutral-600"><span className="font-semibold text-neutral-800">Why it matters:</span> {finding.consequence}</p>
+                    <div className="mt-3 rounded-lg border border-amber-200 bg-white p-3">
+                        <p className="text-xs font-bold uppercase tracking-wider text-neutral-500">Recommended next action</p>
+                        <p className="mt-1 text-sm leading-6 text-neutral-700">{finding.recommendedAction}</p>
+                    </div>
+                    <p className="mt-3 text-xs text-neutral-500">
+                        Raised by {finding.specialistName}{finding.affectedSources.length ? ` · ${finding.affectedSources.join(' · ')}` : ''}
+                    </p>
+                </div>
+                {!readOnly && (
+                    <button
+                        type="button"
+                        onClick={finding.canTriage === false ? onReviewAgain : onTriage}
+                        className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700"
+                    >
+                        {finding.canTriage === false ? 'Review current plan again' : 'Add to review queue'} <ArrowRight size={14} />
+                    </button>
+                )}
+            </div>
+        </article>
+    );
+}
 
 function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: ReviewIssueView; onResolve: () => void; readOnly?: boolean; highlighted?: boolean }) {
     const [expanded, setExpanded] = useState(issue.severity === 'blocking' || highlighted);
@@ -460,19 +532,23 @@ function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: Revie
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCoverage, readOnly, initialIssueId }: {
+function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewReview, onRetryCoverage, readOnly, initialIssueId, initialFindingId }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
+    onTriageFinding: ReviewWorkspaceProps['onTriageFinding'];
     onNewReview: () => void;
     onRetryCoverage: () => void;
     readOnly?: boolean;
     initialIssueId?: string;
+    initialFindingId?: string;
 }) {
     const [statusFilter, setStatusFilter] = useState<'attention' | 'all' | 'closed'>('attention');
     const [actionIssue, setActionIssue] = useState<ReviewIssueView | null>(null);
+    const untriagedFindings = useMemo(() => run.untriagedFindings ?? [], [run.untriagedFindings]);
     const open = run.issues.filter(i => i.status === 'open');
-    const blocking = open.filter(i => i.severity === 'blocking').length;
+    const blocking = open.filter(i => i.severity === 'blocking').length
+        + untriagedFindings.filter(finding => finding.severity === 'blocking').length;
     const deferred = run.issues.filter(i => i.status === 'deferred').length;
     const visible = run.issues.filter(i => statusFilter === 'all' || (statusFilter === 'attention' ? i.status === 'open' || i.status === 'linked' : i.status === 'dismissed' || i.status === 'addressed' || i.status === 'deferred'));
     const failed = run.specialists.filter(s => s.status === 'failed').length;
@@ -481,24 +557,41 @@ function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCovera
         const target = initialIssueId
             ? run.issues.find(issue => issue.id === initialIssueId)
             : undefined;
-        if (!target) return;
+        const targetFinding = initialFindingId
+            ? untriagedFindings.find(finding => finding.id === initialFindingId)
+            : undefined;
+        const representedIssue = initialFindingId
+            ? run.issues.find(issue => issue.sourceFindingIds?.includes(initialFindingId))
+            : undefined;
+        if (targetFinding) {
+            const frame = window.requestAnimationFrame(() => {
+                const element = document.getElementById(reviewFindingAnchorId(targetFinding.id));
+                if (typeof element?.scrollIntoView === 'function') {
+                    element.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                }
+                element?.focus({ preventScroll: true });
+            });
+            return () => window.cancelAnimationFrame(frame);
+        }
+        const exactIssue = target ?? representedIssue;
+        if (!exactIssue) return;
         const targetVisible = statusFilter === 'all'
             || (statusFilter === 'attention'
-                ? target.status === 'open' || target.status === 'linked'
-                : target.status === 'dismissed' || target.status === 'addressed' || target.status === 'deferred');
+                ? exactIssue.status === 'open' || exactIssue.status === 'linked'
+                : exactIssue.status === 'dismissed' || exactIssue.status === 'addressed' || exactIssue.status === 'deferred');
         const frame = window.requestAnimationFrame(() => {
             if (!targetVisible) {
                 setStatusFilter('all');
                 return;
             }
-            const element = document.getElementById(reviewIssueAnchorId(target.id));
+            const element = document.getElementById(reviewIssueAnchorId(exactIssue.id));
             if (typeof element?.scrollIntoView === 'function') {
                 element.scrollIntoView({ behavior: 'smooth', block: 'center' });
             }
             element?.focus({ preventScroll: true });
         });
         return () => window.cancelAnimationFrame(frame);
-    }, [initialIssueId, run.issues, statusFilter]);
+    }, [initialFindingId, initialIssueId, run.issues, statusFilter, untriagedFindings]);
 
     return (
         <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
@@ -526,7 +619,7 @@ function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCovera
                 <div className="space-y-2">
                     {!readOnly && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
                 <div className="grid grid-cols-3 gap-2 text-center sm:flex">
-                    <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{open.length}</div><div className="text-[11px] text-neutral-500">Needs attention</div></div>
+                    <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{open.length + untriagedFindings.length}</div><div className="text-[11px] text-neutral-500">Needs attention</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-amber-700">{blocking}</div><div className="text-[11px] text-neutral-500">Build blockers</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{deferred}</div><div className="text-[11px] text-neutral-500">Deferred</div></div>
                 </div>
@@ -538,13 +631,23 @@ function ReviewResults({ run, planningRecords, onAct, onNewReview, onRetryCovera
                 ))}
             </div>
             <div className="mt-5 space-y-4">
-                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} highlighted={issue.id === initialIssueId} readOnly={readOnly} onResolve={() => setActionIssue(issue)} />) : (
+                {statusFilter !== 'closed' && untriagedFindings.map(finding => (
+                    <UntriagedFindingCard
+                        key={finding.id}
+                        finding={finding}
+                        highlighted={finding.id === initialFindingId}
+                        readOnly={readOnly}
+                        onTriage={() => onTriageFinding(run.id, finding.id)}
+                        onReviewAgain={onNewReview}
+                    />
+                ))}
+                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} highlighted={issue.id === initialIssueId || !!initialFindingId && issue.sourceFindingIds?.includes(initialFindingId)} readOnly={readOnly} onResolve={() => setActionIssue(issue)} />) : untriagedFindings.length === 0 || statusFilter === 'closed' ? (
                     <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-5 py-12 text-center">
                         <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
                         <h2 className="mt-3 font-semibold text-neutral-900">Nothing in this view</h2>
                         <p className="mt-1 text-sm text-neutral-500">A specialist is allowed to report that the reviewed area appears sufficiently resolved.</p>
                     </div>
-                )}
+                ) : null}
             </div>
             {actionIssue && <IssueActionDialog issue={actionIssue} planningRecords={planningRecords} onClose={() => setActionIssue(null)} onSubmit={(action, note, recordId) => { onAct(run.id, actionIssue.id, action, note, recordId); setActionIssue(null); }} />}
         </div>
@@ -612,7 +715,17 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                 ) : isInProgress ? (
                     <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
                 ) : activeRun.status === 'complete' || activeRun.status === 'partial' ? (
-                    <ReviewResults run={activeRun} planningRecords={props.planningRecords} onAct={props.onActOnIssue} readOnly={props.readOnly} initialIssueId={props.initialIssueId} onNewReview={() => setStartingNewReview(true)} onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)} />
+                    <ReviewResults
+                        run={activeRun}
+                        planningRecords={props.planningRecords}
+                        onAct={props.onActOnIssue}
+                        onTriageFinding={props.onTriageFinding}
+                        readOnly={props.readOnly}
+                        initialIssueId={props.initialIssueId}
+                        initialFindingId={props.initialFindingId}
+                        onNewReview={() => setStartingNewReview(true)}
+                        onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)}
+                    />
                 ) : (
                     <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={props.onStartReview} />
                 )}

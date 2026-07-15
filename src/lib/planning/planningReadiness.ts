@@ -69,7 +69,10 @@ export function planningRecordRequiresResolution(
     const legacyWithoutVerdictProvenance = record.schemaVersion === undefined
         && !(record.events ?? []).some(event => event.actor === 'user');
     if (legacyWithoutVerdictProvenance && material(record)) return true;
-    if (record.sourceState === 'changed' || record.sourceState === 'missing') return true;
+    // Provenance drift is only a build blocker when the record itself is
+    // consequential. Low-impact uncertainty stays visible without becoming a
+    // procedural gate merely because its source moved or is unavailable.
+    if (record.sourceState === 'changed' || record.sourceState === 'missing') return material(record);
     if (state.status === 'open' || state.status === 'proposed') {
         if (record.type === 'decision' || record.type === 'open_question' || record.type === 'conflict') return true;
         if (record.type === 'risk') return record.materiality !== 'low';
@@ -79,8 +82,11 @@ export function planningRecordRequiresResolution(
         if (record.type === 'conflict') return true;
         if (['decision', 'open_question', 'risk', 'assumption'].includes(record.type)) return material(record);
     }
-    if (record.type === 'assumption' && state.status === 'confirmed'
-        && material(record) && !record.evidence.some(item => item.verified)) return true;
+    // Evidence references currently prove only that an excerpt is grounded in
+    // durable project content. They do not validate the real-world premise.
+    // Until an explicit validation provenance exists, accepting a material
+    // assumption must remain accepted-but-unvalidated.
+    if (record.type === 'assumption' && state.status === 'confirmed' && material(record)) return true;
     if (record.type === 'risk' && state.status === 'confirmed' && material(record)) return true;
     return false;
 }
@@ -143,7 +149,9 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     const assumptions = unresolved.filter(({ record }) => record.type === 'assumption');
     const materialAssumptions = needsResolution.filter(({ record }) => record.type === 'assumption');
     const materialRisks = needsResolution.filter(({ record }) => record.type === 'risk');
-    const changedSources = input.planningRecords.filter(record => record.sourceState === 'changed' || record.sourceState === 'missing');
+    const changedSources = input.planningRecords.filter(record => (
+        (record.sourceState === 'changed' || record.sourceState === 'missing') && material(record)
+    ));
     const alignmentRecords = input.planningRecords.filter(planningRecordNeedsAlignment);
     const alignmentRecord = alignmentRecords[0];
     const nextRecord = conflicts[0]?.record ?? keyDecisions[0]?.record ?? materialRisks[0]?.record ?? materialAssumptions[0]?.record;

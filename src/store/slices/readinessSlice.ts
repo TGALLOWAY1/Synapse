@@ -16,6 +16,7 @@ import {
     readinessAuthorizationMatchesReview,
     readinessEventMatchesReview,
     readinessReviewSnapshotHash,
+    sealReadinessCommitmentEvent,
 } from '../../lib/planning/readinessCommitment';
 
 export type ReadinessSlice = Pick<ProjectState,
@@ -211,20 +212,23 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'containment_required' };
                 return state;
             }
-            const event: Extract<ReadinessCommitmentEvent, { type: 'commit_authorized' }> = {
-                id: uuidv4(), projectId, reviewId, actor: 'user', type: 'commit_authorized', at: Date.now(),
+            const events = state.readinessCommitmentEvents[projectId] ?? [];
+            const event = sealReadinessCommitmentEvent({
+                eventSchemaVersion: 1,
+                id: uuidv4(), projectId, reviewId, actor: 'user', type: 'commit_authorized',
+                at: Math.max(Date.now(), (events.at(-1)?.at ?? 0) + 1),
                 spineVersionId: review.spineVersionId,
                 snapshotHash: readinessReviewSnapshotHash(review), integrityHash: review.integrityHash,
                 aggregateHash: review.snapshotHashes.aggregate,
                 acceptedConcernIds,
                 rationale: input.rationale?.trim() ?? '',
                 ...(input.containmentPlan?.trim() && { containmentPlan: input.containmentPlan.trim() }),
-            };
+            }) as Extract<ReadinessCommitmentEvent, { type: 'commit_authorized' }>;
             result = { status: 'authorized', authorizationEventId: event.id };
             return {
                 readinessCommitmentEvents: {
                     ...state.readinessCommitmentEvents,
-                    [projectId]: [...(state.readinessCommitmentEvents[projectId] ?? []), event],
+                    [projectId]: [...events, event],
                 },
             };
         });
@@ -274,13 +278,15 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'already_committed' };
                 return state;
             }
-            const event: Extract<ReadinessCommitmentEvent, { type: 'plan_committed' }> = {
-                id: uuidv4(), projectId, reviewId, actor: 'user', type: 'plan_committed', at: Date.now(),
+            const event = sealReadinessCommitmentEvent({
+                eventSchemaVersion: 1,
+                id: uuidv4(), projectId, reviewId, actor: 'user', type: 'plan_committed',
+                at: Math.max(Date.now(), (events.at(-1)?.at ?? 0) + 1),
                 spineVersionId: review.spineVersionId,
                 snapshotHash: readinessReviewSnapshotHash(review), integrityHash: review.integrityHash,
                 aggregateHash: review.snapshotHashes.aggregate,
                 authorizationEventId,
-            };
+            }) as Extract<ReadinessCommitmentEvent, { type: 'plan_committed' }>;
             result = { status: 'committed', commitmentEventId: event.id };
             return {
                 readinessCommitmentEvents: {
@@ -332,14 +338,16 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 result = { status: 'rejected', reason: 'tampered' };
                 return state;
             }
-            const event: Extract<ReadinessCommitmentEvent, { type: 'plan_reopened' }> = {
-                id: uuidv4(), projectId, reviewId: commitment.reviewId, actor: 'user', type: 'plan_reopened', at: Date.now(),
+            const event = sealReadinessCommitmentEvent({
+                eventSchemaVersion: 1,
+                id: uuidv4(), projectId, reviewId: commitment.reviewId, actor: 'user', type: 'plan_reopened',
+                at: Math.max(Date.now(), (events.at(-1)?.at ?? 0) + 1),
                 spineVersionId: commitment.spineVersionId,
                 snapshotHash: commitment.snapshotHash, integrityHash: commitment.integrityHash,
                 aggregateHash: commitment.aggregateHash,
                 priorCommitEventId: commitment.id,
                 ...(reason?.trim() && { reason: reason.trim() }),
-            };
+            }) as Extract<ReadinessCommitmentEvent, { type: 'plan_reopened' }>;
             result = { status: 'reopened', reopenEventId: event.id };
             return {
                 readinessCommitmentEvents: {

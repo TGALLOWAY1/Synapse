@@ -57,6 +57,7 @@ interface Props {
     initialRecordId?: string;
     initialReviewId?: string;
     initialIssueId?: string;
+    initialFindingId?: string;
 }
 
 const activeControllers = new Map<string, AbortController>();
@@ -99,7 +100,7 @@ const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, ReviewIssueDisposition['a
 
 const dispositionForAction = (action: ReviewIssueAction): ReviewIssueDisposition['action'] => DISPOSITION_BY_ACTION[action];
 
-export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId }: Props) {
+export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
     const spines = useProjectStore(state => state.spineVersions[projectId] ?? []);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? []);
@@ -520,6 +521,33 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         });
     };
 
+    const handleTriageFinding = (reviewId: string, findingId: string) => {
+        if (!canWrite) return;
+        const state = useProjectStore.getState();
+        const finding = (state.reviewFindings[projectId] ?? []).find(item => (
+            item.id === findingId && item.reviewId === reviewId
+        ));
+        if (!finding) return;
+        const existing = (state.reviewIssues[projectId] ?? []).find(issue => (
+            issue.reviewId === reviewId && issue.findingIds.includes(findingId)
+        ));
+        if (existing) return;
+        state.addReviewIssue(projectId, {
+            id: `${reviewId}:triage:${hashReviewValue(findingId)}`,
+            reviewId,
+            title: finding.title,
+            summary: finding.observation,
+            kind: finding.kind,
+            findingIds: [finding.id],
+            specialistIds: [finding.specialistId],
+            relationship: 'standalone',
+            severity: finding.severity,
+            confidence: finding.confidence,
+            implementationImpact: finding.implementationImpact,
+            relatedPlanningRecordIds: [],
+        });
+    };
+
     const issueViews = (reviewId: string): ReviewIssueView[] => issues.filter(issue => issue.reviewId === reviewId).map(issue => {
         const sourceFindings = findings.filter(finding => finding.reviewId === reviewId && issue.findingIds.includes(finding.id));
         const latestDisposition = issue.dispositions.at(-1);
@@ -555,6 +583,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             disagreement: issue.relationship === 'disagreement',
             dispositionNote: latestDisposition?.reason,
             planningRecordId: issue.relatedPlanningRecordIds.at(-1),
+            sourceFindingIds: issue.findingIds,
         };
     });
 
@@ -578,6 +607,59 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             resolvedAreas: item.resolvedAreas,
         })),
         issues: issueViews(run.id),
+        untriagedFindings: [...new Set(specialistRuns
+            .filter(specialist => specialist.reviewId === run.id && specialist.status === 'complete')
+            .flatMap(specialist => specialist.findingIds))]
+            .filter(findingId => !issues.some(issue => (
+                issue.reviewId === run.id && issue.findingIds.includes(findingId)
+            )))
+            .map(findingId => {
+                const finding = findings.find(candidate => candidate.id === findingId && candidate.reviewId === run.id);
+                if (!finding) {
+                    const specialist = specialistRuns.find(candidate => (
+                        candidate.reviewId === run.id && candidate.findingIds.includes(findingId)
+                    ));
+                    const specialistName = specialist
+                        ? SPECIALIST_REGISTRY[specialist.specialistId as ReviewSpecialistId]?.label ?? specialist.specialistId
+                        : 'Specialist review';
+                    return {
+                        id: findingId,
+                        title: 'Challenge finding details are unavailable',
+                        observation: 'The completed specialist run references this finding, but its durable finding record is missing.',
+                        consequence: 'Synapse cannot verify or triage the original reasoning without re-running the review.',
+                        recommendedAction: 'Review the current plan again to restore auditable finding detail.',
+                        severity: 'blocking' as const,
+                        confidence: 'low' as const,
+                        specialistName,
+                        affectedSources: [],
+                        evidence: [],
+                        canTriage: false,
+                    };
+                }
+                return {
+                    id: finding.id,
+                    title: finding.title,
+                    observation: finding.observation,
+                    consequence: finding.consequence ?? finding.whyItMatters,
+                    recommendedAction: finding.recommendedAction ?? 'Review this finding and decide how it should affect the plan.',
+                    severity: finding.implementationImpact === 'blocker'
+                        ? 'blocking' as const
+                        : finding.severity === 'high' || finding.severity === 'critical'
+                            ? 'important' as const
+                            : 'advisory' as const,
+                    confidence: finding.confidence,
+                    specialistName: SPECIALIST_REGISTRY[finding.specialistId as ReviewSpecialistId]?.label ?? finding.specialistId,
+                    affectedSources: [...new Set(finding.evidence.map(evidence => (
+                        evidence.locator?.section ?? evidence.artifactSubtype ?? 'PRD'
+                    )))],
+                    evidence: finding.evidence.filter(evidence => evidence.verified).map(evidence => ({
+                        id: evidence.id,
+                        sourceLabel: evidence.artifactSubtype?.replaceAll('_', ' ') ?? 'Product requirements',
+                        locator: evidence.locator?.section ?? evidence.locator?.jsonPath,
+                        excerpt: evidence.excerpt ?? '',
+                    })),
+                };
+            }),
     }));
 
     const planningViews: PlanningRecordView[] = planningRecords.map(record => {
@@ -955,6 +1037,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         initialTab={initialTab}
         initialDecisionId={initialRecordId}
         initialIssueId={initialIssueId}
+        initialFindingId={initialFindingId}
         recommendedPanel={panel}
         sourcesInScope={currentManifest.sources.map(source => source.label)}
         missingSources={currentManifest.missingArtifacts.map(source => source.replaceAll('_', ' '))}
@@ -968,6 +1051,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onRetrySpecialist={(reviewId, specialistId) => void handleRetrySpecialist(reviewId, specialistId)}
         onRetrySynthesis={reviewId => void handleResumeReview(reviewId)}
         onActOnIssue={handleIssueAction}
+        onTriageFinding={handleTriageFinding}
         onConfirmPlanningRecord={recordId => {
             const record = planningRecords.find(item => item.id === recordId);
             if (record) useProjectStore.getState().updatePlanningRecordStatusByUser(projectId, recordId, record.type === 'decision' ? 'confirmed' : 'resolved');

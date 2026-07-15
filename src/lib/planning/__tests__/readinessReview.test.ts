@@ -44,7 +44,7 @@ const reviewRun = (overrides: Partial<ReviewRun> = {}): ReviewRun => ({
 
 const specialistRun = (overrides: Partial<SpecialistRun> = {}): SpecialistRun => ({
     id: 'specialist-1', projectId: 'p1', reviewId: 'review-1', specialistId: 'product_scope',
-    responsibility: 'Test scope and assumptions.', boundaries: [], contextRefIds: [], status: 'complete',
+    responsibility: 'Test scope and assumptions.', boundaries: [], contextRefIds: ['spine:spine-1'], status: 'complete',
     attemptCount: 1, findingIds: [], coverageSummary: 'Reviewed product scope and material uncertainty.',
     resolvedAreas: ['Problem, primary user, outcome, and first-release scope were reviewed.'],
     validation: { valid: true, unsupportedEvidenceIds: [], warnings: [] }, createdAt: 10, completedAt: 20,
@@ -152,6 +152,26 @@ describe('deterministic readiness review', () => {
         ]));
     });
 
+    it('does not mistake a grounded internal excerpt for validation of a material assumption', () => {
+        const assumption = record({
+            id: 'grounded-assumption', type: 'assumption', status: 'confirmed', materiality: 'high', schemaVersion: 1,
+            evidence: [{
+                id: 'evidence-1', sourceType: 'spine', sourceId: 'spine-1', sourceVersionId: 'spine-1',
+                excerpt: 'Teams will revisit warnings during implementation.', excerptHash: 'grounded-hash', verified: true,
+            }],
+            events: [{
+                id: 'assumption-answer', planningRecordId: 'grounded-assumption', type: 'custom_answered',
+                actor: 'user', at: 2, answer: 'Proceed with this premise for now.',
+            }],
+        });
+        const review = deriveReadinessReview(input({ planningRecords: [assumption] }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.criteria.find(item => item.id === 'assumptions')).toMatchObject({ blocking: true });
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'grounded-assumption' }) }),
+        ]));
+    });
+
     it('keeps a deferred consequential propagation proposal blocking', () => {
         const decision: PlanningRecord = record({
             type: 'decision', status: 'confirmed', materiality: 'high',
@@ -196,6 +216,21 @@ describe('deterministic readiness review', () => {
         expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({ blocking: true });
     });
 
+    it('rejects generic source-free coverage even when prose passes length checks', () => {
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({
+                contextRefIds: [],
+                coverageSummary: 'Everything in the product area appears sufficiently covered.',
+                resolvedAreas: ['Everything appears sufficiently resolved.'],
+                findingIds: [],
+            })],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.criteria.find(item => item.id === 'challenge')).toMatchObject({
+            status: 'not_started', blocking: true,
+        });
+    });
+
     it('keeps an earlier exact-current unresolved finding after a newer empty challenge run', () => {
         const newerRun = reviewRun({ id: 'review-2', sequenceNumber: 2, createdAt: 30, completedAt: 40 });
         const review = deriveReadinessReview(input({
@@ -222,6 +257,11 @@ describe('deterministic readiness review', () => {
             expect.objectContaining({
                 title: 'Untriaged challenge finding',
                 source: expect.objectContaining({ sourceId: 'orphan-finding' }),
+                actionTarget: {
+                    kind: 'challenge',
+                    reviewId: 'review-1',
+                    findingId: 'orphan-finding',
+                },
             }),
         ]));
     });
@@ -246,6 +286,36 @@ describe('deterministic readiness review', () => {
         const review = deriveReadinessReview(input({
             specialistRuns: [specialistRun({ findingIds: ['finding-1'] })],
             reviewIssues: [dismissed],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'issue-1' }) }),
+        ]));
+    });
+
+    it('does not let a model-authored stale-context dismissal satisfy challenge readiness', () => {
+        const dismissed = reviewIssue({
+            status: 'dismissed',
+            dispositions: [{
+                action: 'dismiss', actor: 'model', at: 15, contextSignature: 'stale-context',
+                reason: 'The model decided this no longer matters for the first release.',
+            } as unknown as ReviewIssue['dispositions'][number]],
+        });
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ findingIds: ['finding-1'] })],
+            reviewIssues: [dismissed],
+        }));
+        expect(review.conclusion).toBe('not_ready');
+        expect(review.concerns).toEqual(expect.arrayContaining([
+            expect.objectContaining({ source: expect.objectContaining({ sourceId: 'issue-1' }) }),
+        ]));
+    });
+
+    it('does not let a bare superseded issue erase a consequential finding', () => {
+        const superseded = reviewIssue({ status: 'superseded', dispositions: [] });
+        const review = deriveReadinessReview(input({
+            specialistRuns: [specialistRun({ findingIds: ['finding-1'] })],
+            reviewIssues: [superseded],
         }));
         expect(review.conclusion).toBe('not_ready');
         expect(review.concerns).toEqual(expect.arrayContaining([

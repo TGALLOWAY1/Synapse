@@ -67,6 +67,24 @@ describe('planning readiness', () => {
         expect(derivePlanningReadiness({ ...shared, planningRecords: [low] }).isReadyToBuild).toBe(true);
     });
 
+    it('keeps low-impact provenance drift visible without turning it into a blocker', () => {
+        const lowAssumption = {
+            ...record('assumption', 'open'), id: 'low-assumption', materiality: 'low' as const,
+            sourceState: 'missing' as const,
+        };
+        const lowRisk = {
+            ...record('risk', 'open'), id: 'low-risk', materiality: 'low' as const,
+            sourceState: 'changed' as const,
+        };
+        const result = derivePlanningReadiness({
+            prd, planningRecords: [lowAssumption, lowRisk], incompleteSectionCount: 0,
+            hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0,
+        });
+        expect(result.isReadyToBuild).toBe(true);
+        expect(result.changedSourceCount).toBe(0);
+        expect(result.nextAction.kind).toBe('commit_plan');
+    });
+
     it('keeps legacy assumptions, material risks, and consequential deferrals visible', () => {
         const legacy = record('assumption', 'open');
         const risk = { ...record('risk', 'open'), materiality: 'normal' as const };

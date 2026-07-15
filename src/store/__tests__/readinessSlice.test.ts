@@ -61,7 +61,7 @@ beforeEach(() => {
         }] },
         specialistRuns: { [projectId]: [{
             id: 'specialist-1', projectId, reviewId: 'review-1', specialistId: 'product_scope',
-            responsibility: 'Challenge scope and assumptions.', boundaries: [], contextRefIds: [],
+            responsibility: 'Challenge scope and assumptions.', boundaries: [], contextRefIds: [`spine:${spineId}`],
             status: 'complete', attemptCount: 1, findingIds: [],
             coverageSummary: 'Reviewed product scope and material assumptions.',
             resolvedAreas: ['The problem, primary user, outcome, and first-release scope are explicit.'],

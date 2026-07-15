@@ -51,7 +51,7 @@ export function readinessActionLabel(target: ReadinessActionTarget): string {
 export type ReadinessNavigationDestination =
     | { stage: 'prd'; anchorId: string }
     | { stage: 'review'; tab: 'decisions'; planningRecordId: string }
-    | { stage: 'review'; tab: 'review'; reviewId?: string; issueId?: string }
+    | { stage: 'review'; tab: 'review'; reviewId?: string; issueId?: string; findingId?: string }
     | { stage: 'workspace'; artifactId: string; nodeId: ArtifactSlotKey };
 
 export function readinessNavigationDestination(target: ReadinessActionTarget): ReadinessNavigationDestination {
@@ -59,7 +59,10 @@ export function readinessNavigationDestination(target: ReadinessActionTarget): R
         return { stage: 'review', tab: 'decisions', planningRecordId: target.planningRecordId };
     }
     if (target.kind === 'challenge') {
-        return { stage: 'review', tab: 'review', reviewId: target.reviewId, issueId: target.issueId };
+        return {
+            stage: 'review', tab: 'review', reviewId: target.reviewId,
+            issueId: target.issueId, findingId: target.findingId,
+        };
     }
     if (target.kind === 'output') {
         return { stage: 'workspace', artifactId: target.artifactId, nodeId: target.nodeId };

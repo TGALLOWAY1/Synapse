@@ -52,6 +52,7 @@ import {
     deriveReadinessChallengeState,
     deriveReadinessCommitmentState,
     deriveReadinessReview,
+    hasReadinessProvenanceForSpine,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
@@ -117,6 +118,7 @@ export function ProjectWorkspace() {
     const [reviewInitialRecordId, setReviewInitialRecordId] = useState<string>();
     const [reviewInitialRunId, setReviewInitialRunId] = useState<string>();
     const [reviewInitialIssueId, setReviewInitialIssueId] = useState<string>();
+    const [reviewInitialFindingId, setReviewInitialFindingId] = useState<string>();
     const [workspaceInitialNode, setWorkspaceInitialNode] = useState<ArtifactSlotKey>();
     const [workspaceInitialArtifactId, setWorkspaceInitialArtifactId] = useState<string>();
     // Carries an explicit generation request across the design-preset choice.
@@ -357,7 +359,14 @@ export function ProjectWorkspace() {
         .sort((a, b) => b.commitment.activeCommit!.at - a.commitment.activeCommit!.at)[0];
     const isCurrentPlanCommitted = !!currentCommittedReadiness;
     const hasReadinessCommitmentHistory = readinessWithCurrentness.some(item => item.commitment.latestCommit);
-    const isLegacyPlanCommitted = !!activeSpine?.isFinal && !hasReadinessCommitmentHistory;
+    const hasPhase3ReadinessProvenance = !!activeSpine && hasReadinessProvenanceForSpine(
+        readinessReviews, readinessCommitmentEvents, activeSpine.id,
+    );
+    const isLegacyPlanCommitted = !!activeSpine?.isFinal && !hasPhase3ReadinessProvenance;
+    const isCommitmentUnverifiable = !!activeSpine?.isFinal
+        && hasPhase3ReadinessProvenance
+        && !isCurrentPlanCommitted
+        && !hasReadinessCommitmentHistory;
     const displaysCurrentCommitment = isCurrentPlanCommitted || isLegacyPlanCommitted;
     const strictChallenge = readinessReviewInput
         ? deriveReadinessChallengeState(readinessReviewInput)
@@ -763,7 +772,7 @@ export function ProjectWorkspace() {
             if (result.status === 'rejected') setReadinessSubmitError(readinessFailureMessage(result.reason));
             return;
         }
-        if (activeSpine.isFinal && !hasReadinessCommitmentHistory) {
+        if (isLegacyPlanCommitted) {
             // Legacy commitments remain reversible without fabricating a
             // readiness review or user rationale that never existed.
             markSpineFinal(projectId, activeSpine.id, false);
@@ -822,14 +831,16 @@ export function ProjectWorkspace() {
         setReviewInitialRecordId(recordId);
         setReviewInitialRunId(undefined);
         setReviewInitialIssueId(undefined);
+        setReviewInitialFindingId(undefined);
         setPipelineStage('review');
     };
 
-    const openChallenge = (reviewId?: string, issueId?: string) => {
+    const openChallenge = (reviewId?: string, issueId?: string, findingId?: string) => {
         setReviewInitialTab('review');
         setReviewInitialRecordId(undefined);
         setReviewInitialRunId(reviewId);
         setReviewInitialIssueId(issueId);
+        setReviewInitialFindingId(findingId);
         setPipelineStage('review');
     };
 
@@ -840,7 +851,7 @@ export function ProjectWorkspace() {
         if (destination.stage === 'review' && destination.tab === 'decisions') {
             return openDecisionCenter(destination.planningRecordId);
         }
-        if (destination.stage === 'review') return openChallenge(destination.reviewId, destination.issueId);
+        if (destination.stage === 'review') return openChallenge(destination.reviewId, destination.issueId, destination.findingId);
         if (destination.stage === 'workspace') {
             setFinalizeAutoOpen(false);
             setWorkspaceInitialNode(destination.nodeId);
@@ -887,7 +898,7 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : displaysCurrentCommitment ? 'bg-green-900/30 text-green-400 border border-green-800' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine
                             ? activeSpine.safetyReview?.status === 'blocked'
                                 ? 'Blocked'
@@ -895,7 +906,9 @@ export function ProjectWorkspace() {
                                 ? 'Generation Failed'
                                 : isPRDActivelyGenerating
                                     ? 'Generating...'
-                                    : `${getVersionLabel(activeSpine.id)} ${displaysCurrentCommitment
+                                    : `${getVersionLabel(activeSpine.id)} ${isCommitmentUnverifiable
+                                        ? '(READINESS UNVERIFIABLE)'
+                                        : displaysCurrentCommitment
                                         ? isLegacyPlanCommitted
                                             ? '(LEGACY COMMITMENT · READINESS NOT RECORDED)'
                                             : currentCommittedReadiness?.review.conclusion === 'not_ready'
@@ -938,7 +951,7 @@ export function ProjectWorkspace() {
                     {!isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
                         <button
                             onClick={handleToggleFinal}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-700 hover:bg-amber-600 text-white' : displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
                             title={displaysCurrentCommitment ? "Reopen this plan for changes" : "Review readiness and commit this plan"}
                         >
                             <CheckCircle size={14} />
@@ -1188,6 +1201,7 @@ export function ProjectWorkspace() {
                         initialRecordId={reviewInitialRecordId}
                         initialReviewId={reviewInitialRunId}
                         initialIssueId={reviewInitialIssueId}
+                        initialFindingId={reviewInitialFindingId}
                     />
                 ) : (
                 <>

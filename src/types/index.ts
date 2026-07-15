@@ -1844,7 +1844,7 @@ export type ReadinessActionTarget =
     | { kind: 'prd'; section: 'problem' | 'user' | 'outcome' }
     | { kind: 'feature'; featureId?: string }
     | { kind: 'planning_record'; planningRecordId: string }
-    | { kind: 'challenge'; reviewId?: string; issueId?: string }
+    | { kind: 'challenge'; reviewId?: string; issueId?: string; findingId?: string }
     | { kind: 'output'; artifactId: string; nodeId: ArtifactSlotKey };
 
 export type ReadinessReviewCriterion = {
@@ -1913,6 +1913,10 @@ export type ReadinessReview = {
 };
 
 type ReadinessCommitmentEventBase = {
+    eventSchemaVersion: 1;
+    /** Local append-only payload integrity. Legacy events without this value
+     * remain historical provenance but cannot confer current authority. */
+    eventIntegrityHash: string;
     id: string;
     projectId: string;
     reviewId: string;

@@ -5,7 +5,7 @@ import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
 import { useProjectSyncStore } from '../store/projectSyncStore';
-import { compareReadinessReviewCurrentness, deriveReadinessCommitmentState } from '../lib/planning';
+import { compareReadinessReviewCurrentness, deriveReadinessCommitmentState, hasReadinessProvenanceForSpine } from '../lib/planning';
 import { buildReadinessReviewInputFromState } from '../store/slices/readinessSlice';
 
 interface ProjectDrawerProps {
@@ -54,6 +54,11 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
         }
         if (reviewStates.some(item => item.commitment.latestCommit)) {
             return { label: 'Changed since commitment', color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
+        }
+        if (spine?.isFinal && hasReadinessProvenanceForSpine(
+            store.readinessReviews[projectId] ?? [], events, spine.id,
+        )) {
+            return { label: 'Readiness unverifiable', color: 'bg-red-900/30 text-red-300 border-red-800' };
         }
         if (spine?.isFinal) {
             return { label: 'Legacy · readiness not recorded', color: 'bg-neutral-700 text-neutral-300 border-neutral-600' };

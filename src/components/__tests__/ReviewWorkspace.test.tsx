@@ -38,6 +38,7 @@ const baseProps = (patch: Partial<ReviewWorkspaceProps> = {}): ReviewWorkspacePr
     onRetrySpecialist: vi.fn(),
     onRetrySynthesis: vi.fn(),
     onActOnIssue: vi.fn(),
+    onTriageFinding: vi.fn(),
     onConfirmPlanningRecord: vi.fn(),
     onReopenPlanningRecord: vi.fn(),
     ...patch,
@@ -222,5 +223,36 @@ describe('ReviewWorkspace', () => {
         expect(article).toHaveClass('ring-2');
         await waitFor(() => expect(article).toHaveFocus());
         expect(screen.getByText('Inspect this exact issue before committing.')).toBeInTheDocument();
+    });
+
+    it('surfaces, highlights, and triages the exact readiness-linked specialist finding', async () => {
+        const onTriageFinding = vi.fn();
+        const run = completeRun({
+            issues: [],
+            untriagedFindings: [{
+                id: 'finding-exact',
+                title: 'Exact unsynthesized recovery risk',
+                observation: 'The specialist found a recovery gap that did not enter issue synthesis.',
+                consequence: 'Implementation could ship without a safe recovery path.',
+                recommendedAction: 'Define the recovery boundary before implementation.',
+                severity: 'blocking',
+                confidence: 'high',
+                specialistName: 'Reliability & Failure Modes',
+                affectedSources: ['PRD · Recovery'],
+                evidence: [],
+            }],
+        });
+        render(<ReviewWorkspace {...baseProps({
+            runs: [run], activeRunId: run.id, initialFindingId: 'finding-exact', onTriageFinding,
+        })} />);
+
+        const article = document.getElementById('review-finding-finding-exact');
+        expect(article).toHaveClass('ring-2');
+        await waitFor(() => expect(article).toHaveFocus());
+        expect(screen.getByText('Exact unsynthesized recovery risk')).toBeInTheDocument();
+        expect(screen.getByText('Define the recovery boundary before implementation.')).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: 'Add to review queue' }));
+        expect(onTriageFinding).toHaveBeenCalledWith('review-1', 'finding-exact');
     });
 });
