@@ -1771,6 +1771,219 @@ export type DecisionAssessment = {
     createdAt: number;
 };
 
+// --- Assumption validation -------------------------------------------------
+// Validation lives on the existing planning record so it cannot become a
+// parallel source of planning truth. Machine-authored plans and
+// interpretations are proposals; only append-only user events establish the
+// project's treatment or accepted conclusion.
+
+export const ASSUMPTION_VALIDATION_SCHEMA_VERSION = 1;
+export const ASSUMPTION_VALIDATION_CONTRACT_VERSION = 1;
+
+export type AssumptionValidationWorkflowState =
+    | 'not_planned'
+    | 'planned'
+    | 'in_progress'
+    | 'completed'
+    | 'due_for_review';
+
+export type AssumptionEvidenceConclusion =
+    | 'unsupported'
+    | 'supported'
+    | 'partially_supported'
+    | 'contradicted'
+    | 'inconclusive'
+    | 'more_evidence_needed';
+
+export type AssumptionUncertaintyTreatment =
+    | 'accepted_without_validation'
+    | 'temporarily_tolerated'
+    | 'deferred';
+
+export type AssumptionValidationMethodKind =
+    | 'user_interviews'
+    | 'usability_observation'
+    | 'technical_test'
+    | 'prototype'
+    | 'analytics_measurement'
+    | 'stakeholder_statement'
+    | 'expert_review'
+    | 'document_review'
+    | 'direct_observation'
+    | 'other';
+
+export type AssumptionEvidenceSourceType =
+    | 'user_interview'
+    | 'usability_observation'
+    | 'technical_test'
+    | 'prototype'
+    | 'analytics_measurement'
+    | 'stakeholder_statement'
+    | 'expert_review'
+    | 'document'
+    | 'external_source'
+    | 'direct_observation'
+    | 'other';
+
+export type AssumptionValidationMethod = {
+    kind: AssumptionValidationMethodKind;
+    label: string;
+    description?: string;
+};
+
+export type AssumptionValidationPlan = {
+    id: string;
+    question: string;
+    method: AssumptionValidationMethod;
+    supportSignals: string[];
+    contradictionSignals: string[];
+    inconclusiveConditions: string[];
+    limitations: string[];
+    revisitCondition?: string;
+    expiresAt?: number;
+    authoredBy: 'user';
+    createdAt: number;
+    /** Hash excludes this field and makes later mutation fail closed. */
+    contentHash: string;
+};
+
+export type AssumptionValidationPlanProposal = {
+    id: string;
+    planningRecordId: string;
+    contractVersion: typeof ASSUMPTION_VALIDATION_CONTRACT_VERSION;
+    authoredBy: 'synapse';
+    question: string;
+    method: AssumptionValidationMethod;
+    supportSignals: string[];
+    contradictionSignals: string[];
+    inconclusiveConditions: string[];
+    limitations: string[];
+    revisitCondition?: string;
+    expiresAt?: number;
+    assumptionStatementHash: string;
+    evidenceSetHash: string;
+    sourceSpineVersionId?: string;
+    sourceSpineContentHash?: string;
+    model?: string;
+    provider?: string;
+    createdAt: number;
+    contentHash: string;
+};
+
+export type AssumptionEvidenceRecord = {
+    id: string;
+    planningRecordId: string;
+    sourceType: AssumptionEvidenceSourceType;
+    /** Human-readable provenance shown to the user. */
+    source: string;
+    /** Stable URL, file id, session id, experiment id, or other provenance. */
+    sourceIdentity: string;
+    observedAt: number;
+    recordedAt: number;
+    observation: string;
+    validationQuestion: string;
+    scopeOrSample?: string;
+    limitations: string[];
+    character: 'direct' | 'interpretation';
+    /** User-recorded relevance to the validation question. This is distinct
+     * from whether the record is a direct observation or an interpretation. */
+    relation: 'supports' | 'contradicts' | 'inconclusive' | 'irrelevant';
+    assumptionStatementHash: string;
+    validationPlanHash?: string;
+    sourceFingerprint: string;
+    authoredBy: 'user';
+    contentHash: string;
+};
+
+export type AssumptionInterpretationProposal = {
+    id: string;
+    planningRecordId: string;
+    contractVersion: typeof ASSUMPTION_VALIDATION_CONTRACT_VERSION;
+    authoredBy: 'synapse';
+    recommendedConclusion: AssumptionEvidenceConclusion;
+    reasoning: string;
+    supportingEvidenceIds: string[];
+    contradictingEvidenceIds: string[];
+    inconclusiveEvidenceIds: string[];
+    irrelevantEvidenceIds: string[];
+    duplicateEvidenceIds: string[];
+    limitations: string[];
+    assumptionStatementHash: string;
+    validationPlanHash: string;
+    evidenceSetHash: string;
+    sourceSpineVersionId?: string;
+    sourceSpineContentHash?: string;
+    model?: string;
+    provider?: string;
+    createdAt: number;
+    contentHash: string;
+};
+
+type AssumptionValidationEventBase = {
+    id: string;
+    planningRecordId: string;
+    actor: 'user';
+    at: number;
+    assumptionStatementHash: string;
+    expectedSpineVersionId?: string;
+    expectedSpineContentHash?: string;
+    integrityHash: string;
+};
+
+export type AssumptionValidationEvent =
+    | (AssumptionValidationEventBase & {
+        type: 'validation_plan_recorded';
+        plan: AssumptionValidationPlan;
+        expectedEvidenceSetHash: string;
+        sourceProposalId?: string;
+        sourceProposalContentHash?: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_evidence_recorded';
+        evidence: AssumptionEvidenceRecord;
+        expectedEvidenceSetHash: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_evidence_retracted';
+        evidenceId: string;
+        evidenceContentHash: string;
+        expectedEvidenceSetHash: string;
+        reason: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_outcome_recorded';
+        conclusion: AssumptionEvidenceConclusion;
+        caveats?: string;
+        expectedValidationPlanHash: string;
+        expectedEvidenceSetHash: string;
+        sourceInterpretationId?: string;
+        sourceInterpretationContentHash?: string;
+        revisitAt?: number;
+        revisitCondition?: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_outcome_reopened';
+        previousOutcomeEventId: string;
+        reason: string;
+        expectedValidationPlanHash: string;
+        expectedEvidenceSetHash: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_uncertainty_treatment_recorded';
+        treatment: AssumptionUncertaintyTreatment;
+        rationale: string;
+        revisitAt?: number;
+        revisitCondition?: string;
+        expectedEvidenceSetHash: string;
+    });
+
+export type AssumptionValidationState = {
+    schemaVersion: typeof ASSUMPTION_VALIDATION_SCHEMA_VERSION;
+    events: AssumptionValidationEvent[];
+    planProposals: AssumptionValidationPlanProposal[];
+    interpretationProposals: AssumptionInterpretationProposal[];
+};
+
 export type PlanningRecord = {
     id: string;
     projectId: string;
@@ -1815,6 +2028,9 @@ export type PlanningRecord = {
     events?: DecisionEvent[];
     /** Machine-authored analysis kept distinct from user-authored events. */
     assessments?: DecisionAssessment[];
+    /** Optional validation lifecycle for assumption records. Legacy records
+     * omit it and project conservatively as unvalidated. */
+    assumptionValidation?: AssumptionValidationState;
 };
 
 // --- Deterministic build-readiness review ---------------------------------

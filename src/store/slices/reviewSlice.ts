@@ -1,6 +1,9 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type {
+    AssumptionInterpretationProposal,
+    AssumptionValidationEvent,
+    AssumptionValidationPlanProposal,
     DecisionAssessment,
     DecisionEvent,
     PlanningRecord,
@@ -11,8 +14,16 @@ import type {
     SpecialistFinding,
     SpecialistRun,
 } from '../../types';
-import { PLANNING_RECORD_SCHEMA_VERSION } from '../../types';
-import { appendDecisionEvent, importPrdAssumptions, normalizePlanningRecord } from '../../lib/planning';
+import { ASSUMPTION_VALIDATION_SCHEMA_VERSION, PLANNING_RECORD_SCHEMA_VERSION } from '../../types';
+import {
+    addAssumptionInterpretationProposal as addInterpretationProposal,
+    addAssumptionValidationPlanProposal as addValidationPlanProposal,
+    appendAssumptionValidationEvent as appendValidationEvent,
+    appendDecisionEvent,
+    importPrdAssumptions,
+    normalizePlanningRecord,
+    planningContentHash,
+} from '../../lib/planning';
 import type { ProjectState } from '../types';
 
 export type ReviewSlice = Pick<
@@ -35,7 +46,19 @@ export type ReviewSlice = Pick<
     | 'appendPlanningDecisionEvent'
     | 'importPlanningAssumptions'
     | 'addPlanningAssessment'
+    | 'appendAssumptionValidationEvent'
+    | 'addAssumptionValidationPlanProposal'
+    | 'addAssumptionInterpretationProposal'
 >;
+
+const currentPlanningContext = (state: ProjectState, projectId: string) => {
+    const spine = (state.spineVersions[projectId] ?? []).find(item => item.isLatest)
+        ?? state.spineVersions[projectId]?.at(-1);
+    return spine ? {
+        currentSpineVersionId: spine.id,
+        currentSpineContentHash: planningContentHash(spine.structuredPRD ?? spine.responseText),
+    } : {};
+};
 
 const planningRecordInitialStatus = (
     input: Pick<PlanningRecord, 'type' | 'createdBy' | 'status'>,
@@ -239,6 +262,15 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             confirmedAt: input.createdBy === 'specialist_review' || input.createdBy === 'synapse'
                 ? undefined
                 : input.confirmedAt,
+            // Validation authority is append-only. Creation inputs—including
+            // model/review output—cannot smuggle a user conclusion into a new
+            // assumption record.
+            assumptionValidation: input.type === 'assumption' ? {
+                schemaVersion: ASSUMPTION_VALIDATION_SCHEMA_VERSION,
+                events: [],
+                planProposals: [],
+                interpretationProposals: [],
+            } : undefined,
         };
         set((state) => ({
             planningRecords: {
@@ -340,5 +372,95 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
                 }),
             },
         }));
+    },
+
+    appendAssumptionValidationEvent: (projectId, planningRecordId, event: AssumptionValidationEvent) => {
+        let outcome: { ok: true; duplicate: boolean; duplicateEvidenceOf?: string } | { ok: false; reason: string } = {
+            ok: false,
+            reason: 'Planning record not found.',
+        };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const record = records.find(item => item.id === planningRecordId);
+            if (!record) return state;
+            const result = appendValidationEvent(record, event, currentPlanningContext(state, projectId));
+            if (!result.ok) {
+                outcome = result;
+                return state;
+            }
+            outcome = {
+                ok: true,
+                duplicate: result.duplicate,
+                ...(result.duplicateEvidenceOf ? { duplicateEvidenceOf: result.duplicateEvidenceOf } : {}),
+            };
+            if (result.duplicate) return state;
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
+                },
+            };
+        });
+        return outcome;
+    },
+
+    addAssumptionValidationPlanProposal: (
+        projectId,
+        planningRecordId,
+        proposal: AssumptionValidationPlanProposal,
+    ) => {
+        let outcome: { ok: true; duplicate: boolean } | { ok: false; reason: string } = {
+            ok: false,
+            reason: 'Planning record not found.',
+        };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const record = records.find(item => item.id === planningRecordId);
+            if (!record) return state;
+            const result = addValidationPlanProposal(record, proposal, currentPlanningContext(state, projectId));
+            if (!result.ok) {
+                outcome = result;
+                return state;
+            }
+            outcome = { ok: true, duplicate: result.duplicate };
+            if (result.duplicate) return state;
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
+                },
+            };
+        });
+        return outcome;
+    },
+
+    addAssumptionInterpretationProposal: (
+        projectId,
+        planningRecordId,
+        proposal: AssumptionInterpretationProposal,
+    ) => {
+        let outcome: { ok: true; duplicate: boolean } | { ok: false; reason: string } = {
+            ok: false,
+            reason: 'Planning record not found.',
+        };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const record = records.find(item => item.id === planningRecordId);
+            if (!record) return state;
+            const result = addInterpretationProposal(record, proposal, currentPlanningContext(state, projectId));
+            if (!result.ok) {
+                outcome = result;
+                return state;
+            }
+            outcome = { ok: true, duplicate: result.duplicate };
+            if (result.duplicate) return state;
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
+                },
+            };
+        });
+        return outcome;
     },
 });

@@ -11,6 +11,7 @@ import type {
     ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue,
     ReviewIssueDisposition, PlanningRecord, PlanningRecordStatus,
     DecisionEvent, DecisionAssessment,
+    AssumptionValidationEvent, AssumptionValidationPlanProposal, AssumptionInterpretationProposal,
     ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
@@ -340,6 +341,21 @@ export interface ProjectState {
         planningRecordId: string,
         assessment: DecisionAssessment,
     ) => void;
+    appendAssumptionValidationEvent: (
+        projectId: string,
+        planningRecordId: string,
+        event: AssumptionValidationEvent,
+    ) => { ok: true; duplicate: boolean; duplicateEvidenceOf?: string } | { ok: false; reason: string };
+    addAssumptionValidationPlanProposal: (
+        projectId: string,
+        planningRecordId: string,
+        proposal: AssumptionValidationPlanProposal,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    addAssumptionInterpretationProposal: (
+        projectId: string,
+        planningRecordId: string,
+        proposal: AssumptionInterpretationProposal,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
 
     // Durable readiness checkpoints. Reviews are immutable snapshots; user
     // authority is recorded separately as append-only commitment events.

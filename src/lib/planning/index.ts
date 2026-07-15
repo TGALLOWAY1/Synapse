@@ -8,3 +8,4 @@ export * from './outputAlignment';
 export * from './readinessReview';
 export * from './readinessCommitment';
 export * from './readinessReviewComparison';
+export * from './assumptionValidation';
