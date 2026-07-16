@@ -2043,7 +2043,10 @@ export type PlanningRecord = {
 // value in this contract can confer user approval.
 
 export const READINESS_REVIEW_SCHEMA_VERSION = 1;
-export const READINESS_CRITERIA_VERSION = 1;
+// v2 adds integrity-valid, current downstream update-plan state to the
+// downstream-alignment criterion. Historical v1 reviews remain verifiable,
+// but are not silently interpreted using the newer readiness boundary.
+export const READINESS_CRITERIA_VERSION = 2;
 
 export type ReadinessReviewConclusion = 'ready_to_build' | 'not_ready';
 export type ReadinessReviewCriterionId =

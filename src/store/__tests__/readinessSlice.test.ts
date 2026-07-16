@@ -158,6 +158,7 @@ beforeEach(() => {
         }] },
         reviewIssues: { [projectId]: [] }, reviewFindings: { [projectId]: [] },
         readinessReviews: { [projectId]: [] }, readinessCommitmentEvents: { [projectId]: [] },
+        downstreamUpdatePlans: { [projectId]: [] }, downstreamUpdatePlanEvents: { [projectId]: [] },
     });
 });
 

@@ -15,7 +15,7 @@ const review: ReadinessReview = {
     id: 'ready-1',
     projectId: 'project-1',
     schemaVersion: 1,
-    criteriaVersion: 1,
+    criteriaVersion: 2,
     conclusion: 'not_ready',
     spineVersionId: 'spine-2',
     snapshotHashes: {

@@ -1,4 +1,4 @@
-import type { ArtifactSlotKey, PlanningRecord } from '../../types';
+import type { Artifact, ArtifactSlotKey, ArtifactVersion, PlanningRecord, SpineVersion } from '../../types';
 import { hashReviewValue } from '../review/hash';
 
 export const DOWNSTREAM_UPDATE_PLAN_SCHEMA_VERSION = 1 as const;
@@ -216,7 +216,7 @@ export function latestDownstreamUpdatePlanItemState(
     plan: DownstreamUpdatePlan,
     events: DownstreamUpdatePlanEvent[],
     itemId: string,
-): { disposition?: DownstreamUpdateDisposition; priority: number; eventIds: string[] } {
+): { disposition?: DownstreamUpdateDisposition; priority: number; eventIds: string[]; eventIntegrityHashes: string[] } {
     const item = plan.items.find(candidate => candidate.id === itemId);
     const applicable = events
         .filter(event => event.planId === plan.id
@@ -230,7 +230,12 @@ export function latestDownstreamUpdatePlanItemState(
         if (event.type === 'disposition_recorded') disposition = event.disposition;
         if (event.type === 'priority_changed') priority = event.priority;
     }
-    return { disposition, priority, eventIds: applicable.map(event => event.id) };
+    return {
+        disposition,
+        priority,
+        eventIds: applicable.map(event => event.id),
+        eventIntegrityHashes: applicable.map(event => event.integrityHash),
+    };
 }
 
 export type DownstreamUpdatePlanProjection = {
@@ -240,9 +245,36 @@ export type DownstreamUpdatePlanProjection = {
         disposition?: DownstreamUpdateDisposition;
         priority: number;
         dispositionEventIds: string[];
+        dispositionEventIntegrityHashes: string[];
     }>;
     unresolvedDefiniteCount: number;
     unresolvedAdvisoryCount: number;
+};
+
+export type DownstreamUpdatePlanSummaryItem = {
+    planId: string;
+    planIntegrityHash: string;
+    itemId: string;
+    artifactId: string;
+    artifactVersionId: string;
+    nodeId: DownstreamUpdateArtifactSlot;
+    artifactTitle: string;
+    region: DownstreamUpdateRegion;
+    certainty: DownstreamImpactCertainty;
+    implementationCritical: boolean;
+    disposition?: DownstreamUpdateDisposition;
+    priority: number;
+    recommendation: string;
+};
+
+export type DownstreamUpdatePlanSummary = {
+    currentPlanCount: number;
+    historicalPlanCount: number;
+    blockingItems: DownstreamUpdatePlanSummaryItem[];
+    advisoryItems: DownstreamUpdatePlanSummaryItem[];
+    reviewedItems: DownstreamUpdatePlanSummaryItem[];
+    /** Exact integrity-valid current plan/event projection pinned into readiness. */
+    snapshotHash: string;
 };
 
 export function projectDownstreamUpdatePlan(
@@ -252,7 +284,13 @@ export function projectDownstreamUpdatePlan(
 ): DownstreamUpdatePlanProjection {
     const items = plan.items.map(item => {
         const state = latestDownstreamUpdatePlanItemState(plan, events, item.id);
-        return { ...item, disposition: state.disposition, priority: state.priority, dispositionEventIds: state.eventIds };
+        return {
+            ...item,
+            disposition: state.disposition,
+            priority: state.priority,
+            dispositionEventIds: state.eventIds,
+            dispositionEventIntegrityHashes: state.eventIntegrityHashes,
+        };
     }).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
     return {
         plan,
@@ -260,6 +298,89 @@ export function projectDownstreamUpdatePlan(
         items,
         unresolvedDefiniteCount: items.filter(item => item.certainty === 'definite' && !item.disposition).length,
         unresolvedAdvisoryCount: items.filter(item => item.certainty !== 'definite' && !item.disposition).length,
+    };
+}
+
+export function buildDownstreamUpdatePlanCurrentContext(input: {
+    spineVersions: SpineVersion[];
+    planningRecords: PlanningRecord[];
+    artifacts: Artifact[];
+    artifactVersions: ArtifactVersion[];
+}): DownstreamUpdatePlanCurrentContext | undefined {
+    const spine = input.spineVersions.find(candidate => candidate.isLatest);
+    if (!spine) return undefined;
+    return {
+        spineVersionId: spine.id,
+        spineContentHash: hashReviewValue(spine.structuredPRD ?? spine.responseText),
+        planningContextHash: downstreamPlanningContextHash(input.planningRecords),
+        artifactVersions: Object.fromEntries(input.artifacts.flatMap(artifact => {
+            const version = input.artifactVersions.find(candidate => candidate.id === artifact.currentVersionId)
+                ?? input.artifactVersions.find(candidate => candidate.artifactId === artifact.id && candidate.isPreferred);
+            return version ? [[artifact.id, { versionId: version.id, contentHash: hashReviewValue(version.content) }]] : [];
+        })),
+    };
+}
+
+export function deriveDownstreamUpdatePlanSummary(input: {
+    plans: DownstreamUpdatePlan[];
+    events: DownstreamUpdatePlanEvent[];
+    context?: DownstreamUpdatePlanCurrentContext;
+}): DownstreamUpdatePlanSummary {
+    if (!input.context) {
+        return {
+            currentPlanCount: 0,
+            historicalPlanCount: input.plans.filter(validateDownstreamUpdatePlanIntegrity).length,
+            blockingItems: [], advisoryItems: [], reviewedItems: [],
+            snapshotHash: hashReviewValue([]),
+        };
+    }
+    const validPlans = input.plans.filter(validateDownstreamUpdatePlanIntegrity);
+    const projections = validPlans.map(plan => projectDownstreamUpdatePlan(plan, input.events, input.context!));
+    const current = projections.filter(projection => projection.currentness.current);
+    const items: DownstreamUpdatePlanSummaryItem[] = current.flatMap(projection => projection.items.map(item => ({
+        planId: projection.plan.id,
+        planIntegrityHash: projection.plan.integrityHash,
+        itemId: item.id,
+        artifactId: projection.plan.artifact.artifactId,
+        artifactVersionId: projection.plan.artifact.artifactVersionId,
+        nodeId: projection.plan.artifact.slot,
+        artifactTitle: projection.plan.artifact.title,
+        region: item.region,
+        certainty: item.certainty,
+        implementationCritical: item.implementationCritical,
+        disposition: item.disposition,
+        priority: item.priority,
+        recommendation: item.recommendation,
+    })));
+    const handled = (item: DownstreamUpdatePlanSummaryItem): boolean =>
+        item.disposition === 'not_applicable' || item.disposition === 'already_aligned';
+    const blockingItems = items.filter(item => (
+        item.certainty === 'definite' && item.implementationCritical && !handled(item)
+    ));
+    const advisoryItems = items.filter(item => item.certainty !== 'definite' && !handled(item));
+    const reviewedItems = items.filter(handled);
+    const snapshot = current.map(projection => ({
+        planId: projection.plan.id,
+        integrityHash: projection.plan.integrityHash,
+        artifact: projection.plan.artifact,
+        source: projection.plan.source,
+        items: projection.items.map(item => ({
+            id: item.id,
+            certainty: item.certainty,
+            implementationCritical: item.implementationCritical,
+            disposition: item.disposition,
+            priority: item.priority,
+            dispositionEventIds: item.dispositionEventIds,
+            dispositionEventIntegrityHashes: item.dispositionEventIntegrityHashes,
+        })),
+    })).sort((a, b) => a.planId.localeCompare(b.planId));
+    return {
+        currentPlanCount: current.length,
+        historicalPlanCount: projections.length - current.length,
+        blockingItems: blockingItems.sort((a, b) => a.priority - b.priority || a.itemId.localeCompare(b.itemId)),
+        advisoryItems: advisoryItems.sort((a, b) => a.priority - b.priority || a.itemId.localeCompare(b.itemId)),
+        reviewedItems: reviewedItems.sort((a, b) => a.priority - b.priority || a.itemId.localeCompare(b.itemId)),
+        snapshotHash: hashReviewValue(snapshot),
     };
 }
 

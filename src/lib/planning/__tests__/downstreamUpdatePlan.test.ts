@@ -2,6 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PlanningRecord } from '../../../types';
 import {
     compareDownstreamUpdatePlanCurrentness,
+    deriveDownstreamUpdatePlanSummary,
     downstreamPlanningContextHash,
     latestDownstreamUpdatePlanItemState,
     projectDownstreamUpdatePlan,
@@ -82,7 +83,7 @@ describe('downstream update plan integrity and currentness', () => {
         expect(validateDownstreamUpdatePlanEventIntegrity(event)).toBe(true);
         expect(validateDownstreamUpdatePlanEventIntegrity({ ...event, actor: 'synapse' } as never)).toBe(false);
         expect(latestDownstreamUpdatePlanItemState(sealed, [event], 'item-1')).toEqual({
-            disposition: 'planned', priority: 1, eventIds: ['event-1'],
+            disposition: 'planned', priority: 1, eventIds: ['event-1'], eventIntegrityHashes: [event.integrityHash],
         });
         const wrongBinding = sealDownstreamUpdatePlanEvent({
             schemaVersion: 1, id: 'event-2', projectId: 'p1', planId: sealed.id, itemId: 'item-1', actor: 'user', at: 30,
@@ -99,5 +100,40 @@ describe('downstream update plan integrity and currentness', () => {
     it('conservatively initializes legacy collections', () => {
         expect(normalizeDownstreamUpdatePlanCollections({})).toEqual({ plans: {}, events: {} });
         expect(normalizeDownstreamUpdatePlanCollections(undefined)).toEqual({ plans: {}, events: {} });
+    });
+
+    it('summarizes only current integrity-valid plans and preserves unresolved work semantics', () => {
+        const base = plan();
+        const definite = sealDownstreamUpdatePlan({
+            ...base,
+            items: [{ ...base.items[0], certainty: 'definite', implementationCritical: true }],
+        });
+        const context = {
+            spineVersionId: 'spine-2', spineContentHash: 'spine-hash-2', planningContextHash: 'context-1',
+            artifactVersions: { screens: { versionId: 'screens-v1', contentHash: 'screens-hash' } },
+        };
+        const planned = sealDownstreamUpdatePlanEvent({
+            schemaVersion: 1, id: 'planned', projectId: 'p1', planId: definite.id, itemId: 'item-1', actor: 'user', at: 20,
+            expectedPlanIntegrityHash: definite.integrityHash, type: 'disposition_recorded', disposition: 'planned',
+        });
+        const modelAuthored = { ...planned, id: 'model', actor: 'synapse' } as never;
+        const summary = deriveDownstreamUpdatePlanSummary({ plans: [definite], events: [planned, modelAuthored], context });
+        expect(summary).toMatchObject({ currentPlanCount: 1, historicalPlanCount: 0 });
+        expect(summary.blockingItems).toContainEqual(expect.objectContaining({ itemId: 'item-1', disposition: 'planned' }));
+
+        const aligned = sealDownstreamUpdatePlanEvent({
+            schemaVersion: 1, id: 'aligned', projectId: 'p1', planId: definite.id, itemId: 'item-1', actor: 'user', at: 30,
+            expectedPlanIntegrityHash: definite.integrityHash, type: 'disposition_recorded', disposition: 'already_aligned',
+            rationale: 'The current screen already reflects the plan.',
+        });
+        const reviewed = deriveDownstreamUpdatePlanSummary({ plans: [definite], events: [planned, aligned], context });
+        expect(reviewed.blockingItems).toEqual([]);
+        expect(reviewed.reviewedItems[0]).toMatchObject({ disposition: 'already_aligned' });
+        expect(reviewed.snapshotHash).not.toBe(summary.snapshotHash);
+
+        const stale = deriveDownstreamUpdatePlanSummary({
+            plans: [definite], events: [aligned], context: { ...context, spineVersionId: 'spine-3' },
+        });
+        expect(stale).toMatchObject({ currentPlanCount: 0, historicalPlanCount: 1, blockingItems: [] });
     });
 });

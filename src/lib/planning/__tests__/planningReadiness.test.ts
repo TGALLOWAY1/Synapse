@@ -102,6 +102,45 @@ describe('planning readiness', () => {
         expect(result.nextAction).toMatchObject({ kind: 'resolve_decision', planningRecordId: 'open_question-1' });
     });
 
+    it('blocks on an unresolved definite update item and targets its exact output', () => {
+        const result = derivePlanningReadiness({
+            prd, planningRecords: [], incompleteSectionCount: 0,
+            hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 2, staleOutputCount: 0,
+            downstreamUpdatePlanSummary: {
+                currentPlanCount: 1, historicalPlanCount: 0, advisoryItems: [], reviewedItems: [], snapshotHash: 'snapshot',
+                blockingItems: [{
+                    planId: 'plan', planIntegrityHash: 'integrity', itemId: 'item', artifactId: 'screens',
+                    artifactVersionId: 'screens-v1', nodeId: 'screen_inventory', artifactTitle: 'Screens',
+                    region: { kind: 'screen', screenId: 'shared', screenName: 'Shared workspace', aspect: 'screen' },
+                    certainty: 'definite', implementationCritical: true, disposition: 'planned', priority: 1,
+                    recommendation: 'Remove the obsolete shared-workspace behavior.',
+                }],
+            },
+        });
+        expect(result).toMatchObject({ phase: 'needs_alignment', isReadyToBuild: false });
+        expect(result.nextAction).toMatchObject({
+            kind: 'align_outputs', artifactId: 'screens', nodeId: 'screen_inventory',
+        });
+    });
+
+    it('keeps possible update items advisory when output alignment is otherwise clear', () => {
+        const result = derivePlanningReadiness({
+            prd, planningRecords: [], incompleteSectionCount: 0,
+            hasCurrentChallenge: true, blockingReviewIssueCount: 0, generatedOutputCount: 1, staleOutputCount: 0,
+            downstreamUpdatePlanSummary: {
+                currentPlanCount: 1, historicalPlanCount: 0, blockingItems: [], reviewedItems: [], snapshotHash: 'snapshot',
+                advisoryItems: [{
+                    planId: 'plan', planIntegrityHash: 'integrity', itemId: 'item', artifactId: 'screens',
+                    artifactVersionId: 'screens-v1', nodeId: 'screen_inventory', artifactTitle: 'Screens',
+                    region: { kind: 'artifact_review', reason: 'insufficient_dependency', label: 'Screens' },
+                    certainty: 'possible', implementationCritical: false, disposition: 'deferred', priority: 1,
+                    recommendation: 'Review when practical.',
+                }],
+            },
+        });
+        expect(result).toMatchObject({ phase: 'ready_to_build', isReadyToBuild: true });
+    });
+
     it('does not penalize a plan merely because no outputs were generated', () => {
         const result = derivePlanningReadiness({
             prd, planningRecords: [], incompleteSectionCount: 0, hasCurrentChallenge: true,

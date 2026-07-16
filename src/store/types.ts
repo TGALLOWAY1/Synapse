@@ -23,6 +23,7 @@ import type {
     DownstreamUpdatePlan,
     DownstreamUpdatePlanCurrentness,
     DownstreamUpdatePlanEvent,
+    DownstreamUpdatePlanSummary,
 } from '../lib/planning/downstreamUpdatePlan';
 
 export interface SpineGenerationMetaInput {
@@ -410,6 +411,7 @@ export interface ProjectState {
         projectId: string,
         planId: string,
     ) => DownstreamUpdatePlanCurrentness | undefined;
+    getDownstreamUpdatePlanSummary: (projectId: string) => DownstreamUpdatePlanSummary;
 
     // Implementation task tracking. `saveTasks` persists an extracted set for a
     // given Implementation Plan artifact, replacing any prior set for that

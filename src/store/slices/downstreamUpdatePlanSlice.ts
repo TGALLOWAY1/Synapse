@@ -1,10 +1,10 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { ProjectState } from '../types';
-import { hashReviewValue } from '../../lib/review/hash';
 import {
+    buildDownstreamUpdatePlanCurrentContext,
     compareDownstreamUpdatePlanCurrentness,
-    downstreamPlanningContextHash,
+    deriveDownstreamUpdatePlanSummary,
     sealDownstreamUpdatePlanEvent,
     validateDownstreamUpdatePlanIntegrity,
     type DownstreamUpdatePlanCurrentContext,
@@ -18,23 +18,16 @@ export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'generateDownstreamUpdatePlans'
     | 'appendDownstreamUpdatePlanEvent'
     | 'getDownstreamUpdatePlanCurrentness'
+    | 'getDownstreamUpdatePlanSummary'
 >;
 
 function currentContext(state: ProjectState, projectId: string): DownstreamUpdatePlanCurrentContext | undefined {
-    const spine = (state.spineVersions[projectId] ?? []).find(candidate => candidate.isLatest);
-    if (!spine) return undefined;
-    const artifacts = state.artifacts[projectId] ?? [];
-    const versions = state.artifactVersions[projectId] ?? [];
-    return {
-        spineVersionId: spine.id,
-        spineContentHash: hashReviewValue(spine.structuredPRD ?? spine.responseText),
-        planningContextHash: downstreamPlanningContextHash(state.planningRecords[projectId] ?? []),
-        artifactVersions: Object.fromEntries(artifacts.flatMap(artifact => {
-            const version = versions.find(candidate => candidate.id === artifact.currentVersionId)
-                ?? versions.find(candidate => candidate.artifactId === artifact.id && candidate.isPreferred);
-            return version ? [[artifact.id, { versionId: version.id, contentHash: hashReviewValue(version.content) }]] : [];
-        })),
-    };
+    return buildDownstreamUpdatePlanCurrentContext({
+        spineVersions: state.spineVersions[projectId] ?? [],
+        planningRecords: state.planningRecords[projectId] ?? [],
+        artifacts: state.artifacts[projectId] ?? [],
+        artifactVersions: state.artifactVersions[projectId] ?? [],
+    });
 }
 
 const rationaleRequired = (disposition: string): boolean =>
@@ -129,4 +122,10 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         const context = currentContext(get(), projectId);
         return plan && context ? compareDownstreamUpdatePlanCurrentness(plan, context) : undefined;
     },
+
+    getDownstreamUpdatePlanSummary: (projectId) => deriveDownstreamUpdatePlanSummary({
+        plans: get().downstreamUpdatePlans[projectId] ?? [],
+        events: get().downstreamUpdatePlanEvents[projectId] ?? [],
+        context: currentContext(get(), projectId),
+    }),
 });

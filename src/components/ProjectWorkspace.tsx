@@ -68,7 +68,7 @@ export function ProjectWorkspace() {
     const navigate = useNavigate();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -323,6 +323,12 @@ export function ProjectWorkspace() {
     // version drift, legacy provenance gaps, and changes outside an output's
     // main planning inputs stay visible for review without blocking build.
     const outputAlignment = getProjectOutputAlignment(projectId);
+    // Update plans bind to the latest planning spine. When the user is
+    // inspecting an older PRD version, do not project today's review choices
+    // into that historical planning context.
+    const downstreamUpdatePlanSummary = activeSpine?.id === latestSpine?.id
+        ? getDownstreamUpdatePlanSummary(projectId)
+        : undefined;
     const staleOutputCount = outputAlignment.blockingCount;
     const readinessReviewInput = activeSpine ? {
         projectId,
@@ -345,6 +351,7 @@ export function ProjectWorkspace() {
         reviewIssues,
         reviewFindings,
         outputAlignment,
+        downstreamUpdatePlanSummary,
         currentArtifactRefs: currentReadinessArtifactRefs,
         currentChallengeContextSignature,
     } : undefined;
@@ -382,6 +389,7 @@ export function ProjectWorkspace() {
             + (strictChallenge?.untriagedFindings.length ?? 0),
         generatedOutputCount: generatedOutputs.length,
         staleOutputCount,
+        downstreamUpdatePlanSummary,
         isCommitted: displaysCurrentCommitment,
         currentSpineVersionId: activeSpine?.id,
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
@@ -876,7 +884,11 @@ export function ProjectWorkspace() {
         const kind = planningReadiness.nextAction.kind;
         if (kind === 'resolve_decision' || kind === 'validate_assumption' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId);
         if (kind === 'challenge_plan') return openChallenge();
-        if (kind === 'align_outputs') return setPipelineStage('workspace');
+        if (kind === 'align_outputs') {
+            if (planningReadiness.nextAction.nodeId) setWorkspaceInitialNode(planningReadiness.nextAction.nodeId);
+            if (planningReadiness.nextAction.artifactId) setWorkspaceInitialArtifactId(planningReadiness.nextAction.artifactId);
+            return setPipelineStage('workspace');
+        }
         if (kind === 'commit_plan') return handleToggleFinal();
         const anchor = kind === 'confirm_scope' ? 'prd-features' : 'prd-coreProblem';
         document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });

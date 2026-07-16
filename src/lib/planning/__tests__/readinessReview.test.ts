@@ -179,7 +179,7 @@ describe('deterministic readiness review', () => {
         const review = deriveReadinessReview(input());
         expect(review.conclusion).toBe('ready_to_build');
         expect(review.schemaVersion).toBe(1);
-        expect(review.criteriaVersion).toBe(1);
+        expect(review.criteriaVersion).toBe(2);
         expect(review.criteria.map(item => item.id)).toEqual([
             'problem', 'user', 'outcome', 'scope', 'decisions', 'assumptions', 'risks',
             'plan_alignment', 'challenge', 'downstream_alignment',
@@ -582,6 +582,60 @@ describe('deterministic readiness review', () => {
         expect(comparison.reasons).toContain('planning_state_changed');
     });
 
+    it('pins exact current update-plan state and explains definite regional blockers', () => {
+        const blockingSummary = {
+            currentPlanCount: 1, historicalPlanCount: 0, advisoryItems: [], reviewedItems: [], snapshotHash: 'update-state-1',
+            blockingItems: [{
+                planId: 'plan', planIntegrityHash: 'plan-integrity', itemId: 'update-item', artifactId: 'screens',
+                artifactVersionId: 'screens-v1', nodeId: 'screen_inventory' as const, artifactTitle: 'Screens',
+                region: { kind: 'screen' as const, screenId: 'shared', screenName: 'Shared workspace', aspect: 'screen' as const },
+                certainty: 'definite' as const, implementationCritical: true, disposition: 'planned' as const, priority: 1,
+                recommendation: 'Remove the obsolete shared-workspace behavior.',
+            }],
+        };
+        const review = deriveReadinessReview(input({ downstreamUpdatePlanSummary: blockingSummary }));
+        const criterion = review.criteria.find(item => item.id === 'downstream_alignment');
+        expect(criterion).toMatchObject({ blocking: true, status: 'attention' });
+        expect(criterion?.evidence).toContainEqual(expect.objectContaining({ sourceId: 'update-item', sourceVersionId: 'screens-v1' }));
+        expect(review.concerns).toContainEqual(expect.objectContaining({
+            source: expect.objectContaining({ sourceId: 'update-item' }),
+            actionTarget: { kind: 'output', artifactId: 'screens', nodeId: 'screen_inventory' },
+            blocking: true,
+        }));
+
+        const changed = compareReadinessReviewCurrentness(review, input({
+            downstreamUpdatePlanSummary: { ...blockingSummary, snapshotHash: 'update-state-2' },
+        }));
+        expect(changed).toMatchObject({ current: false, historical: true });
+        expect(changed.reasons).toContain('downstream_changed');
+    });
+
+    it('does not let a reviewed plan disposition clear underlying output alignment', () => {
+        const outputAlignment: ProjectOutputAlignmentSummary = {
+            outputs: [{
+                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'possibly_affected',
+                confidence: 'possible', summary: 'Current plan changed.', reasons: ['Relevant scope changed.'],
+                nextAction: 'Review screens.', usefulForExploration: true, blocksBuildReadiness: true,
+                generatedFromSpineId: 'spine-old',
+            }], alignedCount: 0, possiblyAffectedCount: 1, staleCount: 0, blockingCount: 1,
+        };
+        const review = deriveReadinessReview(input({
+            outputAlignment,
+            downstreamUpdatePlanSummary: {
+                currentPlanCount: 1, historicalPlanCount: 0, blockingItems: [], advisoryItems: [], snapshotHash: 'reviewed',
+                reviewedItems: [{
+                    planId: 'plan', planIntegrityHash: 'integrity', itemId: 'item', artifactId: 'screens', artifactVersionId: 'v1',
+                    nodeId: 'screen_inventory', artifactTitle: 'Screens',
+                    region: { kind: 'screen', screenId: 'shared', screenName: 'Shared', aspect: 'screen' },
+                    certainty: 'possible', implementationCritical: false, disposition: 'already_aligned', priority: 1,
+                    recommendation: 'Review the shared screen.',
+                }],
+            },
+        }));
+        expect(review.criteria.find(item => item.id === 'downstream_alignment')).toMatchObject({ blocking: true });
+        expect(review.conclusion).toBe('not_ready');
+    });
+
     it('makes a review historical when the safety boundary changes', () => {
         const review = deriveReadinessReview(input({
             spine: { versionId: 'spine-1', content, structuredPRD: prd, safetyReview: {
@@ -598,7 +652,7 @@ describe('deterministic readiness review', () => {
 
     it('makes a persisted review historical when criteria semantics change', () => {
         const review = deriveReadinessReview(input());
-        const comparison = compareReadinessReviewCurrentness(review, input(), { criteriaVersion: 2 });
+        const comparison = compareReadinessReviewCurrentness(review, input(), { criteriaVersion: 3 });
         expect(comparison.reasons).toContain('criteria_changed');
         expect(comparison.current).toBe(false);
     });

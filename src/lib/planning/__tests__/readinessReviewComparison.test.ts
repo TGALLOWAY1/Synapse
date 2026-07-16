@@ -6,7 +6,7 @@ const baseReview = (overrides: Partial<ReadinessReview> = {}): ReadinessReview =
     id: 'review-old',
     projectId: 'project-1',
     schemaVersion: 1,
-    criteriaVersion: 1,
+    criteriaVersion: 2,
     conclusion: 'ready_to_build',
     spineVersionId: 'spine-1',
     snapshotHashes: {

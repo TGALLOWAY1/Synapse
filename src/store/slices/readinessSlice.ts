@@ -10,6 +10,10 @@ import {
     type ReadinessReviewInput,
 } from '../../lib/planning/readinessReview';
 import { deriveProjectOutputAlignment } from '../../lib/planning/outputAlignment';
+import {
+    buildDownstreamUpdatePlanCurrentContext,
+    deriveDownstreamUpdatePlanSummary,
+} from '../../lib/planning/downstreamUpdatePlan';
 import { buildReviewContextManifest } from '../../lib/review/manifest';
 import {
     deriveReadinessCommitmentState,
@@ -56,6 +60,16 @@ export function buildReadinessReviewInputFromState(
         artifactVersions: versions,
         spineVersions: state.spineVersions[projectId] ?? [],
         job: state.jobs[projectId],
+    });
+    const downstreamUpdatePlanSummary = deriveDownstreamUpdatePlanSummary({
+        plans: state.downstreamUpdatePlans[projectId] ?? [],
+        events: state.downstreamUpdatePlanEvents[projectId] ?? [],
+        context: buildDownstreamUpdatePlanCurrentContext({
+            spineVersions: state.spineVersions[projectId] ?? [],
+            planningRecords: state.planningRecords[projectId] ?? [],
+            artifacts,
+            artifactVersions: versions,
+        }),
     });
     const currentArtifactRefs = artifacts
         .filter(artifact => artifact.status !== 'archived')
@@ -117,6 +131,7 @@ export function buildReadinessReviewInputFromState(
         reviewFindings: state.reviewFindings[projectId] ?? [],
         reviewIssues: state.reviewIssues[projectId] ?? [],
         outputAlignment,
+        downstreamUpdatePlanSummary,
         currentArtifactRefs,
         currentChallengeContextSignature,
         createdAt,
