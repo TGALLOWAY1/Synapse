@@ -13,7 +13,17 @@ export type DownstreamUpdateRegion =
         kind: 'screen';
         screenId: string;
         screenName: string;
-        aspect: 'screen' | 'state' | 'behavior' | 'role';
+        aspect:
+            | 'screen'
+            | 'state'
+            | 'behavior'
+            | 'component'
+            | 'role'
+            | 'interaction'
+            | 'empty'
+            | 'error'
+            | 'permission'
+            | 'navigation';
         aspectId?: string;
         label?: string;
     }
@@ -21,7 +31,15 @@ export type DownstreamUpdateRegion =
         kind: 'flow';
         flowId: string;
         flowName: string;
-        aspect: 'flow' | 'step' | 'branch';
+        aspect:
+            | 'flow'
+            | 'step'
+            | 'branch'
+            | 'entry'
+            | 'exit'
+            | 'actor'
+            | 'decision'
+            | 'error_recovery';
         stepIndex?: number;
         label?: string;
     }

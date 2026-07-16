@@ -13,6 +13,7 @@ import {
     type DownstreamUpdatePlanItem,
 } from '../../lib/planning/downstreamUpdatePlan';
 import { useProjectStore } from '../../store/projectStore';
+import { DownstreamArtifactUpdateProposalReview } from './DownstreamArtifactUpdateProposalReview';
 
 const EMPTY_PLANS: DownstreamUpdatePlan[] = [];
 const EMPTY_EVENTS: DownstreamUpdatePlanEvent[] = [];
@@ -378,6 +379,15 @@ export function DownstreamUpdatePlanReview({
                                         <p className="mt-3 break-words rounded-lg bg-neutral-50 px-3 py-2 text-xs text-neutral-600">
                                             <strong className="text-neutral-800">User rationale:</strong> {item.rationale}
                                         </p>
+                                    )}
+
+                                    {(plan.artifact.slot === 'screen_inventory' || plan.artifact.slot === 'user_flows') && (
+                                        <DownstreamArtifactUpdateProposalReview
+                                            projectId={projectId}
+                                            plan={plan}
+                                            item={item}
+                                            readOnly={readOnly}
+                                        />
                                     )}
 
                                     {!readOnly && (

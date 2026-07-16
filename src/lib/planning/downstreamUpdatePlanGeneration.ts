@@ -184,14 +184,47 @@ function screenRegion(screen: ScreenItem, candidate: ChangeCandidate): { region:
     const lexical = candidate.lexicalTokens.find(token => containsPhrase(JSON.stringify(screen.states ?? []), token));
     if (lexical) {
         const state = (screen.states ?? []).find(item => containsPhrase(JSON.stringify(item), lexical));
+        const stateAspect = state?.type === 'empty' || state?.type === 'error' || state?.type === 'permission'
+            ? state.type
+            : 'state';
         return {
-            region: { kind: 'screen', screenId: screen.id ?? slug(screen.name), screenName: screen.name, aspect: 'state', aspectId: state ? slug(state.name) : undefined, label: state?.name },
+            region: { kind: 'screen', screenId: screen.id ?? slug(screen.name), screenName: screen.name, aspect: stateAspect, aspectId: state ? slug(state.name) : undefined, label: state?.name },
             label: `${screen.name} — ${state?.name ?? 'state'}`,
         };
     }
-    const behavior = candidate.lexicalTokens.some(token => containsPhrase(JSON.stringify({
-        handoff: screen.handoff, elements: screen.coreUIElements, exits: screen.exitPaths,
-    }), token));
+    const component = (screen.coreUIElements ?? screen.components)?.find(item =>
+        candidate.lexicalTokens.some(token => containsPhrase(item, token)));
+    if (component) return {
+        region: {
+            kind: 'screen', screenId: screen.id ?? slug(screen.name), screenName: screen.name,
+            aspect: 'component', aspectId: slug(component), label: component,
+        },
+        label: `${screen.name} — ${component}`,
+    };
+    const interaction = screen.handoff?.events?.find(event =>
+        candidate.lexicalTokens.some(token => containsPhrase(JSON.stringify(event), token)));
+    if (interaction) return {
+        region: {
+            kind: 'screen', screenId: screen.id ?? slug(screen.name), screenName: screen.name,
+            aspect: 'interaction', aspectId: slug(interaction.name), label: interaction.name,
+        },
+        label: `${screen.name} — ${interaction.name}`,
+    };
+    const exit = screen.exitPaths?.find(path =>
+        candidate.lexicalTokens.some(token => containsPhrase(JSON.stringify(path), token)));
+    const entry = screen.entryPoints?.find(value =>
+        candidate.lexicalTokens.some(token => containsPhrase(value, token)));
+    const route = screen.handoff?.route && candidate.lexicalTokens.some(token => containsPhrase(screen.handoff!.route!, token))
+        ? screen.handoff.route : undefined;
+    const navigation = exit?.label ?? entry ?? route;
+    if (navigation) return {
+        region: {
+            kind: 'screen', screenId: screen.id ?? slug(screen.name), screenName: screen.name,
+            aspect: 'navigation', aspectId: slug(navigation), label: navigation,
+        },
+        label: `${screen.name} — ${navigation}`,
+    };
+    const behavior = candidate.lexicalTokens.some(token => containsPhrase(JSON.stringify({ handoff: screen.handoff }), token));
     return {
         region: {
             kind: 'screen', screenId: screen.id ?? slug(screen.name), screenName: screen.name,
@@ -246,14 +279,16 @@ function flowItems(version: ArtifactVersion, candidates: ChangeCandidate[]): Dow
     }
     const affected = new Set(raw.map(item => item.flow.title));
     return raw.map((match, index) => {
-        const branch = match.step?.decisions.length ? match.step.decisions[0] : undefined;
-        const aspect = branch ? 'branch' : match.step ? 'step' : 'flow';
+        const decision = match.step?.decisions.find(value => match.candidate.lexicalTokens.some(token => containsPhrase(value, token)))
+            ?? (match.step?.decisions.length ? match.step.decisions[0] : undefined);
+        const recovery = match.step?.errorRefs.find(value => match.candidate.lexicalTokens.some(token => containsPhrase(value, token)));
+        const aspect = recovery ? 'error_recovery' : decision ? 'decision' : match.step ? 'step' : 'flow';
         const label = match.step ? `${match.flow.title} — Step ${match.step.index + 1}` : match.flow.title;
         return makeItem({
             artifactVersionId: version.id, candidate: match.candidate, slot: 'user_flows',
             region: {
                 kind: 'flow', flowId: slug(match.flow.title), flowName: match.flow.title, aspect,
-                stepIndex: match.step?.index, label: branch ?? match.step?.title,
+                stepIndex: match.step?.index, label: recovery ?? decision ?? match.step?.title,
             },
             label, interpretation: match.step?.rawText ?? match.flow.goal ?? `Flow: ${match.flow.title}`, match: match.match,
             preservedScope: flows.filter(flow => !affected.has(flow.title)).map(flow => `Flow: ${flow.title}`), index,

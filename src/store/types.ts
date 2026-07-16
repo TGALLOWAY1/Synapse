@@ -433,6 +433,12 @@ export interface ProjectState {
         projectId: string,
         proposal: DownstreamArtifactUpdateProposal,
     ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    generateDownstreamArtifactUpdateProposal: (
+        projectId: string,
+        planId: string,
+        itemId: string,
+    ) => { status: 'generated'; proposalId: string; operation: DownstreamArtifactUpdateOperation }
+        | { status: 'rejected'; reason: string };
     appendDownstreamArtifactUpdateReviewEvent: (
         projectId: string,
         proposalId: string,
@@ -446,6 +452,11 @@ export interface ProjectState {
         projectId: string,
         application: DownstreamArtifactUpdateApplication,
     ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    applyDownstreamArtifactUpdateProposal: (
+        projectId: string,
+        proposalId: string,
+    ) => { status: 'applied'; applicationId: string; artifactVersionId: string }
+        | { status: 'rejected'; reason: string };
     recordDownstreamArtifactUpdateVerification: (
         projectId: string,
         verification: DownstreamArtifactUpdateVerification,

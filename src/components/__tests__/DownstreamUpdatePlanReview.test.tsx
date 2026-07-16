@@ -22,7 +22,17 @@ const artifact: Artifact = {
 };
 const version: ArtifactVersion = {
     id: 'screens-v1', artifactId: artifact.id, versionNumber: 1, parentVersionId: null,
-    content: 'Shared workspace screen', metadata: {}, sourceRefs: [], generationPrompt: '',
+    content: JSON.stringify({ sections: [{ title: 'Core', screens: [
+        {
+            id: 'workspace', name: 'Shared workspace', priority: 'P0', purpose: 'Create locally',
+            states: [{ name: 'Invite collaborators', description: 'Invite teammates to edit.' }],
+            coreUIElements: ['Local editor'],
+        },
+        {
+            id: 'settings', name: 'Settings', priority: 'P1', purpose: 'Configure the workspace',
+            coreUIElements: ['Workspace controls'],
+        },
+    ] }] }), metadata: {}, sourceRefs: [], generationPrompt: '',
     isPreferred: true, createdAt: 1,
 };
 const record: PlanningRecord = {
@@ -74,6 +84,9 @@ beforeEach(() => {
         spineVersions: { [projectId]: [spine] }, artifacts: { [projectId]: [artifact] },
         artifactVersions: { [projectId]: [version] }, planningRecords: { [projectId]: [record] },
         downstreamUpdatePlans: { [projectId]: [plan] }, downstreamUpdatePlanEvents: { [projectId]: [] },
+        downstreamArtifactUpdateProposals: {}, downstreamArtifactUpdateReviewEvents: {},
+        downstreamArtifactUpdateApplications: {}, downstreamArtifactUpdateVerifications: {},
+        downstreamArtifactUpdateVerificationEvents: {}, historyEvents: {},
     });
 });
 
@@ -204,5 +217,39 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(screen.getByRole('button', { name: 'Close update plan' })).toHaveClass('min-h-11', 'min-w-11');
         expect(screen.getAllByRole('button', { name: 'Mark planned' })[0]).toHaveClass('min-h-11');
         expect(screen.getAllByText(/Why this region\? Evidence and ambiguity/)).toHaveLength(2);
+    });
+
+    it('keeps review-only guidance non-applicable when evidence does not support an exact change', () => {
+        renderReview();
+        const possible = screen.getByRole('heading', { name: /Settings/ }).closest('article')!;
+        fireEvent.click(within(possible).getByRole('button', { name: 'Prepare proposal' }));
+
+        expect(within(possible).getByText('Review only')).toBeInTheDocument();
+        expect(within(possible).getByText(/No bounded content change is available/)).toBeInTheDocument();
+        expect(within(possible).queryByRole('button', { name: 'Accept proposal' })).not.toBeInTheDocument();
+        expect(within(possible).queryByRole('button', { name: 'Apply approved change' })).not.toBeInTheDocument();
+        expect(within(possible).getByRole('button', { name: 'Add context' })).toBeInTheDocument();
+    });
+
+    it('separates approval from guarded application and creates a child artifact version for one state', () => {
+        renderReview();
+        const definite = screen.getByRole('heading', { name: /Shared workspace/ }).closest('article')!;
+        fireEvent.click(within(definite).getByRole('button', { name: 'Prepare proposal' }));
+        expect(within(definite).getByText('Bounded change')).toBeInTheDocument();
+        expect(within(definite).getByText(/Remove only this exact region/)).toBeInTheDocument();
+
+        fireEvent.click(within(definite).getByRole('button', { name: 'Accept proposal' }));
+        expect(within(definite).getByText(/artifact has not changed yet/)).toBeInTheDocument();
+        expect(useProjectStore.getState().artifactVersions[projectId]).toHaveLength(1);
+
+        fireEvent.click(within(definite).getByRole('button', { name: 'Apply approved change' }));
+        expect(within(definite).getByText(/Alignment still requires verification/)).toBeInTheDocument();
+        const versions = useProjectStore.getState().artifactVersions[projectId];
+        expect(versions).toHaveLength(2);
+        expect(versions[1].parentVersionId).toBe(version.id);
+        expect(JSON.parse(versions[1].content).sections[0].screens[0].states).toEqual([]);
+        expect(JSON.parse(versions[1].content).sections[0].screens[1])
+            .toEqual(JSON.parse(version.content).sections[0].screens[1]);
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId] ?? []).toEqual([]);
     });
 });

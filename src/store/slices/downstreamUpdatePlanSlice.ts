@@ -16,6 +16,7 @@ import {
     effectiveDownstreamArtifactUpdate,
     latestDownstreamArtifactUpdateReview,
     resolveDownstreamUpdateRegionContent,
+    sealDownstreamArtifactUpdateApplication,
     sealDownstreamArtifactUpdateReviewEvent,
     sealDownstreamArtifactUpdateVerificationEvent,
     validateDownstreamArtifactUpdateApplicationIntegrity,
@@ -25,6 +26,12 @@ import {
     validateDownstreamArtifactUpdateVerificationEventIntegrity,
 } from '../../lib/planning/downstreamArtifactUpdateProposal';
 import { hashReviewValue } from '../../lib/review/hash';
+import {
+    applyScreenFlowArtifactUpdate,
+    deriveScreenFlowArtifactUpdateProposal,
+    removedDownstreamUpdateRegionHash,
+} from '../../lib/planning/screenFlowArtifactUpdates';
+import type { ArtifactVersion, HistoryEvent } from '../../types';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamUpdatePlans'
@@ -40,8 +47,10 @@ export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamArtifactUpdateVerifications'
     | 'downstreamArtifactUpdateVerificationEvents'
     | 'recordDownstreamArtifactUpdateProposal'
+    | 'generateDownstreamArtifactUpdateProposal'
     | 'appendDownstreamArtifactUpdateReviewEvent'
     | 'recordDownstreamArtifactUpdateApplication'
+    | 'applyDownstreamArtifactUpdateProposal'
     | 'recordDownstreamArtifactUpdateVerification'
     | 'appendDownstreamArtifactUpdateVerificationEvent'
     | 'getDownstreamArtifactUpdateProposalCurrentness'
@@ -183,6 +192,44 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         return { ok: true, duplicate: false };
     },
 
+    generateDownstreamArtifactUpdateProposal: (projectId, planId, itemId) => {
+        const state = get();
+        const plan = (state.downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === planId);
+        const item = plan?.items.find(candidate => candidate.id === itemId);
+        const artifactVersion = plan
+            ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === plan.artifact.artifactVersionId)
+            : undefined;
+        const context = currentContext(state, projectId);
+        if (!plan || !item || !artifactVersion || !context) return { status: 'rejected', reason: 'binding_not_found' };
+        if (!compareDownstreamUpdatePlanCurrentness(plan, context).current) return { status: 'rejected', reason: 'stale' };
+        const prior = (state.downstreamArtifactUpdateProposals[projectId] ?? [])
+            .filter(candidate => candidate.updatePlanBinding.planId === planId
+                && candidate.updatePlanBinding.itemId === itemId)
+            .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+        const latestProposal = prior[0];
+        const latestReview = latestProposal
+            ? latestDownstreamArtifactUpdateReview(latestProposal, state.downstreamArtifactUpdateReviewEvents[projectId] ?? [])
+            : undefined;
+        if (latestProposal && latestReview?.action !== 'requested_another' && latestReview?.action !== 'provided_context') {
+            return { status: 'generated', proposalId: latestProposal.id, operation: latestProposal.operation };
+        }
+        const result = deriveScreenFlowArtifactUpdateProposal({
+            projectId, plan, item, artifactVersion,
+            requestNonce: latestReview ? `${latestReview.id}:${latestReview.integrityHash}` : 'initial',
+        });
+        if (!result.ok) return { status: 'rejected', reason: result.reason };
+        if (!validateDownstreamArtifactUpdateProposalIntegrity(result.proposal)) {
+            return { status: 'rejected', reason: 'invalid_proposal' };
+        }
+        set(current => ({
+            downstreamArtifactUpdateProposals: {
+                ...current.downstreamArtifactUpdateProposals,
+                [projectId]: [...(current.downstreamArtifactUpdateProposals[projectId] ?? []), result.proposal],
+            },
+        }));
+        return { status: 'generated', proposalId: result.proposal.id, operation: result.proposal.operation };
+    },
+
     appendDownstreamArtifactUpdateReviewEvent: (projectId, proposalId, input) => {
         const state = get();
         const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? []).find(candidate => candidate.id === proposalId);
@@ -258,7 +305,15 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             || result.artifactId !== artifact.id || result.parentVersionId !== proposal.artifact.artifactVersionId
             || hashReviewValue(result.content) !== application.resultingArtifactContentHash) return { ok: false, reason: 'concurrent_artifact_change' };
         const resultRegion = resolveDownstreamUpdateRegionContent(result, proposal.region);
-        if (!resultRegion.found || resultRegion.contentHash !== application.resultingRegionContentHash) return { ok: false, reason: 'result_region_mismatch' };
+        // Legacy Stage 1 callers could record a semantically described remove
+        // whose resulting region still existed. Keep those histories readable,
+        // while the guarded Stage 2 executor records a true absent-region
+        // sentinel for structural removals.
+        const resultMatches = resultRegion.found
+            ? resultRegion.contentHash === application.resultingRegionContentHash
+            : application.effectiveOperation === 'remove'
+                && application.resultingRegionContentHash === removedDownstreamUpdateRegionHash(proposal.region);
+        if (!resultMatches) return { ok: false, reason: 'result_region_mismatch' };
         const context = currentContext(state, projectId);
         if (!context || context.spineVersionId !== proposal.source.targetSpineVersionId
             || context.spineContentHash !== proposal.source.targetSpineContentHash
@@ -270,6 +325,135 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             },
         }));
         return { ok: true, duplicate: false };
+    },
+
+    applyDownstreamArtifactUpdateProposal: (projectId, proposalId) => {
+        let outcome: ReturnType<ProjectState['applyDownstreamArtifactUpdateProposal']> = {
+            status: 'rejected', reason: 'application_failed',
+        };
+        set(state => {
+            const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? [])
+                .find(candidate => candidate.id === proposalId);
+            if (!proposal || !validateDownstreamArtifactUpdateProposalIntegrity(proposal)) {
+                outcome = { status: 'rejected', reason: 'proposal_not_found' };
+                return state;
+            }
+            const plan = (state.downstreamUpdatePlans[projectId] ?? [])
+                .find(candidate => candidate.id === proposal.updatePlanBinding.planId);
+            const context = currentContext(state, projectId);
+            const artifactVersion = (state.artifactVersions[projectId] ?? [])
+                .find(candidate => candidate.id === proposal.artifact.artifactVersionId);
+            if (!context || !artifactVersion || !compareDownstreamArtifactUpdateProposalCurrentness({
+                proposal, plan, planContext: context, artifactVersion,
+            }).current) {
+                outcome = { status: 'rejected', reason: 'stale' };
+                return state;
+            }
+            const artifact = (state.artifacts[projectId] ?? []).find(candidate => candidate.id === proposal.artifact.artifactId);
+            if (!artifact || artifact.currentVersionId !== artifactVersion.id) {
+                outcome = { status: 'rejected', reason: 'concurrent_artifact_change' };
+                return state;
+            }
+            const reviewEvents = state.downstreamArtifactUpdateReviewEvents[projectId] ?? [];
+            const review = latestDownstreamArtifactUpdateReview(proposal, reviewEvents);
+            if (!review || (review.action !== 'accepted' && review.action !== 'edited')) {
+                outcome = { status: 'rejected', reason: 'approval_required' };
+                return state;
+            }
+            if ((state.downstreamArtifactUpdateApplications[projectId] ?? [])
+                .some(candidate => candidate.authorizedByReviewEventId === review.id)) {
+                outcome = { status: 'rejected', reason: 'authorization_consumed' };
+                return state;
+            }
+            const applied = applyScreenFlowArtifactUpdate({ proposal, review, artifactVersion });
+            if (!applied.ok) {
+                outcome = { status: 'rejected', reason: applied.reason };
+                return state;
+            }
+            const effective = effectiveDownstreamArtifactUpdate(proposal, review);
+            if (!effective) {
+                outcome = { status: 'rejected', reason: 'approval_required' };
+                return state;
+            }
+            const now = Date.now();
+            const versionId = uuidv4();
+            const applicationId = uuidv4();
+            const versions = state.artifactVersions[projectId] ?? [];
+            const versionNumber = versions.filter(candidate => candidate.artifactId === artifact.id).length + 1;
+            const resultVersion: ArtifactVersion = {
+                id: versionId,
+                artifactId: artifact.id,
+                versionNumber,
+                parentVersionId: artifactVersion.id,
+                content: applied.content,
+                metadata: artifactVersion.metadata,
+                sourceRefs: artifactVersion.sourceRefs,
+                generationPrompt: artifactVersion.generationPrompt,
+                isPreferred: true,
+                createdAt: now,
+                provenance: {
+                    changeSource: 'user_edit',
+                    editSummary: `Applied an approved selective update to ${artifact.title}`,
+                },
+            };
+            const application = sealDownstreamArtifactUpdateApplication({
+                schemaVersion: 1,
+                id: applicationId,
+                projectId,
+                proposalId: proposal.id,
+                proposalIntegrityHash: proposal.integrityHash,
+                authorizedByReviewEventId: review.id,
+                authorizedByReviewEventIntegrityHash: review.integrityHash,
+                actor: 'system',
+                initiatedBy: 'user',
+                effectiveOperation: effective.operation,
+                effectiveContentHash: effective.contentHash,
+                expectedArtifactVersionId: artifactVersion.id,
+                expectedArtifactContentHash: proposal.artifact.artifactContentHash,
+                expectedRegionContentHash: proposal.currentRegionContentHash,
+                resultingArtifactVersionId: versionId,
+                resultingArtifactContentHash: hashReviewValue(applied.content),
+                resultingRegionContentHash: applied.resultingRegionContentHash,
+                appliedAt: now,
+            });
+            if (!validateDownstreamArtifactUpdateApplicationIntegrity(application)) {
+                outcome = { status: 'rejected', reason: 'invalid_application' };
+                return state;
+            }
+            const history: HistoryEvent = {
+                id: uuidv4(), projectId, artifactId: artifact.id, artifactVersionId: versionId,
+                type: 'Edited',
+                description: `${artifact.title} selectively updated from an approved plan proposal`,
+                createdAt: now,
+            };
+            outcome = { status: 'applied', applicationId, artifactVersionId: versionId };
+            return {
+                artifactVersions: {
+                    ...state.artifactVersions,
+                    [projectId]: [
+                        ...versions.map(candidate => candidate.artifactId === artifact.id
+                            ? { ...candidate, isPreferred: false }
+                            : candidate),
+                        resultVersion,
+                    ],
+                },
+                artifacts: {
+                    ...state.artifacts,
+                    [projectId]: (state.artifacts[projectId] ?? []).map(candidate => candidate.id === artifact.id
+                        ? { ...candidate, currentVersionId: versionId, updatedAt: now }
+                        : candidate),
+                },
+                historyEvents: {
+                    ...state.historyEvents,
+                    [projectId]: [...(state.historyEvents[projectId] ?? []), history],
+                },
+                downstreamArtifactUpdateApplications: {
+                    ...state.downstreamArtifactUpdateApplications,
+                    [projectId]: [...(state.downstreamArtifactUpdateApplications[projectId] ?? []), application],
+                },
+            };
+        });
+        return outcome;
     },
 
     recordDownstreamArtifactUpdateVerification: (projectId, verification) => {

@@ -34,6 +34,27 @@ function resolveFlow(markdown: string, region: Extract<DownstreamUpdateRegion, {
     const next = headings.find(match => (match.index ?? 0) > heading.index!);
     const section = markdown.slice(heading.index, next?.index ?? markdown.length).trim();
     if (region.aspect === 'flow') return section;
+    if (region.aspect === 'entry') {
+        const block = section.match(/^\*\*Entry\s*Points?:\*\*\s*([\s\S]*?)(?=^\*\*[^\n]+:\*\*|$)/im)?.[1]?.trim();
+        if (!block) return undefined;
+        if (!region.label) return block;
+        return block.split('\n').map(line => line.trim().replace(/^[-*]\s+/, ''))
+            .find(line => line === region.label || line.includes(region.label!));
+    }
+    if (region.aspect === 'exit') {
+        const outcome = section.match(/^\*\*Success Outcome:\*\*\s*([\s\S]*?)(?=^\*\*[^\n]+:\*\*|$)/im)?.[1]?.trim();
+        if (!outcome) return undefined;
+        if (!region.label) return outcome;
+        return outcome.split('\n').map(line => line.trim().replace(/^[-*]\s+/, ''))
+            .find(line => line === region.label || line.includes(region.label!));
+    }
+    if (region.aspect === 'error_recovery' && region.stepIndex === undefined) {
+        const block = section.match(/^\*\*Error Paths:\*\*\s*([\s\S]*?)(?=^\*\*[^\n]+:\*\*|$)/im)?.[1]?.trim();
+        if (!block) return undefined;
+        if (!region.label) return block;
+        return block.split('\n').map(line => line.trim().replace(/^[-*]\s+/, ''))
+            .find(line => line === region.label || line.includes(region.label!));
+    }
     const stepsStart = section.search(/^\*\*Steps:\*\*/im);
     if (stepsStart < 0) return undefined;
     const stepsBlock = section.slice(stepsStart).split(/^\*\*(?:Success Outcome|Error Paths|Edge Cases|Assumptions?|Open Questions?):\*\*/im)[0];
@@ -41,9 +62,14 @@ function resolveFlow(markdown: string, region: Extract<DownstreamUpdateRegion, {
     const step = steps.find((_match, index) => index === region.stepIndex);
     if (!step) return undefined;
     if (region.aspect === 'step') return step[0].trim();
+    if (region.aspect === 'actor') {
+        const raw = step[0].trim().replace(/^\d+\.\s*/, '');
+        const withoutScreen = raw.replace(/^\[[^\]]+\]\s*[—-]\s*/, '');
+        return withoutScreen.split(/\s*(?:→|->|⇒)\s*/)[0]?.trim() || undefined;
+    }
     if (!region.label) return step[0].trim();
     const matchingLine = step[0].split('\n').find(line => line.includes(region.label!));
-    return matchingLine?.trim() ?? step[0].trim();
+    return matchingLine?.trim();
 }
 
 function resolveLegacyDataModelJson(content: string, region: Extract<DownstreamUpdateRegion, { kind: 'data_model' }>): unknown {
@@ -91,7 +117,24 @@ export function resolveDownstreamUpdateRegionContent(
         const screen = inventory?.sections.flatMap(section => section.screens)
             .find(candidate => candidate.id === region.screenId || candidate.name === region.screenName);
         if (!screen) return { found: false };
-        if (region.aspect === 'state') return resolved(screen.states?.find(state => slug(state.name) === region.aspectId || state.name === region.label));
+        if (region.aspect === 'state' || region.aspect === 'empty' || region.aspect === 'error' || region.aspect === 'permission') {
+            return resolved(screen.states?.find(state => slug(state.name) === region.aspectId
+                || state.name === region.label
+                || state.type === region.aspect));
+        }
+        if (region.aspect === 'component') {
+            return resolved((screen.coreUIElements ?? screen.components)?.find(component => slug(component) === region.aspectId || component === region.label));
+        }
+        if (region.aspect === 'interaction') {
+            return resolved(screen.handoff?.events?.find(event => slug(event.name) === region.aspectId || event.name === region.label));
+        }
+        if (region.aspect === 'navigation') {
+            return resolved(screen.exitPaths?.find(path => slug(path.label) === region.aspectId
+                || path.label === region.label || path.target === region.label)
+                ?? screen.entryPoints?.find(entry => slug(entry) === region.aspectId || entry === region.label)
+                ?? (screen.handoff?.route && (slug(screen.handoff.route) === region.aspectId || screen.handoff.route === region.label)
+                    ? screen.handoff.route : undefined));
+        }
         if (region.aspect === 'behavior') return resolved({ coreUIElements: screen.coreUIElements, exitPaths: screen.exitPaths, handoff: screen.handoff });
         if (region.aspect === 'role') return resolved({ purpose: screen.purpose, userIntent: screen.userIntent });
         return resolved(screen);

@@ -83,10 +83,37 @@ beforeEach(() => {
         downstreamUpdatePlans: {}, downstreamUpdatePlanEvents: {}, downstreamArtifactUpdateProposals: {},
         downstreamArtifactUpdateReviewEvents: {}, downstreamArtifactUpdateApplications: {},
         downstreamArtifactUpdateVerifications: {}, downstreamArtifactUpdateVerificationEvents: {},
+        historyEvents: {},
     });
 });
 
 describe('downstream artifact-update proposal store boundary', () => {
+    it('generates, authorizes, and atomically applies one exact screen-state removal as a new version', () => {
+        const plan = makePlan();
+        expect(useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan)).toEqual({ ok: true, duplicate: false });
+        const generated = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id);
+        expect(generated).toMatchObject({ status: 'generated', operation: 'remove' });
+        if (generated.status !== 'generated') return;
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, generated.proposalId, { action: 'accepted' }))
+            .toMatchObject({ ok: true });
+        const applied = useProjectStore.getState().applyDownstreamArtifactUpdateProposal(projectId, generated.proposalId);
+        expect(applied).toMatchObject({ status: 'applied' });
+        if (applied.status !== 'applied') return;
+
+        const state = useProjectStore.getState();
+        const result = state.artifactVersions[projectId].find(candidate => candidate.id === applied.artifactVersionId)!;
+        expect(result.parentVersionId).toBe(version.id);
+        expect(result.provenance?.changeSource).toBe('user_edit');
+        expect(JSON.parse(result.content).sections[0].screens[0].states).toEqual([]);
+        expect(state.artifactVersions[projectId].find(candidate => candidate.id === version.id)?.content).toBe(version.content);
+        expect(state.downstreamArtifactUpdateApplications[projectId]).toHaveLength(1);
+        expect(state.downstreamArtifactUpdateVerifications[projectId] ?? []).toEqual([]);
+        expect(state.historyEvents[projectId].at(-1)).toMatchObject({ type: 'Edited', artifactVersionId: result.id });
+        expect(state.downstreamUpdatePlans[projectId][0]).toEqual(plan);
+        expect(state.applyDownstreamArtifactUpdateProposal(projectId, generated.proposalId))
+            .toEqual({ status: 'rejected', reason: 'stale' });
+    });
+
     it('records only a current exact proposal and user-authored review events', () => {
         const { plan, proposal } = makeProposal();
         useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);
@@ -97,6 +124,25 @@ describe('downstream artifact-update proposal store boundary', () => {
         expect(useProjectStore.getState().downstreamArtifactUpdateReviewEvents[projectId][0].actor).toBe('user');
         expect(useProjectStore.getState().recordDownstreamArtifactUpdateProposal(projectId, { ...proposal, authoredBy: 'user' } as never))
             .toEqual({ ok: false, reason: 'invalid_proposal' });
+    });
+
+    it('creates a fresh proposal identity only after the user requests another proposal', () => {
+        const plan = makePlan();
+        useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);
+        const first = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id);
+        expect(first.status).toBe('generated');
+        if (first.status !== 'generated') return;
+        expect(useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id))
+            .toMatchObject({ status: 'generated', proposalId: first.proposalId });
+        expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId]).toHaveLength(1);
+        useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, first.proposalId, {
+            action: 'requested_another', rationale: 'Try a more conservative bounded recommendation.',
+        });
+        const second = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id);
+        expect(second.status).toBe('generated');
+        if (second.status !== 'generated') return;
+        expect(second.proposalId).not.toBe(first.proposalId);
+        expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId]).toHaveLength(2);
     });
 
     it('fails closed for changed planning authority, same-text spine identity, artifact edits, and stale review reuse', () => {
@@ -115,6 +161,24 @@ describe('downstream artifact-update proposal store boundary', () => {
         useProjectStore.setState({ planningRecords: { [projectId]: [record] }, artifactVersions: { [projectId]: [{ ...version, content: content('Changed concurrently') }] } });
         expect(useProjectStore.getState().getDownstreamArtifactUpdateProposalCurrentness(projectId, proposal.id)?.reasons)
             .toEqual(expect.arrayContaining(['artifact_content_changed', 'region_content_changed']));
+    });
+
+    it('fails atomically when manual content changes after approval', () => {
+        const plan = makePlan();
+        useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);
+        const generated = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id);
+        expect(generated.status).toBe('generated');
+        if (generated.status !== 'generated') return;
+        useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, generated.proposalId, { action: 'accepted' });
+        useProjectStore.setState({
+            artifactVersions: { [projectId]: [{ ...version, content: content('Manual edit after approval') }] },
+        });
+
+        expect(useProjectStore.getState().applyDownstreamArtifactUpdateProposal(projectId, generated.proposalId))
+            .toEqual({ status: 'rejected', reason: 'stale' });
+        expect(useProjectStore.getState().artifactVersions[projectId]).toHaveLength(1);
+        expect(useProjectStore.getState().downstreamArtifactUpdateApplications[projectId] ?? []).toEqual([]);
+        expect(useProjectStore.getState().historyEvents[projectId] ?? []).toEqual([]);
     });
 
     it('requires the latest exact user approval, consumes it once, and records application history without applying content', () => {
