@@ -46,6 +46,15 @@ const actionLabel: Record<PendingAction, string> = {
 function proposedSummary(proposal: DownstreamArtifactUpdateProposal): string {
     if (proposal.operation === 'review_only') return 'No bounded content change is available. Review manually or provide more context.';
     if (proposal.operation === 'remove') return 'Remove only this exact region.';
+    if (proposal.region.kind === 'implementation_plan' && proposal.region.section === 'delivery' && proposal.proposedContent) {
+        try {
+            const change = JSON.parse(proposal.proposedContent) as { operation?: string; collection?: string; value?: unknown };
+            const value = typeof change.value === 'string' ? change.value : JSON.stringify(change.value, null, 2);
+            return `${change.operation === 'add' ? 'Add' : 'Replace with'}${change.collection ? ` in ${change.collection.replace(/_/g, ' ')}` : ''}: ${value}`;
+        } catch {
+            return 'Review the exact structured plan change supplied by the user.';
+        }
+    }
     return proposal.proposedContent ?? 'No proposed content.';
 }
 

@@ -162,7 +162,47 @@ export function resolveDownstreamUpdateRegionContent(
     }
 
     const plan = extractStructuredPlan(artifactVersion.content);
-    if (!plan || region.section !== 'architecture') return { found: false };
-    const entry = plan.architecture?.[region.entryIndex];
-    return entry === region.entryLabel ? resolved(entry) : { found: false };
+    if (!plan) return { found: false };
+    if (region.section === 'architecture') {
+        const entry = plan.architecture?.[region.entryIndex];
+        return entry === region.entryLabel ? resolved(entry) : { found: false };
+    }
+    const milestone = region.milestoneId
+        ? plan.milestones.find(candidate => candidate.id === region.milestoneId)
+        : undefined;
+    let entry: unknown;
+    let label: string | undefined;
+    if (region.collection === 'milestones') {
+        entry = plan.milestones[region.entryIndex];
+        label = entry && typeof entry === 'object' ? (entry as { name?: string }).name : undefined;
+    } else if (region.collection === 'tasks') {
+        entry = milestone?.tasks[region.entryIndex];
+        label = entry && typeof entry === 'object' ? (entry as { title?: string }).title : undefined;
+    } else if (region.collection === 'dependencies') {
+        entry = milestone?.dependencies?.[region.entryIndex];
+        label = typeof entry === 'string' ? entry : undefined;
+    } else if (region.collection === 'definition_of_done') {
+        entry = milestone?.definitionOfDone?.[region.entryIndex] ?? plan.definitionOfDone?.[region.entryIndex];
+        label = typeof entry === 'string' ? entry : undefined;
+    } else if (region.collection === 'prompt_acceptance_criteria') {
+        const pack = milestone?.promptPacks?.find(candidate => candidate.id === region.promptPackId);
+        entry = pack?.acceptanceCriteria[region.entryIndex];
+        label = typeof entry === 'string' ? entry : undefined;
+    } else if (region.collection === 'risks') {
+        entry = plan.risks?.[region.entryIndex];
+        label = entry && typeof entry === 'object' ? (entry as { description?: string }).description : undefined;
+    } else if (region.collection === 'critical_path') {
+        entry = plan.summary?.criticalPath?.[region.entryIndex];
+        label = typeof entry === 'string' ? entry : undefined;
+    } else if (region.collection === 'validation_commands') {
+        entry = milestone?.validationCommands?.[region.entryIndex];
+        label = typeof entry === 'string' ? entry : undefined;
+    } else if (region.collection === 'quality_gates') {
+        const gates = milestone ? milestone.qualityGates : plan.globalQualityGates;
+        entry = region.qualityGateId
+            ? gates?.find(candidate => candidate.id === region.qualityGateId)
+            : gates?.[region.entryIndex];
+        label = entry && typeof entry === 'object' ? (entry as { title?: string }).title : undefined;
+    }
+    return entry !== undefined && label === region.entryLabel ? resolved(entry) : { found: false };
 }

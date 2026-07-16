@@ -51,6 +51,8 @@ interface Props {
     metadata?: Record<string, unknown>;
     /** Persists the copy/gate-status progress overlay onto the version. */
     onUpdatePlanProgress?: (next: ImplementationPlanProgress) => void;
+    /** Opens the exact milestone selected from a bounded downstream update plan. */
+    initialMilestoneId?: string;
 }
 
 function inlineMd(text: string) {
@@ -218,6 +220,7 @@ export function ImplementationPlanRenderer({
     onConvertToTasks,
     metadata,
     onUpdatePlanProgress,
+    initialMilestoneId,
 }: Props) {
     const consolidated = useMemo(
         () => {
@@ -235,6 +238,7 @@ export function ImplementationPlanRenderer({
     if (consolidated) {
         return (
             <ConsolidatedPlanView
+                key={initialMilestoneId ?? 'implementation-plan'}
                 plan={consolidated}
                 prdVersionLabel={prdVersionLabel}
                 staleness={staleness}
@@ -243,6 +247,7 @@ export function ImplementationPlanRenderer({
                 onConvertToTasks={onConvertToTasks}
                 progress={onUpdatePlanProgress ? progress : undefined}
                 onUpdateProgress={onUpdatePlanProgress}
+                initialMilestoneId={initialMilestoneId}
             />
         );
     }

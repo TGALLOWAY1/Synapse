@@ -38,6 +38,7 @@ interface Props {
      * session-local state when persistence isn't wired (tests, previews). */
     progress?: ImplementationPlanProgress;
     onUpdateProgress?: (next: ImplementationPlanProgress) => void;
+    initialMilestoneId?: string;
 }
 
 /**
@@ -59,9 +60,12 @@ export function ConsolidatedPlanView({
     onConvertToTasks,
     progress: externalProgress,
     onUpdateProgress,
+    initialMilestoneId,
 }: Props) {
-    const [tab, setTab] = useState<TabId>('overview');
-    const [focusMilestoneId, setFocusMilestoneId] = useState<string | null>(null);
+    const initialMilestoneExists = Boolean(initialMilestoneId
+        && plan.milestones.some(milestone => milestone.id === initialMilestoneId));
+    const [tab, setTab] = useState<TabId>(initialMilestoneExists ? 'milestones' : 'overview');
+    const [focusMilestoneId, setFocusMilestoneId] = useState<string | null>(initialMilestoneExists ? initialMilestoneId! : null);
     // Session-local fallback so copy/gate tracking still works when no
     // persistence callback is wired (e.g. isolated renders).
     const [localProgress, setLocalProgress] = useState<ImplementationPlanProgress>(EMPTY_PLAN_PROGRESS);

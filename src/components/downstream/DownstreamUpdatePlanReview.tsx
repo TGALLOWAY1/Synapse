@@ -60,6 +60,7 @@ const actionCopy: Record<DownstreamUpdatePlanItem['recommendedAction'], string> 
     review_field: 'Review this field',
     review_relationship: 'Review this relationship',
     review_architecture: 'Review this architecture entry',
+    review_implementation_plan: 'Review this plan entry',
     confirm_no_change: 'Confirm no change is required',
     gather_information: 'Gather more information',
 };
@@ -76,7 +77,7 @@ function regionLabel(item: DownstreamUpdatePlanItem): string {
         return `${region.entityName} · ${region.label ?? region.memberName ?? region.aspect}`;
     }
     if (region.kind === 'implementation_plan') {
-        return `Architecture · ${region.label ?? region.entryLabel}`;
+        return `${region.section === 'architecture' ? 'Architecture' : region.aspect.replace(/_/g, ' ')} · ${region.label ?? region.entryLabel}`;
     }
     return region.label;
 }

@@ -69,6 +69,37 @@ export type DownstreamUpdateRegion =
         label?: string;
     }
     | {
+        kind: 'implementation_plan';
+        section: 'delivery';
+        aspect:
+            | 'milestone'
+            | 'workstream'
+            | 'task'
+            | 'dependency'
+            | 'acceptance_criterion'
+            | 'risk'
+            | 'sequencing_assumption'
+            | 'technical_prerequisite'
+            | 'testing_requirement';
+        collection:
+            | 'milestones'
+            | 'tasks'
+            | 'dependencies'
+            | 'definition_of_done'
+            | 'prompt_acceptance_criteria'
+            | 'risks'
+            | 'critical_path'
+            | 'validation_commands'
+            | 'quality_gates';
+        milestoneId?: string;
+        taskId?: string;
+        promptPackId?: string;
+        qualityGateId?: string;
+        entryIndex: number;
+        entryLabel: string;
+        label?: string;
+    }
+    | {
         kind: 'artifact_review';
         reason: 'legacy_provenance' | 'unstructured_content' | 'insufficient_dependency';
         label: string;
@@ -93,6 +124,7 @@ export type DownstreamUpdateRecommendedAction =
     | 'review_field'
     | 'review_relationship'
     | 'review_architecture'
+    | 'review_implementation_plan'
     | 'confirm_no_change'
     | 'gather_information';
 

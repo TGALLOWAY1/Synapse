@@ -360,9 +360,10 @@ function dataModelItems(version: ArtifactVersion, candidates: ChangeCandidate[])
     });
 }
 
-type ImplementationPlanRegion = Extract<DownstreamUpdateRegion, { kind: 'implementation_plan' }>;
+type ArchitectureRegion = Extract<DownstreamUpdateRegion, { kind: 'implementation_plan'; section: 'architecture' }>;
+type DeliveryRegion = Extract<DownstreamUpdateRegion, { kind: 'implementation_plan'; section: 'delivery' }>;
 
-const architectureAspect = (entry: string): ImplementationPlanRegion['aspect'] => {
+const architectureAspect = (entry: string): ArchitectureRegion['aspect'] => {
     const text = normalize(entry);
     if (/auth|identity|sign in|login/.test(text)) return 'authentication';
     if (/permission|authorization|security boundary|access control|tenant isolation/.test(text)) return 'security_boundary';
@@ -376,7 +377,7 @@ const architectureAspect = (entry: string): ImplementationPlanRegion['aspect'] =
     return 'decision';
 };
 
-const explicitArchitectureTrace = (entry: string, candidate: ChangeCandidate): boolean => candidate.exactTokens.some(token => {
+const explicitPlanTrace = (entry: string, candidate: ChangeCandidate): boolean => candidate.exactTokens.some(token => {
     const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
     return new RegExp(`(?:\\[feature:${escaped}\\]|feature(?:Ref)?\\s*[:=]\\s*${escaped}(?:\\b|\\]))`, 'i').test(entry);
 });
@@ -388,7 +389,7 @@ function architectureItems(version: ArtifactVersion, candidates: ChangeCandidate
     const raw: Array<{ entry: string; entryIndex: number; candidate: ChangeCandidate; match: 'trace' | 'reference' }> = [];
     entries.forEach((entry, entryIndex) => {
         candidates.forEach(candidate => {
-            const trace = explicitArchitectureTrace(entry, candidate);
+            const trace = explicitPlanTrace(entry, candidate);
             const reference = candidate.lexicalTokens.some(token => containsPhrase(entry, token));
             if (trace || reference) raw.push({ entry, entryIndex, candidate, match: trace ? 'trace' : 'reference' });
         });
@@ -410,6 +411,147 @@ function architectureItems(version: ArtifactVersion, candidates: ChangeCandidate
             .map(({ entry, entryIndex }) => `Architecture entry ${entryIndex + 1}: ${entry}`),
         index,
     }));
+}
+
+type DeliveryDescriptor = {
+    region: DeliveryRegion;
+    label: string;
+    text: string;
+};
+
+const technicalTask = (text: string): boolean => /security|authentication|authorization|migration|api|technical prerequisite|schema|encryption/i.test(text);
+
+function deliveryDescriptors(version: ArtifactVersion): DeliveryDescriptor[] | null {
+    const plan = extractStructuredPlan(version.content);
+    if (!plan) return null;
+    const descriptors: DeliveryDescriptor[] = [];
+    plan.milestones.forEach((milestone, milestoneIndex) => {
+        const milestoneText = [milestone.name, milestone.goal, milestone.objective, milestone.phase].filter(Boolean).join(' ');
+        descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery',
+                aspect: /workstream/i.test(milestoneText) ? 'workstream' : 'milestone', collection: 'milestones',
+                milestoneId: milestone.id, entryIndex: milestoneIndex, entryLabel: milestone.name, label: milestone.name,
+            },
+            label: `Milestone: ${milestone.name}`,
+            text: milestoneText,
+        });
+        milestone.tasks.forEach((task, entryIndex) => descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery',
+                aspect: technicalTask(`${task.title} ${task.description ?? ''}`) ? 'technical_prerequisite' : 'task',
+                collection: 'tasks', milestoneId: milestone.id, taskId: task.id,
+                entryIndex, entryLabel: task.title, label: task.title,
+            },
+            label: `${milestone.name} · Task: ${task.title}`,
+            text: JSON.stringify(task),
+        }));
+        (milestone.dependencies ?? []).forEach((dependency, entryIndex) => descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery', aspect: 'dependency', collection: 'dependencies',
+                milestoneId: milestone.id, entryIndex, entryLabel: dependency, label: dependency,
+            },
+            label: `${milestone.name} · Dependency: ${dependency}`,
+            text: dependency,
+        }));
+        (milestone.definitionOfDone ?? []).forEach((criterion, entryIndex) => descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery', aspect: 'acceptance_criterion', collection: 'definition_of_done',
+                milestoneId: milestone.id, entryIndex, entryLabel: criterion, label: criterion,
+            },
+            label: `${milestone.name} · Done: ${criterion}`,
+            text: criterion,
+        }));
+        (milestone.promptPacks ?? []).forEach(pack => pack.acceptanceCriteria.forEach((criterion, entryIndex) => descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery', aspect: 'acceptance_criterion', collection: 'prompt_acceptance_criteria',
+                milestoneId: milestone.id, promptPackId: pack.id, entryIndex, entryLabel: criterion, label: criterion,
+            },
+            label: `${milestone.name} · ${pack.title}: ${criterion}`,
+            text: criterion,
+        })));
+        (milestone.validationCommands ?? []).forEach((command, entryIndex) => descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery', aspect: 'testing_requirement', collection: 'validation_commands',
+                milestoneId: milestone.id, entryIndex, entryLabel: command, label: command,
+            },
+            label: `${milestone.name} · Test: ${command}`,
+            text: command,
+        }));
+        (milestone.qualityGates ?? []).forEach((gate, entryIndex) => descriptors.push({
+            region: {
+                kind: 'implementation_plan', section: 'delivery', aspect: 'testing_requirement', collection: 'quality_gates',
+                milestoneId: milestone.id, qualityGateId: gate.id, entryIndex, entryLabel: gate.title, label: gate.title,
+            },
+            label: `${milestone.name} · Gate: ${gate.title}`,
+            text: JSON.stringify(gate),
+        }));
+    });
+    (plan.risks ?? []).forEach((risk, entryIndex) => descriptors.push({
+        region: {
+            kind: 'implementation_plan', section: 'delivery', aspect: 'risk', collection: 'risks',
+            entryIndex, entryLabel: risk.description, label: risk.description,
+        },
+        label: `Risk: ${risk.description}`,
+        text: JSON.stringify(risk),
+    }));
+    (plan.summary?.criticalPath ?? []).forEach((entry, entryIndex) => descriptors.push({
+        region: {
+            kind: 'implementation_plan', section: 'delivery', aspect: 'sequencing_assumption', collection: 'critical_path',
+            entryIndex, entryLabel: entry, label: entry,
+        },
+        label: `Critical path: ${entry}`,
+        text: entry,
+    }));
+    (plan.globalQualityGates ?? []).forEach((gate, entryIndex) => descriptors.push({
+        region: {
+            kind: 'implementation_plan', section: 'delivery', aspect: 'testing_requirement', collection: 'quality_gates',
+            qualityGateId: gate.id, entryIndex, entryLabel: gate.title, label: gate.title,
+        },
+        label: `Global gate: ${gate.title}`,
+        text: JSON.stringify(gate),
+    }));
+    return descriptors;
+}
+
+function deliveryItems(version: ArtifactVersion, candidates: ChangeCandidate[]): DownstreamUpdatePlanItem[] | null {
+    const descriptors = deliveryDescriptors(version);
+    if (!descriptors) return null;
+    const raw: Array<{ descriptor: DeliveryDescriptor; candidate: ChangeCandidate; match: 'trace' | 'reference' }> = [];
+    descriptors.forEach(descriptor => candidates.forEach(candidate => {
+        const trace = explicitPlanTrace(descriptor.text, candidate);
+        const reference = candidate.lexicalTokens.some(token => containsPhrase(descriptor.text, token));
+        if (trace || reference) raw.push({ descriptor, candidate, match: trace ? 'trace' : 'reference' });
+    }));
+    const affected = new Set(raw.map(item => hashReviewValue(item.descriptor.region)));
+    return raw.map((match, index) => {
+        const item = makeItem({
+            artifactVersionId: version.id,
+            candidate: match.candidate,
+            slot: 'implementation_plan',
+            region: match.descriptor.region,
+            label: match.descriptor.label,
+            interpretation: match.descriptor.text,
+            match: match.match,
+            preservedScope: descriptors.filter(descriptor => !affected.has(hashReviewValue(descriptor.region)))
+                .map(descriptor => descriptor.label),
+            index,
+        });
+        return {
+            ...item,
+            recommendedAction: 'review_implementation_plan' as const,
+            recommendation: match.candidate.kind === 'removed_feature'
+                ? 'Review only this exact plan entry and remove it only when its explicit dependency no longer applies.'
+                : 'Review only this exact delivery-plan entry against the changed planning foundation.',
+        };
+    });
+}
+
+function implementationPlanItems(version: ArtifactVersion, candidates: ChangeCandidate[]): DownstreamUpdatePlanItem[] | null {
+    const architecture = architectureItems(version, candidates);
+    const delivery = deliveryItems(version, candidates);
+    if (!architecture || !delivery) return null;
+    return [...architecture, ...delivery].map((item, index) => ({ ...item, recommendedPriority: index + 1 }));
 }
 
 function fallbackItem(
@@ -469,7 +611,7 @@ export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansIn
         let items = slot === 'screen_inventory' ? screenItems(version, candidates)
             : slot === 'user_flows' ? flowItems(version, candidates)
                 : slot === 'data_model' ? dataModelItems(version, candidates)
-                    : architectureItems(version, candidates);
+                    : implementationPlanItems(version, candidates);
         const parserFailed = items === null;
         const weakBinding = !sourceSpine || !summary?.comparable;
         if (parserFailed || weakBinding) {

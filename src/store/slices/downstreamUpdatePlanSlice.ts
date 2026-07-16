@@ -41,6 +41,7 @@ import {
 import {
     applyImplementationPlanArtifactUpdate,
     deriveImplementationPlanArtifactUpdateProposal,
+    parseUserGroundedImplementationPlanChange,
     parseUserGroundedImplementationPlanReplacement,
 } from '../../lib/planning/implementationPlanArtifactUpdates';
 import type { ArtifactVersion, HistoryEvent } from '../../types';
@@ -274,7 +275,9 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                 ? deriveImplementationPlanArtifactUpdateProposal({
                     projectId, plan, item, artifactVersion, requestNonce,
                     ...(latestReview?.action === 'provided_context'
-                        ? { userGroundedReplacement: parseUserGroundedImplementationPlanReplacement(latestReview.context) }
+                        ? item.region.kind === 'implementation_plan' && item.region.section === 'delivery'
+                            ? { userGroundedChange: parseUserGroundedImplementationPlanChange(latestReview.context) }
+                            : { userGroundedReplacement: parseUserGroundedImplementationPlanReplacement(latestReview.context) }
                         : {}),
                 })
                 : deriveScreenFlowArtifactUpdateProposal({

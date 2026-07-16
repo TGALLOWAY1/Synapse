@@ -46,6 +46,7 @@ interface DispatchProps {
     initialFlowId?: string;
     initialFlowStepIndex?: number;
     initialDataEntityName?: string;
+    initialImplementationMilestoneId?: string;
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
     promptPackContent?: string;
@@ -116,6 +117,7 @@ export function ArtifactContentRenderer({
     initialFlowId,
     initialFlowStepIndex,
     initialDataEntityName,
+    initialImplementationMilestoneId,
     promptPackContent,
     savedTasks,
     onConvertToTasks,
@@ -178,6 +180,7 @@ export function ArtifactContentRenderer({
                 onConvertToTasks={onConvertToTasks}
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
+                initialMilestoneId={initialImplementationMilestoneId}
             />
         );
     }

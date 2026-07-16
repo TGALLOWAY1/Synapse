@@ -282,6 +282,7 @@ export function ArtifactWorkspace({
         flowId?: string;
         flowStepIndex?: number;
         dataEntityName?: string;
+        implementationMilestoneId?: string;
     } | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
@@ -895,7 +896,7 @@ export function ArtifactWorkspace({
         const label = region.kind === 'screen' ? region.screenName
             : region.kind === 'flow' ? `${region.flowName}${region.stepIndex === undefined ? '' : ` · Step ${region.stepIndex + 1}`}`
                 : region.kind === 'data_model' ? `${region.entityName}${region.memberName ? ` · ${region.memberName}` : ''}`
-                    : region.kind === 'implementation_plan' ? `Architecture · ${region.entryLabel}`
+                    : region.kind === 'implementation_plan' ? `${region.section === 'architecture' ? 'Architecture' : region.aspect.replace(/_/g, ' ')} · ${region.entryLabel}`
                     : region.label;
         setUpdatePlanRegionTarget({
             planId: plan.id,
@@ -903,6 +904,9 @@ export function ArtifactWorkspace({
             label,
             ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
             ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
+            ...(region.kind === 'implementation_plan' && region.section === 'delivery' && region.milestoneId
+                ? { implementationMilestoneId: region.milestoneId }
+                : {}),
         });
         if (plan.artifact.slot === 'screen_inventory') {
             setSelected('screens');
@@ -1542,6 +1546,7 @@ export function ArtifactWorkspace({
                         initialFlowId={subtype === 'user_flows' ? updatePlanRegionTarget?.flowId : undefined}
                         initialFlowStepIndex={subtype === 'user_flows' ? updatePlanRegionTarget?.flowStepIndex : undefined}
                         initialDataEntityName={subtype === 'data_model' ? updatePlanRegionTarget?.dataEntityName : undefined}
+                        initialImplementationMilestoneId={subtype === 'implementation_plan' ? updatePlanRegionTarget?.implementationMilestoneId : undefined}
                         promptPackContent={legacyPromptPackContent}
                         savedTasks={planSavedTasks}
                         onConvertToTasks={handleConvertToTasks}
