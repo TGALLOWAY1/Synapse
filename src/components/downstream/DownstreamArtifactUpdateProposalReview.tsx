@@ -1,7 +1,8 @@
 import { useMemo, useState } from 'react';
-import { AlertTriangle, Check, FileEdit, Loader2, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, FileEdit, Loader2, RefreshCw, SearchCheck, ShieldCheck, Sparkles } from 'lucide-react';
 import {
     latestDownstreamArtifactUpdateReview,
+    latestDownstreamArtifactUpdateVerificationReview,
     type DownstreamArtifactUpdateProposal,
     type DownstreamArtifactUpdateReviewAction,
 } from '../../lib/planning/downstreamArtifactUpdateProposal';
@@ -13,6 +14,9 @@ const EMPTY_PROPOSALS: DownstreamArtifactUpdateProposal[] = [];
 const EMPTY_EVENTS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateReviewEvents'][string] = [];
 const EMPTY_APPLICATIONS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateApplications'][string] = [];
 const EMPTY_ARTIFACT_VERSIONS: ArtifactVersion[] = [];
+const EMPTY_ARTIFACTS: ReturnType<typeof useProjectStore.getState>['artifacts'][string] = [];
+const EMPTY_VERIFICATIONS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateVerifications'][string] = [];
+const EMPTY_VERIFICATION_EVENTS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateVerificationEvents'][string] = [];
 
 type PendingAction = Exclude<DownstreamArtifactUpdateReviewAction, 'accepted' | 'edited'> | 'edit';
 
@@ -45,13 +49,20 @@ export function DownstreamArtifactUpdateProposalReview({
     const events = useProjectStore(state => state.downstreamArtifactUpdateReviewEvents[projectId] ?? EMPTY_EVENTS);
     const applications = useProjectStore(state => state.downstreamArtifactUpdateApplications[projectId] ?? EMPTY_APPLICATIONS);
     const artifactVersions = useProjectStore(state => state.artifactVersions[projectId] ?? EMPTY_ARTIFACT_VERSIONS);
+    const artifacts = useProjectStore(state => state.artifacts[projectId] ?? EMPTY_ARTIFACTS);
+    const verifications = useProjectStore(state => state.downstreamArtifactUpdateVerifications[projectId] ?? EMPTY_VERIFICATIONS);
+    const verificationEvents = useProjectStore(state => state.downstreamArtifactUpdateVerificationEvents[projectId] ?? EMPTY_VERIFICATION_EVENTS);
     const generate = useProjectStore(state => state.generateDownstreamArtifactUpdateProposal);
     const appendReview = useProjectStore(state => state.appendDownstreamArtifactUpdateReviewEvent);
     const applyProposal = useProjectStore(state => state.applyDownstreamArtifactUpdateProposal);
+    const verifyUpdate = useProjectStore(state => state.verifyDownstreamArtifactUpdateItem);
+    const appendVerificationReview = useProjectStore(state => state.appendDownstreamArtifactUpdateVerificationEvent);
     const [pending, setPending] = useState<PendingAction>();
     const [rationale, setRationale] = useState('');
     const [editedContent, setEditedContent] = useState('');
     const [busy, setBusy] = useState(false);
+    const [verificationReviewAction, setVerificationReviewAction] = useState<'rejected' | 'deferred'>();
+    const [verificationRationale, setVerificationRationale] = useState('');
     const [message, setMessage] = useState<{ kind: 'error' | 'success'; text: string }>();
 
     const proposal = useMemo(() => proposals
@@ -63,6 +74,16 @@ export function DownstreamArtifactUpdateProposalReview({
         : undefined;
     const review = proposal ? latestDownstreamArtifactUpdateReview(proposal, events) : undefined;
     const application = proposal ? applications.find(candidate => candidate.proposalId === proposal.id) : undefined;
+    const currentArtifact = artifacts.find(candidate => candidate.id === plan.artifact.artifactId);
+    const currentArtifactVersionId = currentArtifact?.currentVersionId;
+    const verification = verifications
+        .filter(candidate => candidate.subject?.planId === plan.id
+            && candidate.subject.itemId === item.id
+            && candidate.subject.targetArtifactVersionId === currentArtifactVersionId)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
+    const verificationReview = verification
+        ? latestDownstreamArtifactUpdateVerificationReview(verification, verificationEvents)
+        : undefined;
     // The named artifact-version subscription above makes proposal freshness
     // reactive to manual/concurrent content changes without hidden rerenders.
     const currentness = proposal && boundArtifactVersion
@@ -122,6 +143,36 @@ export function DownstreamArtifactUpdateProposalReview({
                 : 'Nothing changed. The approved proposal could not be applied safely.' });
     };
 
+    const verify = () => {
+        setBusy(true);
+        const result = verifyUpdate(projectId, plan.id, item.id);
+        setBusy(false);
+        setMessage(result.status === 'verified'
+            ? { kind: 'success', text: result.result === 'aligned'
+                ? 'Synapse verified the exact affected region in the current artifact version.'
+                : 'Verification is recorded. The result remains advisory and the affected region still needs attention.' }
+            : { kind: 'error', text: result.reason === 'source_stale'
+                ? 'The planning source changed. Create a current update plan before verifying this output.'
+                : 'The current artifact could not be safely bound to this update-plan item.' });
+    };
+
+    const recordVerificationReview = (action: 'confirmed' | 'rejected' | 'deferred') => {
+        if (!verification) return;
+        const result = appendVerificationReview(projectId, verification.id, {
+            action,
+            ...(action === 'confirmed' ? {} : { rationale: verificationRationale.trim() }),
+        });
+        if (!result.ok) {
+            setMessage({ kind: 'error', text: result.reason === 'stale'
+                ? 'This verification is historical because the artifact changed.'
+                : 'The advisory review choice could not be recorded.' });
+            return;
+        }
+        setVerificationReviewAction(undefined);
+        setVerificationRationale('');
+        setMessage({ kind: 'success', text: 'Your review of the advisory result is preserved. It does not change the evidence or artifact.' });
+    };
+
     if (!proposal) return (
         <div className="mt-3 rounded-lg border border-indigo-100 bg-indigo-50/60 p-3">
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
@@ -136,6 +187,11 @@ export function DownstreamArtifactUpdateProposalReview({
                 </button>
             </div>
             {message && <p role={message.kind === 'error' ? 'alert' : 'status'} className={`mt-2 text-xs ${message.kind === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>{message.text}</p>}
+            {currentArtifactVersionId && currentArtifactVersionId !== plan.artifact.artifactVersionId && (
+                <button type="button" disabled={busy} onClick={verify} className="mt-3 inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 disabled:opacity-50">
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <SearchCheck size={14} />} Verify current output
+                </button>
+            )}
         </div>
     );
 
@@ -207,7 +263,49 @@ export function DownstreamArtifactUpdateProposalReview({
 
             {review && <p className="mt-2 text-xs text-neutral-600"><strong>Latest user choice:</strong> {review.action.replaceAll('_', ' ')}</p>}
             {application && <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"><Check size={14} /> Applied in version {application.resultingArtifactVersionId.slice(0, 8)}. Verification remains separate.</p>}
+            {verification && (
+                <div className={`mt-2 rounded-md border px-2.5 py-2 text-xs leading-relaxed ${verification.result === 'aligned'
+                    ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
+                    : verification.result === 'update_still_required'
+                        ? 'border-red-200 bg-red-50 text-red-900'
+                        : 'border-amber-200 bg-amber-50 text-amber-950'}`}>
+                    <div className="flex items-center gap-1.5 font-semibold">
+                        <SearchCheck size={14} aria-hidden="true" /> Synapse verification: {verification.result.replaceAll('_', ' ')}
+                    </div>
+                    <p className="mt-1 break-words">{verification.reasoning}</p>
+                    {verification.remainingAmbiguity && <p className="mt-1 break-words"><strong>Still needs attention:</strong> {verification.remainingAmbiguity}</p>}
+                    <p className="mt-1 text-[11px] opacity-80">Bound to artifact version {verification.verifiedArtifactVersionId.slice(0, 8)}. This check does not create user authority or change artifact content.</p>
+                    {verificationReview && <p className="mt-1 text-[11px]"><strong>Your latest review:</strong> {verificationReview.action.replaceAll('_', ' ')}</p>}
+                    {verification.result !== 'aligned' && (
+                        <div className="mt-2 border-t border-current/10 pt-2">
+                            <div className="flex flex-wrap gap-2">
+                                <button type="button" onClick={() => recordVerificationReview('confirmed')} className="min-h-11 rounded-lg border border-current/20 bg-white px-3 text-xs font-medium">Record as reviewed</button>
+                                <button type="button" onClick={() => setVerificationReviewAction('deferred')} className="min-h-11 rounded-lg border border-current/20 bg-white px-3 text-xs font-medium">Defer review</button>
+                                <button type="button" onClick={() => setVerificationReviewAction('rejected')} className="min-h-11 rounded-lg border border-current/20 bg-white px-3 text-xs font-medium">Reject result</button>
+                            </div>
+                            {verificationReviewAction && (
+                                <div className="mt-2">
+                                    <label className="block font-medium">
+                                        Rationale
+                                        <textarea value={verificationRationale} onChange={event => setVerificationRationale(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-neutral-300 bg-white px-3 py-2 text-sm text-neutral-900" />
+                                    </label>
+                                    <div className="mt-2 flex justify-end gap-2">
+                                        <button type="button" onClick={() => setVerificationReviewAction(undefined)} className="min-h-11 rounded-lg px-3 text-xs font-medium">Cancel</button>
+                                        <button type="button" disabled={verificationRationale.trim().length < 3} onClick={() => recordVerificationReview(verificationReviewAction)} className="min-h-11 rounded-lg bg-neutral-900 px-3 text-xs font-semibold text-white disabled:opacity-50">Record choice</button>
+                                    </div>
+                                </div>
+                            )}
+                        </div>
+                    )}
+                </div>
+            )}
             {message && <p role={message.kind === 'error' ? 'alert' : 'status'} className={`mt-2 rounded-md px-2.5 py-2 text-xs ${message.kind === 'error' ? 'bg-red-50 text-red-800' : 'bg-emerald-50 text-emerald-800'}`}>{message.text}</p>}
+
+            {currentArtifactVersionId && currentArtifactVersionId !== plan.artifact.artifactVersionId && (!verification || verification.result !== 'aligned') && (
+                <button type="button" disabled={busy} onClick={verify} className="mt-3 inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 disabled:opacity-50">
+                    {busy ? <Loader2 size={14} className="animate-spin" /> : <SearchCheck size={14} />} {verification ? 'Verify again' : 'Verify current output'}
+                </button>
+            )}
 
             {!proposalReadOnly && (
                 <div className="mt-3 border-t border-indigo-100 pt-3">

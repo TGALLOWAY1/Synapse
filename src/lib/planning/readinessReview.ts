@@ -676,7 +676,14 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
                 ...input.outputAlignment.outputs.map(output => makeEvidence('downstream_alignment', output.blocksBuildReadiness ? 'incomplete' : output.state === 'possibly_affected' ? 'inferred' : 'direct', output.summary, 'downstream', output.artifactId, output.generatedFromSpineId)),
                 ...updateBlockers.map(item => makeEvidence('downstream_alignment', 'direct', `Definite affected region · ${item.disposition?.replace('_', ' ') ?? 'not yet reviewed'} · priority ${item.priority}: ${item.recommendation}`, 'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash)),
                 ...updateAdvisories.map(item => makeEvidence('downstream_alignment', 'inferred', `Advisory affected region · ${item.disposition?.replace('_', ' ') ?? 'not yet reviewed'} · priority ${item.priority}: ${item.recommendation}`, 'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash)),
-                ...updateReviewed.map(item => makeEvidence('downstream_alignment', 'direct', `The user reviewed this update-plan item as ${item.disposition?.replace('_', ' ')}. Artifact alignment remains a separate authority.`, 'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash)),
+                ...updateReviewed.map(item => makeEvidence(
+                    'downstream_alignment',
+                    'direct',
+                    item.verificationOutcome === 'aligned'
+                        ? 'Synapse deterministically verified the exact affected region in this artifact version. The prior user-authorized application or manual artifact edit remains the content authority.'
+                        : `The user reviewed this update-plan item as ${item.disposition?.replace('_', ' ')}. Artifact alignment remains a separate authority.`,
+                    'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash,
+                )),
             ],
         actionTarget: updateBlockers[0]
             ? { kind: 'output', artifactId: updateBlockers[0].artifactId, nodeId: updateBlockers[0].nodeId }

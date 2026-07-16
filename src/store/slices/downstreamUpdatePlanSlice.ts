@@ -38,6 +38,12 @@ import {
     parseUserGroundedDataModelChange,
 } from '../../lib/planning/dataModelArtifactUpdates';
 import type { ArtifactVersion, HistoryEvent } from '../../types';
+import {
+    deriveVerifiedDownstreamUpdatePlanSummary,
+    deriveDownstreamArtifactUpdateVerification,
+    projectDownstreamArtifactUpdateVerifications,
+    verificationIsCurrent,
+} from '../../lib/planning/downstreamArtifactUpdateVerification';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamUpdatePlans'
@@ -58,6 +64,7 @@ export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'recordDownstreamArtifactUpdateApplication'
     | 'applyDownstreamArtifactUpdateProposal'
     | 'recordDownstreamArtifactUpdateVerification'
+    | 'verifyDownstreamArtifactUpdateItem'
     | 'appendDownstreamArtifactUpdateVerificationEvent'
     | 'getDownstreamArtifactUpdateProposalCurrentness'
 >;
@@ -169,11 +176,22 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         return plan && context ? compareDownstreamUpdatePlanCurrentness(plan, context) : undefined;
     },
 
-    getDownstreamUpdatePlanSummary: (projectId) => deriveDownstreamUpdatePlanSummary({
-        plans: get().downstreamUpdatePlans[projectId] ?? [],
-        events: get().downstreamUpdatePlanEvents[projectId] ?? [],
-        context: currentContext(get(), projectId),
-    }),
+    getDownstreamUpdatePlanSummary: (projectId) => {
+        const state = get();
+        const context = currentContext(state, projectId);
+        const plans = state.downstreamUpdatePlans[projectId] ?? [];
+        const events = state.downstreamUpdatePlanEvents[projectId] ?? [];
+        const base = deriveDownstreamUpdatePlanSummary({ plans, events, context });
+        const projections = projectDownstreamArtifactUpdateVerifications({
+            plans,
+            context,
+            artifacts: state.artifacts[projectId] ?? [],
+            artifactVersions: state.artifactVersions[projectId] ?? [],
+            verifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
+            verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
+        });
+        return deriveVerifiedDownstreamUpdatePlanSummary({ base, plans, events, context, projections });
+    },
 
     recordDownstreamArtifactUpdateProposal: (projectId, proposal) => {
         if (proposal.projectId !== projectId || !validateDownstreamArtifactUpdateProposalIntegrity(proposal)) {
@@ -498,6 +516,48 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         }
         const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? []).find(candidate => candidate.id === verification.proposalId);
         const application = (state.downstreamArtifactUpdateApplications[projectId] ?? []).find(candidate => candidate.id === verification.applicationId);
+        if (verification.subject) {
+            const plan = (state.downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === verification.subject?.planId);
+            const context = currentContext(state, projectId);
+            const artifact = (state.artifacts[projectId] ?? []).find(candidate => candidate.id === verification.subject?.artifactId);
+            const version = artifact
+                ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === artifact.currentVersionId)
+                : undefined;
+            if (!verificationIsCurrent({ verification, plan, context, currentVersion: version })) {
+                return { ok: false, reason: 'stale' };
+            }
+            if (verification.subject.kind === 'application' && (
+                !proposal || !application
+                || proposal.integrityHash !== verification.subject.proposalIntegrityHash
+                || application.integrityHash !== verification.subject.applicationIntegrityHash
+                || application.resultingArtifactVersionId !== version?.id
+            )) return { ok: false, reason: 'binding_mismatch' };
+            const item = plan?.items.find(candidate => candidate.id === verification.subject?.itemId);
+            const baselineVersion = (state.artifactVersions[projectId] ?? [])
+                .find(candidate => candidate.id === verification.subject?.baselineArtifactVersionId);
+            if (!plan || !item || !context || !version) return { ok: false, reason: 'binding_mismatch' };
+            const expected = deriveDownstreamArtifactUpdateVerification({
+                projectId,
+                plan,
+                item,
+                context,
+                currentVersion: version,
+                baselineVersion,
+                proposal,
+                application: verification.subject.kind === 'application' ? application : undefined,
+                createdAt: verification.createdAt,
+            });
+            if (expected.integrityHash !== verification.integrityHash) {
+                return { ok: false, reason: 'invalid_verification' };
+            }
+            set(current => ({
+                downstreamArtifactUpdateVerifications: {
+                    ...current.downstreamArtifactUpdateVerifications,
+                    [projectId]: [...(current.downstreamArtifactUpdateVerifications[projectId] ?? []), verification],
+                },
+            }));
+            return { ok: true, duplicate: false };
+        }
         if (!proposal || proposal.integrityHash !== verification.proposalIntegrityHash
             || !application || !validateDownstreamArtifactUpdateApplicationIntegrity(application)
             || application.integrityHash !== verification.applicationIntegrityHash) return { ok: false, reason: 'binding_mismatch' };
@@ -517,17 +577,65 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         return { ok: true, duplicate: false };
     },
 
+    verifyDownstreamArtifactUpdateItem: (projectId, planId, itemId) => {
+        const state = get();
+        const plan = (state.downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === planId);
+        const item = plan?.items.find(candidate => candidate.id === itemId);
+        const context = currentContext(state, projectId);
+        const artifact = plan
+            ? (state.artifacts[projectId] ?? []).find(candidate => candidate.id === plan.artifact.artifactId)
+            : undefined;
+        const currentVersion = artifact
+            ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === artifact.currentVersionId)
+            : undefined;
+        const baselineVersion = plan
+            ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === plan.artifact.artifactVersionId)
+            : undefined;
+        if (!plan || !item || !context || !currentVersion) return { status: 'rejected', reason: 'binding_not_found' };
+        if (plan.source.targetSpineVersionId !== context.spineVersionId
+            || plan.source.targetSpineContentHash !== context.spineContentHash
+            || plan.source.planningContextHash !== context.planningContextHash) return { status: 'rejected', reason: 'source_stale' };
+        const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? [])
+            .filter(candidate => candidate.updatePlanBinding.planId === planId
+                && candidate.updatePlanBinding.itemId === itemId
+                && validateDownstreamArtifactUpdateProposalIntegrity(candidate))
+            .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
+        const application = proposal
+            ? (state.downstreamArtifactUpdateApplications[projectId] ?? [])
+                .filter(candidate => candidate.proposalId === proposal.id
+                    && candidate.resultingArtifactVersionId === currentVersion.id
+                    && validateDownstreamArtifactUpdateApplicationIntegrity(candidate))
+                .sort((a, b) => b.appliedAt - a.appliedAt || b.id.localeCompare(a.id))[0]
+            : undefined;
+        const verification = deriveDownstreamArtifactUpdateVerification({
+            projectId, plan, item, context, currentVersion, baselineVersion, proposal, application,
+        });
+        const recorded = get().recordDownstreamArtifactUpdateVerification(projectId, verification);
+        return recorded.ok
+            ? { status: 'verified', verificationId: verification.id, result: verification.result }
+            : { status: 'rejected', reason: recorded.reason };
+    },
+
     appendDownstreamArtifactUpdateVerificationEvent: (projectId, verificationId, input) => {
         const state = get();
         const verification = (state.downstreamArtifactUpdateVerifications[projectId] ?? []).find(candidate => candidate.id === verificationId);
         if (!verification || !validateDownstreamArtifactUpdateVerificationIntegrity(verification)) return { ok: false, reason: 'verification_not_found' };
+        if (verification.subject) {
+            const plan = (state.downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === verification.subject?.planId);
+            const context = currentContext(state, projectId);
+            const artifact = (state.artifacts[projectId] ?? []).find(candidate => candidate.id === verification.subject?.artifactId);
+            const version = artifact
+                ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === artifact.currentVersionId)
+                : undefined;
+            if (!verificationIsCurrent({ verification, plan, context, currentVersion: version })) return { ok: false, reason: 'stale' };
+        }
         const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? []).find(candidate => candidate.id === verification.proposalId);
         const artifact = proposal ? (state.artifacts[projectId] ?? []).find(candidate => candidate.id === proposal.artifact.artifactId) : undefined;
         const version = (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === verification.verifiedArtifactVersionId);
         const region = proposal && version ? resolveDownstreamUpdateRegionContent(version, downstreamArtifactUpdateResultRegion(proposal)) : { found: false };
-        if (!artifact || artifact.currentVersionId !== verification.verifiedArtifactVersionId || !version
+        if (!verification.subject && (!artifact || artifact.currentVersionId !== verification.verifiedArtifactVersionId || !version
             || hashReviewValue(version.content) !== verification.verifiedArtifactContentHash
-            || !region.found || region.contentHash !== verification.verifiedRegionContentHash) return { ok: false, reason: 'stale' };
+            || !region.found || region.contentHash !== verification.verifiedRegionContentHash)) return { ok: false, reason: 'stale' };
         const events = state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [];
         const at = Math.max(input.at ?? Date.now(), (events.at(-1)?.at ?? 0) + 1);
         const event = sealDownstreamArtifactUpdateVerificationEvent({

@@ -167,12 +167,41 @@ export type DownstreamArtifactUpdateVerification = {
     schemaVersion: typeof DOWNSTREAM_ARTIFACT_UPDATE_VERIFICATION_SCHEMA_VERSION;
     id: string;
     projectId: string;
-    proposalId: string;
-    proposalIntegrityHash: string;
-    applicationId: string;
-    applicationIntegrityHash: string;
+    /** Legacy bindings remain readable; new verification records use subject. */
+    proposalId?: string;
+    proposalIntegrityHash?: string;
+    applicationId?: string;
+    applicationIntegrityHash?: string;
+    subject?: {
+        kind: 'application' | 'manual_update';
+        planId: string;
+        planIntegrityHash: string;
+        itemId: string;
+        itemIntegrityHash: string;
+        sourceSpineVersionId: string;
+        sourceSpineContentHash: string;
+        planningContextHash: string;
+        artifactId: string;
+        baselineArtifactVersionId: string;
+        baselineArtifactContentHash: string;
+        targetArtifactVersionId: string;
+        targetArtifactContentHash: string;
+        proposalId?: string;
+        proposalIntegrityHash?: string;
+        applicationId?: string;
+        applicationIntegrityHash?: string;
+    };
     authoredBy: 'synapse';
-    result: 'matches_proposal' | 'partial' | 'mismatch' | 'inconclusive';
+    result:
+        | 'aligned'
+        | 'review_recommended'
+        | 'update_still_required'
+        | 'verification_unavailable'
+        /** Legacy Stage 1 values are retained conservatively. */
+        | 'matches_proposal'
+        | 'partial'
+        | 'mismatch'
+        | 'inconclusive';
     evidence: DownstreamUpdateEvidence[];
     reasoning: string;
     remainingAmbiguity?: string;
@@ -335,8 +364,18 @@ export function sealDownstreamArtifactUpdateVerification(
 }
 
 export function validateDownstreamArtifactUpdateVerificationIntegrity(verification: DownstreamArtifactUpdateVerification): boolean {
+    const subjectValid = !verification.subject || (
+        verification.subject.planId.trim().length > 0
+        && verification.subject.itemId.trim().length > 0
+        && verification.subject.artifactId.trim().length > 0
+        && verification.subject.targetArtifactVersionId === verification.verifiedArtifactVersionId
+        && verification.subject.targetArtifactContentHash === verification.verifiedArtifactContentHash
+        && (verification.subject.kind === 'manual_update'
+            || Boolean(verification.subject.applicationId && verification.subject.applicationIntegrityHash))
+    );
     return verification.schemaVersion === DOWNSTREAM_ARTIFACT_UPDATE_VERIFICATION_SCHEMA_VERSION
         && verification.authoredBy === 'synapse'
+        && subjectValid
         && validSeal(verification);
 }
 

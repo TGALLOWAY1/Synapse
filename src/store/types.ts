@@ -461,6 +461,12 @@ export interface ProjectState {
         projectId: string,
         verification: DownstreamArtifactUpdateVerification,
     ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    verifyDownstreamArtifactUpdateItem: (
+        projectId: string,
+        planId: string,
+        itemId: string,
+    ) => { status: 'verified'; verificationId: string; result: DownstreamArtifactUpdateVerification['result'] }
+        | { status: 'rejected'; reason: string };
     appendDownstreamArtifactUpdateVerificationEvent: (
         projectId: string,
         verificationId: string,

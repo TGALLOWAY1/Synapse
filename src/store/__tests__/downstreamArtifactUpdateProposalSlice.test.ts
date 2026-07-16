@@ -114,6 +114,76 @@ describe('downstream artifact-update proposal store boundary', () => {
             .toEqual({ status: 'rejected', reason: 'stale' });
     });
 
+    it('deterministically verifies an authorized exact removal and reconciles readiness without a second approval', () => {
+        const plan = makePlan();
+        useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);
+        const generated = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, plan.items[0].id);
+        expect(generated.status).toBe('generated');
+        if (generated.status !== 'generated') return;
+        useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, generated.proposalId, { action: 'accepted' });
+        const applied = useProjectStore.getState().applyDownstreamArtifactUpdateProposal(projectId, generated.proposalId);
+        expect(applied.status).toBe('applied');
+        if (applied.status !== 'applied') return;
+
+        const verified = useProjectStore.getState().verifyDownstreamArtifactUpdateItem(projectId, plan.id, plan.items[0].id);
+        expect(verified).toMatchObject({ status: 'verified', result: 'aligned' });
+        const verification = useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId][0];
+        expect(verification.subject).toMatchObject({
+            kind: 'application', planId: plan.id, itemId: plan.items[0].id,
+            baselineArtifactVersionId: version.id, targetArtifactVersionId: applied.artifactVersionId,
+        });
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId] ?? []).toEqual([]);
+        // The fixture intentionally lacks source provenance. Exact region
+        // verification does not erase that independent artifact-level gap.
+        expect(useProjectStore.getState().getArtifactAlignment(projectId, artifact.id)).toMatchObject({
+            state: 'possibly_affected', confidence: 'unknown',
+        });
+        const summary = useProjectStore.getState().getDownstreamUpdatePlanSummary(projectId);
+        expect(summary.blockingItems).toEqual([]);
+        expect(summary.reviewedItems[0]).toMatchObject({ verificationOutcome: 'aligned' });
+    });
+
+    it('binds manual verification to the exact current artifact and invalidates it after another edit', () => {
+        const { plan, proposal } = makeProposal();
+        useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);
+        useProjectStore.getState().recordDownstreamArtifactUpdateProposal(projectId, proposal);
+        const manuallyUpdated: ArtifactVersion = {
+            ...version, id: 'screens-manual', versionNumber: 2, parentVersionId: version.id,
+            content: JSON.stringify({ sections: [{ title: 'Core', screens: [{
+                id: 'workspace', name: 'Workspace', priority: 'P0', purpose: 'Local editing', states: [],
+            }] }] }), isPreferred: true, createdAt: 200,
+        };
+        useProjectStore.setState({
+            artifacts: { [projectId]: [{ ...artifact, currentVersionId: manuallyUpdated.id }] },
+            artifactVersions: { [projectId]: [{ ...version, isPreferred: false }, manuallyUpdated] },
+        });
+        const verified = useProjectStore.getState().verifyDownstreamArtifactUpdateItem(projectId, plan.id, plan.items[0].id);
+        expect(verified).toMatchObject({ status: 'verified', result: 'aligned' });
+        const verification = useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId][0];
+        expect(verification.subject).toMatchObject({ kind: 'manual_update', targetArtifactVersionId: manuallyUpdated.id });
+        expect(verification.subject?.applicationId).toBeUndefined();
+        const { integrityHash: _verificationHash, ...verificationBase } = verification;
+        void _verificationHash;
+        const forged = sealDownstreamArtifactUpdateVerification({
+            ...verificationBase,
+            id: 'model-authored-false-alignment',
+            result: 'aligned',
+            reasoning: 'A generated narrative claims this is aligned.',
+            remainingAmbiguity: undefined,
+        });
+        expect(useProjectStore.getState().recordDownstreamArtifactUpdateVerification(projectId, forged))
+            .toEqual({ ok: false, reason: 'invalid_verification' });
+
+        const concurrent = { ...manuallyUpdated, id: 'screens-concurrent', parentVersionId: manuallyUpdated.id, content: content('Cloud returned') };
+        useProjectStore.setState({
+            artifacts: { [projectId]: [{ ...artifact, currentVersionId: concurrent.id }] },
+            artifactVersions: { [projectId]: [version, manuallyUpdated, concurrent] },
+        });
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateVerificationEvent(projectId, verification.id, { action: 'confirmed' }))
+            .toEqual({ ok: false, reason: 'stale' });
+        expect(useProjectStore.getState().getArtifactAlignment(projectId, artifact.id)?.state).not.toBe('aligned');
+    });
+
     it('records only a current exact proposal and user-authored review events', () => {
         const { plan, proposal } = makeProposal();
         useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);

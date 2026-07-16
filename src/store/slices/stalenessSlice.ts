@@ -2,6 +2,11 @@ import type { StateCreator } from 'zustand';
 import type { StalenessState } from '../../types';
 import type { ProjectState } from '../types';
 import { deriveProjectOutputAlignment } from '../../lib/planning/outputAlignment';
+import { buildDownstreamUpdatePlanCurrentContext } from '../../lib/planning/downstreamUpdatePlan';
+import {
+    projectDownstreamArtifactUpdateVerifications,
+    reconcileProjectOutputAlignment,
+} from '../../lib/planning/downstreamArtifactUpdateVerification';
 
 export type StalenessSlice = {
     getArtifactStaleness: ProjectState['getArtifactStaleness'];
@@ -12,22 +17,31 @@ export type StalenessSlice = {
 export const createStalenessSlice: StateCreator<ProjectState, [], [], StalenessSlice> = (_set, get) => ({
     getProjectOutputAlignment: (projectId) => {
         const state = get();
-        return deriveProjectOutputAlignment({
+        const raw = deriveProjectOutputAlignment({
             artifacts: state.artifacts[projectId] || [],
             artifactVersions: state.artifactVersions[projectId] || [],
             spineVersions: state.spineVersions[projectId] || [],
             job: state.jobs[projectId],
         });
+        const context = buildDownstreamUpdatePlanCurrentContext({
+            spineVersions: state.spineVersions[projectId] ?? [],
+            planningRecords: state.planningRecords[projectId] ?? [],
+            artifacts: state.artifacts[projectId] ?? [],
+            artifactVersions: state.artifactVersions[projectId] ?? [],
+        });
+        return reconcileProjectOutputAlignment(raw, projectDownstreamArtifactUpdateVerifications({
+            plans: state.downstreamUpdatePlans[projectId] ?? [],
+            context,
+            artifacts: state.artifacts[projectId] ?? [],
+            artifactVersions: state.artifactVersions[projectId] ?? [],
+            verifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
+            verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
+        }));
     },
 
     getArtifactAlignment: (projectId, artifactId) => {
         const state = get();
-        return deriveProjectOutputAlignment({
-            artifacts: state.artifacts[projectId] || [],
-            artifactVersions: state.artifactVersions[projectId] || [],
-            spineVersions: state.spineVersions[projectId] || [],
-            job: state.jobs[projectId],
-        }).outputs.find(output => output.artifactId === artifactId);
+        return state.getProjectOutputAlignment(projectId).outputs.find(output => output.artifactId === artifactId);
     },
 
     getArtifactStaleness: (projectId: string, artifactId: string): StalenessState => {

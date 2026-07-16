@@ -557,6 +557,7 @@ export function ArtifactWorkspace({
     // stable across renders. Presence is tracked separately from the version id
     // so an absent artifact is a caveat, never a defect (Phase 5B rule).
     const projectName = getProject(projectId)?.name;
+    const screensOutputAlignment = projectOutputAlignment.outputs.find(output => output.nodeId === 'screen_inventory');
     const exportManifest = useMemo(() => ({
         prdVersionId: spineVersionId,
         screensArtifactVersionId: invPreferred?.id,
@@ -565,9 +566,15 @@ export function ArtifactWorkspace({
         designSystemVersionId,
         dataModelPresent: Boolean(dataModelArtifact),
         implementationPlanPresent: Boolean(implPlanArtifact),
+        ...(screensOutputAlignment ? { alignment: {
+            state: screensOutputAlignment.state,
+            summary: screensOutputAlignment.summary,
+            nextAction: screensOutputAlignment.nextAction,
+            blocksBuildReadiness: screensOutputAlignment.blocksBuildReadiness,
+        } } : {}),
     }), [
         spineVersionId, invPreferred?.id, dataModelPreferred?.id, implPlanPreferred?.id,
-        designSystemVersionId, dataModelArtifact, implPlanArtifact,
+        designSystemVersionId, dataModelArtifact, implPlanArtifact, screensOutputAlignment,
     ]);
 
     // Validation issues minus the user's persisted dismissals.

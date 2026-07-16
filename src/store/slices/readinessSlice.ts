@@ -14,6 +14,11 @@ import {
     buildDownstreamUpdatePlanCurrentContext,
     deriveDownstreamUpdatePlanSummary,
 } from '../../lib/planning/downstreamUpdatePlan';
+import {
+    deriveVerifiedDownstreamUpdatePlanSummary,
+    projectDownstreamArtifactUpdateVerifications,
+    reconcileProjectOutputAlignment,
+} from '../../lib/planning/downstreamArtifactUpdateVerification';
 import { buildReviewContextManifest } from '../../lib/review/manifest';
 import {
     deriveReadinessCommitmentState,
@@ -55,21 +60,39 @@ export function buildReadinessReviewInputFromState(
     if (!spine) return undefined;
     const artifacts = state.artifacts[projectId] ?? [];
     const versions = state.artifactVersions[projectId] ?? [];
-    const outputAlignment = deriveProjectOutputAlignment({
+    const rawOutputAlignment = deriveProjectOutputAlignment({
         artifacts,
         artifactVersions: versions,
         spineVersions: state.spineVersions[projectId] ?? [],
         job: state.jobs[projectId],
     });
-    const downstreamUpdatePlanSummary = deriveDownstreamUpdatePlanSummary({
-        plans: state.downstreamUpdatePlans[projectId] ?? [],
-        events: state.downstreamUpdatePlanEvents[projectId] ?? [],
-        context: buildDownstreamUpdatePlanCurrentContext({
+    const planContext = buildDownstreamUpdatePlanCurrentContext({
             spineVersions: state.spineVersions[projectId] ?? [],
             planningRecords: state.planningRecords[projectId] ?? [],
             artifacts,
             artifactVersions: versions,
+        });
+    const plans = state.downstreamUpdatePlans[projectId] ?? [];
+    const planEvents = state.downstreamUpdatePlanEvents[projectId] ?? [];
+    const verificationProjection = projectDownstreamArtifactUpdateVerifications({
+        plans,
+        context: planContext,
+        artifacts,
+        artifactVersions: versions,
+        verifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
+        verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
+    });
+    const outputAlignment = reconcileProjectOutputAlignment(rawOutputAlignment, verificationProjection);
+    const downstreamUpdatePlanSummary = deriveVerifiedDownstreamUpdatePlanSummary({
+        base: deriveDownstreamUpdatePlanSummary({
+            plans,
+            events: planEvents,
+            context: planContext,
         }),
+        plans,
+        events: planEvents,
+        context: planContext,
+        projections: verificationProjection,
     });
     const currentArtifactRefs = artifacts
         .filter(artifact => artifact.status !== 'archived')

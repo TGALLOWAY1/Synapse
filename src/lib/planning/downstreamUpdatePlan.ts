@@ -283,6 +283,8 @@ export type DownstreamUpdatePlanSummaryItem = {
     disposition?: DownstreamUpdateDisposition;
     priority: number;
     recommendation: string;
+    verificationOutcome?: import('./downstreamArtifactUpdateVerification').DownstreamVerificationOutcome;
+    verificationIntegrityHash?: string;
 };
 
 export type DownstreamUpdatePlanSummary = {
