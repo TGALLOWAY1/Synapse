@@ -589,7 +589,7 @@ describe('deterministic readiness review', () => {
                 planId: 'plan', planIntegrityHash: 'plan-integrity', itemId: 'update-item', artifactId: 'screens',
                 artifactVersionId: 'screens-v1', nodeId: 'screen_inventory' as const, artifactTitle: 'Screens',
                 region: { kind: 'screen' as const, screenId: 'shared', screenName: 'Shared workspace', aspect: 'screen' as const },
-                certainty: 'definite' as const, implementationCritical: true, disposition: 'planned' as const, priority: 1,
+                certainty: 'definite' as const, implementationCritical: true, priority: 1,
                 recommendation: 'Remove the obsolete shared-workspace behavior.',
             }],
         };

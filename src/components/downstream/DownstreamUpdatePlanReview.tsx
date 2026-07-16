@@ -96,13 +96,14 @@ type ReviewItem = DownstreamUpdatePlanItem & {
 interface DownstreamUpdatePlanReviewProps {
     projectId: string;
     initialPlanId: string;
+    initialItemId?: string;
     onClose: () => void;
     onOpenSource: (planningRecordId?: string) => void;
     onOpenOutput: (plan: DownstreamUpdatePlan, item: DownstreamUpdatePlanItem) => void;
 }
 
 export function DownstreamUpdatePlanReview({
-    projectId, initialPlanId, onClose, onOpenSource, onOpenOutput,
+    projectId, initialPlanId, initialItemId, onClose, onOpenSource, onOpenOutput,
 }: DownstreamUpdatePlanReviewProps) {
     const plans = useProjectStore(state => state.downstreamUpdatePlans[projectId] ?? EMPTY_PLANS);
     const events = useProjectStore(state => state.downstreamUpdatePlanEvents[projectId] ?? EMPTY_EVENTS);
@@ -173,6 +174,11 @@ export function DownstreamUpdatePlanReview({
         };
     }, []);
 
+    useEffect(() => {
+        if (!initialItemId) return;
+        document.getElementById(`update-plan-item-${initialItemId}`)?.scrollIntoView?.({ block: 'center' });
+    }, [initialItemId]);
+
     if (!plan) return null;
 
     const recordDisposition = (itemId: string, disposition: DownstreamUpdateDisposition, note?: string) => {
@@ -200,13 +206,20 @@ export function DownstreamUpdatePlanReview({
     };
 
     const moveItem = (itemId: string, direction: -1 | 1) => {
-        const index = items.findIndex(item => item.id === itemId);
+        const item = items.find(candidate => candidate.id === itemId);
+        if (!item) return;
+        // Certainty is a safety ordering, not a user preference. Reorder only
+        // within that group so a possible item never displays "Priority 1"
+        // beneath a definite item that the UI must keep first.
+        const group = items.filter(candidate => candidate.certainty === item.certainty);
+        const index = group.findIndex(candidate => candidate.id === itemId);
         const nextIndex = index + direction;
-        if (index < 0 || nextIndex < 0 || nextIndex >= items.length) return;
-        const reordered = [...items];
+        if (index < 0 || nextIndex < 0 || nextIndex >= group.length) return;
+        const reordered = [...group];
         [reordered[index], reordered[nextIndex]] = [reordered[nextIndex], reordered[index]];
-        reordered.forEach((item, priority) => {
-            appendEvent(projectId, plan.id, item.id, { type: 'priority_changed', priority: priority + 1 });
+        const groupStart = items.findIndex(candidate => candidate.certainty === item.certainty);
+        reordered.forEach((candidate, priority) => {
+            appendEvent(projectId, plan.id, candidate.id, { type: 'priority_changed', priority: groupStart + priority + 1 });
         });
     };
 
@@ -291,11 +304,13 @@ export function DownstreamUpdatePlanReview({
                     )}
                     {error && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
                     <div className="space-y-3">
-                        {items.map((item, index) => {
+                        {items.map((item) => {
                             const certainty = certaintyCopy[item.certainty];
                             const pending = pendingDisposition?.itemId === item.id ? pendingDisposition : undefined;
+                            const certaintyPeers = items.filter(candidate => candidate.certainty === item.certainty);
+                            const certaintyIndex = certaintyPeers.findIndex(candidate => candidate.id === item.id);
                             return (
-                                <article key={item.id} className="min-w-0 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
+                                <article id={`update-plan-item-${item.id}`} key={item.id} className="min-w-0 scroll-mt-4 rounded-xl border border-neutral-200 bg-white p-4 shadow-sm">
                                     <div className="flex min-w-0 flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
                                         <div className="min-w-0">
                                             <div className="flex flex-wrap items-center gap-2">
@@ -312,8 +327,8 @@ export function DownstreamUpdatePlanReview({
                                         </div>
                                         {!readOnly && items.length > 1 && (
                                             <div className="flex shrink-0 gap-1" aria-label={`Reorder ${regionLabel(item)}`}>
-                                                <button type="button" disabled={index === 0} onClick={() => moveItem(item.id, -1)} aria-label="Move earlier" className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:opacity-30"><ArrowUp size={16} /></button>
-                                                <button type="button" disabled={index === items.length - 1} onClick={() => moveItem(item.id, 1)} aria-label="Move later" className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:opacity-30"><ArrowDown size={16} /></button>
+                                                <button type="button" disabled={certaintyIndex === 0} onClick={() => moveItem(item.id, -1)} aria-label="Move earlier within this certainty group" className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:opacity-30"><ArrowUp size={16} /></button>
+                                                <button type="button" disabled={certaintyIndex === certaintyPeers.length - 1} onClick={() => moveItem(item.id, 1)} aria-label="Move later within this certainty group" className="flex min-h-11 min-w-11 items-center justify-center rounded-lg border border-neutral-200 text-neutral-600 hover:bg-neutral-50 disabled:opacity-30"><ArrowDown size={16} /></button>
                                             </div>
                                         )}
                                     </div>

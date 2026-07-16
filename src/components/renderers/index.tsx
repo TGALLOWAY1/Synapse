@@ -41,6 +41,11 @@ interface DispatchProps {
      * journey nodes can open the matching Screen Detail view. */
     onNavigateToScreen?: (screenSlug: string) => void;
     availableScreenSlugs?: ReadonlySet<string>;
+    /** Phase 5A region navigation. These values select and reveal the exact
+     * flow/data-model region without changing either artifact. */
+    initialFlowId?: string;
+    initialFlowStepIndex?: number;
+    initialDataEntityName?: string;
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
     promptPackContent?: string;
@@ -108,6 +113,9 @@ export function ArtifactContentRenderer({
     implementationPlan,
     onNavigateToScreen,
     availableScreenSlugs,
+    initialFlowId,
+    initialFlowStepIndex,
+    initialDataEntityName,
     promptPackContent,
     savedTasks,
     onConvertToTasks,
@@ -126,7 +134,14 @@ export function ArtifactContentRenderer({
     if (subtype === 'data_model') {
         // PRD provenance (`prdVersionLabel`) is shown once at the page level, not
         // repeated inside the Data Model summary card — so it isn't passed here.
-        return <DataModelRenderer content={content} staleness={staleness} />;
+        return (
+            <DataModelRenderer
+                key={initialDataEntityName ?? 'data-model'}
+                content={content}
+                staleness={staleness}
+                initialEntityName={initialDataEntityName}
+            />
+        );
     }
     if (subtype === 'component_inventory' && isJsonString(content)) {
         return <ComponentInventoryRenderer content={content} />;
@@ -137,6 +152,7 @@ export function ArtifactContentRenderer({
     if (subtype === 'user_flows') {
         return (
             <UserFlowsRenderer
+                key={`${initialFlowId ?? 'flows'}:${initialFlowStepIndex ?? 'all'}`}
                 content={content}
                 features={features}
                 uxPages={uxPages}
@@ -145,6 +161,8 @@ export function ArtifactContentRenderer({
                 implementationPlan={implementationPlan}
                 onNavigateToScreen={onNavigateToScreen}
                 availableScreenSlugs={availableScreenSlugs}
+                initialFlowId={initialFlowId}
+                initialStepIndex={initialFlowStepIndex}
             />
         );
     }

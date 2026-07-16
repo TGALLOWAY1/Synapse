@@ -50,7 +50,10 @@ const twoEntityModel: DataModelContent = {
     apiEndpoints: [],
 };
 
-function renderModel(content: DataModelContent, props: Partial<{ staleness: 'current' | 'possibly_outdated' | 'outdated' }> = {}) {
+function renderModel(content: DataModelContent, props: Partial<{
+    staleness: 'current' | 'possibly_outdated' | 'outdated';
+    initialEntityName: string;
+}> = {}) {
     return render(<DataModelRenderer content={JSON.stringify(content)} {...props} />);
 }
 
@@ -159,6 +162,15 @@ describe('DataModelRenderer — collapsible entity cards', () => {
         const { getByText } = renderModel(single);
         // Field from the expanded body is visible without interaction.
         expect(getByText('token')).toBeInTheDocument();
+    });
+
+    it('opens and scrolls to an exact update-plan entity target', () => {
+        const scroll = vi.mocked(Element.prototype.scrollIntoView);
+        scroll.mockClear();
+        const { getByText } = renderModel(twoEntityModel, { initialEntityName: 'Order' });
+
+        expect(getByText('total_cents')).toBeInTheDocument();
+        expect(scroll).toHaveBeenCalled();
     });
 });
 

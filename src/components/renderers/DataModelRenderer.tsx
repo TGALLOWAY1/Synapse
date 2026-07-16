@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { ChevronsDownUp, ChevronsUpDown, Layers, Sparkles } from 'lucide-react';
@@ -33,6 +33,7 @@ interface Props {
      * artifact/page level, not repeated inside the summary card.
      */
     staleness?: StalenessState;
+    initialEntityName?: string;
 }
 
 function tryParseAsJson(content: string): DataModelContent | null {
@@ -76,7 +77,7 @@ function MethodPill({ method }: { method: string }) {
     );
 }
 
-export function DataModelRenderer({ content, staleness }: Props) {
+export function DataModelRenderer({ content, staleness, initialEntityName }: Props) {
     const { parsed, sourceMarkdown } = useMemo(() => {
         const json = tryParseAsJson(content);
         if (json) {
@@ -101,9 +102,10 @@ export function DataModelRenderer({ content, staleness }: Props) {
     const signature = parsed.entities.map(e => e.name).join('|');
     return (
         <DataModelBody
-            key={signature}
+            key={`${signature}:${initialEntityName ?? ''}`}
             parsed={parsed}
             staleness={staleness}
+            initialEntityName={initialEntityName}
         />
     );
 }
@@ -111,9 +113,10 @@ export function DataModelRenderer({ content, staleness }: Props) {
 interface BodyProps {
     parsed: ParsedDataModel;
     staleness?: StalenessState;
+    initialEntityName?: string;
 }
 
-function DataModelBody({ parsed, staleness }: BodyProps) {
+function DataModelBody({ parsed, staleness, initialEntityName }: BodyProps) {
     const isMobile = useIsMobile();
     const { graph, summary } = useMemo(() => analyzeDataModel(parsed), [parsed]);
 
@@ -144,9 +147,11 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
 
     // Expansion — single-entity models open by default; larger ones start
     // collapsed for scannability.
-    const [expandedIds, setExpandedIds] = useState<Set<string>>(
-        () => (pairs.length === 1 ? new Set(pairs.map(p => p.node.id)) : new Set()),
-    );
+    const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
+        const target = initialEntityName ? slugifyEntity(initialEntityName) : undefined;
+        if (target && nodeIdSet.has(target)) return new Set([target]);
+        return pairs.length === 1 ? new Set(pairs.map(p => p.node.id)) : new Set();
+    });
 
     const outlineItems: ArtifactOutlineItem[] = useMemo(
         () => orderedPairs.map(({ entity, node }) => ({
@@ -158,6 +163,11 @@ function DataModelBody({ parsed, staleness }: BodyProps) {
     );
     const outlineIds = useMemo(() => outlineItems.map(i => i.id), [outlineItems]);
     const { activeId, scrollTo } = useArtifactOutline(outlineIds);
+
+    useEffect(() => {
+        if (!initialEntityName) return;
+        document.getElementById(entityAnchorId(initialEntityName))?.scrollIntoView?.({ block: 'center' });
+    }, [initialEntityName]);
 
     const toggleEntity = (nodeId: string) =>
         setExpandedIds(prev => {

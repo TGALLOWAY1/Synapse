@@ -275,6 +275,14 @@ export function ArtifactWorkspace({
     // Which artifact's version-history panel is open (null = none).
     const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
     const [updatePlanId, setUpdatePlanId] = useState<string | null>(null);
+    const [updatePlanRegionTarget, setUpdatePlanRegionTarget] = useState<{
+        planId: string;
+        itemId: string;
+        label: string;
+        flowId?: string;
+        flowStepIndex?: number;
+        dataEntityName?: string;
+    } | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
@@ -875,9 +883,21 @@ export function ArtifactWorkspace({
     const openUpdatePlanOutput = (plan: DownstreamUpdatePlan, item: DownstreamUpdatePlanItem) => {
         setUpdatePlanId(null);
         setSelectedArtifactId(plan.artifact.artifactId);
+        const region = item.region;
+        const label = region.kind === 'screen' ? region.screenName
+            : region.kind === 'flow' ? `${region.flowName}${region.stepIndex === undefined ? '' : ` · Step ${region.stepIndex + 1}`}`
+                : region.kind === 'data_model' ? `${region.entityName}${region.memberName ? ` · ${region.memberName}` : ''}`
+                    : region.label;
+        setUpdatePlanRegionTarget({
+            planId: plan.id,
+            itemId: item.id,
+            label,
+            ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
+            ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
+        });
         if (plan.artifact.slot === 'screen_inventory') {
             setSelected('screens');
-            if (item.region.kind === 'screen') setScreenParams(item.region.screenId);
+            if (region.kind === 'screen') setScreenParams(region.screenId);
         } else {
             setSelected(plan.artifact.slot);
             if (selectedScreenId) setScreenParams(null);
@@ -1510,6 +1530,9 @@ export function ArtifactWorkspace({
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
                         onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
                         availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
+                        initialFlowId={subtype === 'user_flows' ? updatePlanRegionTarget?.flowId : undefined}
+                        initialFlowStepIndex={subtype === 'user_flows' ? updatePlanRegionTarget?.flowStepIndex : undefined}
+                        initialDataEntityName={subtype === 'data_model' ? updatePlanRegionTarget?.dataEntityName : undefined}
                         promptPackContent={legacyPromptPackContent}
                         savedTasks={planSavedTasks}
                         onConvertToTasks={handleConvertToTasks}
@@ -1690,6 +1713,20 @@ export function ArtifactWorkspace({
                     )}
                 </div>
                 <div className="p-4 md:p-8">
+                    {updatePlanRegionTarget && (
+                        <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-950">
+                            <span className="min-w-0 break-words">
+                                Viewing update-plan region: <strong>{updatePlanRegionTarget.label}</strong>
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setUpdatePlanId(updatePlanRegionTarget.planId)}
+                                className="min-h-11 shrink-0 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
+                            >
+                                Return to update plan
+                            </button>
+                        </div>
+                    )}
                     {renderMain()}
                 </div>
             </main>
@@ -1698,6 +1735,7 @@ export function ArtifactWorkspace({
                 <DownstreamUpdatePlanReview
                     projectId={projectId}
                     initialPlanId={updatePlanId}
+                    initialItemId={updatePlanRegionTarget?.planId === updatePlanId ? updatePlanRegionTarget.itemId : undefined}
                     onClose={() => setUpdatePlanId(null)}
                     onOpenSource={openUpdatePlanSource}
                     onOpenOutput={openUpdatePlanOutput}

@@ -119,7 +119,8 @@ describe('downstream update plan integrity and currentness', () => {
         const modelAuthored = { ...planned, id: 'model', actor: 'synapse' } as never;
         const summary = deriveDownstreamUpdatePlanSummary({ plans: [definite], events: [planned, modelAuthored], context });
         expect(summary).toMatchObject({ currentPlanCount: 1, historicalPlanCount: 0 });
-        expect(summary.blockingItems).toContainEqual(expect.objectContaining({ itemId: 'item-1', disposition: 'planned' }));
+        expect(summary.blockingItems).toEqual([]);
+        expect(summary.reviewedItems[0]).toMatchObject({ itemId: 'item-1', disposition: 'planned' });
 
         const aligned = sealDownstreamUpdatePlanEvent({
             schemaVersion: 1, id: 'aligned', projectId: 'p1', planId: definite.id, itemId: 'item-1', actor: 'user', at: 30,

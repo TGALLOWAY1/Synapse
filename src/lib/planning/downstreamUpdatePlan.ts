@@ -352,8 +352,14 @@ export function deriveDownstreamUpdatePlanSummary(input: {
         priority: item.priority,
         recommendation: item.recommendation,
     })));
+    // Phase 5A ends at a reviewed update plan. Marking an item planned therefore
+    // completes this planning checkpoint, while the independent OutputAlignment
+    // projection continues to decide whether the artifact itself blocks build.
+    // Deferred work remains unresolved when the affected region is definite.
     const handled = (item: DownstreamUpdatePlanSummaryItem): boolean =>
-        item.disposition === 'not_applicable' || item.disposition === 'already_aligned';
+        item.disposition === 'planned'
+        || item.disposition === 'not_applicable'
+        || item.disposition === 'already_aligned';
     const blockingItems = items.filter(item => (
         item.certainty === 'definite' && item.implementationCritical && !handled(item)
     ));

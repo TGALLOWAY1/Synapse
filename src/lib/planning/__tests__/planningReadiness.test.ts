@@ -112,7 +112,7 @@ describe('planning readiness', () => {
                     planId: 'plan', planIntegrityHash: 'integrity', itemId: 'item', artifactId: 'screens',
                     artifactVersionId: 'screens-v1', nodeId: 'screen_inventory', artifactTitle: 'Screens',
                     region: { kind: 'screen', screenId: 'shared', screenName: 'Shared workspace', aspect: 'screen' },
-                    certainty: 'definite', implementationCritical: true, disposition: 'planned', priority: 1,
+                    certainty: 'definite', implementationCritical: true, priority: 1,
                     recommendation: 'Remove the obsolete shared-workspace behavior.',
                 }],
             },

@@ -124,14 +124,36 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(screen.getByText(/User rationale:/).parentElement).toHaveTextContent('already removed manually');
     });
 
-    it('supports explicit prioritization without modifying artifact content', () => {
+    it('keeps certainty ordering fixed while supporting priority changes within a certainty group', () => {
         const originalContent = useProjectStore.getState().artifactVersions[projectId][0].content;
+        const original = makePlan();
+        const { integrityHash: _integrityHash, ...unsealed } = original;
+        void _integrityHash;
+        const peerPlan = sealDownstreamUpdatePlan({
+            ...unsealed,
+            items: [...unsealed.items, {
+                ...unsealed.items[0], id: 'possible-peer', recommendedPriority: 3,
+                region: { kind: 'screen', screenId: 'profile', screenName: 'Profile', aspect: 'behavior', label: 'Audience language' },
+            }],
+        });
+        useProjectStore.setState({ downstreamUpdatePlans: { [projectId]: [peerPlan] } });
         renderReview();
         const possible = screen.getByRole('heading', { name: /Settings/ }).closest('article')!;
-        fireEvent.click(within(possible).getByRole('button', { name: 'Move earlier' }));
+        expect(within(possible).getByRole('button', { name: /Move earlier within this certainty group/ })).toBeDisabled();
+
+        const peer = screen.getByRole('heading', { name: /Profile/ }).closest('article')!;
+        fireEvent.click(within(peer).getByRole('button', { name: /Move earlier within this certainty group/ }));
 
         expect(useProjectStore.getState().downstreamUpdatePlanEvents[projectId].every(event => event.type === 'priority_changed')).toBe(true);
         expect(useProjectStore.getState().artifactVersions[projectId][0].content).toBe(originalContent);
+        const regions = screen.getAllByRole('heading', { level: 3 });
+        expect(regions.map(region => region.textContent)).toEqual(expect.arrayContaining([
+            expect.stringContaining('Shared workspace'),
+            expect.stringContaining('Profile'),
+            expect.stringContaining('Settings'),
+        ]));
+        expect(regions.findIndex(region => region.textContent?.includes('Profile')))
+            .toBeLessThan(regions.findIndex(region => region.textContent?.includes('Settings')));
     });
 
     it('opens the durable source and exact output region through explicit callbacks', () => {
