@@ -339,6 +339,18 @@ export function validateDownstreamArtifactUpdateReviewEventIntegrity(event: Down
     return true;
 }
 
+/** Editing may refine content, but it may not escalate a bounded proposal into
+ * a more destructive or structurally broader operation. A removal may be
+ * de-escalated to replacement so the user can preserve a revised region. */
+export function downstreamArtifactUpdateReviewOperationCompatible(
+    proposalOperation: DownstreamArtifactUpdateOperation,
+    editedOperation: Exclude<DownstreamArtifactUpdateOperation, 'review_only'>,
+): boolean {
+    if (proposalOperation === 'review_only') return false;
+    if (proposalOperation === 'remove') return editedOperation === 'remove' || editedOperation === 'replace';
+    return editedOperation === proposalOperation;
+}
+
 export function sealDownstreamArtifactUpdateApplication(
     input: Omit<DownstreamArtifactUpdateApplication, 'integrityHash'>,
 ): DownstreamArtifactUpdateApplication {
@@ -462,10 +474,13 @@ export function effectiveDownstreamArtifactUpdate(
     proposal: DownstreamArtifactUpdateProposal,
     review: DownstreamArtifactUpdateReviewEvent,
 ): { operation: Exclude<DownstreamArtifactUpdateOperation, 'review_only'>; contentHash: string | null } | undefined {
-    if (review.action === 'edited') return {
-        operation: review.operation,
-        contentHash: review.editedContent === null ? null : hashReviewValue(review.editedContent),
-    };
+    if (review.action === 'edited') {
+        if (!downstreamArtifactUpdateReviewOperationCompatible(proposal.operation, review.operation)) return undefined;
+        return {
+            operation: review.operation,
+            contentHash: review.editedContent === null ? null : hashReviewValue(review.editedContent),
+        };
+    }
     if (review.action !== 'accepted' || proposal.operation === 'review_only') return undefined;
     return {
         operation: proposal.operation,

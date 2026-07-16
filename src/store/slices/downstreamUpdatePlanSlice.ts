@@ -14,6 +14,7 @@ import {
     compareDownstreamArtifactUpdateProposalCurrentness,
     downstreamArtifactUpdateResultRegion,
     downstreamUpdatePlanItemIntegrityHash,
+    downstreamArtifactUpdateReviewOperationCompatible,
     effectiveDownstreamArtifactUpdate,
     latestDownstreamArtifactUpdateReview,
     resolveDownstreamUpdateRegionContent,
@@ -189,6 +190,8 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             artifactVersions: state.artifactVersions[projectId] ?? [],
             verifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
             verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
+            proposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
+            applications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
         });
         return deriveVerifiedDownstreamUpdatePlanSummary({ base, plans, events, context, projections });
     },
@@ -283,6 +286,10 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         if (!proposal || !validateDownstreamArtifactUpdateProposalIntegrity(proposal)) return { ok: false, reason: 'proposal_not_found' };
         if (proposal.operation === 'review_only' && (input.action === 'accepted' || input.action === 'edited')) {
             return { ok: false, reason: 'no_bounded_proposal' };
+        }
+        if (input.action === 'edited'
+            && !downstreamArtifactUpdateReviewOperationCompatible(proposal.operation, input.operation)) {
+            return { ok: false, reason: 'operation_escalation' };
         }
         const plan = (state.downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === proposal.updatePlanBinding.planId);
         const context = currentContext(state, projectId);
@@ -523,7 +530,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             const version = artifact
                 ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === artifact.currentVersionId)
                 : undefined;
-            if (!verificationIsCurrent({ verification, plan, context, currentVersion: version })) {
+            if (!verificationIsCurrent({ verification, plan, context, currentVersion: version, proposal, application })) {
                 return { ok: false, reason: 'stale' };
             }
             if (verification.subject.kind === 'application' && (
@@ -591,7 +598,9 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         const baselineVersion = plan
             ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === plan.artifact.artifactVersionId)
             : undefined;
-        if (!plan || !item || !context || !currentVersion) return { status: 'rejected', reason: 'binding_not_found' };
+        if (!plan || !validateDownstreamUpdatePlanIntegrity(plan) || !item || !context || !currentVersion) {
+            return { status: 'rejected', reason: 'binding_not_found' };
+        }
         if (plan.source.targetSpineVersionId !== context.spineVersionId
             || plan.source.targetSpineContentHash !== context.spineContentHash
             || plan.source.planningContextHash !== context.planningContextHash) return { status: 'rejected', reason: 'source_stale' };
@@ -627,7 +636,14 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             const version = artifact
                 ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === artifact.currentVersionId)
                 : undefined;
-            if (!verificationIsCurrent({ verification, plan, context, currentVersion: version })) return { ok: false, reason: 'stale' };
+            const boundProposal = (state.downstreamArtifactUpdateProposals[projectId] ?? [])
+                .find(candidate => candidate.id === verification.subject?.proposalId);
+            const boundApplication = (state.downstreamArtifactUpdateApplications[projectId] ?? [])
+                .find(candidate => candidate.id === verification.subject?.applicationId);
+            if (!verificationIsCurrent({
+                verification, plan, context, currentVersion: version,
+                proposal: boundProposal, application: boundApplication,
+            })) return { ok: false, reason: 'stale' };
         }
         const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? []).find(candidate => candidate.id === verification.proposalId);
         const artifact = proposal ? (state.artifacts[projectId] ?? []).find(candidate => candidate.id === proposal.artifact.artifactId) : undefined;

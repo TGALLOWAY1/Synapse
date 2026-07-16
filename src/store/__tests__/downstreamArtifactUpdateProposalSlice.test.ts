@@ -196,6 +196,27 @@ describe('downstream artifact-update proposal store boundary', () => {
             .toEqual({ ok: false, reason: 'invalid_proposal' });
     });
 
+    it('rejects edited-operation escalation beyond the proposal safety class', () => {
+        const { plan, proposal: removal } = makeProposal();
+        const { integrityHash: _proposalIntegrity, ...proposalBase } = removal;
+        void _proposalIntegrity;
+        const replacement = sealDownstreamArtifactUpdateProposal({
+            ...proposalBase,
+            id: 'replacement-proposal',
+            operation: 'replace',
+            proposedContent: '{"name":"Local"}',
+        });
+        useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);
+        useProjectStore.getState().recordDownstreamArtifactUpdateProposal(projectId, replacement);
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, replacement.id, {
+            action: 'edited', operation: 'remove', editedContent: null, rationale: 'Delete the region instead.',
+        })).toEqual({ ok: false, reason: 'operation_escalation' });
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, replacement.id, {
+            action: 'edited', operation: 'structural', editedContent: 'broader rewrite', rationale: 'Rewrite the structure.',
+        })).toEqual({ ok: false, reason: 'operation_escalation' });
+        expect(useProjectStore.getState().downstreamArtifactUpdateReviewEvents[projectId] ?? []).toEqual([]);
+    });
+
     it('creates a fresh proposal identity only after the user requests another proposal', () => {
         const plan = makePlan();
         useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan);

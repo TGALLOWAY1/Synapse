@@ -200,12 +200,33 @@ export function verificationIsCurrent(input: {
     plan?: DownstreamUpdatePlan;
     context?: DownstreamUpdatePlanCurrentContext;
     currentVersion?: ArtifactVersion;
+    proposal?: DownstreamArtifactUpdateProposal;
+    application?: DownstreamArtifactUpdateApplication;
 }): boolean {
     const { verification, plan, context, currentVersion } = input;
     const subject = verification.subject;
     if (!subject || !plan || !context || !currentVersion || !validateDownstreamArtifactUpdateVerificationIntegrity(verification)) return false;
     const item = plan.items.find(candidate => candidate.id === subject.itemId);
-    return plan.id === subject.planId
+    const proposalValid = !subject.proposalId || Boolean(input.proposal
+        && validateDownstreamArtifactUpdateProposalIntegrity(input.proposal)
+        && input.proposal.id === subject.proposalId
+        && input.proposal.integrityHash === subject.proposalIntegrityHash
+        && input.proposal.updatePlanBinding.planId === plan.id
+        && input.proposal.updatePlanBinding.planIntegrityHash === plan.integrityHash
+        && input.proposal.updatePlanBinding.itemId === subject.itemId
+        && input.proposal.updatePlanBinding.itemIntegrityHash === subject.itemIntegrityHash);
+    const applicationValid = subject.kind !== 'application' || Boolean(input.application
+        && validateDownstreamArtifactUpdateApplicationIntegrity(input.application)
+        && input.application.id === subject.applicationId
+        && input.application.integrityHash === subject.applicationIntegrityHash
+        && input.application.proposalId === subject.proposalId
+        && input.application.proposalIntegrityHash === subject.proposalIntegrityHash
+        && input.application.resultingArtifactVersionId === subject.targetArtifactVersionId
+        && input.application.resultingArtifactContentHash === subject.targetArtifactContentHash);
+    return validateDownstreamUpdatePlanIntegrity(plan)
+        && proposalValid
+        && applicationValid
+        && plan.id === subject.planId
         && plan.integrityHash === subject.planIntegrityHash
         && Boolean(item && downstreamUpdatePlanItemIntegrityHash(plan, item) === subject.itemIntegrityHash)
         && subject.sourceSpineVersionId === plan.source.targetSpineVersionId
@@ -227,9 +248,11 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
     artifactVersions: ArtifactVersion[];
     verifications: DownstreamArtifactUpdateVerification[];
     verificationEvents: DownstreamArtifactUpdateVerificationEvent[];
+    proposals: DownstreamArtifactUpdateProposal[];
+    applications: DownstreamArtifactUpdateApplication[];
 }): DownstreamVerificationProjection[] {
     if (!input.context) return [];
-    return input.plans.flatMap(plan => {
+    return input.plans.filter(validateDownstreamUpdatePlanIntegrity).flatMap(plan => {
         if (!sourceCurrent(plan, input.context!)) return [];
         const artifact = input.artifacts.find(candidate => candidate.id === plan.artifact.artifactId);
         const currentVersion = artifact
@@ -240,7 +263,14 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
             const verification = input.verifications
                 .filter(candidate => candidate.subject?.planId === plan.id
                     && candidate.subject.itemId === item.id
-                    && verificationIsCurrent({ verification: candidate, plan, context: input.context, currentVersion }))
+                    && verificationIsCurrent({
+                        verification: candidate,
+                        plan,
+                        context: input.context,
+                        currentVersion,
+                        proposal: input.proposals.find(proposal => proposal.id === candidate.subject?.proposalId),
+                        application: input.applications.find(application => application.id === candidate.subject?.applicationId),
+                    }))
                 .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
             const userReview = verification
                 ? latestDownstreamArtifactUpdateVerificationReview(verification, input.verificationEvents)?.action

@@ -5,9 +5,11 @@ import {
     downstreamUpdatePlanItemIntegrityHash,
     downstreamUpdateRegionKey,
     sealDownstreamArtifactUpdateProposal,
+    sealDownstreamArtifactUpdateVerification,
 } from '../downstreamArtifactUpdateProposal';
 import {
     deriveDownstreamArtifactUpdateVerification,
+    projectDownstreamArtifactUpdateVerifications,
     reconcileProjectOutputAlignment,
     type DownstreamVerificationProjection,
 } from '../downstreamArtifactUpdateVerification';
@@ -99,5 +101,57 @@ describe('downstream artifact verification', () => {
         expect(reconcileProjectOutputAlignment({
             outputs: [upstream], alignedCount: 0, possiblyAffectedCount: 1, staleCount: 0, blockingCount: 1,
         }, [projection]).outputs[0]).toMatchObject({ state: 'possibly_affected', blocksBuildReadiness: true });
+    });
+
+    it('does not project verification from a tampered plan or missing proposal provenance', () => {
+        const verification = deriveDownstreamArtifactUpdateVerification({
+            projectId: 'project', plan, item: plan.items[0], baselineVersion: baseline, currentVersion: current,
+            context: {
+                spineVersionId: 'spine-v2', spineContentHash: 'spine-hash',
+                planningContextHash: downstreamPlanningContextHash(records),
+                artifactVersions: { screens: { versionId: current.id, contentHash: hashReviewValue(current.content) } },
+            },
+        });
+        const context = {
+            spineVersionId: 'spine-v2', spineContentHash: 'spine-hash',
+            planningContextHash: downstreamPlanningContextHash(records),
+            artifactVersions: { screens: { versionId: current.id, contentHash: hashReviewValue(current.content) } },
+        };
+        const artifact = {
+            id: 'screens', projectId: 'project', type: 'core_artifact' as const, subtype: 'screen_inventory' as const,
+            title: 'Screens', status: 'active' as const, currentVersionId: current.id, createdAt: 1, updatedAt: 2,
+        };
+        const invalidPlanProjection = projectDownstreamArtifactUpdateVerifications({
+            plans: [{ ...plan, preservedArtifactSummary: 'tampered' }], context, artifacts: [artifact],
+            artifactVersions: [baseline, current], verifications: [verification], verificationEvents: [],
+            proposals: [], applications: [],
+        });
+        expect(invalidPlanProjection).toEqual([]);
+        const raw = {
+            outputs: [{
+                artifactId: 'screens', nodeId: 'screen_inventory' as const, title: 'Screens', state: 'possibly_affected' as const,
+                confidence: 'possible' as const, summary: 'Raw plan drift', reasons: ['PRD changed'], nextAction: 'Review',
+                usefulForExploration: true as const, blocksBuildReadiness: true, generatedFromSpineId: 'spine-v1',
+            }], alignedCount: 0, possiblyAffectedCount: 1, staleCount: 0, blockingCount: 1,
+        };
+        expect(reconcileProjectOutputAlignment(raw, invalidPlanProjection)).toEqual(raw);
+
+        const { integrityHash: _verificationIntegrity, ...verificationBase } = verification;
+        void _verificationIntegrity;
+        const missingBoundProposal = sealDownstreamArtifactUpdateVerification({
+            ...verificationBase,
+            proposalId: 'missing-proposal',
+            proposalIntegrityHash: 'missing-hash',
+            subject: {
+                ...verification.subject!,
+                proposalId: 'missing-proposal',
+                proposalIntegrityHash: 'missing-hash',
+            },
+        });
+        const missingProposal = projectDownstreamArtifactUpdateVerifications({
+            plans: [plan], context, artifacts: [artifact], artifactVersions: [baseline, current],
+            verifications: [missingBoundProposal], verificationEvents: [], proposals: [], applications: [],
+        });
+        expect(missingProposal[0]).toMatchObject({ outcome: 'verification_unavailable', deterministic: false });
     });
 });

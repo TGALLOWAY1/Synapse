@@ -174,6 +174,11 @@ describe('bounded downstream artifact-update proposal contract', () => {
         expect(effectiveDownstreamArtifactUpdate(proposal, edited)).toEqual({
             operation: 'replace', contentHash: hashReviewValue('{"name":"Offline"}'),
         });
+        const escalated = sealDownstreamArtifactUpdateReviewEvent({
+            ...acceptedBase, id: 'review-3', at: 32, action: 'edited', operation: 'structural',
+            editedContent: 'Rewrite the artifact structure', rationale: 'Attempt a broader rewrite.',
+        });
+        expect(effectiveDownstreamArtifactUpdate(proposal, escalated)).toBeUndefined();
         expect(latestDownstreamArtifactUpdateReview(proposal, [accepted, edited])?.id).toBe(edited.id);
     });
 

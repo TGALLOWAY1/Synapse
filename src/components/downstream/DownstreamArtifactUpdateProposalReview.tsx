@@ -3,12 +3,19 @@ import { AlertTriangle, Check, FileEdit, Loader2, RefreshCw, SearchCheck, Shield
 import {
     latestDownstreamArtifactUpdateReview,
     latestDownstreamArtifactUpdateVerificationReview,
+    effectiveDownstreamArtifactUpdate,
+    downstreamUpdatePlanItemIntegrityHash,
+    validateDownstreamArtifactUpdateApplicationIntegrity,
+    validateDownstreamArtifactUpdateProposalIntegrity,
+    validateDownstreamArtifactUpdateReviewEventIntegrity,
+    validateDownstreamArtifactUpdateVerificationIntegrity,
     type DownstreamArtifactUpdateProposal,
     type DownstreamArtifactUpdateReviewAction,
 } from '../../lib/planning/downstreamArtifactUpdateProposal';
-import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../../lib/planning/downstreamUpdatePlan';
+import { validateDownstreamUpdatePlanIntegrity, type DownstreamUpdatePlan, type DownstreamUpdatePlanItem } from '../../lib/planning/downstreamUpdatePlan';
 import { useProjectStore } from '../../store/projectStore';
 import type { ArtifactVersion } from '../../types';
+import { hashReviewValue } from '../../lib/review/hash';
 
 const EMPTY_PROPOSALS: DownstreamArtifactUpdateProposal[] = [];
 const EMPTY_EVENTS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateReviewEvents'][string] = [];
@@ -50,6 +57,8 @@ export function DownstreamArtifactUpdateProposalReview({
     const applications = useProjectStore(state => state.downstreamArtifactUpdateApplications[projectId] ?? EMPTY_APPLICATIONS);
     const artifactVersions = useProjectStore(state => state.artifactVersions[projectId] ?? EMPTY_ARTIFACT_VERSIONS);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? EMPTY_ARTIFACTS);
+    const spineVersions = useProjectStore(state => state.spineVersions[projectId] ?? []);
+    const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? []);
     const verifications = useProjectStore(state => state.downstreamArtifactUpdateVerifications[projectId] ?? EMPTY_VERIFICATIONS);
     const verificationEvents = useProjectStore(state => state.downstreamArtifactUpdateVerificationEvents[projectId] ?? EMPTY_VERIFICATION_EVENTS);
     const generate = useProjectStore(state => state.generateDownstreamArtifactUpdateProposal);
@@ -65,30 +74,87 @@ export function DownstreamArtifactUpdateProposalReview({
     const [verificationRationale, setVerificationRationale] = useState('');
     const [message, setMessage] = useState<{ kind: 'error' | 'success'; text: string }>();
 
-    const proposal = useMemo(() => proposals
+    const matchingProposals = useMemo(() => proposals
         .filter(candidate => candidate.updatePlanBinding.planId === plan.id
-            && candidate.updatePlanBinding.itemId === item.id)
-        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0], [item.id, plan.id, proposals]);
+            && candidate.updatePlanBinding.itemId === item.id), [item.id, plan.id, proposals]);
+    const validProposals = useMemo(() => matchingProposals.filter(candidate => (
+        validateDownstreamUpdatePlanIntegrity(plan)
+        && validateDownstreamArtifactUpdateProposalIntegrity(candidate)
+        && candidate.updatePlanBinding.planIntegrityHash === plan.integrityHash
+        && candidate.updatePlanBinding.itemIntegrityHash === downstreamUpdatePlanItemIntegrityHash(plan, item)
+    )).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)), [item, matchingProposals, plan]);
+    const proposal = validProposals.find(candidate => (
+        useProjectStore.getState().getDownstreamArtifactUpdateProposalCurrentness(projectId, candidate.id)?.current
+    )) ?? validProposals[0];
+    const corruptedProposalLifecycle = matchingProposals.length !== validProposals.length;
     const boundArtifactVersion = proposal
         ? artifactVersions.find(candidate => candidate.id === proposal.artifact.artifactVersionId)
-        : undefined;
-    const review = proposal ? latestDownstreamArtifactUpdateReview(proposal, events) : undefined;
-    const application = proposal ? applications.find(candidate => candidate.proposalId === proposal.id) : undefined;
-    const currentArtifact = artifacts.find(candidate => candidate.id === plan.artifact.artifactId);
-    const currentArtifactVersionId = currentArtifact?.currentVersionId;
-    const verification = verifications
-        .filter(candidate => candidate.subject?.planId === plan.id
-            && candidate.subject.itemId === item.id
-            && candidate.subject.targetArtifactVersionId === currentArtifactVersionId)
-        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
-    const verificationReview = verification
-        ? latestDownstreamArtifactUpdateVerificationReview(verification, verificationEvents)
         : undefined;
     // The named artifact-version subscription above makes proposal freshness
     // reactive to manual/concurrent content changes without hidden rerenders.
     const currentness = proposal && boundArtifactVersion
         ? useProjectStore.getState().getDownstreamArtifactUpdateProposalCurrentness(projectId, proposal.id)
         : undefined;
+    const sourceAuthorityCurrent = Boolean(currentness?.current || currentness?.reasons.every(reason => (
+        reason === 'artifact_version_changed' || reason === 'artifact_content_changed'
+    )));
+    const review = proposal ? latestDownstreamArtifactUpdateReview(proposal, events) : undefined;
+    const currentArtifact = artifacts.find(candidate => candidate.id === plan.artifact.artifactId);
+    const currentArtifactVersionId = currentArtifact?.currentVersionId;
+    const applicationCandidates = proposal
+        ? applications.filter(candidate => candidate.proposalId === proposal.id)
+        : [];
+    const validApplications = applicationCandidates.filter(candidate => {
+        const authorization = events.find(event => event.id === candidate.authorizedByReviewEventId);
+        const resultVersion = artifactVersions.find(version => version.id === candidate.resultingArtifactVersionId);
+        const effective = proposal && authorization
+            ? effectiveDownstreamArtifactUpdate(proposal, authorization)
+            : undefined;
+        return validateDownstreamArtifactUpdateApplicationIntegrity(candidate)
+            && candidate.proposalIntegrityHash === proposal?.integrityHash
+            && Boolean(resultVersion
+                && resultVersion.artifactId === proposal?.artifact.artifactId
+                && resultVersion.parentVersionId === candidate.expectedArtifactVersionId
+                && hashReviewValue(resultVersion.content) === candidate.resultingArtifactContentHash)
+            && Boolean(effective
+                && effective.operation === candidate.effectiveOperation
+                && effective.contentHash === candidate.effectiveContentHash)
+            && Boolean(authorization
+                && validateDownstreamArtifactUpdateReviewEventIntegrity(authorization)
+                && authorization.proposalId === proposal?.id
+                && authorization.expectedProposalIntegrityHash === proposal?.integrityHash
+                && candidate.authorizedByReviewEventIntegrityHash === authorization.integrityHash);
+    });
+    const application = sourceAuthorityCurrent
+        ? validApplications.find(candidate => candidate.resultingArtifactVersionId === currentArtifactVersionId)
+        : undefined;
+    const verificationCandidates = verifications.filter(candidate => candidate.subject?.planId === plan.id
+        && candidate.subject.itemId === item.id);
+    const validVerifications = verificationCandidates.filter(candidate => (
+        validateDownstreamArtifactUpdateVerificationIntegrity(candidate)
+        && candidate.subject?.planIntegrityHash === plan.integrityHash
+        && (!candidate.subject?.proposalId || Boolean(proposal
+            && candidate.subject.proposalId === proposal.id
+            && candidate.subject.proposalIntegrityHash === proposal.integrityHash))
+        && (candidate.subject?.kind !== 'application' || validApplications.some(bound => (
+            candidate.subject?.applicationId === bound.id
+            && candidate.subject.applicationIntegrityHash === bound.integrityHash
+        )))
+    ));
+    const verification = validVerifications
+        .filter(candidate => sourceAuthorityCurrent
+            && candidate.subject?.targetArtifactVersionId === currentArtifactVersionId)
+        .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
+    const corruptedLifecycle = corruptedProposalLifecycle
+        || validApplications.length !== applicationCandidates.length
+        || validVerifications.length !== verificationCandidates.length;
+    const verificationReview = verification
+        ? latestDownstreamArtifactUpdateVerificationReview(verification, verificationEvents)
+        : undefined;
+    // These subscriptions are part of proposal currentness even when visible
+    // artifact text is unchanged: authority or spine changes must close review.
+    void spineVersions;
+    void planningRecords;
     const proposalReadOnly = readOnly || !currentness?.current || Boolean(application);
 
     const prepare = () => {
@@ -187,6 +253,7 @@ export function DownstreamArtifactUpdateProposalReview({
                 </button>
             </div>
             {message && <p role={message.kind === 'error' ? 'alert' : 'status'} className={`mt-2 text-xs ${message.kind === 'error' ? 'text-red-700' : 'text-emerald-700'}`}>{message.text}</p>}
+            {corruptedLifecycle && <p role="alert" className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">A saved proposal failed integrity checks and was ignored. Prepare a current proposal before recording authority.</p>}
             {currentArtifactVersionId && currentArtifactVersionId !== plan.artifact.artifactVersionId && (
                 <button type="button" disabled={busy} onClick={verify} className="mt-3 inline-flex min-h-11 items-center justify-center gap-1.5 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 disabled:opacity-50">
                     {busy ? <Loader2 size={14} className="animate-spin" /> : <SearchCheck size={14} />} Verify current output
@@ -217,6 +284,7 @@ export function DownstreamArtifactUpdateProposalReview({
             </div>
 
             {!currentness?.current && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">Historical proposal — its planning source or artifact binding changed. It cannot be approved or applied.</p>}
+            {corruptedLifecycle && <p role="alert" className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">One or more saved lifecycle records failed integrity checks and are not shown as applied or aligned.</p>}
             <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-2">
                 <div className="min-w-0 rounded-md border border-neutral-200 bg-white p-2.5">
                     <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Current region</div>
