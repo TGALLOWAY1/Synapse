@@ -9,11 +9,13 @@ import {
     validateDownstreamUpdatePlanIntegrity,
     type DownstreamUpdatePlanCurrentContext,
 } from '../../lib/planning/downstreamUpdatePlan';
+import { deriveDownstreamUpdatePlans } from '../../lib/planning/downstreamUpdatePlanGeneration';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamUpdatePlans'
     | 'downstreamUpdatePlanEvents'
     | 'recordDownstreamUpdatePlan'
+    | 'generateDownstreamUpdatePlans'
     | 'appendDownstreamUpdatePlanEvent'
     | 'getDownstreamUpdatePlanCurrentness'
 >;
@@ -60,6 +62,31 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             },
         }));
         return { ok: true, duplicate: false };
+    },
+
+    generateDownstreamUpdatePlans: (projectId) => {
+        const state = get();
+        if (!state.projects[projectId]) return { status: 'rejected', reason: 'project_not_found' };
+        const plans = deriveDownstreamUpdatePlans({
+            projectId,
+            artifacts: state.artifacts[projectId] ?? [],
+            artifactVersions: state.artifactVersions[projectId] ?? [],
+            spineVersions: state.spineVersions[projectId] ?? [],
+            planningRecords: state.planningRecords[projectId] ?? [],
+        });
+        const existing = state.downstreamUpdatePlans[projectId] ?? [];
+        const additions = plans.filter(plan => !existing.some(candidate => (
+            candidate.id === plan.id || candidate.integrityHash === plan.integrityHash
+        )));
+        if (additions.length > 0) {
+            set(current => ({
+                downstreamUpdatePlans: {
+                    ...current.downstreamUpdatePlans,
+                    [projectId]: [...(current.downstreamUpdatePlans[projectId] ?? []), ...additions],
+                },
+            }));
+        }
+        return { status: 'generated', planIds: plans.map(plan => plan.id), created: additions.length };
     },
 
     appendDownstreamUpdatePlanEvent: (projectId, planId, itemId, input) => {

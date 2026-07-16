@@ -6,6 +6,7 @@ export * from './consequentialEditRecognition';
 export * from './complexTargetReasoning';
 export * from './outputAlignment';
 export * from './downstreamUpdatePlan';
+export * from './downstreamUpdatePlanGeneration';
 export * from './readinessReview';
 export * from './readinessCommitment';
 export * from './readinessReviewComparison';

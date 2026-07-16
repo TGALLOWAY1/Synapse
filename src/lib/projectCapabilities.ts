@@ -47,7 +47,7 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'addPlanningAssessment',
     'createReadinessReview', 'authorizeReadinessCommitment',
     'commitReadinessReview', 'reopenReadinessCommitment',
-    'recordDownstreamUpdatePlan', 'appendDownstreamUpdatePlanEvent',
+    'recordDownstreamUpdatePlan', 'generateDownstreamUpdatePlans', 'appendDownstreamUpdatePlanEvent',
 ]);
 
 /** Wrap store writes once, at their authoritative shared boundary. */

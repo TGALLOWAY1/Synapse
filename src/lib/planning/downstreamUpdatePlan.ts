@@ -149,12 +149,14 @@ export type DownstreamUpdatePlanCurrentness = {
 };
 
 const canonicalPlan = (plan: Omit<DownstreamUpdatePlan, 'integrityHash'> | DownstreamUpdatePlan) => {
-    const { integrityHash: _integrityHash, ...canonical } = plan as DownstreamUpdatePlan;
+    const canonical = { ...plan } as Partial<DownstreamUpdatePlan>;
+    delete canonical.integrityHash;
     return canonical;
 };
 
 const canonicalEvent = (event: Omit<DownstreamUpdatePlanEvent, 'integrityHash'> | DownstreamUpdatePlanEvent) => {
-    const { integrityHash: _integrityHash, ...canonical } = event as DownstreamUpdatePlanEvent;
+    const canonical = { ...event } as Partial<DownstreamUpdatePlanEvent>;
+    delete canonical.integrityHash;
     return canonical;
 };
 
@@ -217,7 +219,10 @@ export function latestDownstreamUpdatePlanItemState(
 ): { disposition?: DownstreamUpdateDisposition; priority: number; eventIds: string[] } {
     const item = plan.items.find(candidate => candidate.id === itemId);
     const applicable = events
-        .filter(event => event.planId === plan.id && event.itemId === itemId && validateDownstreamUpdatePlanEventIntegrity(event))
+        .filter(event => event.planId === plan.id
+            && event.itemId === itemId
+            && event.expectedPlanIntegrityHash === plan.integrityHash
+            && validateDownstreamUpdatePlanEventIntegrity(event))
         .sort((a, b) => a.at - b.at || a.id.localeCompare(b.id));
     let disposition: DownstreamUpdateDisposition | undefined;
     let priority = item?.recommendedPriority ?? Number.MAX_SAFE_INTEGER;
@@ -226,6 +231,36 @@ export function latestDownstreamUpdatePlanItemState(
         if (event.type === 'priority_changed') priority = event.priority;
     }
     return { disposition, priority, eventIds: applicable.map(event => event.id) };
+}
+
+export type DownstreamUpdatePlanProjection = {
+    plan: DownstreamUpdatePlan;
+    currentness: DownstreamUpdatePlanCurrentness;
+    items: Array<DownstreamUpdatePlanItem & {
+        disposition?: DownstreamUpdateDisposition;
+        priority: number;
+        dispositionEventIds: string[];
+    }>;
+    unresolvedDefiniteCount: number;
+    unresolvedAdvisoryCount: number;
+};
+
+export function projectDownstreamUpdatePlan(
+    plan: DownstreamUpdatePlan,
+    events: DownstreamUpdatePlanEvent[],
+    context: DownstreamUpdatePlanCurrentContext,
+): DownstreamUpdatePlanProjection {
+    const items = plan.items.map(item => {
+        const state = latestDownstreamUpdatePlanItemState(plan, events, item.id);
+        return { ...item, disposition: state.disposition, priority: state.priority, dispositionEventIds: state.eventIds };
+    }).sort((a, b) => a.priority - b.priority || a.id.localeCompare(b.id));
+    return {
+        plan,
+        currentness: compareDownstreamUpdatePlanCurrentness(plan, context),
+        items,
+        unresolvedDefiniteCount: items.filter(item => item.certainty === 'definite' && !item.disposition).length,
+        unresolvedAdvisoryCount: items.filter(item => item.certainty !== 'definite' && !item.disposition).length,
+    };
 }
 
 export function normalizeDownstreamUpdatePlanCollections(value: unknown): {

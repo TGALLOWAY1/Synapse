@@ -4,6 +4,7 @@ import {
     compareDownstreamUpdatePlanCurrentness,
     downstreamPlanningContextHash,
     latestDownstreamUpdatePlanItemState,
+    projectDownstreamUpdatePlan,
     normalizeDownstreamUpdatePlanCollections,
     sealDownstreamUpdatePlan,
     sealDownstreamUpdatePlanEvent,
@@ -83,6 +84,16 @@ describe('downstream update plan integrity and currentness', () => {
         expect(latestDownstreamUpdatePlanItemState(sealed, [event], 'item-1')).toEqual({
             disposition: 'planned', priority: 1, eventIds: ['event-1'],
         });
+        const wrongBinding = sealDownstreamUpdatePlanEvent({
+            schemaVersion: 1, id: 'event-2', projectId: 'p1', planId: sealed.id, itemId: 'item-1', actor: 'user', at: 30,
+            expectedPlanIntegrityHash: 'different-plan', type: 'disposition_recorded', disposition: 'already_aligned', rationale: 'No longer applies.',
+        });
+        const projection = projectDownstreamUpdatePlan(sealed, [event, wrongBinding], {
+            spineVersionId: 'spine-2', spineContentHash: 'spine-hash-2', planningContextHash: 'context-1',
+            artifactVersions: { screens: { versionId: 'screens-v1', contentHash: 'screens-hash' } },
+        });
+        expect(projection.items[0].disposition).toBe('planned');
+        expect(projection.unresolvedAdvisoryCount).toBe(0);
     });
 
     it('conservatively initializes legacy collections', () => {

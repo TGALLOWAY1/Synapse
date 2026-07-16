@@ -396,6 +396,9 @@ export interface ProjectState {
         projectId: string,
         plan: DownstreamUpdatePlan,
     ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    generateDownstreamUpdatePlans: (
+        projectId: string,
+    ) => { status: 'generated'; planIds: string[]; created: number } | { status: 'rejected'; reason: string };
     appendDownstreamUpdatePlanEvent: (
         projectId: string,
         planId: string,

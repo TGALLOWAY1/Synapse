@@ -99,4 +99,15 @@ describe('downstream update plan store authority boundary', () => {
             type: 'priority_changed', priority: 2,
         })).toEqual({ ok: false, reason: 'stale' });
     });
+
+    it('generates an idempotent bounded legacy review through the store', () => {
+        const first = useProjectStore.getState().generateDownstreamUpdatePlans(projectId);
+        expect(first).toMatchObject({ status: 'generated', created: 1 });
+        expect(useProjectStore.getState().downstreamUpdatePlans[projectId][0].items[0].region).toMatchObject({
+            kind: 'artifact_review', reason: 'legacy_provenance',
+        });
+        const second = useProjectStore.getState().generateDownstreamUpdatePlans(projectId);
+        expect(second).toMatchObject({ status: 'generated', created: 0 });
+        expect(useProjectStore.getState().downstreamUpdatePlans[projectId]).toHaveLength(1);
+    });
 });
