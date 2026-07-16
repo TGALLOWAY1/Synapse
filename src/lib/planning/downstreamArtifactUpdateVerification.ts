@@ -3,13 +3,16 @@ import { hashReviewValue } from '../review/hash';
 import {
     downstreamArtifactUpdateResultRegion,
     downstreamUpdatePlanItemIntegrityHash,
+    effectiveDownstreamArtifactUpdate,
     latestDownstreamArtifactUpdateVerificationReview,
     sealDownstreamArtifactUpdateVerification,
     validateDownstreamArtifactUpdateApplicationIntegrity,
     validateDownstreamArtifactUpdateProposalIntegrity,
+    validateDownstreamArtifactUpdateReviewEventIntegrity,
     validateDownstreamArtifactUpdateVerificationIntegrity,
     type DownstreamArtifactUpdateApplication,
     type DownstreamArtifactUpdateProposal,
+    type DownstreamArtifactUpdateReviewEvent,
     type DownstreamArtifactUpdateVerification,
     type DownstreamArtifactUpdateVerificationEvent,
 } from './downstreamArtifactUpdateProposal';
@@ -202,6 +205,7 @@ export function verificationIsCurrent(input: {
     currentVersion?: ArtifactVersion;
     proposal?: DownstreamArtifactUpdateProposal;
     application?: DownstreamArtifactUpdateApplication;
+    reviewEvents: DownstreamArtifactUpdateReviewEvent[];
 }): boolean {
     const { verification, plan, context, currentVersion } = input;
     const subject = verification.subject;
@@ -209,18 +213,41 @@ export function verificationIsCurrent(input: {
     const item = plan.items.find(candidate => candidate.id === subject.itemId);
     const proposalValid = !subject.proposalId || Boolean(input.proposal
         && validateDownstreamArtifactUpdateProposalIntegrity(input.proposal)
+        && input.proposal.projectId === verification.projectId
         && input.proposal.id === subject.proposalId
         && input.proposal.integrityHash === subject.proposalIntegrityHash
         && input.proposal.updatePlanBinding.planId === plan.id
         && input.proposal.updatePlanBinding.planIntegrityHash === plan.integrityHash
         && input.proposal.updatePlanBinding.itemId === subject.itemId
         && input.proposal.updatePlanBinding.itemIntegrityHash === subject.itemIntegrityHash);
+    const approval = input.application
+        ? input.reviewEvents.find(event => event.id === input.application?.authorizedByReviewEventId)
+        : undefined;
+    const effective = input.proposal && approval
+        ? effectiveDownstreamArtifactUpdate(input.proposal, approval)
+        : undefined;
     const applicationValid = subject.kind !== 'application' || Boolean(input.application
+        && input.proposal
+        && approval
         && validateDownstreamArtifactUpdateApplicationIntegrity(input.application)
+        && validateDownstreamArtifactUpdateReviewEventIntegrity(approval)
+        && input.application.projectId === verification.projectId
+        && approval.projectId === verification.projectId
+        && approval.proposalId === input.proposal.id
+        && approval.expectedProposalIntegrityHash === input.proposal.integrityHash
+        && approval.expectedPlanIntegrityHash === input.proposal.updatePlanBinding.planIntegrityHash
+        && approval.expectedItemIntegrityHash === input.proposal.updatePlanBinding.itemIntegrityHash
+        && approval.expectedRegionContentHash === input.proposal.currentRegionContentHash
+        && input.application.authorizedByReviewEventIntegrityHash === approval.integrityHash
         && input.application.id === subject.applicationId
         && input.application.integrityHash === subject.applicationIntegrityHash
         && input.application.proposalId === subject.proposalId
         && input.application.proposalIntegrityHash === subject.proposalIntegrityHash
+        && input.application.expectedArtifactVersionId === input.proposal.artifact.artifactVersionId
+        && input.application.expectedArtifactContentHash === input.proposal.artifact.artifactContentHash
+        && input.application.expectedRegionContentHash === input.proposal.currentRegionContentHash
+        && effective?.operation === input.application.effectiveOperation
+        && effective.contentHash === input.application.effectiveContentHash
         && input.application.resultingArtifactVersionId === subject.targetArtifactVersionId
         && input.application.resultingArtifactContentHash === subject.targetArtifactContentHash);
     return validateDownstreamUpdatePlanIntegrity(plan)
@@ -250,6 +277,7 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
     verificationEvents: DownstreamArtifactUpdateVerificationEvent[];
     proposals: DownstreamArtifactUpdateProposal[];
     applications: DownstreamArtifactUpdateApplication[];
+    reviewEvents: DownstreamArtifactUpdateReviewEvent[];
 }): DownstreamVerificationProjection[] {
     if (!input.context) return [];
     return input.plans.filter(validateDownstreamUpdatePlanIntegrity).flatMap(plan => {
@@ -270,6 +298,7 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
                         currentVersion,
                         proposal: input.proposals.find(proposal => proposal.id === candidate.subject?.proposalId),
                         application: input.applications.find(application => application.id === candidate.subject?.applicationId),
+                        reviewEvents: input.reviewEvents,
                     }))
                 .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
             const userReview = verification

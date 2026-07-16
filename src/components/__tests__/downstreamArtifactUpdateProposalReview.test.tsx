@@ -58,7 +58,7 @@ const proposal = sealDownstreamArtifactUpdateProposal({
     source: plan.source, artifact: plan.artifact, region: plan.items[0].region,
     regionKey: downstreamUpdateRegionKey(plan.items[0].region), currentRegionContentHash: region.contentHash!,
     currentRegionSnapshot: region.snapshot!, currentRegionSnapshotTruncated: false,
-    operation: 'replace', proposedContent: '{"purpose":"Local work"}', evidence: plan.items[0].evidence,
+    operation: 'remove', proposedContent: null, evidence: plan.items[0].evidence,
     reasoning: 'Revise only the exact screen.', certainty: 'definite', preservedScope: [],
     preservedScopeHash: hashReviewValue([]), preservedRegionBindings: [],
     generator: { provider: 'synapse', model: 'bounded', promptHash: 'hash', reasoningVersion: 'v1' }, createdAt: 3,
@@ -132,5 +132,35 @@ describe('DownstreamArtifactUpdateProposalReview authority currentness', () => {
         expect(screen.getByText(/lifecycle records failed integrity checks/)).toBeInTheDocument();
         expect(screen.queryByText(/Applied in version/)).not.toBeInTheDocument();
         expect(screen.queryByText(/Synapse verification:/)).not.toBeInTheDocument();
+    });
+
+    it('keeps UI and readiness conservative for an orphaned approval, then recovers when provenance is restored', async () => {
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, proposal.id, { action: 'accepted' }))
+            .toMatchObject({ ok: true });
+        const approval = useProjectStore.getState().downstreamArtifactUpdateReviewEvents[projectId][0];
+        expect(useProjectStore.getState().applyDownstreamArtifactUpdateProposal(projectId, proposal.id))
+            .toMatchObject({ status: 'applied' });
+        expect(useProjectStore.getState().verifyDownstreamArtifactUpdateItem(projectId, plan.id, plan.items[0].id))
+            .toMatchObject({ status: 'verified', result: 'aligned' });
+
+        // Simulate an imported/recovered lifecycle whose application arrived
+        // before its append-only user approval event.
+        useProjectStore.setState({ downstreamArtifactUpdateReviewEvents: { [projectId]: [] } });
+        render(<DownstreamArtifactUpdateProposalReview projectId={projectId} plan={plan} item={plan.items[0]} readOnly={false} />);
+        expect(screen.queryByText(/Synapse verification: aligned/)).not.toBeInTheDocument();
+        expect(screen.getByText(/lifecycle records failed integrity checks/)).toBeInTheDocument();
+        expect(useProjectStore.getState().getDownstreamUpdatePlanSummary(projectId).blockingItems).toHaveLength(1);
+
+        useProjectStore.setState({
+            downstreamArtifactUpdateReviewEvents: {
+                [projectId]: [{ ...approval, expectedProposalIntegrityHash: 'tampered-import' }],
+            },
+        });
+        expect(screen.queryByText(/Synapse verification: aligned/)).not.toBeInTheDocument();
+        expect(useProjectStore.getState().getDownstreamUpdatePlanSummary(projectId).blockingItems).toHaveLength(1);
+
+        useProjectStore.setState({ downstreamArtifactUpdateReviewEvents: { [projectId]: [approval] } });
+        await waitFor(() => expect(screen.getByText(/Synapse verification: aligned/)).toBeInTheDocument());
+        expect(useProjectStore.getState().getDownstreamUpdatePlanSummary(projectId).blockingItems).toEqual([]);
     });
 });

@@ -77,12 +77,16 @@ export function DownstreamArtifactUpdateProposalReview({
     const matchingProposals = useMemo(() => proposals
         .filter(candidate => candidate.updatePlanBinding.planId === plan.id
             && candidate.updatePlanBinding.itemId === item.id), [item.id, plan.id, proposals]);
+    // The review list passes a projected item with disposition/priority fields.
+    // Proposal authority is sealed against the canonical plan item only.
+    const canonicalItem = plan.items.find(candidate => candidate.id === item.id);
     const validProposals = useMemo(() => matchingProposals.filter(candidate => (
         validateDownstreamUpdatePlanIntegrity(plan)
+        && Boolean(canonicalItem)
         && validateDownstreamArtifactUpdateProposalIntegrity(candidate)
         && candidate.updatePlanBinding.planIntegrityHash === plan.integrityHash
-        && candidate.updatePlanBinding.itemIntegrityHash === downstreamUpdatePlanItemIntegrityHash(plan, item)
-    )).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)), [item, matchingProposals, plan]);
+        && candidate.updatePlanBinding.itemIntegrityHash === downstreamUpdatePlanItemIntegrityHash(plan, canonicalItem!)
+    )).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)), [canonicalItem, matchingProposals, plan]);
     const proposal = validProposals.find(candidate => (
         useProjectStore.getState().getDownstreamArtifactUpdateProposalCurrentness(projectId, candidate.id)?.current
     )) ?? validProposals[0];
@@ -101,6 +105,7 @@ export function DownstreamArtifactUpdateProposalReview({
     const review = proposal ? latestDownstreamArtifactUpdateReview(proposal, events) : undefined;
     const currentArtifact = artifacts.find(candidate => candidate.id === plan.artifact.artifactId);
     const currentArtifactVersionId = currentArtifact?.currentVersionId;
+    const currentArtifactVersion = artifactVersions.find(candidate => candidate.id === currentArtifactVersionId);
     const applicationCandidates = proposal
         ? applications.filter(candidate => candidate.proposalId === proposal.id)
         : [];
@@ -111,7 +116,11 @@ export function DownstreamArtifactUpdateProposalReview({
             ? effectiveDownstreamArtifactUpdate(proposal, authorization)
             : undefined;
         return validateDownstreamArtifactUpdateApplicationIntegrity(candidate)
+            && candidate.projectId === projectId
             && candidate.proposalIntegrityHash === proposal?.integrityHash
+            && candidate.expectedArtifactVersionId === proposal?.artifact.artifactVersionId
+            && candidate.expectedArtifactContentHash === proposal?.artifact.artifactContentHash
+            && candidate.expectedRegionContentHash === proposal?.currentRegionContentHash
             && Boolean(resultVersion
                 && resultVersion.artifactId === proposal?.artifact.artifactId
                 && resultVersion.parentVersionId === candidate.expectedArtifactVersionId
@@ -121,8 +130,12 @@ export function DownstreamArtifactUpdateProposalReview({
                 && effective.contentHash === candidate.effectiveContentHash)
             && Boolean(authorization
                 && validateDownstreamArtifactUpdateReviewEventIntegrity(authorization)
+                && authorization.projectId === projectId
                 && authorization.proposalId === proposal?.id
                 && authorization.expectedProposalIntegrityHash === proposal?.integrityHash
+                && authorization.expectedPlanIntegrityHash === proposal?.updatePlanBinding.planIntegrityHash
+                && authorization.expectedItemIntegrityHash === proposal?.updatePlanBinding.itemIntegrityHash
+                && authorization.expectedRegionContentHash === proposal?.currentRegionContentHash
                 && candidate.authorizedByReviewEventIntegrityHash === authorization.integrityHash);
     });
     const application = sourceAuthorityCurrent
@@ -132,7 +145,16 @@ export function DownstreamArtifactUpdateProposalReview({
         && candidate.subject.itemId === item.id);
     const validVerifications = verificationCandidates.filter(candidate => (
         validateDownstreamArtifactUpdateVerificationIntegrity(candidate)
+        && candidate.projectId === projectId
         && candidate.subject?.planIntegrityHash === plan.integrityHash
+        && candidate.subject?.itemIntegrityHash === (canonicalItem
+            ? downstreamUpdatePlanItemIntegrityHash(plan, canonicalItem)
+            : undefined)
+        && candidate.subject?.baselineArtifactVersionId === plan.artifact.artifactVersionId
+        && candidate.subject?.baselineArtifactContentHash === plan.artifact.artifactContentHash
+        && candidate.subject?.targetArtifactContentHash === (currentArtifactVersion
+            ? hashReviewValue(currentArtifactVersion.content)
+            : undefined)
         && (!candidate.subject?.proposalId || Boolean(proposal
             && candidate.subject.proposalId === proposal.id
             && candidate.subject.proposalIntegrityHash === proposal.integrityHash))

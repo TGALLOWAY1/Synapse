@@ -38,6 +38,7 @@ export const createStalenessSlice: StateCreator<ProjectState, [], [], StalenessS
             verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
             proposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
             applications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
+            reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
         }));
     },
 

@@ -125,6 +125,7 @@ describe('downstream artifact verification', () => {
             plans: [{ ...plan, preservedArtifactSummary: 'tampered' }], context, artifacts: [artifact],
             artifactVersions: [baseline, current], verifications: [verification], verificationEvents: [],
             proposals: [], applications: [],
+            reviewEvents: [],
         });
         expect(invalidPlanProjection).toEqual([]);
         const raw = {
@@ -151,6 +152,7 @@ describe('downstream artifact verification', () => {
         const missingProposal = projectDownstreamArtifactUpdateVerifications({
             plans: [plan], context, artifacts: [artifact], artifactVersions: [baseline, current],
             verifications: [missingBoundProposal], verificationEvents: [], proposals: [], applications: [],
+            reviewEvents: [],
         });
         expect(missingProposal[0]).toMatchObject({ outcome: 'verification_unavailable', deterministic: false });
     });

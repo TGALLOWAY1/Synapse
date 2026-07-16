@@ -83,6 +83,7 @@ export function buildReadinessReviewInputFromState(
         verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
         proposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
         applications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
+        reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
     });
     const outputAlignment = reconcileProjectOutputAlignment(rawOutputAlignment, verificationProjection);
     const downstreamUpdatePlanSummary = deriveVerifiedDownstreamUpdatePlanSummary({

@@ -192,6 +192,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
             proposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
             applications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
+            reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
         });
         return deriveVerifiedDownstreamUpdatePlanSummary({ base, plans, events, context, projections });
     },
@@ -530,7 +531,10 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             const version = artifact
                 ? (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === artifact.currentVersionId)
                 : undefined;
-            if (!verificationIsCurrent({ verification, plan, context, currentVersion: version, proposal, application })) {
+            if (!verificationIsCurrent({
+                verification, plan, context, currentVersion: version, proposal, application,
+                reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
+            })) {
                 return { ok: false, reason: 'stale' };
             }
             if (verification.subject.kind === 'application' && (
@@ -643,6 +647,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             if (!verificationIsCurrent({
                 verification, plan, context, currentVersion: version,
                 proposal: boundProposal, application: boundApplication,
+                reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
             })) return { ok: false, reason: 'stale' };
         }
         const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? []).find(candidate => candidate.id === verification.proposalId);

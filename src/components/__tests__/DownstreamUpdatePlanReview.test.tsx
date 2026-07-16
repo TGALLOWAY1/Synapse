@@ -10,6 +10,7 @@ import {
 import { useProjectStore } from '../../store/projectStore';
 import type { Artifact, ArtifactVersion, PlanningRecord, SpineVersion } from '../../types';
 import { DownstreamUpdatePlanReview } from '../downstream/DownstreamUpdatePlanReview';
+import { validateDownstreamArtifactUpdateProposalIntegrity } from '../../lib/planning/downstreamArtifactUpdateProposal';
 
 const projectId = 'project-update-review';
 const spine: SpineVersion = {
@@ -219,31 +220,37 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(screen.getAllByText(/Why this region\? Evidence and ambiguity/)).toHaveLength(2);
     });
 
-    it('keeps review-only guidance non-applicable when evidence does not support an exact change', () => {
+    it('keeps review-only guidance non-applicable when evidence does not support an exact change', async () => {
         renderReview();
         const possible = screen.getByRole('heading', { name: /Settings/ }).closest('article')!;
         fireEvent.click(within(possible).getByRole('button', { name: 'Prepare proposal' }));
 
-        expect(within(possible).getByText('Review only')).toBeInTheDocument();
+        const generated = useProjectStore.getState().downstreamArtifactUpdateProposals[projectId];
+        expect(generated).toHaveLength(1);
+        expect(validateDownstreamArtifactUpdateProposalIntegrity(generated[0])).toBe(true);
+        expect(await within(possible).findByText('Review only')).toBeInTheDocument();
         expect(within(possible).getByText(/No bounded content change is available/)).toBeInTheDocument();
         expect(within(possible).queryByRole('button', { name: 'Accept proposal' })).not.toBeInTheDocument();
         expect(within(possible).queryByRole('button', { name: 'Apply approved change' })).not.toBeInTheDocument();
         expect(within(possible).getByRole('button', { name: 'Add context' })).toBeInTheDocument();
     });
 
-    it('separates approval from guarded application and creates a child artifact version for one state', () => {
+    it('separates approval from guarded application and creates a child artifact version for one state', async () => {
         renderReview();
         const definite = screen.getByRole('heading', { name: /Shared workspace/ }).closest('article')!;
         fireEvent.click(within(definite).getByRole('button', { name: 'Prepare proposal' }));
-        expect(within(definite).getByText('Bounded change')).toBeInTheDocument();
+        const generated = useProjectStore.getState().downstreamArtifactUpdateProposals[projectId];
+        expect(generated).toHaveLength(1);
+        expect(validateDownstreamArtifactUpdateProposalIntegrity(generated[0])).toBe(true);
+        expect(await within(definite).findByText('Bounded change')).toBeInTheDocument();
         expect(within(definite).getByText(/Remove only this exact region/)).toBeInTheDocument();
 
-        fireEvent.click(within(definite).getByRole('button', { name: 'Accept proposal' }));
-        expect(within(definite).getByText(/artifact has not changed yet/)).toBeInTheDocument();
+        fireEvent.click(await within(definite).findByRole('button', { name: 'Accept proposal' }));
+        expect(await within(definite).findByText(/artifact has not changed yet/)).toBeInTheDocument();
         expect(useProjectStore.getState().artifactVersions[projectId]).toHaveLength(1);
 
-        fireEvent.click(within(definite).getByRole('button', { name: 'Apply approved change' }));
-        expect(within(definite).getByText(/Alignment still requires verification/)).toBeInTheDocument();
+        fireEvent.click(await within(definite).findByRole('button', { name: 'Apply approved change' }));
+        expect(await within(definite).findByText(/Alignment still requires verification/)).toBeInTheDocument();
         const versions = useProjectStore.getState().artifactVersions[projectId];
         expect(versions).toHaveLength(2);
         expect(versions[1].parentVersionId).toBe(version.id);
