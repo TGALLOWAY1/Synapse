@@ -1,0 +1,105 @@
+import type { StateCreator } from 'zustand';
+import { v4 as uuidv4 } from 'uuid';
+import type { ProjectState } from '../types';
+import { hashReviewValue } from '../../lib/review/hash';
+import {
+    compareDownstreamUpdatePlanCurrentness,
+    downstreamPlanningContextHash,
+    sealDownstreamUpdatePlanEvent,
+    validateDownstreamUpdatePlanIntegrity,
+    type DownstreamUpdatePlanCurrentContext,
+} from '../../lib/planning/downstreamUpdatePlan';
+
+export type DownstreamUpdatePlanSlice = Pick<ProjectState,
+    | 'downstreamUpdatePlans'
+    | 'downstreamUpdatePlanEvents'
+    | 'recordDownstreamUpdatePlan'
+    | 'appendDownstreamUpdatePlanEvent'
+    | 'getDownstreamUpdatePlanCurrentness'
+>;
+
+function currentContext(state: ProjectState, projectId: string): DownstreamUpdatePlanCurrentContext | undefined {
+    const spine = (state.spineVersions[projectId] ?? []).find(candidate => candidate.isLatest);
+    if (!spine) return undefined;
+    const artifacts = state.artifacts[projectId] ?? [];
+    const versions = state.artifactVersions[projectId] ?? [];
+    return {
+        spineVersionId: spine.id,
+        spineContentHash: hashReviewValue(spine.structuredPRD ?? spine.responseText),
+        planningContextHash: downstreamPlanningContextHash(state.planningRecords[projectId] ?? []),
+        artifactVersions: Object.fromEntries(artifacts.flatMap(artifact => {
+            const version = versions.find(candidate => candidate.id === artifact.currentVersionId)
+                ?? versions.find(candidate => candidate.artifactId === artifact.id && candidate.isPreferred);
+            return version ? [[artifact.id, { versionId: version.id, contentHash: hashReviewValue(version.content) }]] : [];
+        })),
+    };
+}
+
+const rationaleRequired = (disposition: string): boolean =>
+    disposition === 'deferred' || disposition === 'not_applicable' || disposition === 'already_aligned';
+
+export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [], DownstreamUpdatePlanSlice> = (set, get) => ({
+    downstreamUpdatePlans: {},
+    downstreamUpdatePlanEvents: {},
+
+    recordDownstreamUpdatePlan: (projectId, plan) => {
+        if (plan.projectId !== projectId || !validateDownstreamUpdatePlanIntegrity(plan)) {
+            return { ok: false, reason: 'invalid_plan' };
+        }
+        const context = currentContext(get(), projectId);
+        if (!context || !compareDownstreamUpdatePlanCurrentness(plan, context).current) {
+            return { ok: false, reason: 'stale' };
+        }
+        const existing = get().downstreamUpdatePlans[projectId] ?? [];
+        const duplicate = existing.some(candidate => candidate.id === plan.id || candidate.integrityHash === plan.integrityHash);
+        if (duplicate) return { ok: true, duplicate: true };
+        set(state => ({
+            downstreamUpdatePlans: {
+                ...state.downstreamUpdatePlans,
+                [projectId]: [...(state.downstreamUpdatePlans[projectId] ?? []), plan],
+            },
+        }));
+        return { ok: true, duplicate: false };
+    },
+
+    appendDownstreamUpdatePlanEvent: (projectId, planId, itemId, input) => {
+        const plan = (get().downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === planId);
+        if (!plan || !validateDownstreamUpdatePlanIntegrity(plan)) return { ok: false, reason: 'plan_not_found' };
+        if (!plan.items.some(item => item.id === itemId)) return { ok: false, reason: 'item_not_found' };
+        const context = currentContext(get(), projectId);
+        if (!context || !compareDownstreamUpdatePlanCurrentness(plan, context).current) return { ok: false, reason: 'stale' };
+        if (input.type === 'priority_changed' && (!Number.isInteger(input.priority) || input.priority < 1)) {
+            return { ok: false, reason: 'invalid_priority' };
+        }
+        if (input.type === 'disposition_recorded'
+            && rationaleRequired(input.disposition)
+            && (!input.rationale || input.rationale.trim().length < 3)) {
+            return { ok: false, reason: 'rationale_required' };
+        }
+        const events = get().downstreamUpdatePlanEvents[projectId] ?? [];
+        const at = Math.max(input.at ?? Date.now(), (events.at(-1)?.at ?? 0) + 1);
+        const event = sealDownstreamUpdatePlanEvent({
+            schemaVersion: 1,
+            id: uuidv4(), projectId, planId, itemId, actor: 'user', at,
+            expectedPlanIntegrityHash: plan.integrityHash,
+            ...(input.type === 'priority_changed'
+                ? { type: input.type, priority: input.priority }
+                : { type: input.type, disposition: input.disposition, ...(input.rationale ? { rationale: input.rationale.trim() } : {}) }),
+        });
+        const duplicate = events.some(candidate => candidate.integrityHash === event.integrityHash);
+        if (duplicate) return { ok: true, eventId: event.id, duplicate: true };
+        set(state => ({
+            downstreamUpdatePlanEvents: {
+                ...state.downstreamUpdatePlanEvents,
+                [projectId]: [...(state.downstreamUpdatePlanEvents[projectId] ?? []), event],
+            },
+        }));
+        return { ok: true, eventId: event.id, duplicate: false };
+    },
+
+    getDownstreamUpdatePlanCurrentness: (projectId, planId) => {
+        const plan = (get().downstreamUpdatePlans[projectId] ?? []).find(candidate => candidate.id === planId);
+        const context = currentContext(get(), projectId);
+        return plan && context ? compareDownstreamUpdatePlanCurrentness(plan, context) : undefined;
+    },
+});

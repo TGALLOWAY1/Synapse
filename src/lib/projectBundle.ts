@@ -14,6 +14,7 @@ import type {
   ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
   ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
+import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
 
 export interface ProjectBundle {
   project: Project;
@@ -33,6 +34,8 @@ export interface ProjectBundle {
   planningRecords?: PlanningRecord[];
   readinessReviews?: ReadinessReview[];
   readinessCommitmentEvents?: ReadinessCommitmentEvent[];
+  downstreamUpdatePlans?: DownstreamUpdatePlan[];
+  downstreamUpdatePlanEvents?: DownstreamUpdatePlanEvent[];
 }
 
 /** The persisted, project-id-keyed slices a bundle is assembled from. */
@@ -53,6 +56,8 @@ export interface BundleSource {
   planningRecords: Record<string, PlanningRecord[]>;
   readinessReviews: Record<string, ReadinessReview[]>;
   readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
+  downstreamUpdatePlans?: Record<string, DownstreamUpdatePlan[]>;
+  downstreamUpdatePlanEvents?: Record<string, DownstreamUpdatePlanEvent[]>;
 }
 
 // Array-valued collections (everything except the `projects` map).
@@ -72,6 +77,8 @@ const ARRAY_COLLECTIONS = [
   'planningRecords',
   'readinessReviews',
   'readinessCommitmentEvents',
+  'downstreamUpdatePlans',
+  'downstreamUpdatePlanEvents',
 ] as const;
 
 /**
@@ -125,6 +132,8 @@ export function mergeBundlesIntoSource(
     planningRecords: { ...source.planningRecords },
     readinessReviews: { ...source.readinessReviews },
     readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
+    downstreamUpdatePlans: { ...source.downstreamUpdatePlans },
+    downstreamUpdatePlanEvents: { ...source.downstreamUpdatePlanEvents },
   };
   const addedIds: string[] = [];
   for (const bundle of bundles) {
@@ -170,6 +179,8 @@ export function overwriteBundlesIntoSource(
     planningRecords: { ...source.planningRecords },
     readinessReviews: { ...source.readinessReviews },
     readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
+    downstreamUpdatePlans: { ...source.downstreamUpdatePlans },
+    downstreamUpdatePlanEvents: { ...source.downstreamUpdatePlanEvents },
   };
   const replacedIds: string[] = [];
   for (const bundle of bundles) {
@@ -197,7 +208,8 @@ export function projectSlicesChanged(
 ): boolean {
   if (a.projects[projectId] !== b.projects[projectId]) return true;
   for (const key of ARRAY_COLLECTIONS) {
-    if ((a[key] as Record<string, unknown>)[projectId] !== (b[key] as Record<string, unknown>)[projectId]) {
+    if ((a[key] as Record<string, unknown> | undefined)?.[projectId]
+      !== (b[key] as Record<string, unknown> | undefined)?.[projectId]) {
       return true;
     }
   }

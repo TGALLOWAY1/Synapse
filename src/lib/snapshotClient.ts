@@ -49,6 +49,7 @@ import {
     type MockupVariantImageSnapshot,
 } from './mockupVariantSnapshot';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
+import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -73,6 +74,8 @@ export type SnapshotProjectBundle = {
     planningRecords?: PlanningRecord[];
     readinessReviews?: ReadinessReview[];
     readinessCommitmentEvents?: ReadinessCommitmentEvent[];
+    downstreamUpdatePlans?: DownstreamUpdatePlan[];
+    downstreamUpdatePlanEvents?: DownstreamUpdatePlanEvent[];
     // Phase 3D: per-variant mockup images (the Screens Mockups-tab variant
     // gallery) live in a dedicated IndexedDB store. They ride INSIDE the bundle
     // (which the server persists verbatim) in their WIRE form — image bytes are
@@ -189,6 +192,8 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
         planningRecords: state.planningRecords[projectId] ?? [],
         readinessReviews: state.readinessReviews[projectId] ?? [],
         readinessCommitmentEvents: state.readinessCommitmentEvents[projectId] ?? [],
+        downstreamUpdatePlans: state.downstreamUpdatePlans[projectId] ?? [],
+        downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents[projectId] ?? [],
     };
 };
 
@@ -651,6 +656,8 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
             ...state.readinessCommitmentEvents,
             [projectId]: bundle.readinessCommitmentEvents ?? [],
         },
+        downstreamUpdatePlans: { ...state.downstreamUpdatePlans, [projectId]: bundle.downstreamUpdatePlans ?? [] },
+        downstreamUpdatePlanEvents: { ...state.downstreamUpdatePlanEvents, [projectId]: bundle.downstreamUpdatePlanEvents ?? [] },
     }));
 
     return projectId;
@@ -780,6 +787,8 @@ export const restoreSnapshotAs = async (
             ...state.readinessCommitmentEvents,
             [targetProjectId]: remapped.readinessCommitmentEvents ?? [],
         },
+        downstreamUpdatePlans: { ...state.downstreamUpdatePlans, [targetProjectId]: remapped.downstreamUpdatePlans ?? [] },
+        downstreamUpdatePlanEvents: { ...state.downstreamUpdatePlanEvents, [targetProjectId]: remapped.downstreamUpdatePlanEvents ?? [] },
     }));
 
     return targetProjectId;

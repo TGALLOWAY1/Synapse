@@ -18,6 +18,12 @@ import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { PrdSectionStatusEntry } from './slices/prdProgressSlice';
 import type { OutputAlignment, ProjectOutputAlignmentSummary } from '../lib/planning/outputAlignment';
+import type {
+    DownstreamUpdateDisposition,
+    DownstreamUpdatePlan,
+    DownstreamUpdatePlanCurrentness,
+    DownstreamUpdatePlanEvent,
+} from '../lib/planning/downstreamUpdatePlan';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -95,6 +101,8 @@ export interface ProjectState {
     planningRecords: Record<string, PlanningRecord[]>;
     readinessReviews: Record<string, ReadinessReview[]>;
     readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
+    downstreamUpdatePlans: Record<string, DownstreamUpdatePlan[]>;
+    downstreamUpdatePlanEvents: Record<string, DownstreamUpdatePlanEvent[]>;
 
     // Persisted implementation tasks, keyed by projectId.
     tasks: Record<string, ProjectTask[]>;
@@ -381,6 +389,24 @@ export interface ProjectState {
         commitmentEventId: string,
         reason?: string,
     ) => ReopenReadinessCommitmentResult;
+
+    // Immutable, version-bound downstream update plans. Generated snapshots
+    // carry no user authority; review choices are separate append-only events.
+    recordDownstreamUpdatePlan: (
+        projectId: string,
+        plan: DownstreamUpdatePlan,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    appendDownstreamUpdatePlanEvent: (
+        projectId: string,
+        planId: string,
+        itemId: string,
+        input: { type: 'disposition_recorded'; disposition: DownstreamUpdateDisposition; rationale?: string; at?: number }
+            | { type: 'priority_changed'; priority: number; at?: number },
+    ) => { ok: true; eventId: string; duplicate: boolean } | { ok: false; reason: string };
+    getDownstreamUpdatePlanCurrentness: (
+        projectId: string,
+        planId: string,
+    ) => DownstreamUpdatePlanCurrentness | undefined;
 
     // Implementation task tracking. `saveTasks` persists an extracted set for a
     // given Implementation Plan artifact, replacing any prior set for that

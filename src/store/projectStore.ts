@@ -15,6 +15,7 @@ import { createTasksSlice } from './slices/tasksSlice';
 import { createMetricsSlice } from './slices/metricsSlice';
 import { createReviewSlice } from './slices/reviewSlice';
 import { createReadinessSlice } from './slices/readinessSlice';
+import { createDownstreamUpdatePlanSlice } from './slices/downstreamUpdatePlanSlice';
 import { markInterruptedGenerations } from './interruptedGeneration';
 import { markInterruptedReviews } from './interruptedReviews';
 import { guardProjectStoreActions } from '../lib/projectCapabilities';
@@ -36,6 +37,7 @@ export const useProjectStore = create<ProjectState>()(
             ...createMetricsSlice(...a),
             ...createReviewSlice(...a),
             ...createReadinessSlice(...a),
+            ...createDownstreamUpdatePlanSlice(...a),
         }),
         {
             name: 'synapse-projects-storage',
@@ -58,6 +60,8 @@ export const useProjectStore = create<ProjectState>()(
                     // error — otherwise the UI shows "Generating…" forever.
                     markInterruptedGenerations(state.spineVersions);
                     markInterruptedReviews(state.reviewRuns ?? {}, state.specialistRuns ?? {});
+                    state.downstreamUpdatePlans ??= {};
+                    state.downstreamUpdatePlanEvents ??= {};
                     // Migrate legacy currentStage values. The active pipeline
                     // bar exposes only prd / workspace / history, so any
                     // lingering 'devplan' / 'prompts' / 'mockups' / 'artifacts'
