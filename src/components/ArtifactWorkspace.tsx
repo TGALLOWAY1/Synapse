@@ -864,7 +864,8 @@ export function ArtifactWorkspace({
         return artifact?.type === 'core_artifact'
             && (artifact.subtype === 'screen_inventory'
                 || artifact.subtype === 'user_flows'
-                || artifact.subtype === 'data_model');
+                || artifact.subtype === 'data_model'
+                || artifact.subtype === 'implementation_plan');
     };
 
     const currentUpdatePlanFor = (artifactId: string) => downstreamUpdatePlans
@@ -894,6 +895,7 @@ export function ArtifactWorkspace({
         const label = region.kind === 'screen' ? region.screenName
             : region.kind === 'flow' ? `${region.flowName}${region.stepIndex === undefined ? '' : ` · Step ${region.stepIndex + 1}`}`
                 : region.kind === 'data_model' ? `${region.entityName}${region.memberName ? ` · ${region.memberName}` : ''}`
+                    : region.kind === 'implementation_plan' ? `Architecture · ${region.entryLabel}`
                     : region.label;
         setUpdatePlanRegionTarget({
             planId: plan.id,

@@ -4,7 +4,7 @@ import { hashReviewValue } from '../review/hash';
 export const DOWNSTREAM_UPDATE_PLAN_SCHEMA_VERSION = 1 as const;
 export const DOWNSTREAM_UPDATE_PLAN_EVENT_SCHEMA_VERSION = 1 as const;
 
-export type DownstreamUpdateArtifactSlot = Extract<ArtifactSlotKey, 'screen_inventory' | 'user_flows' | 'data_model'>;
+export type DownstreamUpdateArtifactSlot = Extract<ArtifactSlotKey, 'screen_inventory' | 'user_flows' | 'data_model' | 'implementation_plan'>;
 export type DownstreamImpactCertainty = 'possible' | 'likely' | 'definite';
 export type DownstreamUpdateDisposition = 'planned' | 'deferred' | 'not_applicable' | 'already_aligned';
 
@@ -51,6 +51,24 @@ export type DownstreamUpdateRegion =
         label?: string;
     }
     | {
+        kind: 'implementation_plan';
+        section: 'architecture';
+        aspect:
+            | 'decision'
+            | 'component'
+            | 'integration'
+            | 'data_flow'
+            | 'security_boundary'
+            | 'deployment'
+            | 'storage'
+            | 'authentication'
+            | 'external_dependency'
+            | 'operational_constraint';
+        entryIndex: number;
+        entryLabel: string;
+        label?: string;
+    }
+    | {
         kind: 'artifact_review';
         reason: 'legacy_provenance' | 'unstructured_content' | 'insufficient_dependency';
         label: string;
@@ -74,6 +92,7 @@ export type DownstreamUpdateRecommendedAction =
     | 'review_entity'
     | 'review_field'
     | 'review_relationship'
+    | 'review_architecture'
     | 'confirm_no_change'
     | 'gather_information';
 

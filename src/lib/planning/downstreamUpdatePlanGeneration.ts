@@ -10,6 +10,7 @@ import { parseFlows } from '../../components/renderers/userFlows/parseFlow';
 import type { ParsedFlow, ParsedStep } from '../../components/renderers/userFlows/types';
 import { parseScreenInventory } from '../screenInventoryNormalize';
 import { parseDataModelMarkdown, type ParsedEntity } from '../services/dataModelMarkdown';
+import { extractStructuredPlan } from '../services/implementationPlanParser';
 import { hashReviewValue } from '../review/hash';
 import { isLikelyUnaffected, summarizeSpineChange, type SpineChangeSummary } from '../spineChangeAnalysis';
 import { deriveProjectOutputAlignment } from './outputAlignment';
@@ -34,7 +35,7 @@ export type DeriveDownstreamUpdatePlansInput = {
     createdAt?: number;
 };
 
-const SUPPORTED_SLOTS = new Set<DownstreamUpdateArtifactSlot>(['screen_inventory', 'user_flows', 'data_model']);
+const SUPPORTED_SLOTS = new Set<DownstreamUpdateArtifactSlot>(['screen_inventory', 'user_flows', 'data_model', 'implementation_plan']);
 const STOP_WORDS = new Set(['about', 'after', 'again', 'also', 'before', 'being', 'between', 'could', 'from', 'have', 'into', 'only', 'other', 'should', 'that', 'their', 'there', 'these', 'this', 'through', 'user', 'users', 'with', 'without']);
 
 const normalize = (value: string): string => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
@@ -137,6 +138,12 @@ function recommendation(
     if (slot === 'data_model') return {
         action: candidate.kind === 'removed_feature' ? 'review_relationship' : 'review_entity',
         text: 'Review this exact data-model region; preserve the rest of the entity unless a dependency is demonstrated.',
+    };
+    if (slot === 'implementation_plan') return {
+        action: 'review_architecture',
+        text: candidate.kind === 'removed_feature'
+            ? 'Review this exact architecture entry and remove it only when its explicit dependency is no longer part of the plan.'
+            : 'Review this exact architecture entry against the changed planning foundation.',
     };
     return {
         action: candidate.kind === 'removed_feature' ? 'remove_obsolete_element' : 'revise_behavior',
@@ -353,6 +360,58 @@ function dataModelItems(version: ArtifactVersion, candidates: ChangeCandidate[])
     });
 }
 
+type ImplementationPlanRegion = Extract<DownstreamUpdateRegion, { kind: 'implementation_plan' }>;
+
+const architectureAspect = (entry: string): ImplementationPlanRegion['aspect'] => {
+    const text = normalize(entry);
+    if (/auth|identity|sign in|login/.test(text)) return 'authentication';
+    if (/permission|authorization|security boundary|access control|tenant isolation/.test(text)) return 'security_boundary';
+    if (/storage|database|persist|local only|local first|cloud sync/.test(text)) return 'storage';
+    if (/deploy|hosting|runtime|environment|region/.test(text)) return 'deployment';
+    if (/integration|webhook|api|third party|external service/.test(text)) return 'integration';
+    if (/data flow|pipeline|event flow|sync flow/.test(text)) return 'data_flow';
+    if (/dependency|provider|vendor|sdk/.test(text)) return 'external_dependency';
+    if (/operational|recovery|backup|monitor|availability|rate limit/.test(text)) return 'operational_constraint';
+    if (/component|service|module|client|server/.test(text)) return 'component';
+    return 'decision';
+};
+
+const explicitArchitectureTrace = (entry: string, candidate: ChangeCandidate): boolean => candidate.exactTokens.some(token => {
+    const escaped = token.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+    return new RegExp(`(?:\\[feature:${escaped}\\]|feature(?:Ref)?\\s*[:=]\\s*${escaped}(?:\\b|\\]))`, 'i').test(entry);
+});
+
+function architectureItems(version: ArtifactVersion, candidates: ChangeCandidate[]): DownstreamUpdatePlanItem[] | null {
+    const plan = extractStructuredPlan(version.content);
+    if (!plan) return null;
+    const entries = plan.architecture ?? [];
+    const raw: Array<{ entry: string; entryIndex: number; candidate: ChangeCandidate; match: 'trace' | 'reference' }> = [];
+    entries.forEach((entry, entryIndex) => {
+        candidates.forEach(candidate => {
+            const trace = explicitArchitectureTrace(entry, candidate);
+            const reference = candidate.lexicalTokens.some(token => containsPhrase(entry, token));
+            if (trace || reference) raw.push({ entry, entryIndex, candidate, match: trace ? 'trace' : 'reference' });
+        });
+    });
+    const affected = new Set(raw.map(item => item.entryIndex));
+    return raw.map((match, index) => makeItem({
+        artifactVersionId: version.id,
+        candidate: match.candidate,
+        slot: 'implementation_plan',
+        region: {
+            kind: 'implementation_plan', section: 'architecture', aspect: architectureAspect(match.entry),
+            entryIndex: match.entryIndex, entryLabel: match.entry, label: match.entry,
+        },
+        label: `Architecture entry ${match.entryIndex + 1}`,
+        interpretation: match.entry,
+        match: match.match,
+        preservedScope: entries.map((entry, entryIndex) => ({ entry, entryIndex }))
+            .filter(({ entryIndex }) => !affected.has(entryIndex))
+            .map(({ entry, entryIndex }) => `Architecture entry ${entryIndex + 1}: ${entry}`),
+        index,
+    }));
+}
+
 function fallbackItem(
     version: ArtifactVersion,
     slot: DownstreamUpdateArtifactSlot,
@@ -409,7 +468,8 @@ export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansIn
         const candidates = summary ? changeCandidates(summary, sourceSpine?.structuredPRD) : [];
         let items = slot === 'screen_inventory' ? screenItems(version, candidates)
             : slot === 'user_flows' ? flowItems(version, candidates)
-                : dataModelItems(version, candidates);
+                : slot === 'data_model' ? dataModelItems(version, candidates)
+                    : architectureItems(version, candidates);
         const parserFailed = items === null;
         const weakBinding = !sourceSpine || !summary?.comparable;
         if (parserFailed || weakBinding) {
@@ -419,6 +479,7 @@ export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansIn
                     : slot === 'screen_inventory' && !parseScreenInventory(version.content) ? 'unstructured_content'
                         : slot === 'data_model' && !parseDataModelMarkdown(version.content) ? 'unstructured_content'
                             : slot === 'user_flows' && parseFlows(version.content).length === 0 ? 'unstructured_content'
+                                : slot === 'implementation_plan' && !extractStructuredPlan(version.content) ? 'unstructured_content'
                                 : 'insufficient_dependency',
                 label: artifact.title,
             })];

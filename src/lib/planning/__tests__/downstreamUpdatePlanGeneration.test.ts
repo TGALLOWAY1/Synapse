@@ -80,6 +80,18 @@ Stores unrelated local settings.
 |---|---|---|---|
 | theme | string | No | Selected theme |`;
 
+const implementationPlanContent = `# Implementation Plan
+
+\`\`\`json synapse-plan
+${JSON.stringify({
+        milestones: [{ id: 'm1', name: 'Foundation', tasks: [{ id: 't1', title: 'Build local editor', status: 'todo' }] }],
+        architecture: [
+            '[feature:f1] Authentication and permission boundary for shared workspaces.',
+            'Local persistence for personal preferences.',
+        ],
+    }, null, 2)}
+\`\`\``;
+
 function derive(before: StructuredPRD, after: StructuredPRD, entries: Array<{ artifact: Artifact; content: string; source?: string }>) {
     return deriveDownstreamUpdatePlans({
         projectId: 'p1', artifacts: entries.map(entry => entry.artifact),
@@ -129,6 +141,31 @@ Stores local display choices.
         });
         expect(plan.items[0].preservedScope).toContain('Entity: PersonalPreference');
         expect(plan.preservedArtifactSummary).toContain('Only 1 identified region');
+    });
+
+    it('targets one explicitly traced architecture entry inside the structured implementation plan', () => {
+        const implementation = artifact('implementation', 'implementation_plan', 'Implementation Plan');
+        const [plan] = derive(basePrd(), basePrd({ features: [] }), [{ artifact: implementation, content: implementationPlanContent }]);
+        expect(plan.artifact.slot).toBe('implementation_plan');
+        expect(plan.items).toEqual([expect.objectContaining({
+            region: expect.objectContaining({
+                kind: 'implementation_plan', section: 'architecture', aspect: 'authentication', entryIndex: 0,
+            }),
+            certainty: 'definite',
+            recommendedAction: 'review_architecture',
+        })]);
+        expect(plan.items[0].preservedScope).toContain('Architecture entry 2: Local persistence for personal preferences.');
+    });
+
+    it('keeps an architecture language match possible when no explicit trace proves a mismatch', () => {
+        const implementation = artifact('implementation', 'implementation_plan', 'Implementation Plan');
+        const ambiguous = implementationPlanContent.replace('[feature:f1] ', '');
+        const [plan] = derive(basePrd(), basePrd({ features: [] }), [{ artifact: implementation, content: ambiguous }]);
+        expect(plan.items[0]).toMatchObject({
+            region: { kind: 'implementation_plan', section: 'architecture' },
+            certainty: 'possible',
+        });
+        expect(plan.items[0].ambiguity).toContain('relevance, not proof');
     });
 
     it('keeps literal relevance possible rather than definite', () => {

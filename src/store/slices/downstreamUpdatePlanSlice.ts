@@ -38,6 +38,11 @@ import {
     deriveDataModelArtifactUpdateProposal,
     parseUserGroundedDataModelChange,
 } from '../../lib/planning/dataModelArtifactUpdates';
+import {
+    applyImplementationPlanArtifactUpdate,
+    deriveImplementationPlanArtifactUpdateProposal,
+    parseUserGroundedImplementationPlanReplacement,
+} from '../../lib/planning/implementationPlanArtifactUpdates';
 import type { ArtifactVersion, HistoryEvent } from '../../types';
 import {
     deriveVerifiedDownstreamUpdatePlanSummary,
@@ -265,7 +270,14 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                     })),
                 ],
             })
-            : deriveScreenFlowArtifactUpdateProposal({
+            : plan.artifact.slot === 'implementation_plan'
+                ? deriveImplementationPlanArtifactUpdateProposal({
+                    projectId, plan, item, artifactVersion, requestNonce,
+                    ...(latestReview?.action === 'provided_context'
+                        ? { userGroundedReplacement: parseUserGroundedImplementationPlanReplacement(latestReview.context) }
+                        : {}),
+                })
+                : deriveScreenFlowArtifactUpdateProposal({
                 projectId, plan, item, artifactVersion, requestNonce,
             });
         if (!result.ok) return { status: 'rejected', reason: result.reason };
@@ -422,7 +434,9 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             }
             const applied = proposal.artifact.slot === 'data_model'
                 ? applyDataModelArtifactUpdate({ proposal, review, artifactVersion })
-                : applyScreenFlowArtifactUpdate({ proposal, review, artifactVersion });
+                : proposal.artifact.slot === 'implementation_plan'
+                    ? applyImplementationPlanArtifactUpdate({ proposal, review, artifactVersion })
+                    : applyScreenFlowArtifactUpdate({ proposal, review, artifactVersion });
             if (!applied.ok) {
                 outcome = { status: 'rejected', reason: applied.reason };
                 return state;

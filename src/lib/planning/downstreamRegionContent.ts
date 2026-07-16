@@ -2,6 +2,7 @@ import type { ArtifactVersion } from '../../types';
 import { hashReviewValue } from '../review/hash';
 import { parseScreenInventory } from '../screenInventoryNormalize';
 import { parseDataModelMarkdown } from '../services/dataModelMarkdown';
+import { extractStructuredPlan } from '../services/implementationPlanParser';
 import type { DownstreamUpdateRegion } from './downstreamUpdatePlan';
 
 export const MAX_DOWNSTREAM_REGION_SNAPSHOT_LENGTH = 8_000;
@@ -146,15 +147,22 @@ export function resolveDownstreamUpdateRegionContent(
 
     if (region.kind === 'flow') return resolved(resolveFlow(artifactVersion.content, region));
 
-    const legacy = resolveLegacyDataModelJson(artifactVersion.content, region);
-    if (legacy !== undefined) return resolved(legacy);
-    const entity = parseDataModelMarkdown(artifactVersion.content)?.entities.find(candidate => candidate.name === region.entityName);
-    if (!entity) return { found: false };
-    if (region.aspect === 'field') return resolved(entity.fieldGroups.flatMap(group => group.fields).find(field => field.name === region.memberName));
-    if (region.aspect === 'relationship' || region.aspect === 'constraint' || region.aspect === 'data_expectation') {
-        const expectedKinds = region.aspect === 'relationship' ? ['RELATIONSHIP']
-            : region.aspect === 'constraint' ? ['CONSTRAINT'] : ['PRIVACY', 'INDEX'];
-        return resolved(entity.callouts.find(callout => expectedKinds.includes(callout.kind) && callout.text === region.memberName));
+    if (region.kind === 'data_model') {
+        const legacy = resolveLegacyDataModelJson(artifactVersion.content, region);
+        if (legacy !== undefined) return resolved(legacy);
+        const entity = parseDataModelMarkdown(artifactVersion.content)?.entities.find(candidate => candidate.name === region.entityName);
+        if (!entity) return { found: false };
+        if (region.aspect === 'field') return resolved(entity.fieldGroups.flatMap(group => group.fields).find(field => field.name === region.memberName));
+        if (region.aspect === 'relationship' || region.aspect === 'constraint' || region.aspect === 'data_expectation') {
+            const expectedKinds = region.aspect === 'relationship' ? ['RELATIONSHIP']
+                : region.aspect === 'constraint' ? ['CONSTRAINT'] : ['PRIVACY', 'INDEX'];
+            return resolved(entity.callouts.find(callout => expectedKinds.includes(callout.kind) && callout.text === region.memberName));
+        }
+        return resolved(entity);
     }
-    return resolved(entity);
+
+    const plan = extractStructuredPlan(artifactVersion.content);
+    if (!plan || region.section !== 'architecture') return { found: false };
+    const entry = plan.architecture?.[region.entryIndex];
+    return entry === region.entryLabel ? resolved(entry) : { found: false };
 }
