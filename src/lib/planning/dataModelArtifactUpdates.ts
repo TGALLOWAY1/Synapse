@@ -178,6 +178,19 @@ function relationshipEndpoints(region: DataModelRegion, snapshot: string): strin
     return [...endpoints];
 }
 
+const endpointToken = (value: string): string => token(value).replace(/s$/i, '');
+
+function valueText(value: unknown): string {
+    return typeof value === 'string' ? value : JSON.stringify(value);
+}
+
+function structuredRelationshipEndpoints(entityName: string, value: unknown): string[] {
+    return relationshipEndpoints(
+        { kind: 'data_model', entityName, aspect: 'relationship' },
+        typeof value === 'string' ? value : JSON.stringify(value),
+    );
+}
+
 function dependencyAnalysis(input: {
     version: ArtifactVersion;
     region: DataModelRegion;
@@ -194,43 +207,95 @@ function dependencyAnalysis(input: {
         seen.add(id);
         dependencies.push({ id, ...dependency });
     };
-    const endpoints = relationshipEndpoints(region, input.snapshot);
+    const endpoints = region.aspect === 'entity' ? [region.entityName] : relationshipEndpoints(region, input.snapshot);
     const entity = targetEntity(version, region);
     const targetTokens = [region.memberName, ...endpoints].filter((value): value is string => Boolean(value?.trim()));
+    const targetEndpointTokens = new Set(endpoints.map(endpointToken).filter(Boolean));
+    const parsedSnapshot = (() => { try { return JSON.parse(input.snapshot) as unknown; } catch { return input.snapshot; } })();
+    const isTargetMember = (entityName: string, value: unknown): boolean => entityName === region.entityName
+        && hashReviewValue(value) === hashReviewValue(parsedSnapshot);
+    const references = (text: string, values: string[]): string[] => values.filter(value => {
+        const needle = normalize(value);
+        return needle.length >= 3 && normalize(text).includes(needle);
+    });
 
-    if (entity && 'fieldGroups' in entity) {
-        const parsed = entity as ParsedEntity;
-        for (const field of parsed.fieldGroups.flatMap(group => group.fields)) {
-            if (region.aspect === 'field' && field.name === region.memberName) continue;
-            const matchesEndpoint = endpoints.some(endpoint => token(field.name).startsWith(`${token(endpoint)}_`));
-            const referencesTarget = region.memberName ? normalize(JSON.stringify(field)).includes(normalize(region.memberName)) : false;
-            if (matchesEndpoint || referencesTarget) add({
-                label: `${region.entityName}.${field.name}`, kind: 'field', certainty: 'direct',
-                explanation: 'This exact field structurally references an endpoint or the target member.',
-            });
+    const scanField = (entityName: string, field: unknown, fieldName: string) => {
+        if (isTargetMember(entityName, field)) return;
+        const fieldRecord = isRecord(field) ? field : undefined;
+        const fieldNameToken = endpointToken(fieldName);
+        const structuralEndpoint = [...targetEndpointTokens].find(endpoint => (
+            fieldNameToken === `${endpoint}_id` || fieldNameToken === `${endpoint}id`
+            || endpointToken(String(fieldRecord?.type ?? '')) === endpoint
+        ));
+        const memberReferences = references(valueText(field), region.memberName ? [region.memberName] : []);
+        const endpointReferences = references(valueText(field), endpoints);
+        if (structuralEndpoint) add({
+            label: `${entityName}.${fieldName}`, kind: 'field', certainty: 'direct',
+            explanation: `This structured field is an inbound or endpoint reference to ${structuralEndpoint}.`,
+        });
+        else if (memberReferences.length > 0 || endpointReferences.length > 0) add({
+            label: `${entityName}.${fieldName}`, kind: 'field', certainty: 'possible',
+            explanation: 'This structured field description or type references the target member or one of its endpoints.',
+        });
+    };
+
+    const scanRelationship = (entityName: string, relationship: unknown, label: string) => {
+        if (isTargetMember(entityName, relationship)) return;
+        const candidateEndpoints = structuredRelationshipEndpoints(entityName, relationship);
+        const overlap = new Set(candidateEndpoints.map(endpointToken).filter(endpoint => targetEndpointTokens.has(endpoint)));
+        const memberReferences = references(valueText(relationship), region.memberName ? [region.memberName] : []);
+        if (overlap.size >= 2 || memberReferences.length > 0) add({
+            label: `${entityName}: ${label}`, kind: 'relationship', certainty: 'direct',
+            explanation: 'This reciprocal or inbound structured relationship references the target relationship.',
+        });
+        else if (overlap.size === 1) add({
+            label: `${entityName}: ${label}`, kind: 'relationship', certainty: 'possible',
+            explanation: 'This structured relationship shares an endpoint; its exact reciprocal dependency requires review.',
+        });
+    };
+
+    const scanRule = (
+        entityName: string,
+        value: unknown,
+        kind: 'constraint' | 'data_expectation',
+        label: string,
+    ) => {
+        if (isTargetMember(entityName, value)) return;
+        const memberReferences = references(valueText(value), region.memberName ? [region.memberName] : []);
+        const endpointReferences = references(valueText(value), endpoints);
+        if (memberReferences.length > 0 || endpointReferences.length > 0) add({
+            label: `${entityName}: ${label}`, kind, certainty: memberReferences.length > 0 ? 'direct' : 'possible',
+            explanation: memberReferences.length > 0
+                ? 'This structured rule directly references the target member.'
+                : 'This structured rule references a relationship endpoint and may depend on the target.',
+        });
+    };
+
+    const markdownEntities = parsedEntities(version.content);
+    if (markdownEntities.length > 0) {
+        for (const parsed of markdownEntities) {
+            for (const field of parsed.fieldGroups.flatMap(group => group.fields)) scanField(parsed.name, field, field.name);
+            for (const callout of parsed.callouts) {
+                if (callout.kind === 'RELATIONSHIP') scanRelationship(parsed.name, callout, callout.text);
+                else if (callout.kind === 'CONSTRAINT') scanRule(parsed.name, callout, 'constraint', callout.text);
+                else scanRule(parsed.name, callout, 'data_expectation', callout.text);
+            }
         }
-        for (const callout of parsed.callouts) {
-            if (callout.text === region.memberName) continue;
-            if (targetTokens.some(value => normalize(callout.text).includes(normalize(value)))) add({
-                label: `${region.entityName}: ${callout.text}`, kind: callout.kind === 'RELATIONSHIP' ? 'relationship'
-                    : callout.kind === 'CONSTRAINT' ? 'constraint' : 'data_expectation', certainty: 'direct',
-                explanation: 'This exact structured callout references the target or one of its endpoints.',
-            });
-        }
-    } else if (isRecord(entity)) {
-        const arrays: Array<[unknown, DownstreamDataModelDependency['kind']]> = [
-            [entity.fields, 'field'], [entity.relationships, 'relationship'], [entity.constraints, 'constraint'],
-            [entity.dataExpectations ?? entity.privacyRules ?? entity.indexes, 'data_expectation'],
-        ];
-        for (const [values, kind] of arrays) {
-            if (!Array.isArray(values)) continue;
-            for (const value of values) {
-                const text = typeof value === 'string' ? value : JSON.stringify(value);
-                if (text === input.snapshot || region.memberName && text.includes(region.memberName)) continue;
-                if (targetTokens.some(target => normalize(text).includes(normalize(target)))) add({
-                    label: `${region.entityName}: ${text.slice(0, 120)}`, kind, certainty: 'direct',
-                    explanation: 'This exact structured member references the target or one of its endpoints.',
-                });
+    } else {
+        for (const parsed of jsonEntities(version.content) ?? []) {
+            const entityName = typeof parsed.name === 'string' ? parsed.name : 'Unknown entity';
+            for (const field of Array.isArray(parsed.fields) ? parsed.fields : []) {
+                scanField(entityName, field, isRecord(field) && typeof field.name === 'string' ? field.name : valueText(field).slice(0, 80));
+            }
+            for (const relationship of Array.isArray(parsed.relationships) ? parsed.relationships : []) {
+                scanRelationship(entityName, relationship, valueText(relationship).slice(0, 120));
+            }
+            for (const constraint of Array.isArray(parsed.constraints) ? parsed.constraints : []) {
+                scanRule(entityName, constraint, 'constraint', valueText(constraint).slice(0, 120));
+            }
+            const expectations = parsed.dataExpectations ?? parsed.privacyRules ?? parsed.indexes;
+            for (const expectation of Array.isArray(expectations) ? expectations : []) {
+                scanRule(entityName, expectation, 'data_expectation', valueText(expectation).slice(0, 120));
             }
         }
     }

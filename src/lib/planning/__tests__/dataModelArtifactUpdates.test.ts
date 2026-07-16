@@ -127,6 +127,86 @@ Unrelated manual history.
         expect(derived.proposal.dataModelImpact?.automaticApplicationBlocked).toBe(true);
     });
 
+    it('blocks a markdown relationship removal for reciprocal, inbound-FK, and constraint dependencies in another entity', () => {
+        const target = 'Workspace has many Memberships';
+        const content = `# Data Model
+
+## Workspace
+Owns collaborative work.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| id | string | Yes | Workspace id |
+
+> [!RELATIONSHIP] ${target}
+
+## Membership
+Joins a user to a workspace.
+
+| Field | Type | Required | Description |
+|---|---|---|---|
+| workspace_id | string | Yes | Inbound workspace reference |
+| user_id | string | Yes | Member identity |
+
+> [!RELATIONSHIP] Membership belongs to Workspace
+> [!CONSTRAINT] workspace_id must identify an existing Workspace
+`;
+        const artifactVersion = version(content);
+        const item: DownstreamUpdatePlanItem = {
+            id: 'workspace-memberships',
+            region: { kind: 'data_model', entityName: 'Workspace', aspect: 'relationship', memberName: target },
+            currentInterpretation: target, whyAffected: 'Removed feature: Team collaboration.', certainty: 'definite',
+            evidence: directEvidence, recommendedAction: 'review_relationship', recommendation: 'Remove only if dependencies are handled.',
+            preservedScope: [], recommendedPriority: 1, implementationCritical: true,
+        };
+        const plan = planFor(artifactVersion, item);
+        const derived = deriveDataModelArtifactUpdateProposal({ projectId: 'p1', plan, item, artifactVersion, createdAt: 20 });
+        expect(derived.ok).toBe(true);
+        if (!derived.ok) return;
+        expect(derived.proposal.operation).toBe('review_only');
+        expect(derived.proposal.dataModelImpact?.relationshipEndpoints).toEqual(expect.arrayContaining(['Workspace', 'Membership']));
+        expect(derived.proposal.dataModelImpact?.dependencies).toEqual(expect.arrayContaining([
+            expect.objectContaining({ label: 'Membership.workspace_id', kind: 'field', certainty: 'direct' }),
+            expect.objectContaining({ label: expect.stringContaining('Membership belongs to Workspace'), kind: 'relationship', certainty: 'direct' }),
+            expect.objectContaining({ label: expect.stringContaining('workspace_id must identify'), kind: 'constraint' }),
+        ]));
+        expect(derived.proposal.dataModelImpact?.automaticApplicationBlocked).toBe(true);
+    });
+
+    it('blocks a legacy JSON relationship removal for inbound structured dependencies across entities', () => {
+        const content = JSON.stringify({ entities: [
+            {
+                name: 'Workspace', description: 'Work area', fields: [{ name: 'id', type: 'string', required: true, description: 'Id' }],
+                relationships: [{ type: 'has_many', target: 'Membership', description: 'Workspace members' }], constraints: [],
+            },
+            {
+                name: 'Membership', description: 'Join',
+                fields: [{ name: 'workspace_id', type: 'Workspace', required: true, description: 'Inbound owner' }],
+                relationships: [{ type: 'belongs_to', target: 'Workspace', description: 'Reciprocal owner' }],
+                constraints: ['workspace_id must reference Workspace'],
+            },
+        ] });
+        const artifactVersion = version(content);
+        const item: DownstreamUpdatePlanItem = {
+            id: 'legacy-workspace-memberships',
+            region: { kind: 'data_model', entityName: 'Workspace', aspect: 'relationship', memberName: 'Membership' },
+            currentInterpretation: 'Workspace has many memberships.', whyAffected: 'Removed feature: Team collaboration.', certainty: 'definite',
+            evidence: directEvidence, recommendedAction: 'review_relationship', recommendation: 'Review removal.',
+            preservedScope: [], recommendedPriority: 1, implementationCritical: true,
+        };
+        const plan = planFor(artifactVersion, item);
+        const derived = deriveDataModelArtifactUpdateProposal({ projectId: 'p1', plan, item, artifactVersion, createdAt: 20 });
+        expect(derived.ok).toBe(true);
+        if (!derived.ok) return;
+        expect(derived.proposal.operation).toBe('review_only');
+        expect(derived.proposal.dataModelImpact?.dependencies).toEqual(expect.arrayContaining([
+            expect.objectContaining({ label: 'Membership.workspace_id', kind: 'field', certainty: 'direct' }),
+            expect.objectContaining({ label: expect.stringContaining('Membership'), kind: 'relationship', certainty: 'direct' }),
+            expect.objectContaining({ label: expect.stringContaining('workspace_id must reference Workspace'), kind: 'constraint' }),
+        ]));
+        expect(derived.proposal.dataModelImpact?.automaticApplicationBlocked).toBe(true);
+    });
+
     it('applies an explicit user-grounded requiredness change without rewriting sibling JSON values', () => {
         const content = JSON.stringify({
             entities: [
