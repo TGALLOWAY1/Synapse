@@ -42,6 +42,41 @@ export type DownstreamArtifactUpdateGenerator = {
     reasoningVersion: string;
 };
 
+export type DownstreamDataModelChangeKind =
+    | 'add'
+    | 'remove'
+    | 'rename'
+    | 'requiredness'
+    | 'cardinality'
+    | 'constraint'
+    | 'replace'
+    | 'out_of_scope';
+
+export type DownstreamDataModelDependency = {
+    id: string;
+    label: string;
+    kind: 'field' | 'relationship' | 'constraint' | 'flow' | 'requirement' | 'data_expectation';
+    /** Direct dependencies are structurally established; possible dependencies require review. */
+    certainty: 'direct' | 'possible';
+    explanation: string;
+};
+
+/**
+ * Advisory impact metadata for an exact data-model proposal. It is sealed as
+ * part of the proposal, but never grants authority or clears alignment.
+ */
+export type DownstreamDataModelImpact = {
+    changeKind: DownstreamDataModelChangeKind;
+    memberKind: 'entity' | 'field' | 'relationship' | 'constraint' | 'data_expectation';
+    destructive: boolean;
+    format: 'markdown' | 'json';
+    relationshipEndpoints: string[];
+    dependencies: DownstreamDataModelDependency[];
+    migrationImplications: string[];
+    automaticApplicationBlocked: boolean;
+    blockReasons: string[];
+};
+
 export type DownstreamArtifactUpdateProposal = {
     schemaVersion: typeof DOWNSTREAM_ARTIFACT_UPDATE_PROPOSAL_SCHEMA_VERSION;
     id: string;
@@ -63,6 +98,8 @@ export type DownstreamArtifactUpdateProposal = {
     };
     region: DownstreamUpdateRegion;
     regionKey: string;
+    /** Exact post-change identity when a bounded rename changes the lookup key. */
+    resultingRegion?: DownstreamUpdateRegion;
     currentRegionContentHash: string;
     /** Bounded, displayable snapshot of what the exact region contained. */
     currentRegionSnapshot: string;
@@ -70,6 +107,7 @@ export type DownstreamArtifactUpdateProposal = {
     operation: DownstreamArtifactUpdateOperation;
     /** Null for remove and review-only operations. Generated content has no authority. */
     proposedContent: string | null;
+    dataModelImpact?: DownstreamDataModelImpact;
     evidence: DownstreamUpdateEvidence[];
     reasoning: string;
     certainty: DownstreamImpactCertainty;
@@ -224,9 +262,18 @@ export function validateDownstreamArtifactUpdateProposalIntegrity(proposal: Down
     const contentShapeValid = proposal.operation === 'review_only' || proposal.operation === 'remove'
         ? proposal.proposedContent === null
         : typeof proposal.proposedContent === 'string' && proposal.proposedContent.trim().length > 0;
+    const dataModelShapeValid = !proposal.dataModelImpact || (
+        proposal.artifact.slot === 'data_model'
+        && proposal.region.kind === 'data_model'
+        && ['entity', 'field', 'relationship', 'constraint', 'data_expectation'].includes(proposal.dataModelImpact.memberKind)
+        && (!proposal.dataModelImpact.automaticApplicationBlocked || proposal.operation === 'review_only')
+        && new Set(proposal.dataModelImpact.dependencies.map(dependency => dependency.id)).size === proposal.dataModelImpact.dependencies.length
+        && proposal.dataModelImpact.dependencies.every(dependency => dependency.label.trim().length > 0 && dependency.explanation.trim().length > 0)
+    );
     return proposal.schemaVersion === DOWNSTREAM_ARTIFACT_UPDATE_PROPOSAL_SCHEMA_VERSION
         && proposal.authoredBy === 'synapse'
         && proposal.regionKey === downstreamUpdateRegionKey(proposal.region)
+        && (!proposal.resultingRegion || proposal.resultingRegion.kind === proposal.region.kind)
         && proposal.currentRegionSnapshot.length <= MAX_DOWNSTREAM_REGION_SNAPSHOT_LENGTH
         && proposal.preservedScopeHash === hashReviewValue(proposal.preservedScope)
         && new Set(proposal.preservedRegionBindings.map(binding => binding.regionKey)).size === proposal.preservedRegionBindings.length
@@ -237,8 +284,13 @@ export function validateDownstreamArtifactUpdateProposalIntegrity(proposal: Down
         && proposal.generator.promptHash.trim().length > 0
         && proposal.generator.reasoningVersion.trim().length > 0
         && (proposal.region.kind !== 'artifact_review' || proposal.operation === 'review_only')
+        && dataModelShapeValid
         && contentShapeValid
         && validSeal(proposal);
+}
+
+export function downstreamArtifactUpdateResultRegion(proposal: DownstreamArtifactUpdateProposal): DownstreamUpdateRegion {
+    return proposal.resultingRegion ?? proposal.region;
 }
 
 export function sealDownstreamArtifactUpdateReviewEvent(input: UnsealedReviewEvent): DownstreamArtifactUpdateReviewEvent {

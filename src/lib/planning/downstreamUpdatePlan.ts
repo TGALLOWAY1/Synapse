@@ -46,7 +46,7 @@ export type DownstreamUpdateRegion =
     | {
         kind: 'data_model';
         entityName: string;
-        aspect: 'entity' | 'field' | 'relationship' | 'constraint';
+        aspect: 'entity' | 'field' | 'relationship' | 'constraint' | 'data_expectation';
         memberName?: string;
         label?: string;
     }

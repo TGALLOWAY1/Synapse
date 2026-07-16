@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { Check, FileEdit, Loader2, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
+import { AlertTriangle, Check, FileEdit, Loader2, RefreshCw, ShieldCheck, Sparkles } from 'lucide-react';
 import {
     latestDownstreamArtifactUpdateReview,
     type DownstreamArtifactUpdateProposal,
@@ -91,7 +91,7 @@ export function DownstreamArtifactUpdateProposalReview({
             ? appendReview(projectId, proposal.id, { action, context: payload })
             : action === 'edited'
                 ? appendReview(projectId, proposal.id, {
-                    action, operation: 'replace', editedContent, rationale: payload,
+                    action, operation: proposal.operation === 'add' ? 'add' : 'replace', editedContent, rationale: payload,
                 })
                 : action === 'accepted'
                     ? appendReview(projectId, proposal.id, { action })
@@ -173,6 +173,29 @@ export function DownstreamArtifactUpdateProposalReview({
             </div>
             <p className="mt-2 break-words text-xs leading-relaxed text-neutral-700"><strong>Why:</strong> {proposal.reasoning}</p>
             {proposal.ambiguity && <p className="mt-1 break-words text-xs leading-relaxed text-neutral-600"><strong>Still uncertain:</strong> {proposal.ambiguity}</p>}
+            {proposal.dataModelImpact?.destructive && (
+                <div className="mt-2 rounded-md border border-amber-300 bg-amber-50 px-2.5 py-2 text-xs leading-relaxed text-amber-950">
+                    <div className="flex items-center gap-1.5 font-semibold"><AlertTriangle size={14} aria-hidden="true" /> Destructive data-model change</div>
+                    <p className="mt-1">This can affect persisted data. No migration or dependent region is changed automatically.</p>
+                    {proposal.dataModelImpact.relationshipEndpoints.length > 0 && (
+                        <p className="mt-1"><strong>Relationship endpoints:</strong> {proposal.dataModelImpact.relationshipEndpoints.join(' ↔ ')}</p>
+                    )}
+                    {proposal.dataModelImpact.migrationImplications.map(implication => <p key={implication} className="mt-1">• {implication}</p>)}
+                </div>
+            )}
+            {proposal.dataModelImpact && proposal.dataModelImpact.dependencies.length > 0 && (
+                <details className="mt-2 rounded-md border border-amber-200 bg-white px-2.5 py-1.5">
+                    <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-amber-900">
+                        Dependencies requiring review ({proposal.dataModelImpact.dependencies.length})
+                    </summary>
+                    <div className="border-t border-amber-100 pb-2 pt-2 text-xs leading-relaxed text-neutral-700">
+                        {proposal.dataModelImpact.dependencies.map(dependency => (
+                            <p key={dependency.id} className="break-words">• <strong>{dependency.label}</strong> — {dependency.explanation}</p>
+                        ))}
+                        {proposal.dataModelImpact.blockReasons.map(reason => <p key={reason} className="mt-2 font-medium text-amber-900">{reason}</p>)}
+                    </div>
+                </details>
+            )}
             <details className="mt-2 rounded-md border border-neutral-200 bg-white px-2.5 py-1.5">
                 <summary className="flex min-h-11 cursor-pointer items-center text-xs font-semibold text-neutral-700">Evidence and preserved scope</summary>
                 <div className="border-t border-neutral-100 pb-2 pt-2 text-xs leading-relaxed text-neutral-600">

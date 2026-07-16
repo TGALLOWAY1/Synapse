@@ -381,7 +381,7 @@ export function DownstreamUpdatePlanReview({
                                         </p>
                                     )}
 
-                                    {(plan.artifact.slot === 'screen_inventory' || plan.artifact.slot === 'user_flows') && (
+                                    {(plan.artifact.slot === 'screen_inventory' || plan.artifact.slot === 'user_flows' || plan.artifact.slot === 'data_model') && (
                                         <DownstreamArtifactUpdateProposalReview
                                             projectId={projectId}
                                             plan={plan}

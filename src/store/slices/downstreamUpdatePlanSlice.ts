@@ -12,6 +12,7 @@ import {
 import { deriveDownstreamUpdatePlans } from '../../lib/planning/downstreamUpdatePlanGeneration';
 import {
     compareDownstreamArtifactUpdateProposalCurrentness,
+    downstreamArtifactUpdateResultRegion,
     downstreamUpdatePlanItemIntegrityHash,
     effectiveDownstreamArtifactUpdate,
     latestDownstreamArtifactUpdateReview,
@@ -31,6 +32,11 @@ import {
     deriveScreenFlowArtifactUpdateProposal,
     removedDownstreamUpdateRegionHash,
 } from '../../lib/planning/screenFlowArtifactUpdates';
+import {
+    applyDataModelArtifactUpdate,
+    deriveDataModelArtifactUpdateProposal,
+    parseUserGroundedDataModelChange,
+} from '../../lib/planning/dataModelArtifactUpdates';
 import type { ArtifactVersion, HistoryEvent } from '../../types';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
@@ -213,10 +219,33 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         if (latestProposal && latestReview?.action !== 'requested_another' && latestReview?.action !== 'provided_context') {
             return { status: 'generated', proposalId: latestProposal.id, operation: latestProposal.operation };
         }
-        const result = deriveScreenFlowArtifactUpdateProposal({
-            projectId, plan, item, artifactVersion,
-            requestNonce: latestReview ? `${latestReview.id}:${latestReview.integrityHash}` : 'initial',
-        });
+        const requestNonce = latestReview ? `${latestReview.id}:${latestReview.integrityHash}` : 'initial';
+        const result = plan.artifact.slot === 'data_model'
+            ? deriveDataModelArtifactUpdateProposal({
+                projectId, plan, item, artifactVersion, requestNonce,
+                userContextProvided: latestReview?.action === 'provided_context',
+                ...(latestReview?.action === 'provided_context'
+                    ? { userGroundedChange: parseUserGroundedDataModelChange(latestReview.context) }
+                    : {}),
+                dependencyDocuments: [
+                    ...(state.artifacts[projectId] ?? []).flatMap(candidate => {
+                        if (candidate.id === plan.artifact.artifactId || candidate.type !== 'core_artifact') return [];
+                        const current = (state.artifactVersions[projectId] ?? []).find(version => version.id === candidate.currentVersionId);
+                        return current ? [{
+                            id: candidate.id, label: candidate.title,
+                            kind: candidate.subtype === 'user_flows' ? 'flow' as const : 'requirement' as const,
+                            content: current.content,
+                        }] : [];
+                    }),
+                    ...(state.spineVersions[projectId] ?? []).filter(candidate => candidate.id === context.spineVersionId).map(candidate => ({
+                        id: candidate.id, label: 'Current product requirements', kind: 'requirement' as const,
+                        content: candidate.responseText,
+                    })),
+                ],
+            })
+            : deriveScreenFlowArtifactUpdateProposal({
+                projectId, plan, item, artifactVersion, requestNonce,
+            });
         if (!result.ok) return { status: 'rejected', reason: result.reason };
         if (!validateDownstreamArtifactUpdateProposalIntegrity(result.proposal)) {
             return { status: 'rejected', reason: 'invalid_proposal' };
@@ -304,7 +333,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         if (!artifact || artifact.currentVersionId !== application.resultingArtifactVersionId || !result
             || result.artifactId !== artifact.id || result.parentVersionId !== proposal.artifact.artifactVersionId
             || hashReviewValue(result.content) !== application.resultingArtifactContentHash) return { ok: false, reason: 'concurrent_artifact_change' };
-        const resultRegion = resolveDownstreamUpdateRegionContent(result, proposal.region);
+        const resultRegion = resolveDownstreamUpdateRegionContent(result, downstreamArtifactUpdateResultRegion(proposal));
         // Legacy Stage 1 callers could record a semantically described remove
         // whose resulting region still existed. Keep those histories readable,
         // while the guarded Stage 2 executor records a true absent-region
@@ -365,7 +394,9 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                 outcome = { status: 'rejected', reason: 'authorization_consumed' };
                 return state;
             }
-            const applied = applyScreenFlowArtifactUpdate({ proposal, review, artifactVersion });
+            const applied = proposal.artifact.slot === 'data_model'
+                ? applyDataModelArtifactUpdate({ proposal, review, artifactVersion })
+                : applyScreenFlowArtifactUpdate({ proposal, review, artifactVersion });
             if (!applied.ok) {
                 outcome = { status: 'rejected', reason: applied.reason };
                 return state;
@@ -472,7 +503,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             || application.integrityHash !== verification.applicationIntegrityHash) return { ok: false, reason: 'binding_mismatch' };
         const artifact = (state.artifacts[projectId] ?? []).find(candidate => candidate.id === proposal.artifact.artifactId);
         const version = (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === verification.verifiedArtifactVersionId);
-        const region = version ? resolveDownstreamUpdateRegionContent(version, proposal.region) : { found: false };
+        const region = version ? resolveDownstreamUpdateRegionContent(version, downstreamArtifactUpdateResultRegion(proposal)) : { found: false };
         if (!artifact || artifact.currentVersionId !== verification.verifiedArtifactVersionId || !version
             || version.id !== application.resultingArtifactVersionId
             || hashReviewValue(version.content) !== verification.verifiedArtifactContentHash
@@ -493,7 +524,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         const proposal = (state.downstreamArtifactUpdateProposals[projectId] ?? []).find(candidate => candidate.id === verification.proposalId);
         const artifact = proposal ? (state.artifacts[projectId] ?? []).find(candidate => candidate.id === proposal.artifact.artifactId) : undefined;
         const version = (state.artifactVersions[projectId] ?? []).find(candidate => candidate.id === verification.verifiedArtifactVersionId);
-        const region = proposal && version ? resolveDownstreamUpdateRegionContent(version, proposal.region) : { found: false };
+        const region = proposal && version ? resolveDownstreamUpdateRegionContent(version, downstreamArtifactUpdateResultRegion(proposal)) : { found: false };
         if (!artifact || artifact.currentVersionId !== verification.verifiedArtifactVersionId || !version
             || hashReviewValue(version.content) !== verification.verifiedArtifactContentHash
             || !region.found || region.contentHash !== verification.verifiedRegionContentHash) return { ok: false, reason: 'stale' };

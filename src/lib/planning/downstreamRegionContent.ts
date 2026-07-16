@@ -98,9 +98,13 @@ function resolveLegacyDataModelJson(content: string, region: Extract<DownstreamU
             })
             : undefined;
     }
-    return Array.isArray(entity.constraints)
+    if (region.aspect === 'constraint') return Array.isArray(entity.constraints)
         ? entity.constraints.find(candidate => candidate === region.memberName)
         : undefined;
+    const expectations = Array.isArray(entity.dataExpectations) ? entity.dataExpectations
+        : Array.isArray(entity.privacyRules) ? entity.privacyRules
+            : Array.isArray(entity.indexes) ? entity.indexes : [];
+    return expectations.find(candidate => candidate === region.memberName);
 }
 
 export function resolveDownstreamUpdateRegionContent(
@@ -147,9 +151,10 @@ export function resolveDownstreamUpdateRegionContent(
     const entity = parseDataModelMarkdown(artifactVersion.content)?.entities.find(candidate => candidate.name === region.entityName);
     if (!entity) return { found: false };
     if (region.aspect === 'field') return resolved(entity.fieldGroups.flatMap(group => group.fields).find(field => field.name === region.memberName));
-    if (region.aspect === 'relationship' || region.aspect === 'constraint') {
-        const expectedKind = region.aspect === 'relationship' ? 'RELATIONSHIP' : 'CONSTRAINT';
-        return resolved(entity.callouts.find(callout => callout.kind === expectedKind && callout.text === region.memberName));
+    if (region.aspect === 'relationship' || region.aspect === 'constraint' || region.aspect === 'data_expectation') {
+        const expectedKinds = region.aspect === 'relationship' ? ['RELATIONSHIP']
+            : region.aspect === 'constraint' ? ['CONSTRAINT'] : ['PRIVACY', 'INDEX'];
+        return resolved(entity.callouts.find(callout => expectedKinds.includes(callout.kind) && callout.text === region.memberName));
     }
     return resolved(entity);
 }
