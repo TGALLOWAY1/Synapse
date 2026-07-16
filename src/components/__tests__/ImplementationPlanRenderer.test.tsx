@@ -9,6 +9,7 @@ beforeEach(() => {
     Object.assign(navigator, {
         clipboard: { writeText: vi.fn().mockResolvedValue(undefined) },
     });
+    Element.prototype.scrollIntoView = vi.fn();
 });
 
 function fencePlan(plan: StructuredImplementationPlan): string {
@@ -114,6 +115,12 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(screen.getByText(/Landing Page/)).toBeInTheDocument();
         // Plan tasks are labeled as planned until converted.
         expect(screen.getByText(/Planned steps — use Convert to tasks/)).toBeInTheDocument();
+    });
+
+    it('opens the exact milestone selected from a downstream update plan', () => {
+        render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} initialMilestoneId="m_setup" />);
+        expect(screen.getByText('Initialize Vite app')).toBeInTheDocument();
+        expect(screen.getByText('Done when')).toBeInTheDocument();
     });
 
     it('copies the prompt pack body via the clipboard', async () => {
