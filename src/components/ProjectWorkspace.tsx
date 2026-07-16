@@ -1191,6 +1191,7 @@ export function ProjectWorkspace() {
                             onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
                             initialSelection={workspaceInitialNode}
                             initialArtifactId={workspaceInitialArtifactId}
+                            onOpenPlanningRecord={openDecisionCenter}
                             onInitialSelectionConsumed={() => {
                                 setWorkspaceInitialNode(undefined);
                                 setWorkspaceInitialArtifactId(undefined);

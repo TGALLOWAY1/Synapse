@@ -2,7 +2,7 @@ import { useMemo, useState } from 'react';
 import {
     AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle,
     Code2, Database, ExternalLink, FileText, Image, Info, Loader2, Package, Palette,
-    PencilLine, RefreshCcw, ShieldCheck, Waypoints, X,
+    ListChecks, PencilLine, RefreshCcw, ShieldCheck, Waypoints, X,
 } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 import { artifactJobController } from '../../lib/services/artifactJobController';
@@ -37,6 +37,8 @@ interface DependencyGraphViewProps {
     projectPlatform?: ProjectPlatform;
     /** Navigate the workspace to a node's artifact view. */
     onOpenNode: (nodeId: DependencyNodeId) => void;
+    /** Open a bounded, non-executing update plan for a supported affected output. */
+    onOpenUpdatePlan?: (artifactId: string) => void;
 }
 
 const NODE_ICONS: Record<DependencyNodeId, typeof FileText> = {
@@ -115,7 +117,7 @@ type DetailTab = 'overview' | 'dependencies' | 'impact' | 'history';
 type ViewMode = 'graph' | 'impact';
 
 export function DependencyGraphView({
-    projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode,
+    projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode, onOpenUpdatePlan,
 }: DependencyGraphViewProps) {
     const {
         getArtifacts, getPreferredVersion, getSpineVersions, getArtifactVersions, getProjectOutputAlignment, getJob,
@@ -497,6 +499,14 @@ export function DependencyGraphView({
                     onClose={() => setSelectedId(null)}
                     onSelect={selectNode}
                     onOpenNode={onOpenNode}
+                    onOpenUpdatePlan={
+                        onOpenUpdatePlan
+                        && (selectedId === 'screen_inventory' || selectedId === 'user_flows' || selectedId === 'data_model')
+                        && artifactIdByNode.has(selectedId)
+                        && alignmentByNode.get(selectedId)?.state !== 'aligned'
+                            ? () => onOpenUpdatePlan(artifactIdByNode.get(selectedId)!)
+                            : undefined
+                    }
                     onUpdate={() => confirmSingleUpdate(selectedId)}
                     onUpdateImpacted={() => confirmImpactedUpdate(selectedId)}
                     onMarkCurrent={canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
@@ -734,6 +744,7 @@ interface DetailPanelProps {
     onClose: () => void;
     onSelect: (id: DependencyNodeId) => void;
     onOpenNode: (id: DependencyNodeId) => void;
+    onOpenUpdatePlan?: () => void;
     onUpdate: () => void;
     onUpdateImpacted: () => void;
     /** Present only when the node is stale and can be confirmed current. */
@@ -757,7 +768,7 @@ const CHANGE_SOURCE_LABELS: Record<string, string> = {
 
 function DetailPanel({
     nodeId, evaluation, alignment, graph, evaluations, tab, onTabChange, onClose, onSelect,
-    onOpenNode, onUpdate, onUpdateImpacted, onMarkCurrent, removedFeatureRefs,
+    onOpenNode, onOpenUpdatePlan, onUpdate, onUpdateImpacted, onMarkCurrent, removedFeatureRefs,
     jobActive, titleOf, history,
 }: DetailPanelProps) {
     const node = getDependencyNode(graph, nodeId);
@@ -819,6 +830,15 @@ function DetailPanel({
                     </div>
                 </div>
                 <div className="flex items-center gap-2 shrink-0">
+                    {onOpenUpdatePlan && (
+                        <button
+                            type="button"
+                            onClick={onOpenUpdatePlan}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+                        >
+                            <ListChecks size={13} /> Update plan
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => onOpenNode(nodeId)}

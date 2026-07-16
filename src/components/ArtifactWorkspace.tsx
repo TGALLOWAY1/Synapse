@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, History, Lock, ShieldAlert, ShieldCheck,
-    Layers, Database, Code2, AppWindow, Waypoints,
+    Layers, Database, Code2, AppWindow, Waypoints, ListChecks,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -22,6 +22,7 @@ import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
 import { StalenessBadge } from './StalenessBadge';
 import { OutputAlignmentBadge, OutputAlignmentDot, OutputAlignmentNotice } from './OutputAlignmentStatus';
+import { DownstreamUpdatePlanReview } from './downstream/DownstreamUpdatePlanReview';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
@@ -54,6 +55,7 @@ import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
 import { makeSpineChangeResolver } from '../lib/spineChangeAnalysis';
 import type { OutputAlignment } from '../lib/planning/outputAlignment';
+import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../lib/planning/downstreamUpdatePlan';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -67,6 +69,7 @@ const EMPTY_TASKS: ProjectTask[] = [];
 
 // Stable empty flows list for the screen-experience join memo.
 const EMPTY_FLOWS: ParsedFlow[] = [];
+const EMPTY_UPDATE_PLANS: DownstreamUpdatePlan[] = [];
 
 interface ArtifactWorkspaceProps {
     projectId: string;
@@ -85,6 +88,7 @@ interface ArtifactWorkspaceProps {
     initialSelection?: ArtifactSlotKey;
     initialArtifactId?: string;
     onInitialSelectionConsumed?: () => void;
+    onOpenPlanningRecord?: (recordId?: string) => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -256,21 +260,25 @@ function AssetLock() {
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
     autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId, onInitialSelectionConsumed,
+    onOpenPlanningRecord,
 }: ArtifactWorkspaceProps) {
     const isMobile = useIsMobile();
     const {
         getArtifacts, getArtifact, getPreferredVersion, getArtifactStaleness, getProjectOutputAlignment, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
+        generateDownstreamUpdatePlans,
     } = useProjectStore();
     // Reactive read of the project's chosen visual direction, so the Design
     // System "Design direction" control re-renders when it changes.
     const designSystemPreset = useProjectStore(s => s.projects[projectId]?.designSystemPreset);
     // Which artifact's version-history panel is open (null = none).
     const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
+    const [updatePlanId, setUpdatePlanId] = useState<string | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
+    const downstreamUpdatePlans = useProjectStore(s => s.downstreamUpdatePlans[projectId] ?? EMPTY_UPDATE_PLANS);
     // Active design tokens, so the Screen Inventory copy-prompt embeds the same
     // Design System Brief the internal mockups use. selectPreferredDesignTokens
     // is reference-stable per ArtifactVersion, so it's safe inside a selector.
@@ -836,6 +844,57 @@ export function ArtifactWorkspace({
         [allSpines, latestSpineId],
     );
 
+    const supportedUpdatePlanArtifact = (artifactId: string) => {
+        const artifact = getArtifact(projectId, artifactId);
+        return artifact?.type === 'core_artifact'
+            && (artifact.subtype === 'screen_inventory'
+                || artifact.subtype === 'user_flows'
+                || artifact.subtype === 'data_model');
+    };
+
+    const currentUpdatePlanFor = (artifactId: string) => downstreamUpdatePlans
+        .filter(plan => plan.artifact.artifactId === artifactId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .find(plan => useProjectStore.getState().getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current);
+
+    const openUpdatePlanForArtifact = (artifactId: string) => {
+        if (!supportedUpdatePlanArtifact(artifactId)) return;
+        const existing = currentUpdatePlanFor(artifactId);
+        if (existing) {
+            setUpdatePlanId(existing.id);
+            return;
+        }
+        generateDownstreamUpdatePlans(projectId);
+        const generated = (useProjectStore.getState().downstreamUpdatePlans[projectId] ?? [])
+            .filter(plan => plan.artifact.artifactId === artifactId)
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .find(plan => useProjectStore.getState().getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current);
+        if (generated) setUpdatePlanId(generated.id);
+    };
+
+    const openUpdatePlanOutput = (plan: DownstreamUpdatePlan, item: DownstreamUpdatePlanItem) => {
+        setUpdatePlanId(null);
+        setSelectedArtifactId(plan.artifact.artifactId);
+        if (plan.artifact.slot === 'screen_inventory') {
+            setSelected('screens');
+            if (item.region.kind === 'screen') setScreenParams(item.region.screenId);
+        } else {
+            setSelected(plan.artifact.slot);
+            if (selectedScreenId) setScreenParams(null);
+        }
+        setMobileSidebarOpen(false);
+    };
+
+    const openUpdatePlanSource = (recordId?: string) => {
+        setUpdatePlanId(null);
+        if (recordId && onOpenPlanningRecord) {
+            onOpenPlanningRecord(recordId);
+            return;
+        }
+        setSelected('prd');
+        if (selectedScreenId) setScreenParams(null);
+    };
+
     // Header strip shown above a generated artifact: provenance chip ("Generated
     // from PRD Version X"), staleness badge (+ what-changed detail), a
     // "Mark up to date" escape hatch when stale, and a Version history entry.
@@ -876,6 +935,15 @@ export function ArtifactWorkspace({
                             <ShieldCheck size={12} /> Confirm aligned
                         </button>
                     )}
+                    {alignment && alignment.state !== 'aligned' && supportedUpdatePlanArtifact(artifactId) && (
+                        <button
+                            type="button"
+                            onClick={() => openUpdatePlanForArtifact(artifactId)}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+                        >
+                            <ListChecks size={13} /> {currentUpdatePlanFor(artifactId) ? 'Review update plan' : 'Create update plan'}
+                        </button>
+                    )}
                     <button
                         type="button"
                         onClick={() => setVersionHistoryArtifactId(artifactId)}
@@ -913,6 +981,7 @@ export function ArtifactWorkspace({
                     structuredPRD={structuredPRD}
                     projectPlatform={projectPlatform}
                     onOpenNode={handleOpenGraphNode}
+                    onOpenUpdatePlan={openUpdatePlanForArtifact}
                 />
             );
         }
@@ -1074,6 +1143,23 @@ export function ArtifactWorkspace({
             // Stale screen id (e.g. inventory regenerated) falls back to the list.
             return (
                 <div className="space-y-4">
+                    {invArtifact && alignmentByNode.get('screen_inventory') && alignmentByNode.get('screen_inventory')?.state !== 'aligned' && (
+                        <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 xl:max-w-5xl sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <p className="text-sm font-semibold text-indigo-950">Plan a focused screen review</p>
+                                <p className="mt-0.5 text-xs leading-relaxed text-indigo-800">
+                                    Identify the exact screens or states that need attention while preserving unrelated work.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openUpdatePlanForArtifact(invArtifact.id)}
+                                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white hover:bg-indigo-700"
+                            >
+                                <ListChecks size={14} /> {currentUpdatePlanFor(invArtifact.id) ? 'Review update plan' : 'Create update plan'}
+                            </button>
+                        </div>
+                    )}
                     {visibleScreenIssues.length > 0 && (
                         <div className="max-w-3xl xl:max-w-5xl mx-auto">
                             <ReferenceWarningsPanel
@@ -1607,6 +1693,16 @@ export function ArtifactWorkspace({
                     {renderMain()}
                 </div>
             </main>
+
+            {updatePlanId && (
+                <DownstreamUpdatePlanReview
+                    projectId={projectId}
+                    initialPlanId={updatePlanId}
+                    onClose={() => setUpdatePlanId(null)}
+                    onOpenSource={openUpdatePlanSource}
+                    onOpenOutput={openUpdatePlanOutput}
+                />
+            )}
 
             {tasksModalSource && (
                 <ConvertToTasksModal
