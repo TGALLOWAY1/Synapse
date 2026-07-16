@@ -38,6 +38,11 @@ function emptyState() {
     feedbackItems: {},
     tasks: {},
     workflowRuns: {},
+    reviewRuns: {}, specialistRuns: {}, reviewFindings: {}, reviewIssues: {}, planningRecords: {},
+    readinessReviews: {}, readinessCommitmentEvents: {}, downstreamUpdatePlans: {}, downstreamUpdatePlanEvents: {},
+    downstreamArtifactUpdateProposals: {}, downstreamArtifactUpdateReviewEvents: {},
+    downstreamArtifactUpdateApplications: {}, downstreamArtifactUpdateVerifications: {},
+    downstreamArtifactUpdateVerificationEvents: {},
   };
 }
 
@@ -163,6 +168,27 @@ describe('live local changes push (debounced) after the initial reconcile', () =
     await vi.advanceTimersByTimeAsync(2000); // past the push debounce
 
     expect(client.saveProject).toHaveBeenCalledWith(projectId, expect.objectContaining({ project: expect.any(Object) }), expect.anything());
+  });
+
+  it('includes downstream proposal authority and verification history in a user sync bundle', async () => {
+    client.fetchProjectList.mockResolvedValue([]);
+    client.saveProject.mockResolvedValue({ id: 'x' });
+    startProjectSync('user-a');
+    await vi.waitFor(() => expect(useProjectSyncStore.getState().phase).toBe('ready'));
+    client.saveProject.mockClear();
+
+    vi.useFakeTimers();
+    const { projectId } = useProjectStore.getState().createProject('Proposal project', 'an idea');
+    useProjectStore.setState({
+      downstreamArtifactUpdateProposals: { [projectId]: [{ id: 'proposal', projectId }] as never[] },
+      downstreamArtifactUpdateVerificationEvents: { [projectId]: [{ id: 'verified', projectId }] as never[] },
+    });
+    await vi.advanceTimersByTimeAsync(2000);
+
+    expect(client.saveProject).toHaveBeenCalledWith(projectId, expect.objectContaining({
+      downstreamArtifactUpdateProposals: [expect.objectContaining({ id: 'proposal' })],
+      downstreamArtifactUpdateVerificationEvents: [expect.objectContaining({ id: 'verified' })],
+    }), expect.anything());
   });
 });
 

@@ -122,6 +122,16 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
             delete newDownstreamUpdatePlans[projectId];
             const newDownstreamUpdatePlanEvents = { ...state.downstreamUpdatePlanEvents };
             delete newDownstreamUpdatePlanEvents[projectId];
+            const newDownstreamArtifactUpdateProposals = { ...state.downstreamArtifactUpdateProposals };
+            delete newDownstreamArtifactUpdateProposals[projectId];
+            const newDownstreamArtifactUpdateReviewEvents = { ...state.downstreamArtifactUpdateReviewEvents };
+            delete newDownstreamArtifactUpdateReviewEvents[projectId];
+            const newDownstreamArtifactUpdateApplications = { ...state.downstreamArtifactUpdateApplications };
+            delete newDownstreamArtifactUpdateApplications[projectId];
+            const newDownstreamArtifactUpdateVerifications = { ...state.downstreamArtifactUpdateVerifications };
+            delete newDownstreamArtifactUpdateVerifications[projectId];
+            const newDownstreamArtifactUpdateVerificationEvents = { ...state.downstreamArtifactUpdateVerificationEvents };
+            delete newDownstreamArtifactUpdateVerificationEvents[projectId];
             return {
                 projects: newProjects,
                 spineVersions: newSpines,
@@ -141,6 +151,11 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 readinessCommitmentEvents: newReadinessCommitmentEvents,
                 downstreamUpdatePlans: newDownstreamUpdatePlans,
                 downstreamUpdatePlanEvents: newDownstreamUpdatePlanEvents,
+                downstreamArtifactUpdateProposals: newDownstreamArtifactUpdateProposals,
+                downstreamArtifactUpdateReviewEvents: newDownstreamArtifactUpdateReviewEvents,
+                downstreamArtifactUpdateApplications: newDownstreamArtifactUpdateApplications,
+                downstreamArtifactUpdateVerifications: newDownstreamArtifactUpdateVerifications,
+                downstreamArtifactUpdateVerificationEvents: newDownstreamArtifactUpdateVerificationEvents,
             };
         });
     },
@@ -218,6 +233,9 @@ export const createProjectSlice: StateCreator<ProjectState, [], [], ProjectSlice
                 'reviewFindings', 'reviewIssues', 'planningRecords', 'tasks', 'workflowRuns',
                 'readinessReviews', 'readinessCommitmentEvents',
                 'downstreamUpdatePlans', 'downstreamUpdatePlanEvents',
+                'downstreamArtifactUpdateProposals', 'downstreamArtifactUpdateReviewEvents',
+                'downstreamArtifactUpdateApplications', 'downstreamArtifactUpdateVerifications',
+                'downstreamArtifactUpdateVerificationEvents',
             ] as const;
             const next: Record<string, unknown> = {};
             for (const key of keys) {

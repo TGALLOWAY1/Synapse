@@ -50,6 +50,11 @@ import {
 } from './mockupVariantSnapshot';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
+import type {
+    DownstreamArtifactUpdateApplication, DownstreamArtifactUpdateProposal,
+    DownstreamArtifactUpdateReviewEvent, DownstreamArtifactUpdateVerification,
+    DownstreamArtifactUpdateVerificationEvent,
+} from './planning/downstreamArtifactUpdateProposal';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -76,6 +81,11 @@ export type SnapshotProjectBundle = {
     readinessCommitmentEvents?: ReadinessCommitmentEvent[];
     downstreamUpdatePlans?: DownstreamUpdatePlan[];
     downstreamUpdatePlanEvents?: DownstreamUpdatePlanEvent[];
+    downstreamArtifactUpdateProposals?: DownstreamArtifactUpdateProposal[];
+    downstreamArtifactUpdateReviewEvents?: DownstreamArtifactUpdateReviewEvent[];
+    downstreamArtifactUpdateApplications?: DownstreamArtifactUpdateApplication[];
+    downstreamArtifactUpdateVerifications?: DownstreamArtifactUpdateVerification[];
+    downstreamArtifactUpdateVerificationEvents?: DownstreamArtifactUpdateVerificationEvent[];
     // Phase 3D: per-variant mockup images (the Screens Mockups-tab variant
     // gallery) live in a dedicated IndexedDB store. They ride INSIDE the bundle
     // (which the server persists verbatim) in their WIRE form — image bytes are
@@ -194,6 +204,11 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
         readinessCommitmentEvents: state.readinessCommitmentEvents[projectId] ?? [],
         downstreamUpdatePlans: state.downstreamUpdatePlans[projectId] ?? [],
         downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents[projectId] ?? [],
+        downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
+        downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
+        downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
+        downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
+        downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
     };
 };
 
@@ -658,6 +673,11 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
         },
         downstreamUpdatePlans: { ...state.downstreamUpdatePlans, [projectId]: bundle.downstreamUpdatePlans ?? [] },
         downstreamUpdatePlanEvents: { ...state.downstreamUpdatePlanEvents, [projectId]: bundle.downstreamUpdatePlanEvents ?? [] },
+        downstreamArtifactUpdateProposals: { ...state.downstreamArtifactUpdateProposals, [projectId]: bundle.downstreamArtifactUpdateProposals ?? [] },
+        downstreamArtifactUpdateReviewEvents: { ...state.downstreamArtifactUpdateReviewEvents, [projectId]: bundle.downstreamArtifactUpdateReviewEvents ?? [] },
+        downstreamArtifactUpdateApplications: { ...state.downstreamArtifactUpdateApplications, [projectId]: bundle.downstreamArtifactUpdateApplications ?? [] },
+        downstreamArtifactUpdateVerifications: { ...state.downstreamArtifactUpdateVerifications, [projectId]: bundle.downstreamArtifactUpdateVerifications ?? [] },
+        downstreamArtifactUpdateVerificationEvents: { ...state.downstreamArtifactUpdateVerificationEvents, [projectId]: bundle.downstreamArtifactUpdateVerificationEvents ?? [] },
     }));
 
     return projectId;
@@ -724,6 +744,17 @@ export const namespaceSnapshotForRestore = (
     }
 
     const bundle = rewriteIds(snapshot.project, idMap);
+    // Proposal/review/application integrity hashes bind exact project and
+    // artifact-version ids. A namespaced read-only demo cannot rewrite those
+    // ids without invalidating the seals, and must never manufacture equivalent
+    // user authority by resealing them. Same-project restores preserve the full
+    // lifecycle via the no-op branch above; namespaced restores start this
+    // lifecycle empty and conservative.
+    bundle.downstreamArtifactUpdateProposals = [];
+    bundle.downstreamArtifactUpdateReviewEvents = [];
+    bundle.downstreamArtifactUpdateApplications = [];
+    bundle.downstreamArtifactUpdateVerifications = [];
+    bundle.downstreamArtifactUpdateVerificationEvents = [];
     // The variant snapshot's composite `key` embeds the versionId (with colons),
     // so exact-string rewriteIds can't fix it — rebuild the keys (and projectId)
     // deterministically from the source snapshot so re-restores stay idempotent.
@@ -789,6 +820,11 @@ export const restoreSnapshotAs = async (
         },
         downstreamUpdatePlans: { ...state.downstreamUpdatePlans, [targetProjectId]: remapped.downstreamUpdatePlans ?? [] },
         downstreamUpdatePlanEvents: { ...state.downstreamUpdatePlanEvents, [targetProjectId]: remapped.downstreamUpdatePlanEvents ?? [] },
+        downstreamArtifactUpdateProposals: { ...state.downstreamArtifactUpdateProposals, [targetProjectId]: remapped.downstreamArtifactUpdateProposals ?? [] },
+        downstreamArtifactUpdateReviewEvents: { ...state.downstreamArtifactUpdateReviewEvents, [targetProjectId]: remapped.downstreamArtifactUpdateReviewEvents ?? [] },
+        downstreamArtifactUpdateApplications: { ...state.downstreamArtifactUpdateApplications, [targetProjectId]: remapped.downstreamArtifactUpdateApplications ?? [] },
+        downstreamArtifactUpdateVerifications: { ...state.downstreamArtifactUpdateVerifications, [targetProjectId]: remapped.downstreamArtifactUpdateVerifications ?? [] },
+        downstreamArtifactUpdateVerificationEvents: { ...state.downstreamArtifactUpdateVerificationEvents, [targetProjectId]: remapped.downstreamArtifactUpdateVerificationEvents ?? [] },
     }));
 
     return targetProjectId;

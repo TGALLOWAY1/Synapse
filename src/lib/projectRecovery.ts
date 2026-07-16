@@ -43,6 +43,13 @@ function bundleSourceOfStore(): BundleSource {
     planningRecords: state.planningRecords,
     readinessReviews: state.readinessReviews,
     readinessCommitmentEvents: state.readinessCommitmentEvents,
+    downstreamUpdatePlans: state.downstreamUpdatePlans,
+    downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents,
+    downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals,
+    downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents,
+    downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications,
+    downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications,
+    downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents,
   };
 }
 

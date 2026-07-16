@@ -25,6 +25,15 @@ import type {
     DownstreamUpdatePlanEvent,
     DownstreamUpdatePlanSummary,
 } from '../lib/planning/downstreamUpdatePlan';
+import type {
+    DownstreamArtifactUpdateApplication,
+    DownstreamArtifactUpdateProposal,
+    DownstreamArtifactUpdateProposalCurrentness,
+    DownstreamArtifactUpdateReviewEvent,
+    DownstreamArtifactUpdateVerification,
+    DownstreamArtifactUpdateVerificationEvent,
+    DownstreamArtifactUpdateOperation,
+} from '../lib/planning/downstreamArtifactUpdateProposal';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -104,6 +113,11 @@ export interface ProjectState {
     readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
     downstreamUpdatePlans: Record<string, DownstreamUpdatePlan[]>;
     downstreamUpdatePlanEvents: Record<string, DownstreamUpdatePlanEvent[]>;
+    downstreamArtifactUpdateProposals: Record<string, DownstreamArtifactUpdateProposal[]>;
+    downstreamArtifactUpdateReviewEvents: Record<string, DownstreamArtifactUpdateReviewEvent[]>;
+    downstreamArtifactUpdateApplications: Record<string, DownstreamArtifactUpdateApplication[]>;
+    downstreamArtifactUpdateVerifications: Record<string, DownstreamArtifactUpdateVerification[]>;
+    downstreamArtifactUpdateVerificationEvents: Record<string, DownstreamArtifactUpdateVerificationEvent[]>;
 
     // Persisted implementation tasks, keyed by projectId.
     tasks: Record<string, ProjectTask[]>;
@@ -412,6 +426,44 @@ export interface ProjectState {
         planId: string,
     ) => DownstreamUpdatePlanCurrentness | undefined;
     getDownstreamUpdatePlanSummary: (projectId: string) => DownstreamUpdatePlanSummary;
+
+    // Phase 5 proposal foundation extends one exact update-plan item. Generated
+    // proposals and verifications are advisory; user authority is append-only.
+    recordDownstreamArtifactUpdateProposal: (
+        projectId: string,
+        proposal: DownstreamArtifactUpdateProposal,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    appendDownstreamArtifactUpdateReviewEvent: (
+        projectId: string,
+        proposalId: string,
+        input:
+            | { action: 'accepted'; rationale?: string; at?: number }
+            | { action: 'edited'; operation: Exclude<DownstreamArtifactUpdateOperation, 'review_only'>; editedContent: string | null; rationale: string; at?: number }
+            | { action: 'rejected' | 'preserved' | 'deferred' | 'requested_another'; rationale: string; at?: number }
+            | { action: 'provided_context'; context: string; at?: number },
+    ) => { ok: true; eventId: string; duplicate: boolean } | { ok: false; reason: string };
+    recordDownstreamArtifactUpdateApplication: (
+        projectId: string,
+        application: DownstreamArtifactUpdateApplication,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    recordDownstreamArtifactUpdateVerification: (
+        projectId: string,
+        verification: DownstreamArtifactUpdateVerification,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    appendDownstreamArtifactUpdateVerificationEvent: (
+        projectId: string,
+        verificationId: string,
+        input: {
+            action: 'confirmed' | 'rejected' | 'deferred' | 'requested_another' | 'provided_context';
+            rationale?: string;
+            context?: string;
+            at?: number;
+        },
+    ) => { ok: true; eventId: string; duplicate: boolean } | { ok: false; reason: string };
+    getDownstreamArtifactUpdateProposalCurrentness: (
+        projectId: string,
+        proposalId: string,
+    ) => DownstreamArtifactUpdateProposalCurrentness | undefined;
 
     // Implementation task tracking. `saveTasks` persists an extracted set for a
     // given Implementation Plan artifact, replacing any prior set for that

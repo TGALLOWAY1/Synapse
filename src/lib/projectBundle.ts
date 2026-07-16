@@ -15,6 +15,11 @@ import type {
   ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
+import type {
+  DownstreamArtifactUpdateApplication, DownstreamArtifactUpdateProposal,
+  DownstreamArtifactUpdateReviewEvent, DownstreamArtifactUpdateVerification,
+  DownstreamArtifactUpdateVerificationEvent,
+} from './planning/downstreamArtifactUpdateProposal';
 
 export interface ProjectBundle {
   project: Project;
@@ -36,6 +41,11 @@ export interface ProjectBundle {
   readinessCommitmentEvents?: ReadinessCommitmentEvent[];
   downstreamUpdatePlans?: DownstreamUpdatePlan[];
   downstreamUpdatePlanEvents?: DownstreamUpdatePlanEvent[];
+  downstreamArtifactUpdateProposals?: DownstreamArtifactUpdateProposal[];
+  downstreamArtifactUpdateReviewEvents?: DownstreamArtifactUpdateReviewEvent[];
+  downstreamArtifactUpdateApplications?: DownstreamArtifactUpdateApplication[];
+  downstreamArtifactUpdateVerifications?: DownstreamArtifactUpdateVerification[];
+  downstreamArtifactUpdateVerificationEvents?: DownstreamArtifactUpdateVerificationEvent[];
 }
 
 /** The persisted, project-id-keyed slices a bundle is assembled from. */
@@ -58,6 +68,11 @@ export interface BundleSource {
   readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
   downstreamUpdatePlans?: Record<string, DownstreamUpdatePlan[]>;
   downstreamUpdatePlanEvents?: Record<string, DownstreamUpdatePlanEvent[]>;
+  downstreamArtifactUpdateProposals?: Record<string, DownstreamArtifactUpdateProposal[]>;
+  downstreamArtifactUpdateReviewEvents?: Record<string, DownstreamArtifactUpdateReviewEvent[]>;
+  downstreamArtifactUpdateApplications?: Record<string, DownstreamArtifactUpdateApplication[]>;
+  downstreamArtifactUpdateVerifications?: Record<string, DownstreamArtifactUpdateVerification[]>;
+  downstreamArtifactUpdateVerificationEvents?: Record<string, DownstreamArtifactUpdateVerificationEvent[]>;
 }
 
 // Array-valued collections (everything except the `projects` map).
@@ -79,6 +94,11 @@ const ARRAY_COLLECTIONS = [
   'readinessCommitmentEvents',
   'downstreamUpdatePlans',
   'downstreamUpdatePlanEvents',
+  'downstreamArtifactUpdateProposals',
+  'downstreamArtifactUpdateReviewEvents',
+  'downstreamArtifactUpdateApplications',
+  'downstreamArtifactUpdateVerifications',
+  'downstreamArtifactUpdateVerificationEvents',
 ] as const;
 
 /**
@@ -134,6 +154,11 @@ export function mergeBundlesIntoSource(
     readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
     downstreamUpdatePlans: { ...source.downstreamUpdatePlans },
     downstreamUpdatePlanEvents: { ...source.downstreamUpdatePlanEvents },
+    downstreamArtifactUpdateProposals: { ...source.downstreamArtifactUpdateProposals },
+    downstreamArtifactUpdateReviewEvents: { ...source.downstreamArtifactUpdateReviewEvents },
+    downstreamArtifactUpdateApplications: { ...source.downstreamArtifactUpdateApplications },
+    downstreamArtifactUpdateVerifications: { ...source.downstreamArtifactUpdateVerifications },
+    downstreamArtifactUpdateVerificationEvents: { ...source.downstreamArtifactUpdateVerificationEvents },
   };
   const addedIds: string[] = [];
   for (const bundle of bundles) {
@@ -181,6 +206,11 @@ export function overwriteBundlesIntoSource(
     readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
     downstreamUpdatePlans: { ...source.downstreamUpdatePlans },
     downstreamUpdatePlanEvents: { ...source.downstreamUpdatePlanEvents },
+    downstreamArtifactUpdateProposals: { ...source.downstreamArtifactUpdateProposals },
+    downstreamArtifactUpdateReviewEvents: { ...source.downstreamArtifactUpdateReviewEvents },
+    downstreamArtifactUpdateApplications: { ...source.downstreamArtifactUpdateApplications },
+    downstreamArtifactUpdateVerifications: { ...source.downstreamArtifactUpdateVerifications },
+    downstreamArtifactUpdateVerificationEvents: { ...source.downstreamArtifactUpdateVerificationEvents },
   };
   const replacedIds: string[] = [];
   for (const bundle of bundles) {

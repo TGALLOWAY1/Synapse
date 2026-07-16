@@ -117,6 +117,14 @@ describe('namespaceSnapshotForRestore — screen images, tasks, metrics', () => 
                 workflowRuns: [{ id: 'run-1', projectId: SOURCE_PROJECT_ID }],
                 readinessReviews: [{ id: 'ready-1', projectId: SOURCE_PROJECT_ID }],
                 readinessCommitmentEvents: [{ id: 'commit-1', projectId: SOURCE_PROJECT_ID }],
+                downstreamArtifactUpdateProposals: [{
+                    id: 'proposal-1', projectId: SOURCE_PROJECT_ID,
+                    artifact: { artifactVersionId: VERSION_ID },
+                }],
+                downstreamArtifactUpdateApplications: [{
+                    id: 'application-1', projectId: SOURCE_PROJECT_ID,
+                    resultingArtifactVersionId: VERSION_ID,
+                }],
             } as unknown as SnapshotPayload['project'],
             screenImages: [makeScreenImage(1), makeScreenImage(2)],
         };
@@ -142,6 +150,8 @@ describe('namespaceSnapshotForRestore — screen images, tasks, metrics', () => 
         expect(bundle.workflowRuns?.[0].projectId).toBe(DEMO_PROJECT_ID);
         expect(bundle.readinessReviews?.[0].projectId).toBe(DEMO_PROJECT_ID);
         expect(bundle.readinessCommitmentEvents?.[0].projectId).toBe(DEMO_PROJECT_ID);
+        expect(bundle.downstreamArtifactUpdateProposals).toEqual([]);
+        expect(bundle.downstreamArtifactUpdateApplications).toEqual([]);
     });
 
     it('namespaces bundled mockup variant images by versionId and rebuilds the key', () => {

@@ -74,12 +74,24 @@ describe('projectStore', () => {
             const { projectId } = store.createProject('Test', 'prompt');
 
             expect(useProjectStore.getState().projects[projectId]).toBeDefined();
+            useProjectStore.setState({
+                downstreamArtifactUpdateProposals: { [projectId]: [{ id: 'proposal' }] as never[] },
+                downstreamArtifactUpdateReviewEvents: { [projectId]: [{ id: 'review' }] as never[] },
+                downstreamArtifactUpdateApplications: { [projectId]: [{ id: 'application' }] as never[] },
+                downstreamArtifactUpdateVerifications: { [projectId]: [{ id: 'verification' }] as never[] },
+                downstreamArtifactUpdateVerificationEvents: { [projectId]: [{ id: 'verification-event' }] as never[] },
+            });
 
             useProjectStore.getState().deleteProject(projectId);
 
             expect(useProjectStore.getState().projects[projectId]).toBeUndefined();
             expect(useProjectStore.getState().spineVersions[projectId]).toBeUndefined();
             expect(useProjectStore.getState().historyEvents[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateReviewEvents[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateApplications[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId]).toBeUndefined();
         });
     });
 

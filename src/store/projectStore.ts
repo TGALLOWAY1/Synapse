@@ -62,6 +62,11 @@ export const useProjectStore = create<ProjectState>()(
                     markInterruptedReviews(state.reviewRuns ?? {}, state.specialistRuns ?? {});
                     state.downstreamUpdatePlans ??= {};
                     state.downstreamUpdatePlanEvents ??= {};
+                    state.downstreamArtifactUpdateProposals ??= {};
+                    state.downstreamArtifactUpdateReviewEvents ??= {};
+                    state.downstreamArtifactUpdateApplications ??= {};
+                    state.downstreamArtifactUpdateVerifications ??= {};
+                    state.downstreamArtifactUpdateVerificationEvents ??= {};
                     // Migrate legacy currentStage values. The active pipeline
                     // bar exposes only prd / workspace / history, so any
                     // lingering 'devplan' / 'prompts' / 'mockups' / 'artifacts'

@@ -26,6 +26,13 @@ function emptySource(): BundleSource {
     planningRecords: {},
     readinessReviews: {},
     readinessCommitmentEvents: {},
+    downstreamUpdatePlans: {},
+    downstreamUpdatePlanEvents: {},
+    downstreamArtifactUpdateProposals: {},
+    downstreamArtifactUpdateReviewEvents: {},
+    downstreamArtifactUpdateApplications: {},
+    downstreamArtifactUpdateVerifications: {},
+    downstreamArtifactUpdateVerificationEvents: {},
   };
 }
 
@@ -51,6 +58,11 @@ describe('extractProjectBundle', () => {
     expect(bundle!.planningRecords).toEqual([]);
     expect(bundle!.readinessReviews).toEqual([]);
     expect(bundle!.readinessCommitmentEvents).toEqual([]);
+    expect(bundle!.downstreamArtifactUpdateProposals).toEqual([]);
+    expect(bundle!.downstreamArtifactUpdateReviewEvents).toEqual([]);
+    expect(bundle!.downstreamArtifactUpdateApplications).toEqual([]);
+    expect(bundle!.downstreamArtifactUpdateVerifications).toEqual([]);
+    expect(bundle!.downstreamArtifactUpdateVerificationEvents).toEqual([]);
   });
 
   it('returns null for an unknown project', () => {
@@ -100,6 +112,15 @@ describe('projectSlicesChanged', () => {
   it('detects readiness lifecycle changes for cloud sync', () => {
     const a = sourceWith('p1');
     const b: BundleSource = { ...a, readinessCommitmentEvents: { ...a.readinessCommitmentEvents, p1: [] } };
+    expect(projectSlicesChanged(a, b, 'p1')).toBe(true);
+  });
+
+  it('detects downstream proposal and verification lifecycle changes for cloud sync', () => {
+    const a = sourceWith('p1');
+    const b: BundleSource = {
+      ...a,
+      downstreamArtifactUpdateVerificationEvents: { ...a.downstreamArtifactUpdateVerificationEvents, p1: [] },
+    };
     expect(projectSlicesChanged(a, b, 'p1')).toBe(true);
   });
 
