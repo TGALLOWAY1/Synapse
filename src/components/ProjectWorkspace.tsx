@@ -899,11 +899,11 @@ export function ProjectWorkspace() {
     };
 
     return (
-        <div className="flex flex-col h-screen bg-neutral-900 text-neutral-100">
+        <div className="flex h-screen flex-col overflow-x-hidden bg-neutral-900 text-neutral-100">
 
             {/* Top Navigation Bar — shrink-0, no absolute */}
             <div className="shrink-0 h-14 bg-neutral-900 border-b border-neutral-800 flex items-center justify-between px-4 z-10">
-                <div className="flex items-center gap-3 min-w-0">
+                <div className="flex min-w-0 flex-1 items-center gap-3">
                     <button
                         onClick={() => navigate('/')}
                         className="p-1 hover:bg-neutral-800 rounded-md transition text-neutral-400 shrink-0"
@@ -913,7 +913,7 @@ export function ProjectWorkspace() {
                         <ChevronLeft size={20} />
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
-                    <span className={`text-xs px-2 py-0.5 rounded whitespace-nowrap shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
+                    <span className={`max-w-[44vw] truncate whitespace-nowrap rounded px-2 py-0.5 text-xs md:max-w-none md:shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine
                             ? activeSpine.safetyReview?.status === 'blocked'
                                 ? 'Blocked'
@@ -1186,7 +1186,7 @@ export function ProjectWorkspace() {
             {/* Main Workspace Area — flex-1 fills remaining height */}
             <div className="flex-1 flex overflow-hidden">
                 {pipelineStage === 'workspace' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
-                    <div className="flex min-h-0 flex-1 flex-col">
+                    <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                         {!planningReadiness.isReadyToBuild && (
                             <div className="shrink-0 border-b border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                                 <span className="font-semibold">Exploratory outputs.</span> Use early screens, flows, or technical concepts to think—but they are not evidence that this plan is ready to build.

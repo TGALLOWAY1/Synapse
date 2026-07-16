@@ -1601,7 +1601,7 @@ export function ArtifactWorkspace({
                         type="button"
                         onClick={() => setMobileSidebarOpen(false)}
                         aria-label="Close artifact list"
-                        className="p-1.5 -mr-1 text-neutral-500 hover:text-neutral-900"
+                        className="-mr-1 flex min-h-11 min-w-11 items-center justify-center text-neutral-500 hover:text-neutral-900"
                     >
                         <X size={18} />
                     </button>
@@ -1689,7 +1689,7 @@ export function ArtifactWorkspace({
                         type="button"
                         onClick={() => setMobileSidebarOpen(true)}
                         aria-label="Open artifact list"
-                        className="p-1.5 -ml-1 text-neutral-700 hover:text-neutral-900"
+                        className="-ml-1 flex min-h-11 min-w-11 items-center justify-center text-neutral-700 hover:text-neutral-900"
                     >
                         <Menu size={20} />
                     </button>
@@ -1714,7 +1714,7 @@ export function ArtifactWorkspace({
                 </div>
                 <div className="p-4 md:p-8">
                     {updatePlanRegionTarget && (
-                        <div className="mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-950">
+                        <div className="sticky top-14 z-[9] mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-950 shadow-sm md:top-3">
                             <span className="min-w-0 break-words">
                                 Viewing update-plan region: <strong>{updatePlanRegionTarget.label}</strong>
                             </span>
