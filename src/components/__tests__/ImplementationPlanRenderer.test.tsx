@@ -2,6 +2,10 @@ import { describe, it, expect, vi, beforeEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { ImplementationPlanRenderer } from '../renderers/ImplementationPlanRenderer';
 import type { StructuredImplementationPlan } from '../../types';
+import {
+    implementationPlanAnchor,
+    type ImplementationPlanNavigationTarget,
+} from '../../lib/planning/implementationPlanNavigation';
 
 // jsdom lacks the async clipboard API; the copy buttons fall back to
 // execCommand, which jsdom also stubs. Provide a spyable writeText.
@@ -53,6 +57,7 @@ const NATIVE_PLAN: StructuredImplementationPlan = {
             name: 'Core Loop',
             goal: 'Deliver the main flow.',
             tasks: [],
+            dependencies: ['m_setup'],
         },
     ],
     globalQualityGates: [
@@ -121,6 +126,41 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         render(<ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} initialMilestoneId="m_setup" />);
         expect(screen.getByText('Initialize Vite app')).toBeInTheDocument();
         expect(screen.getByText('Done when')).toBeInTheDocument();
+    });
+
+    it('opens and scrolls every supported exact implementation-plan region', () => {
+        const cases: Array<{ target: ImplementationPlanNavigationTarget; anchorId: string }> = [
+            { target: { tab: 'overview', anchorId: implementationPlanAnchor.architecture(0) }, anchorId: implementationPlanAnchor.architecture(0) },
+            { target: { tab: 'overview', anchorId: implementationPlanAnchor.risk(0) }, anchorId: implementationPlanAnchor.risk(0) },
+            { target: { tab: 'overview', anchorId: implementationPlanAnchor.criticalPath(1) }, anchorId: implementationPlanAnchor.criticalPath(1) },
+            { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.task('m_setup', 't1') }, anchorId: implementationPlanAnchor.task('m_setup', 't1') },
+            { target: { tab: 'milestones', milestoneId: 'm_core', anchorId: implementationPlanAnchor.dependency('m_core', 0) }, anchorId: implementationPlanAnchor.dependency('m_core', 0) },
+            { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.definitionOfDone('m_setup', 0) }, anchorId: implementationPlanAnchor.definitionOfDone('m_setup', 0) },
+            { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.promptCriterion('m_setup', 'pp_setup', 0) }, anchorId: implementationPlanAnchor.promptCriterion('m_setup', 'pp_setup', 0) },
+            { target: { tab: 'milestones', milestoneId: 'm_setup', anchorId: implementationPlanAnchor.validationCommand('m_setup', 0) }, anchorId: implementationPlanAnchor.validationCommand('m_setup', 0) },
+            { target: { tab: 'quality_gates', anchorId: implementationPlanAnchor.qualityGate(undefined, 'g1', 0) }, anchorId: implementationPlanAnchor.qualityGate(undefined, 'g1', 0) },
+        ];
+
+        for (const { target, anchorId } of cases) {
+            const { unmount } = render(
+                <ImplementationPlanRenderer content={fencePlan(NATIVE_PLAN)} initialNavigationTarget={target} />,
+            );
+            expect(document.getElementById(anchorId)).toBeInTheDocument();
+            expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+            expect(document.activeElement).toBe(document.getElementById(anchorId));
+            unmount();
+            vi.mocked(Element.prototype.scrollIntoView).mockClear();
+        }
+    });
+
+    it('falls back to the bounded artifact view when an exact structured region cannot resolve', () => {
+        const target: ImplementationPlanNavigationTarget = {
+            tab: 'overview', anchorId: implementationPlanAnchor.architecture(0),
+        };
+        render(<ImplementationPlanRenderer content="Just some legacy implementation notes." initialNavigationTarget={target} />);
+        expect(screen.getByText('Just some legacy implementation notes.')).toBeInTheDocument();
+        expect(document.getElementById(target.anchorId)).not.toBeInTheDocument();
+        expect(Element.prototype.scrollIntoView).not.toHaveBeenCalled();
     });
 
     it('copies the prompt pack body via the clipboard', async () => {

@@ -107,11 +107,103 @@ describe('downstream artifact-update proposal store boundary', () => {
         expect(JSON.parse(result.content).sections[0].screens[0].states).toEqual([]);
         expect(state.artifactVersions[projectId].find(candidate => candidate.id === version.id)?.content).toBe(version.content);
         expect(state.downstreamArtifactUpdateApplications[projectId]).toHaveLength(1);
-        expect(state.downstreamArtifactUpdateVerifications[projectId] ?? []).toEqual([]);
+        expect(state.downstreamArtifactUpdateVerifications[projectId]).toHaveLength(1);
+        expect(state.downstreamArtifactUpdateVerifications[projectId][0]).toMatchObject({ result: 'aligned' });
         expect(state.historyEvents[projectId].at(-1)).toMatchObject({ type: 'Edited', artifactVersionId: result.id });
         expect(state.downstreamUpdatePlans[projectId][0]).toEqual(plan);
+        expect(state.downstreamUpdatePlans[projectId][1]).toMatchObject({
+            artifact: { artifactVersionId: result.id },
+            items: [],
+            rebase: { predecessorPlanId: plan.id, appliedPredecessorItemId: plan.items[0].id },
+        });
         expect(state.applyDownstreamArtifactUpdateProposal(projectId, generated.proposalId))
             .toEqual({ status: 'rejected', reason: 'stale' });
+    });
+
+    it('rebases untouched siblings so two updates can be applied while defer and reject history remain explicit', () => {
+        const stateNames = ['Syncing', 'Collaborating', 'Cloud backup', 'Legacy role'];
+        const multiVersion: ArtifactVersion = {
+            ...version,
+            content: JSON.stringify({ sections: [{ title: 'Core', screens: [{
+                id: 'workspace', name: 'Workspace', priority: 'P0', purpose: 'Local editing',
+                states: stateNames.map(name => ({ name, description: `${name} behavior` })),
+            }] }] }),
+        };
+        const items = stateNames.map((name, index) => ({
+            ...makePlan().items[0],
+            id: `item-${index + 1}`,
+            region: {
+                kind: 'screen' as const, screenId: 'workspace', screenName: 'Workspace',
+                aspect: 'state' as const, aspectId: name.toLowerCase().replace(/\s+/g, '-'), label: name,
+            },
+            currentInterpretation: `${name} remains in the screen.`,
+            recommendation: `Remove ${name}.`,
+            recommendedPriority: index + 1,
+        }));
+        const { integrityHash: _basePlanIntegrityHash, ...basePlan } = makePlan();
+        void _basePlanIntegrityHash;
+        const plan = sealDownstreamUpdatePlan({
+            ...basePlan,
+            id: 'plan-partial',
+            artifact: {
+                ...makePlan().artifact,
+                artifactContentHash: hashReviewValue(multiVersion.content),
+            },
+            items,
+        });
+        useProjectStore.setState({ artifactVersions: { [projectId]: [multiVersion] } });
+        expect(useProjectStore.getState().recordDownstreamUpdatePlan(projectId, plan)).toMatchObject({ ok: true });
+
+        expect(useProjectStore.getState().appendDownstreamUpdatePlanEvent(projectId, plan.id, items[2].id, {
+            type: 'disposition_recorded', disposition: 'deferred', rationale: 'Defer cloud backup until recovery testing.',
+        })).toMatchObject({ ok: true });
+        const rejected = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, items[3].id);
+        expect(rejected.status).toBe('generated');
+        if (rejected.status !== 'generated') return;
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, rejected.proposalId, {
+            action: 'rejected', rationale: 'Keep the legacy role until migration completes.',
+        })).toMatchObject({ ok: true });
+
+        const first = useProjectStore.getState().generateDownstreamArtifactUpdateProposal(projectId, plan.id, items[0].id);
+        expect(first.status).toBe('generated');
+        if (first.status !== 'generated') return;
+        useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, first.proposalId, { action: 'accepted' });
+        expect(useProjectStore.getState().applyDownstreamArtifactUpdateProposal(projectId, first.proposalId)).toMatchObject({ status: 'applied' });
+
+        const afterFirst = useProjectStore.getState();
+        const firstRebase = afterFirst.downstreamUpdatePlans[projectId].at(-1)!;
+        expect(firstRebase.rebase).toMatchObject({ predecessorPlanId: plan.id, appliedPredecessorItemId: items[0].id });
+        expect(firstRebase.items.map(item => item.region.kind === 'screen' ? item.region.label : '')).toEqual([
+            'Collaborating', 'Cloud backup', 'Legacy role',
+        ]);
+        expect(afterFirst.downstreamUpdatePlanEvents[projectId].some(event => (
+            event.planId === firstRebase.id && event.type === 'disposition_recorded' && event.disposition === 'deferred' && event.carriedFrom
+        ))).toBe(true);
+        expect(afterFirst.downstreamArtifactUpdateReviewEvents[projectId].some(event => (
+            event.action === 'rejected' && event.carriedFrom?.proposalId === rejected.proposalId
+        ))).toBe(true);
+        expect(afterFirst.downstreamArtifactUpdateReviewEvents[projectId].some(event => (
+            event.action === 'accepted' && Boolean(event.carriedFrom)
+        ))).toBe(false);
+
+        const secondItem = firstRebase.items.find(item => item.region.kind === 'screen' && item.region.label === 'Collaborating')!;
+        const secondProposal = afterFirst.downstreamArtifactUpdateProposals[projectId].find(candidate => (
+            candidate.updatePlanBinding.planId === firstRebase.id
+            && candidate.updatePlanBinding.itemId === secondItem.id
+        ))!;
+        expect(secondProposal.id).not.toBe(first.proposalId);
+        expect(useProjectStore.getState().appendDownstreamArtifactUpdateReviewEvent(projectId, secondProposal.id, { action: 'accepted' }))
+            .toMatchObject({ ok: true });
+        expect(useProjectStore.getState().applyDownstreamArtifactUpdateProposal(projectId, secondProposal.id))
+            .toMatchObject({ status: 'applied' });
+
+        const finalState = useProjectStore.getState();
+        const finalVersion = finalState.artifactVersions[projectId].find(candidate => candidate.id === finalState.artifacts[projectId][0].currentVersionId)!;
+        expect(JSON.parse(finalVersion.content).sections[0].screens[0].states.map((state: { name: string }) => state.name))
+            .toEqual(['Cloud backup', 'Legacy role']);
+        expect(finalState.downstreamUpdatePlans[projectId].at(-1)?.items).toHaveLength(2);
+        expect(finalState.downstreamArtifactUpdateApplications[projectId]).toHaveLength(2);
+        expect(finalState.downstreamArtifactUpdateVerifications[projectId]).toHaveLength(2);
     });
 
     it('deterministically verifies an authorized exact removal and reconciles readiness without a second approval', () => {

@@ -1,4 +1,4 @@
-import { fireEvent, render, screen, within } from '@testing-library/react';
+import { fireEvent, render, screen, waitFor, within } from '@testing-library/react';
 import { beforeEach, describe, expect, it, vi } from 'vitest';
 import { hashReviewValue } from '../../lib/review/hash';
 import {
@@ -105,7 +105,8 @@ describe('DownstreamUpdatePlanReview', () => {
 
         expect(screen.getByRole('dialog', { name: 'Screens' })).toHaveClass('min-w-0');
         expect(screen.getByText('Current plan')).toBeInTheDocument();
-        expect(screen.getByText(/Nothing here edits or regenerates this output/)).toBeInTheDocument();
+        expect(screen.getByText(/Planning alone does not edit this output/)).toBeInTheDocument();
+        expect(screen.getByText(/creates a new artifact version without regenerating/)).toBeInTheDocument();
         expect(screen.getByText(/Confirmed source change/)).toBeInTheDocument();
         expect(screen.getByText('Manual screen work remains usable.')).toBeInTheDocument();
         expect(screen.getByText(/Other screen work remains usable/)).toBeInTheDocument();
@@ -251,12 +252,61 @@ describe('DownstreamUpdatePlanReview', () => {
 
         fireEvent.click(await within(definite).findByRole('button', { name: 'Apply approved change' }));
         expect(await within(definite).findByText(/Alignment still requires verification/)).toBeInTheDocument();
+        expect(await within(definite).findByText('Completed · applied')).toBeInTheDocument();
+        expect(within(definite).getByText(/Completed for this proposal/)).toBeInTheDocument();
+        expect(within(definite).queryByText(/Historical proposal/)).not.toBeInTheDocument();
+        expect(within(definite).queryByRole('button', { name: 'Accept proposal' })).not.toBeInTheDocument();
         const versions = useProjectStore.getState().artifactVersions[projectId];
         expect(versions).toHaveLength(2);
         expect(versions[1].parentVersionId).toBe(version.id);
         expect(JSON.parse(versions[1].content).sections[0].screens[0].states).toEqual([]);
         expect(JSON.parse(versions[1].content).sections[0].screens[1])
             .toEqual(JSON.parse(version.content).sections[0].screens[1]);
-        expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId] ?? []).toEqual([]);
+        expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId] ?? [])
+            .toEqual([expect.objectContaining({ result: 'aligned', authoredBy: 'synapse' })]);
+    });
+
+    it('previews the exact user-edited operation and content before guarded application', async () => {
+        renderReview();
+        const definite = screen.getByRole('heading', { name: /Shared workspace/ }).closest('article')!;
+        fireEvent.click(within(definite).getByRole('button', { name: 'Prepare proposal' }));
+        fireEvent.click(await within(definite).findByRole('button', { name: 'Edit proposal' }));
+        const replacement = JSON.stringify({ name: 'Saved locally', description: 'Confirms a local save without cloud sync.' });
+        fireEvent.change(within(definite).getByLabelText('Exact replacement for this region'), { target: { value: replacement } });
+        fireEvent.change(within(definite).getByLabelText('Rationale'), { target: { value: 'Keep explicit local save feedback.' } });
+        fireEvent.click(within(definite).getByRole('button', { name: 'Record choice' }));
+
+        expect(await within(definite).findByText(/Apply the exact user-approved change/)).toBeInTheDocument();
+        expect(within(definite).getByText(/Operation:/).parentElement).toHaveTextContent('replace');
+        expect(within(definite).getByText('Your edited replacement:')).toBeInTheDocument();
+        expect(within(definite).getByText(replacement)).toBeInTheDocument();
+        expect(within(definite).getByText(/Current artifact version:/).parentElement).toHaveTextContent(version.id.slice(0, 8));
+        expect(within(definite).getByText(/Preserved:/).parentElement).toHaveTextContent('Local workspace creation remains aligned');
+        expect(within(definite).queryByText(/This exact region will be removed/)).not.toBeInTheDocument();
+    });
+
+    it('uses plain-language context immediately and preserves it when another proposal is requested', async () => {
+        renderReview();
+        const possible = screen.getByRole('heading', { name: /Settings/ }).closest('article')!;
+        fireEvent.click(within(possible).getByRole('button', { name: 'Prepare proposal' }));
+        fireEvent.click(await within(possible).findByRole('button', { name: 'Add context' }));
+        expect(within(possible).getByText(/Structured screen or flow replacements.*manual-only/)).toBeInTheDocument();
+        fireEvent.change(within(possible).getByLabelText('Planning context'), {
+            target: { value: 'Keep local workspace controls, but remove every sharing affordance.' },
+        });
+        fireEvent.click(within(possible).getByRole('button', { name: 'Use context' }));
+
+        await waitFor(() => expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId]).toHaveLength(2));
+        expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId].at(-1)?.reasoning)
+            .toMatch(/user supplied additional planning context/i);
+
+        fireEvent.click(await within(possible).findByRole('button', { name: 'Another proposal' }));
+        fireEvent.change(within(possible).getByLabelText('Rationale'), {
+            target: { value: 'Try again without broadening the affected region.' },
+        });
+        fireEvent.click(within(possible).getByRole('button', { name: 'Record choice' }));
+        await waitFor(() => expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId]).toHaveLength(3));
+        expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId].at(-1)?.reasoning)
+            .toMatch(/user supplied additional planning context/i);
     });
 });

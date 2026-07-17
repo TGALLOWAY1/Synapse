@@ -56,6 +56,10 @@ import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
 import { makeSpineChangeResolver } from '../lib/spineChangeAnalysis';
 import type { OutputAlignment } from '../lib/planning/outputAlignment';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../lib/planning/downstreamUpdatePlan';
+import {
+    implementationPlanNavigationTarget,
+    type ImplementationPlanNavigationTarget,
+} from '../lib/planning/implementationPlanNavigation';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -282,7 +286,7 @@ export function ArtifactWorkspace({
         flowId?: string;
         flowStepIndex?: number;
         dataEntityName?: string;
-        implementationMilestoneId?: string;
+        implementationTarget?: ImplementationPlanNavigationTarget;
     } | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
@@ -893,6 +897,7 @@ export function ArtifactWorkspace({
         setUpdatePlanId(null);
         setSelectedArtifactId(plan.artifact.artifactId);
         const region = item.region;
+        const implementationTarget = implementationPlanNavigationTarget(region);
         const label = region.kind === 'screen' ? region.screenName
             : region.kind === 'flow' ? `${region.flowName}${region.stepIndex === undefined ? '' : ` · Step ${region.stepIndex + 1}`}`
                 : region.kind === 'data_model' ? `${region.entityName}${region.memberName ? ` · ${region.memberName}` : ''}`
@@ -904,9 +909,7 @@ export function ArtifactWorkspace({
             label,
             ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
             ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
-            ...(region.kind === 'implementation_plan' && region.section === 'delivery' && region.milestoneId
-                ? { implementationMilestoneId: region.milestoneId }
-                : {}),
+            ...(implementationTarget ? { implementationTarget } : {}),
         });
         if (plan.artifact.slot === 'screen_inventory') {
             setSelected('screens');
@@ -1546,7 +1549,7 @@ export function ArtifactWorkspace({
                         initialFlowId={subtype === 'user_flows' ? updatePlanRegionTarget?.flowId : undefined}
                         initialFlowStepIndex={subtype === 'user_flows' ? updatePlanRegionTarget?.flowStepIndex : undefined}
                         initialDataEntityName={subtype === 'data_model' ? updatePlanRegionTarget?.dataEntityName : undefined}
-                        initialImplementationMilestoneId={subtype === 'implementation_plan' ? updatePlanRegionTarget?.implementationMilestoneId : undefined}
+                        initialImplementationTarget={subtype === 'implementation_plan' ? updatePlanRegionTarget?.implementationTarget : undefined}
                         promptPackContent={legacyPromptPackContent}
                         savedTasks={planSavedTasks}
                         onConvertToTasks={handleConvertToTasks}

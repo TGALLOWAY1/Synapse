@@ -11,6 +11,7 @@ import { GATE_CATEGORY_LABELS, GATE_CATEGORY_ORDER } from './gateCategories';
 import { GATE_STATUS_BADGE_STYLE, GATE_STATUS_LABELS } from './gateStatus';
 import { QualityGateCard } from './QualityGateCard';
 import { CopyTextButton } from './CopyTextButton';
+import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 
 interface Props {
     plan: ConsolidatedImplementationPlan;
@@ -97,22 +98,34 @@ export function ValidationTab({ plan, gateStatuses, onSetGateStatus }: Props) {
                         <ShieldCheck size={11} /> {GATE_CATEGORY_LABELS[category]}
                     </p>
                     <div className="space-y-2">
-                        {byCategory.get(category)!.map((row, i) => (
-                            <QualityGateCard
-                                key={`${row.gate.id}-${i}`}
-                                gate={row.gate}
-                                status={gateStatuses[row.gate.id] ?? 'not_run'}
-                                onSetStatus={onSetGateStatus ? s => onSetGateStatus(row.gate.id, s) : undefined}
-                                milestoneLabel={
-                                    row.milestoneName !== undefined
-                                        ? `M${(row.milestoneIndex ?? 0) + 1} · ${row.milestoneName}`
-                                        : undefined
-                                }
-                                relatedPackTitles={row.relatedPackTitles}
-                                verifyCommands={row.verifyCommands}
-                                blocksLabel={row.blocksLabel}
-                            />
-                        ))}
+                        {byCategory.get(category)!.map((row, i) => {
+                            const gateIndex = row.milestoneId
+                                ? plan.milestones.find(milestone => milestone.id === row.milestoneId)?.qualityGates
+                                    ?.findIndex(gate => gate.id === row.gate.id) ?? i
+                                : plan.globalQualityGates.findIndex(gate => gate.id === row.gate.id);
+                            return (
+                                <div
+                                    id={implementationPlanAnchor.qualityGate(row.milestoneId, row.gate.id, Math.max(0, gateIndex))}
+                                    tabIndex={-1}
+                                    key={`${row.gate.id}-${i}`}
+                                    className="scroll-mt-24"
+                                >
+                                    <QualityGateCard
+                                        gate={row.gate}
+                                        status={gateStatuses[row.gate.id] ?? 'not_run'}
+                                        onSetStatus={onSetGateStatus ? s => onSetGateStatus(row.gate.id, s) : undefined}
+                                        milestoneLabel={
+                                            row.milestoneName !== undefined
+                                                ? `M${(row.milestoneIndex ?? 0) + 1} · ${row.milestoneName}`
+                                                : undefined
+                                        }
+                                        relatedPackTitles={row.relatedPackTitles}
+                                        verifyCommands={row.verifyCommands}
+                                        blocksLabel={row.blocksLabel}
+                                    />
+                                </div>
+                            );
+                        })}
                     </div>
                 </div>
             ))}

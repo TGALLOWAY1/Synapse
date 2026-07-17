@@ -26,6 +26,7 @@ const EMPTY_VERIFICATIONS: ReturnType<typeof useProjectStore.getState>['downstre
 const EMPTY_VERIFICATION_EVENTS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateVerificationEvents'][string] = [];
 
 type PendingAction = Exclude<DownstreamArtifactUpdateReviewAction, 'accepted' | 'edited'> | 'edit';
+type ContextIntent = 'replace' | 'rename' | 'requiredness' | 'remove' | 'out_of_scope';
 
 interface DownstreamArtifactUpdateProposalReviewProps {
     projectId: string;
@@ -58,6 +59,32 @@ function proposedSummary(proposal: DownstreamArtifactUpdateProposal): string {
     return proposal.proposedContent ?? 'No proposed content.';
 }
 
+function snapshotRecord(snapshot: string): Record<string, unknown> | undefined {
+    try {
+        const value = JSON.parse(snapshot) as unknown;
+        return value && typeof value === 'object' && !Array.isArray(value)
+            ? value as Record<string, unknown>
+            : undefined;
+    } catch {
+        return undefined;
+    }
+}
+
+function implementationValueWithLabel(
+    proposal: DownstreamArtifactUpdateProposal,
+    replacement: string,
+): unknown {
+    const current = snapshotRecord(proposal.currentRegionSnapshot);
+    if (!current || proposal.region.kind !== 'implementation_plan' || proposal.region.section !== 'delivery') {
+        return replacement;
+    }
+    const key = proposal.region.collection === 'milestones' ? 'name'
+        : proposal.region.collection === 'tasks' || proposal.region.collection === 'quality_gates' ? 'title'
+            : proposal.region.collection === 'risks' ? 'description'
+                : undefined;
+    return key ? { ...current, [key]: replacement } : replacement;
+}
+
 export function DownstreamArtifactUpdateProposalReview({
     projectId, plan, item, readOnly,
 }: DownstreamArtifactUpdateProposalReviewProps) {
@@ -78,6 +105,11 @@ export function DownstreamArtifactUpdateProposalReview({
     const [pending, setPending] = useState<PendingAction>();
     const [rationale, setRationale] = useState('');
     const [editedContent, setEditedContent] = useState('');
+    const [contextIntent, setContextIntent] = useState<ContextIntent>('replace');
+    const [contextValue, setContextValue] = useState('');
+    const [contextName, setContextName] = useState('');
+    const [contextType, setContextType] = useState('string');
+    const [contextRequired, setContextRequired] = useState<'required' | 'optional'>('optional');
     const [busy, setBusy] = useState(false);
     const [verificationReviewAction, setVerificationReviewAction] = useState<'rejected' | 'deferred'>();
     const [verificationRationale, setVerificationRationale] = useState('');
@@ -95,7 +127,8 @@ export function DownstreamArtifactUpdateProposalReview({
         && validateDownstreamArtifactUpdateProposalIntegrity(candidate)
         && candidate.updatePlanBinding.planIntegrityHash === plan.integrityHash
         && candidate.updatePlanBinding.itemIntegrityHash === downstreamUpdatePlanItemIntegrityHash(plan, canonicalItem!)
-    )).sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id)), [canonicalItem, matchingProposals, plan]);
+    )).sort((a, b) => b.createdAt - a.createdAt
+        || matchingProposals.indexOf(b) - matchingProposals.indexOf(a)), [canonicalItem, matchingProposals, plan]);
     const proposal = validProposals.find(candidate => (
         useProjectStore.getState().getDownstreamArtifactUpdateProposalCurrentness(projectId, candidate.id)?.current
     )) ?? validProposals[0];
@@ -187,6 +220,54 @@ export function DownstreamArtifactUpdateProposalReview({
     void spineVersions;
     void planningRecords;
     const proposalReadOnly = readOnly || !currentness?.current || Boolean(application);
+    const dataModelContextIsManualOnly = proposal?.region.kind === 'data_model'
+        && proposal.region.aspect === 'entity'
+        && proposal.dataModelImpact?.format === 'json';
+
+    const buildProvidedContext = (): string => {
+        if (!proposal) return '';
+        if (proposal.region.kind === 'data_model') {
+            if (dataModelContextIsManualOnly) return JSON.stringify({ note: contextValue.trim() });
+            const memberKind = proposal.region.aspect;
+            if (contextIntent === 'remove' || contextIntent === 'out_of_scope') return JSON.stringify({
+                changeKind: contextIntent, memberKind, content: null,
+            });
+            if (memberKind === 'field') {
+                const current = snapshotRecord(proposal.currentRegionSnapshot) ?? {};
+                return JSON.stringify({
+                    changeKind: contextIntent,
+                    memberKind,
+                    content: {
+                        ...current,
+                        name: contextName.trim() || proposal.region.memberName || current.name,
+                        type: contextType.trim() || current.type || 'string',
+                        required: contextRequired === 'required',
+                        description: contextValue.trim() || current.description || '',
+                    },
+                });
+            }
+            return JSON.stringify({ changeKind: contextIntent, memberKind, content: contextValue.trim() });
+        }
+        if (proposal.region.kind === 'implementation_plan') {
+            if (proposal.region.section === 'architecture') return `replace: ${contextValue.trim()}`;
+            return `replace: ${JSON.stringify({
+                collection: proposal.region.collection,
+                value: implementationValueWithLabel(proposal, contextValue.trim()),
+            })}`;
+        }
+        return contextValue.trim();
+    };
+
+    const contextReady = (() => {
+        if (pending !== 'provided_context') return true;
+        if (!proposal) return false;
+        if (dataModelContextIsManualOnly) return contextValue.trim().length >= 3;
+        if (proposal.region.kind === 'data_model' && (contextIntent === 'remove' || contextIntent === 'out_of_scope')) return true;
+        if (proposal.region.kind === 'data_model' && proposal.region.aspect === 'field') {
+            return contextName.trim().length > 0 && contextType.trim().length > 0 && contextValue.trim().length > 0;
+        }
+        return contextValue.trim().length >= 3;
+    })();
 
     const prepare = () => {
         setBusy(true);
@@ -224,8 +305,10 @@ export function DownstreamArtifactUpdateProposalReview({
         setRationale('');
         setMessage({ kind: 'success', text: action === 'accepted' || action === 'edited'
             ? 'Your approval is recorded. The artifact has not changed yet.'
+            : action === 'deferred'
+                ? 'This proposal is deferred. The update-plan item remains unresolved and no artifact content changed.'
             : 'Your review choice is preserved in proposal history.' });
-        if (action === 'requested_another') prepare();
+        if (action === 'requested_another' || action === 'provided_context') prepare();
     };
 
     const apply = () => {
@@ -295,10 +378,23 @@ export function DownstreamArtifactUpdateProposalReview({
 
     const writable = proposal.operation !== 'review_only';
     const canApply = !proposalReadOnly && !application && (review?.action === 'accepted' || review?.action === 'edited');
+    const approvedOperation = review?.action === 'edited' ? review.operation
+        : review?.action === 'accepted' && proposal.operation !== 'review_only' ? proposal.operation
+            : undefined;
+    const approvedContent = review?.action === 'edited' ? review.editedContent : proposal.proposedContent;
     const startPending = (action: PendingAction) => {
         setPending(action);
         setRationale('');
         if (action === 'edit') setEditedContent(proposal.proposedContent ?? proposal.currentRegionSnapshot);
+        if (action === 'provided_context') {
+            const current = snapshotRecord(proposal.currentRegionSnapshot);
+            setContextIntent('replace');
+            setContextValue('');
+            setContextName(typeof current?.name === 'string' ? current.name
+                : proposal.region.kind === 'data_model' ? proposal.region.memberName ?? '' : '');
+            setContextType(typeof current?.type === 'string' ? current.type : 'string');
+            setContextRequired(current?.required === true ? 'required' : 'optional');
+        }
         setMessage(undefined);
     };
 
@@ -308,13 +404,14 @@ export function DownstreamArtifactUpdateProposalReview({
                 <div className="flex items-center gap-2 text-xs font-semibold text-indigo-950">
                     <FileEdit size={14} aria-hidden="true" /> Selective change proposal
                     <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-700">
-                        {proposal.operation === 'review_only' ? 'Review only' : 'Bounded change'}
+                        {application ? 'Completed · applied' : proposal.operation === 'review_only' ? 'Review only' : 'Bounded change'}
                     </span>
                 </div>
                 <span className="text-[11px] text-indigo-700">Artifact version {proposal.artifact.artifactVersionId.slice(0, 8)}</span>
             </div>
 
-            {!currentness?.current && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">Historical proposal — its planning source or artifact binding changed. It cannot be approved or applied.</p>}
+            {!application && !currentness?.current && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">Historical proposal — its planning source or artifact binding changed. It cannot be approved or applied.</p>}
+            {application && <p className="mt-2 rounded-md border border-emerald-200 bg-emerald-50 px-2.5 py-2 text-xs text-emerald-900">Completed for this proposal. The approved change was applied to a new artifact version; verification is the next separate step.</p>}
             {corruptedLifecycle && <p role="alert" className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-950">One or more saved lifecycle records failed integrity checks and are not shown as applied or aligned.</p>}
             <div className="mt-3 grid min-w-0 gap-2 md:grid-cols-2">
                 <div className="min-w-0 rounded-md border border-neutral-200 bg-white p-2.5">
@@ -424,22 +521,88 @@ export function DownstreamArtifactUpdateProposalReview({
                                 Exact replacement for this region
                                 <textarea value={editedContent} onChange={event => setEditedContent(event.target.value)} rows={5} className="mt-1 w-full resize-y rounded-lg border border-neutral-300 px-3 py-2 font-mono text-xs" />
                             </label>}
-                            <label className="mt-2 block text-xs text-neutral-700">
-                                {pending === 'provided_context' ? 'Missing context' : 'Rationale'}
-                                <textarea value={rationale} onChange={event => setRationale(event.target.value)} rows={3} className="mt-1 w-full resize-y rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
-                            </label>
+                            {pending === 'provided_context' ? (
+                                <div className="mt-2 space-y-2 text-xs text-neutral-700">
+                                    {proposal.region.kind === 'data_model' ? (
+                                        <>
+                                            {dataModelContextIsManualOnly ? (
+                                                <>
+                                                    <label className="block font-medium">Planning context<textarea value={contextValue} onChange={event => setContextValue(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" /></label>
+                                                    <p className="text-neutral-500">A whole JSON entity cannot be safely reconstructed from a short form. Synapse will preserve this context for review, but the exact entity replacement remains a manual artifact edit.</p>
+                                                </>
+                                            ) : <><label className="block font-medium">
+                                                Intended change
+                                                <select value={contextIntent} onChange={event => setContextIntent(event.target.value as ContextIntent)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 text-sm">
+                                                    <option value="replace">Replace this exact definition</option>
+                                                    {proposal.region.aspect === 'field' && <option value="rename">Rename this field</option>}
+                                                    {proposal.region.aspect === 'field' && <option value="requiredness">Change whether this field is required</option>}
+                                                    <option value="remove">Remove this exact region</option>
+                                                    <option value="out_of_scope">Mark this region out of current scope</option>
+                                                </select>
+                                            </label>
+                                            {contextIntent !== 'remove' && contextIntent !== 'out_of_scope' && proposal.region.aspect === 'field' && (
+                                                <div className="grid gap-2 sm:grid-cols-2">
+                                                    <label className="font-medium">Field name<input value={contextName} onChange={event => setContextName(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 px-3 text-sm" /></label>
+                                                    <label className="font-medium">Field type<input value={contextType} onChange={event => setContextType(event.target.value)} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 px-3 text-sm" /></label>
+                                                    <label className="font-medium">Requirement<select value={contextRequired} onChange={event => setContextRequired(event.target.value as 'required' | 'optional')} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-300 bg-white px-3 text-sm"><option value="optional">Optional</option><option value="required">Required</option></select></label>
+                                                    <label className="font-medium sm:col-span-2">Description<textarea value={contextValue} onChange={event => setContextValue(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" /></label>
+                                                </div>
+                                            )}
+                                            {contextIntent !== 'remove' && contextIntent !== 'out_of_scope' && proposal.region.aspect !== 'field' && (
+                                                <label className="block font-medium">Exact replacement text<textarea value={contextValue} onChange={event => setContextValue(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" /></label>
+                                            )}
+                                            <p className="text-neutral-500">Synapse constructs the bounded internal change from these fields. You do not need to enter a command prefix or JSON.</p>
+                                            </>}
+                                        </>
+                                    ) : proposal.region.kind === 'implementation_plan' ? (
+                                        <>
+                                            <label className="block font-medium">
+                                                Exact replacement {proposal.region.section === 'delivery' ? 'label or text' : 'text'}
+                                                <textarea value={contextValue} onChange={event => setContextValue(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                                            </label>
+                                            <p className="text-neutral-500">This creates a replacement proposal for the exact selected entry. Adding a new structured milestone or task remains a manual artifact edit in this release.</p>
+                                        </>
+                                    ) : (
+                                        <>
+                                            <label className="block font-medium">Planning context<textarea value={contextValue} onChange={event => setContextValue(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" /></label>
+                                            <p className="text-neutral-500">Synapse will immediately reconsider this exact region using your context. Structured screen or flow replacements that cannot be safely constructed remain manual-only.</p>
+                                        </>
+                                    )}
+                                </div>
+                            ) : (
+                                <label className="mt-2 block text-xs text-neutral-700">
+                                    Rationale
+                                    <textarea value={rationale} onChange={event => setRationale(event.target.value)} rows={3} className="mt-1 w-full resize-y rounded-lg border border-neutral-300 px-3 py-2 text-sm" />
+                                </label>
+                            )}
                             <div className="mt-2 flex justify-end gap-2">
                                 <button type="button" onClick={() => setPending(undefined)} className="min-h-11 rounded-lg px-3 text-xs font-medium text-neutral-700">Cancel</button>
-                                <button type="button" disabled={rationale.trim().length < 3 || pending === 'edit' && editedContent.trim().length === 0} onClick={() => record(pending === 'edit' ? 'edited' : pending, rationale.trim())} className="min-h-11 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white disabled:opacity-50">Record choice</button>
+                                <button type="button" disabled={!contextReady || pending !== 'provided_context' && (rationale.trim().length < 3 || pending === 'edit' && editedContent.trim().length === 0)} onClick={() => record(pending === 'edit' ? 'edited' : pending, pending === 'provided_context' ? buildProvidedContext() : rationale.trim())} className="min-h-11 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white disabled:opacity-50">{pending === 'provided_context' ? 'Use context' : 'Record choice'}</button>
                             </div>
                         </div>
                     )}
                     {canApply && <div className="mt-3 rounded-md border border-emerald-200 bg-emerald-50 p-3">
-                        <div className="flex flex-col gap-2 sm:flex-row sm:items-center sm:justify-between">
-                            <div className="min-w-0 text-xs text-emerald-900">
-                                <div className="flex items-center gap-1.5 font-semibold"><ShieldCheck size={14} /> Apply only this approved region</div>
-                                <p className="mt-1">Synapse will recheck every version binding and create a new artifact version. Application does not prove alignment.</p>
+                        <div className="min-w-0 text-xs text-emerald-950">
+                            <div className="flex items-center gap-1.5 font-semibold"><ShieldCheck size={14} /> Apply the exact user-approved change</div>
+                            <div className="mt-2 grid gap-2 rounded-md border border-emerald-200 bg-white p-2.5 sm:grid-cols-2">
+                                <div><strong>Operation:</strong> {approvedOperation?.replaceAll('_', ' ')}</div>
+                                <div><strong>Current artifact version:</strong> {proposal.artifact.artifactVersionId.slice(0, 8)}</div>
+                                <div className="sm:col-span-2">
+                                    <strong>{review?.action === 'edited' ? 'Your edited replacement:' : 'Approved content:'}</strong>
+                                    {approvedOperation === 'remove'
+                                        ? <p className="mt-1 font-medium text-amber-800">This exact region will be removed. No neighboring region is included.</p>
+                                        : <pre className="mt-1 max-h-36 overflow-auto whitespace-pre-wrap break-words font-sans text-xs text-neutral-800">{approvedContent}</pre>}
+                                </div>
+                                <div className="sm:col-span-2">
+                                    <strong>Preserved:</strong> {proposal.preservedScope.length > 0 ? proposal.preservedScope.join(' · ') : 'All content outside the exact bound region.'}
+                                </div>
                             </div>
+                            {(approvedOperation === 'remove' || proposal.dataModelImpact?.destructive) && (
+                                <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 font-medium text-amber-900"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> Destructive change: review the exact removed content above. Synapse will not update migrations or dependencies automatically.</p>
+                            )}
+                            <p className="mt-2">Synapse will recheck every version binding and create a new artifact version. It will not regenerate the output, and application does not prove alignment.</p>
+                        </div>
+                        <div className="mt-3 flex justify-end">
                             <button type="button" disabled={busy} onClick={apply} className="min-h-11 shrink-0 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white disabled:opacity-50">Apply approved change</button>
                         </div>
                     </div>}

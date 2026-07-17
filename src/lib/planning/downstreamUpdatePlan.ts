@@ -164,6 +164,26 @@ export type DownstreamUpdatePlanArtifactBinding = {
     title: string;
 };
 
+/**
+ * A selective application creates a child artifact version. The previous plan
+ * remains immutable history while every unapplied item is rebound to that
+ * child version. The applied predecessor item intentionally has no replacement:
+ * its sealed application verification remains the durable reconciliation
+ * record. All other predecessor items are superseded by the listed fresh item.
+ */
+export type DownstreamUpdatePlanRebase = {
+    predecessorPlanId: string;
+    predecessorPlanIntegrityHash: string;
+    triggeringApplicationId: string;
+    triggeringApplicationIntegrityHash: string;
+    appliedPredecessorItemId: string;
+    itemLineage: Array<{
+        predecessorItemId: string;
+        successorItemId: string;
+        regionState: 'unchanged' | 'changed' | 'missing';
+    }>;
+};
+
 export type DownstreamUpdatePlan = {
     schemaVersion: typeof DOWNSTREAM_UPDATE_PLAN_SCHEMA_VERSION;
     id: string;
@@ -172,9 +192,18 @@ export type DownstreamUpdatePlan = {
     source: DownstreamUpdatePlanSource;
     artifact: DownstreamUpdatePlanArtifactBinding;
     items: DownstreamUpdatePlanItem[];
+    /** Optional so pre-Stage-4 plans remain readable without migration. */
+    rebase?: DownstreamUpdatePlanRebase;
     preservedArtifactSummary: string;
     createdAt: number;
     integrityHash: string;
+};
+
+export type DownstreamUpdatePlanEventLineage = {
+    eventId: string;
+    eventIntegrityHash: string;
+    planId: string;
+    itemId: string;
 };
 
 type DownstreamUpdatePlanEventBase = {
@@ -186,6 +215,8 @@ type DownstreamUpdatePlanEventBase = {
     actor: 'user';
     at: number;
     expectedPlanIntegrityHash: string;
+    /** Preserves the exact user action that a safe rebase carried forward. */
+    carriedFrom?: DownstreamUpdatePlanEventLineage;
     integrityHash: string;
 };
 
@@ -237,6 +268,31 @@ export function validateDownstreamUpdatePlanIntegrity(plan: DownstreamUpdatePlan
     return plan.schemaVersion === DOWNSTREAM_UPDATE_PLAN_SCHEMA_VERSION
         && plan.authoredBy === 'synapse'
         && plan.integrityHash === hashReviewValue(canonicalPlan(plan));
+}
+
+/**
+ * Returns predecessor item keys replaced by a sealed descendant plan. The
+ * applied predecessor item is excluded so its application verification can
+ * continue to reconcile the current artifact.
+ */
+export function supersededDownstreamUpdatePlanItemKeys(plans: DownstreamUpdatePlan[]): Set<string> {
+    const validById = new Map(plans.filter(validateDownstreamUpdatePlanIntegrity).map(plan => [plan.id, plan]));
+    const superseded = new Set<string>();
+    for (const plan of validById.values()) {
+        const rebase = plan.rebase;
+        if (!rebase) continue;
+        const predecessor = validById.get(rebase.predecessorPlanId);
+        if (!predecessor
+            || predecessor.integrityHash !== rebase.predecessorPlanIntegrityHash
+            || !predecessor.items.some(item => item.id === rebase.appliedPredecessorItemId)) continue;
+        for (const lineage of rebase.itemLineage) {
+            if (predecessor.items.some(item => item.id === lineage.predecessorItemId)
+                && plan.items.some(item => item.id === lineage.successorItemId)) {
+                superseded.add(`${predecessor.id}:${lineage.predecessorItemId}`);
+            }
+        }
+    }
+    return superseded;
 }
 
 export function sealDownstreamUpdatePlanEvent(input: UnsealedDownstreamUpdatePlanEvent): DownstreamUpdatePlanEvent {

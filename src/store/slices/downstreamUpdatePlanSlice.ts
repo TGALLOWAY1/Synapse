@@ -26,6 +26,7 @@ import {
     validateDownstreamArtifactUpdateReviewEventIntegrity,
     validateDownstreamArtifactUpdateVerificationIntegrity,
     validateDownstreamArtifactUpdateVerificationEventIntegrity,
+    type DownstreamArtifactUpdateReviewEvent,
 } from '../../lib/planning/downstreamArtifactUpdateProposal';
 import { hashReviewValue } from '../../lib/review/hash';
 import {
@@ -51,6 +52,7 @@ import {
     projectDownstreamArtifactUpdateVerifications,
     verificationIsCurrent,
 } from '../../lib/planning/downstreamArtifactUpdateVerification';
+import { rebaseDownstreamUpdatePlanAfterApplication } from '../../lib/planning/downstreamUpdatePlanRebase';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamUpdatePlans'
@@ -247,13 +249,25 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         if (latestProposal && latestReview?.action !== 'requested_another' && latestReview?.action !== 'provided_context') {
             return { status: 'generated', proposalId: latestProposal.id, operation: latestProposal.operation };
         }
+        const priorById = new Map(prior.map(candidate => [candidate.id, candidate]));
+        const latestContextReview = (state.downstreamArtifactUpdateReviewEvents[projectId] ?? [])
+            .filter((event): event is Extract<DownstreamArtifactUpdateReviewEvent, { action: 'provided_context' }> => {
+                if (event.action !== 'provided_context' || !validateDownstreamArtifactUpdateReviewEventIntegrity(event)) return false;
+                const bound = priorById.get(event.proposalId);
+                return Boolean(bound
+                    && event.expectedProposalIntegrityHash === bound.integrityHash
+                    && event.expectedPlanIntegrityHash === bound.updatePlanBinding.planIntegrityHash
+                    && event.expectedItemIntegrityHash === bound.updatePlanBinding.itemIntegrityHash
+                    && event.expectedRegionContentHash === bound.currentRegionContentHash);
+            })
+            .sort((a, b) => b.at - a.at || b.id.localeCompare(a.id))[0];
         const requestNonce = latestReview ? `${latestReview.id}:${latestReview.integrityHash}` : 'initial';
         const result = plan.artifact.slot === 'data_model'
             ? deriveDataModelArtifactUpdateProposal({
                 projectId, plan, item, artifactVersion, requestNonce,
-                userContextProvided: latestReview?.action === 'provided_context',
-                ...(latestReview?.action === 'provided_context'
-                    ? { userGroundedChange: parseUserGroundedDataModelChange(latestReview.context) }
+                userContextProvided: Boolean(latestContextReview),
+                ...(latestContextReview
+                    ? { userGroundedChange: parseUserGroundedDataModelChange(latestContextReview.context) }
                     : {}),
                 dependencyDocuments: [
                     ...(state.artifacts[projectId] ?? []).flatMap(candidate => {
@@ -274,14 +288,15 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             : plan.artifact.slot === 'implementation_plan'
                 ? deriveImplementationPlanArtifactUpdateProposal({
                     projectId, plan, item, artifactVersion, requestNonce,
-                    ...(latestReview?.action === 'provided_context'
+                    ...(latestContextReview
                         ? item.region.kind === 'implementation_plan' && item.region.section === 'delivery'
-                            ? { userGroundedChange: parseUserGroundedImplementationPlanChange(latestReview.context) }
-                            : { userGroundedReplacement: parseUserGroundedImplementationPlanReplacement(latestReview.context) }
+                            ? { userGroundedChange: parseUserGroundedImplementationPlanChange(latestContextReview.context) }
+                            : { userGroundedReplacement: parseUserGroundedImplementationPlanReplacement(latestContextReview.context) }
                         : {}),
                 })
                 : deriveScreenFlowArtifactUpdateProposal({
                 projectId, plan, item, artifactVersion, requestNonce,
+                ...(latestContextReview ? { userContext: latestContextReview.context } : {}),
             });
         if (!result.ok) return { status: 'rejected', reason: result.reason };
         if (!validateDownstreamArtifactUpdateProposalIntegrity(result.proposal)) {
@@ -494,6 +509,133 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                 outcome = { status: 'rejected', reason: 'invalid_application' };
                 return state;
             }
+            const nextContext: DownstreamUpdatePlanCurrentContext = {
+                ...context,
+                artifactVersions: {
+                    ...context.artifactVersions,
+                    [artifact.id]: { versionId, contentHash: hashReviewValue(resultVersion.content) },
+                },
+            };
+            const rebased = plan ? rebaseDownstreamUpdatePlanAfterApplication({
+                plan,
+                appliedItemId: proposal.updatePlanBinding.itemId,
+                application,
+                baselineVersion: artifactVersion,
+                resultVersion,
+                events: state.downstreamUpdatePlanEvents[projectId] ?? [],
+                createdAt: now,
+            }) : undefined;
+            if (!plan || !rebased
+                || !validateDownstreamUpdatePlanIntegrity(rebased.plan)
+                || !compareDownstreamUpdatePlanCurrentness(rebased.plan, nextContext).current) {
+                outcome = { status: 'rejected', reason: 'rebase_failed' };
+                return state;
+            }
+
+            const freshProposals = [] as typeof state.downstreamArtifactUpdateProposals[string];
+            for (const sibling of rebased.plan.items) {
+                const requestNonce = `rebase:${application.id}:${sibling.id}`;
+                const result = rebased.plan.artifact.slot === 'data_model'
+                    ? deriveDataModelArtifactUpdateProposal({
+                        projectId, plan: rebased.plan, item: sibling, artifactVersion: resultVersion, requestNonce,
+                        dependencyDocuments: [
+                            ...(state.artifacts[projectId] ?? []).flatMap(candidate => {
+                                if (candidate.id === rebased.plan.artifact.artifactId || candidate.type !== 'core_artifact') return [];
+                                const current = (state.artifactVersions[projectId] ?? [])
+                                    .find(version => version.id === candidate.currentVersionId);
+                                return current ? [{
+                                    id: candidate.id,
+                                    label: candidate.title,
+                                    kind: candidate.subtype === 'user_flows' ? 'flow' as const : 'requirement' as const,
+                                    content: current.content,
+                                }] : [];
+                            }),
+                            ...(state.spineVersions[projectId] ?? [])
+                                .filter(candidate => candidate.id === nextContext.spineVersionId)
+                                .map(candidate => ({
+                                    id: candidate.id,
+                                    label: 'Current product requirements',
+                                    kind: 'requirement' as const,
+                                    content: candidate.responseText,
+                                })),
+                        ],
+                    })
+                    : rebased.plan.artifact.slot === 'implementation_plan'
+                        ? deriveImplementationPlanArtifactUpdateProposal({
+                            projectId, plan: rebased.plan, item: sibling, artifactVersion: resultVersion, requestNonce,
+                        })
+                        : deriveScreenFlowArtifactUpdateProposal({
+                            projectId, plan: rebased.plan, item: sibling, artifactVersion: resultVersion, requestNonce,
+                        });
+                if (!result.ok || !validateDownstreamArtifactUpdateProposalIntegrity(result.proposal)) {
+                    outcome = { status: 'rejected', reason: 'rebase_proposal_failed' };
+                    return state;
+                }
+                freshProposals.push(result.proposal);
+            }
+
+            const carriedReviews = [] as typeof reviewEvents;
+            let carriedReviewAt = Math.max(now, reviewEvents.at(-1)?.at ?? 0, rebased.events.at(-1)?.at ?? 0);
+            for (const freshProposal of freshProposals) {
+                if (rebased.regionStates.get(freshProposal.updatePlanBinding.itemId) !== 'unchanged') continue;
+                const predecessor = rebased.predecessorItems.get(freshProposal.updatePlanBinding.itemId);
+                if (!predecessor) continue;
+                const previousProposal = (state.downstreamArtifactUpdateProposals[projectId] ?? [])
+                    .filter(candidate => candidate.updatePlanBinding.planId === plan.id
+                        && candidate.updatePlanBinding.itemId === predecessor.id
+                        && validateDownstreamArtifactUpdateProposalIntegrity(candidate))
+                    .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id))[0];
+                const previousReview = previousProposal
+                    ? latestDownstreamArtifactUpdateReview(previousProposal, reviewEvents)
+                    : undefined;
+                if (!previousProposal || !previousReview
+                    || !['rejected', 'preserved', 'deferred'].includes(previousReview.action)) continue;
+                const carried = sealDownstreamArtifactUpdateReviewEvent({
+                    schemaVersion: 1,
+                    id: `artifact-update-review-${hashReviewValue({
+                        proposal: freshProposal.id,
+                        source: previousReview.integrityHash,
+                    })}`,
+                    projectId,
+                    proposalId: freshProposal.id,
+                    actor: 'user',
+                    at: ++carriedReviewAt,
+                    expectedProposalIntegrityHash: freshProposal.integrityHash,
+                    expectedPlanIntegrityHash: freshProposal.updatePlanBinding.planIntegrityHash,
+                    expectedItemIntegrityHash: freshProposal.updatePlanBinding.itemIntegrityHash,
+                    expectedRegionContentHash: freshProposal.currentRegionContentHash,
+                    carriedFrom: {
+                        eventId: previousReview.id,
+                        eventIntegrityHash: previousReview.integrityHash,
+                        proposalId: previousProposal.id,
+                    },
+                    action: previousReview.action as 'rejected' | 'preserved' | 'deferred',
+                    rationale: ('rationale' in previousReview ? previousReview.rationale : undefined)
+                        || 'Carried from the unchanged predecessor region.',
+                });
+                if (!validateDownstreamArtifactUpdateReviewEventIntegrity(carried)) {
+                    outcome = { status: 'rejected', reason: 'rebase_review_failed' };
+                    return state;
+                }
+                carriedReviews.push(carried);
+            }
+
+            const appliedItem = plan.items.find(item => item.id === proposal.updatePlanBinding.itemId);
+            const verification = appliedItem ? deriveDownstreamArtifactUpdateVerification({
+                projectId,
+                plan,
+                item: appliedItem,
+                context: nextContext,
+                currentVersion: resultVersion,
+                baselineVersion: artifactVersion,
+                proposal,
+                application,
+                createdAt: now,
+            }) : undefined;
+            if (!verification || !validateDownstreamArtifactUpdateVerificationIntegrity(verification)) {
+                outcome = { status: 'rejected', reason: 'rebase_verification_failed' };
+                return state;
+            }
             const history: HistoryEvent = {
                 id: uuidv4(), projectId, artifactId: artifact.id, artifactVersionId: versionId,
                 type: 'Edited',
@@ -524,6 +666,26 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                 downstreamArtifactUpdateApplications: {
                     ...state.downstreamArtifactUpdateApplications,
                     [projectId]: [...(state.downstreamArtifactUpdateApplications[projectId] ?? []), application],
+                },
+                downstreamArtifactUpdateVerifications: {
+                    ...state.downstreamArtifactUpdateVerifications,
+                    [projectId]: [...(state.downstreamArtifactUpdateVerifications[projectId] ?? []), verification],
+                },
+                downstreamUpdatePlans: {
+                    ...state.downstreamUpdatePlans,
+                    [projectId]: [...(state.downstreamUpdatePlans[projectId] ?? []), rebased.plan],
+                },
+                downstreamUpdatePlanEvents: {
+                    ...state.downstreamUpdatePlanEvents,
+                    [projectId]: [...(state.downstreamUpdatePlanEvents[projectId] ?? []), ...rebased.events],
+                },
+                downstreamArtifactUpdateProposals: {
+                    ...state.downstreamArtifactUpdateProposals,
+                    [projectId]: [...(state.downstreamArtifactUpdateProposals[projectId] ?? []), ...freshProposals],
+                },
+                downstreamArtifactUpdateReviewEvents: {
+                    ...state.downstreamArtifactUpdateReviewEvents,
+                    [projectId]: [...reviewEvents, ...carriedReviews],
                 },
             };
         });

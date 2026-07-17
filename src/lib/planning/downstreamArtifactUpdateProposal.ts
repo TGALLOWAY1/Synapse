@@ -131,6 +131,12 @@ type ReviewEventBase = {
     expectedPlanIntegrityHash: string;
     expectedItemIntegrityHash: string;
     expectedRegionContentHash: string;
+    /** Exact negative user disposition carried across an unchanged region rebase. */
+    carriedFrom?: {
+        eventId: string;
+        eventIntegrityHash: string;
+        proposalId: string;
+    };
     integrityHash: string;
 };
 

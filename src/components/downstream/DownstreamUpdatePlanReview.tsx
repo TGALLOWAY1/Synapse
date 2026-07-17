@@ -263,7 +263,7 @@ export function DownstreamUpdatePlanReview({
                                 {plan.artifact.title}
                             </h2>
                             <p className="mt-1 text-sm leading-relaxed text-neutral-600">
-                                Plan the smallest necessary review. Nothing here edits or regenerates this output.
+                                Planning alone does not edit this output. If you later approve and apply a bounded proposal, Synapse creates a new artifact version without regenerating the full output.
                             </p>
                         </div>
                         <button ref={closeRef} type="button" onClick={onClose} aria-label="Close update plan" className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">
@@ -429,7 +429,7 @@ export function DownstreamUpdatePlanReview({
                             <div className="min-w-0 text-xs leading-relaxed text-neutral-600">
                                 <div className="font-semibold text-neutral-900">Unaffected work is preserved</div>
                                 <p className="mt-0.5 break-words">{plan.preservedArtifactSummary}</p>
-                                <p className="mt-1">Planning these reviews does not change artifact content, regenerate an output, or clear its underlying alignment state.</p>
+                                <p className="mt-1">Planning does not change artifact content. Only a separately approved selective proposal can create a new version; Synapse does not regenerate the full output or clear alignment automatically.</p>
                             </div>
                         </div>
                     </footer>

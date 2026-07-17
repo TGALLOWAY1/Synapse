@@ -2,6 +2,7 @@ import type {
     CoreArtifactSubtype, DomainEntity, Feature, FeatureSystem, ImplementationPlan, ProjectTask, StalenessState, UXPage,
 } from '../../types';
 import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
+import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -46,7 +47,7 @@ interface DispatchProps {
     initialFlowId?: string;
     initialFlowStepIndex?: number;
     initialDataEntityName?: string;
-    initialImplementationMilestoneId?: string;
+    initialImplementationTarget?: ImplementationPlanNavigationTarget;
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
     promptPackContent?: string;
@@ -117,7 +118,7 @@ export function ArtifactContentRenderer({
     initialFlowId,
     initialFlowStepIndex,
     initialDataEntityName,
-    initialImplementationMilestoneId,
+    initialImplementationTarget,
     promptPackContent,
     savedTasks,
     onConvertToTasks,
@@ -180,7 +181,7 @@ export function ArtifactContentRenderer({
                 onConvertToTasks={onConvertToTasks}
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
-                initialMilestoneId={initialImplementationMilestoneId}
+                initialNavigationTarget={initialImplementationTarget}
             />
         );
     }

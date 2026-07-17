@@ -24,7 +24,11 @@ import type {
     DownstreamUpdatePlanCurrentContext,
     DownstreamUpdatePlanItem,
 } from './downstreamUpdatePlan';
-import { latestDownstreamUpdatePlanItemState, validateDownstreamUpdatePlanIntegrity } from './downstreamUpdatePlan';
+import {
+    latestDownstreamUpdatePlanItemState,
+    supersededDownstreamUpdatePlanItemKeys,
+    validateDownstreamUpdatePlanIntegrity,
+} from './downstreamUpdatePlan';
 import type { ProjectOutputAlignmentSummary } from './outputAlignment';
 import { resolveDownstreamUpdateRegionContent } from './downstreamRegionContent';
 import { removedDownstreamUpdateRegionHash } from './screenFlowArtifactUpdates';
@@ -280,6 +284,7 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
     reviewEvents: DownstreamArtifactUpdateReviewEvent[];
 }): DownstreamVerificationProjection[] {
     if (!input.context) return [];
+    const supersededItems = supersededDownstreamUpdatePlanItemKeys(input.plans);
     return input.plans.filter(validateDownstreamUpdatePlanIntegrity).flatMap(plan => {
         if (!sourceCurrent(plan, input.context!)) return [];
         const artifact = input.artifacts.find(candidate => candidate.id === plan.artifact.artifactId);
@@ -287,7 +292,7 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
             ? input.artifactVersions.find(candidate => candidate.id === artifact.currentVersionId)
             : undefined;
         if (!currentVersion) return [];
-        return plan.items.map(item => {
+        return plan.items.filter(item => !supersededItems.has(`${plan.id}:${item.id}`)).map(item => {
             const verification = input.verifications
                 .filter(candidate => candidate.subject?.planId === plan.id
                     && candidate.subject.itemId === item.id
@@ -346,10 +351,11 @@ export function deriveVerifiedDownstreamUpdatePlanSummary(input: {
     projections: DownstreamVerificationProjection[];
 }): DownstreamUpdatePlanSummary {
     if (!input.context) return input.base;
+    const supersededItems = supersededDownstreamUpdatePlanItemKeys(input.plans);
     const items: DownstreamUpdatePlanSummaryItem[] = input.plans
         .filter(validateDownstreamUpdatePlanIntegrity)
         .filter(plan => sourceCurrent(plan, input.context!))
-        .flatMap(plan => plan.items.map(item => {
+        .flatMap(plan => plan.items.filter(item => !supersededItems.has(`${plan.id}:${item.id}`)).map(item => {
             const state = latestDownstreamUpdatePlanItemState(plan, input.events, item.id);
             const verification = input.projections.find(candidate => candidate.planId === plan.id && candidate.itemId === item.id);
             return {
@@ -383,9 +389,15 @@ export function deriveVerifiedDownstreamUpdatePlanSummary(input: {
     const advisoryItems = items.filter(item => item.certainty !== 'definite' && !handled(item));
     const reviewedItems = items.filter(handled);
     return {
-        currentPlanCount: new Set(items.map(item => item.planId)).size,
+        currentPlanCount: input.plans.filter(validateDownstreamUpdatePlanIntegrity)
+            .filter(plan => sourceCurrent(plan, input.context!)
+                && plan.artifact.artifactVersionId === input.context!.artifactVersions[plan.artifact.artifactId]?.versionId
+                && plan.artifact.artifactContentHash === input.context!.artifactVersions[plan.artifact.artifactId]?.contentHash).length,
         historicalPlanCount: input.plans.filter(validateDownstreamUpdatePlanIntegrity).length
-            - new Set(items.map(item => item.planId)).size,
+            - input.plans.filter(validateDownstreamUpdatePlanIntegrity)
+                .filter(plan => sourceCurrent(plan, input.context!)
+                    && plan.artifact.artifactVersionId === input.context!.artifactVersions[plan.artifact.artifactId]?.versionId
+                    && plan.artifact.artifactContentHash === input.context!.artifactVersions[plan.artifact.artifactId]?.contentHash).length,
         blockingItems: blockingItems.sort((a, b) => a.priority - b.priority || a.itemId.localeCompare(b.itemId)),
         advisoryItems: advisoryItems.sort((a, b) => a.priority - b.priority || a.itemId.localeCompare(b.itemId)),
         reviewedItems: reviewedItems.sort((a, b) => a.priority - b.priority || a.itemId.localeCompare(b.itemId)),

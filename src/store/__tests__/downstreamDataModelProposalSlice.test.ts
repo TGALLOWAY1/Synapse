@@ -87,7 +87,8 @@ describe('data-model proposal store integration', () => {
         expect(child.content.split('## PersonalPreference')[1]).toBe(content.split('## PersonalPreference')[1]);
         expect(state.artifactVersions[projectId].find(candidate => candidate.id === version.id)?.content).toBe(content);
         expect(state.downstreamArtifactUpdateApplications[projectId]).toHaveLength(1);
-        expect(state.downstreamArtifactUpdateVerifications[projectId] ?? []).toEqual([]);
+        expect(state.downstreamArtifactUpdateVerifications[projectId]).toHaveLength(1);
+        expect(state.downstreamArtifactUpdateVerifications[projectId][0]).toMatchObject({ result: 'aligned' });
         expect(state.applyDownstreamArtifactUpdateProposal(projectId, generated.proposalId))
             .toEqual({ status: 'rejected', reason: 'stale' });
     });

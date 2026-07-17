@@ -22,6 +22,8 @@ type ProposalInput = {
     artifactVersion: ArtifactVersion;
     createdAt?: number;
     requestNonce?: string;
+    /** User-supplied planning context is preserved in proposal reasoning but never interpreted as exact structured content. */
+    userContext?: string;
 };
 
 export type ScreenFlowProposalResult =
@@ -103,7 +105,7 @@ export function deriveScreenFlowArtifactUpdateProposal(input: ProposalInput): Sc
     const requestNonce = input.requestNonce ?? 'initial';
     const generator = {
         provider: 'synapse', model: 'bounded-structural-planner',
-        promptHash: hashReviewValue({ plan: plan.integrityHash, item, requestNonce }),
+        promptHash: hashReviewValue({ plan: plan.integrityHash, item, requestNonce, userContext: input.userContext }),
         reasoningVersion: 'phase-5-screen-flow-v1',
     };
     return { ok: true, proposal: sealDownstreamArtifactUpdateProposal({
@@ -129,6 +131,8 @@ export function deriveScreenFlowArtifactUpdateProposal(input: ProposalInput): Sc
         evidence: item.evidence,
         reasoning: exactRemoval
             ? 'The confirmed source change and direct dependency evidence support removing only this exact obsolete region.'
+            : input.userContext
+                ? 'The user supplied additional planning context. It is preserved with this review, but it does not define a machine-safe exact structured replacement, so manual change remains safer.'
             : 'The dependency warrants review, but the durable project state does not specify a safe exact replacement. Add context or make a manual change.',
         certainty: item.certainty,
         ...(item.ambiguity ? { ambiguity: item.ambiguity } : {}),

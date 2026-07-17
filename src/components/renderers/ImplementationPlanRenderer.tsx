@@ -15,6 +15,7 @@ import {
     type ImplementationPlanProgress,
 } from '../../lib/services/implementationPlanInsights';
 import { ConsolidatedPlanView } from './implementationPlan/ConsolidatedPlanView';
+import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
 
 // Render an `implementation_plan` artifact.
 //
@@ -53,6 +54,8 @@ interface Props {
     onUpdatePlanProgress?: (next: ImplementationPlanProgress) => void;
     /** Opens the exact milestone selected from a bounded downstream update plan. */
     initialMilestoneId?: string;
+    /** Opens an exact architecture or delivery-plan region when it can be resolved safely. */
+    initialNavigationTarget?: ImplementationPlanNavigationTarget;
 }
 
 function inlineMd(text: string) {
@@ -221,6 +224,7 @@ export function ImplementationPlanRenderer({
     metadata,
     onUpdatePlanProgress,
     initialMilestoneId,
+    initialNavigationTarget,
 }: Props) {
     const consolidated = useMemo(
         () => {
@@ -238,7 +242,7 @@ export function ImplementationPlanRenderer({
     if (consolidated) {
         return (
             <ConsolidatedPlanView
-                key={initialMilestoneId ?? 'implementation-plan'}
+                key={initialNavigationTarget?.anchorId ?? initialMilestoneId ?? 'implementation-plan'}
                 plan={consolidated}
                 prdVersionLabel={prdVersionLabel}
                 staleness={staleness}
@@ -248,6 +252,7 @@ export function ImplementationPlanRenderer({
                 progress={onUpdatePlanProgress ? progress : undefined}
                 onUpdateProgress={onUpdatePlanProgress}
                 initialMilestoneId={initialMilestoneId}
+                initialNavigationTarget={initialNavigationTarget}
             />
         );
     }
