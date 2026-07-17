@@ -80,6 +80,16 @@ const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
 });
 
 describe('ReviewWorkspace', () => {
+    it('updates the active surface when an exact target arrives while mounted', () => {
+        const props = baseProps({ initialTab: 'review' });
+        const { rerender } = render(<ReviewWorkspace {...props} />);
+        expect(screen.getByRole('button', { name: 'Review findings' })).toHaveClass('border-indigo-600');
+
+        rerender(<ReviewWorkspace {...props} initialTab="decisions" />);
+        expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
+        expect(screen.getByRole('heading', { name: 'Decision Center' })).toBeInTheDocument();
+    });
+
     it('keeps all three navigation targets reachable at mobile width', () => {
         render(<ReviewWorkspace {...baseProps()} />);
 
@@ -203,7 +213,7 @@ describe('ReviewWorkspace', () => {
         render(<ReviewWorkspace {...baseProps({ planningRecords: records, onConfirmPlanningRecord })} />);
 
         fireEvent.click(screen.getByRole('button', { name: /Decision Center/ }));
-        expect(screen.getByText('proposed')).toBeInTheDocument();
+        expect(screen.getAllByText('Needs your decision').length).toBeGreaterThan(0);
         fireEvent.click(screen.getByRole('button', { name: 'Confirm decision' }));
         expect(onConfirmPlanningRecord).toHaveBeenCalledWith('record-1');
     });

@@ -2,6 +2,8 @@ import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Circle, Compass, 
 import {
     planningReadinessCopy,
     projectCommitmentCopy,
+    type PlanningAttentionSummary,
+    type PlanningDestination,
     type PlanningReadiness,
     type ProjectCommitmentCondition,
 } from '../../lib/planning';
@@ -14,6 +16,8 @@ interface Props {
     onReviewReadiness: () => void;
     onOpenDecisions: () => void;
     onOpenChallenge: () => void;
+    attention?: PlanningAttentionSummary;
+    onOpenAttention?: (destination: PlanningDestination) => void;
 }
 
 const phaseTone: Record<PlanningReadiness['phase'], string> = {
@@ -24,7 +28,7 @@ const phaseTone: Record<PlanningReadiness['phase'], string> = {
     ready_to_build: 'border-emerald-200 bg-emerald-50 text-emerald-950',
 };
 
-export function PlanningStateBar({ readiness, committed, legacyCommitted = false, onNextAction, onReviewReadiness, onOpenDecisions, onOpenChallenge }: Props) {
+export function PlanningStateBar({ readiness, committed, legacyCommitted = false, onNextAction, onReviewReadiness, onOpenDecisions, onOpenChallenge, attention, onOpenAttention }: Props) {
     const nextGoesToChallenge = readiness.nextAction.kind === 'challenge_plan';
     const commitmentCondition: ProjectCommitmentCondition = legacyCommitted
         ? 'legacy_commitment'
@@ -33,6 +37,7 @@ export function PlanningStateBar({ readiness, committed, legacyCommitted = false
             : 'working_plan';
     const commitmentCopy = projectCommitmentCopy(commitmentCondition);
     const readinessCopy = planningReadinessCopy(readiness.phase);
+    const primaryAttention = attention?.primary;
     return (
         <section className={`mb-5 rounded-2xl border p-4 sm:p-5 ${phaseTone[readiness.phase]}`} aria-labelledby="planning-state-heading">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -49,13 +54,41 @@ export function PlanningStateBar({ readiness, committed, legacyCommitted = false
                     <p className="mt-1 max-w-2xl text-sm leading-6 opacity-80">{readiness.summary}</p>
                 </div>
                 <button type="button" onClick={nextGoesToChallenge ? onOpenChallenge : onNextAction} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-neutral-950 px-4 text-sm font-semibold text-white hover:bg-neutral-800">
-                    {readiness.nextAction.label}<ArrowRight size={15} />
+                    {primaryAttention?.actionLabel ?? readiness.nextAction.label}<ArrowRight size={15} />
                 </button>
             </div>
             <div className="mt-4 rounded-xl bg-white/65 px-3 py-3">
                 <p className="text-xs font-bold uppercase tracking-wider opacity-60">Most valuable next step</p>
-                <p className="mt-1 text-sm font-semibold">{readiness.nextAction.detail}</p>
+                <p className="mt-1 text-sm font-semibold">{primaryAttention?.title ?? readiness.nextAction.detail}</p>
+                {primaryAttention?.why && primaryAttention.why !== primaryAttention.title && (
+                    <p className="mt-1 text-xs leading-5 opacity-70">{primaryAttention.why}</p>
+                )}
             </div>
+            {attention && attention.secondary.length > 0 && onOpenAttention && (
+                <details className="mt-3 rounded-xl bg-white/45 px-3 py-1 group">
+                    <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold opacity-75">
+                        <ChevronDown size={15} className="transition group-open:rotate-180" />
+                        Other items needing attention
+                        {attention.hiddenCount > 0 && <span className="text-xs font-medium opacity-60">+{attention.hiddenCount} more</span>}
+                    </summary>
+                    <div className="border-t border-current/10 py-2">
+                        {attention.secondary.map(item => (
+                            <button
+                                key={item.key}
+                                type="button"
+                                onClick={() => onOpenAttention(item.destination)}
+                                className="flex min-h-11 w-full items-center justify-between gap-3 rounded-lg px-2 py-2 text-left hover:bg-white/70"
+                            >
+                                <span className="min-w-0">
+                                    <span className="block text-sm font-semibold">{item.title}</span>
+                                    <span className="mt-0.5 block text-xs leading-5 opacity-70">{item.why}</span>
+                                </span>
+                                <span className="shrink-0 text-xs font-semibold">{item.actionLabel}</span>
+                            </button>
+                        ))}
+                    </div>
+                </details>
+            )}
             <details className="mt-3 group">
                 <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold opacity-75">
                     <ChevronDown size={15} className="transition group-open:rotate-180" /> Why Synapse sees it this way

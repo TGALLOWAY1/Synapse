@@ -24,6 +24,17 @@ const callbacks = () => ({
 });
 
 describe('DecisionCenter', () => {
+    it('switches to a newly linked exact record while the center remains mounted', () => {
+        const resolved = { ...openRecord, id: 'resolved', title: 'Resolved audience', status: 'confirmed' as const, resolution: 'Independent creators' };
+        const props = callbacks();
+        const { rerender } = render(<DecisionCenter records={[openRecord, resolved]} initialSelectedId="d1" {...props} />);
+        expect(screen.getByRole('button', { name: /Should guests start without an account/ })).toHaveAttribute('aria-current', 'true');
+
+        rerender(<DecisionCenter records={[openRecord, resolved]} initialSelectedId="resolved" {...props} />);
+        expect(screen.getByRole('button', { name: /Resolved audience/ })).toHaveAttribute('aria-current', 'true');
+        expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
+    });
+
     it('shows a calm queue/detail layout with recommendation distinct from user actions', () => {
         const props = callbacks();
         const { rerender } = render(<DecisionCenter records={[openRecord]} {...props} />);

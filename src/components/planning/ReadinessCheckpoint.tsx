@@ -68,6 +68,7 @@ export type ReadinessOverrideInput = {
 
 interface ReadinessCheckpointProps {
     review: ReadinessCheckpointView;
+    initialConcernId?: string;
     readOnly?: boolean;
     submitting?: boolean;
     submitError?: string | null;
@@ -88,6 +89,7 @@ const statusIcon = (status: ReadinessCheckpointCriterionView['status']) => {
 
 export function ReadinessCheckpoint({
     review,
+    initialConcernId,
     readOnly = false,
     submitting = false,
     submitError,
@@ -103,6 +105,13 @@ export function ReadinessCheckpoint({
     const [attemptedSubmit, setAttemptedSubmit] = useState(false);
     const overrideSectionRef = useRef<HTMLElement>(null);
     const rationaleRef = useRef<HTMLTextAreaElement>(null);
+
+    useEffect(() => {
+        if (!initialConcernId || !review.concerns.some(concern => concern.id === initialConcernId)) return;
+        window.requestAnimationFrame(() => {
+            document.getElementById(`readiness-concern-${initialConcernId}`)?.scrollIntoView({ block: 'center' });
+        });
+    }, [initialConcernId, review.concerns]);
 
     const requiresContainment = useMemo(
         () => review.concerns.some(concern => concern.severity === 'blocker'),
@@ -263,7 +272,7 @@ export function ReadinessCheckpoint({
                             </div>
                             <div className="mt-3 space-y-3">
                                 {review.concerns.map((concern, index) => (
-                                    <article key={concern.id} className="rounded-xl border border-neutral-200 p-4">
+                                    <article id={`readiness-concern-${concern.id}`} key={concern.id} className="scroll-mt-20 rounded-xl border border-neutral-200 p-4">
                                         <div className="flex items-start gap-3">
                                             {concern.severity === 'blocker'
                                                 ? <ShieldAlert size={18} className="mt-0.5 shrink-0 text-red-600" />

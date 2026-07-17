@@ -175,7 +175,10 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
         render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
         expect(screen.getByText(/Affected: Primary market promise/)).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
-        expect(onOpenDecisions).toHaveBeenCalledOnce();
+        expect(onOpenDecisions).toHaveBeenCalledWith('conflict-1', {
+            destination: { kind: 'prd', anchorId: 'prd-uncertainty-vision' },
+            label: 'Return to Vision',
+        });
     });
 
     it('renders no MVP Scope section — the Implementation Summary is the single scope surface', () => {

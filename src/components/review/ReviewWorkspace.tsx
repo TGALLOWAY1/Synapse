@@ -710,6 +710,11 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
 
 export function ReviewWorkspace(props: ReviewWorkspaceProps) {
     const [tab, setTab] = useState<'review' | 'decisions' | 'history'>(props.initialTab ?? 'review');
+    const [lastInitialTab, setLastInitialTab] = useState(props.initialTab);
+    if (props.initialTab !== lastInitialTab) {
+        setLastInitialTab(props.initialTab);
+        if (props.initialTab) setTab(props.initialTab);
+    }
     const [startingNewReview, setStartingNewReview] = useState(false);
     const activeRun = startingNewReview ? undefined : (props.runs.find(run => run.id === props.activeRunId) ?? props.runs[0]);
     const chronologicalRuns = useMemo(() => [...props.runs].sort((a, b) => b.capturedAt - a.capturedAt), [props.runs]);

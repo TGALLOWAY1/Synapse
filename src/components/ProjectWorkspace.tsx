@@ -1,8 +1,8 @@
-import { useParams, useNavigate } from 'react-router-dom';
+import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity } from 'lucide-react';
-import { useState, useRef, useEffect, useLayoutEffect } from 'react';
+import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD } from '../lib/llmProvider';
@@ -48,6 +48,7 @@ import { canPerformProjectAction } from '../lib/projectCapabilities';
 import {
     compareReadinessReviewCurrentness,
     compareReadinessReviewProjections,
+    derivePlanningAttention,
     derivePlanningReadiness,
     deriveReadinessChallengeState,
     deriveReadinessCommitmentState,
@@ -60,12 +61,23 @@ import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/Rea
 import { buildReadinessCheckpointView, readinessNavigationDestination } from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
 import { buildReviewContextManifest } from '../lib/review/manifest';
+import {
+    PLANNING_NAVIGATION_QUERY_PARAM,
+    parsePlanningNavigationIntent,
+    validatePlanningDestination,
+    withPlanningNavigationIntent,
+    type PlanningArtifactRegionTarget,
+    type PlanningNavigationIntent,
+    type PlanningDestination,
+    type PlanningReturnTarget,
+} from '../lib/planning/planningNavigation';
 
 const EMPTY_PROJECT_LIST: never[] = [];
 
 export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
+    const [searchParams, setSearchParams] = useSearchParams();
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
     const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
@@ -80,6 +92,8 @@ export function ProjectWorkspace() {
     const reviewFindings = useProjectStore((s) => (projectId ? s.reviewFindings[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const readinessReviews = useProjectStore((s) => (projectId ? s.readinessReviews[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const readinessCommitmentEvents = useProjectStore((s) => (projectId ? s.readinessCommitmentEvents[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const navigationArtifacts = useProjectStore((s) => (projectId ? s.artifacts[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const downstreamUpdatePlans = useProjectStore((s) => (projectId ? s.downstreamUpdatePlans[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const planningSourceSpine = useProjectStore((s) => projectId
         ? (s.spineVersions[projectId] ?? EMPTY_PROJECT_LIST).find(spine => spine.isLatest)
         : undefined);
@@ -113,6 +127,7 @@ export function ProjectWorkspace() {
     // Design direction is requested only when output generation begins.
     const [showPresetChoice, setShowPresetChoice] = useState(false);
     const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
+    const [readinessInitialConcernId, setReadinessInitialConcernId] = useState<string>();
     const [readinessSubmitError, setReadinessSubmitError] = useState<string | null>(null);
     const [isReadinessSubmitting, setIsReadinessSubmitting] = useState(false);
     const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
@@ -122,6 +137,10 @@ export function ProjectWorkspace() {
     const [reviewInitialFindingId, setReviewInitialFindingId] = useState<string>();
     const [workspaceInitialNode, setWorkspaceInitialNode] = useState<ArtifactSlotKey>();
     const [workspaceInitialArtifactId, setWorkspaceInitialArtifactId] = useState<string>();
+    const [workspaceInitialRegion, setWorkspaceInitialRegion] = useState<PlanningArtifactRegionTarget>();
+    const [workspaceInitialUpdatePlanId, setWorkspaceInitialUpdatePlanId] = useState<string>();
+    const [workspaceInitialUpdatePlanItemId, setWorkspaceInitialUpdatePlanItemId] = useState<string>();
+    const lastPlanningIntentRef = useRef<PlanningNavigationIntent | undefined>(undefined);
     // Carries an explicit generation request across the design-preset choice.
     const generateAfterPreset = useRef(false);
     const overflowRef = useRef<HTMLDivElement>(null);
@@ -133,6 +152,97 @@ export function ProjectWorkspace() {
     const [animationParent] = useAutoAnimate();
     const [isResettingDemo, setIsResettingDemo] = useState(false);
     const [demoResetError, setDemoResetError] = useState<string | null>(null);
+
+    const planningIntent = useMemo(
+        () => parsePlanningNavigationIntent(searchParams.get(PLANNING_NAVIGATION_QUERY_PARAM)),
+        [searchParams],
+    );
+
+    const writePlanningIntent = (intent?: PlanningNavigationIntent, replace = false) => {
+        if (!intent) lastPlanningIntentRef.current = undefined;
+        setSearchParams(current => {
+            const next = withPlanningNavigationIntent(current, intent);
+            const screenId = intent?.destination.kind === 'artifact' ? intent.destination.region?.screenId : undefined;
+            if (!screenId) {
+                next.delete('screen');
+                next.delete('screenTab');
+            }
+            return next;
+        }, { replace });
+    };
+
+    // The project workspace is the single presentation resolver. Navigation
+    // state is deliberately URL-only and never enters planning hashes or user
+    // authority. Missing exact targets fail to a readable parent surface.
+    useEffect(() => {
+        if (!projectId) return;
+        const previousIntent = lastPlanningIntentRef.current;
+        lastPlanningIntentRef.current = planningIntent;
+        // Browser Back removes the destination query. When that destination
+        // carried an explicit origin, restore the origin presentation once;
+        // the URL remains clean and no planning data is mutated.
+        const effectiveIntent = planningIntent ?? (previousIntent?.returnTo
+            ? { destination: previousIntent.returnTo.destination }
+            : undefined);
+        if (!effectiveIntent) return;
+        const destination = validatePlanningDestination(effectiveIntent.destination, {
+            planningRecordIds: new Set(planningRecords.map(record => record.id)),
+            reviewIds: new Set(reviewRuns.map(review => review.id)),
+            reviewIssueIds: new Set(reviewIssues.map(issue => issue.id)),
+            reviewFindingIds: new Set(reviewFindings.map(finding => finding.id)),
+            readinessReviewIds: new Set(readinessReviews.map(review => review.id)),
+            artifactIds: new Set(navigationArtifacts.map(artifact => artifact.id)),
+            updatePlanIds: new Set(downstreamUpdatePlans.map(plan => plan.id)),
+        });
+        if (destination.kind === 'prd') {
+            setSelectedReadinessReviewId(null);
+            setProjectStage(projectId, 'prd');
+            if (destination.anchorId) window.requestAnimationFrame(() => window.requestAnimationFrame(() => {
+                document.getElementById(destination.anchorId!)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+            }));
+            return;
+        }
+        if (destination.kind === 'decision_center' || destination.kind === 'planning_record') {
+            setReviewInitialTab('decisions');
+            setReviewInitialRecordId(destination.kind === 'planning_record' ? destination.recordId : undefined);
+            setReviewInitialRunId(undefined);
+            setReviewInitialIssueId(undefined);
+            setReviewInitialFindingId(undefined);
+            setProjectStage(projectId, 'review');
+            return;
+        }
+        if (destination.kind === 'challenge') {
+            setReviewInitialTab('review');
+            setReviewInitialRecordId(undefined);
+            setReviewInitialRunId(destination.reviewId);
+            setReviewInitialIssueId(destination.issueId);
+            setReviewInitialFindingId(destination.findingId);
+            setProjectStage(projectId, 'review');
+            return;
+        }
+        if (destination.kind === 'readiness') {
+            setReadinessInitialConcernId(destination.concernId);
+            setSelectedReadinessReviewId(destination.reviewId);
+            return;
+        }
+        if (destination.kind === 'artifact') {
+            setFinalizeAutoOpen(false);
+            setWorkspaceInitialNode(destination.nodeId);
+            setWorkspaceInitialArtifactId(destination.artifactId);
+            setWorkspaceInitialRegion(destination.region);
+            setWorkspaceInitialUpdatePlanId(undefined);
+            setWorkspaceInitialUpdatePlanItemId(undefined);
+            setProjectStage(projectId, 'workspace');
+            return;
+        }
+        const plan = downstreamUpdatePlans.find(candidate => candidate.id === destination.planId);
+        setFinalizeAutoOpen(false);
+        setWorkspaceInitialNode(destination.nodeId ?? plan?.artifact.slot);
+        setWorkspaceInitialArtifactId(destination.artifactId ?? plan?.artifact.artifactId);
+        setWorkspaceInitialUpdatePlanId(destination.planId);
+        setWorkspaceInitialUpdatePlanItemId(destination.itemId);
+        setProjectStage(projectId, 'workspace');
+    }, [downstreamUpdatePlans, navigationArtifacts, planningIntent, planningRecords, projectId, readinessReviews, reviewFindings, reviewIssues, reviewRuns, setProjectStage]);
 
     const handleResetDemo = async () => {
         if (isResettingDemo) return;
@@ -236,6 +346,7 @@ export function ProjectWorkspace() {
     };
     const handlePipelineStageChange = (stage: PipelineStage) => {
         if (stage === 'review') setReviewInitialTab('review');
+        writePlanningIntent(undefined);
         setPipelineStage(stage);
     };
 
@@ -379,7 +490,7 @@ export function ProjectWorkspace() {
     const strictChallenge = readinessReviewInput
         ? deriveReadinessChallengeState(readinessReviewInput)
         : undefined;
-    const planningReadiness = derivePlanningReadiness({
+    const planningReadinessInput = {
         prd: activeSpine?.structuredPRD,
         planningRecords,
         incompleteSectionCount: persistedFailedSections.length,
@@ -393,6 +504,12 @@ export function ProjectWorkspace() {
         isCommitted: displaysCurrentCommitment,
         currentSpineVersionId: activeSpine?.id,
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
+    };
+    const planningReadiness = derivePlanningReadiness(planningReadinessInput);
+    const planningAttention = derivePlanningAttention({
+        ...planningReadinessInput,
+        reviewIssues,
+        outputAlignments: outputAlignment.outputs,
     });
     const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput
@@ -735,6 +852,8 @@ export function ProjectWorkspace() {
         setReadinessSubmitError(null);
         const result = createReadinessReview(projectId);
         if (result.status === 'created') {
+            writePlanningIntent({ destination: { kind: 'readiness', reviewId: result.reviewId } });
+            setReadinessInitialConcernId(undefined);
             setSelectedReadinessReviewId(result.reviewId);
             return;
         }
@@ -767,6 +886,7 @@ export function ProjectWorkspace() {
                 return;
             }
             setSelectedReadinessReviewId(null);
+            writePlanningIntent(undefined, true);
             setShowFinalizeSuccess(true);
         } finally {
             setIsReadinessSubmitting(false);
@@ -837,38 +957,61 @@ export function ProjectWorkspace() {
         startAssetGeneration();
     };
 
-    const openDecisionCenter = (recordId?: string) => {
+    const openDecisionCenter = (recordId?: string, returnTo?: PlanningReturnTarget) => {
         setReviewInitialTab('decisions');
         setReviewInitialRecordId(recordId);
         setReviewInitialRunId(undefined);
         setReviewInitialIssueId(undefined);
         setReviewInitialFindingId(undefined);
+        writePlanningIntent(recordId
+            ? { destination: { kind: 'planning_record', recordId }, ...(returnTo ? { returnTo } : {}) }
+            : { destination: { kind: 'decision_center' }, ...(returnTo ? { returnTo } : {}) });
         setPipelineStage('review');
     };
 
-    const openChallenge = (reviewId?: string, issueId?: string, findingId?: string) => {
+    const openChallenge = (reviewId?: string, issueId?: string, findingId?: string, returnTo?: PlanningReturnTarget) => {
         setReviewInitialTab('review');
         setReviewInitialRecordId(undefined);
         setReviewInitialRunId(reviewId);
         setReviewInitialIssueId(issueId);
         setReviewInitialFindingId(findingId);
+        writePlanningIntent({
+            destination: { kind: 'challenge', reviewId, issueId, findingId },
+            ...(returnTo ? { returnTo } : {}),
+        });
         setPipelineStage('review');
     };
 
-    const navigateReadinessTarget = (target: ReadinessActionTarget) => {
+    const navigateReadinessTarget = (target: ReadinessActionTarget, concernId?: string) => {
+        const returnTo: PlanningReturnTarget | undefined = selectedReadinessReview ? {
+            destination: {
+                kind: 'readiness',
+                reviewId: selectedReadinessReview.id,
+                ...(concernId ? { concernId } : {}),
+            },
+            label: 'Return to readiness checkpoint',
+        } : undefined;
         setSelectedReadinessReviewId(null);
         setReadinessSubmitError(null);
         const destination = readinessNavigationDestination(target);
         if (destination.stage === 'review' && destination.tab === 'decisions') {
-            return openDecisionCenter(destination.planningRecordId);
+            return openDecisionCenter(destination.planningRecordId, returnTo);
         }
-        if (destination.stage === 'review') return openChallenge(destination.reviewId, destination.issueId, destination.findingId);
+        if (destination.stage === 'review') return openChallenge(destination.reviewId, destination.issueId, destination.findingId, returnTo);
         if (destination.stage === 'workspace') {
             setFinalizeAutoOpen(false);
             setWorkspaceInitialNode(destination.nodeId);
             setWorkspaceInitialArtifactId(destination.artifactId);
+            writePlanningIntent({
+                destination: { kind: 'artifact', nodeId: destination.nodeId, artifactId: destination.artifactId },
+                ...(returnTo ? { returnTo } : {}),
+            });
             return setPipelineStage('workspace');
         }
+        writePlanningIntent({
+            destination: { kind: 'prd', anchorId: destination.anchorId },
+            ...(returnTo ? { returnTo } : {}),
+        });
         setPipelineStage('prd');
         window.requestAnimationFrame(() => {
             document.getElementById(destination.anchorId)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
@@ -877,7 +1020,7 @@ export function ProjectWorkspace() {
 
     const handleReadinessConcern = (concernId: string) => {
         const concern = selectedReadinessReview?.concerns.find(item => item.id === concernId);
-        if (concern) navigateReadinessTarget(concern.actionTarget);
+        if (concern) navigateReadinessTarget(concern.actionTarget, concernId);
     };
 
     const handlePlanningNextAction = () => {
@@ -892,6 +1035,10 @@ export function ProjectWorkspace() {
         if (kind === 'commit_plan') return handleToggleFinal();
         const anchor = kind === 'confirm_scope' ? 'prd-features' : 'prd-coreProblem';
         document.getElementById(anchor)?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+    };
+
+    const openPlanningAttention = (destination: PlanningDestination) => {
+        writePlanningIntent({ destination });
     };
 
     const handleExport = () => {
@@ -1074,11 +1221,14 @@ export function ProjectWorkspace() {
             {selectedReadinessView && (
                 <ReadinessCheckpoint
                     review={selectedReadinessView}
+                    initialConcernId={readinessInitialConcernId}
                     submitting={isReadinessSubmitting}
                     submitError={readinessSubmitError}
                     onClose={() => {
                         setSelectedReadinessReviewId(null);
+                        setReadinessInitialConcernId(undefined);
                         setReadinessSubmitError(null);
+                        if (planningIntent?.destination.kind === 'readiness') writePlanningIntent(undefined, true);
                     }}
                     onAddressConcern={handleReadinessConcern}
                     onRefresh={openCurrentReadinessCheckpoint}
@@ -1183,6 +1333,18 @@ export function ProjectWorkspace() {
                 </div>
             )}
 
+            {planningIntent?.returnTo && (
+                <div className="shrink-0 border-b border-indigo-200 bg-indigo-50 px-4 py-2 text-sm text-indigo-950 z-10">
+                    <button
+                        type="button"
+                        onClick={() => writePlanningIntent({ destination: planningIntent.returnTo!.destination }, true)}
+                        className="inline-flex min-h-11 items-center gap-2 rounded-lg px-2 font-semibold hover:bg-indigo-100 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500"
+                    >
+                        <ChevronLeft size={16} /> {planningIntent.returnTo.label}
+                    </button>
+                </div>
+            )}
+
             {/* Main Workspace Area — flex-1 fills remaining height */}
             <div className="flex-1 flex overflow-hidden">
                 {pipelineStage === 'workspace' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
@@ -1203,10 +1365,17 @@ export function ProjectWorkspace() {
                             onAutoOpenConsumed={() => setFinalizeAutoOpen(false)}
                             initialSelection={workspaceInitialNode}
                             initialArtifactId={workspaceInitialArtifactId}
+                            initialRegion={workspaceInitialRegion}
+                            initialUpdatePlanId={workspaceInitialUpdatePlanId}
+                            initialUpdatePlanItemId={workspaceInitialUpdatePlanItemId}
                             onOpenPlanningRecord={openDecisionCenter}
+                            onNavigatePlanning={intent => writePlanningIntent(intent)}
                             onInitialSelectionConsumed={() => {
                                 setWorkspaceInitialNode(undefined);
                                 setWorkspaceInitialArtifactId(undefined);
+                                setWorkspaceInitialRegion(undefined);
+                                setWorkspaceInitialUpdatePlanId(undefined);
+                                setWorkspaceInitialUpdatePlanItemId(undefined);
                             }}
                         />
                     </div>
@@ -1423,6 +1592,8 @@ export function ProjectWorkspace() {
                                                         onReviewReadiness={openCurrentReadinessCheckpoint}
                                                         onOpenDecisions={openDecisionCenter}
                                                         onOpenChallenge={openChallenge}
+                                                        attention={planningAttention}
+                                                        onOpenAttention={openPlanningAttention}
                                                     />
                                                 )}
                                                 <StructuredPRDView

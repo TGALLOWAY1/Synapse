@@ -163,6 +163,18 @@ export function DecisionCenter({
     const [proposalEdits, setProposalEdits] = useState<Record<string, string>>({});
     const [proposalRequest, setProposalRequest] = useState<{ proposalId: string; kind: 'missing_info' | 'different_interpretation' }>();
     const [proposalGuidance, setProposalGuidance] = useState('');
+    const [lastInitialSelectedId, setLastInitialSelectedId] = useState(initialSelectedId);
+    if (initialSelectedId !== lastInitialSelectedId) {
+        setLastInitialSelectedId(initialSelectedId);
+        const target = records.find(record => record.id === initialSelectedId);
+        if (target) {
+            setView(needsAttention(target) ? 'needs_review' : 'log');
+            setSelectedId(target.id);
+            setMobileDetailOpen(true);
+            setCustomAnswer('');
+            setRationale('');
+        }
+    }
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
     const selectedHasCurrentAssumptionConclusion = selected?.type === 'assumption'

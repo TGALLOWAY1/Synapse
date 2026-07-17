@@ -25,6 +25,7 @@ import { splitAssumptions, deriveDecisionLog } from '../lib/derive/prdDecisions'
 import { assumptionSourceKey } from '../lib/planning/assumptionImport';
 import { projectDecision } from '../lib/planning/decisionProjection';
 import type { ConsequentialPrdEditRecognition } from '../lib/planning';
+import type { PlanningReturnTarget } from '../lib/planning/planningNavigation';
 import {
     deriveDeferredFeatureIds,
     deriveImplementationSummary,
@@ -54,7 +55,7 @@ interface StructuredPRDViewProps {
     spineId: string;
     structuredPRD: StructuredPRD;
     readOnly: boolean;
-    onOpenDecisions?: (recordId?: string) => void;
+    onOpenDecisions?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
 }
 
 const EMPTY_PLANNING_RECORDS: PlanningRecord[] = [];
@@ -490,14 +491,31 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
                 .map(location => location.label),
         )].filter((label, index, labels) => labels.indexOf(label) === index);
+        const assumptionRecords = assumptions.flatMap(assumption => {
+            const sourceKey = assumptionSourceKey(assumption.id);
+            const record = planningRecords.find(candidate => candidate.sources?.some(source => source.key === sourceKey));
+            return record ? [record] : [];
+        });
+        const materialityOrder: Record<NonNullable<PlanningRecord['materiality']>, number> = {
+            blocking: 0, high: 1, normal: 2, low: 3,
+        };
+        const exactRecord = [...assumptionRecords, ...durableRecords]
+            .filter((record, index, records) => records.findIndex(candidate => candidate.id === record.id) === index)
+            .sort((a, b) => (materialityOrder[a.materiality ?? 'high'] - materialityOrder[b.materiality ?? 'high'])
+                || a.createdAt - b.createdAt)[0];
+        const anchorId = `prd-uncertainty-${normalizeSectionName(section).replace(/\s+/g, '-')}`;
         return (
             <button
+                id={anchorId}
                 type="button"
                 onClick={() => {
-                    if (onOpenDecisions) onOpenDecisions();
+                    if (onOpenDecisions) onOpenDecisions(exactRecord?.id, {
+                        destination: { kind: 'prd', anchorId },
+                        label: `Return to ${section}`,
+                    });
                     else document.getElementById('prd-review-confirm')?.scrollIntoView({ behavior: 'smooth', block: 'start' });
                 }}
-                className="mb-3 flex w-full items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
+                className="mb-3 flex w-full scroll-mt-24 items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
             >
                 <span className="text-xs leading-5">
                     <strong>{affectedCount} planning item{affectedCount === 1 ? ' needs' : 's need'} review</strong> in this section.

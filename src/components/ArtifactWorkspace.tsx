@@ -58,8 +58,12 @@ import type { OutputAlignment } from '../lib/planning/outputAlignment';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../lib/planning/downstreamUpdatePlan';
 import {
     implementationPlanNavigationTarget,
-    type ImplementationPlanNavigationTarget,
 } from '../lib/planning/implementationPlanNavigation';
+import type {
+    PlanningArtifactRegionTarget,
+    PlanningNavigationIntent,
+    PlanningReturnTarget,
+} from '../lib/planning/planningNavigation';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
@@ -91,8 +95,12 @@ interface ArtifactWorkspaceProps {
      * different output merely because it is earlier in display order. */
     initialSelection?: ArtifactSlotKey;
     initialArtifactId?: string;
+    initialRegion?: PlanningArtifactRegionTarget;
+    initialUpdatePlanId?: string;
+    initialUpdatePlanItemId?: string;
     onInitialSelectionConsumed?: () => void;
-    onOpenPlanningRecord?: (recordId?: string) => void;
+    onOpenPlanningRecord?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
+    onNavigatePlanning?: (intent: PlanningNavigationIntent) => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -263,8 +271,9 @@ function AssetLock() {
 
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
-    autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId, onInitialSelectionConsumed,
-    onOpenPlanningRecord,
+    autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
+    initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
+    onOpenPlanningRecord, onNavigatePlanning,
 }: ArtifactWorkspaceProps) {
     const isMobile = useIsMobile();
     const {
@@ -279,15 +288,7 @@ export function ArtifactWorkspace({
     // Which artifact's version-history panel is open (null = none).
     const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
     const [updatePlanId, setUpdatePlanId] = useState<string | null>(null);
-    const [updatePlanRegionTarget, setUpdatePlanRegionTarget] = useState<{
-        planId: string;
-        itemId: string;
-        label: string;
-        flowId?: string;
-        flowStepIndex?: number;
-        dataEntityName?: string;
-        implementationTarget?: ImplementationPlanNavigationTarget;
-    } | null>(null);
+    const [updatePlanRegionTarget, setUpdatePlanRegionTarget] = useState<PlanningArtifactRegionTarget | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
@@ -371,6 +372,22 @@ export function ArtifactWorkspace({
             return next;
         }, { replace: opts?.replace });
     };
+
+    useEffect(() => {
+        if (initialRegion) {
+            setUpdatePlanRegionTarget(initialRegion);
+            if (initialRegion.screenId) setScreenParams(initialRegion.screenId, 'overview', { replace: true });
+        }
+        if (initialUpdatePlanId) {
+            setUpdatePlanId(initialUpdatePlanId);
+            if (initialUpdatePlanItemId) {
+                window.requestAnimationFrame(() => document.getElementById(`update-plan-item-${initialUpdatePlanItemId}`)?.scrollIntoView?.({ block: 'center' }));
+            }
+        }
+    // setScreenParams intentionally reads the current search params so exact
+    // region entry preserves the presentation-only planning intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialRegion, initialUpdatePlanId, initialUpdatePlanItemId]);
 
     // The rendered selection: an open screen param always means the Screens
     // view (derived — never synced), so back/forward re-entering ?screen=…
@@ -907,24 +924,66 @@ export function ArtifactWorkspace({
             planId: plan.id,
             itemId: item.id,
             label,
+            ...(region.kind === 'screen' && { screenId: region.screenId }),
             ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
             ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
             ...(implementationTarget ? { implementationTarget } : {}),
         });
+        const navigationRegion: PlanningArtifactRegionTarget = {
+            planId: plan.id,
+            itemId: item.id,
+            label,
+            ...(region.kind === 'screen' && { screenId: region.screenId }),
+            ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
+            ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
+            ...(implementationTarget ? { implementationTarget } : {}),
+        };
+        onNavigatePlanning?.({
+            destination: {
+                kind: 'artifact',
+                artifactId: plan.artifact.artifactId,
+                nodeId: plan.artifact.slot,
+                region: navigationRegion,
+            },
+            returnTo: {
+                destination: {
+                    kind: 'update_plan',
+                    planId: plan.id,
+                    itemId: item.id,
+                    artifactId: plan.artifact.artifactId,
+                    nodeId: plan.artifact.slot,
+                },
+                label: 'Return to update plan',
+            },
+        });
         if (plan.artifact.slot === 'screen_inventory') {
             setSelected('screens');
-            if (region.kind === 'screen') setScreenParams(region.screenId);
+            if (region.kind === 'screen') setScreenParams(region.screenId, 'overview', { replace: true });
         } else {
             setSelected(plan.artifact.slot);
-            if (selectedScreenId) setScreenParams(null);
+            if (selectedScreenId) setScreenParams(null, 'overview', { replace: true });
         }
         setMobileSidebarOpen(false);
     };
 
     const openUpdatePlanSource = (recordId?: string) => {
+        const plan = downstreamUpdatePlans.find(candidate => candidate.id === updatePlanId);
+        const returnTo: PlanningReturnTarget | undefined = plan ? {
+            destination: {
+                kind: 'update_plan',
+                planId: plan.id,
+                artifactId: plan.artifact.artifactId,
+                nodeId: plan.artifact.slot,
+            },
+            label: 'Return to update plan',
+        } : undefined;
         setUpdatePlanId(null);
         if (recordId && onOpenPlanningRecord) {
-            onOpenPlanningRecord(recordId);
+            onOpenPlanningRecord(recordId, returnTo);
+            return;
+        }
+        if (onNavigatePlanning) {
+            onNavigatePlanning({ destination: { kind: 'prd' }, ...(returnTo ? { returnTo } : {}) });
             return;
         }
         setSelected('prd');
