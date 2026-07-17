@@ -1,5 +1,5 @@
 import { useState } from 'react';
-import { AlertTriangle, CheckCircle2, Clock3, FlaskConical, Plus, Sparkles } from 'lucide-react';
+import { AlertTriangle, CheckCircle2, Clock3, FlaskConical, Pencil, Plus, Sparkles, Trash2 } from 'lucide-react';
 import type {
     AssumptionEvidenceConclusion,
     AssumptionEvidenceRecord,
@@ -38,6 +38,19 @@ export type AssumptionEvidenceInput = {
     relation: AssumptionEvidenceRecord['relation'];
 };
 
+export type AssumptionEvidenceActionGuard = {
+    evidenceId: string;
+    expectedEvidenceContentHash: string;
+    expectedEvidenceSetHash: string;
+    expectedSpineVersionId: string;
+    expectedSpineContentHash: string;
+    reason: string;
+};
+
+export type AssumptionEvidenceCorrectionInput = AssumptionEvidenceActionGuard & {
+    replacement: AssumptionEvidenceInput;
+};
+
 export type AssumptionValidationView = {
     workflowState: AssumptionValidationWorkflowState;
     currentPlan?: AssumptionValidationPlan;
@@ -55,6 +68,9 @@ export type AssumptionValidationView = {
     hasHistoricalValidation: boolean;
     dependentLabels: string[];
     history: Array<{ id: string; label: string; at: number; detail?: string }>;
+    evidenceSetHash?: string;
+    sourceSpineVersionId?: string;
+    sourceSpineContentHash?: string;
 };
 
 interface Props {
@@ -67,6 +83,8 @@ interface Props {
     onGeneratePlan: (recordId: string) => void;
     onRecordPlan: (recordId: string, input: AssumptionValidationPlanInput) => void;
     onAddEvidence: (recordId: string, input: AssumptionEvidenceInput) => void;
+    onCorrectEvidence: (recordId: string, input: AssumptionEvidenceCorrectionInput) => void;
+    onRetractEvidence: (recordId: string, input: AssumptionEvidenceActionGuard) => void;
     onInterpretEvidence: (recordId: string) => void;
     onRecordOutcome: (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
@@ -184,6 +202,8 @@ export function AssumptionValidationPanel({
     onGeneratePlan,
     onRecordPlan,
     onAddEvidence,
+    onCorrectEvidence,
+    onRetractEvidence,
     onInterpretEvidence,
     onRecordOutcome,
     onRecordTreatment,
@@ -218,6 +238,14 @@ export function AssumptionValidationPanel({
     const [treatmentRevisit, setTreatmentRevisit] = useState('');
     const [treatmentRevisitDate, setTreatmentRevisitDate] = useState('');
     const [reopenReason, setReopenReason] = useState('');
+    const [evidenceAction, setEvidenceAction] = useState<{ kind: 'correct' | 'retract'; evidenceId: string }>();
+    const [evidenceActionReason, setEvidenceActionReason] = useState('');
+    const [correctionDraft, setCorrectionDraft] = useState({
+        sourceType: 'user_interview' as AssumptionEvidenceSourceType,
+        source: '', sourceIdentity: '', observedDate: '', observation: '', scopeOrSample: '', limitations: '',
+        character: 'direct' as 'direct' | 'interpretation',
+        relation: 'inconclusive' as AssumptionEvidenceRecord['relation'],
+    });
     const duplicateIds = new Set(validation.duplicateEvidenceIds);
     const consequenceDetail = consequence ? consequenceWithoutPrefix(consequence) : '';
 
@@ -270,6 +298,66 @@ export function AssumptionValidationPanel({
             relation: evidenceDraft.relation,
         });
         setEvidenceDraft(current => ({ ...current, source: '', sourceIdentity: '', observation: '', scopeOrSample: '', limitations: '' }));
+    };
+
+    const evidenceGuard = (evidence: AssumptionEvidenceRecord): Omit<AssumptionEvidenceActionGuard, 'reason'> | undefined => {
+        if (!validation.evidenceSetHash || !validation.sourceSpineVersionId || !validation.sourceSpineContentHash) return undefined;
+        return {
+            evidenceId: evidence.id,
+            expectedEvidenceContentHash: evidence.contentHash,
+            expectedEvidenceSetHash: validation.evidenceSetHash,
+            expectedSpineVersionId: validation.sourceSpineVersionId,
+            expectedSpineContentHash: validation.sourceSpineContentHash,
+        };
+    };
+
+    const beginCorrection = (evidence: AssumptionEvidenceRecord) => {
+        setEvidenceAction({ kind: 'correct', evidenceId: evidence.id });
+        setEvidenceActionReason('');
+        setCorrectionDraft({
+            sourceType: evidence.sourceType,
+            source: evidence.source,
+            sourceIdentity: evidence.sourceIdentity,
+            observedDate: dateInputValue(evidence.observedAt),
+            observation: evidence.observation,
+            scopeOrSample: evidence.scopeOrSample ?? '',
+            limitations: evidence.limitations.join('\n'),
+            character: evidence.character,
+            relation: evidence.relation,
+        });
+    };
+
+    const submitCorrection = (evidence: AssumptionEvidenceRecord) => {
+        const guard = evidenceGuard(evidence);
+        const observedAt = dateInputTimestamp(correctionDraft.observedDate);
+        if (!guard || !observedAt || !evidenceActionReason.trim()
+            || !correctionDraft.source.trim() || !correctionDraft.sourceIdentity.trim()
+            || !correctionDraft.observation.trim()) return;
+        onCorrectEvidence(recordId, {
+            ...guard,
+            reason: evidenceActionReason.trim(),
+            replacement: {
+                sourceType: correctionDraft.sourceType,
+                source: correctionDraft.source.trim(),
+                sourceIdentity: correctionDraft.sourceIdentity.trim(),
+                observedAt,
+                observation: correctionDraft.observation.trim(),
+                scopeOrSample: correctionDraft.scopeOrSample.trim() || undefined,
+                limitations: splitLines(correctionDraft.limitations),
+                character: correctionDraft.character,
+                relation: correctionDraft.relation,
+            },
+        });
+        setEvidenceAction(undefined);
+        setEvidenceActionReason('');
+    };
+
+    const submitRetraction = (evidence: AssumptionEvidenceRecord) => {
+        const guard = evidenceGuard(evidence);
+        if (!guard || !evidenceActionReason.trim()) return;
+        onRetractEvidence(recordId, { ...guard, reason: evidenceActionReason.trim() });
+        setEvidenceAction(undefined);
+        setEvidenceActionReason('');
     };
 
     return (
@@ -393,6 +481,64 @@ export function AssumptionValidationPanel({
                                         {evidence.relation === 'irrelevant' && <p className="mt-1 text-xs text-neutral-500">This source is preserved, but does not count as support for this question.</p>}
                                         {duplicateIds.has(evidence.id) && <p className="mt-1 flex items-center gap-1 text-xs font-medium text-amber-800"><AlertTriangle size={13} /> Duplicate source — not independent corroboration.</p>}
                                         {(evidence.scopeOrSample || evidence.limitations.length > 0) && <details className="mt-2 text-xs text-neutral-600"><summary className="cursor-pointer font-medium">Scope and limitations</summary>{evidence.scopeOrSample && <p className="mt-1">Scope: {evidence.scopeOrSample}</p>}{evidence.limitations.length > 0 && <p className="mt-1">Limits: {evidence.limitations.join(' · ')}</p>}</details>}
+                                        {!readOnly && (
+                                            <div className="mt-3 border-t border-neutral-100 pt-2">
+                                                <div className="flex flex-wrap gap-2">
+                                                    <button type="button" onClick={() => beginCorrection(evidence)} disabled={!evidenceGuard(evidence)} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"><Pencil size={13} /> Correct</button>
+                                                    <button type="button" onClick={() => { setEvidenceAction({ kind: 'retract', evidenceId: evidence.id }); setEvidenceActionReason(''); }} disabled={!evidenceGuard(evidence)} className="inline-flex min-h-11 items-center gap-1.5 rounded-lg px-3 text-xs font-semibold text-red-700 hover:bg-red-50 disabled:opacity-40"><Trash2 size={13} /> Retract</button>
+                                                </div>
+                                                {evidenceAction?.evidenceId === evidence.id && evidenceAction.kind === 'retract' && (
+                                                    <div className="mt-2 rounded-lg border border-red-200 bg-red-50 p-3">
+                                                        <p className="text-xs leading-5 text-red-800">Retraction preserves this record in history but removes it from current evidence. Any conclusion based on the prior evidence set will need review.</p>
+                                                        <label className="mt-2 block text-xs font-semibold text-red-900">Why retract this evidence?
+                                                            <textarea aria-label={`Retraction reason for ${evidence.source}`} value={evidenceActionReason} onChange={event => setEvidenceActionReason(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-red-200 bg-white px-3 py-2 text-sm font-normal text-neutral-900" />
+                                                        </label>
+                                                        <div className="mt-2 flex flex-col gap-2 sm:flex-row">
+                                                            <button type="button" disabled={!evidenceActionReason.trim()} onClick={() => submitRetraction(evidence)} className="min-h-11 rounded-lg bg-red-700 px-3 text-sm font-semibold text-white disabled:opacity-40">Retract evidence</button>
+                                                            <button type="button" onClick={() => { setEvidenceAction(undefined); setEvidenceActionReason(''); }} className="min-h-11 rounded-lg border border-red-200 bg-white px-3 text-sm font-semibold text-neutral-700">Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                                {evidenceAction?.evidenceId === evidence.id && evidenceAction.kind === 'correct' && (
+                                                    <div className="mt-2 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
+                                                        <p className="text-xs leading-5 text-indigo-900">Save a corrected replacement. The original remains in history and the prior conclusion becomes historical until you review the new evidence set.</p>
+                                                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                                            <label className="text-xs font-semibold text-neutral-700">Evidence type
+                                                                <select aria-label={`Corrected evidence type for ${evidence.source}`} value={correctionDraft.sourceType} onChange={event => setCorrectionDraft(current => ({ ...current, sourceType: event.target.value as AssumptionEvidenceSourceType }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal">{evidenceSourceOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}</select>
+                                                            </label>
+                                                            <label className="text-xs font-semibold text-neutral-700">Source
+                                                                <input aria-label={`Corrected source for ${evidence.source}`} value={correctionDraft.source} onChange={event => setCorrectionDraft(current => ({ ...current, source: event.target.value }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal" />
+                                                            </label>
+                                                        </div>
+                                                        <label className="mt-3 block text-xs font-semibold text-neutral-700">Source identity
+                                                            <input aria-label={`Corrected source identity for ${evidence.source}`} value={correctionDraft.sourceIdentity} onChange={event => setCorrectionDraft(current => ({ ...current, sourceIdentity: event.target.value }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal" />
+                                                        </label>
+                                                        <label className="mt-3 block text-xs font-semibold text-neutral-700">Observed on
+                                                            <input aria-label={`Corrected observation date for ${evidence.source}`} type="date" value={correctionDraft.observedDate} onChange={event => setCorrectionDraft(current => ({ ...current, observedDate: event.target.value }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal sm:w-auto" />
+                                                        </label>
+                                                        <label className="mt-3 block text-xs font-semibold text-neutral-700">Observation or result
+                                                            <textarea aria-label={`Corrected observation for ${evidence.source}`} value={correctionDraft.observation} onChange={event => setCorrectionDraft(current => ({ ...current, observation: event.target.value }))} rows={3} className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-normal" />
+                                                        </label>
+                                                        <div className="mt-3 grid gap-3 sm:grid-cols-2">
+                                                            <label className="text-xs font-semibold text-neutral-700">Relation to the question
+                                                                <select aria-label={`Corrected relation for ${evidence.source}`} value={correctionDraft.relation} onChange={event => setCorrectionDraft(current => ({ ...current, relation: event.target.value as AssumptionEvidenceRecord['relation'] }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal"><option value="supports">Supports</option><option value="contradicts">Contradicts</option><option value="inconclusive">Inconclusive</option><option value="irrelevant">Irrelevant</option></select>
+                                                            </label>
+                                                            <label className="text-xs font-semibold text-neutral-700">Evidence character
+                                                                <select aria-label={`Corrected evidence character for ${evidence.source}`} value={correctionDraft.character} onChange={event => setCorrectionDraft(current => ({ ...current, character: event.target.value as 'direct' | 'interpretation' }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm font-normal"><option value="direct">Direct observation</option><option value="interpretation">Interpretation</option></select>
+                                                            </label>
+                                                        </div>
+                                                        <details className="mt-3"><summary className="min-h-10 cursor-pointer py-2 text-xs font-semibold text-neutral-600">Correct scope or limitations</summary><label className="block text-xs text-neutral-600">Scope or sample<input aria-label={`Corrected scope for ${evidence.source}`} value={correctionDraft.scopeOrSample} onChange={event => setCorrectionDraft(current => ({ ...current, scopeOrSample: event.target.value }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 bg-white px-3 text-sm" /></label><label className="mt-3 block text-xs text-neutral-600">Limitations<textarea aria-label={`Corrected limitations for ${evidence.source}`} value={correctionDraft.limitations} onChange={event => setCorrectionDraft(current => ({ ...current, limitations: event.target.value }))} rows={2} className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm" /></label></details>
+                                                        <label className="mt-3 block text-xs font-semibold text-neutral-700">Why is this correction needed?
+                                                            <textarea aria-label={`Correction reason for ${evidence.source}`} value={evidenceActionReason} onChange={event => setEvidenceActionReason(event.target.value)} rows={2} className="mt-1 w-full rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-normal" />
+                                                        </label>
+                                                        <div className="mt-3 flex flex-col gap-2 sm:flex-row">
+                                                            <button type="button" disabled={!evidenceActionReason.trim() || !correctionDraft.source.trim() || !correctionDraft.sourceIdentity.trim() || !correctionDraft.observation.trim() || !correctionDraft.observedDate} onClick={() => submitCorrection(evidence)} className="min-h-11 rounded-lg bg-indigo-600 px-3 text-sm font-semibold text-white disabled:opacity-40">Save correction</button>
+                                                            <button type="button" onClick={() => { setEvidenceAction(undefined); setEvidenceActionReason(''); }} className="min-h-11 rounded-lg border border-neutral-200 bg-white px-3 text-sm font-semibold text-neutral-700">Cancel</button>
+                                                        </div>
+                                                    </div>
+                                                )}
+                                            </div>
+                                        )}
                                     </li>
                                 ))}
                             </ul>

@@ -11,6 +11,8 @@ export type PlanningArtifactRegionTarget = {
     flowId?: string;
     flowStepIndex?: number;
     dataEntityName?: string;
+    dataMemberName?: string;
+    dataMemberAspect?: 'field' | 'relationship' | 'constraint' | 'data_expectation';
     implementationTarget?: ImplementationPlanNavigationTarget;
 };
 
@@ -87,6 +89,10 @@ function isRegion(value: unknown): value is PlanningArtifactRegionTarget {
                 && Number.isInteger(candidate.flowStepIndex)
                 && candidate.flowStepIndex >= 0)
         && optionalString(candidate.dataEntityName)
+        && optionalString(candidate.dataMemberName)
+        && (candidate.dataMemberAspect === undefined
+            || ['field', 'relationship', 'constraint', 'data_expectation'].includes(candidate.dataMemberAspect))
+        && ((candidate.dataMemberName === undefined) === (candidate.dataMemberAspect === undefined))
         && (candidate.implementationTarget === undefined
             || isImplementationTarget(candidate.implementationTarget));
 }

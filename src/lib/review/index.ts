@@ -8,3 +8,4 @@ export * from './prompt';
 export * from './normalize';
 export * from './orchestrator';
 export * from './geminiTransport';
+export * from './issueRecovery';

@@ -702,6 +702,59 @@ export function appendAssumptionValidationEvent(
     };
 }
 
+export type AssumptionEvidenceRecordedEvent = Extract<AssumptionValidationEvent, { type: 'validation_evidence_recorded' }>;
+export type AssumptionEvidenceRetractedEvent = Extract<AssumptionValidationEvent, { type: 'validation_evidence_retracted' }>;
+
+/**
+ * Atomically correct active evidence by first appending its replacement and
+ * then retracting the exact predecessor. Both events are validated against the
+ * intermediate evidence sets, but no partial record escapes when either step
+ * fails. Existing events remain immutable history.
+ */
+export function appendAssumptionEvidenceCorrection(
+    record: PlanningRecord,
+    replacementEvent: AssumptionEvidenceRecordedEvent,
+    retractionEvent: AssumptionEvidenceRetractedEvent,
+    context: AssumptionValidationAppendContext = {},
+): AppendAssumptionValidationEventResult {
+    if (replacementEvent.evidence.id === retractionEvent.evidenceId) {
+        return { ok: false, reason: 'Corrected evidence requires a new durable identity.' };
+    }
+    if (!retractionEvent.reason.trim()) {
+        return { ok: false, reason: 'Evidence correction requires a reason.' };
+    }
+    const predecessor = projectAssumptionValidation(record, replacementEvent.at).activeEvidence.find(
+        evidence => evidence.id === retractionEvent.evidenceId,
+    );
+    if (!predecessor || predecessor.contentHash !== retractionEvent.evidenceContentHash) {
+        return { ok: false, reason: 'Evidence changed before it could be corrected.' };
+    }
+    const replacement = appendAssumptionValidationEvent(record, replacementEvent, context);
+    if (!replacement.ok) return replacement;
+    if (replacement.duplicate) {
+        return { ok: false, reason: 'Corrected evidence must use a fresh event identity.' };
+    }
+    if (replacement.duplicateEvidenceOf && replacement.duplicateEvidenceOf !== predecessor.id) {
+        return { ok: false, reason: 'The corrected evidence duplicates another active source.' };
+    }
+    const retracted = appendAssumptionValidationEvent(replacement.record, retractionEvent, context);
+    if (!retracted.ok) return retracted;
+    if (retracted.duplicate) {
+        return { ok: false, reason: 'Evidence correction must append a fresh retraction event.' };
+    }
+    const finalProjection = projectAssumptionValidation(retracted.record, retractionEvent.at);
+    if (!finalProjection.activeEvidence.some(evidence => evidence.id === replacementEvent.evidence.id)
+        || finalProjection.activeEvidence.some(evidence => evidence.id === predecessor.id)
+        || finalProjection.duplicateEvidenceIds.includes(replacementEvent.evidence.id)) {
+        return { ok: false, reason: 'Corrected evidence could not be established as the active source.' };
+    }
+    return {
+        ok: true,
+        record: retracted.record,
+        duplicate: false,
+    };
+}
+
 export type AddAssumptionProposalResult =
     | { ok: true; record: PlanningRecord; duplicate: boolean }
     | { ok: false; reason: string };

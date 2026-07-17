@@ -1472,7 +1472,8 @@ export type ReviewIssueDisposition = {
         | 'request_revision'
         | 'defer'
         | 'dismiss'
-        | 'already_addressed';
+        | 'already_addressed'
+        | 'reopen';
     actor: 'user';
     at: number;
     contextSignature: string;

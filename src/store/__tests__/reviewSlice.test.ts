@@ -134,6 +134,81 @@ describe('adversarial review domain', () => {
         });
     });
 
+    it('reopens a closed finding with append-only user history without mutating its linked planning record', () => {
+        const { reviewId } = useProjectStore.getState().createReviewRun('p1', {
+            scope: { kind: 'project' },
+            sourceManifest: manifest,
+            selectedSpecialists: [],
+        });
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'risk',
+            status: 'open',
+            title: 'Recovery risk',
+            statement: 'Failed uploads may be lost.',
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'user',
+        });
+        const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
+            reviewId,
+            title: 'Recovery is incomplete', summary: 'Failed uploads have no recovery path.', kind: 'risk',
+            findingIds: [], specialistIds: [], relationship: 'standalone', severity: 'high', confidence: 'high',
+            implementationImpact: 'resolve_before_build', relatedPlanningRecordIds: [],
+        });
+        useProjectStore.getState().applyReviewIssueDisposition('p1', reviewId, issueId, {
+            action: 'link_existing',
+            planningRecordId,
+            reason: 'Track this in the existing risk.',
+            contextSignature: manifest.contextSignature,
+        });
+        const recordBefore = useProjectStore.getState().planningRecords.p1.find(record => record.id === planningRecordId);
+        const issueBefore = useProjectStore.getState().reviewIssues.p1.find(issue => issue.id === issueId)!;
+
+        const result = useProjectStore.getState().reopenReviewIssue('p1', reviewId, issueId, {
+            reason: 'New failure evidence requires another treatment.',
+            expectedContextSignature: manifest.contextSignature,
+            currentContextSignature: manifest.contextSignature,
+            expectedUpdatedAt: issueBefore.updatedAt,
+            at: 1_001,
+        });
+
+        expect(result).toEqual({ ok: true });
+        expect(useProjectStore.getState().reviewIssues.p1.find(issue => issue.id === issueId)).toMatchObject({
+            status: 'open',
+            dispositions: [
+                { action: 'link_existing', actor: 'user' },
+                { action: 'reopen', actor: 'user', reason: 'New failure evidence requires another treatment.', at: 1_001 },
+            ],
+        });
+        expect(useProjectStore.getState().planningRecords.p1.find(record => record.id === planningRecordId)).toEqual(recordBefore);
+    });
+
+    it('fails closed when recovery uses stale Challenge context or issue state', () => {
+        const { reviewId } = useProjectStore.getState().createReviewRun('p1', {
+            scope: { kind: 'project' }, sourceManifest: manifest, selectedSpecialists: [],
+        });
+        const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
+            reviewId, title: 'Risk', summary: 'Summary', kind: 'risk', findingIds: [], specialistIds: [],
+            relationship: 'standalone', severity: 'high', confidence: 'high', implementationImpact: 'deferrable', relatedPlanningRecordIds: [],
+        });
+        useProjectStore.getState().applyReviewIssueDisposition('p1', reviewId, issueId, {
+            action: 'dismiss', reason: 'Previously judged irrelevant.', contextSignature: manifest.contextSignature,
+        });
+        const issue = useProjectStore.getState().reviewIssues.p1.find(item => item.id === issueId)!;
+        const staleContext = useProjectStore.getState().reopenReviewIssue('p1', reviewId, issueId, {
+            reason: 'This now deserves another explicit review.', expectedContextSignature: manifest.contextSignature,
+            currentContextSignature: 'changed-context', expectedUpdatedAt: issue.updatedAt,
+        });
+        const concurrentChange = useProjectStore.getState().reopenReviewIssue('p1', reviewId, issueId, {
+            reason: 'This now deserves another explicit review.', expectedContextSignature: manifest.contextSignature,
+            currentContextSignature: manifest.contextSignature, expectedUpdatedAt: issue.updatedAt - 1,
+        });
+
+        expect(staleContext).toMatchObject({ ok: false, reason: expect.stringMatching(/Review the current plan again/i) });
+        expect(concurrentChange).toMatchObject({ ok: false, reason: expect.stringMatching(/finding changed/i) });
+        expect(useProjectStore.getState().reviewIssues.p1.find(item => item.id === issueId)?.status).toBe('dismissed');
+    });
+
     it('scopes dispositions by review when deterministic issue ids repeat', () => {
         const issue = {
             id: 'repeated-issue',

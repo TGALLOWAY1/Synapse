@@ -128,17 +128,24 @@ export function FieldTypeChip({ kind, label }: { kind: FieldTypeKind; label: str
  * stacked callout cards for relationships / constraints / privacy / indexes.
  */
 export function InspectorRow({
-    category, label, description, linkLabel, onLink,
+    category, label, description, linkLabel, onLink, id, highlighted = false,
 }: {
     category: InspectorCategory;
     label: string;
     description?: string;
     linkLabel?: string;
     onLink?: () => void;
+    id?: string;
+    highlighted?: boolean;
 }) {
     const style = INSPECTOR_STYLES[category];
     return (
-        <div className="flex items-start gap-2.5 px-2.5 py-2 rounded-lg hover:bg-neutral-50 transition">
+        <div
+            id={id}
+            tabIndex={id ? -1 : undefined}
+            aria-current={highlighted ? 'true' : undefined}
+            className={`flex min-w-0 scroll-mt-24 items-start gap-2.5 rounded-lg px-2.5 py-2 outline-none transition focus:ring-2 focus:ring-indigo-500 ${highlighted ? 'bg-indigo-50 ring-2 ring-indigo-300' : 'hover:bg-neutral-50'}`}
+        >
             <span className={`mt-0.5 shrink-0 text-[9px] font-bold uppercase tracking-wider px-1.5 py-0.5 rounded ${style.badge}`}>
                 {style.label}
             </span>
@@ -159,7 +166,7 @@ export function InspectorRow({
                         )
                     )}
                 </div>
-                {description && <p className="text-xs text-neutral-600 leading-relaxed mt-0.5">{description}</p>}
+                {description && <p className="mt-0.5 break-words text-xs leading-relaxed text-neutral-600">{description}</p>}
             </div>
         </div>
     );

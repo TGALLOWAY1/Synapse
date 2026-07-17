@@ -27,6 +27,26 @@ describe('planning navigation presentation contract', () => {
         expect(parsePlanningNavigationIntent(params.get('planning'))).toEqual(intent);
     });
 
+    it('round-trips a bounded exact data-model member while rejecting partial member identity', () => {
+        const exact: PlanningNavigationIntent = {
+            destination: {
+                kind: 'artifact', artifactId: 'data-model', nodeId: 'data_model',
+                region: {
+                    planId: 'plan-1', itemId: 'field-1', label: 'Workspace · owner_id',
+                    dataEntityName: 'Workspace', dataMemberAspect: 'field', dataMemberName: 'owner_id',
+                },
+            },
+            returnTo: { destination: { kind: 'update_plan', planId: 'plan-1' }, label: 'Return to update plan' },
+        };
+        expect(parsePlanningNavigationIntent(serializePlanningNavigationIntent(exact))).toEqual(exact);
+        expect(parsePlanningNavigationIntent(JSON.stringify({
+            destination: {
+                kind: 'artifact', artifactId: 'data-model',
+                region: { planId: 'plan-1', itemId: 'field-1', label: 'Field', dataEntityName: 'Workspace', dataMemberName: 'owner_id' },
+            },
+        }))).toBeUndefined();
+    });
+
     it('rejects malformed, overlong, and unknown targets', () => {
         expect(parsePlanningNavigationIntent('{not-json')).toBeUndefined();
         expect(parsePlanningNavigationIntent(JSON.stringify({ destination: { kind: 'authority_override' } }))).toBeUndefined();

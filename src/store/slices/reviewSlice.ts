@@ -18,14 +18,29 @@ import { ASSUMPTION_VALIDATION_SCHEMA_VERSION, PLANNING_RECORD_SCHEMA_VERSION } 
 import {
     addAssumptionInterpretationProposal as addInterpretationProposal,
     addAssumptionValidationPlanProposal as addValidationPlanProposal,
+    appendAssumptionEvidenceCorrection,
     appendAssumptionValidationEvent as appendValidationEvent,
+    assumptionEvidenceSetHash,
+    assumptionStatementHash,
     assumptionValidationDecisionEvent,
     appendDecisionEvent,
     importPrdAssumptions,
     normalizePlanningRecord,
     planningContentHash,
+    projectAssumptionValidation,
+    sealAssumptionEvidence,
+    sealAssumptionValidationEvent,
+    type AssumptionEvidenceRecordedEvent,
+    type AssumptionEvidenceRetractedEvent,
 } from '../../lib/planning';
-import type { ProjectState } from '../types';
+import type {
+    AssumptionEvidenceCorrectionInput,
+    AssumptionEvidenceMutationGuard,
+    AssumptionEvidenceMutationResult,
+    AssumptionEvidenceReplacementInput,
+    ProjectState,
+} from '../types';
+import { validateReviewIssueRecovery } from '../../lib/review';
 
 export type ReviewSlice = Pick<
     ProjectState,
@@ -42,12 +57,15 @@ export type ReviewSlice = Pick<
     | 'addReviewIssue'
     | 'supersedeOpenReviewIssues'
     | 'applyReviewIssueDisposition'
+    | 'reopenReviewIssue'
     | 'createPlanningRecord'
     | 'updatePlanningRecordStatusByUser'
     | 'appendPlanningDecisionEvent'
     | 'importPlanningAssumptions'
     | 'addPlanningAssessment'
     | 'appendAssumptionValidationEvent'
+    | 'retractAssumptionEvidence'
+    | 'correctAssumptionEvidence'
     | 'addAssumptionValidationPlanProposal'
     | 'addAssumptionInterpretationProposal'
 >;
@@ -60,6 +78,50 @@ const currentPlanningContext = (state: ProjectState, projectId: string) => {
         currentSpineContentHash: planningContentHash(spine.structuredPRD ?? spine.responseText),
     } : {};
 };
+
+const evidenceMutationAt = (record: PlanningRecord): number => Math.max(
+    Date.now(),
+    (record.assumptionValidation?.events.at(-1)?.at ?? -Infinity) + 1,
+);
+
+const validateEvidenceMutationGuard = (
+    record: PlanningRecord,
+    input: AssumptionEvidenceMutationGuard,
+    context: ReturnType<typeof currentPlanningContext>,
+    at: number,
+): { ok: true; evidence: ReturnType<typeof projectAssumptionValidation>['activeEvidence'][number] }
+    | { ok: false; reason: string } => {
+    if (!input.reason.trim()) return { ok: false, reason: 'Evidence correction or retraction requires a reason.' };
+    if (!context.currentSpineVersionId || !context.currentSpineContentHash
+        || input.expectedSpineVersionId !== context.currentSpineVersionId
+        || input.expectedSpineContentHash !== context.currentSpineContentHash) {
+        return { ok: false, reason: 'The plan changed before the evidence action was recorded.' };
+    }
+    const projection = projectAssumptionValidation(record, at);
+    if (input.expectedEvidenceSetHash !== assumptionEvidenceSetHash(projection.activeEvidence)) {
+        return { ok: false, reason: 'The evidence changed before this action was recorded.' };
+    }
+    const evidence = projection.activeEvidence.find(item => item.id === input.evidenceId);
+    if (!evidence || evidence.planningRecordId !== record.id
+        || evidence.contentHash !== input.expectedEvidenceContentHash) {
+        return { ok: false, reason: 'The selected evidence is no longer current for this assumption.' };
+    }
+    return { ok: true, evidence };
+};
+
+const sameEvidenceMeaning = (
+    evidence: ReturnType<typeof projectAssumptionValidation>['activeEvidence'][number],
+    replacement: AssumptionEvidenceReplacementInput,
+): boolean => evidence.sourceType === replacement.sourceType
+    && evidence.source.trim() === replacement.source.trim()
+    && evidence.sourceIdentity.trim() === replacement.sourceIdentity.trim()
+    && evidence.observedAt === replacement.observedAt
+    && evidence.observation.trim() === replacement.observation.trim()
+    && (evidence.scopeOrSample?.trim() ?? '') === (replacement.scopeOrSample?.trim() ?? '')
+    && evidence.limitations.map(item => item.trim()).filter(Boolean).join('\n')
+        === replacement.limitations.map(item => item.trim()).filter(Boolean).join('\n')
+    && evidence.character === replacement.character
+    && evidence.relation === replacement.relation;
 
 const planningRecordInitialStatus = (
     input: Pick<PlanningRecord, 'type' | 'createdBy' | 'status'>,
@@ -240,6 +302,47 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
         }));
     },
 
+    reopenReviewIssue: (projectId, reviewId, issueId, input) => {
+        let outcome: { ok: true } | { ok: false; reason: string } = {
+            ok: false,
+            reason: 'The Challenge finding could not be reopened.',
+        };
+        set((state) => {
+            const issue = (state.reviewIssues[projectId] ?? []).find(item => (
+                item.id === issueId && item.reviewId === reviewId
+            ));
+            const run = (state.reviewRuns[projectId] ?? []).find(item => item.id === reviewId);
+            const validation = validateReviewIssueRecovery(issue, run, input);
+            if (!validation.ok || !issue || !run) {
+                outcome = validation.ok ? outcome : validation;
+                return state;
+            }
+            const at = input.at ?? Date.now();
+            const disposition: ReviewIssueDisposition = {
+                action: 'reopen',
+                actor: 'user',
+                at,
+                contextSignature: run.sourceManifest.contextSignature,
+                reason: validation.reason,
+            };
+            outcome = { ok: true };
+            return {
+                reviewIssues: {
+                    ...state.reviewIssues,
+                    [projectId]: (state.reviewIssues[projectId] ?? []).map(item => item.id === issueId && item.reviewId === reviewId
+                        ? {
+                            ...item,
+                            status: 'open',
+                            dispositions: [...item.dispositions, disposition],
+                            updatedAt: at,
+                        }
+                        : item),
+                },
+            };
+        });
+        return outcome;
+    },
+
     createPlanningRecord: (projectId, input) => {
         const id = uuidv4();
         const now = Date.now();
@@ -411,6 +514,130 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
                 planningRecords: {
                     ...state.planningRecords,
                     [projectId]: records.map(item => item.id === planningRecordId ? synchronized.record : item),
+                },
+            };
+        });
+        return outcome;
+    },
+
+    retractAssumptionEvidence: (projectId, planningRecordId, input: AssumptionEvidenceMutationGuard) => {
+        let outcome: AssumptionEvidenceMutationResult = { ok: false, reason: 'Planning record not found.' };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const stored = records.find(item => item.id === planningRecordId);
+            if (!stored || stored.type !== 'assumption') return state;
+            const record = normalizePlanningRecord(stored);
+            const context = currentPlanningContext(state, projectId);
+            const at = evidenceMutationAt(record);
+            const guard = validateEvidenceMutationGuard(record, input, context, at);
+            if (!guard.ok) {
+                outcome = guard;
+                return state;
+            }
+            const event = sealAssumptionValidationEvent({
+                id: uuidv4(), planningRecordId, actor: 'user', type: 'validation_evidence_retracted', at,
+                assumptionStatementHash: assumptionStatementHash(record),
+                expectedSpineVersionId: input.expectedSpineVersionId,
+                expectedSpineContentHash: input.expectedSpineContentHash,
+                expectedEvidenceSetHash: input.expectedEvidenceSetHash,
+                evidenceId: guard.evidence.id,
+                evidenceContentHash: guard.evidence.contentHash,
+                reason: input.reason.trim(),
+            });
+            const result = appendValidationEvent(record, event, context);
+            if (!result.ok) {
+                outcome = result;
+                return state;
+            }
+            if (result.duplicate) {
+                outcome = { ok: false, reason: 'Evidence retraction must append a fresh user event.' };
+                return state;
+            }
+            outcome = { ok: true, eventIds: [event.id] };
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
+                },
+            };
+        });
+        return outcome;
+    },
+
+    correctAssumptionEvidence: (projectId, planningRecordId, input: AssumptionEvidenceCorrectionInput) => {
+        let outcome: AssumptionEvidenceMutationResult = { ok: false, reason: 'Planning record not found.' };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const stored = records.find(item => item.id === planningRecordId);
+            if (!stored || stored.type !== 'assumption') return state;
+            const record = normalizePlanningRecord(stored);
+            const context = currentPlanningContext(state, projectId);
+            const at = evidenceMutationAt(record);
+            const guard = validateEvidenceMutationGuard(record, input, context, at);
+            if (!guard.ok) {
+                outcome = guard;
+                return state;
+            }
+            const projection = projectAssumptionValidation(record, at);
+            if (!projection.currentPlan) {
+                outcome = { ok: false, reason: 'The validation plan changed before the evidence could be corrected.' };
+                return state;
+            }
+            if (sameEvidenceMeaning(guard.evidence, input.replacement)) {
+                outcome = { ok: false, reason: 'The correction does not change the evidence.' };
+                return state;
+            }
+            const evidence = sealAssumptionEvidence({
+                id: uuidv4(), planningRecordId,
+                sourceType: input.replacement.sourceType,
+                source: input.replacement.source.trim(),
+                sourceIdentity: input.replacement.sourceIdentity.trim(),
+                observedAt: input.replacement.observedAt,
+                recordedAt: at,
+                observation: input.replacement.observation.trim(),
+                validationQuestion: projection.currentPlan.question,
+                scopeOrSample: input.replacement.scopeOrSample?.trim() || undefined,
+                limitations: input.replacement.limitations.map(item => item.trim()).filter(Boolean),
+                character: input.replacement.character,
+                relation: input.replacement.relation,
+                assumptionStatementHash: assumptionStatementHash(record),
+                validationPlanHash: projection.currentPlan.contentHash,
+                authoredBy: 'user',
+            });
+            const replacementEvent = sealAssumptionValidationEvent({
+                id: uuidv4(), planningRecordId, actor: 'user', type: 'validation_evidence_recorded', at,
+                assumptionStatementHash: assumptionStatementHash(record),
+                expectedSpineVersionId: input.expectedSpineVersionId,
+                expectedSpineContentHash: input.expectedSpineContentHash,
+                expectedEvidenceSetHash: input.expectedEvidenceSetHash,
+                evidence,
+            }) as AssumptionEvidenceRecordedEvent;
+            const intermediate = appendValidationEvent(record, replacementEvent, context);
+            if (!intermediate.ok) {
+                outcome = intermediate;
+                return state;
+            }
+            const intermediateProjection = projectAssumptionValidation(intermediate.record, at + 1);
+            const retractionEvent = sealAssumptionValidationEvent({
+                id: uuidv4(), planningRecordId, actor: 'user', type: 'validation_evidence_retracted', at: at + 1,
+                assumptionStatementHash: assumptionStatementHash(record),
+                expectedSpineVersionId: input.expectedSpineVersionId,
+                expectedSpineContentHash: input.expectedSpineContentHash,
+                expectedEvidenceSetHash: assumptionEvidenceSetHash(intermediateProjection.activeEvidence),
+                evidenceId: guard.evidence.id,
+                evidenceContentHash: guard.evidence.contentHash,
+                reason: input.reason.trim(),
+            }) as AssumptionEvidenceRetractedEvent;
+            const result = appendAssumptionEvidenceCorrection(record, replacementEvent, retractionEvent, context);
+            if (!result.ok) {
+                outcome = result;
+                return state;
+            }
+            outcome = { ok: true, evidenceId: evidence.id, eventIds: [replacementEvent.id, retractionEvent.id] };
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? result.record : item),
                 },
             };
         });

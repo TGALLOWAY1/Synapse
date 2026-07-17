@@ -926,7 +926,13 @@ export function ArtifactWorkspace({
             label,
             ...(region.kind === 'screen' && { screenId: region.screenId }),
             ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
-            ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
+            ...(region.kind === 'data_model' && {
+                dataEntityName: region.entityName,
+                ...(region.memberName && region.aspect !== 'entity' ? {
+                    dataMemberName: region.memberName,
+                    dataMemberAspect: region.aspect,
+                } : {}),
+            }),
             ...(implementationTarget ? { implementationTarget } : {}),
         });
         const navigationRegion: PlanningArtifactRegionTarget = {
@@ -935,7 +941,13 @@ export function ArtifactWorkspace({
             label,
             ...(region.kind === 'screen' && { screenId: region.screenId }),
             ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
-            ...(region.kind === 'data_model' && { dataEntityName: region.entityName }),
+            ...(region.kind === 'data_model' && {
+                dataEntityName: region.entityName,
+                ...(region.memberName && region.aspect !== 'entity' ? {
+                    dataMemberName: region.memberName,
+                    dataMemberAspect: region.aspect,
+                } : {}),
+            }),
             ...(implementationTarget ? { implementationTarget } : {}),
         };
         onNavigatePlanning?.({
@@ -1608,6 +1620,8 @@ export function ArtifactWorkspace({
                         initialFlowId={subtype === 'user_flows' ? updatePlanRegionTarget?.flowId : undefined}
                         initialFlowStepIndex={subtype === 'user_flows' ? updatePlanRegionTarget?.flowStepIndex : undefined}
                         initialDataEntityName={subtype === 'data_model' ? updatePlanRegionTarget?.dataEntityName : undefined}
+                        initialDataMemberName={subtype === 'data_model' ? updatePlanRegionTarget?.dataMemberName : undefined}
+                        initialDataMemberAspect={subtype === 'data_model' ? updatePlanRegionTarget?.dataMemberAspect : undefined}
                         initialImplementationTarget={subtype === 'implementation_plan' ? updatePlanRegionTarget?.implementationTarget : undefined}
                         promptPackContent={legacyPromptPackContent}
                         savedTasks={planSavedTasks}

@@ -2,6 +2,8 @@ import { useEffect, useMemo, useRef, useState } from 'react';
 import { ArrowLeft, Check, ChevronDown, Clock3, FileQuestion, RefreshCcw, Sparkles, X } from 'lucide-react';
 import {
     AssumptionValidationPanel,
+    type AssumptionEvidenceActionGuard,
+    type AssumptionEvidenceCorrectionInput,
     type AssumptionEvidenceInput,
     type AssumptionValidationPlanInput,
     type AssumptionValidationView,
@@ -98,6 +100,8 @@ interface Props {
     onGenerateAssumptionValidationPlan?: (recordId: string) => void;
     onRecordAssumptionValidationPlan?: (recordId: string, input: AssumptionValidationPlanInput) => void;
     onAddAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceInput) => void;
+    onCorrectAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceCorrectionInput) => void;
+    onRetractAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceActionGuard) => void;
     onInterpretAssumptionEvidence?: (recordId: string) => void;
     onRecordAssumptionOutcome?: (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
@@ -148,6 +152,8 @@ export function DecisionCenter({
     onGenerateAssumptionValidationPlan = () => {},
     onRecordAssumptionValidationPlan = () => {},
     onAddAssumptionEvidence = () => {},
+    onCorrectAssumptionEvidence = () => {},
+    onRetractAssumptionEvidence = () => {},
     onInterpretAssumptionEvidence = () => {},
     onRecordAssumptionOutcome = () => {},
     onRecordAssumptionTreatment = () => {},
@@ -317,7 +323,9 @@ export function DecisionCenter({
                                         hasPlanImpact={Boolean(selected.preview)}
                                         onGeneratePlan={onGenerateAssumptionValidationPlan}
                                         onRecordPlan={onRecordAssumptionValidationPlan}
-                                        onAddEvidence={onAddAssumptionEvidence}
+                                    onAddEvidence={onAddAssumptionEvidence}
+                                    onCorrectEvidence={onCorrectAssumptionEvidence}
+                                    onRetractEvidence={onRetractAssumptionEvidence}
                                         onInterpretEvidence={onInterpretAssumptionEvidence}
                                         onRecordOutcome={onRecordAssumptionOutcome}
                                         onRecordTreatment={onRecordAssumptionTreatment}

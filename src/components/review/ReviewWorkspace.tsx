@@ -20,7 +20,12 @@ import {
     type DecisionAction,
     type DecisionCenterRecordView,
 } from './DecisionCenter';
-import type { AssumptionEvidenceInput, AssumptionValidationPlanInput } from './AssumptionValidationPanel';
+import type {
+    AssumptionEvidenceActionGuard,
+    AssumptionEvidenceCorrectionInput,
+    AssumptionEvidenceInput,
+    AssumptionValidationPlanInput,
+} from './AssumptionValidationPanel';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 
 export type ReviewSpecialistOption = {
@@ -69,6 +74,8 @@ export type ReviewIssueView = {
     dispositionNote?: string;
     planningRecordId?: string;
     sourceFindingIds?: string[];
+    updatedAt: number;
+    treatmentHistory?: Array<{ action: string; reason?: string; at: number }>;
 };
 
 export type ReviewUntriagedFindingView = {
@@ -138,6 +145,7 @@ export interface ReviewWorkspaceProps {
     onRetrySpecialist: (runId: string, specialistId: string) => void;
     onRetrySynthesis: (runId: string) => void;
     onActOnIssue: (runId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => void;
+    onReopenIssue: (runId: string, issueId: string, reason: string, expectedUpdatedAt: number) => void;
     onTriageFinding: (runId: string, findingId: string) => void;
     onConfirmPlanningRecord: (recordId: string) => void;
     onReopenPlanningRecord: (recordId: string) => void;
@@ -154,6 +162,8 @@ export interface ReviewWorkspaceProps {
     onGenerateAssumptionValidationPlan?: (recordId: string) => void;
     onRecordAssumptionValidationPlan?: (recordId: string, input: AssumptionValidationPlanInput) => void;
     onAddAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceInput) => void;
+    onCorrectAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceCorrectionInput) => void;
+    onRetractAssumptionEvidence?: (recordId: string, input: AssumptionEvidenceActionGuard) => void;
     onInterpretAssumptionEvidence?: (recordId: string) => void;
     onRecordAssumptionOutcome?: (recordId: string, input: {
         conclusion: AssumptionEvidenceConclusion;
@@ -443,6 +453,38 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
     );
 }
 
+function ReopenFindingDialog({ issue, onClose, onSubmit }: {
+    issue: ReviewIssueView;
+    onClose: () => void;
+    onSubmit: (reason: string) => void;
+}) {
+    const [reason, setReason] = useState('');
+    const valid = reason.trim().length >= 10;
+    return (
+        <div className="fixed inset-0 z-[1200] flex items-end justify-center bg-black/45 sm:items-center sm:p-5" role="presentation" onMouseDown={onClose}>
+            <div className="w-full rounded-t-2xl bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="reopen-finding-title" onMouseDown={event => event.stopPropagation()}>
+                <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-4 py-4 sm:px-5">
+                    <div>
+                        <h2 id="reopen-finding-title" className="font-semibold text-neutral-950">Change this finding's treatment</h2>
+                        <p className="mt-0.5 line-clamp-2 text-sm text-neutral-500">{issue.title}</p>
+                    </div>
+                    <button type="button" onClick={onClose} aria-label="Close" className="rounded-lg p-2 text-neutral-400 hover:bg-neutral-100"><X size={18} /></button>
+                </div>
+                <div className="p-4 sm:p-5">
+                    <p className="text-sm leading-6 text-neutral-600">This returns the finding to Needs attention. It does not reopen or change any linked decision.</p>
+                    <label className="mt-4 block text-sm font-medium text-neutral-800" htmlFor="reopen-finding-reason">Why does this need attention again?</label>
+                    <textarea id="reopen-finding-reason" autoFocus rows={3} value={reason} onChange={event => setReason(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" />
+                    <p className="mt-2 text-xs text-neutral-500">Your rationale is added to the finding's history.</p>
+                </div>
+                <div className="flex flex-col-reverse gap-2 border-t border-neutral-100 p-4 sm:flex-row sm:justify-end">
+                    <button type="button" onClick={onClose} className="min-h-11 rounded-xl px-4 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel</button>
+                    <button type="button" disabled={!valid} onClick={() => onSubmit(reason.trim())} className="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Return to Needs attention</button>
+                </div>
+            </div>
+        </div>
+    );
+}
+
 const reviewIssueAnchorId = (issueId: string): string => `review-issue-${issueId}`;
 const reviewFindingAnchorId = (findingId: string): string => `review-finding-${findingId}`;
 
@@ -496,7 +538,7 @@ function UntriagedFindingCard({
     );
 }
 
-function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: ReviewIssueView; onResolve: () => void; readOnly?: boolean; highlighted?: boolean }) {
+function FindingCard({ issue, onResolve, onReopen, onReviewCurrent, contextChanged, readOnly, highlighted }: { issue: ReviewIssueView; onResolve: () => void; onReopen: () => void; onReviewCurrent: () => void; contextChanged?: boolean; readOnly?: boolean; highlighted?: boolean }) {
     const [expanded, setExpanded] = useState(issue.severity === 'blocking' || highlighted);
     const isExpanded = expanded || highlighted;
     const isClosed = issue.status === 'dismissed' || issue.status === 'addressed';
@@ -522,6 +564,11 @@ function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: Revie
                     {issue.status === 'open' && !readOnly && (
                         <button type="button" onClick={onResolve} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
                             Resolve <ArrowRight size={14} />
+                        </button>
+                    )}
+                    {issue.status !== 'open' && !readOnly && (
+                        <button type="button" onClick={contextChanged ? onReviewCurrent : onReopen} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50">
+                            {contextChanged ? <><RefreshCcw size={14} /> Review current plan</> : <>Change treatment <ArrowRight size={14} /></>}
                         </button>
                     )}
                 </div>
@@ -559,17 +606,31 @@ function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: Revie
                         </div>
                     </div>
                     <p className="text-xs text-neutral-400">Confidence: {issue.confidence}. Confidence describes evidence strength, not severity.</p>
+                    {issue.treatmentHistory && issue.treatmentHistory.length > 0 && (
+                        <div>
+                            <h4 className="text-xs font-bold uppercase tracking-wider text-neutral-500">Treatment history</h4>
+                            <ol className="mt-2 space-y-2">
+                                {issue.treatmentHistory.map((event, index) => (
+                                    <li key={`${event.at}-${index}`} className="rounded-lg border border-neutral-200 bg-white p-3 text-xs leading-5 text-neutral-600">
+                                        <span className="font-semibold text-neutral-800">{event.action}</span>
+                                        {event.reason && <span className="mt-0.5 block">{event.reason}</span>}
+                                    </li>
+                                ))}
+                            </ol>
+                        </div>
+                    )}
                 </div>
             )}
         </article>
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewReview, onRetryCoverage, readOnly, initialIssueId, initialFindingId }: {
+function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, readOnly, initialIssueId, initialFindingId }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
     onTriageFinding: ReviewWorkspaceProps['onTriageFinding'];
+    onReopenIssue: ReviewWorkspaceProps['onReopenIssue'];
     onNewReview: () => void;
     onRetryCoverage: () => void;
     readOnly?: boolean;
@@ -578,6 +639,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
 }) {
     const [statusFilter, setStatusFilter] = useState<'attention' | 'all' | 'closed'>('attention');
     const [actionIssue, setActionIssue] = useState<ReviewIssueView | null>(null);
+    const [reopeningIssue, setReopeningIssue] = useState<ReviewIssueView | null>(null);
     const untriagedFindings = useMemo(() => run.untriagedFindings ?? [], [run.untriagedFindings]);
     const open = run.issues.filter(i => i.status === 'open');
     const blocking = open.filter(i => i.severity === 'blocking').length
@@ -695,7 +757,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
                         onReviewAgain={onNewReview}
                     />
                 ))}
-                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} highlighted={issue.id === initialIssueId || !!initialFindingId && issue.sourceFindingIds?.includes(initialFindingId)} readOnly={readOnly} onResolve={() => setActionIssue(issue)} />) : untriagedFindings.length === 0 || statusFilter === 'closed' ? (
+                {visible.length > 0 ? visible.map(issue => <FindingCard key={issue.id} issue={issue} highlighted={issue.id === initialIssueId || !!initialFindingId && issue.sourceFindingIds?.includes(initialFindingId)} contextChanged={run.contextChanged} readOnly={readOnly} onResolve={() => setActionIssue(issue)} onReopen={() => setReopeningIssue(issue)} onReviewCurrent={onNewReview} />) : untriagedFindings.length === 0 || statusFilter === 'closed' ? (
                     <div className="rounded-2xl border border-dashed border-neutral-300 bg-white px-5 py-12 text-center">
                         <CheckCircle2 size={28} className="mx-auto text-emerald-500" />
                         <h2 className="mt-3 font-semibold text-neutral-900">Nothing in this view</h2>
@@ -704,6 +766,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onNewRevi
                 ) : null}
             </div>
             {actionIssue && <IssueActionDialog issue={actionIssue} planningRecords={planningRecords} onClose={() => setActionIssue(null)} onSubmit={(action, note, recordId) => { onAct(run.id, actionIssue.id, action, note, recordId); setActionIssue(null); }} />}
+            {reopeningIssue && <ReopenFindingDialog issue={reopeningIssue} onClose={() => setReopeningIssue(null)} onSubmit={reason => { onReopenIssue(run.id, reopeningIssue.id, reason, reopeningIssue.updatedAt); setReopeningIssue(null); setStatusFilter('attention'); }} />}
         </div>
     );
 }
@@ -751,6 +814,8 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onGenerateAssumptionValidationPlan={props.onGenerateAssumptionValidationPlan}
                         onRecordAssumptionValidationPlan={props.onRecordAssumptionValidationPlan}
                         onAddAssumptionEvidence={props.onAddAssumptionEvidence}
+                        onCorrectAssumptionEvidence={props.onCorrectAssumptionEvidence}
+                        onRetractAssumptionEvidence={props.onRetractAssumptionEvidence}
                         onInterpretAssumptionEvidence={props.onInterpretAssumptionEvidence}
                         onRecordAssumptionOutcome={props.onRecordAssumptionOutcome}
                         onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
@@ -793,6 +858,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         planningRecords={props.planningRecords}
                         onAct={props.onActOnIssue}
                         onTriageFinding={props.onTriageFinding}
+                        onReopenIssue={props.onReopenIssue}
                         readOnly={props.readOnly}
                         initialIssueId={props.initialIssueId}
                         initialFindingId={props.initialFindingId}

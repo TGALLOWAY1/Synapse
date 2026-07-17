@@ -62,7 +62,12 @@ import {
     type ReviewRunView,
     type ReviewSpecialistOption,
 } from './ReviewWorkspace';
-import type { AssumptionEvidenceInput, AssumptionValidationPlanInput } from './AssumptionValidationPanel';
+import type {
+    AssumptionEvidenceActionGuard,
+    AssumptionEvidenceCorrectionInput,
+    AssumptionEvidenceInput,
+    AssumptionValidationPlanInput,
+} from './AssumptionValidationPanel';
 
 interface Props {
     projectId: string;
@@ -103,7 +108,9 @@ const recordTypeForAction = (action: ReviewIssueAction): PlanningRecord['type'] 
     challenge_decision: 'conflict',
 } as Partial<Record<ReviewIssueAction, PlanningRecord['type']>>)[action];
 
-const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, ReviewIssueDisposition['action']> = {
+type InitialReviewIssueDispositionAction = Exclude<ReviewIssueDisposition['action'], 'reopen'>;
+
+const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, InitialReviewIssueDispositionAction> = {
     propose_decision: 'propose_record',
     add_assumption: 'propose_record',
     add_risk: 'propose_record',
@@ -117,7 +124,18 @@ const DISPOSITION_BY_ACTION: Record<ReviewIssueAction, ReviewIssueDisposition['a
     already_addressed: 'already_addressed',
 };
 
-const dispositionForAction = (action: ReviewIssueAction): ReviewIssueDisposition['action'] => DISPOSITION_BY_ACTION[action];
+const dispositionForAction = (action: ReviewIssueAction): InitialReviewIssueDispositionAction => DISPOSITION_BY_ACTION[action];
+
+const issueTreatmentLabel = (action: ReviewIssueDisposition['action']): string => ({
+    propose_record: 'Added to the Decision Center',
+    link_existing: 'Connected to an existing planning item',
+    challenge_existing: 'Recorded as a conflict with an existing decision',
+    request_revision: 'Plan revision requested',
+    defer: 'Deferred',
+    dismiss: 'Dismissed with rationale',
+    already_addressed: 'Marked already addressed',
+    reopen: 'Returned to Needs attention',
+})[action];
 
 export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
@@ -568,6 +586,26 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         });
     };
 
+    const handleReopenIssue = (reviewId: string, issueId: string, reason: string, expectedUpdatedAt: number) => {
+        if (!canWrite || !currentManifest) return;
+        const state = useProjectStore.getState();
+        const run = (state.reviewRuns[projectId] ?? []).find(item => item.id === reviewId);
+        if (!run) return;
+        const result = state.reopenReviewIssue(projectId, reviewId, issueId, {
+            reason,
+            expectedUpdatedAt,
+            expectedContextSignature: run.sourceManifest.contextSignature,
+            currentContextSignature: currentManifest.contextSignature,
+        });
+        if (!result.ok) {
+            useToastStore.getState().addToast({
+                type: 'warning',
+                title: 'Finding not reopened',
+                message: result.reason,
+            });
+        }
+    };
+
     const handleTriageFinding = (reviewId: string, findingId: string) => {
         if (!canWrite) return;
         const state = useProjectStore.getState();
@@ -631,6 +669,12 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
             dispositionNote: latestDisposition?.reason,
             planningRecordId: issue.relatedPlanningRecordIds.at(-1),
             sourceFindingIds: issue.findingIds,
+            updatedAt: issue.updatedAt,
+            treatmentHistory: issue.dispositions.map(disposition => ({
+                action: issueTreatmentLabel(disposition.action),
+                reason: disposition.reason,
+                at: disposition.at,
+            })),
         };
     });
 
@@ -829,6 +873,9 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
                                 : event.type === 'validation_evidence_retracted' || event.type === 'validation_outcome_reopened' ? event.reason
                                     : undefined,
                 })),
+                evidenceSetHash,
+                sourceSpineVersionId: latestSpine?.id,
+                sourceSpineContentHash: currentSpineContentHash,
             } : undefined,
             preview: storedPreview ? {
                 id: storedPreview.id,
@@ -1007,6 +1054,26 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         if (!result.ok) showValidationError('Evidence not saved', result.reason);
         else if (result.duplicateEvidenceOf) useToastStore.getState().addToast({ type: 'info', title: 'Duplicate source preserved', message: 'This record is visible, but will not count as independent corroboration.' });
         else useToastStore.getState().addToast({ type: 'success', title: 'Evidence recorded', message: 'The observation remains separate from any interpretation or conclusion.' });
+    };
+
+    const handleRetractAssumptionEvidence = (recordId: string, input: AssumptionEvidenceActionGuard) => {
+        if (!canWrite) return;
+        const result = useProjectStore.getState().retractAssumptionEvidence(projectId, recordId, input);
+        if (!result.ok) showValidationError('Evidence not retracted', result.reason);
+        else useToastStore.getState().addToast({
+            type: 'success', title: 'Evidence retracted',
+            message: 'The original remains in history. Prior interpretations and conclusions now need review.',
+        });
+    };
+
+    const handleCorrectAssumptionEvidence = (recordId: string, input: AssumptionEvidenceCorrectionInput) => {
+        if (!canWrite) return;
+        const result = useProjectStore.getState().correctAssumptionEvidence(projectId, recordId, input);
+        if (!result.ok) showValidationError('Evidence not corrected', result.reason);
+        else useToastStore.getState().addToast({
+            type: 'success', title: 'Evidence corrected',
+            message: 'The replacement is current, the original remains in history, and the conclusion needs review.',
+        });
     };
 
     const handleInterpretAssumptionEvidence = (recordId: string) => {
@@ -1403,6 +1470,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onRetrySpecialist={(reviewId, specialistId) => void handleRetrySpecialist(reviewId, specialistId)}
         onRetrySynthesis={reviewId => void handleResumeReview(reviewId)}
         onActOnIssue={handleIssueAction}
+        onReopenIssue={handleReopenIssue}
         onTriageFinding={handleTriageFinding}
         onConfirmPlanningRecord={recordId => {
             const record = planningRecords.find(item => item.id === recordId);
@@ -1417,6 +1485,8 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         onGenerateAssumptionValidationPlan={handleGenerateAssumptionValidationPlan}
         onRecordAssumptionValidationPlan={handleRecordAssumptionValidationPlan}
         onAddAssumptionEvidence={handleAddAssumptionEvidence}
+        onCorrectAssumptionEvidence={handleCorrectAssumptionEvidence}
+        onRetractAssumptionEvidence={handleRetractAssumptionEvidence}
         onInterpretAssumptionEvidence={handleInterpretAssumptionEvidence}
         onRecordAssumptionOutcome={handleRecordAssumptionOutcome}
         onRecordAssumptionTreatment={handleRecordAssumptionTreatment}

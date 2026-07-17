@@ -1,6 +1,8 @@
 import { describe, it, expect, beforeAll, afterEach, vi } from 'vitest';
 import { render, fireEvent, within } from '@testing-library/react';
 import { DataModelRenderer } from '../DataModelRenderer';
+import { dataModelMemberAnchorId } from '../dataModel/dataModelNavigation';
+import { dataModelToMarkdown, parseDataModelMarkdown } from '../../../lib/services/dataModelMarkdown';
 import type { DataModelContent } from '../../../types';
 
 // jsdom doesn't implement scrollIntoView; the outline/graph interactions call it.
@@ -53,6 +55,8 @@ const twoEntityModel: DataModelContent = {
 function renderModel(content: DataModelContent, props: Partial<{
     staleness: 'current' | 'possibly_outdated' | 'outdated';
     initialEntityName: string;
+    initialMemberName: string;
+    initialMemberAspect: 'field' | 'relationship' | 'constraint' | 'data_expectation';
 }> = {}) {
     return render(<DataModelRenderer content={JSON.stringify(content)} {...props} />);
 }
@@ -171,6 +175,56 @@ describe('DataModelRenderer — collapsible entity cards', () => {
 
         expect(getByText('total_cents')).toBeInTheDocument();
         expect(scroll).toHaveBeenCalled();
+    });
+
+    it('focuses and visibly identifies an exact structured field target', () => {
+        const { container } = renderModel(twoEntityModel, {
+            initialEntityName: 'Order', initialMemberAspect: 'field', initialMemberName: 'total_cents',
+        });
+
+        const row = container.querySelector(`#${dataModelMemberAnchorId('Order', 'field', 'total_cents')}`);
+        expect(row).toHaveAttribute('aria-current', 'true');
+        expect(row).toHaveClass('bg-indigo-50', 'focus:ring-2');
+        expect(row).toHaveFocus();
+        expect(Element.prototype.scrollIntoView).toHaveBeenCalled();
+    });
+
+    it.each([
+        ['relationship', 'RELATIONSHIP'],
+        ['constraint', 'CONSTRAINT'],
+        ['data_expectation', 'PRIVACY'],
+    ] as const)('focuses the exact %s row only when its stable member identity exists', (aspect, calloutKind) => {
+        const model: DataModelContent = {
+            entities: [{
+                name: 'Workspace', description: 'A workspace.', fields: [{ name: 'id', type: 'UUID', required: true, description: 'Primary key' }],
+                relationships: [{ type: 'belongs_to', target: 'User', description: 'Owned by one user' }],
+                constraints: ['A workspace name must be unique'],
+                privacyRules: ['Workspace notes must be encrypted'],
+            }], apiEndpoints: [],
+        };
+        const parsed = parseDataModelMarkdown(dataModelToMarkdown(model));
+        const member = parsed?.entities[0].callouts.find(callout => callout.kind === calloutKind)?.text;
+        expect(member).toBeTruthy();
+        const { container } = renderModel(model, {
+            initialEntityName: 'Workspace', initialMemberAspect: aspect, initialMemberName: member!,
+        });
+
+        const row = container.querySelector(`#${dataModelMemberAnchorId('Workspace', aspect, member!)}`);
+        expect(row).toHaveAttribute('aria-current', 'true');
+        expect(row).toHaveFocus();
+        expect(row).toHaveClass('min-w-0');
+        expect(row?.querySelector('p')).toHaveClass('break-words');
+    });
+
+    it('falls back conservatively to the entity when a legacy member identity is ambiguous', () => {
+        const { container } = renderModel(twoEntityModel, {
+            initialEntityName: 'Order', initialMemberAspect: 'field', initialMemberName: 'total',
+        });
+
+        const entity = container.querySelector('#data-model-entity-order');
+        expect(entity).toHaveAttribute('aria-current', 'true');
+        expect(entity).toHaveFocus();
+        expect(container.querySelector(`#${dataModelMemberAnchorId('Order', 'field', 'total')}`)).toBeNull();
     });
 });
 

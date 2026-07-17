@@ -11,6 +11,7 @@ import type {
     ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue,
     ReviewIssueDisposition, PlanningRecord, PlanningRecordStatus,
     DecisionEvent, DecisionAssessment,
+    AssumptionEvidenceRecord, AssumptionEvidenceSourceType,
     AssumptionValidationEvent, AssumptionValidationPlanProposal, AssumptionInterpretationProposal,
     ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
@@ -90,6 +91,35 @@ export type CommitReadinessReviewResult =
 export type ReopenReadinessCommitmentResult =
     | { status: 'reopened'; reopenEventId: string }
     | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
+export type AssumptionEvidenceMutationGuard = {
+    evidenceId: string;
+    expectedEvidenceContentHash: string;
+    expectedEvidenceSetHash: string;
+    expectedSpineVersionId: string;
+    expectedSpineContentHash: string;
+    reason: string;
+};
+
+export type AssumptionEvidenceReplacementInput = {
+    sourceType: AssumptionEvidenceSourceType;
+    source: string;
+    sourceIdentity: string;
+    observedAt: number;
+    observation: string;
+    scopeOrSample?: string;
+    limitations: string[];
+    character: 'direct' | 'interpretation';
+    relation: AssumptionEvidenceRecord['relation'];
+};
+
+export type AssumptionEvidenceCorrectionInput = AssumptionEvidenceMutationGuard & {
+    replacement: AssumptionEvidenceReplacementInput;
+};
+
+export type AssumptionEvidenceMutationResult =
+    | { ok: true; evidenceId?: string; eventIds: string[] }
+    | { ok: false; reason: string };
 
 export interface ProjectState {
     projects: Record<string, Project>;
@@ -336,8 +366,17 @@ export interface ProjectState {
         projectId: string,
         reviewId: string,
         issueId: string,
-        disposition: Omit<ReviewIssueDisposition, 'actor' | 'at'> & { at?: number },
+        disposition: Omit<ReviewIssueDisposition, 'actor' | 'at' | 'action'> & {
+            action: Exclude<ReviewIssueDisposition['action'], 'reopen'>;
+            at?: number;
+        },
     ) => void;
+    reopenReviewIssue: (
+        projectId: string,
+        reviewId: string,
+        issueId: string,
+        input: import('../lib/review').ReviewIssueRecoveryGuard & { at?: number },
+    ) => { ok: true } | { ok: false; reason: string };
     createPlanningRecord: (
         projectId: string,
         input: Omit<PlanningRecord, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>,
@@ -369,6 +408,16 @@ export interface ProjectState {
         planningRecordId: string,
         event: AssumptionValidationEvent,
     ) => { ok: true; duplicate: boolean; duplicateEvidenceOf?: string } | { ok: false; reason: string };
+    retractAssumptionEvidence: (
+        projectId: string,
+        planningRecordId: string,
+        input: AssumptionEvidenceMutationGuard,
+    ) => AssumptionEvidenceMutationResult;
+    correctAssumptionEvidence: (
+        projectId: string,
+        planningRecordId: string,
+        input: AssumptionEvidenceCorrectionInput,
+    ) => AssumptionEvidenceMutationResult;
     addAssumptionValidationPlanProposal: (
         projectId: string,
         planningRecordId: string,

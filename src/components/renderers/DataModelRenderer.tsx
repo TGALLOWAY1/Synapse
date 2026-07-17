@@ -23,6 +23,7 @@ import { useIsMobile } from '../../lib/useIsMobile';
 import { DataModelOverview } from './dataModel/DataModelOverview';
 import { EntityGraph } from './dataModel/EntityGraph';
 import { EntityCard } from './dataModel/EntityCard';
+import { resolveDataModelMemberAnchor, type DataModelMemberAspect } from './dataModel/dataModelNavigation';
 import { CategoryBadge } from './dataModel/badges';
 
 interface Props {
@@ -34,6 +35,8 @@ interface Props {
      */
     staleness?: StalenessState;
     initialEntityName?: string;
+    initialMemberName?: string;
+    initialMemberAspect?: DataModelMemberAspect;
 }
 
 function tryParseAsJson(content: string): DataModelContent | null {
@@ -77,7 +80,7 @@ function MethodPill({ method }: { method: string }) {
     );
 }
 
-export function DataModelRenderer({ content, staleness, initialEntityName }: Props) {
+export function DataModelRenderer({ content, staleness, initialEntityName, initialMemberName, initialMemberAspect }: Props) {
     const { parsed, sourceMarkdown } = useMemo(() => {
         const json = tryParseAsJson(content);
         if (json) {
@@ -102,10 +105,12 @@ export function DataModelRenderer({ content, staleness, initialEntityName }: Pro
     const signature = parsed.entities.map(e => e.name).join('|');
     return (
         <DataModelBody
-            key={`${signature}:${initialEntityName ?? ''}`}
+            key={`${signature}:${initialEntityName ?? ''}:${initialMemberAspect ?? ''}:${initialMemberName ?? ''}`}
             parsed={parsed}
             staleness={staleness}
             initialEntityName={initialEntityName}
+            initialMemberName={initialMemberName}
+            initialMemberAspect={initialMemberAspect}
         />
     );
 }
@@ -114,9 +119,11 @@ interface BodyProps {
     parsed: ParsedDataModel;
     staleness?: StalenessState;
     initialEntityName?: string;
+    initialMemberName?: string;
+    initialMemberAspect?: DataModelMemberAspect;
 }
 
-function DataModelBody({ parsed, staleness, initialEntityName }: BodyProps) {
+function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName, initialMemberAspect }: BodyProps) {
     const isMobile = useIsMobile();
     const { graph, summary } = useMemo(() => analyzeDataModel(parsed), [parsed]);
 
@@ -130,6 +137,11 @@ function DataModelBody({ parsed, staleness, initialEntityName }: BodyProps) {
             .filter((p): p is { entity: ParsedEntity; node: DataModelNode } => Boolean(p.node)),
         [parsed, nodeById],
     );
+    const initialNodeId = initialEntityName ? slugifyEntity(initialEntityName) : undefined;
+    const initialPair = initialNodeId ? pairs.find(pair => pair.node.id === initialNodeId) : undefined;
+    const exactMemberAnchor = initialPair
+        ? resolveDataModelMemberAnchor(initialPair.entity, initialMemberAspect, initialMemberName)
+        : undefined;
 
     const distinctCategories = useMemo(
         () => new Set(pairs.map(p => p.node.category)).size,
@@ -148,7 +160,7 @@ function DataModelBody({ parsed, staleness, initialEntityName }: BodyProps) {
     // Expansion — single-entity models open by default; larger ones start
     // collapsed for scannability.
     const [expandedIds, setExpandedIds] = useState<Set<string>>(() => {
-        const target = initialEntityName ? slugifyEntity(initialEntityName) : undefined;
+        const target = initialNodeId;
         if (target && nodeIdSet.has(target)) return new Set([target]);
         return pairs.length === 1 ? new Set(pairs.map(p => p.node.id)) : new Set();
     });
@@ -166,8 +178,10 @@ function DataModelBody({ parsed, staleness, initialEntityName }: BodyProps) {
 
     useEffect(() => {
         if (!initialEntityName) return;
-        document.getElementById(entityAnchorId(initialEntityName))?.scrollIntoView?.({ block: 'center' });
-    }, [initialEntityName]);
+        const target = document.getElementById(exactMemberAnchor ?? entityAnchorId(initialEntityName));
+        target?.scrollIntoView?.({ block: 'center' });
+        target?.focus({ preventScroll: true });
+    }, [exactMemberAnchor, initialEntityName]);
 
     const toggleEntity = (nodeId: string) =>
         setExpandedIds(prev => {
@@ -296,6 +310,9 @@ function DataModelBody({ parsed, staleness, initialEntityName }: BodyProps) {
                                         onNavigateToEntity={focusEntity}
                                         showCategory={!grouped}
                                         isMobile={isMobile}
+                                        focusedEntity={initialPair?.node.id === node.id && !exactMemberAnchor}
+                                        initialMemberName={initialPair?.node.id === node.id && exactMemberAnchor ? initialMemberName : undefined}
+                                        initialMemberAspect={initialPair?.node.id === node.id && exactMemberAnchor ? initialMemberAspect : undefined}
                                     />
                                 </div>
                             );

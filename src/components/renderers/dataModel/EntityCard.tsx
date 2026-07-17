@@ -8,6 +8,7 @@ import {
     classifyFieldType, entityAnchorId, indexedFieldNames, parseRelationshipCallout,
 } from '../../../lib/dataModelGraph';
 import { CategoryBadge, EntityAttributeBadges, FieldTypeChip, InspectorRow } from './badges';
+import { dataModelMemberAnchorId, type DataModelMemberAspect } from './dataModelNavigation';
 
 interface Props {
     entity: ParsedEntity;
@@ -24,6 +25,9 @@ interface Props {
     showCategory: boolean;
     /** Mobile viewport — drives collapsed-card chip density. */
     isMobile: boolean;
+    focusedEntity?: boolean;
+    initialMemberName?: string;
+    initialMemberAspect?: DataModelMemberAspect;
 }
 
 function CountChip({ icon: Icon, count, label, tone = 'neutral' }: {
@@ -42,7 +46,12 @@ function CountChip({ icon: Icon, count, label, tone = 'neutral' }: {
     );
 }
 
-function FieldTable({ group, indexed }: { group: ParsedFieldGroup; indexed: Set<string> }) {
+function FieldTable({ group, indexed, entityName, initialMemberName }: {
+    group: ParsedFieldGroup;
+    indexed: Set<string>;
+    entityName: string;
+    initialMemberName?: string;
+}) {
     return (
         <div className="space-y-1.5">
             <h5 className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500">{group.name}</h5>
@@ -66,8 +75,16 @@ function FieldTable({ group, indexed }: { group: ParsedFieldGroup; indexed: Set<
                         {group.fields.map((f, fi) => {
                             const kind = classifyFieldType(f.type, f.name);
                             const isIndexed = indexed.has(f.name);
+                            const highlighted = f.name === initialMemberName;
+                            const rowId = dataModelMemberAnchorId(entityName, 'field', f.name);
                             return (
-                                <tr key={fi} className="border-t border-neutral-100 align-top">
+                                <tr
+                                    key={fi}
+                                    id={rowId}
+                                    tabIndex={-1}
+                                    aria-current={highlighted ? 'true' : undefined}
+                                    className={`scroll-mt-24 border-t align-top outline-none focus:ring-2 focus:ring-inset focus:ring-indigo-500 ${highlighted ? 'border-indigo-200 bg-indigo-50 ring-2 ring-inset ring-indigo-300' : 'border-neutral-100'}`}
+                                >
                                     <td className="px-2 py-1.5">
                                         <span className="inline-flex items-center gap-1 font-mono text-[11px] text-neutral-800 break-all">
                                             {f.name}
@@ -89,7 +106,7 @@ function FieldTable({ group, indexed }: { group: ParsedFieldGroup; indexed: Set<
                                             ? <Check size={13} className="inline text-emerald-500" aria-label="Required" />
                                             : <span className="text-neutral-300" aria-label="Optional">—</span>}
                                     </td>
-                                    <td className="px-2 py-1.5 text-neutral-600 leading-relaxed">{f.description}</td>
+                                    <td className="break-words px-2 py-1.5 leading-relaxed text-neutral-600">{f.description}</td>
                                 </tr>
                             );
                         })}
@@ -108,6 +125,7 @@ function FieldTable({ group, indexed }: { group: ParsedFieldGroup; indexed: Set<
  */
 export function EntityCard({
     entity, node, expanded, onToggle, resolveTargetId, onNavigateToEntity, showCategory, isMobile,
+    focusedEntity = false, initialMemberName, initialMemberAspect,
 }: Props) {
     const indexed = useMemo(() => indexedFieldNames(entity), [entity]);
 
@@ -117,7 +135,12 @@ export function EntityCard({
     const indexes = entity.callouts.filter(c => c.kind === 'INDEX');
 
     return (
-        <section id={entityAnchorId(entity.name)} className="scroll-mt-24 rounded-xl border border-neutral-200 bg-white shadow-sm overflow-hidden">
+        <section
+            id={entityAnchorId(entity.name)}
+            tabIndex={-1}
+            aria-current={focusedEntity ? 'true' : undefined}
+            className={`scroll-mt-24 overflow-hidden rounded-xl border bg-white shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 ${focusedEntity ? 'border-indigo-300 ring-2 ring-indigo-300' : 'border-neutral-200'}`}
+        >
             {/* Header — always visible, toggles expansion */}
             <button
                 type="button"
@@ -175,7 +198,13 @@ export function EntityCard({
                     )}
 
                     {entity.fieldGroups.map((group, gi) => (
-                        <FieldTable key={gi} group={group} indexed={indexed} />
+                        <FieldTable
+                            key={gi}
+                            group={group}
+                            indexed={indexed}
+                            entityName={entity.name}
+                            initialMemberName={initialMemberAspect === 'field' ? initialMemberName : undefined}
+                        />
                     ))}
 
                     {relationships.length > 0 && (
@@ -188,6 +217,8 @@ export function EntityCard({
                                 return (
                                     <InspectorRow
                                         key={i}
+                                        id={dataModelMemberAnchorId(entity.name, 'relationship', c.text)}
+                                        highlighted={initialMemberAspect === 'relationship' && initialMemberName === c.text}
                                         category="relationship"
                                         label={label}
                                         description={rel.description}
@@ -202,7 +233,7 @@ export function EntityCard({
                     {constraints.length > 0 && (
                         <InspectorSection title="Constraints">
                             {constraints.map((c, i) => (
-                                <InspectorRow key={i} category="constraint" label="" description={c.text} />
+                                <InspectorRow key={i} id={dataModelMemberAnchorId(entity.name, 'constraint', c.text)} highlighted={initialMemberAspect === 'constraint' && initialMemberName === c.text} category="constraint" label="" description={c.text} />
                             ))}
                         </InspectorSection>
                     )}
@@ -210,7 +241,7 @@ export function EntityCard({
                     {privacy.length > 0 && (
                         <InspectorSection title="Privacy">
                             {privacy.map((c, i) => (
-                                <InspectorRow key={i} category="privacy" label="" description={c.text} />
+                                <InspectorRow key={i} id={dataModelMemberAnchorId(entity.name, 'data_expectation', c.text)} highlighted={initialMemberAspect === 'data_expectation' && initialMemberName === c.text} category="privacy" label="" description={c.text} />
                             ))}
                         </InspectorSection>
                     )}
@@ -218,7 +249,7 @@ export function EntityCard({
                     {indexes.length > 0 && (
                         <InspectorSection title="Indexes">
                             {indexes.map((c, i) => (
-                                <InspectorRow key={i} category="index" label="" description={c.text} />
+                                <InspectorRow key={i} id={dataModelMemberAnchorId(entity.name, 'data_expectation', c.text)} highlighted={initialMemberAspect === 'data_expectation' && initialMemberName === c.text} category="index" label="" description={c.text} />
                             ))}
                         </InspectorSection>
                     )}

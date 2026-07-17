@@ -3,6 +3,7 @@ import type {
 } from '../../types';
 import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
 import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
+import type { PlanningArtifactRegionTarget } from '../../lib/planning/planningNavigation';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -47,6 +48,8 @@ interface DispatchProps {
     initialFlowId?: string;
     initialFlowStepIndex?: number;
     initialDataEntityName?: string;
+    initialDataMemberName?: string;
+    initialDataMemberAspect?: PlanningArtifactRegionTarget['dataMemberAspect'];
     initialImplementationTarget?: ImplementationPlanNavigationTarget;
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
@@ -118,6 +121,8 @@ export function ArtifactContentRenderer({
     initialFlowId,
     initialFlowStepIndex,
     initialDataEntityName,
+    initialDataMemberName,
+    initialDataMemberAspect,
     initialImplementationTarget,
     promptPackContent,
     savedTasks,
@@ -139,10 +144,12 @@ export function ArtifactContentRenderer({
         // repeated inside the Data Model summary card — so it isn't passed here.
         return (
             <DataModelRenderer
-                key={initialDataEntityName ?? 'data-model'}
+                key={`${initialDataEntityName ?? 'data-model'}:${initialDataMemberAspect ?? ''}:${initialDataMemberName ?? ''}`}
                 content={content}
                 staleness={staleness}
                 initialEntityName={initialDataEntityName}
+                initialMemberName={initialDataMemberName}
+                initialMemberAspect={initialDataMemberAspect}
             />
         );
     }

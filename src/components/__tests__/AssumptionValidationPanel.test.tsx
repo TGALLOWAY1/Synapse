@@ -38,6 +38,7 @@ const baseValidation = (overrides: Partial<AssumptionValidationView> = {}): Assu
 
 const callbacks = () => ({
     onGeneratePlan: vi.fn(), onRecordPlan: vi.fn(), onAddEvidence: vi.fn(),
+    onCorrectEvidence: vi.fn(), onRetractEvidence: vi.fn(),
     onInterpretEvidence: vi.fn(), onRecordOutcome: vi.fn(), onRecordTreatment: vi.fn(),
     onReopenOutcome: vi.fn(), onPreviewImpact: vi.fn(),
 });
@@ -91,6 +92,62 @@ describe('AssumptionValidationPanel', () => {
             sourceIdentity: 'prototype-run-7',
             observedAt: new Date('2026-06-10T12:00:00').getTime(),
         }));
+    });
+
+    it('corrects or retracts exact active evidence only with an explicit user reason', () => {
+        const handlers = callbacks();
+        const currentEvidence = evidence();
+        render(<AssumptionValidationPanel
+            recordId="assumption-1"
+            validation={baseValidation({
+                currentPlan: plan,
+                workflowState: 'in_progress',
+                activeEvidence: [currentEvidence],
+                evidenceSetHash: 'evidence-set-hash',
+                sourceSpineVersionId: 'spine-1',
+                sourceSpineContentHash: 'spine-content-hash',
+            })}
+            requiresValidation
+            hasPlanImpact={false}
+            {...handlers}
+        />);
+
+        fireEvent.click(screen.getByText(/2\. Add evidence/));
+        fireEvent.click(screen.getByRole('button', { name: 'Correct' }));
+        expect(screen.getByRole('button', { name: 'Save correction' })).toBeDisabled();
+        fireEvent.change(screen.getByLabelText(`Corrected observation for ${currentEvidence.source}`), {
+            target: { value: 'The creator abandoned when the price appeared.' },
+        });
+        fireEvent.change(screen.getByLabelText(`Correction reason for ${currentEvidence.source}`), {
+            target: { value: 'The original note reversed the observed behavior.' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Save correction' }));
+        expect(handlers.onCorrectEvidence).toHaveBeenCalledWith('assumption-1', expect.objectContaining({
+            evidenceId: currentEvidence.id,
+            expectedEvidenceContentHash: currentEvidence.contentHash,
+            expectedEvidenceSetHash: 'evidence-set-hash',
+            expectedSpineVersionId: 'spine-1',
+            reason: 'The original note reversed the observed behavior.',
+            replacement: expect.objectContaining({
+                observation: 'The creator abandoned when the price appeared.',
+                sourceIdentity: currentEvidence.sourceIdentity,
+            }),
+        }));
+
+        fireEvent.click(screen.getByRole('button', { name: 'Retract' }));
+        expect(screen.getByRole('button', { name: 'Retract evidence' })).toBeDisabled();
+        fireEvent.change(screen.getByLabelText(`Retraction reason for ${currentEvidence.source}`), {
+            target: { value: 'The session was attributed to the wrong participant.' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Retract evidence' }));
+        expect(handlers.onRetractEvidence).toHaveBeenCalledWith('assumption-1', {
+            evidenceId: currentEvidence.id,
+            expectedEvidenceContentHash: currentEvidence.contentHash,
+            expectedEvidenceSetHash: 'evidence-set-hash',
+            expectedSpineVersionId: 'spine-1',
+            expectedSpineContentHash: 'spine-content-hash',
+            reason: 'The session was attributed to the wrong participant.',
+        });
     });
 
     it('allows contradictory evidence to remain inconclusive and never turns advisory interpretation into authority', () => {

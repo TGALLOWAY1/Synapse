@@ -38,6 +38,7 @@ const baseProps = (patch: Partial<ReviewWorkspaceProps> = {}): ReviewWorkspacePr
     onRetrySpecialist: vi.fn(),
     onRetrySynthesis: vi.fn(),
     onActOnIssue: vi.fn(),
+    onReopenIssue: vi.fn(),
     onTriageFinding: vi.fn(),
     onConfirmPlanningRecord: vi.fn(),
     onReopenPlanningRecord: vi.fn(),
@@ -75,6 +76,7 @@ const completeRun = (patch: Partial<ReviewRunView> = {}): ReviewRunView => ({
             { specialistName: 'Product & Scope', recommendation: 'Retain files so users can revisit them.' },
         ],
         disagreement: true,
+        updatedAt: 1_700_000_000_000,
     }],
     ...patch,
 });
@@ -195,6 +197,40 @@ describe('ReviewWorkspace', () => {
             'Policy already approved elsewhere',
             undefined,
         );
+    });
+
+    it('reopens a closed current finding only after an explicit rationale', () => {
+        const onReopenIssue = vi.fn();
+        const closed = {
+            ...completeRun().issues[0],
+            status: 'dismissed' as const,
+            treatmentHistory: [{ action: 'dismiss', reason: 'Initially out of scope.', at: 1 }],
+        };
+        const run = completeRun({ issues: [closed] });
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id, onReopenIssue })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'All findings' }));
+        fireEvent.click(screen.getByRole('button', { name: /Change treatment/i }));
+        const submit = screen.getByRole('button', { name: 'Return to Needs attention' });
+        expect(submit).toBeDisabled();
+        fireEvent.change(screen.getByLabelText('Why does this need attention again?'), {
+            target: { value: 'New recovery evidence makes this risk relevant again.' },
+        });
+        fireEvent.click(submit);
+
+        expect(onReopenIssue).toHaveBeenCalledWith(run.id, closed.id, 'New recovery evidence makes this risk relevant again.', closed.updatedAt);
+    });
+
+    it('offers a fresh review instead of reopening a finding from stale Challenge context', () => {
+        const closed = { ...completeRun().issues[0], status: 'dismissed' as const };
+        const run = completeRun({ issues: [closed], contextChanged: true });
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'All findings' }));
+        const reviewButtons = screen.getAllByRole('button', { name: 'Review current plan' });
+        expect(screen.queryByRole('button', { name: /Change treatment/i })).not.toBeInTheDocument();
+        fireEvent.click(reviewButtons.at(-1)!);
+        expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeInTheDocument();
     });
 
     it('keeps proposed specialist records distinct from confirmed decisions', () => {
