@@ -7,6 +7,7 @@ import {
     type AssumptionValidationView,
 } from './AssumptionValidationPanel';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
+import { planningRecordCopy, planningRecordDominantCondition } from '../../lib/planning/planningLanguage';
 
 export type DecisionCenterOptionView = {
     id: string;
@@ -117,13 +118,20 @@ interface Props {
 
 const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
 const needsAttention = (record: DecisionCenterRecordView) => needsVerdict(record) || Boolean(record.requiresValidation);
+const dominantConditionLabel = (record: DecisionCenterRecordView) => planningRecordCopy(planningRecordDominantCondition({
+    type: record.type === 'question' ? 'open_question' : record.type,
+    status: record.status,
+    requiresValidation: record.requiresValidation,
+    hasCurrentEvidenceConclusion: Boolean(record.validation?.conclusionIsCurrent && record.validation.acceptedConclusion),
+    needsAlignment: Boolean(record.preview && ['ready', 'stale', 'failed'].includes(record.preview.status)),
+})).label;
 const previewStatusLabel: Record<DecisionCenterPreviewView['status'], string> = {
     generating: 'Preparing impact', ready: 'Review changes', stale: 'Impact needs refresh',
-    failed: 'Impact unavailable', applied: 'Applied to working plan', superseded: 'Superseded',
+    failed: 'Impact unavailable', applied: 'Change applied', superseded: 'Superseded',
 };
 const proposalDispositionLabel: Record<NonNullable<DecisionCenterPreviewView['proposals']>[number]['disposition'], string> = {
     pending: 'Needs review', accepted: 'Will update', rejected: 'Keeping current', edited: 'Edited', deferred: 'Deferred',
-    confirmed_aligned: 'Confirmed aligned', confirmed_not_applicable: 'Confirmed not affected',
+    confirmed_aligned: 'Alignment verified', confirmed_not_applicable: 'Confirmed not affected',
 };
 const proposalAnalysisLabel: Record<NonNullable<NonNullable<DecisionCenterPreviewView['proposals']>[number]['analysisStatus']>, string> = {
     advisory_candidate: 'Advisory target', bounded_applicable: 'Ready to review', needs_input: 'Needs context',
@@ -218,27 +226,27 @@ export function DecisionCenter({
                         <p className="mt-1 text-sm text-neutral-500">Resolve consequential choices, preview their impact, then apply them explicitly.</p>
                     </div>
                     <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" aria-label={`${unresolvedCount} planning items need attention`}>
-                        {unresolvedCount} need{unresolvedCount === 1 ? 's' : ''} review
+                        {unresolvedCount} need{unresolvedCount === 1 ? 's' : ''} attention
                     </div>
                 </div>
             </header>
             {unresolvedCount === 0 && records.length > 0 && (
                 <div className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 sm:px-6" role="status">
-                    All current planning items reviewed
+                    Nothing needs attention right now
                 </div>
             )}
 
             <div className="min-h-0 flex-1 md:grid md:grid-cols-[300px_minmax(0,1fr)]">
                 <aside className={`${mobileDetailOpen ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-neutral-200 bg-white`} aria-label="Decision queue">
                     <div className="flex shrink-0 border-b border-neutral-100 p-2">
-                        <button type="button" onClick={() => setView('needs_review')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'needs_review' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Needs review</button>
-                        <button type="button" onClick={() => setView('log')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'log' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Decision log</button>
+                        <button type="button" onClick={() => setView('needs_review')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'needs_review' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Needs attention</button>
+                        <button type="button" onClick={() => setView('log')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'log' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Resolved &amp; history</button>
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
                         {visible.length === 0 ? (
                             <div className="px-4 py-10 text-center">
                                 {view === 'needs_review' ? <Check className="mx-auto text-emerald-500" size={24} /> : <FileQuestion className="mx-auto text-neutral-300" size={24} />}
-                                <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'All current planning items reviewed' : 'No decision history yet'}</p>
+                                <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'Nothing needs attention' : 'No resolved planning history yet'}</p>
                                 <p className="mt-1 text-xs leading-5 text-neutral-500">{view === 'needs_review' ? 'New assumptions and review findings will appear here.' : 'Resolved and deferred choices remain available here.'}</p>
                             </div>
                         ) : visible.map(record => (
@@ -249,10 +257,7 @@ export function DecisionCenter({
                                 aria-current={selected?.id === record.id ? 'true' : undefined}
                                 className={`mb-1 w-full rounded-xl border px-3 py-3 text-left transition ${selected?.id === record.id ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-neutral-50'}`}
                             >
-                                <div className="flex items-center gap-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-400">
-                                    <span>{record.type === 'question' ? 'Open question' : record.type.replace('_', ' ')}</span>
-                                    <span>·</span><span>{record.requiresValidation && !needsVerdict(record) ? 'needs validation' : record.status.replace('_', ' ')}</span>
-                                </div>
+                                <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{dominantConditionLabel(record)}</div>
                                 <p className="mt-1 text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
                                 {record.sourceLabels?.[0] && <p className="mt-1 truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</p>}
                             </button>
@@ -266,7 +271,7 @@ export function DecisionCenter({
                     ) : (
                         <div className="mx-auto max-w-3xl px-4 py-5 sm:px-7 sm:py-8">
                             <button type="button" onClick={() => setMobileDetailOpen(false)} className="mb-4 inline-flex min-h-10 items-center gap-2 text-sm font-medium text-neutral-600 md:hidden"><ArrowLeft size={16} /> Back to decisions</button>
-                            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">{selected.requiresValidation && !needsVerdict(selected) ? 'needs validation' : selected.status.replace('_', ' ')} · {selected.type.replace('_', ' ')}</div>
+                            <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">{dominantConditionLabel(selected)}</div>
                             <h2 ref={detailHeadingRef} tabIndex={-1} className="mt-2 text-2xl font-bold leading-tight text-neutral-950">{selected.title}</h2>
                             {selected.statement && selected.statement !== selected.title && <p className="mt-2 text-sm leading-6 text-neutral-700">{selected.statement}</p>}
                             {selected.sourceNotice && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">{selected.sourceNotice}</div>}

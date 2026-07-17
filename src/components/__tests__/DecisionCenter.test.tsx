@@ -30,7 +30,7 @@ describe('DecisionCenter', () => {
         expect(screen.getByLabelText('Decision queue')).toBeInTheDocument();
         expect(screen.getByLabelText('Decision detail')).toBeInTheDocument();
         expect(screen.getByText('Synapse recommendation')).toBeInTheDocument();
-        expect(screen.getByText('1 needs review')).toBeInTheDocument();
+        expect(screen.getByText('1 needs attention')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /Allow a limited guest session/ }));
         expect(props.onDecide).toHaveBeenCalledWith('d1', 'confirm', 'guest', undefined);
         rerender(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Allow a limited guest session' }]} {...props} />);
@@ -271,8 +271,8 @@ describe('DecisionCenter', () => {
 
     it('renders an explicit completed state and decision log', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...callbacks()} />);
-        expect(screen.getByText('All current planning items reviewed')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Decision log' }));
+        expect(screen.getByText('Nothing needs attention right now')).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Resolved & history' }));
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
     });
 
@@ -290,10 +290,10 @@ describe('DecisionCenter', () => {
             },
         }]} {...callbacks()} />);
 
-        expect(screen.getByText('1 needs review')).toBeInTheDocument();
+        expect(screen.getByText('1 needs attention')).toBeInTheDocument();
         expect(screen.queryByText('All current planning items reviewed')).toBeNull();
         expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
-        expect(screen.getAllByText('needs validation').length).toBeGreaterThan(0);
+        expect(screen.getAllByText('Worth validating').length).toBeGreaterThan(0);
         expect(screen.getByText('Replace belief with evidence')).toBeInTheDocument();
     });
 

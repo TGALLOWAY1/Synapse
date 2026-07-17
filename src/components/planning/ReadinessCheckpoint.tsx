@@ -10,6 +10,7 @@ import {
     ShieldAlert,
     X,
 } from 'lucide-react';
+import { projectCommitmentCopy } from '../../lib/planning/planningLanguage';
 
 export type ReadinessCheckpointEvidenceView = {
     id: string;
@@ -133,17 +134,17 @@ export function ReadinessCheckpoint({
     };
 
     const outcomeLabel = !review.integrityValid
-        ? 'Checkpoint unverifiable'
+        ? projectCommitmentCopy('needs_fresh_review').label
         : !review.isCurrent
             ? review.commitment?.kind === 'with_open_questions'
-                ? 'Previously committed with open questions'
+                ? 'Previously proceeded with accepted risk'
                 : review.commitment?.kind === 'ready'
                     ? 'Previously committed'
                     : ready
                         ? 'Previously ready to build'
                         : 'Previously not ready'
         : review.commitment?.kind === 'with_open_questions'
-        ? 'Committed with open questions'
+        ? projectCommitmentCopy('proceeding_with_accepted_risk').label
         : review.commitment?.kind === 'ready'
             ? 'Plan committed'
             : ready
@@ -172,7 +173,7 @@ export function ReadinessCheckpoint({
                             <span>{review.versionLabel}</span>
                             {!review.integrityValid ? (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-red-50 px-2 py-1 text-red-700">
-                                    <ShieldAlert size={12} /> Unverifiable
+                                    <ShieldAlert size={12} /> Fresh review needed
                                 </span>
                             ) : !review.isCurrent && (
                                 <span className="inline-flex items-center gap-1 rounded-full bg-neutral-100 px-2 py-1 text-neutral-600">
@@ -201,15 +202,21 @@ export function ReadinessCheckpoint({
                 <div className="min-h-0 flex-1 overflow-y-auto overscroll-contain px-4 py-5 sm:px-6">
                     {!review.integrityValid ? (
                         <div role="alert" className="mb-5 rounded-xl border border-red-200 bg-red-50 p-4 text-red-950">
-                            <p className="font-semibold">This checkpoint cannot be verified.</p>
+                            <p className="font-semibold">This checkpoint needs a fresh review.</p>
                             <p className="mt-1 text-sm leading-6 text-red-800">
-                                Its stored contents no longer match the integrity signature. Synapse will not treat its conclusion or commitment as authoritative.
+                                Synapse cannot safely rely on this saved checkpoint. Review the current plan before committing.
                             </p>
-                            {(review.currentnessReasons?.length ?? 0) > 0 && (
-                                <ul className="mt-2 space-y-1 text-sm text-red-800">
-                                    {review.currentnessReasons!.map(reason => <li key={reason}>• {reason}</li>)}
-                                </ul>
-                            )}
+                            <details className="mt-3">
+                                <summary className="min-h-10 cursor-pointer py-2 text-sm font-semibold text-red-900">Technical details</summary>
+                                <p className="text-sm leading-6 text-red-800">
+                                    The saved contents no longer match the checkpoint integrity record, so its conclusion and commitment are not authoritative.
+                                </p>
+                                {(review.currentnessReasons?.length ?? 0) > 0 && (
+                                    <ul className="mt-2 space-y-1 text-sm text-red-800">
+                                        {review.currentnessReasons!.map(reason => <li key={reason}>• {reason}</li>)}
+                                    </ul>
+                                )}
+                            </details>
                         </div>
                     ) : !review.isCurrent && (
                         <div className="mb-5 rounded-xl border border-amber-200 bg-amber-50 p-4 text-amber-950">
@@ -373,7 +380,7 @@ export function ReadinessCheckpoint({
 
                     {!historical && !ready && showOverride && (
                         <section ref={overrideSectionRef} className="scroll-mt-4 mt-5 rounded-xl border border-amber-200 bg-amber-50 p-4" aria-labelledby="override-heading">
-                            <h3 id="override-heading" className="font-semibold text-amber-950">Commit with open questions</h3>
+                            <h3 id="override-heading" className="font-semibold text-amber-950">Proceed with accepted risk</h3>
                             <p className="mt-1 text-sm leading-6 text-amber-800">
                                 This records your decision to proceed. It does not resolve the {review.concerns.length} open item{review.concerns.length === 1 ? '' : 's'} above.
                             </p>
@@ -437,7 +444,7 @@ export function ReadinessCheckpoint({
                                     disabled={submitting}
                                     className="min-h-11 w-full rounded-xl bg-amber-700 px-4 text-sm font-semibold text-white hover:bg-amber-800 disabled:cursor-not-allowed disabled:opacity-50 sm:w-auto"
                                 >
-                                    {submitting ? 'Recording commitment…' : `Commit with ${review.concerns.length} open item${review.concerns.length === 1 ? '' : 's'}`}
+                                    {submitting ? 'Recording commitment…' : `Proceed with ${review.concerns.length} open item${review.concerns.length === 1 ? '' : 's'}`}
                                 </button>
                             </div>
                         ) : (
@@ -447,7 +454,7 @@ export function ReadinessCheckpoint({
                                     onClick={() => setShowOverride(true)}
                                     className="min-h-11 w-full px-2 text-sm font-semibold text-neutral-600 underline decoration-neutral-300 underline-offset-4 hover:text-neutral-900 sm:w-auto"
                                 >
-                                    Commit with open questions
+                                    Proceed with accepted risk
                                 </button>
                                 <button
                                     type="button"

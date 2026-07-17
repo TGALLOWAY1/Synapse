@@ -1,5 +1,10 @@
 import { AlertTriangle, ArrowRight, CheckCircle2, ChevronDown, Circle, Compass, ShieldCheck } from 'lucide-react';
-import type { PlanningReadiness } from '../../lib/planning';
+import {
+    planningReadinessCopy,
+    projectCommitmentCopy,
+    type PlanningReadiness,
+    type ProjectCommitmentCondition,
+} from '../../lib/planning';
 
 interface Props {
     readiness: PlanningReadiness;
@@ -21,6 +26,13 @@ const phaseTone: Record<PlanningReadiness['phase'], string> = {
 
 export function PlanningStateBar({ readiness, committed, legacyCommitted = false, onNextAction, onReviewReadiness, onOpenDecisions, onOpenChallenge }: Props) {
     const nextGoesToChallenge = readiness.nextAction.kind === 'challenge_plan';
+    const commitmentCondition: ProjectCommitmentCondition = legacyCommitted
+        ? 'legacy_commitment'
+        : committed
+            ? readiness.isReadyToBuild ? 'plan_committed' : 'proceeding_with_accepted_risk'
+            : 'working_plan';
+    const commitmentCopy = projectCommitmentCopy(commitmentCondition);
+    const readinessCopy = planningReadinessCopy(readiness.phase);
     return (
         <section className={`mb-5 rounded-2xl border p-4 sm:p-5 ${phaseTone[readiness.phase]}`} aria-labelledby="planning-state-heading">
             <div className="flex flex-col gap-4 lg:flex-row lg:items-start lg:justify-between">
@@ -28,16 +40,12 @@ export function PlanningStateBar({ readiness, committed, legacyCommitted = false
                     <div className="flex flex-wrap items-center gap-2">
                         <span className="inline-flex items-center gap-1 rounded-full bg-white/70 px-2 py-1 text-[11px] font-bold uppercase tracking-wider">
                             {committed || legacyCommitted ? <CheckCircle2 size={12} /> : <Compass size={12} />}
-                            {legacyCommitted
-                                ? 'Legacy commitment · readiness not recorded'
-                                : committed
-                                    ? readiness.isReadyToBuild ? 'Plan committed' : 'Committed with open questions'
-                                    : 'Working plan'}
+                            {commitmentCopy.label}
                         </span>
                         {readiness.unresolvedCount > 0 && <span className="text-xs font-semibold">{readiness.unresolvedCount} unresolved</span>}
                         {readiness.conflictCount > 0 && <span className="text-xs font-semibold">{readiness.conflictCount} conflict{readiness.conflictCount === 1 ? '' : 's'}</span>}
                     </div>
-                    <h2 id="planning-state-heading" className="mt-2 text-lg font-bold tracking-tight">{readiness.headline}</h2>
+                    <h2 id="planning-state-heading" className="mt-2 text-lg font-bold tracking-tight">{readinessCopy.label}</h2>
                     <p className="mt-1 max-w-2xl text-sm leading-6 opacity-80">{readiness.summary}</p>
                 </div>
                 <button type="button" onClick={nextGoesToChallenge ? onOpenChallenge : onNextAction} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-neutral-950 px-4 text-sm font-semibold text-white hover:bg-neutral-800">
@@ -63,7 +71,7 @@ export function PlanningStateBar({ readiness, committed, legacyCommitted = false
             </details>
             <div className="mt-3 flex flex-wrap gap-3 text-xs font-semibold">
                 <button type="button" onClick={onReviewReadiness} className="underline decoration-current/30 underline-offset-4 hover:decoration-current">Review readiness</button>
-                <button type="button" onClick={onOpenDecisions} className="underline decoration-current/30 underline-offset-4 hover:decoration-current">Open all decisions</button>
+                <button type="button" onClick={onOpenDecisions} className="underline decoration-current/30 underline-offset-4 hover:decoration-current">View attention</button>
                 <button type="button" onClick={onOpenChallenge} className="inline-flex items-center gap-1 underline decoration-current/30 underline-offset-4 hover:decoration-current"><ShieldCheck size={12} /> Challenge this plan</button>
             </div>
         </section>

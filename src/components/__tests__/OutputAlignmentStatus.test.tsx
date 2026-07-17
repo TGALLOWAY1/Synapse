@@ -32,6 +32,8 @@ describe('OutputAlignmentStatus', () => {
 
     it('does not render a warning panel for aligned output', () => {
         const item = alignment({ state: 'aligned', confidence: 'definite', blocksBuildReadiness: false });
+        render(<OutputAlignmentBadge alignment={item} />);
+        expect(screen.getByText('Up to date')).toBeInTheDocument();
         const { container } = render(<OutputAlignmentNotice alignment={item} />);
         expect(container).toBeEmptyDOMElement();
     });

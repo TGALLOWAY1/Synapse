@@ -1,21 +1,22 @@
 import { AlertTriangle, CheckCircle2, HelpCircle } from 'lucide-react';
 import type { OutputAlignment } from '../lib/planning/outputAlignment';
+import { outputAlignmentCopy } from '../lib/planning/planningLanguage';
 
 const config = {
     aligned: {
-        label: 'Aligned',
+        label: outputAlignmentCopy('aligned').label,
         Icon: CheckCircle2,
         pill: 'border-emerald-200 bg-emerald-50 text-emerald-700',
         icon: 'text-emerald-500',
     },
     possibly_affected: {
-        label: 'Review recommended',
+        label: outputAlignmentCopy('possibly_affected').label,
         Icon: HelpCircle,
         pill: 'border-amber-200 bg-amber-50 text-amber-800',
         icon: 'text-amber-600',
     },
     stale: {
-        label: 'Update required',
+        label: outputAlignmentCopy('stale').label,
         Icon: AlertTriangle,
         pill: 'border-orange-300 bg-orange-50 text-orange-900',
         icon: 'text-orange-600',
