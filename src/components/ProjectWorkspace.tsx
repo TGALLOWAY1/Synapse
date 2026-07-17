@@ -1045,6 +1045,22 @@ export function ProjectWorkspace() {
         setIsExportOpen(true);
     };
 
+    const headerPlanStatus = activeSpine?.safetyReview?.status === 'blocked'
+        ? 'Blocked'
+        : activeSpine?.generationError
+            ? 'Generation failed'
+            : isPRDActivelyGenerating
+                ? 'Generating…'
+                : isCommitmentUnverifiable
+                    ? 'Readiness unavailable'
+                    : displaysCurrentCommitment
+                        ? isLegacyPlanCommitted
+                            ? 'Legacy commitment · readiness not recorded'
+                            : currentCommittedReadiness?.review.conclusion === 'not_ready'
+                                ? 'Committed with open questions'
+                                : 'Plan committed'
+                        : 'Working plan';
+
     return (
         <div className="flex h-screen flex-col overflow-x-hidden bg-neutral-900 text-neutral-100">
 
@@ -1061,23 +1077,7 @@ export function ProjectWorkspace() {
                     </button>
                     <span className="font-semibold truncate">{project.name}</span>
                     <span className={`max-w-[44vw] truncate whitespace-nowrap rounded px-2 py-0.5 text-xs md:max-w-none md:shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
-                        {activeSpine
-                            ? activeSpine.safetyReview?.status === 'blocked'
-                                ? 'Blocked'
-                                : activeSpine.generationError
-                                ? 'Generation Failed'
-                                : isPRDActivelyGenerating
-                                    ? 'Generating...'
-                                    : `${getVersionLabel(activeSpine.id)} ${isCommitmentUnverifiable
-                                        ? '(READINESS UNVERIFIABLE)'
-                                        : displaysCurrentCommitment
-                                        ? isLegacyPlanCommitted
-                                            ? '(LEGACY COMMITMENT · READINESS NOT RECORDED)'
-                                            : currentCommittedReadiness?.review.conclusion === 'not_ready'
-                                                ? '(COMMITTED WITH OPEN QUESTIONS)'
-                                                : '(PLAN COMMITTED)'
-                                        : ''}`
-                            : 'Initializing...'}
+                        {activeSpine ? `${getVersionLabel(activeSpine.id)} · ${headerPlanStatus}` : 'Initializing…'}
                     </span>
                     {projectId !== DEMO_PROJECT_ID && (
                         <span className="hidden md:inline-flex shrink-0">
@@ -1181,7 +1181,7 @@ export function ProjectWorkspace() {
                                 </button>
                                 <button
                                     onClick={() => { setIsBranchesVisible(!isBranchesVisible); setShowNavOverflow(false); }}
-                                    className="w-full flex items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 hover:bg-white/5 transition"
+                                    className="hidden w-full items-center gap-2 px-4 py-2.5 text-sm text-neutral-300 transition hover:bg-white/5 md:flex"
                                 >
                                     {isBranchesVisible ? <PanelRightClose size={14} className="text-neutral-500" /> : <PanelRightOpen size={14} className="text-neutral-500" />}
                                     {isBranchesVisible ? 'Hide Sidebar' : 'Show Sidebar'}
@@ -1307,7 +1307,7 @@ export function ProjectWorkspace() {
                     currentStage={pipelineStage}
                     onStageChange={handlePipelineStageChange}
                     canExploreOutputs={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
-                    isPlanCommitted={isCurrentPlanCommitted}
+                    isReadyToBuild={planningReadiness.isReadyToBuild}
                     canReview={!!activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked'}
                 />
             </div>
@@ -1586,6 +1586,7 @@ export function ProjectWorkspace() {
                                                 {!isOldVersion && (
                                                     <PlanningStateBar
                                                         readiness={planningReadiness}
+                                                        planSummary={activeSpine.structuredPRD.executiveSummary ?? activeSpine.structuredPRD.vision}
                                                         committed={isCurrentPlanCommitted}
                                                         legacyCommitted={isLegacyPlanCommitted}
                                                         onNextAction={handlePlanningNextAction}

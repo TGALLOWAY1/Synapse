@@ -57,6 +57,7 @@ describe('PlanningStateBar', () => {
         const onOpenAttention = vi.fn();
         render(<PlanningStateBar
             readiness={readiness}
+            planSummary="A focused guest onboarding experience that preserves work without forcing early account creation."
             attention={attention}
             committed={false}
             onNextAction={onNextAction}
@@ -68,7 +69,16 @@ describe('PlanningStateBar', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /Make this decision/ }));
         expect(onNextAction).toHaveBeenCalledTimes(1);
+        expect(screen.getByText('2 unresolved · 1 assumption')).toBeInTheDocument();
+        expect(screen.getByText(/A focused guest onboarding experience/)).toBeInTheDocument();
+        expect(screen.getByText('Downstream review needs attention')).toBeInTheDocument();
         expect(screen.getByText('Should guests require an account?')).toBeInTheDocument();
+
+        const planningTools = screen.getByText('Review details and planning tools').closest('details');
+        expect(planningTools).not.toHaveAttribute('open');
+        fireEvent.click(screen.getByText('Review details and planning tools'));
+        expect(planningTools).toHaveAttribute('open');
+        expect(screen.getByRole('button', { name: 'Open Decision Center' })).toBeInTheDocument();
 
         fireEvent.click(screen.getByText('Other items needing attention'));
         fireEvent.click(screen.getByRole('button', { name: /Recovery conflicts with guest access/ }));

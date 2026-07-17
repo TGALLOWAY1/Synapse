@@ -111,7 +111,7 @@ beforeEach(() => {
 });
 
 describe('DependencyGraphView', () => {
-    it('fresh project: shows every artifact node as not generated and offers a batch update', () => {
+    it('fresh project: shows every output without turning the map into a batch generation queue', () => {
         seedStore({ spines: [spine(SPINE_V1, true)], generated: false });
         renderView();
         expect(screen.getByText('Dependency Graph')).toBeTruthy();
@@ -123,13 +123,14 @@ describe('DependencyGraphView', () => {
             expect(screen.getAllByText(title).length).toBeGreaterThan(0);
         }
         expect(screen.getAllByText('Not generated').length).toBeGreaterThan(0);
-        expect(screen.getByText(/Generate 6 outputs/)).toBeTruthy();
+        expect(screen.getByText(/6 not generated/)).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /Generate 6 outputs/i })).toBeNull();
     });
 
     it('consistent project: everything reads up to date with no batch update offer', () => {
         seedStore({ spines: [spine(SPINE_V1, true)], generated: true });
         renderView();
-        expect(screen.getAllByText('Aligned').length).toBeGreaterThan(0);
+        expect(screen.getByText(/6 aligned/)).toBeTruthy();
         expect(screen.queryByText(/impacted$/)).toBeNull();
         expect(screen.queryByText('Update required')).toBeNull();
     });
@@ -142,8 +143,8 @@ describe('DependencyGraphView', () => {
         });
         renderView();
         expect(screen.getAllByText('Review recommended').length).toBeGreaterThan(0);
-        expect(screen.getByText(/Review 6 affected/)).toBeTruthy();
         expect(screen.getByText(/6 advisory/)).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /Review 6 affected/i })).toBeNull();
 
         // Open the Data Model node → detail panel explains the PRD drift.
         fireEvent.click(screen.getAllByText('Data Model')[0]);
@@ -154,6 +155,7 @@ describe('DependencyGraphView', () => {
         ).toBeGreaterThan(0);
         // "Generated from PRD Version 1" metadata row.
         expect(screen.getByText('PRD Version 1')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /Update this \+ downstream artifacts/i })).toBeNull();
     });
 
     it('impact view lists dependencies and downstream impacts for a selected artifact', () => {

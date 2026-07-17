@@ -12,7 +12,6 @@ import {
     computeDisplayEdges,
     computeDownstreamImpacts,
     computeGraphLayout,
-    computeRecommendedUpdates,
     computeUpdateOrder,
     evaluateDependencyGraph,
     getDependencyNode,
@@ -190,7 +189,6 @@ export function DependencyGraphView({
         spineChangeFor,
     });
 
-    const recommendedUpdates = computeRecommendedUpdates(graph, evaluations);
     const jobActive = !!job && Object.values(job.slots).some(
         s => s && (s.status === 'generating' || s.status === 'queued'),
     );
@@ -221,19 +219,6 @@ export function DependencyGraphView({
         if (id === 'prd') return;
         setUpdateConfirm({ title: `Update ${titleOf(id)}`, order: [id] });
     };
-    const confirmImpactedUpdate = (id: DependencyNodeId) => {
-        // The node itself + everything downstream that the map says consumes it.
-        const { direct, indirect } = computeDownstreamImpacts(graph, id);
-        const ids = [id, ...direct, ...indirect].filter(n => n !== 'prd');
-        setUpdateConfirm({
-            title: `Update ${titleOf(id)} and downstream artifacts`,
-            order: computeUpdateOrder(graph, ids),
-        });
-    };
-    const confirmRecommendedUpdate = () => {
-        setUpdateConfirm({ title: 'Update all impacted artifacts', order: recommendedUpdates });
-    };
-
     // --- canvas geometry --------------------------------------------------------
     const maxCols = Math.max(...layout.rows.map(r => r.length));
     const canvasW = maxCols * CARD_W + (maxCols - 1) * GAP_X;
@@ -345,7 +330,8 @@ export function DependencyGraphView({
                             </button>
                         ))}
                     </div>
-                    {/* Health summary + batch action */}
+                    {/* Health summary. Update work stays scoped to a selected
+                        output so this map never becomes a bulk propagation path. */}
                     <div className="flex items-center gap-2 flex-wrap">
                         <span className="text-[11px] text-neutral-500">
                             {summaryCounts.ok} aligned
@@ -355,20 +341,6 @@ export function DependencyGraphView({
                             {summaryCounts.generating > 0 && ` · ${summaryCounts.generating} generating`}
                             {summaryCounts.error > 0 && ` · ${summaryCounts.error} failed`}
                         </span>
-                        {recommendedUpdates.length > 0 && (
-                            <button
-                                type="button"
-                                disabled={jobActive}
-                                onClick={confirmRecommendedUpdate}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-indigo-600 text-white rounded-md hover:bg-indigo-700 transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                title={jobActive ? 'Generation is already running' : undefined}
-                            >
-                                <RefreshCcw size={12} />
-                                {outputAlignment.outputs.length === 0
-                                    ? `Generate ${recommendedUpdates.length} outputs`
-                                    : `Review ${recommendedUpdates.length} affected`}
-                            </button>
-                        )}
                     </div>
                 </div>
 
@@ -508,7 +480,6 @@ export function DependencyGraphView({
                             : undefined
                     }
                     onUpdate={() => confirmSingleUpdate(selectedId)}
-                    onUpdateImpacted={() => confirmImpactedUpdate(selectedId)}
                     onMarkCurrent={canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
                     removedFeatureRefs={selectedRemovedFeatureRefs}
                     jobActive={jobActive}
@@ -746,7 +717,6 @@ interface DetailPanelProps {
     onOpenNode: (id: DependencyNodeId) => void;
     onOpenUpdatePlan?: () => void;
     onUpdate: () => void;
-    onUpdateImpacted: () => void;
     /** Present only when the node is stale and can be confirmed current. */
     onMarkCurrent?: () => void;
     /** Removed-feature names this artifact's content still mentions. */
@@ -768,7 +738,7 @@ const CHANGE_SOURCE_LABELS: Record<string, string> = {
 
 function DetailPanel({
     nodeId, evaluation, alignment, graph, evaluations, tab, onTabChange, onClose, onSelect,
-    onOpenNode, onOpenUpdatePlan, onUpdate, onUpdateImpacted, onMarkCurrent, removedFeatureRefs,
+    onOpenNode, onOpenUpdatePlan, onUpdate, onMarkCurrent, removedFeatureRefs,
     jobActive, titleOf, history,
 }: DetailPanelProps) {
     const node = getDependencyNode(graph, nodeId);
@@ -982,24 +952,6 @@ function DetailPanel({
                                     </p>
                                 </div>
                             ) : null}
-                            {canUpdate && (direct.length > 0 || indirect.length > 0) && (
-                                <button
-                                    type="button"
-                                    disabled={jobActive}
-                                    onClick={onUpdateImpacted}
-                                    className="w-full flex items-center justify-between gap-2 px-3 py-2.5 rounded-lg border border-neutral-200 hover:border-indigo-300 bg-white text-left transition disabled:opacity-50 disabled:cursor-not-allowed"
-                                >
-                                    <span>
-                                        <span className="block text-sm font-medium text-neutral-800">
-                                            Update this + downstream artifacts
-                                        </span>
-                                        <span className="block text-[11px] text-neutral-500 mt-0.5">
-                                            {1 + direct.length + indirect.length} artifacts, regenerated in dependency order
-                                        </span>
-                                    </span>
-                                    <RefreshCcw size={14} className="text-neutral-400 shrink-0" />
-                                </button>
-                            )}
                         </div>
                     </div>
                 )}

@@ -170,7 +170,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                 <div className="text-center py-16 text-neutral-400">
                     <Clock size={48} className="mx-auto mb-4 opacity-30" />
                     <p className="text-lg font-medium text-neutral-500 mb-2">No history yet</p>
-                    <p className="text-sm">Events will appear here as you create and modify artifacts.</p>
+                    <p className="text-sm">Changes to the plan, its reasoning, and downstream outputs will appear here.</p>
                 </div>
             ) : (
                 <div className="space-y-8">
@@ -193,14 +193,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                                                 <Icon size={14} className={config.color} />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-medium text-neutral-800">
-                                                        {event.description}
-                                                    </span>
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-mono shrink-0">
-                                                        {event.type}
-                                                    </span>
-                                                </div>
+                                                <p className="text-sm font-medium text-neutral-800">{event.description}</p>
                                                 <div className="text-xs text-neutral-400 mt-1 flex items-center gap-2">
                                                     <span>{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                     {event.spineVersionId && <span>PRD {spineLabel(event.spineVersionId)}</span>}

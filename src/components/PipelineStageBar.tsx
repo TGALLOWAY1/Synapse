@@ -5,7 +5,7 @@ interface PipelineStageBarProps {
     currentStage: PipelineStage;
     onStageChange: (stage: PipelineStage) => void;
     canExploreOutputs: boolean;
-    isPlanCommitted: boolean;
+    isReadyToBuild: boolean;
     canReview?: boolean;
 }
 
@@ -16,7 +16,7 @@ const stages: { key: PipelineStage; label: string; description: string; icon: ty
     { key: 'history', label: 'History', description: 'Chronological timeline of changes', icon: Clock },
 ];
 
-export function PipelineStageBar({ currentStage, onStageChange, canExploreOutputs, isPlanCommitted, canReview = canExploreOutputs }: PipelineStageBarProps) {
+export function PipelineStageBar({ currentStage, onStageChange, canExploreOutputs, isReadyToBuild, canReview = canExploreOutputs }: PipelineStageBarProps) {
     const isEnabled = (stage: PipelineStage): boolean => {
         if (stage === 'prd' || stage === 'history') return true;
         if (stage === 'review') return canReview;
@@ -33,12 +33,12 @@ export function PipelineStageBar({ currentStage, onStageChange, canExploreOutput
             : currentStage;
 
     return (
-        <div className="flex items-center gap-1 px-4 py-2 bg-neutral-900 border-b border-neutral-800">
+        <nav aria-label="Planning progression" className="grid grid-cols-4 gap-1 border-b border-neutral-800 bg-neutral-900 px-2 py-2 sm:px-4">
             {stages.map((stage) => {
                 const enabled = isEnabled(stage.key);
                 const active = activeKey === stage.key;
                 const Icon = stage.icon;
-                const label = stage.key === 'workspace' && !isPlanCommitted ? 'Explore' : stage.label;
+                const label = stage.key === 'workspace' && !isReadyToBuild ? 'Explore' : stage.label;
 
                 return (
                     <button
@@ -47,7 +47,7 @@ export function PipelineStageBar({ currentStage, onStageChange, canExploreOutput
                         disabled={!enabled}
                         title={stage.description}
                         aria-label={`${label}: ${stage.description}`}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition ${
+                        className={`flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-1.5 text-sm transition sm:px-3 ${
                             active
                                 ? 'bg-indigo-600 text-white'
                                 : enabled
@@ -55,11 +55,11 @@ export function PipelineStageBar({ currentStage, onStageChange, canExploreOutput
                                     : 'text-neutral-600 cursor-not-allowed'
                         }`}
                     >
-                        <Icon size={14} />
-                        {label}
+                        <Icon size={14} className="hidden shrink-0 sm:block" />
+                        <span className="truncate">{label}</span>
                     </button>
                 );
             })}
-        </div>
+        </nav>
     );
 }
