@@ -157,10 +157,38 @@ describe('AssumptionValidationPanel', () => {
         render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} consequence="The onboarding and pricing model would need to change." {...callbacks()} />);
 
         const impact = screen.getByRole('region', { name: 'Potential plan impact' });
+        expect(impact).not.toHaveAttribute('open');
         expect(impact).toHaveTextContent('The onboarding and pricing model would need to change.');
         expect(impact).toHaveTextContent('Pricing · First-release scope');
         const planStep = screen.getByText('1. Plan the smallest credible test');
         expect(impact.compareDocumentPosition(planStep) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    });
+
+    it('keeps user authority explicit while validation details remain progressively disclosed', () => {
+        const advisoryInterpretation = {
+            id: 'interpretation-advisory', planningRecordId: 'assumption-1', contractVersion: 1 as const,
+            authoredBy: 'synapse' as const, recommendedConclusion: 'inconclusive' as const,
+            reasoning: 'The available evidence does not settle the question.', supportingEvidenceIds: [],
+            contradictingEvidenceIds: [], inconclusiveEvidenceIds: ['evidence-1'], irrelevantEvidenceIds: [],
+            duplicateEvidenceIds: [], limitations: ['Small sample'], assumptionStatementHash: 'statement-hash',
+            validationPlanHash: plan.contentHash, evidenceSetHash: 'evidence-set', createdAt: 30,
+            contentHash: 'interpretation-content',
+        };
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({
+            currentPlan: plan,
+            activeEvidence: [evidence()],
+            latestInterpretation: advisoryInterpretation,
+            userTreatment: 'temporarily_tolerated',
+            treatmentRationale: 'Proceed only for the pilot.',
+            history: [{ id: 'history-1', label: 'Treatment recorded', at: 31 }],
+        })} requiresValidation hasPlanImpact {...callbacks()} />);
+
+        expect(screen.getByText(/cannot become the project outcome until you explicitly record your conclusion/i)).toBeInTheDocument();
+        expect(screen.getByText('How unresolved uncertainty is being treated').closest('details')).not.toHaveAttribute('open');
+        expect(screen.getByRole('region', { name: 'Potential plan impact' })).not.toHaveAttribute('open');
+        expect(screen.getByText('Validation history (1)').closest('details')).not.toHaveAttribute('open');
+        expect(screen.getByText(/exact guarded alignment review is shown next/i)).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Refresh plan impact' })).not.toBeInTheDocument();
     });
 
     it('does not repeat an existing consequence prefix', () => {

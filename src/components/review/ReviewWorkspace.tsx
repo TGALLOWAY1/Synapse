@@ -520,7 +520,7 @@ function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: Revie
                         <p className="mt-2 text-sm leading-6 text-neutral-600"><span className="font-semibold text-neutral-800">Why it matters:</span> {issue.consequence}</p>
                     </div>
                     {issue.status === 'open' && !readOnly && (
-                        <button type="button" onClick={onResolve} className="inline-flex min-h-10 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
+                        <button type="button" onClick={onResolve} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 py-2 text-sm font-semibold text-white hover:bg-indigo-700">
                             Resolve <ArrowRight size={14} />
                         </button>
                     )}
@@ -528,7 +528,7 @@ function FindingCard({ issue, onResolve, readOnly, highlighted }: { issue: Revie
                 <div className="mt-4 flex flex-wrap items-center gap-x-3 gap-y-2 border-t border-neutral-100 pt-3 text-xs text-neutral-500">
                     <span>{issue.specialistNames.length > 1 ? `Raised independently by ${issue.specialistNames.join(' + ')}` : `Raised by ${issue.specialistNames[0]}`}</span>
                     <span>{issue.affectedSources.join(' · ')}</span>
-                    <button type="button" onClick={() => setExpanded(v => !v)} aria-expanded={isExpanded} className="ml-auto inline-flex min-h-8 items-center gap-1 font-medium text-neutral-700 hover:text-neutral-950">
+                    <button type="button" onClick={() => setExpanded(v => !v)} aria-expanded={isExpanded} className="ml-auto inline-flex min-h-11 items-center gap-1 font-medium text-neutral-700 hover:text-neutral-950">
                         {isExpanded ? <ChevronDown size={14} /> : <ChevronRight size={14} />} Evidence and recommendation
                     </button>
                 </div>

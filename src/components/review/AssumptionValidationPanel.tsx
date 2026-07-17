@@ -285,18 +285,20 @@ export function AssumptionValidationPanel({
                 </span>
             </div>
 
-            <div className="mt-4 grid gap-2 sm:grid-cols-2">
+            <div className="mt-4 rounded-lg bg-neutral-50 px-3 py-2.5">
                 <div className="rounded-lg bg-neutral-50 px-3 py-2.5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Evidence conclusion</p>
                     <p className="mt-1 text-sm font-semibold text-neutral-900">{validation.acceptedConclusion ? conclusionLabels[validation.acceptedConclusion] : 'No current conclusion'}</p>
                     {!validation.conclusionIsCurrent && validation.hasHistoricalValidation && <p className="mt-1 text-xs text-amber-700">Earlier validation is historical and cannot support the current assumption.</p>}
                 </div>
-                <div className="rounded-lg bg-neutral-50 px-3 py-2.5">
-                    <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Unresolved uncertainty</p>
-                    <p className="mt-1 text-sm font-semibold text-neutral-900">{validation.userTreatment ? treatmentLabels[validation.userTreatment] : 'Not explicitly treated'}</p>
-                    {validation.treatmentRationale && <p className="mt-1 text-xs text-neutral-600">{validation.treatmentRationale}</p>}
-                </div>
             </div>
+            {validation.userTreatment && (
+                <details className="mt-2 rounded-lg border border-neutral-200 px-3">
+                    <summary className="min-h-10 cursor-pointer py-2 text-xs font-semibold text-neutral-600">How unresolved uncertainty is being treated</summary>
+                    <p className="pb-1 text-sm font-semibold text-neutral-900">{treatmentLabels[validation.userTreatment]}</p>
+                    {validation.treatmentRationale && <p className="pb-3 text-xs text-neutral-600">{validation.treatmentRationale}</p>}
+                </details>
+            )}
 
             {validation.acceptedConclusion && requiresValidation && (
                 <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900" role="status">
@@ -304,12 +306,12 @@ export function AssumptionValidationPanel({
                 </div>
             )}
 
-            <section className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3 py-3" aria-label="Potential plan impact">
-                <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Potential plan impact</p>
+            <details role="region" className="mt-3 rounded-lg border border-neutral-200 bg-neutral-50 px-3" aria-label="Potential plan impact">
+                <summary className="min-h-11 cursor-pointer py-3 text-xs font-semibold text-neutral-700">Potential plan impact and dependencies</summary>
                 {consequenceDetail && <p className="mt-1 text-sm leading-5 text-neutral-700"><strong className="text-neutral-900">If this is wrong:</strong> {consequenceDetail}</p>}
                 <p className="mt-1 text-xs leading-5 text-neutral-600"><strong className="text-neutral-800">Dependent areas:</strong> {validation.dependentLabels.length > 0 ? validation.dependentLabels.join(' · ') : 'No exact dependent areas have been identified.'}</p>
-                <p className="mt-1 text-xs leading-5 text-neutral-500">This is a read-only preview. Recording a conclusion will not change the plan; exact changes must use the guarded alignment review.</p>
-            </section>
+                <p className="mt-1 pb-3 text-xs leading-5 text-neutral-500">This is a read-only preview. Recording a conclusion will not change the plan; exact changes must use the guarded alignment review.</p>
+            </details>
 
             {(validation.revisitCondition || validation.revisitAt) && (
                 <div className="mt-3 flex gap-2 rounded-lg border border-amber-100 bg-amber-50 px-3 py-2 text-xs leading-5 text-amber-900">
@@ -506,8 +508,8 @@ export function AssumptionValidationPanel({
 
             {(validation.acceptedConclusion || validation.userTreatment) && (
                 <div className="mt-4 rounded-lg border border-neutral-200 bg-neutral-50 p-3">
-                    <div className="flex gap-2"><CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" /><div><p className="text-sm font-semibold text-neutral-900">Review the plan consequence</p><p className="mt-1 text-xs leading-5 text-neutral-600">The recorded outcome does not rewrite the PRD. Inspect exact affected targets through the existing guarded alignment review.</p></div></div>
-                    {!readOnly && <button type="button" onClick={() => onPreviewImpact(recordId)} className="mt-3 min-h-11 w-full rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white sm:w-auto">{hasPlanImpact ? 'Refresh plan impact' : 'Review plan impact'}</button>}
+                    <div className="flex gap-2"><CheckCircle2 size={16} className="mt-0.5 shrink-0 text-emerald-600" /><div><p className="text-sm font-semibold text-neutral-900">Next: align the plan</p><p className="mt-1 text-xs leading-5 text-neutral-600">The recorded outcome does not rewrite the PRD. {hasPlanImpact ? 'The exact guarded alignment review is shown next.' : 'Review exact affected targets through the guarded alignment flow.'}</p></div></div>
+                    {!readOnly && !hasPlanImpact && <button type="button" onClick={() => onPreviewImpact(recordId)} className="mt-3 min-h-11 w-full rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white sm:w-auto">Review plan impact</button>}
                 </div>
             )}
 

@@ -177,6 +177,17 @@ export function DecisionCenter({
     }
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
+    const dominantNextAction = selected
+        ? needsVerdict(selected)
+            ? selected.type === 'assumption'
+                ? 'Decide whether to test this assumption, correct it, or explicitly proceed with the uncertainty.'
+                : 'Record the product choice that should govern the plan.'
+            : selected.preview
+                ? 'Review the exact plan alignment work below.'
+                : ['confirmed', 'rejected', 'resolved'].includes(selected.status)
+                    ? 'Preview what this recorded answer may change in the plan.'
+                    : 'Review the recorded outcome and decide whether it should be reopened.'
+        : undefined;
     const selectedHasCurrentAssumptionConclusion = selected?.type === 'assumption'
         && selected.validation?.conclusionIsCurrent
         && Boolean(selected.validation.acceptedConclusion);
@@ -282,51 +293,38 @@ export function DecisionCenter({
                         <div className="mx-auto max-w-xl px-5 py-16 text-center text-sm text-neutral-500">Select a decision to inspect its reasoning and history.</div>
                     ) : (
                         <div className="mx-auto max-w-3xl px-4 py-5 sm:px-7 sm:py-8">
-                            <button type="button" onClick={() => setMobileDetailOpen(false)} className="mb-4 inline-flex min-h-10 items-center gap-2 text-sm font-medium text-neutral-600 md:hidden"><ArrowLeft size={16} /> Back to decisions</button>
+                            <button type="button" onClick={() => setMobileDetailOpen(false)} className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-neutral-600 md:hidden"><ArrowLeft size={16} /> Back to decisions</button>
                             <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">{dominantConditionLabel(selected)}</div>
                             <h2 ref={detailHeadingRef} tabIndex={-1} className="mt-2 text-2xl font-bold leading-tight text-neutral-950">{selected.title}</h2>
                             {selected.statement && selected.statement !== selected.title && <p className="mt-2 text-sm leading-6 text-neutral-700">{selected.statement}</p>}
                             {selected.sourceNotice && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">{selected.sourceNotice}</div>}
                             {selected.whyItMatters && <section className="mt-6"><h3 className="text-sm font-semibold text-neutral-900">Why it matters</h3><p className="mt-1 text-sm leading-6 text-neutral-600">{selected.whyItMatters}</p></section>}
 
-                            {selected.options && selected.options.length > 0 && needsVerdict(selected) && (
-                                <section className="mt-6 space-y-2" aria-label="Available options">
-                                    {selected.options.map(option => (
-                                        <button key={option.id} type="button" disabled={readOnly} onClick={() => submit('confirm', option.id)} className="w-full rounded-xl border border-neutral-200 bg-white p-4 text-left hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60">
-                                            <span className="text-sm font-semibold text-neutral-900">{option.label}</span>
-                                            {option.description && <span className="mt-1 block text-sm text-neutral-600">{option.description}</span>}
-                                            {option.tradeoffs && option.tradeoffs.length > 0 && <span className="mt-2 block text-xs text-neutral-500">{option.tradeoffs.map(item => item.summary).join(' · ')}</span>}
-                                        </button>
-                                    ))}
-                                </section>
-                            )}
-
-                            {selected.recommendation && (
-                                <section className="mt-6 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
-                                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-700"><Sparkles size={14} /> Synapse recommendation</div>
-                                    <p className="mt-2 text-sm font-semibold text-indigo-950">{selected.recommendation.summary}</p>
-                                    {selected.recommendation.rationale && <p className="mt-1 text-sm leading-6 text-indigo-900/80">{selected.recommendation.rationale}</p>}
-                                </section>
-                            )}
+                            <section className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3" aria-label="Next action">
+                                <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Next action</p>
+                                <p className="mt-1 text-sm font-semibold leading-6 text-indigo-950">{dominantNextAction}</p>
+                            </section>
 
                             {selected.type === 'assumption' && selected.validation && (
-                                <AssumptionValidationPanel
-                                    key={selected.id}
-                                    recordId={selected.id}
-                                    readOnly={readOnly}
-                                    validation={selected.validation}
-                                    requiresValidation={Boolean(selected.requiresValidation)}
-                                    consequence={selected.whyItMatters}
-                                    hasPlanImpact={Boolean(selected.preview)}
-                                    onGeneratePlan={onGenerateAssumptionValidationPlan}
-                                    onRecordPlan={onRecordAssumptionValidationPlan}
-                                    onAddEvidence={onAddAssumptionEvidence}
-                                    onInterpretEvidence={onInterpretAssumptionEvidence}
-                                    onRecordOutcome={onRecordAssumptionOutcome}
-                                    onRecordTreatment={onRecordAssumptionTreatment}
-                                    onReopenOutcome={onReopenAssumptionOutcome}
-                                    onPreviewImpact={onPreviewImpact}
-                                />
+                                <div>
+                                    <AssumptionValidationPanel
+                                        key={selected.id}
+                                        recordId={selected.id}
+                                        readOnly={readOnly}
+                                        validation={selected.validation}
+                                        requiresValidation={Boolean(selected.requiresValidation)}
+                                        consequence={selected.whyItMatters}
+                                        hasPlanImpact={Boolean(selected.preview)}
+                                        onGeneratePlan={onGenerateAssumptionValidationPlan}
+                                        onRecordPlan={onRecordAssumptionValidationPlan}
+                                        onAddEvidence={onAddAssumptionEvidence}
+                                        onInterpretEvidence={onInterpretAssumptionEvidence}
+                                        onRecordOutcome={onRecordAssumptionOutcome}
+                                        onRecordTreatment={onRecordAssumptionTreatment}
+                                        onReopenOutcome={onReopenAssumptionOutcome}
+                                        onPreviewImpact={onPreviewImpact}
+                                    />
+                                </div>
                             )}
 
                             {!readOnly && needsVerdict(selected) && (
@@ -360,8 +358,11 @@ export function DecisionCenter({
                                     {selected.preview.beforeSummary && <p className="text-sm text-neutral-700">{selected.preview.beforeSummary}</p>}
                                     {selected.preview.afterSummary && <p className="mt-3 text-xs text-neutral-500">After</p>}
                                     {selected.preview.afterSummary && <p className="text-sm font-medium text-neutral-900">{selected.preview.afterSummary}</p>}
-                                    <p className="mt-3 text-xs text-neutral-500">PRD: {selected.preview.affectedPrdSections.join(', ') || 'No verified changes'}</p>
-                                    <p className="mt-1 text-xs text-neutral-500">Assets to review: {selected.preview.affectedArtifactLabels.join(', ') || 'None identified'}</p>
+                                    <details className="mt-3 rounded-lg border border-neutral-200 bg-white/70 px-3 py-2 text-xs text-neutral-600">
+                                        <summary className="min-h-10 cursor-pointer py-2 font-semibold text-neutral-700">Affected plan and outputs</summary>
+                                        <p>PRD: {selected.preview.affectedPrdSections.join(', ') || 'No verified changes'}</p>
+                                        <p className="mt-1">Outputs to review: {selected.preview.affectedArtifactLabels.join(', ') || 'None identified'}</p>
+                                    </details>
                                     {selected.preview.explanation && <p className="mt-3 text-sm leading-6 text-neutral-700">{selected.preview.explanation}</p>}
                                     {selected.preview.error && <p className="mt-2 text-sm text-red-700">{selected.preview.error}</p>}
                                     {selected.preview.proposals && selected.preview.proposals.length > 0 && (
@@ -506,6 +507,43 @@ export function DecisionCenter({
                                 <button type="button" onClick={() => onPreviewImpact(selected.id)} className="mt-6 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Preview impact</button>
                             ) : null}
 
+                            {selected.recommendation && (
+                                <section className="mt-6 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
+                                    <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-700"><Sparkles size={14} /> Synapse recommendation</div>
+                                    <p className="mt-2 text-sm font-semibold text-indigo-950">{selected.recommendation.summary}</p>
+                                    {selected.recommendation.rationale && <p className="mt-1 text-sm leading-6 text-indigo-900/80">{selected.recommendation.rationale}</p>}
+                                </section>
+                            )}
+
+                            {selected.options && selected.options.length > 0 && needsVerdict(selected) && (
+                                <section className="mt-6 space-y-2" aria-label="Available options">
+                                    <h3 className="text-sm font-semibold text-neutral-900">Alternatives and tradeoffs</h3>
+                                    {selected.options.map(option => (
+                                        <button key={option.id} type="button" disabled={readOnly} onClick={() => submit('confirm', option.id)} className="min-h-11 w-full rounded-xl border border-neutral-200 bg-white p-4 text-left hover:border-indigo-300 disabled:cursor-not-allowed disabled:opacity-60">
+                                            <span className="text-sm font-semibold text-neutral-900">{option.label}</span>
+                                            {option.description && <span className="mt-1 block text-sm text-neutral-600">{option.description}</span>}
+                                            {option.tradeoffs && option.tradeoffs.length > 0 && <span className="mt-2 block text-xs text-neutral-500">{option.tradeoffs.map(item => item.summary).join(' · ')}</span>}
+                                        </button>
+                                    ))}
+                                </section>
+                            )}
+
+                            {!readOnly && !needsVerdict(selected) && (
+                                <details className="mt-6 rounded-xl border border-neutral-200 bg-white">
+                                    <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold text-neutral-700">Change this record</summary>
+                                    <section className="border-t border-neutral-100 p-4">
+                                    {['confirmed', 'rejected', 'resolved'].includes(selected.status) && <>
+                                    <label className="text-sm font-semibold text-neutral-900" htmlFor="decision-revision">Revise or invalidate</label>
+                                    <textarea id="decision-revision" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={2} placeholder="Enter the revised answer or explain why this decision is no longer valid" className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                    <div className="mt-3 flex flex-wrap gap-2">
+                                        <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('revise', customAnswer.trim())} className="min-h-11 rounded-lg border border-indigo-200 px-4 text-sm font-semibold text-indigo-700 disabled:opacity-40">Save revision</button>
+                                        <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('invalidate', customAnswer.trim())} className="min-h-11 rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-700 disabled:opacity-40">Mark no longer valid</button>
+                                    </div>
+                                    </>}
+                                    <button type="button" onClick={() => submit('reopen')} className="mt-4 min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} className="mr-1 inline" /> Reopen decision</button>
+                                    </section>
+                                </details>
+                            )}
                             <details className="mt-7 border-t border-neutral-200 pt-4">
                                 <summary className="flex min-h-10 cursor-pointer items-center gap-2 text-sm font-semibold text-neutral-700"><ChevronDown size={14} /> Source and history</summary>
                                 <p className="mt-2 text-xs text-neutral-500">Sources: {selected.sourceLabels?.join(', ') || 'User-created decision'}</p>
@@ -513,19 +551,6 @@ export function DecisionCenter({
                                     {(selected.history ?? []).map(item => <li key={item.id}><p className="text-sm font-medium text-neutral-800">{item.label}</p><p className="text-xs text-neutral-400">{new Date(item.at).toLocaleString()}</p>{item.rationale && <p className="mt-1 text-xs text-neutral-600">{item.rationale}</p>}</li>)}
                                 </ol>
                             </details>
-
-                            {!readOnly && ['confirmed', 'rejected', 'resolved'].includes(selected.status) && (
-                                <section className="mt-6 rounded-xl border border-neutral-200 bg-white p-4">
-                                    <label className="text-sm font-semibold text-neutral-900" htmlFor="decision-revision">Revise or invalidate</label>
-                                    <textarea id="decision-revision" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={2} placeholder="Enter the revised answer or explain why this decision is no longer valid" className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-                                    <div className="mt-3 flex flex-wrap gap-2">
-                                        <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('revise', customAnswer.trim())} className="min-h-11 rounded-lg border border-indigo-200 px-4 text-sm font-semibold text-indigo-700 disabled:opacity-40">Save revision</button>
-                                        <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('invalidate', customAnswer.trim())} className="min-h-11 rounded-lg border border-red-200 px-4 text-sm font-semibold text-red-700 disabled:opacity-40">Mark no longer valid</button>
-                                    </div>
-                                </section>
-                            )}
-
-                            {!readOnly && !needsVerdict(selected) && <button type="button" onClick={() => submit('reopen')} className="mt-6 min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-white"><RefreshCcw size={14} className="mr-1 inline" /> Reopen decision</button>}
                         </div>
                     )}
                 </main>

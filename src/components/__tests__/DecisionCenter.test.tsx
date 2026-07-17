@@ -24,6 +24,21 @@ const callbacks = () => ({
 });
 
 describe('DecisionCenter', () => {
+    it('leads with one condition and next action before recommendation and alternatives', () => {
+        render(<DecisionCenter records={[openRecord]} {...callbacks()} />);
+
+        expect(screen.getAllByText('Worth validating').length).toBeGreaterThan(0);
+        const nextAction = screen.getByRole('region', { name: 'Next action' });
+        const answer = screen.getByLabelText('Your answer');
+        const recommendation = screen.getByText('Synapse recommendation');
+        const alternatives = screen.getByRole('heading', { name: 'Alternatives and tradeoffs' });
+        expect(nextAction).toHaveTextContent(/Decide whether to test this assumption/);
+        expect(answer.compareDocumentPosition(recommendation) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(recommendation.compareDocumentPosition(alternatives) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(screen.getByText('Source and history').closest('details')).not.toHaveAttribute('open');
+        expect(screen.getByRole('button', { name: 'Back to decisions' })).toHaveClass('min-h-11');
+    });
+
     it('switches to a newly linked exact record while the center remains mounted', () => {
         const resolved = { ...openRecord, id: 'resolved', title: 'Resolved audience', status: 'confirmed' as const, resolution: 'Independent creators' };
         const props = callbacks();
@@ -339,6 +354,7 @@ describe('DecisionCenter', () => {
     it('lets a user explicitly revise or invalidate a recorded decision', () => {
         const props = callbacks();
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...props} />);
+        fireEvent.click(screen.getByText('Change this record'));
         const revision = screen.getByLabelText('Revise or invalidate');
         fireEvent.change(revision, { target: { value: 'Require sign-in before the first save' } });
         fireEvent.click(screen.getByRole('button', { name: 'Save revision' }));
