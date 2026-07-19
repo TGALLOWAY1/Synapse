@@ -15,7 +15,7 @@ describe('read-only demo surfaces', () => {
 
         const status = screen.getByRole('status');
         // The compact banner leads with what the product does.
-        expect(status).toHaveTextContent('live example');
+        expect(status).toHaveTextContent('saved example');
         // Policy detail + reset are collapsed until "Details" is expanded.
         expect(status).not.toHaveTextContent('read-only example project');
         expect(screen.queryByRole('button', { name: /Reset demo/ })).toBeNull();

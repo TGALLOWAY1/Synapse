@@ -46,7 +46,7 @@ export function DemoReadOnlyNotice() {
                 <Sparkles size={15} className="shrink-0 text-indigo-300" aria-hidden="true" />
                 <p className="min-w-0 flex-1">
                     <span className="font-semibold text-white">Synapse</span> turns a plain-language
-                    idea into a PRD, screens, mockups, and a build plan — you're exploring a live example.
+                    idea into a PRD, screens, mockups, and a build plan — you're exploring a saved example.
                 </p>
                 <button
                     type="button"
