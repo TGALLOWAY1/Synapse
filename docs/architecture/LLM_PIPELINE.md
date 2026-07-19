@@ -211,7 +211,18 @@
       strings drive the buckets instead (resolved to features via
       `resolveScopeFeature` where possible; an unresolved entry still renders
       as a plain scope card with no id badge — `SummaryFeature.id` is
-      optional). Only when BOTH signals are absent does it fall back to the
+      optional, and its absence is the "untraced" signal: the scope pills in
+      `StructuredPRDView.renderScopeGroup` attach a small advisory
+      "not traced to a feature" label to id-less entries, because downstream
+      artifacts generate from `prd.features` only and an untraced scope string
+      never reaches them. Advisory only — it never gates rendering/generation
+      or rewrites the PRD. To prevent new untraced entries at the source, the
+      `metrics_scope` section prompt (`prdSectionPrompts.ts`) requires every
+      `mvpScope.mvp`/`v1`/`later` entry to begin with the id + exact name of a
+      feature from the provided Features list ("f1: Feature Name — brief scope
+      note") and forbids standalone scope items for capabilities not in the
+      list — keep that id-reference requirement when editing the prompt).
+      Only when BOTH signals are absent does it fall back to the
       declaration-order 4+4 heuristic. Bucket cards show the feature
       **description** as supporting text (falling back to userValue) — never
       the raw complexity rating prefix ("low · "). Do not reintroduce a

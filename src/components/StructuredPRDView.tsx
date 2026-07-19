@@ -1106,9 +1106,19 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                         ) : (
                             <span
                                 key={`${f.name}-${i}`}
+                                // A scope entry with no id resolved to no PRD feature —
+                                // downstream assets generate from features only, so this
+                                // entry won't reach them. Advisory label only: never
+                                // gate rendering/generation or rewrite the PRD here.
+                                title={!f.id ? 'This scope entry does not reference a PRD feature, so downstream assets are generated without it.' : undefined}
                                 className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
                             >
-                                {f.name}
+                                <span className="min-w-0 break-words">{f.name}</span>
+                                {!f.id && (
+                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">
+                                        not traced to a feature
+                                    </span>
+                                )}
                             </span>
                         );
                     })}

@@ -195,8 +195,13 @@ describe('deriveImplementationSummary — explicit mvpScope entries', () => {
         });
         const s = deriveImplementationSummary(prd);
         expect(s.buildFirst.map(f => f.name)).toEqual(['Quick Capture', 'Basic auth and onboarding']);
+        // A missing `id` IS the untraced signal: feature-backed entries always
+        // carry the feature id, so the scope UI renders its advisory
+        // "not traced to a feature" hint exactly when `id` is undefined.
+        expect(s.buildFirst[0].id).toBe('f1');
         expect(s.buildFirst[1].id).toBeUndefined();
         expect(s.buildNext.map(f => f.name)).toEqual(['Billing integration']);
+        expect(s.buildNext[0].id).toBeUndefined();
     });
 
     it('excludes scope-deferred features from the buckets', () => {
