@@ -55,6 +55,10 @@ import {
 } from '../../lib/planning/downstreamArtifactUpdateVerification';
 import { deriveProjectOutputAlignment } from '../../lib/planning/outputAlignment';
 import { rebaseDownstreamUpdatePlanAfterApplication } from '../../lib/planning/downstreamUpdatePlanRebase';
+import {
+    pruneDownstreamCollections,
+    type DownstreamRetentionCollections,
+} from '../../lib/collectionRetention';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamUpdatePlans'
@@ -94,6 +98,18 @@ function currentContext(state: ProjectState, projectId: string): DownstreamUpdat
 const rationaleRequired = (disposition: string): boolean =>
     disposition === 'deferred' || disposition === 'not_applicable' || disposition === 'already_aligned';
 
+/** The seven persisted downstream collections, picked off a state snapshot for
+ *  the write-time retention pass (see src/lib/collectionRetention.ts). */
+const downstreamCollectionsOf = (state: ProjectState): DownstreamRetentionCollections => ({
+    downstreamUpdatePlans: state.downstreamUpdatePlans,
+    downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents,
+    downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals,
+    downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents,
+    downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications,
+    downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications,
+    downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents,
+});
+
 export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [], DownstreamUpdatePlanSlice> = (set, get) => ({
     downstreamUpdatePlans: {},
     downstreamUpdatePlanEvents: {},
@@ -114,12 +130,13 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
         const existing = get().downstreamUpdatePlans[projectId] ?? [];
         const duplicate = existing.some(candidate => candidate.id === plan.id || candidate.integrityHash === plan.integrityHash);
         if (duplicate) return { ok: true, duplicate: true };
-        set(state => ({
+        set(state => pruneDownstreamCollections({
+            ...downstreamCollectionsOf(state),
             downstreamUpdatePlans: {
                 ...state.downstreamUpdatePlans,
                 [projectId]: [...(state.downstreamUpdatePlans[projectId] ?? []), plan],
             },
-        }));
+        }, projectId));
         return { ok: true, duplicate: false };
     },
 
@@ -138,12 +155,13 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             candidate.id === plan.id || candidate.integrityHash === plan.integrityHash
         )));
         if (additions.length > 0) {
-            set(current => ({
+            set(current => pruneDownstreamCollections({
+                ...downstreamCollectionsOf(current),
                 downstreamUpdatePlans: {
                     ...current.downstreamUpdatePlans,
                     [projectId]: [...(current.downstreamUpdatePlans[projectId] ?? []), ...additions],
                 },
-            }));
+            }, projectId));
         }
         return { status: 'generated', planIds: plans.map(plan => plan.id), created: additions.length };
     },
@@ -676,6 +694,37 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                 createdAt: now,
             };
             outcome = { status: 'applied', applicationId, artifactVersionId: versionId };
+            // Retention: the rebased plan append is a downstream-plan write, so
+            // run the same write-time retention pass as the other plan appends.
+            // The fresh plan is the newest in its artifact lineage and its full
+            // chain (proposals, reviews, application, verification) is kept.
+            const prunedDownstream = pruneDownstreamCollections({
+                downstreamUpdatePlans: {
+                    ...state.downstreamUpdatePlans,
+                    [projectId]: [...(state.downstreamUpdatePlans[projectId] ?? []), rebased.plan],
+                },
+                downstreamUpdatePlanEvents: {
+                    ...state.downstreamUpdatePlanEvents,
+                    [projectId]: [...(state.downstreamUpdatePlanEvents[projectId] ?? []), ...rebased.events],
+                },
+                downstreamArtifactUpdateProposals: {
+                    ...state.downstreamArtifactUpdateProposals,
+                    [projectId]: [...(state.downstreamArtifactUpdateProposals[projectId] ?? []), ...freshProposals],
+                },
+                downstreamArtifactUpdateReviewEvents: {
+                    ...state.downstreamArtifactUpdateReviewEvents,
+                    [projectId]: [...reviewEvents, ...carriedReviews],
+                },
+                downstreamArtifactUpdateApplications: {
+                    ...state.downstreamArtifactUpdateApplications,
+                    [projectId]: [...(state.downstreamArtifactUpdateApplications[projectId] ?? []), application],
+                },
+                downstreamArtifactUpdateVerifications: {
+                    ...state.downstreamArtifactUpdateVerifications,
+                    [projectId]: [...(state.downstreamArtifactUpdateVerifications[projectId] ?? []), verification],
+                },
+                downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents,
+            }, projectId);
             return {
                 artifactVersions: {
                     ...state.artifactVersions,
@@ -696,30 +745,7 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                     ...state.historyEvents,
                     [projectId]: [...(state.historyEvents[projectId] ?? []), history],
                 },
-                downstreamArtifactUpdateApplications: {
-                    ...state.downstreamArtifactUpdateApplications,
-                    [projectId]: [...(state.downstreamArtifactUpdateApplications[projectId] ?? []), application],
-                },
-                downstreamArtifactUpdateVerifications: {
-                    ...state.downstreamArtifactUpdateVerifications,
-                    [projectId]: [...(state.downstreamArtifactUpdateVerifications[projectId] ?? []), verification],
-                },
-                downstreamUpdatePlans: {
-                    ...state.downstreamUpdatePlans,
-                    [projectId]: [...(state.downstreamUpdatePlans[projectId] ?? []), rebased.plan],
-                },
-                downstreamUpdatePlanEvents: {
-                    ...state.downstreamUpdatePlanEvents,
-                    [projectId]: [...(state.downstreamUpdatePlanEvents[projectId] ?? []), ...rebased.events],
-                },
-                downstreamArtifactUpdateProposals: {
-                    ...state.downstreamArtifactUpdateProposals,
-                    [projectId]: [...(state.downstreamArtifactUpdateProposals[projectId] ?? []), ...freshProposals],
-                },
-                downstreamArtifactUpdateReviewEvents: {
-                    ...state.downstreamArtifactUpdateReviewEvents,
-                    [projectId]: [...reviewEvents, ...carriedReviews],
-                },
+                ...prunedDownstream,
             };
         });
         return outcome;

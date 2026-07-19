@@ -109,6 +109,16 @@ describe('lean decision-level prompts (detail deferred to artifacts)', () => {
         expect(user).not.toContain('instrumentation?');
     });
 
+    it('metrics_scope requires scope entries to reference features by id + exact name', () => {
+        // Free-form scope strings that name no feature never resolve to an id
+        // (resolveScopeFeature) and silently vanish from downstream assets,
+        // which generate from prd.features only — the prompt must forbid them.
+        const { user } = buildSectionPrompt('metrics_scope', { idea: 'Test app', upstream: {} });
+        expect(user).toContain('MUST begin with the id and exact name of a feature from the Features list');
+        expect(user).toContain('"f1: Feature Name — brief scope note"');
+        expect(user).toContain('Do NOT introduce capabilities that are not in the Features list');
+    });
+
     it('active sections keep the lean rubric', () => {
         const { system } = buildSectionPrompt('ux_loops', { idea: 'Test app', upstream: {} });
         expect(system).toContain('QUALITY BAR');

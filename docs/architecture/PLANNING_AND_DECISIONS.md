@@ -9,7 +9,15 @@ is available as soon as a safe structured working PRD exists and hosts
 specialist findings, review history, and the full Decision Center.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
-`ReviewWorkspace.tsx` and `DecisionCenter.tsx`.
+`ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
+composition root: run orchestration lives in `useReviewRunController.ts`,
+manifest capture/reconstruction in `useReviewContextManifest.ts`, issue
+dispositions in `useReviewIssueActions.ts` (+ the
+`reviewIssueDispositions.ts` action→disposition tables), assumption
+validation in `useAssumptionValidationActions.ts`, decision verdicts /
+impact previews / the write-barrier apply path in
+`useDecisionImpactActions.ts`, and the pure store→view projections in
+`reviewRunViews.ts` and `planningRecordViews.ts`.
 
 - `derivePlanningReadiness` (`planningReadiness.ts`) is the pure, categorical
   project-readiness projection. It evaluates foundation clarity, intentional
@@ -70,6 +78,18 @@ adapts persisted review/planning state into the responsive UI in
   recovery exports, and snapshots. Keep review/planning collections in
   `userScope.MERGEABLE_COLLECTIONS`, demo cleanup, and the explicit
   `PERSISTENT_STORE_ACTIONS` write guard.
+- **Retention:** the machine-generated run/checkpoint history (review runs and
+  their specialist runs/findings/issues, readiness reviews, downstream update
+  plans and their proposal/application/verification chains) is capped at write
+  time through `src/lib/collectionRetention.ts` (see the "Retention caps"
+  section in STATE_AND_AUTH.md for limits and the cascade/protection rules).
+  **`planningRecords` and `readinessCommitmentEvents` are exempt** — they are
+  the append-only user-authority aggregates and are never pruned; do not add a
+  cap to them, and never let a retention pass touch `DecisionEvent[]` or
+  assumption-validation events. Runs with open/deferred issues, commitment-
+  referenced readiness reviews, and the current substantive challenge are
+  protected from pruning so nothing readiness/commitment currently relies on
+  disappears.
 
 The full normalized Planning Knowledge Graph is deliberately future work; see
 `docs/DECISION_CENTER_DESIGN.md`. Do not introduce composite planning-confidence
