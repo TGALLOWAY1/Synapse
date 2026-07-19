@@ -115,7 +115,7 @@ export function DownstreamUpdatePlanReview({
     const events = useProjectStore(state => state.downstreamUpdatePlanEvents[projectId] ?? EMPTY_EVENTS);
     // These subscriptions intentionally keep currentness reactive. Stable store arrays avoid
     // React 19/Zustand snapshot churn for projects without one of these collections.
-    useProjectStore(state => state.spineVersions[projectId] ?? EMPTY_LIST);
+    const spineVersions = useProjectStore(state => state.spineVersions[projectId] ?? EMPTY_LIST);
     useProjectStore(state => state.artifactVersions[projectId] ?? EMPTY_LIST);
     useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_LIST);
     const appendEvent = useProjectStore(state => state.appendDownstreamUpdatePlanEvent);
@@ -230,7 +230,8 @@ export function DownstreamUpdatePlanReview({
     };
 
     const completed = items.filter(item => item.disposition).length;
-    const targetSpine = plan.source.targetSpineVersionId.slice(0, 8);
+    const sourceVersionIndex = spineVersions.findIndex(version => version.id === plan.source.targetSpineVersionId);
+    const sourceVersionLabel = sourceVersionIndex >= 0 ? `Version ${sourceVersionIndex + 1}` : 'Recorded plan version';
 
     return (
         <div className="fixed inset-0 z-50 flex items-end justify-center bg-black/50 md:items-center md:p-4" role="presentation" onMouseDown={onClose}>
@@ -263,7 +264,7 @@ export function DownstreamUpdatePlanReview({
                                 {plan.artifact.title}
                             </h2>
                             <p className="mt-1 text-sm leading-relaxed text-neutral-600">
-                                Planning alone does not edit this output. If you later approve and apply a bounded proposal, Synapse creates a new artifact version without regenerating the full output.
+                                Planning alone does not edit this output. You can review focused proposed changes later without regenerating the full output.
                             </p>
                         </div>
                         <button ref={closeRef} type="button" onClick={onClose} aria-label="Close update plan" className="flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-lg text-neutral-500 hover:bg-neutral-100 focus-visible:outline focus-visible:outline-2 focus-visible:outline-indigo-600">
@@ -275,7 +276,7 @@ export function DownstreamUpdatePlanReview({
                             <div className="font-semibold text-indigo-900">What changed</div>
                             <div className="mt-0.5 break-words text-indigo-800">{plan.source.summary}</div>
                             <div className="mt-1 text-[11px] text-indigo-700">
-                                Planning spine {targetSpine} · {plan.source.confirmed ? 'Confirmed source change' : 'Source change remains provisional'}
+                                {sourceVersionLabel} · {plan.source.confirmed ? 'Confirmed source change' : 'Source change remains provisional'}
                             </div>
                         </div>
                         {artifactPlans.length > 1 && (
@@ -305,7 +306,7 @@ export function DownstreamUpdatePlanReview({
                     {readOnly && (
                         <div className="mb-4 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2.5 text-sm text-amber-900">
                             <History size={16} className="mt-0.5 shrink-0" />
-                            <p>This plan no longer describes the current planning spine or output version. Its recommendations and user choices are preserved as history.</p>
+                            <p>This plan no longer describes the current plan version or output version. Its recommendations and user choices are preserved as history.</p>
                         </div>
                     )}
                     {error && <p role="alert" className="mb-4 rounded-lg border border-red-200 bg-red-50 px-3 py-2 text-sm text-red-800">{error}</p>}
@@ -375,7 +376,7 @@ export function DownstreamUpdatePlanReview({
                                                         <div className="font-medium text-neutral-800">{evidence.quality === 'direct' ? 'Direct evidence' : evidence.quality === 'inferred' ? 'Inferred support' : 'Incomplete provenance'}</div>
                                                         <div className="mt-0.5 break-words">{evidence.summary}</div>
                                                     </div>
-                                                )) : <p className="italic text-neutral-500">No durable evidence identifies a narrower region. Treat this as a bounded review recommendation.</p>}
+                                                )) : <p className="italic text-neutral-500">No durable evidence identifies a narrower region. Review this output without assuming a specific change.</p>}
                                             </div>
                                         </div>
                                     </details>

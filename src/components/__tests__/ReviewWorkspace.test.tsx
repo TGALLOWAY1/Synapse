@@ -221,6 +221,29 @@ describe('ReviewWorkspace', () => {
         expect(onReopenIssue).toHaveBeenCalledWith(run.id, closed.id, 'New recovery evidence makes this risk relevant again.', closed.updatedAt);
     });
 
+    it('treats reopening a finding as a keyboard-contained dialog and restores focus', async () => {
+        const closed = {
+            ...completeRun().issues[0], status: 'dismissed' as const,
+            treatmentHistory: [{ action: 'dismiss', reason: 'Initially out of scope.', at: 1 }],
+        };
+        const run = completeRun({ issues: [closed] });
+        render(<ReviewWorkspace {...baseProps({ runs: [run], activeRunId: run.id })} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'All findings' }));
+        const trigger = screen.getByRole('button', { name: /Change treatment/i });
+        trigger.focus();
+        fireEvent.click(trigger);
+        const reason = screen.getByLabelText('Why does this need attention again?');
+        await waitFor(() => expect(reason).toHaveFocus());
+        const close = screen.getByRole('button', { name: 'Close' });
+        close.focus();
+        fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+        expect(screen.getByRole('button', { name: 'Cancel' })).toHaveFocus();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(screen.queryByRole('dialog', { name: /Change this finding/i })).toBeNull();
+        expect(trigger).toHaveFocus();
+    });
+
     it('offers a fresh review instead of reopening a finding from stale Challenge context', () => {
         const closed = { ...completeRun().issues[0], status: 'dismissed' as const };
         const run = completeRun({ issues: [closed], contextChanged: true });

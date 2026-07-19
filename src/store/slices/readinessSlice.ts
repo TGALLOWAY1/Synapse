@@ -204,8 +204,8 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                         readinessReviewId: review.id,
                         type: 'ReadinessReviewed',
                         description: review.conclusion === 'ready_to_build'
-                            ? 'Readiness checkpoint found this plan ready to build'
-                            : 'Readiness checkpoint recorded open planning concerns',
+                            ? 'Readiness review found this plan ready to build'
+                            : 'Readiness review recorded open planning concerns',
                         createdAt: review.createdAt,
                     }],
                 },

@@ -480,7 +480,7 @@ export function DecisionCenter({
                                                                                     ? 'Prepare another interpretation'
                                                                                     : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
                                                                                         ? 'Try again with context'
-                                                                                        : 'Prepare bounded proposal'}
+                                                                                        : 'Prepare proposed change'}
                                                                         </button>
                                                                         <button type="button" disabled={proposal.analysisBusy} onClick={() => { setProposalRequest(undefined); setProposalGuidance(''); }} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Cancel</button>
                                                                     </div>

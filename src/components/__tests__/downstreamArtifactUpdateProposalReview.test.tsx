@@ -95,7 +95,7 @@ describe('DownstreamArtifactUpdateProposalReview authority currentness', () => {
         render(<DownstreamArtifactUpdateProposalReview projectId={projectId} plan={plan} item={plan.items[0]} readOnly={false} />);
         expect(screen.getByText(/failed integrity checks and was ignored/)).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Accept proposal' })).not.toBeInTheDocument();
-        expect(screen.queryByText(/Applied in version/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Applied in a new output version/)).not.toBeInTheDocument();
         expect(screen.queryByText(/Synapse verification:/)).not.toBeInTheDocument();
     });
 
@@ -130,7 +130,7 @@ describe('DownstreamArtifactUpdateProposalReview authority currentness', () => {
         });
         render(<DownstreamArtifactUpdateProposalReview projectId={projectId} plan={plan} item={plan.items[0]} readOnly={false} />);
         expect(screen.getByText(/lifecycle records failed integrity checks/)).toBeInTheDocument();
-        expect(screen.queryByText(/Applied in version/)).not.toBeInTheDocument();
+        expect(screen.queryByText(/Applied in a new output version/)).not.toBeInTheDocument();
         expect(screen.queryByText(/Synapse verification:/)).not.toBeInTheDocument();
     });
 

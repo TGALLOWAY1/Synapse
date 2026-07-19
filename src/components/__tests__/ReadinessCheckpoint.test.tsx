@@ -208,4 +208,23 @@ describe('ReadinessCheckpoint', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Proceed with accepted risk' }));
         await waitFor(() => expect(screen.getByLabelText('Why proceed now?')).toHaveFocus());
     });
+
+    it('contains focus, closes on Escape, and restores the triggering focus', async () => {
+        const props = callbacks();
+        const trigger = document.createElement('button');
+        document.body.append(trigger);
+        trigger.focus();
+        const rendered = render(<ReadinessCheckpoint review={baseReview()} {...props} />);
+
+        const close = screen.getByRole('button', { name: 'Close readiness review' });
+        await waitFor(() => expect(close).toHaveFocus());
+        fireEvent.keyDown(window, { key: 'Tab', shiftKey: true });
+        expect(screen.getAllByRole('button', { name: 'Resolve in Decision Center' }).at(-1)).toHaveFocus();
+        fireEvent.keyDown(window, { key: 'Escape' });
+        expect(props.onClose).toHaveBeenCalledTimes(1);
+
+        rendered.unmount();
+        expect(trigger).toHaveFocus();
+        trigger.remove();
+    });
 });

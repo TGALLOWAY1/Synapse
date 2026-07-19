@@ -45,6 +45,14 @@ export function PlanningStateBar({ readiness, planSummary, committed, legacyComm
         : alignmentCriterion?.status === 'not_started'
             ? 'No downstream review needed yet'
             : 'Downstream review needs attention';
+    const openPrimaryAction = () => {
+        if (primaryAttention && onOpenAttention) {
+            onOpenAttention(primaryAttention.destination);
+            return;
+        }
+        if (nextGoesToChallenge) onOpenChallenge();
+        else onNextAction();
+    };
     return (
         <section className={`mb-5 rounded-2xl border p-4 sm:p-5 ${phaseTone[readiness.phase]}`} aria-labelledby="planning-state-heading">
             {planSummary && (
@@ -66,7 +74,7 @@ export function PlanningStateBar({ readiness, planSummary, committed, legacyComm
                     <h2 id="planning-state-heading" className="mt-2 text-lg font-bold tracking-tight">{readinessCopy.label}</h2>
                     <p className="mt-1 max-w-2xl text-sm leading-6 opacity-80">{readiness.summary}</p>
                 </div>
-                <button type="button" onClick={nextGoesToChallenge ? onOpenChallenge : onNextAction} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-neutral-950 px-4 text-sm font-semibold text-white hover:bg-neutral-800">
+                <button type="button" onClick={openPrimaryAction} className="inline-flex min-h-11 shrink-0 items-center justify-center gap-2 rounded-xl bg-neutral-950 px-4 text-sm font-semibold text-white hover:bg-neutral-800">
                     {primaryAttention?.actionLabel ?? readiness.nextAction.label}<ArrowRight size={15} />
                 </button>
             </div>

@@ -27,8 +27,8 @@ const sourceLabel = (sourceType: ReadinessReview['criteria'][number]['evidence']
 
 const describeCurrentnessReason = (reason: ReadinessReviewCurrentnessReason): string => {
     const labels: Record<ReadinessReviewCurrentnessReason, string> = {
-        integrity_mismatch: 'The stored checkpoint no longer matches its integrity signature.',
-        schema_changed: 'Synapse now stores readiness checkpoints with a different schema.',
+        integrity_mismatch: 'The saved readiness review no longer matches its integrity record.',
+        schema_changed: 'Synapse now stores readiness reviews with a different schema.',
         criteria_changed: 'Synapse now evaluates readiness with different criteria.',
         spine_identity_changed: 'A different plan version is now current.',
         spine_content_changed: 'The reviewed plan content changed.',
@@ -45,6 +45,7 @@ export function readinessActionLabel(target: ReadinessActionTarget): string {
     if (target.kind === 'feature') return 'Review first-release scope';
     if (target.kind === 'planning_record') return 'Resolve in Decision Center';
     if (target.kind === 'challenge') return 'Open challenge review';
+    if (target.kind === 'update_plan') return 'Review this update plan';
     return 'Review affected output';
 }
 
@@ -52,7 +53,7 @@ export type ReadinessNavigationDestination =
     | { stage: 'prd'; anchorId: string }
     | { stage: 'review'; tab: 'decisions'; planningRecordId: string }
     | { stage: 'review'; tab: 'review'; reviewId?: string; issueId?: string; findingId?: string }
-    | { stage: 'workspace'; artifactId: string; nodeId: ArtifactSlotKey };
+    | { stage: 'workspace'; artifactId: string; nodeId: ArtifactSlotKey; updatePlanId?: string; updatePlanItemId?: string };
 
 export function readinessNavigationDestination(target: ReadinessActionTarget): ReadinessNavigationDestination {
     if (target.kind === 'planning_record') {
@@ -66,6 +67,12 @@ export function readinessNavigationDestination(target: ReadinessActionTarget): R
     }
     if (target.kind === 'output') {
         return { stage: 'workspace', artifactId: target.artifactId, nodeId: target.nodeId };
+    }
+    if (target.kind === 'update_plan') {
+        return {
+            stage: 'workspace', artifactId: target.artifactId, nodeId: target.nodeId,
+            updatePlanId: target.planId, updatePlanItemId: target.itemId,
+        };
     }
     if (target.kind === 'feature') {
         return { stage: 'prd', anchorId: target.featureId ? featureDetailAnchorId(target.featureId) : 'prd-features' };

@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertTriangle,
     ArrowRight,
@@ -460,9 +460,48 @@ function ReopenFindingDialog({ issue, onClose, onSubmit }: {
 }) {
     const [reason, setReason] = useState('');
     const valid = reason.trim().length >= 10;
+    const dialogRef = useRef<HTMLDivElement>(null);
+    const reasonRef = useRef<HTMLTextAreaElement>(null);
+    const onCloseRef = useRef(onClose);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
+
+    useEffect(() => {
+        const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        reasonRef.current?.focus();
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onCloseRef.current();
+                return;
+            }
+            if (event.key !== 'Tab' || !dialogRef.current) return;
+            const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+            )];
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            previouslyFocused?.focus();
+        };
+    }, []);
+
     return (
         <div className="fixed inset-0 z-[1200] flex items-end justify-center bg-black/45 sm:items-center sm:p-5" role="presentation" onMouseDown={onClose}>
-            <div className="w-full rounded-t-2xl bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="reopen-finding-title" onMouseDown={event => event.stopPropagation()}>
+            <div ref={dialogRef} className="w-full rounded-t-2xl bg-white shadow-2xl sm:max-w-lg sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="reopen-finding-title" onMouseDown={event => event.stopPropagation()}>
                 <div className="flex items-start justify-between gap-3 border-b border-neutral-100 px-4 py-4 sm:px-5">
                     <div>
                         <h2 id="reopen-finding-title" className="font-semibold text-neutral-950">Change this finding's treatment</h2>
@@ -473,7 +512,7 @@ function ReopenFindingDialog({ issue, onClose, onSubmit }: {
                 <div className="p-4 sm:p-5">
                     <p className="text-sm leading-6 text-neutral-600">This returns the finding to Needs attention. It does not reopen or change any linked decision.</p>
                     <label className="mt-4 block text-sm font-medium text-neutral-800" htmlFor="reopen-finding-reason">Why does this need attention again?</label>
-                    <textarea id="reopen-finding-reason" autoFocus rows={3} value={reason} onChange={event => setReason(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" />
+                    <textarea ref={reasonRef} id="reopen-finding-reason" rows={3} value={reason} onChange={event => setReason(event.target.value)} className="mt-2 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:bg-white focus:ring-2 focus:ring-indigo-100" />
                     <p className="mt-2 text-xs text-neutral-500">Your rationale is added to the finding's history.</p>
                 </div>
                 <div className="flex flex-col-reverse gap-2 border-t border-neutral-100 p-4 sm:flex-row sm:justify-end">
@@ -702,7 +741,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
             {run.readinessCoverage === 'unverifiable' && (
                 <div className="mb-5 flex items-start gap-2 rounded-xl border border-amber-200 bg-amber-50 p-3 text-sm text-amber-900">
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
-                    <span>This legacy review did not record its required specialist panel, so it cannot support the current readiness checkpoint. Review the current plan again.</span>
+                    <span>This legacy review did not record its required specialist panel, so it cannot support the current readiness review. Review the current plan again.</span>
                 </div>
             )}
             {run.readinessCoverage === 'incomplete' && (

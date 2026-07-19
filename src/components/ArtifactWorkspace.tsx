@@ -320,6 +320,8 @@ export function ArtifactWorkspace({
     // Mobile-only: the left rail is a slide-in drawer below the md breakpoint.
     // Closed by default so the content pane is fully visible on first paint.
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    const mobileDrawerRef = useRef<HTMLElement>(null);
+    const mobileDrawerTriggerRef = useRef<HTMLButtonElement>(null);
     // Holds the artifact id + content the modal should extract tasks from.
     // Stored as state (rather than derived) so the modal keeps working even
     // if the user mutates the artifact in another tab while it's open.
@@ -338,6 +340,42 @@ export function ArtifactWorkspace({
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
+
+    useEffect(() => {
+        if (!isMobile || !mobileSidebarOpen) return;
+        const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        const focusFirst = () => {
+            const first = mobileDrawerRef.current?.querySelector<HTMLElement>(focusableSelector);
+            first?.focus();
+        };
+        const focusFrame = window.requestAnimationFrame(focusFirst);
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setMobileSidebarOpen(false);
+                return;
+            }
+            if (event.key !== 'Tab' || !mobileDrawerRef.current) return;
+            const focusable = [...mobileDrawerRef.current.querySelectorAll<HTMLElement>(focusableSelector)];
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.cancelAnimationFrame(focusFrame);
+            window.removeEventListener('keydown', onKeyDown);
+            previouslyFocused?.focus();
+        };
+    }, [isMobile, mobileSidebarOpen]);
     // Experience workspace (Screens) navigation state — URL-addressable:
     // /p/:projectId?screen=<canonical id>[&screenTab=flow|mockups]. The URL
     // is the single source of truth for which screen is open, so deep links,
@@ -1677,6 +1715,12 @@ export function ArtifactWorkspace({
 
             {/* Left rail — fixed sidebar on md+, slide-in drawer on mobile */}
             <aside
+                ref={mobileDrawerRef}
+                id="mobile-artifact-navigation"
+                role={isMobile && mobileSidebarOpen ? 'dialog' : undefined}
+                aria-modal={isMobile && mobileSidebarOpen ? true : undefined}
+                aria-labelledby={isMobile && mobileSidebarOpen ? 'mobile-artifact-navigation-title' : undefined}
+                aria-hidden={isMobile && !mobileSidebarOpen ? true : undefined}
                 className={`
                     absolute md:static inset-y-0 left-0 z-40 w-64 shrink-0
                     border-r border-neutral-200 bg-white overflow-y-auto
@@ -1686,7 +1730,7 @@ export function ArtifactWorkspace({
                 `}
             >
                 <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-neutral-100">
-                    <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Artifacts</span>
+                    <span id="mobile-artifact-navigation-title" className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Artifacts</span>
                     <button
                         type="button"
                         onClick={() => setMobileSidebarOpen(false)}
@@ -1772,13 +1816,16 @@ export function ArtifactWorkspace({
             </aside>
 
             {/* Main pane */}
-            <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
+            <main ref={mainRef} aria-hidden={isMobile && mobileSidebarOpen ? true : undefined} inert={isMobile && mobileSidebarOpen ? '' : undefined} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
                 {/* Mobile-only header with sidebar toggle and current artifact name */}
                 <div className="md:hidden sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-white border-b border-neutral-200">
                     <button
+                        ref={mobileDrawerTriggerRef}
                         type="button"
                         onClick={() => setMobileSidebarOpen(true)}
                         aria-label="Open artifact list"
+                        aria-expanded={mobileSidebarOpen}
+                        aria-controls="mobile-artifact-navigation"
                         className="-ml-1 flex min-h-11 min-w-11 items-center justify-center text-neutral-700 hover:text-neutral-900"
                     >
                         <Menu size={20} />

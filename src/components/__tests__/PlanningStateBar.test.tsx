@@ -68,7 +68,8 @@ describe('PlanningStateBar', () => {
         />);
 
         fireEvent.click(screen.getByRole('button', { name: /Make this decision/ }));
-        expect(onNextAction).toHaveBeenCalledTimes(1);
+        expect(onNextAction).not.toHaveBeenCalled();
+        expect(onOpenAttention).toHaveBeenCalledWith({ kind: 'planning_record', recordId: 'decision-1' });
         expect(screen.getByText('2 unresolved · 1 assumption')).toBeInTheDocument();
         expect(screen.getByText(/A focused guest onboarding experience/)).toBeInTheDocument();
         expect(screen.getByText('Downstream review needs attention')).toBeInTheDocument();

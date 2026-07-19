@@ -599,7 +599,9 @@ describe('deterministic readiness review', () => {
         expect(criterion?.evidence).toContainEqual(expect.objectContaining({ sourceId: 'update-item', sourceVersionId: 'screens-v1' }));
         expect(review.concerns).toContainEqual(expect.objectContaining({
             source: expect.objectContaining({ sourceId: 'update-item' }),
-            actionTarget: { kind: 'output', artifactId: 'screens', nodeId: 'screen_inventory' },
+            actionTarget: {
+                kind: 'update_plan', planId: 'plan', itemId: 'update-item', artifactId: 'screens', nodeId: 'screen_inventory',
+            },
             blocking: true,
         }));
 
@@ -608,6 +610,42 @@ describe('deterministic readiness review', () => {
         }));
         expect(changed).toMatchObject({ current: false, historical: true });
         expect(changed.reasons).toContain('downstream_changed');
+    });
+
+    it('uses a current precise update-plan item once instead of duplicating its artifact-wide concern', () => {
+        const outputAlignment: ProjectOutputAlignmentSummary = {
+            outputs: [{
+                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'definitely_stale',
+                confidence: 'certain', summary: 'Shared-workspace behavior contradicts the current plan.',
+                reasons: ['Collaboration was removed.'], nextAction: 'Review shared workspace.', usefulForExploration: true,
+                blocksBuildReadiness: true, generatedFromSpineId: 'spine-old',
+            }], alignedCount: 0, possiblyAffectedCount: 0, staleCount: 1, blockingCount: 1,
+        };
+        const updateItem = {
+            planId: 'plan-1', planIntegrityHash: 'plan-integrity', itemId: 'shared-screen', artifactId: 'screens',
+            artifactVersionId: 'screens-v1', nodeId: 'screen_inventory' as const, artifactTitle: 'Screens',
+            region: { kind: 'screen' as const, screenId: 'shared', screenName: 'Shared workspace', aspect: 'screen' as const },
+            certainty: 'definite' as const, implementationCritical: true, priority: 1,
+            recommendation: 'Remove the obsolete shared-workspace behavior.',
+        };
+        const review = deriveReadinessReview(input({
+            outputAlignment,
+            downstreamUpdatePlanSummary: {
+                currentPlanCount: 1, historicalPlanCount: 0, blockingItems: [updateItem], advisoryItems: [], reviewedItems: [], snapshotHash: 'precise-state',
+            },
+        }));
+        const downstream = review.concerns.filter(concern => concern.criterionId === 'downstream_alignment');
+        expect(downstream).toHaveLength(1);
+        expect(downstream[0]).toMatchObject({
+            source: expect.objectContaining({ sourceId: 'shared-screen' }),
+            actionTarget: {
+                kind: 'update_plan', planId: 'plan-1', itemId: 'shared-screen', artifactId: 'screens', nodeId: 'screen_inventory',
+            },
+            blocking: true,
+        });
+        expect(review.criteria.find(item => item.id === 'downstream_alignment')?.actionTarget).toMatchObject({
+            kind: 'update_plan', planId: 'plan-1', itemId: 'shared-screen',
+        });
     });
 
     it('does not let a reviewed plan disposition clear underlying output alignment', () => {
@@ -633,7 +671,47 @@ describe('deterministic readiness review', () => {
             },
         }));
         expect(review.criteria.find(item => item.id === 'downstream_alignment')).toMatchObject({ blocking: true });
+        expect(review.criteria.find(item => item.id === 'downstream_alignment')?.actionTarget).toEqual({
+            kind: 'output', artifactId: 'screens', nodeId: 'screen_inventory',
+        });
+        expect(review.concerns.filter(concern => concern.criterionId === 'downstream_alignment')).toEqual([
+            expect.objectContaining({
+                source: expect.objectContaining({ sourceId: 'screens' }),
+                actionTarget: { kind: 'output', artifactId: 'screens', nodeId: 'screen_inventory' },
+                blocking: true,
+            }),
+        ]);
         expect(review.conclusion).toBe('not_ready');
+    });
+
+    it('does not give an advisory region false blocking precision from its artifact', () => {
+        const outputAlignment: ProjectOutputAlignmentSummary = {
+            outputs: [{
+                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'definitely_stale',
+                confidence: 'certain', summary: 'A proven mismatch remains somewhere in this output.', reasons: ['Mismatch found.'],
+                nextAction: 'Review screens.', usefulForExploration: true, blocksBuildReadiness: true,
+                generatedFromSpineId: 'spine-old',
+            }], alignedCount: 0, possiblyAffectedCount: 0, staleCount: 1, blockingCount: 1,
+        };
+        const review = deriveReadinessReview(input({
+            outputAlignment,
+            downstreamUpdatePlanSummary: {
+                currentPlanCount: 1, historicalPlanCount: 0, blockingItems: [], reviewedItems: [], snapshotHash: 'advisory',
+                advisoryItems: [{
+                    planId: 'plan', planIntegrityHash: 'integrity', itemId: 'possible-item', artifactId: 'screens', artifactVersionId: 'v1',
+                    nodeId: 'screen_inventory', artifactTitle: 'Screens',
+                    region: { kind: 'screen', screenId: 'maybe', screenName: 'Possible screen', aspect: 'screen' },
+                    certainty: 'possible', implementationCritical: false, priority: 1, recommendation: 'Review this possible region.',
+                }],
+            },
+        }));
+        expect(review.concerns.filter(concern => concern.criterionId === 'downstream_alignment')).toEqual([
+            expect.objectContaining({
+                source: expect.objectContaining({ sourceId: 'screens' }),
+                actionTarget: { kind: 'output', artifactId: 'screens', nodeId: 'screen_inventory' },
+                blocking: true,
+            }),
+        ]);
     });
 
     it('makes a review historical when the safety boundary changes', () => {

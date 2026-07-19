@@ -2079,6 +2079,7 @@ export type ReadinessActionTarget =
     | { kind: 'feature'; featureId?: string }
     | { kind: 'planning_record'; planningRecordId: string }
     | { kind: 'challenge'; reviewId?: string; issueId?: string; findingId?: string }
+    | { kind: 'update_plan'; planId: string; itemId: string; artifactId: string; nodeId: ArtifactSlotKey }
     | { kind: 'output'; artifactId: string; nodeId: ArtifactSlotKey };
 
 export type ReadinessReviewCriterion = {

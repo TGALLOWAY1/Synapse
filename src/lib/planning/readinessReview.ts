@@ -657,14 +657,31 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
     const updateBlockers = updateSummary?.blockingItems ?? [];
     const updateAdvisories = updateSummary?.advisoryItems ?? [];
     const updateReviewed = updateSummary?.reviewedItems ?? [];
+    // A current update-plan item is a narrower, durable articulation of an
+    // output concern. Keep the broad output state in the criterion, but show
+    // one actionable concern that opens the exact plan item rather than both
+    // the artifact-wide and region-specific versions of the same issue.
     const blockingOutputs = input.outputAlignment.outputs.filter(output => output.blocksBuildReadiness);
     const outputCaveats = input.outputAlignment.outputs.filter(output => output.state === 'possibly_affected' && !output.blocksBuildReadiness);
+    // Only a definite, unresolved update item can stand in for an artifact-wide
+    // build blocker. Advisory or already-reviewed items must not acquire false
+    // blocking precision from some other mismatch on the same artifact.
+    const blockingPlanArtifacts = new Set(updateBlockers.map(item => item.artifactId));
+    const advisoryPlanArtifacts = new Set(updateAdvisories.map(item => item.artifactId));
+    const blockingOutputArtifacts = new Set(blockingOutputs.map(output => output.artifactId));
+    const uncoveredBlockingOutputs = blockingOutputs.filter(output => !blockingPlanArtifacts.has(output.artifactId));
+    const uncoveredOutputCaveats = outputCaveats.filter(output => !advisoryPlanArtifacts.has(output.artifactId));
+    const actionableUpdateItems = [
+        ...updateBlockers,
+        ...updateAdvisories.filter(item => !blockingOutputArtifacts.has(item.artifactId)),
+    ];
+    const exactBlockingItems = updateBlockers;
     const downstreamBlocking = blockingOutputs.length > 0 || updateBlockers.length > 0;
     const downstreamExplanation = downstreamBlocking
-        ? updateBlockers.length > 0
-            ? `${updateBlockers.length} definite downstream region${updateBlockers.length === 1 ? '' : 's'} still ${updateBlockers.length === 1 ? 'needs' : 'need'} update planning before build.`
-            : `${blockingOutputs.length} downstream output${blockingOutputs.length === 1 ? '' : 's'} requires alignment.`
-        : outputCaveats.length > 0 || updateAdvisories.length > 0 ? 'No update-plan item independently blocks implementation, but some outputs remain possibly affected.'
+        ? exactBlockingItems.length > 0
+            ? `${exactBlockingItems.length} downstream region${exactBlockingItems.length === 1 ? '' : 's'} still ${exactBlockingItems.length === 1 ? 'needs' : 'need'} review before build.`
+            : `${uncoveredBlockingOutputs.length} downstream output${uncoveredBlockingOutputs.length === 1 ? '' : 's'} requires alignment.`
+        : uncoveredOutputCaveats.length > 0 || updateAdvisories.length > 0 ? 'No update-plan item independently blocks implementation, but some outputs remain possibly affected.'
             : input.outputAlignment.outputs.length === 0 ? 'No downstream output exists; this does not reduce planning readiness.'
                 : 'Downstream outputs are aligned with the current plan.';
     criteria.push({
@@ -673,7 +690,13 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
         evidence: input.outputAlignment.outputs.length === 0 && (updateSummary?.currentPlanCount ?? 0) === 0
             ? [makeEvidence('downstream_alignment', 'direct', downstreamExplanation, 'downstream', 'none')]
             : [
-                ...input.outputAlignment.outputs.map(output => makeEvidence('downstream_alignment', output.blocksBuildReadiness ? 'incomplete' : output.state === 'possibly_affected' ? 'inferred' : 'direct', output.summary, 'downstream', output.artifactId, output.generatedFromSpineId)),
+                ...input.outputAlignment.outputs.filter(output => (
+                    output.blocksBuildReadiness
+                        ? !blockingPlanArtifacts.has(output.artifactId)
+                        : output.state === 'possibly_affected'
+                            ? !advisoryPlanArtifacts.has(output.artifactId)
+                            : true
+                )).map(output => makeEvidence('downstream_alignment', output.blocksBuildReadiness ? 'incomplete' : output.state === 'possibly_affected' ? 'inferred' : 'direct', output.summary, 'downstream', output.artifactId, output.generatedFromSpineId)),
                 ...updateBlockers.map(item => makeEvidence('downstream_alignment', 'direct', `Definite affected region · ${item.disposition?.replace('_', ' ') ?? 'not yet reviewed'} · priority ${item.priority}: ${item.recommendation}`, 'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash)),
                 ...updateAdvisories.map(item => makeEvidence('downstream_alignment', 'inferred', `Advisory affected region · ${item.disposition?.replace('_', ' ') ?? 'not yet reviewed'} · priority ${item.priority}: ${item.recommendation}`, 'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash)),
                 ...updateReviewed.map(item => makeEvidence(
@@ -685,26 +708,29 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
                     'downstream', item.itemId, item.artifactVersionId, updateSummary?.snapshotHash,
                 )),
             ],
-        actionTarget: updateBlockers[0]
-            ? { kind: 'output', artifactId: updateBlockers[0].artifactId, nodeId: updateBlockers[0].nodeId }
-            : blockingOutputs[0] ? { kind: 'output', artifactId: blockingOutputs[0].artifactId, nodeId: blockingOutputs[0].nodeId } : undefined,
+        actionTarget: exactBlockingItems[0]
+            ? { kind: 'update_plan', planId: exactBlockingItems[0].planId, itemId: exactBlockingItems[0].itemId, artifactId: exactBlockingItems[0].artifactId, nodeId: exactBlockingItems[0].nodeId }
+            : uncoveredBlockingOutputs[0] ? { kind: 'output', artifactId: uncoveredBlockingOutputs[0].artifactId, nodeId: uncoveredBlockingOutputs[0].nodeId } : undefined,
     });
-    for (const output of [...blockingOutputs, ...outputCaveats]) concerns.push(makeConcern({
+    for (const output of [...uncoveredBlockingOutputs, ...uncoveredOutputCaveats]) concerns.push(makeConcern({
         criterionId: 'downstream_alignment', kind: 'downstream', title: output.title, consequence: output.summary,
         blocking: output.blocksBuildReadiness, evidenceQuality: output.blocksBuildReadiness ? 'incomplete' : 'inferred',
         sourceType: 'downstream', sourceId: output.artifactId, sourceVersionId: output.generatedFromSpineId,
         actionTarget: { kind: 'output', artifactId: output.artifactId, nodeId: output.nodeId },
     }));
-    for (const item of [...updateBlockers, ...updateAdvisories]) concerns.push(makeConcern({
+    for (const item of actionableUpdateItems) {
+        const blocking = updateBlockers.includes(item);
+        concerns.push(makeConcern({
         criterionId: 'downstream_alignment', kind: 'downstream', title: `${item.artifactTitle} update`,
-        consequence: `${item.recommendation} Current update-plan disposition: ${item.disposition?.replace('_', ' ') ?? 'not yet reviewed'}.`, blocking: updateBlockers.includes(item),
-        evidenceQuality: updateBlockers.includes(item) ? 'direct' : 'inferred',
+        consequence: `${item.recommendation} Current update-plan disposition: ${item.disposition?.replace('_', ' ') ?? 'not yet reviewed'}.`, blocking,
+        evidenceQuality: blocking ? 'direct' : 'inferred',
         sourceType: 'downstream', sourceId: item.itemId, sourceVersionId: item.artifactVersionId,
-        actionTarget: { kind: 'output', artifactId: item.artifactId, nodeId: item.nodeId },
+        actionTarget: { kind: 'update_plan', planId: item.planId, itemId: item.itemId, artifactId: item.artifactId, nodeId: item.nodeId },
     }));
+    }
 
     const caveats = [
-        ...outputCaveats.map(output => `${output.title}: ${output.summary}`),
+        ...uncoveredOutputCaveats.map(output => `${output.title}: ${output.summary}`),
         ...updateAdvisories.map(item => `${item.artifactTitle}: ${item.recommendation}`),
     ];
     const conclusion = base.isReadyToBuild && acceptedUnvalidated.length === 0 && !criteria.some(item => item.blocking)

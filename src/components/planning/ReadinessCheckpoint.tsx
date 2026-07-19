@@ -105,6 +105,44 @@ export function ReadinessCheckpoint({
     const [attemptedSubmit, setAttemptedSubmit] = useState(false);
     const overrideSectionRef = useRef<HTMLElement>(null);
     const rationaleRef = useRef<HTMLTextAreaElement>(null);
+    const dialogRef = useRef<HTMLElement>(null);
+    const closeRef = useRef<HTMLButtonElement>(null);
+    const onCloseRef = useRef(onClose);
+
+    useEffect(() => {
+        onCloseRef.current = onClose;
+    }, [onClose]);
+
+    useEffect(() => {
+        const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        closeRef.current?.focus();
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                onCloseRef.current();
+                return;
+            }
+            if (event.key !== 'Tab' || !dialogRef.current) return;
+            const focusable = [...dialogRef.current.querySelectorAll<HTMLElement>(
+                'button:not([disabled]), select:not([disabled]), textarea:not([disabled]), [href], [tabindex]:not([tabindex="-1"])',
+            )];
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.removeEventListener('keydown', onKeyDown);
+            previouslyFocused?.focus();
+        };
+    }, []);
 
     useEffect(() => {
         if (!initialConcernId || !review.concerns.some(concern => concern.id === initialConcernId)) return;
@@ -169,6 +207,7 @@ export function ReadinessCheckpoint({
             }}
         >
             <section
+                ref={dialogRef}
                 role="dialog"
                 aria-modal="true"
                 aria-labelledby="readiness-checkpoint-title"
@@ -177,7 +216,7 @@ export function ReadinessCheckpoint({
                 <header className="sticky top-0 z-10 flex shrink-0 items-start justify-between gap-4 border-b border-neutral-100 bg-white px-4 py-4 sm:px-6">
                     <div className="min-w-0">
                         <div className="flex flex-wrap items-center gap-2 text-xs font-semibold text-neutral-500">
-                            <span>Readiness checkpoint</span>
+                            <span>Readiness review</span>
                             <span aria-hidden="true">·</span>
                             <span>{review.versionLabel}</span>
                             {!review.integrityValid ? (
@@ -199,9 +238,10 @@ export function ReadinessCheckpoint({
                         </p>
                     </div>
                     <button
+                        ref={closeRef}
                         type="button"
                         onClick={onClose}
-                        aria-label="Close readiness checkpoint"
+                        aria-label="Close readiness review"
                         className="inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center rounded-xl text-neutral-500 hover:bg-neutral-100 hover:text-neutral-800"
                     >
                         <X size={19} />

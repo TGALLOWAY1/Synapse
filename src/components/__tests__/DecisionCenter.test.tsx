@@ -186,7 +186,7 @@ describe('DecisionCenter', () => {
 
         fireEvent.click(screen.getByRole('button', { name: 'Ask Synapse to propose wording' }));
         expect(screen.getByLabelText('Add context for this proposal (optional)')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Prepare bounded proposal' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Prepare proposed change' }));
         expect(props.onRequestAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'flow-review', {
             kind: 'missing_info', guidance: '',
         });

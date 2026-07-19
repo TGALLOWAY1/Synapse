@@ -20,4 +20,13 @@ describe('Phase 5A rendered mobile release regressions', () => {
         expect(artifacts).toContain('sticky top-14 z-[9]');
         expect(artifacts.match(/min-h-11 min-w-11/g)?.length).toBeGreaterThanOrEqual(2);
     });
+
+    it('treats the mobile artifact list as a contained navigation modal', () => {
+        const artifacts = source('ArtifactWorkspace.tsx');
+        expect(artifacts).toContain('role={isMobile && mobileSidebarOpen ? \'dialog\' : undefined}');
+        expect(artifacts).toContain('aria-modal={isMobile && mobileSidebarOpen ? true : undefined}');
+        expect(artifacts).toContain('aria-hidden={isMobile && mobileSidebarOpen ? true : undefined}');
+        expect(artifacts).toContain('inert={isMobile && mobileSidebarOpen ? \'\' : undefined}');
+        expect(artifacts).toContain("if (event.key === 'Escape')");
+    });
 });

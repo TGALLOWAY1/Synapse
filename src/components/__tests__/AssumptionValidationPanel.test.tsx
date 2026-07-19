@@ -244,7 +244,7 @@ describe('AssumptionValidationPanel', () => {
         expect(screen.getByText('How unresolved uncertainty is being treated').closest('details')).not.toHaveAttribute('open');
         expect(screen.getByRole('region', { name: 'Potential plan impact' })).not.toHaveAttribute('open');
         expect(screen.getByText('Validation history (1)').closest('details')).not.toHaveAttribute('open');
-        expect(screen.getByText(/exact guarded alignment review is shown next/i)).toBeInTheDocument();
+        expect(screen.getByText(/review the affected plan areas next/i)).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Refresh plan impact' })).not.toBeInTheDocument();
     });
 

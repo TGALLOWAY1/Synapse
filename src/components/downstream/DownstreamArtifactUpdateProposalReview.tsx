@@ -45,7 +45,7 @@ const actionLabel: Record<PendingAction, string> = {
 };
 
 function proposedSummary(proposal: DownstreamArtifactUpdateProposal): string {
-    if (proposal.operation === 'review_only') return 'No bounded content change is available. Review manually or provide more context.';
+    if (proposal.operation === 'review_only') return 'No focused content change is available. Review manually or provide more context.';
     if (proposal.operation === 'remove') return 'Remove only this exact region.';
     if (proposal.region.kind === 'implementation_plan' && proposal.region.section === 'delivery' && proposal.proposedContent) {
         try {
@@ -281,7 +281,7 @@ export function DownstreamArtifactUpdateProposalReview({
         }
         setMessage({ kind: 'success', text: result.operation === 'review_only'
             ? 'Review guidance prepared. No content will be applied from this recommendation.'
-            : 'A bounded proposal is ready for your review.' });
+            : 'A proposed change is ready for your review.' });
     };
 
     const record = (action: DownstreamArtifactUpdateReviewAction, payload: string) => {
@@ -317,7 +317,7 @@ export function DownstreamArtifactUpdateProposalReview({
         const result = applyProposal(projectId, proposal.id);
         setBusy(false);
         setMessage(result.status === 'applied'
-            ? { kind: 'success', text: `Applied as a new artifact version (${result.artifactVersionId.slice(0, 8)}). Alignment still requires verification.` }
+            ? { kind: 'success', text: 'Applied as a new output version. Alignment still requires verification.' }
             : { kind: 'error', text: result.reason === 'stale'
                 ? 'Nothing changed. The proposal is stale and must be prepared again against the current artifact.'
                 : 'Nothing changed. The approved proposal could not be applied safely.' });
@@ -329,7 +329,7 @@ export function DownstreamArtifactUpdateProposalReview({
         setBusy(false);
         setMessage(result.status === 'verified'
             ? { kind: 'success', text: result.result === 'aligned'
-                ? 'Synapse verified the exact affected region in the current artifact version.'
+                ? 'Synapse verified the exact affected region in the current output version.'
                 : 'Verification is recorded. The result remains advisory and the affected region still needs attention.' }
             : { kind: 'error', text: result.reason === 'source_stale'
                 ? 'The planning source changed. Create a current update plan before verifying this output.'
@@ -358,7 +358,7 @@ export function DownstreamArtifactUpdateProposalReview({
             <div className="flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
                 <div className="min-w-0">
                     <div className="flex items-center gap-1.5 text-xs font-semibold text-indigo-950">
-                        <Sparkles size={14} aria-hidden="true" /> Prepare a bounded change proposal
+                        <Sparkles size={14} aria-hidden="true" /> Prepare a proposed change
                     </div>
                     <p className="mt-1 text-xs leading-relaxed text-indigo-800">Synapse will propose content only when the exact region and change are strongly grounded. Otherwise it will explain why manual review is safer.</p>
                 </div>
@@ -402,12 +402,12 @@ export function DownstreamArtifactUpdateProposalReview({
         <div className="mt-3 rounded-lg border border-indigo-200 bg-indigo-50/50 p-3">
             <div className="flex flex-wrap items-center justify-between gap-2">
                 <div className="flex items-center gap-2 text-xs font-semibold text-indigo-950">
-                    <FileEdit size={14} aria-hidden="true" /> Selective change proposal
+                    <FileEdit size={14} aria-hidden="true" /> Proposed output change
                     <span className="rounded-full border border-indigo-200 bg-white px-2 py-0.5 text-[11px] font-medium text-indigo-700">
-                        {application ? 'Completed · applied' : proposal.operation === 'review_only' ? 'Review only' : 'Bounded change'}
+                        {application ? 'Completed · applied' : proposal.operation === 'review_only' ? 'Review only' : 'Proposed change'}
                     </span>
                 </div>
-                <span className="text-[11px] text-indigo-700">Artifact version {proposal.artifact.artifactVersionId.slice(0, 8)}</span>
+                <span className="text-[11px] text-indigo-700">Current output version</span>
             </div>
 
             {!application && !currentness?.current && <p className="mt-2 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 text-xs text-amber-900">Historical proposal — its planning source or artifact binding changed. It cannot be approved or applied.</p>}
@@ -458,7 +458,7 @@ export function DownstreamArtifactUpdateProposalReview({
             </details>
 
             {review && <p className="mt-2 text-xs text-neutral-600"><strong>Latest user choice:</strong> {review.action.replaceAll('_', ' ')}</p>}
-            {application && <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"><Check size={14} /> Applied in version {application.resultingArtifactVersionId.slice(0, 8)}. Verification remains separate.</p>}
+            {application && <p className="mt-2 inline-flex items-center gap-1.5 text-xs font-medium text-emerald-700"><Check size={14} /> Applied in a new output version. Verification remains separate.</p>}
             {verification && (
                 <div className={`mt-2 rounded-md border px-2.5 py-2 text-xs leading-relaxed ${verification.result === 'aligned'
                     ? 'border-emerald-200 bg-emerald-50 text-emerald-900'
@@ -470,7 +470,7 @@ export function DownstreamArtifactUpdateProposalReview({
                     </div>
                     <p className="mt-1 break-words">{verification.reasoning}</p>
                     {verification.remainingAmbiguity && <p className="mt-1 break-words"><strong>Still needs attention:</strong> {verification.remainingAmbiguity}</p>}
-                    <p className="mt-1 text-[11px] opacity-80">Bound to artifact version {verification.verifiedArtifactVersionId.slice(0, 8)}. This check does not create user authority or change artifact content.</p>
+                    <p className="mt-1 text-[11px] opacity-80">Checked against the current output version. This check does not create user authority or change output content.</p>
                     {verificationReview && <p className="mt-1 text-[11px]"><strong>Your latest review:</strong> {verificationReview.action.replaceAll('_', ' ')}</p>}
                     {verification.result !== 'aligned' && (
                         <div className="mt-2 border-t border-current/10 pt-2">
@@ -551,7 +551,7 @@ export function DownstreamArtifactUpdateProposalReview({
                                             {contextIntent !== 'remove' && contextIntent !== 'out_of_scope' && proposal.region.aspect !== 'field' && (
                                                 <label className="block font-medium">Exact replacement text<textarea value={contextValue} onChange={event => setContextValue(event.target.value)} rows={3} className="mt-1 w-full rounded-lg border border-neutral-300 px-3 py-2 text-sm" /></label>
                                             )}
-                                            <p className="text-neutral-500">Synapse constructs the bounded internal change from these fields. You do not need to enter a command prefix or JSON.</p>
+                                            <p className="text-neutral-500">Synapse constructs the focused change from these fields. You do not need to enter a command prefix or JSON.</p>
                                             </>}
                                         </>
                                     ) : proposal.region.kind === 'implementation_plan' ? (
@@ -586,7 +586,7 @@ export function DownstreamArtifactUpdateProposalReview({
                             <div className="flex items-center gap-1.5 font-semibold"><ShieldCheck size={14} /> Apply the exact user-approved change</div>
                             <div className="mt-2 grid gap-2 rounded-md border border-emerald-200 bg-white p-2.5 sm:grid-cols-2">
                                 <div><strong>Operation:</strong> {approvedOperation?.replaceAll('_', ' ')}</div>
-                                <div><strong>Current artifact version:</strong> {proposal.artifact.artifactVersionId.slice(0, 8)}</div>
+                                <div><strong>Output version:</strong> Current when this review opened</div>
                                 <div className="sm:col-span-2">
                                     <strong>{review?.action === 'edited' ? 'Your edited replacement:' : 'Approved content:'}</strong>
                                     {approvedOperation === 'remove'
@@ -600,7 +600,7 @@ export function DownstreamArtifactUpdateProposalReview({
                             {(approvedOperation === 'remove' || proposal.dataModelImpact?.destructive) && (
                                 <p className="mt-2 flex items-start gap-1.5 rounded-md border border-amber-200 bg-amber-50 px-2.5 py-2 font-medium text-amber-900"><AlertTriangle size={14} className="mt-0.5 shrink-0" /> Destructive change: review the exact removed content above. Synapse will not update migrations or dependencies automatically.</p>
                             )}
-                            <p className="mt-2">Synapse will recheck every version binding and create a new artifact version. It will not regenerate the output, and application does not prove alignment.</p>
+                            <p className="mt-2">Synapse will recheck that this change still matches the current plan and create a new artifact version. It will not regenerate the output, and application does not prove alignment.</p>
                         </div>
                         <div className="mt-3 flex justify-end">
                             <button type="button" disabled={busy} onClick={apply} className="min-h-11 shrink-0 rounded-lg bg-emerald-700 px-3 text-xs font-semibold text-white disabled:opacity-50">Apply approved change</button>

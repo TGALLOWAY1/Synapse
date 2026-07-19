@@ -134,7 +134,7 @@ describe('readiness checkpoint authority projection', () => {
         expect(view.integrityValid).toBe(false);
         expect(view.commitment).toBeUndefined();
         expect(view.priorCommitment).toBeUndefined();
-        expect(view.currentnessReasons).toContain('The stored checkpoint no longer matches its integrity signature.');
+        expect(view.currentnessReasons).toContain('The saved readiness review no longer matches its integrity record.');
     });
 
     it('rejects restored commitment events with forged authority, mismatched hashes, or invalid authorization linkage', () => {
@@ -219,6 +219,12 @@ describe('readiness checkpoint authority projection', () => {
         });
         expect(readinessNavigationDestination({ kind: 'output', artifactId: 'artifact-exact', nodeId: 'data_model' })).toEqual({
             stage: 'workspace', artifactId: 'artifact-exact', nodeId: 'data_model',
+        });
+        expect(readinessNavigationDestination({
+            kind: 'update_plan', planId: 'plan-exact', itemId: 'item-exact', artifactId: 'artifact-exact', nodeId: 'data_model',
+        })).toEqual({
+            stage: 'workspace', artifactId: 'artifact-exact', nodeId: 'data_model',
+            updatePlanId: 'plan-exact', updatePlanItemId: 'item-exact',
         });
         expect(readinessNavigationDestination({ kind: 'feature', featureId: 'feature-exact' })).toEqual({
             stage: 'prd', anchorId: 'prd-feature-feature-exact',

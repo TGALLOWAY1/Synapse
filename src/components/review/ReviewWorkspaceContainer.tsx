@@ -1338,7 +1338,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         });
         const reasoning = result.ok
             ? result
-            : fail(result.errors[0] ?? 'Synapse could not produce a trustworthy bounded proposal.');
+            : fail(result.errors[0] ?? 'Synapse could not produce a trustworthy proposed change.');
 
         // The model call is outside the store transaction. Re-read every guard
         // before integrating so concurrent edits or verdict changes fail closed.

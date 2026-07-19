@@ -106,7 +106,7 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(screen.getByRole('dialog', { name: 'Screens' })).toHaveClass('min-w-0');
         expect(screen.getByText('Current plan')).toBeInTheDocument();
         expect(screen.getByText(/Planning alone does not edit this output/)).toBeInTheDocument();
-        expect(screen.getByText(/creates a new artifact version without regenerating/)).toBeInTheDocument();
+        expect(screen.getByText(/review focused proposed changes later without regenerating/)).toBeInTheDocument();
         expect(screen.getByText(/Confirmed source change/)).toBeInTheDocument();
         expect(screen.getByText('Manual screen work remains usable.')).toBeInTheDocument();
         expect(screen.getByText(/Other screen work remains usable/)).toBeInTheDocument();
@@ -189,7 +189,7 @@ describe('DownstreamUpdatePlanReview', () => {
         renderReview();
 
         expect(screen.getByText('Historical · read only')).toBeInTheDocument();
-        expect(screen.getByText(/no longer describes the current planning spine/)).toBeInTheDocument();
+        expect(screen.getByText(/no longer describes the current plan version/)).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Mark planned' })).not.toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Already aligned' })).not.toBeInTheDocument();
     });
@@ -230,7 +230,7 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(generated).toHaveLength(1);
         expect(validateDownstreamArtifactUpdateProposalIntegrity(generated[0])).toBe(true);
         expect(await within(possible).findByText('Review only')).toBeInTheDocument();
-        expect(within(possible).getByText(/No bounded content change is available/)).toBeInTheDocument();
+        expect(within(possible).getByText(/No focused content change is available/)).toBeInTheDocument();
         expect(within(possible).queryByRole('button', { name: 'Accept proposal' })).not.toBeInTheDocument();
         expect(within(possible).queryByRole('button', { name: 'Apply approved change' })).not.toBeInTheDocument();
         expect(within(possible).getByRole('button', { name: 'Add context' })).toBeInTheDocument();
@@ -243,7 +243,7 @@ describe('DownstreamUpdatePlanReview', () => {
         const generated = useProjectStore.getState().downstreamArtifactUpdateProposals[projectId];
         expect(generated).toHaveLength(1);
         expect(validateDownstreamArtifactUpdateProposalIntegrity(generated[0])).toBe(true);
-        expect(await within(definite).findByText('Bounded change')).toBeInTheDocument();
+        expect(await within(definite).findByText('Proposed change')).toBeInTheDocument();
         expect(within(definite).getByText(/Remove only this exact region/)).toBeInTheDocument();
 
         fireEvent.click(await within(definite).findByRole('button', { name: 'Accept proposal' }));
@@ -280,7 +280,7 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(within(definite).getByText(/Operation:/).parentElement).toHaveTextContent('replace');
         expect(within(definite).getByText('Your edited replacement:')).toBeInTheDocument();
         expect(within(definite).getByText(replacement)).toBeInTheDocument();
-        expect(within(definite).getByText(/Current artifact version:/).parentElement).toHaveTextContent(version.id.slice(0, 8));
+        expect(within(definite).getByText(/Output version:/).parentElement).toHaveTextContent('Current when this review opened');
         expect(within(definite).getByText(/Preserved:/).parentElement).toHaveTextContent('Local workspace creation remains aligned');
         expect(within(definite).queryByText(/This exact region will be removed/)).not.toBeInTheDocument();
     });

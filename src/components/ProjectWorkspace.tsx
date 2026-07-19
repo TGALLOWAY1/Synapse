@@ -991,7 +991,7 @@ export function ProjectWorkspace() {
                 reviewId: selectedReadinessReview.id,
                 ...(concernId ? { concernId } : {}),
             },
-            label: 'Return to readiness checkpoint',
+            label: 'Return to readiness review',
         } : undefined;
         setSelectedReadinessReviewId(null);
         setReadinessSubmitError(null);
@@ -1004,8 +1004,15 @@ export function ProjectWorkspace() {
             setFinalizeAutoOpen(false);
             setWorkspaceInitialNode(destination.nodeId);
             setWorkspaceInitialArtifactId(destination.artifactId);
+            setWorkspaceInitialUpdatePlanId(destination.updatePlanId);
+            setWorkspaceInitialUpdatePlanItemId(destination.updatePlanItemId);
             writePlanningIntent({
-                destination: { kind: 'artifact', nodeId: destination.nodeId, artifactId: destination.artifactId },
+                destination: destination.updatePlanId
+                    ? {
+                        kind: 'update_plan', planId: destination.updatePlanId, itemId: destination.updatePlanItemId,
+                        nodeId: destination.nodeId, artifactId: destination.artifactId,
+                    }
+                    : { kind: 'artifact', nodeId: destination.nodeId, artifactId: destination.artifactId },
                 ...(returnTo ? { returnTo } : {}),
             });
             return setPipelineStage('workspace');
@@ -1059,7 +1066,7 @@ export function ProjectWorkspace() {
                         ? isLegacyPlanCommitted
                             ? 'Legacy commitment · readiness not recorded'
                             : currentCommittedReadiness?.review.conclusion === 'not_ready'
-                                ? 'Committed with open questions'
+                                ? 'Proceeding with accepted risk'
                                 : 'Plan committed'
                         : 'Working plan';
 
