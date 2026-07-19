@@ -10,11 +10,21 @@ import { VersionHistoryPanel } from '../versions';
 const structuredPRD = { productName: 'Demo' } as StructuredPRD;
 
 describe('read-only demo surfaces', () => {
-    it('communicates the policy once at workspace level', () => {
+    it('orients the visitor first and reveals the read-only policy on demand', () => {
         render(<DemoReadOnlyNotice />);
 
-        expect(screen.getByRole('status')).toHaveTextContent('read-only example project');
-        expect(screen.getByRole('status')).toHaveTextContent('without changing the saved project');
+        const status = screen.getByRole('status');
+        // The compact banner leads with what the product does.
+        expect(status).toHaveTextContent('live example');
+        // Policy detail + reset are collapsed until "Details" is expanded.
+        expect(status).not.toHaveTextContent('read-only example project');
+        expect(screen.queryByRole('button', { name: /Reset demo/ })).toBeNull();
+
+        fireEvent.click(screen.getByRole('button', { name: /Details/ }));
+
+        expect(status).toHaveTextContent('read-only example project');
+        expect(status).toHaveTextContent('without changing the saved project');
+        expect(screen.getByRole('button', { name: /Reset demo/ })).toBeEnabled();
     });
 
     it('keeps dependency inspection usable while hiding generation controls', () => {

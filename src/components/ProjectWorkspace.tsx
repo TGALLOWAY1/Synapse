@@ -1365,7 +1365,10 @@ export function ProjectWorkspace() {
             <div className="flex-1 flex overflow-hidden">
                 {pipelineStage === 'workspace' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
-                        {!planningReadiness.isReadyToBuild && (
+                        {/* The read-only demo already carries a workspace-level
+                            banner; don't stack this exploratory-outputs notice on
+                            top of it there (it can't be built anyway). */}
+                        {!capabilities.isReadOnly && !planningReadiness.isReadyToBuild && (
                             <div className="shrink-0 border-b border-sky-200 bg-sky-50 px-4 py-3 text-sm text-sky-900">
                                 <span className="font-semibold">Exploratory outputs.</span> Use early screens, flows, or technical concepts to think—but they are not evidence that this plan is ready to build.
                                 <button type="button" onClick={() => setPipelineStage('prd')} className="ml-2 font-semibold underline underline-offset-2">Return to the plan</button>
