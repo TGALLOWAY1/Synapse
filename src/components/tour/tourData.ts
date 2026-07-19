@@ -302,14 +302,18 @@ export const TOUR_PROJECT = {
     summary: 'Consolidated strategy with updated user personas and monetization.',
 };
 
+/**
+ * The workspace's planning progression, mirroring the production
+ * `PipelineStageBar` (src/components/PipelineStageBar.tsx): Plan → Challenge →
+ * Build → History. (In the live app the Build tab reads "Explore" until the
+ * plan is committed; the tour shows the committed state.) Keep these labels in
+ * sync if the stage bar changes.
+ */
 export const WORKSPACE_NAV = [
-    'Overview',
-    'PRD',
-    'Artifacts',
+    'Plan',
+    'Challenge',
+    'Build',
     'History',
-    'Conversations',
-    'Tasks',
-    'Settings',
 ];
 
 export interface ActivityEntry {

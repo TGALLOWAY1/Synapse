@@ -36,7 +36,7 @@ function PrdHubCard() {
                     <Clock size={11} /> {TOUR_PROJECT.updated}
                 </span>
                 <span className="inline-flex items-center gap-1 text-emerald-400">
-                    <ShieldCheck size={11} /> Finalized
+                    <ShieldCheck size={11} /> Plan committed
                 </span>
             </span>
         </span>
@@ -44,10 +44,11 @@ function PrdHubCard() {
 }
 
 /**
- * Screen 6 — the connected workspace. A project rail, the finalized PRD wired
- * to its generated artifacts (tap any node to trace dependencies), and a
- * tappable recent-activity timeline. Teaches that Synapse keeps the whole
- * project consistent.
+ * Screen 6 — the connected workspace. A project rail showing the Plan →
+ * Challenge → Build → History progression, the committed plan's PRD wired to
+ * its generated artifacts (tap any node to trace dependencies), and a tappable
+ * recent-activity timeline. Teaches that Synapse keeps the whole project
+ * consistent.
  */
 export default function ScreenConnections({ reducedMotion }: ScreenProps) {
     const [selected, setSelected] = useState<GraphSelection>('prd');
@@ -71,11 +72,13 @@ export default function ScreenConnections({ reducedMotion }: ScreenProps) {
                         {TOUR_PROJECT.name}
                     </div>
                     <nav className="space-y-1">
-                        {WORKSPACE_NAV.map((item, i) => (
+                        {/* "Build" is active — this screen shows the committed
+                            plan's generated outputs and their connections. */}
+                        {WORKSPACE_NAV.map((item) => (
                             <span
                                 key={item}
                                 className={`block rounded-lg px-3 py-1.5 text-sm ${
-                                    i === 0 ? 'bg-indigo-500/15 text-indigo-200' : 'text-neutral-400'
+                                    item === 'Build' ? 'bg-indigo-500/15 text-indigo-200' : 'text-neutral-400'
                                 }`}
                             >
                                 {item}
