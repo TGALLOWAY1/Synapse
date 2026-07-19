@@ -111,7 +111,9 @@ export function ProjectWorkspace() {
     const [bannerCompareOpen, setBannerCompareOpen] = useState(false);
     const [bannerRestoreOpen, setBannerRestoreOpen] = useState(false);
     const [isPromptCollapsed, setIsPromptCollapsed] = useState(true);
-    const [isBranchesVisible, setIsBranchesVisible] = useState(true);
+    // Keep the planning canvas primary. The branch/history sidebar opens when
+    // a branch is created or when the user explicitly asks for it.
+    const [isBranchesVisible, setIsBranchesVisible] = useState(false);
     const [activeRightTab, setActiveRightTab] = useState<'branches' | 'history'>('branches');
     const [activeCanvasBranchId, setActiveCanvasBranchId] = useState<string | null>(null);
     const [showStructuredView, setShowStructuredView] = useState(true);

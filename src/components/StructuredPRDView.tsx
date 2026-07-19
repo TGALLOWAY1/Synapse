@@ -918,6 +918,22 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     return (
         <div className="relative">
+            {/* On mobile, offer edit mode in the document flow so the idle
+                control never covers the planning overview or its next action.
+                The active toolbar remains pinned only after the user opts in. */}
+            {isMobile && !readOnly && !editingSection && !selection && (
+                <MobileSelectionToolbar
+                    active={mobileSelectMode}
+                    hasSelection={!!pendingText}
+                    pendingText={pendingText}
+                    onActivate={() => setMobileSelectMode(true)}
+                    onEdit={commit}
+                    onCancel={() => {
+                        setMobileSelectMode(false);
+                        clear();
+                    }}
+                />
+            )}
             <div ref={contentRef} className="space-y-2">
                 {renderEditRecognition()}
                 {renderGroundingBackfill()}
@@ -1104,23 +1120,6 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     onSubmit={handleSubmit}
                     onQuickAction={handleQuickAction}
                     onDismiss={dismiss}
-                />
-            )}
-
-            {/* Mobile-only: explicit selection mode so the iOS toolbar and the
-                Synapse action sheet don't fight. Hidden while the sheet is open
-                or while inline-editing a section. */}
-            {isMobile && !readOnly && !editingSection && !selection && (
-                <MobileSelectionToolbar
-                    active={mobileSelectMode}
-                    hasSelection={!!pendingText}
-                    pendingText={pendingText}
-                    onActivate={() => setMobileSelectMode(true)}
-                    onEdit={commit}
-                    onCancel={() => {
-                        setMobileSelectMode(false);
-                        clear();
-                    }}
                 />
             )}
         </div>
