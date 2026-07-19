@@ -211,9 +211,6 @@ export function ProjectWorkspace() {
             lastAppliedPlanningIntentRef.current = undefined;
             return;
         }
-        const serializedIntent = JSON.stringify(effectiveIntent);
-        if (serializedIntent === lastAppliedPlanningIntentRef.current) return;
-        lastAppliedPlanningIntentRef.current = serializedIntent;
         const destination = validatePlanningDestination(effectiveIntent.destination, {
             planningRecordIds: new Set(planningRecords.map(record => record.id)),
             reviewIds: new Set(reviewRuns.map(review => review.id)),
@@ -223,6 +220,13 @@ export function ProjectWorkspace() {
             artifactIds: new Set(navigationArtifacts.map(artifact => artifact.id)),
             updatePlanIds: new Set(downstreamUpdatePlans.map(plan => plan.id)),
         });
+        // The applied key covers the intent AND its validated destination: a
+        // deep link whose target had not loaded yet (falling back to the PRD)
+        // re-applies once the target exists, while store churn that leaves the
+        // validated destination unchanged can never re-run a stale navigation.
+        const serializedIntent = `${JSON.stringify(effectiveIntent)}=>${JSON.stringify(destination)}`;
+        if (serializedIntent === lastAppliedPlanningIntentRef.current) return;
+        lastAppliedPlanningIntentRef.current = serializedIntent;
         if (destination.kind === 'prd') {
             setSelectedReadinessReviewId(null);
             setProjectStage(projectId, 'prd');

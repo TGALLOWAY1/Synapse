@@ -69,10 +69,12 @@ adapts persisted review/planning state into the responsive UI in
   in `promptSurfaces.test.ts`.
 - **Planning navigation intents apply exactly once.** The `planning` URL
   param is applied to the presentation by `ProjectWorkspace`'s intent effect,
-  which tracks the last-applied serialized intent — later store updates
-  (planning records, review runs, update plans) must never re-run a stale
-  destination and yank the user back to a stage they navigated away from. Do
-  not remove that guard. Every jump that starts from the Plan stage
+  which tracks the last-applied serialized intent **plus its validated
+  destination** — later store updates (planning records, review runs, update
+  plans) must never re-run a stale destination and yank the user back to a
+  stage they navigated away from, while a deep link whose target loads late
+  (initially validated down to the PRD fallback) still re-applies once the
+  target exists. Do not remove that guard. Every jump that starts from the Plan stage
   (state bar, attention items, PRD decision surfaces) carries a
   `returnTo: { kind: 'prd' }` target so a persistent "Back to Plan" banner is
   available in Challenge, and the Decision Center offers the next unresolved
