@@ -29,6 +29,16 @@ adapts persisted review/planning state into the responsive UI in
   exists. Commitment and `artifactJobController.startAll` are separate user
   actions. Before commitment, Build is available as an explicitly exploratory
   surface and must never imply implementation readiness.
+- A commitment binds to the reviewed spine, not to the readiness snapshot:
+  post-commit Build activity (outputs, alignment, challenge, or planning-state
+  drift) makes the readiness review historical without revoking the
+  commitment. Commitment display goes through
+  `commitmentRemainsCurrent(currentness)` (`readinessReview.ts`) — only an
+  integrity failure or a changed reviewed spine (identity/content) ends the
+  committed state; never re-add a raw `currentness.current` check for
+  commitment UI. Closing a finding as dismissed/already-addressed requires a
+  rationale of `MIN_CLOSURE_REASON_LENGTH` characters — entry surfaces must
+  enforce the same floor the readiness predicate checks.
 
 - `PlanningRecord` is the shared durable aggregate for decisions, assumptions,
   risks, open questions, and semantic inconsistencies. Do not add a parallel

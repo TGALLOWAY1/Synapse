@@ -27,6 +27,7 @@ import type {
     AssumptionValidationPlanInput,
 } from './AssumptionValidationPanel';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
+import { MIN_CLOSURE_REASON_LENGTH } from '../../lib/planning';
 
 export type ReviewSpecialistOption = {
     id: string;
@@ -409,6 +410,10 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
     const [recordId, setRecordId] = useState('');
     const selected = ACTIONS.find(a => a.id === action)!;
     const noteRequired = action === 'dismiss' || action === 'defer' || action === 'already_addressed' || action === 'request_revision';
+    // Dismissal/already-addressed dispositions must satisfy the readiness
+    // closure floor here, or the closure gets rejected later at commit time.
+    const minReasonLength = action === 'dismiss' || action === 'already_addressed' ? MIN_CLOSURE_REASON_LENGTH : 1;
+    const reasonTooShort = noteRequired && note.trim().length < minReasonLength;
     return (
         <div className="fixed inset-0 z-[1200] flex items-end justify-center bg-black/45 sm:items-center sm:p-5" role="presentation" onMouseDown={onClose}>
             <div className="max-h-[92vh] w-full overflow-y-auto rounded-t-2xl bg-white shadow-2xl sm:max-w-xl sm:rounded-2xl" role="dialog" aria-modal="true" aria-labelledby="issue-action-title" onMouseDown={e => e.stopPropagation()}>
@@ -441,12 +446,17 @@ function IssueActionDialog({ issue, planningRecords, onClose, onSubmit }: {
                     <div>
                         <label className="block text-sm font-medium text-neutral-800" htmlFor="action-note">{noteRequired ? 'Reason' : 'Note (optional)'}</label>
                         <textarea id="action-note" rows={3} value={note} onChange={e => setNote(e.target.value)} placeholder={action === 'already_addressed' ? 'Where is this addressed?' : 'Add context for the project record'} className="mt-2 w-full rounded-xl border border-neutral-200 bg-neutral-50 px-3 py-2.5 text-sm outline-none focus:border-indigo-400 focus:bg-white" />
+                        {minReasonLength > 1 && (
+                            <p className="mt-1.5 text-xs text-neutral-500">
+                                Readiness review requires a substantive reason (at least {minReasonLength} characters) to close a finding this way.
+                            </p>
+                        )}
                     </div>
                     {action === 'request_revision' && <p className="rounded-lg bg-neutral-50 p-3 text-xs text-neutral-600">This records a revision request. Synapse will not rewrite a confirmed artifact automatically.</p>}
                 </div>
                 <div className="sticky bottom-0 flex flex-col-reverse gap-2 border-t border-neutral-100 bg-white p-4 sm:flex-row sm:justify-end">
                     <button type="button" onClick={onClose} className="min-h-11 rounded-xl px-4 text-sm font-medium text-neutral-600 hover:bg-neutral-50">Cancel</button>
-                    <button type="button" disabled={(noteRequired && !note.trim()) || ((action === 'link_existing' || action === 'challenge_decision') && !recordId)} onClick={() => onSubmit(action, note.trim() || undefined, recordId || undefined)} className="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Save action</button>
+                    <button type="button" disabled={reasonTooShort || ((action === 'link_existing' || action === 'challenge_decision') && !recordId)} onClick={() => onSubmit(action, note.trim() || undefined, recordId || undefined)} className="min-h-11 rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700 disabled:opacity-40">Save action</button>
                 </div>
             </div>
         </div>

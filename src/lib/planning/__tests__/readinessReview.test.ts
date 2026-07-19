@@ -24,6 +24,7 @@ import {
 } from '../assumptionValidation';
 import { planningContentHash } from '../planningHash';
 import {
+    commitmentRemainsCurrent,
     compareReadinessReviewCurrentness,
     deriveReadinessReview,
     type ReadinessReviewInput,
@@ -610,6 +611,39 @@ describe('deterministic readiness review', () => {
         }));
         expect(changed).toMatchObject({ current: false, historical: true });
         expect(changed.reasons).toContain('downstream_changed');
+    });
+
+    it('keeps a commitment current across post-commit Build activity but not plan changes', () => {
+        const review = deriveReadinessReview(input());
+
+        // Downstream/alignment drift (generating outputs after commit) makes the
+        // readiness snapshot historical without revoking the commitment.
+        const afterOutputs = compareReadinessReviewCurrentness(review, input({
+            downstreamUpdatePlanSummary: {
+                currentPlanCount: 1, historicalPlanCount: 0, blockingItems: [], advisoryItems: [], reviewedItems: [], snapshotHash: 'post-commit-outputs',
+            },
+        }));
+        expect(afterOutputs.current).toBe(false);
+        expect(commitmentRemainsCurrent(afterOutputs)).toBe(true);
+
+        // A changed reviewed plan (content or identity) revokes it.
+        const afterContentChange = compareReadinessReviewCurrentness(review, input({
+            spine: { versionId: 'spine-1', content: `${content}\nChanged`, structuredPRD: prd, incompleteSectionCount: 0 },
+        }));
+        expect(commitmentRemainsCurrent(afterContentChange)).toBe(false);
+
+        const afterIdentityChange = compareReadinessReviewCurrentness(review, input({
+            spine: { versionId: 'spine-2', content, structuredPRD: prd, incompleteSectionCount: 0 },
+        }));
+        expect(commitmentRemainsCurrent(afterIdentityChange)).toBe(false);
+
+        // A tampered review is never treated as a current commitment.
+        const tampered = compareReadinessReviewCurrentness(
+            { ...review, conclusion: review.conclusion === 'not_ready' ? 'ready_to_build' : 'not_ready' },
+            input(),
+        );
+        expect(tampered.integrityValid).toBe(false);
+        expect(commitmentRemainsCurrent(tampered)).toBe(false);
     });
 
     it('uses a current precise update-plan item once instead of duplicating its artifact-wide concern', () => {

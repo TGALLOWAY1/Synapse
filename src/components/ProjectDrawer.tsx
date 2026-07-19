@@ -5,7 +5,7 @@ import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
 import { useProjectSyncStore } from '../store/projectSyncStore';
-import { compareReadinessReviewCurrentness, deriveReadinessCommitmentState, hasReadinessProvenanceForSpine, projectCommitmentCopy } from '../lib/planning';
+import { commitmentRemainsCurrent, compareReadinessReviewCurrentness, deriveReadinessCommitmentState, hasReadinessProvenanceForSpine, projectCommitmentCopy } from '../lib/planning';
 import { buildReadinessReviewInputFromState } from '../store/slices/readinessSlice';
 
 interface ProjectDrawerProps {
@@ -42,7 +42,7 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
             currentness: input ? compareReadinessReviewCurrentness(review, input) : undefined,
             commitment: deriveReadinessCommitmentState(review, events),
         }));
-        const currentReview = reviewStates.find(item => item.currentness?.current && item.commitment.activeCommit)?.review;
+        const currentReview = reviewStates.find(item => item.currentness && commitmentRemainsCurrent(item.currentness) && item.commitment.activeCommit)?.review;
         if (currentReview?.conclusion === 'ready_to_build') {
             return { label: projectCommitmentCopy('plan_committed').label, color: 'bg-green-900/30 text-green-400 border-green-800' };
         }

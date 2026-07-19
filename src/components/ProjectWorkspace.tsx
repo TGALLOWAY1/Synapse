@@ -46,6 +46,7 @@ import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
 import { resetDemoProject } from '../lib/demoRouteHydration';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
 import {
+    commitmentRemainsCurrent,
     compareReadinessReviewCurrentness,
     compareReadinessReviewProjections,
     derivePlanningAttention,
@@ -476,7 +477,7 @@ export function ProjectWorkspace() {
         }))
         : [];
     const currentCommittedReadiness = readinessWithCurrentness
-        .filter(item => item.currentness.current && item.commitment.activeCommit)
+        .filter(item => commitmentRemainsCurrent(item.currentness) && item.commitment.activeCommit)
         .sort((a, b) => b.commitment.activeCommit!.at - a.commitment.activeCommit!.at)[0];
     const isCurrentPlanCommitted = !!currentCommittedReadiness;
     const hasReadinessCommitmentHistory = readinessWithCurrentness.some(item => item.commitment.latestCommit);

@@ -85,6 +85,21 @@ export type ReadinessReviewCurrentness = {
     reasons: ReadinessReviewCurrentnessReason[];
 };
 
+/** A commitment binds to the reviewed plan itself. Post-commit Build activity
+ * (outputs, alignment, challenge, or planning-state drift) makes the readiness
+ * snapshot historical without revoking the commitment — only a changed or
+ * untrustworthy reviewed spine does that. */
+const COMMITMENT_REVOKING_REASONS: ReadonlySet<ReadinessReviewCurrentnessReason> = new Set([
+    'integrity_mismatch',
+    'spine_identity_changed',
+    'spine_content_changed',
+]);
+
+export function commitmentRemainsCurrent(currentness: ReadinessReviewCurrentness): boolean {
+    return currentness.integrityValid
+        && !currentness.reasons.some(reason => COMMITMENT_REVOKING_REASONS.has(reason));
+}
+
 const byId = <T extends { id: string }>(items: T[]): T[] =>
     [...items].sort((a, b) => a.id.localeCompare(b.id));
 
@@ -237,6 +252,11 @@ function isSubstantiveChallenge(
     });
 }
 
+/** Dismissing or marking a finding already addressed needs a substantive
+ * rationale; entry surfaces must enforce the same floor so a closure accepted
+ * in the UI can never be rejected later at readiness time. */
+export const MIN_CLOSURE_REASON_LENGTH = 12;
+
 const validDispositionActionsByStatus: Partial<Record<ReviewIssue['status'], Set<ReviewIssue['dispositions'][number]['action']>>> = {
     acted: new Set(['propose_record', 'link_existing', 'challenge_existing', 'request_revision']),
     dismissed: new Set(['dismiss']),
@@ -252,7 +272,7 @@ function hasValidIssueDisposition(issue: ReviewIssue, run: ReviewRun): boolean {
         || !allowedActions.has(disposition.action)
         || disposition.contextSignature !== run.sourceManifest.contextSignature) return false;
     if ((issue.status === 'dismissed' || issue.status === 'already_addressed')
-        && (disposition.reason?.trim().length ?? 0) < 12) return false;
+        && (disposition.reason?.trim().length ?? 0) < MIN_CLOSURE_REASON_LENGTH) return false;
     return true;
 }
 
