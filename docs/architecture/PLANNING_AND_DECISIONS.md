@@ -9,7 +9,15 @@ is available as soon as a safe structured working PRD exists and hosts
 specialist findings, review history, and the full Decision Center.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
-`ReviewWorkspace.tsx` and `DecisionCenter.tsx`.
+`ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
+composition root: run orchestration lives in `useReviewRunController.ts`,
+manifest capture/reconstruction in `useReviewContextManifest.ts`, issue
+dispositions in `useReviewIssueActions.ts` (+ the
+`reviewIssueDispositions.ts` action→disposition tables), assumption
+validation in `useAssumptionValidationActions.ts`, decision verdicts /
+impact previews / the write-barrier apply path in
+`useDecisionImpactActions.ts`, and the pure store→view projections in
+`reviewRunViews.ts` and `planningRecordViews.ts`.
 
 - `derivePlanningReadiness` (`planningReadiness.ts`) is the pure, categorical
   project-readiness projection. It evaluates foundation clarity, intentional
