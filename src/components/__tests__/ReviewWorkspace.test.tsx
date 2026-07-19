@@ -273,7 +273,10 @@ describe('ReviewWorkspace', () => {
 
         fireEvent.click(screen.getByRole('button', { name: /Decision Center/ }));
         expect(screen.getAllByText('Needs your decision').length).toBeGreaterThan(0);
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm decision' }));
+        const save = screen.getByRole('button', { name: 'Save decision' });
+        expect(save).toBeDisabled();
+        fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: 'Retain source files for 30 days.' } });
+        fireEvent.click(save);
         expect(onConfirmPlanningRecord).toHaveBeenCalledWith('record-1');
     });
 

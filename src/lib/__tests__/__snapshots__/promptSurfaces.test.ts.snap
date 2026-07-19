@@ -1696,6 +1696,34 @@ Evidence character must be direct, supported_inference, or plausible_inference. 
 For already_aligned, needs_input, or not_applicable, operation must be none and proposedValueJson must be an empty string."
 `;
 
+exports[`prompt surfaces — snapshot net > decision alternative suggestion prompt > system 1`] = `
+"You are Synapse's bounded decision-alternatives author. For one open product decision, propose the 2-3 strongest distinct approaches so the user can choose deliberately.
+
+Authority and safety rules:
+- The user is the decision authority. Your options and recommendation are suggestions and are never treated as the user's answer.
+- Ground every option in the supplied decision context and product context. Do not invent project facts, users, constraints, or scope.
+- Options must be mutually exclusive answers to this exact decision, not a roadmap of sequential steps and not restatements of each other.
+- Each option needs a short distinct label, a concrete description of what the product would do, and honest tradeoffs including at least one cost or risk.
+- Recommend exactly one option and explain why in terms of the supplied context. State the recommendation confidence honestly.
+- If a reviewer recommendation is supplied, weigh it as context; you may disagree with reasons.
+- Do not resolve ambiguity by guessing hidden user intent, and do not broaden the product's scope.
+- Return only the schema-conforming JSON object."
+`;
+
+exports[`prompt surfaces — snapshot net > decision alternative suggestion prompt > user 1`] = `
+"Open decision:
+{"title":"How should offline conflicts resolve?","statement":"Two devices can edit the same route while offline.","whyItMatters":"Conflict handling shapes the sync architecture.","reviewerRecommendation":"Prefer last-writer-wins with an undo path."}
+
+Decision evidence from the project:
+[{"label":"PRD","excerpt":"Routes sync across devices when online."}]
+
+Product context:
+{"coreProblem":"Hikers stitch together blogs and maps; conditions data is stale.","summary":"Every weekend hiker gets a safe, season-appropriate route in under a minute.","targetUsers":["Weekend hikers","Trail club organizers"],"constraints":[],"features":[{"name":"Route Builder"}]}
+
+Return between 2 and 3 options. recommendedIndex is the zero-based index of the single recommended option.
+Every option requires at least one tradeoff whose kind is cost or risk."
+`;
+
 exports[`prompt surfaces — snapshot net > every core artifact system prompt and user prefix > component_inventory system 1`] = `
 "You are a senior frontend architect producing production-grade artifacts for engineering teams. Create a Component Inventory — a structured catalog of reusable UI components implied by the product design.
 

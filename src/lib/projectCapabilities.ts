@@ -122,7 +122,7 @@ export const PERSISTENT_STORE_ACTIONS = new Set<string>([
     'addReviewFinding', 'addReviewIssue', 'applyReviewIssueDisposition', 'reopenReviewIssue', 'createPlanningRecord',
     'supersedeOpenReviewIssues',
     'updatePlanningRecordStatusByUser', 'appendPlanningDecisionEvent', 'importPlanningAssumptions',
-    'addPlanningAssessment',
+    'addPlanningAssessment', 'setPlanningRecordDecisionOptions',
     'createReadinessReview', 'authorizeReadinessCommitment',
     'commitReadinessReview', 'reopenReadinessCommitment',
     'recordDownstreamUpdatePlan', 'generateDownstreamUpdatePlans', 'appendDownstreamUpdatePlanEvent',

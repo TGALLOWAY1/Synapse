@@ -388,6 +388,17 @@ export interface ProjectState {
         projectId: string,
         input: Omit<PlanningRecord, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>,
     ) => { planningRecordId: string };
+    /** Stores machine-suggested alternatives for an unresolved decision or
+     * open question. Advisory only — refused once a user verdict exists. */
+    setPlanningRecordDecisionOptions: (
+        projectId: string,
+        planningRecordId: string,
+        input: {
+            options: import('../types').PlanningDecisionOption[];
+            recommendation?: import('../types').PlanningRecommendation;
+            provenance?: PlanningRecord['decisionOptionsProvenance'];
+        },
+    ) => { ok: true } | { ok: false; reason: string };
     updatePlanningRecordStatusByUser: (
         projectId: string,
         planningRecordId: string,

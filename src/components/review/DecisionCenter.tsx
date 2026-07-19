@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef, useState } from 'react';
-import { ArrowLeft, Check, ChevronDown, Clock3, FileQuestion, RefreshCcw, Sparkles, X } from 'lucide-react';
+import { ArrowLeft, ArrowRight, Check, ChevronDown, Clock3, FileQuestion, Loader2, RefreshCcw, Sparkles, X } from 'lucide-react';
 import {
     AssumptionValidationPanel,
     type AssumptionEvidenceActionGuard,
@@ -70,6 +70,9 @@ export type DecisionCenterRecordView = {
      * need evidence-backed validation. This is attention, not a second verdict. */
     requiresValidation?: boolean;
     options?: DecisionCenterOptionView[];
+    /** Live state of machine option suggestion for records without stored
+     * options. Presence of an error means the last attempt failed. */
+    optionsSuggestion?: { busy: boolean; error?: string };
     recommendation?: { optionId?: string; summary: string; rationale?: string; confidence?: string };
     resolution?: string;
     rationale?: string;
@@ -88,6 +91,9 @@ interface Props {
     initialSelectedId?: string;
     readOnly?: boolean;
     onDecide: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
+    /** Requests machine-suggested alternatives for an unresolved decision.
+     * Safe to call repeatedly; the container ignores duplicate requests. */
+    onPrepareOptions?: (recordId: string) => void;
     onPreviewImpact: (recordId: string) => void;
     onApplyToPlan: (recordId: string) => void;
     onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable', editedValue?: string) => void;
@@ -147,7 +153,7 @@ const evidenceCharacterLabel = {
 } as const;
 
 export function DecisionCenter({
-    records, initialSelectedId, readOnly, onDecide, onPreviewImpact, onApplyToPlan,
+    records, initialSelectedId, readOnly, onDecide, onPrepareOptions, onPreviewImpact, onApplyToPlan,
     onReviewAlignmentProposal, onRequestAlignmentProposal,
     onGenerateAssumptionValidationPlan = () => {},
     onRecordAssumptionValidationPlan = () => {},
@@ -166,6 +172,10 @@ export function DecisionCenter({
     const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialRecord));
     const [customAnswer, setCustomAnswer] = useState('');
     const [rationale, setRationale] = useState('');
+    /** Selected suggested option id, or 'other' for a custom answer. Never
+     * preselected: a recommendation is visually distinct, not a default. */
+    const [answerChoice, setAnswerChoice] = useState<string | undefined>();
+    const [lastDecidedId, setLastDecidedId] = useState<string | undefined>();
     const [proposalEdits, setProposalEdits] = useState<Record<string, string>>({});
     const [proposalRequest, setProposalRequest] = useState<{ proposalId: string; kind: 'missing_info' | 'different_interpretation' }>();
     const [proposalGuidance, setProposalGuidance] = useState('');
@@ -179,6 +189,7 @@ export function DecisionCenter({
             setMobileDetailOpen(true);
             setCustomAnswer('');
             setRationale('');
+            setAnswerChoice(undefined);
         }
     }
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
@@ -203,11 +214,22 @@ export function DecisionCenter({
         if (mobileDetailOpen) detailHeadingRef.current?.focus();
     }, [mobileDetailOpen, selected?.id]);
 
+    // Suggested alternatives are prepared automatically the first time an
+    // unresolved decision is opened. The container ignores duplicate requests
+    // and a failed attempt stays visible with a manual retry.
+    useEffect(() => {
+        if (readOnly || !onPrepareOptions || !selected) return;
+        if (selected.type !== 'decision' && selected.type !== 'question') return;
+        if (!needsVerdict(selected) || selected.options?.length || selected.optionsSuggestion) return;
+        onPrepareOptions(selected.id);
+    }, [onPrepareOptions, readOnly, selected]);
+
     const choose = (id: string) => {
         setSelectedId(id);
         setMobileDetailOpen(true);
         setCustomAnswer('');
         setRationale('');
+        setAnswerChoice(undefined);
     };
 
     const submit = (action: DecisionAction, value?: string) => {
@@ -221,10 +243,12 @@ export function DecisionCenter({
         } else if (needsVerdict(selected)) {
             setView(selected.requiresValidation ? 'needs_review' : 'log');
         }
+        setLastDecidedId(['confirm', 'custom', 'reject'].includes(action) && needsVerdict(selected) ? selected.id : undefined);
         setSelectedId(selected.id);
         setMobileDetailOpen(true);
         setCustomAnswer('');
         setRationale('');
+        setAnswerChoice(undefined);
     };
 
     const requestAlignmentProposal = async (proposalId: string) => {
@@ -335,21 +359,124 @@ export function DecisionCenter({
                                 </div>
                             )}
 
-                            {!readOnly && needsVerdict(selected) && (
+                            {!readOnly && needsVerdict(selected) && (() => {
+                                // Assumptions keep their dedicated validation flow; suggested
+                                // alternatives apply to choices (decisions and open questions).
+                                const optionsApply = selected.type !== 'assumption';
+                                const storedOptions = optionsApply ? selected.options ?? [] : [];
+                                const recommendedId = selected.recommendation?.optionId;
+                                const orderedOptions = recommendedId
+                                    ? [...storedOptions.filter(option => option.id === recommendedId), ...storedOptions.filter(option => option.id !== recommendedId)]
+                                    : storedOptions;
+                                const hasOptions = orderedOptions.length > 0;
+                                const suggestionBusy = optionsApply && !hasOptions && Boolean(selected.optionsSuggestion?.busy);
+                                const suggestionError = optionsApply && !hasOptions && !suggestionBusy ? selected.optionsSuggestion?.error : undefined;
+                                const showTextarea = !hasOptions || answerChoice === 'other';
+                                const chosenOption = answerChoice && answerChoice !== 'other'
+                                    ? orderedOptions.find(option => option.id === answerChoice)
+                                    : undefined;
+                                const canSave = chosenOption !== undefined || (showTextarea && customAnswer.trim().length > 0);
+                                const save = () => {
+                                    if (chosenOption) submit('confirm', chosenOption.id);
+                                    else if (customAnswer.trim()) submit('custom', customAnswer.trim());
+                                };
+                                return (
                                 <section className="mt-6 rounded-xl border border-neutral-200 bg-white p-4">
-                                    <label className="text-sm font-semibold text-neutral-900" htmlFor="decision-answer">Your answer</label>
-                                    <textarea id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder={selected.type === 'assumption' ? 'Explain what should replace this premise' : 'Record the product choice in your own words'} className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                    <h3 className="text-sm font-semibold text-neutral-900" id="decision-answer-heading">Your answer</h3>
+                                    {hasOptions && (
+                                        <div className="mt-3 space-y-2" role="radiogroup" aria-labelledby="decision-answer-heading">
+                                            {orderedOptions.map(option => {
+                                                const isRecommended = option.id === recommendedId;
+                                                const isChosen = answerChoice === option.id;
+                                                return (
+                                                    <button
+                                                        key={option.id}
+                                                        type="button"
+                                                        role="radio"
+                                                        aria-checked={isChosen}
+                                                        onClick={() => setAnswerChoice(option.id)}
+                                                        className={`w-full rounded-xl border p-4 text-left transition ${isChosen ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-neutral-200 bg-white hover:border-indigo-300'}`}
+                                                    >
+                                                        <span className="flex flex-wrap items-center gap-2">
+                                                            <span className="text-sm font-semibold text-neutral-900">{option.label}</span>
+                                                            {isRecommended && <span className="inline-flex items-center gap-1 rounded-full bg-indigo-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-indigo-700"><Sparkles size={10} /> Recommended</span>}
+                                                        </span>
+                                                        {option.description && <span className="mt-1 block text-sm leading-6 text-neutral-600">{option.description}</span>}
+                                                        {option.tradeoffs && option.tradeoffs.length > 0 && <span className="mt-2 block text-xs leading-5 text-neutral-500">{option.tradeoffs.map(item => item.summary).join(' · ')}</span>}
+                                                        {isRecommended && selected.recommendation?.rationale && <span className="mt-2 block border-t border-indigo-100 pt-2 text-xs leading-5 text-indigo-900/80">Why Synapse suggests this: {selected.recommendation.rationale}</span>}
+                                                    </button>
+                                                );
+                                            })}
+                                            <button
+                                                type="button"
+                                                role="radio"
+                                                aria-checked={answerChoice === 'other'}
+                                                onClick={() => setAnswerChoice('other')}
+                                                className={`w-full rounded-xl border p-4 text-left transition ${answerChoice === 'other' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-dashed border-neutral-300 bg-white hover:border-indigo-300'}`}
+                                            >
+                                                <span className="text-sm font-semibold text-neutral-900">Other</span>
+                                                <span className="mt-1 block text-sm text-neutral-600">Record a different approach in your own words.</span>
+                                            </button>
+                                        </div>
+                                    )}
+                                    {suggestionBusy && (
+                                        <div className="mt-3 flex items-center gap-2 rounded-lg border border-indigo-100 bg-indigo-50/60 px-3 py-2 text-sm text-indigo-900" role="status">
+                                            <Loader2 size={14} className="shrink-0 animate-spin" /> Synapse is preparing 2-3 suggested approaches. You can also answer directly below.
+                                        </div>
+                                    )}
+                                    {suggestionError && (
+                                        <div className="mt-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-900" role="status">
+                                            Suggested approaches are unavailable: {suggestionError}
+                                            {onPrepareOptions && <button type="button" onClick={() => onPrepareOptions(selected.id)} className="ml-2 font-semibold underline underline-offset-2">Try again</button>}
+                                        </div>
+                                    )}
+                                    {showTextarea && <>
+                                        <label className={hasOptions ? 'sr-only' : 'mt-2 block'} htmlFor="decision-answer"><span className="sr-only">Your answer</span></label>
+                                        <textarea id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder={selected.type === 'assumption' ? 'Explain what should replace this premise' : hasOptions ? 'Describe the approach that should govern the plan' : 'Record the product choice in your own words'} className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                    </>}
                                     <label className="mt-3 block text-xs font-medium text-neutral-600" htmlFor="decision-rationale">Why? (optional)</label>
                                     <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                                        {selected.type !== 'assumption' && <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('custom', customAnswer.trim())} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
+                                        {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
                                         {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50">Accept for planning · not validated</button>}
-                                        {selected.type === 'decision' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-emerald-200 px-4 text-sm font-semibold text-emerald-700 hover:bg-emerald-50">Confirm decision</button>}
                                         {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
-                                        <button type="button" disabled={!customAnswer.trim()} onClick={() => submit('reject', customAnswer.trim())} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><X size={14} className="mr-1 inline" /> Reject premise</button>
+                                        <button
+                                            type="button"
+                                            disabled={showTextarea && !customAnswer.trim()}
+                                            onClick={() => {
+                                                if (customAnswer.trim()) submit('reject', customAnswer.trim());
+                                                else setAnswerChoice('other');
+                                            }}
+                                            className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
+                                        ><X size={14} className="mr-1 inline" /> Reject premise</button>
                                     </div>
                                 </section>
-                            )}
+                                );
+                            })()}
+
+                            {selected.id === lastDecidedId && !needsVerdict(selected) && (() => {
+                                const next = records.filter(record => needsAttention(record) && record.id !== selected.id);
+                                return (
+                                    <section className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3" role="status" aria-label="Answer recorded">
+                                        <div className="flex flex-wrap items-center justify-between gap-2">
+                                            <p className="text-sm font-semibold text-emerald-900">
+                                                Answer recorded. {next.length > 0
+                                                    ? `${next.length} item${next.length === 1 ? '' : 's'} still need${next.length === 1 ? 's' : ''} your attention.`
+                                                    : 'Nothing else needs your attention right now.'}
+                                            </p>
+                                            {next.length > 0 && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => { setLastDecidedId(undefined); setView('needs_review'); choose(next[0].id); }}
+                                                    className="inline-flex min-h-10 max-w-full items-center gap-1 rounded-lg border border-emerald-300 bg-white px-3 text-sm font-semibold text-emerald-800 hover:bg-emerald-100"
+                                                >
+                                                    <span className="truncate">Next: {next[0].title}</span> <ArrowRight size={14} className="shrink-0" />
+                                                </button>
+                                            )}
+                                        </div>
+                                    </section>
+                                );
+                            })()}
 
                             {!needsVerdict(selected) && selected.status !== 'deferred' && selected.status !== 'invalidated' && (
                                 <section className={`mt-6 rounded-xl border p-4 ${selected.type === 'assumption' ? 'border-amber-200 bg-amber-50' : 'border-emerald-200 bg-emerald-50'}`}>
@@ -515,7 +642,10 @@ export function DecisionCenter({
                                 <button type="button" onClick={() => onPreviewImpact(selected.id)} className="mt-6 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Preview impact</button>
                             ) : null}
 
-                            {selected.recommendation && (
+                            {selected.recommendation
+                                && !(needsVerdict(selected) && !readOnly && selected.type !== 'assumption'
+                                    && selected.recommendation.optionId
+                                    && selected.options?.some(option => option.id === selected.recommendation?.optionId)) && (
                                 <section className="mt-6 rounded-xl border border-indigo-100 bg-indigo-50/70 p-4">
                                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-700"><Sparkles size={14} /> Synapse recommendation</div>
                                     <p className="mt-2 text-sm font-semibold text-indigo-950">{selected.recommendation.summary}</p>
@@ -523,7 +653,7 @@ export function DecisionCenter({
                                 </section>
                             )}
 
-                            {selected.options && selected.options.length > 0 && needsVerdict(selected) && (
+                            {selected.options && selected.options.length > 0 && needsVerdict(selected) && (readOnly || selected.type === 'assumption') && (
                                 <section className="mt-6 space-y-2" aria-label="Available options">
                                     <h3 className="text-sm font-semibold text-neutral-900">Alternatives and tradeoffs</h3>
                                     {selected.options.map(option => (

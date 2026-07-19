@@ -351,6 +351,122 @@ describe('DecisionCenter', () => {
         expect(screen.getByLabelText('Decision queue')).toHaveClass('flex');
     });
 
+    describe('suggested alternatives for open decisions', () => {
+        const decisionRecord: DecisionCenterRecordView = {
+            id: 'dec-1', type: 'decision', title: 'How should mixed-success days render?',
+            statement: 'The contribution graph needs a rule for days with mixed project outcomes.',
+            whyItMatters: 'It defines what the graph communicates at a glance.', status: 'proposed',
+            options: [
+                { id: 'opt-split', label: 'Split-color cells', description: 'Each day cell shows proportional success and failure.', tradeoffs: [{ kind: 'risk', summary: 'Harder to read at small sizes' }] },
+                { id: 'opt-dominant', label: 'Dominant outcome wins', description: 'The day takes the color of the majority outcome.', tradeoffs: [{ kind: 'cost', summary: 'Hides minority outcomes' }] },
+            ],
+            recommendation: { optionId: 'opt-dominant', summary: 'Dominant outcome wins', rationale: 'It keeps the graph legible.' },
+            sourceLabels: ['specialist review'], createdAt: 1, history: [],
+        };
+
+        it('saves a selected option as an explicit two-step choice with the recommendation first', () => {
+            const props = callbacks();
+            render(<DecisionCenter records={[decisionRecord]} {...props} />);
+
+            const group = screen.getByRole('radiogroup', { name: 'Your answer' });
+            const radios = within(group).getAllByRole('radio');
+            expect(radios[0]).toHaveTextContent('Dominant outcome wins');
+            expect(radios[0]).toHaveTextContent('Recommended');
+            expect(radios[0]).toHaveTextContent('It keeps the graph legible.');
+            expect(radios[0]).toHaveAttribute('aria-checked', 'false');
+            expect(radios.at(-1)).toHaveTextContent('Other');
+
+            const save = screen.getByRole('button', { name: 'Save decision' });
+            expect(save).toBeDisabled();
+            fireEvent.click(within(group).getByRole('radio', { name: /Split-color cells/ }));
+            expect(props.onDecide).not.toHaveBeenCalled();
+            expect(save).toBeEnabled();
+            fireEvent.click(save);
+            expect(props.onDecide).toHaveBeenCalledWith('dec-1', 'confirm', 'opt-split', undefined);
+        });
+
+        it('supports an "Other" custom answer alongside the suggestions', () => {
+            const props = callbacks();
+            render(<DecisionCenter records={[decisionRecord]} {...props} />);
+
+            expect(screen.queryByLabelText('Your answer', { selector: 'textarea' })).toBeNull();
+            fireEvent.click(screen.getByRole('radio', { name: /Other/ }));
+            const save = screen.getByRole('button', { name: 'Save decision' });
+            expect(save).toBeDisabled();
+            fireEvent.change(screen.getByPlaceholderText('Describe the approach that should govern the plan'), {
+                target: { value: 'Render a small stacked bar inside the day cell.' },
+            });
+            fireEvent.click(save);
+            expect(props.onDecide).toHaveBeenCalledWith('dec-1', 'custom', 'Render a small stacked bar inside the day cell.', undefined);
+        });
+
+        it('requests suggestions automatically for an open decision without options', () => {
+            const onPrepareOptions = vi.fn();
+            render(<DecisionCenter
+                records={[{ ...decisionRecord, options: undefined, recommendation: undefined }]}
+                {...callbacks()}
+                onPrepareOptions={onPrepareOptions}
+            />);
+            expect(onPrepareOptions).toHaveBeenCalledWith('dec-1');
+            expect(onPrepareOptions).toHaveBeenCalledTimes(1);
+        });
+
+        it('keeps the direct answer available while suggestions generate, and retries after failure', () => {
+            const onPrepareOptions = vi.fn();
+            const props = callbacks();
+            const { rerender } = render(<DecisionCenter
+                records={[{ ...decisionRecord, options: undefined, recommendation: undefined, optionsSuggestion: { busy: true } }]}
+                {...props}
+                onPrepareOptions={onPrepareOptions}
+            />);
+            expect(onPrepareOptions).not.toHaveBeenCalled();
+            expect(screen.getByText(/preparing 2-3 suggested approaches/i)).toBeInTheDocument();
+            expect(screen.getByLabelText('Your answer', { selector: 'textarea' })).toBeInTheDocument();
+
+            rerender(<DecisionCenter
+                records={[{ ...decisionRecord, options: undefined, recommendation: undefined, optionsSuggestion: { busy: false, error: 'The model is unavailable.' } }]}
+                {...props}
+                onPrepareOptions={onPrepareOptions}
+            />);
+            expect(screen.getByText(/Suggested approaches are unavailable/)).toBeInTheDocument();
+            fireEvent.click(screen.getByRole('button', { name: 'Try again' }));
+            expect(onPrepareOptions).toHaveBeenCalledWith('dec-1');
+        });
+
+        it('offers the next unresolved item right after an answer is recorded', () => {
+            const other: DecisionCenterRecordView = {
+                ...decisionRecord, id: 'dec-2', options: undefined, recommendation: undefined,
+                title: 'Should streaks reset on failure?', status: 'open',
+            };
+            const props = callbacks();
+            const { rerender } = render(<DecisionCenter records={[decisionRecord, other]} {...props} />);
+            fireEvent.click(screen.getByRole('radio', { name: /Dominant outcome wins/ }));
+            fireEvent.click(screen.getByRole('button', { name: 'Save decision' }));
+
+            rerender(<DecisionCenter
+                records={[{ ...decisionRecord, status: 'confirmed', resolution: 'Dominant outcome wins' }, other]}
+                {...props}
+            />);
+            const status = screen.getByRole('status', { name: 'Answer recorded' });
+            expect(status).toHaveTextContent('1 item still needs your attention');
+            fireEvent.click(within(status).getByRole('button', { name: /Next: Should streaks reset on failure\?/ }));
+            expect(screen.getByRole('heading', { name: 'Should streaks reset on failure?' })).toBeInTheDocument();
+        });
+
+        it('reveals the explanation field before a premise can be rejected', () => {
+            const props = callbacks();
+            render(<DecisionCenter records={[decisionRecord]} {...props} />);
+            const reject = screen.getByRole('button', { name: /Reject premise/ });
+            expect(reject).toBeEnabled();
+            fireEvent.click(reject);
+            expect(props.onDecide).not.toHaveBeenCalled();
+            const textarea = screen.getByPlaceholderText('Describe the approach that should govern the plan');
+            fireEvent.change(textarea, { target: { value: 'The graph should not encode success at all.' } });
+            fireEvent.click(reject);
+            expect(props.onDecide).toHaveBeenCalledWith('dec-1', 'reject', 'The graph should not encode success at all.', undefined);
+        });
+    });
+
     it('lets a user explicitly revise or invalidate a recorded decision', () => {
         const props = callbacks();
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...props} />);

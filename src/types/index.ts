@@ -1979,6 +1979,15 @@ export type PlanningRecord = {
     options?: string[];
     /** Structured choice model used by the Decision Center. */
     decisionOptions?: PlanningDecisionOption[];
+    /** Provenance for machine-suggested decisionOptions/recommendationDetail.
+     * Suggestions are advisory; only user events carry verdict authority. */
+    decisionOptionsProvenance?: {
+        authoredBy: 'synapse';
+        model: string;
+        provider?: string;
+        sourceSpineVersionId?: string;
+        generatedAt: number;
+    };
     recommendation?: string;
     recommendationDetail?: PlanningRecommendation;
     resolution?: string;

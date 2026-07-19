@@ -158,6 +158,11 @@ export function ProjectWorkspace() {
     const [workspaceInitialUpdatePlanId, setWorkspaceInitialUpdatePlanId] = useState<string>();
     const [workspaceInitialUpdatePlanItemId, setWorkspaceInitialUpdatePlanItemId] = useState<string>();
     const lastPlanningIntentRef = useRef<PlanningNavigationIntent | undefined>(undefined);
+    // Serialized form of the intent most recently applied to the presentation.
+    // An intent is applied exactly once: later store updates (planning records,
+    // review runs, update plans) must never re-run a stale destination and
+    // yank the user back to a stage they already navigated away from.
+    const lastAppliedPlanningIntentRef = useRef<string | undefined>(undefined);
     // Carries an explicit generation request across the design-preset choice.
     const generateAfterPreset = useRef(false);
     const overflowRef = useRef<HTMLDivElement>(null);
@@ -202,7 +207,13 @@ export function ProjectWorkspace() {
         const effectiveIntent = planningIntent ?? (previousIntent?.returnTo
             ? { destination: previousIntent.returnTo.destination }
             : undefined);
-        if (!effectiveIntent) return;
+        if (!effectiveIntent) {
+            lastAppliedPlanningIntentRef.current = undefined;
+            return;
+        }
+        const serializedIntent = JSON.stringify(effectiveIntent);
+        if (serializedIntent === lastAppliedPlanningIntentRef.current) return;
+        lastAppliedPlanningIntentRef.current = serializedIntent;
         const destination = validatePlanningDestination(effectiveIntent.destination, {
             planningRecordIds: new Set(planningRecords.map(record => record.id)),
             reviewIds: new Set(reviewRuns.map(review => review.id)),
@@ -1045,10 +1056,14 @@ export function ProjectWorkspace() {
         if (concern) navigateReadinessTarget(concern.actionTarget, concernId);
     };
 
+    // Every jump that starts from the Plan stage carries an explicit way back,
+    // so resolving a decision in Challenge never strands the user there.
+    const planReturnTarget: PlanningReturnTarget = { destination: { kind: 'prd' }, label: 'Back to Plan' };
+
     const handlePlanningNextAction = () => {
         const kind = planningReadiness.nextAction.kind;
-        if (kind === 'resolve_decision' || kind === 'validate_assumption' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId);
-        if (kind === 'challenge_plan') return openChallenge();
+        if (kind === 'resolve_decision' || kind === 'validate_assumption' || kind === 'review_source_change' || kind === 'align_plan') return openDecisionCenter(planningReadiness.nextAction.planningRecordId, planReturnTarget);
+        if (kind === 'challenge_plan') return openChallenge(undefined, undefined, undefined, planReturnTarget);
         if (kind === 'align_outputs') {
             if (planningReadiness.nextAction.nodeId) setWorkspaceInitialNode(planningReadiness.nextAction.nodeId);
             if (planningReadiness.nextAction.artifactId) setWorkspaceInitialArtifactId(planningReadiness.nextAction.artifactId);
@@ -1060,7 +1075,9 @@ export function ProjectWorkspace() {
     };
 
     const openPlanningAttention = (destination: PlanningDestination) => {
-        writePlanningIntent({ destination });
+        writePlanningIntent(destination.kind === 'prd'
+            ? { destination }
+            : { destination, returnTo: planReturnTarget });
     };
 
     const handleExport = () => {
@@ -1589,8 +1606,8 @@ export function ProjectWorkspace() {
                                                         legacyCommitted={isLegacyPlanCommitted}
                                                         onNextAction={handlePlanningNextAction}
                                                         onReviewReadiness={openCurrentReadinessCheckpoint}
-                                                        onOpenDecisions={openDecisionCenter}
-                                                        onOpenChallenge={openChallenge}
+                                                        onOpenDecisions={() => openDecisionCenter(undefined, planReturnTarget)}
+                                                        onOpenChallenge={() => openChallenge(undefined, undefined, undefined, planReturnTarget)}
                                                         attention={planningAttention}
                                                         onOpenAttention={openPlanningAttention}
                                                     />
@@ -1602,7 +1619,7 @@ export function ProjectWorkspace() {
                                                     readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
                                                     view={prdView}
                                                     onViewChange={setPrdView}
-                                                    onOpenDecisions={openDecisionCenter}
+                                                    onOpenDecisions={(recordId, returnTo) => openDecisionCenter(recordId, returnTo ?? planReturnTarget)}
                                                 />
                                             </>
                                         ) : (
