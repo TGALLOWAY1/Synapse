@@ -182,9 +182,10 @@ defeats the store's consecutive-dedupe and floods the history list.
 
 "Meet Synapse" is a fully interactive product tour (mounted at `/tour`, with
 `/about` kept as a backward-compatible alias) — **not** a static infographic
-page. It rebuilds six onboarding screens as native UI and teaches the workflow
-through interaction. All content is demo-only (`tourData.ts`); it never touches
-the Gemini pipeline, the `api/` backend, or the Zustand project store.
+page. It rebuilds seven onboarding screens as native UI and teaches the
+workflow through interaction. All content is demo-only (`tourData.ts`); it
+never touches the Gemini pipeline, the `api/` backend, or the Zustand project
+store.
 
 **Public portfolio demo:** `/tour` and `/about` are deliberately **outside the
 auth gate** in `App.tsx` (no `RequireAuth`), so the tour is a standalone,
@@ -212,7 +213,7 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
   `drag="x"` (mobile + motion-allowed only) commits via the pure
   `shouldCommitSwipe()` in `src/lib/swipeMath.ts` (offset/velocity → next/prev).
   Only the active screen is mounted; each `screens/Screen*.tsx` is
-  `React.lazy`-loaded so all six never load at once (verify: separate chunks in
+  `React.lazy`-loaded so all seven never load at once (verify: separate chunks in
   `vite build` output). Because only the active screen mounts, screens reset by
   remounting — do not add `isActive`-based reset effects (they trip the
   `react-hooks/set-state-in-effect` lint rule); use async timer callbacks +
@@ -223,7 +224,11 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
   interaction must remain usable without animation.
 - **Screens** (`screens/`): Idea, SpecGeneration, Refine (reuses the
   Clarify/Expand/Specify/Alternative/Replace action set mirrored from
-  `SELECTION_ACTIONS`), Versions, Assets (the hero — Mark as Final →
+  `SELECTION_ACTIONS`), Decisions (mirrors the Challenge stage's Decision
+  Center — needs-attention queue, suggested options with a never-preselected
+  recommendation, explicit verdict → impact preview → explicit apply; keep its
+  vocabulary in sync with `src/components/review/DecisionCenter.tsx`),
+  Versions, Assets (the hero — Mark as Final →
   sequential asset generation → `ArtifactDrawer` previews), Connections
   (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared
   pieces in `components/`: `ScreenShell`, `GenerationStep`, `RefineMenu`,

@@ -2,6 +2,7 @@ import { describe, it, expect, beforeEach, vi } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
 import { MemoryRouter } from 'react-router-dom';
 import { TourPage } from '../tour/TourPage';
+import { TOTAL_STEPS } from '../tour/tourTypes';
 import { TOUR_COMPLETED_KEY } from '../../lib/tourPersistence';
 
 // jsdom has no matchMedia — provide a non-matching stub so useIsMobile /
@@ -32,7 +33,7 @@ const renderTour = () =>
 describe('TourPage', () => {
     it('starts a first-timer in guided mode at step 1', () => {
         renderTour();
-        expect(screen.getByText(/Step 1 of 6/)).toBeInTheDocument();
+        expect(screen.getByText(new RegExp(`Step 1 of ${TOTAL_STEPS}`))).toBeInTheDocument();
         // Guided mode → no overview rail.
         expect(screen.queryByRole('button', { name: /Restart tour/i })).not.toBeInTheDocument();
     });
@@ -40,9 +41,9 @@ describe('TourPage', () => {
     it('advances with the Right arrow key', () => {
         renderTour();
         fireEvent.keyDown(document.body, { key: 'ArrowRight' });
-        expect(screen.getByText(/Step 2 of 6/)).toBeInTheDocument();
+        expect(screen.getByText(new RegExp(`Step 2 of ${TOTAL_STEPS}`))).toBeInTheDocument();
         fireEvent.keyDown(document.body, { key: 'ArrowLeft' });
-        expect(screen.getByText(/Step 1 of 6/)).toBeInTheDocument();
+        expect(screen.getByText(new RegExp(`Step 1 of ${TOTAL_STEPS}`))).toBeInTheDocument();
     });
 
     it('starts a returning user in overview mode with a section rail', () => {

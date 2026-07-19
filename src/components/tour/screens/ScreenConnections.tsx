@@ -44,7 +44,7 @@ function PrdHubCard() {
 }
 
 /**
- * Screen 6 — the connected workspace. A project rail showing the Plan →
+ * Screen 7 — the connected workspace. A project rail showing the Plan →
  * Challenge → Build → History progression, the committed plan's PRD wired to
  * its generated artifacts (tap any node to trace dependencies), and a tappable
  * recent-activity timeline. Teaches that Synapse keeps the whole project

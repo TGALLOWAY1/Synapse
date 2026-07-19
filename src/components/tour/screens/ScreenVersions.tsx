@@ -37,7 +37,7 @@ function CountBadges({ additions, changes, removals }: { additions: number; chan
 }
 
 /**
- * Screen 4 — an interactive version timeline plus a compare panel. Teaches safe
+ * Screen 5 — an interactive version timeline plus a compare panel. Teaches safe
  * experimentation: every refinement is a version you can revisit and diff.
  */
 export default function ScreenVersions({ reducedMotion }: ScreenProps) {
