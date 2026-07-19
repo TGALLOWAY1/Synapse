@@ -13,8 +13,11 @@ export function useReviewIssueActions(params: {
     projectId: string;
     canWrite: boolean;
     currentManifest: ReviewContextManifest | undefined;
+    /** Called after a NEW choice record (decision/open question) is created
+     * from an issue, so suggested alternatives can start generating. */
+    onChoiceRecordCreated?: (recordId: string) => void;
 }) {
-    const { projectId, canWrite, currentManifest } = params;
+    const { projectId, canWrite, currentManifest, onChoiceRecordCreated } = params;
 
     const handleIssueAction = (reviewId: string, issueId: string, action: ReviewIssueAction, note?: string, planningRecordId?: string) => {
         if (!canWrite) return;
@@ -47,6 +50,9 @@ export function useReviewIssueActions(params: {
             reason: note?.trim() || undefined,
             planningRecordId: recordId,
         });
+        if (recordId && !planningRecordId && (recordType === 'decision' || recordType === 'open_question')) {
+            onChoiceRecordCreated?.(recordId);
+        }
     };
 
     const handleReopenIssue = (reviewId: string, issueId: string, reason: string, expectedUpdatedAt: number) => {

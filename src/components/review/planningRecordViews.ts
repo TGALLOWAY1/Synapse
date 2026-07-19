@@ -19,8 +19,10 @@ export const buildPlanningRecordViews = (params: {
     planningRecords: PlanningRecord[];
     latestSpine: SpineVersion | undefined;
     alignmentAnalysis: AlignmentAnalysisState;
+    /** Live option-suggestion state per record id (useDecisionOptionSuggestions). */
+    optionSuggestions?: Record<string, { busy: boolean; error?: string }>;
 }): PlanningRecordView[] => {
-    const { planningRecords, latestSpine, alignmentAnalysis } = params;
+    const { planningRecords, latestSpine, alignmentAnalysis, optionSuggestions } = params;
     return planningRecords.map(record => {
         const projection = projectDecision(record);
         const validationProjection = record.type === 'assumption' ? projectAssumptionValidation(record) : undefined;
@@ -70,6 +72,7 @@ export const buildPlanningRecordViews = (params: {
                     currentSpineContentHash,
                 }).ready,
             options: record.decisionOptions,
+            optionsSuggestion: optionSuggestions?.[record.id],
             recommendation: record.recommendationDetail ?? (record.recommendation ? { summary: record.recommendation } : undefined),
             resolution: option?.label ?? projection.answer,
             rationale: projection.rationale,

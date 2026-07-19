@@ -151,6 +151,7 @@ export interface ReviewWorkspaceProps {
     onConfirmPlanningRecord: (recordId: string) => void;
     onReopenPlanningRecord: (recordId: string) => void;
     onDecidePlanningRecord?: (recordId: string, action: DecisionAction, value?: string, rationale?: string) => void;
+    onPrepareDecisionOptions?: (recordId: string) => void;
     onPreviewPlanningRecordImpact?: (recordId: string) => void;
     onApplyPlanningRecordToPlan?: (recordId: string) => void;
     onReviewAlignmentProposal?: (recordId: string, previewId: string, proposalId: string, disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable', editedValue?: string) => void;
@@ -856,6 +857,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                                 props.onConfirmPlanningRecord(recordId);
                             }
                         }}
+                        onPrepareOptions={props.onPrepareDecisionOptions}
                         onPreviewImpact={props.onPreviewPlanningRecordImpact ?? (() => {})}
                         onApplyToPlan={props.onApplyPlanningRecordToPlan ?? (() => {})}
                         onReviewAlignmentProposal={props.onReviewAlignmentProposal}

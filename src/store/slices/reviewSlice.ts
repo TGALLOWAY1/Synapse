@@ -28,6 +28,7 @@ import {
     normalizePlanningRecord,
     planningContentHash,
     projectAssumptionValidation,
+    projectDecision,
     sealAssumptionEvidence,
     sealAssumptionValidationEvent,
     type AssumptionEvidenceRecordedEvent,
@@ -60,6 +61,7 @@ export type ReviewSlice = Pick<
     | 'applyReviewIssueDisposition'
     | 'reopenReviewIssue'
     | 'createPlanningRecord'
+    | 'setPlanningRecordDecisionOptions'
     | 'updatePlanningRecordStatusByUser'
     | 'appendPlanningDecisionEvent'
     | 'importPlanningAssumptions'
@@ -401,6 +403,44 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             },
         }));
         return { planningRecordId: id };
+    },
+
+    setPlanningRecordDecisionOptions: (projectId, planningRecordId, input) => {
+        let outcome: { ok: true } | { ok: false; reason: string } = {
+            ok: false,
+            reason: 'Planning record not found.',
+        };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const record = records.find(item => item.id === planningRecordId);
+            if (!record) return state;
+            if (record.type !== 'decision' && record.type !== 'open_question') {
+                outcome = { ok: false, reason: 'Only decisions and open questions accept suggested alternatives.' };
+                return state;
+            }
+            // Suggestions are advisory input to an unresolved choice. Once a
+            // user verdict exists, the presented options are part of that
+            // verdict's context and must not be rewritten underneath it.
+            const projection = projectDecision(normalizePlanningRecord(record));
+            if (projection.status !== 'open' && projection.status !== 'proposed') {
+                outcome = { ok: false, reason: 'This record already has an answer; reopen it before regenerating alternatives.' };
+                return state;
+            }
+            outcome = { ok: true };
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: records.map(item => item.id === planningRecordId ? {
+                        ...item,
+                        decisionOptions: input.options,
+                        recommendationDetail: input.recommendation,
+                        decisionOptionsProvenance: input.provenance,
+                        updatedAt: Date.now(),
+                    } : item),
+                },
+            };
+        });
+        return outcome;
     },
 
     updatePlanningRecordStatusByUser: (projectId, planningRecordId, status, patch) => {

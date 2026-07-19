@@ -4,6 +4,7 @@ export * from './decisionImpact';
 export * from './planningReadiness';
 export * from './consequentialEditRecognition';
 export * from './complexTargetReasoning';
+export * from './decisionOptionsGeneration';
 export * from './outputAlignment';
 export * from './downstreamUpdatePlan';
 export * from './downstreamUpdatePlanGeneration';

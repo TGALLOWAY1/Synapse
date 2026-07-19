@@ -5,6 +5,7 @@ import { ReviewWorkspace } from './ReviewWorkspace';
 import { useReviewContextManifest } from './useReviewContextManifest';
 import { useReviewRunController } from './useReviewRunController';
 import { useReviewIssueActions } from './useReviewIssueActions';
+import { useDecisionOptionSuggestions } from './useDecisionOptionSuggestions';
 import { useAssumptionValidationActions } from './useAssumptionValidationActions';
 import { useDecisionImpactActions } from './useDecisionImpactActions';
 import { buildReviewRunViews } from './reviewRunViews';
@@ -50,8 +51,13 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         projectId, canWrite, initialReviewId, currentManifest, manifests, manifestForReview, panel, reviewRuns, specialistRuns,
     });
 
+    const { optionSuggestions, prepareDecisionOptions } = useDecisionOptionSuggestions({ projectId, canWrite });
+
     const { handleIssueAction, handleReopenIssue, handleTriageFinding } = useReviewIssueActions({
         projectId, canWrite, currentManifest,
+        // A newly proposed choice immediately starts collecting its suggested
+        // alternatives so the Decision Center opens with concrete approaches.
+        onChoiceRecordCreated: recordId => void prepareDecisionOptions(recordId),
     });
 
     const {
@@ -84,7 +90,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         currentContextSignature: currentManifest?.contextSignature,
     });
 
-    const planningViews = buildPlanningRecordViews({ planningRecords, latestSpine, alignmentAnalysis });
+    const planningViews = buildPlanningRecordViews({ planningRecords, latestSpine, alignmentAnalysis, optionSuggestions });
 
     if (!project || !currentManifest) return <div className="p-6 text-sm text-neutral-500">A structured working plan is needed before Synapse can challenge it.</div>;
     return <ReviewWorkspace
@@ -114,6 +120,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         }}
         onReopenPlanningRecord={recordId => useProjectStore.getState().updatePlanningRecordStatusByUser(projectId, recordId, 'open')}
         onDecidePlanningRecord={handleDecisionAction}
+        onPrepareDecisionOptions={recordId => void prepareDecisionOptions(recordId)}
         onPreviewPlanningRecordImpact={handlePreviewImpact}
         onApplyPlanningRecordToPlan={handleApplyToPlan}
         onReviewAlignmentProposal={handleAlignmentProposalReview}

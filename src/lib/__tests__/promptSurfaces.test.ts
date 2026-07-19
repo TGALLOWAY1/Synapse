@@ -27,6 +27,10 @@ import {
     type ComplexTargetReasoningTransport,
 } from '../planning/complexTargetReasoning';
 import { creatorWorkspaceReasoningInput } from '../planning/__tests__/fixtures/complexTargetReasoningFixtures';
+import {
+    generateDecisionOptions,
+    type DecisionOptionsTransport,
+} from '../planning/decisionOptionsGeneration';
 import type { MockupPayload, MockupScreen, MockupSettings, ScreenItem, StructuredPRD } from '../../types';
 
 const FIXTURE_IDEA = 'A trip-planning app for weekend hikers that builds routes from difficulty and season.';
@@ -165,6 +169,32 @@ describe('prompt surfaces — snapshot net', () => {
             transport,
             model: 'snapshot-test',
         });
+        expect(calls.length).toBeGreaterThan(0);
+        expect(calls[0].system).toMatchSnapshot('system');
+        expect(calls[0].prompt).toMatchSnapshot('user');
+    });
+
+    it('decision alternative suggestion prompt', async () => {
+        // The system/user prompts are module-private; capture them through the
+        // injectable transport, mirroring the planning-alignment surface above.
+        const calls: { system: string; prompt: string }[] = [];
+        const transport: DecisionOptionsTransport = async ({ system, prompt }) => {
+            calls.push({ system, prompt });
+            return JSON.stringify({ options: [] });
+        };
+        await generateDecisionOptions({
+            baselineSpineVersionId: 'spine-fixture',
+            record: {
+                id: 'record-fixture',
+                type: 'decision',
+                title: 'How should offline conflicts resolve?',
+                statement: 'Two devices can edit the same route while offline.',
+                whyItMatters: 'Conflict handling shapes the sync architecture.',
+                recommendation: 'Prefer last-writer-wins with an undo path.',
+                evidence: [{ label: 'PRD', excerpt: 'Routes sync across devices when online.' }],
+            },
+            structuredPRD: FIXTURE_UPSTREAM as StructuredPRD,
+        }, { transport, model: 'snapshot-test', maxStructuredRepairAttempts: 0 });
         expect(calls.length).toBeGreaterThan(0);
         expect(calls[0].system).toMatchSnapshot('system');
         expect(calls[0].prompt).toMatchSnapshot('user');

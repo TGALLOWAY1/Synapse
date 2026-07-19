@@ -59,7 +59,12 @@ export function useDecisionImpactActions(params: {
             ...base, type: 'revised', previousEventId: projection.latestVerdictEventId, answer: value?.trim(),
         };
         else if (action === 'confirm' && value && record.decisionOptions?.some(option => option.id === value)) {
-            event = { ...base, type: 'option_selected', optionId: value };
+            // The label travels on the event so the recorded answer stays
+            // readable even if suggestions are regenerated after a reopen.
+            event = {
+                ...base, type: 'option_selected', optionId: value,
+                answer: record.decisionOptions.find(option => option.id === value)?.label,
+            };
         } else {
             event = { ...base, type: 'custom_answered', answer: value?.trim() || record.statement };
         }

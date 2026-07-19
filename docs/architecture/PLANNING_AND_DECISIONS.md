@@ -61,6 +61,31 @@ impact previews / the write-barrier apply path in
   assumption id (`assumptionImport.ts`). Legacy confirmed/rejected assumption
   fields become explicit imported user verdict events; undecided assumptions
   never gain fabricated approval.
+- Open decisions and open questions get **machine-suggested alternatives**:
+  `generateDecisionOptions` (`decisionOptionsGeneration.ts`) is a bounded
+  strong-model call that returns 2-3 mutually exclusive options (each with
+  honest tradeoffs including at least one cost/risk) and exactly one
+  recommendation, validated closed with one structured-repair attempt. Results
+  persist through `setPlanningRecordDecisionOptions` only — a guarded store
+  action that refuses non-choice record types and any record that already has
+  a user verdict, and stamps `decisionOptionsProvenance`. Suggestions are
+  advisory: they never alter record status and the recommendation is never
+  preselected in the UI. Generation auto-triggers when a decision record is
+  created from a Challenge finding and when the Decision Center opens an
+  option-less unresolved decision (`useDecisionOptionSuggestions.ts`, deduped
+  in-flight). The prompt is snapshot-locked in `promptSurfaces.test.ts`.
+- **Planning navigation intents apply exactly once.** The `planning` URL
+  param is applied to the presentation by `ProjectWorkspace`'s intent effect,
+  which tracks the last-applied serialized intent **plus its validated
+  destination** — later store updates (planning records, review runs, update
+  plans) must never re-run a stale destination and yank the user back to a
+  stage they navigated away from, while a deep link whose target loads late
+  (initially validated down to the PRD fallback) still re-applies once the
+  target exists. Do not remove that guard. Every jump that starts from the Plan stage
+  (state bar, attention items, PRD decision surfaces) carries a
+  `returnTo: { kind: 'prd' }` target so a persistent "Back to Plan" banner is
+  available in Challenge, and the Decision Center offers the next unresolved
+  item immediately after an answer is recorded.
 - Decision impact previews are bound to a PRD version and deterministic content
   hash (`decisionImpact.ts`). The first implementation safely patches imported
   PRD assumptions. Source-less or ambiguous records require a later

@@ -103,6 +103,60 @@ describe('adversarial review domain', () => {
         });
     });
 
+    it('stores machine-suggested alternatives only while the decision is unresolved', () => {
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'decision',
+            status: 'proposed',
+            title: 'Choose retention policy',
+            statement: 'How long should audit events be retained?',
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'specialist_review',
+        });
+        const options = [
+            { id: 'opt-30', label: 'Retain 30 days', description: 'Short retention.', tradeoffs: [{ kind: 'risk' as const, summary: 'Shorter audit window' }] },
+            { id: 'opt-365', label: 'Retain one year', description: 'Long retention.', tradeoffs: [{ kind: 'cost' as const, summary: 'Higher storage cost' }] },
+        ];
+        const saved = useProjectStore.getState().setPlanningRecordDecisionOptions('p1', planningRecordId, {
+            options,
+            recommendation: { optionId: 'opt-30', summary: 'Retain 30 days', rationale: 'Matches the stated constraints.', confidence: 'medium' },
+            provenance: { authoredBy: 'synapse', model: 'strong-model', provider: 'gemini', sourceSpineVersionId: 'spine-v2', generatedAt: 1_000 },
+        });
+        expect(saved).toEqual({ ok: true });
+        const record = useProjectStore.getState().planningRecords.p1.find(item => item.id === planningRecordId)!;
+        expect(record.decisionOptions).toEqual(options);
+        expect(record.recommendationDetail).toMatchObject({ optionId: 'opt-30' });
+        expect(record.decisionOptionsProvenance).toMatchObject({ authoredBy: 'synapse', model: 'strong-model' });
+        // Suggestions never alter authority: the record still needs a verdict.
+        expect(record.status).toBe('proposed');
+
+        useProjectStore.getState().updatePlanningRecordStatusByUser('p1', planningRecordId, 'confirmed', {
+            resolution: 'Retain 30 days',
+        });
+        const refused = useProjectStore.getState().setPlanningRecordDecisionOptions('p1', planningRecordId, {
+            options: [{ id: 'opt-late', label: 'Late rewrite' }],
+        });
+        expect(refused.ok).toBe(false);
+        expect(useProjectStore.getState().planningRecords.p1[0].decisionOptions).toEqual(options);
+    });
+
+    it('refuses suggested alternatives for record types with their own resolution flow', () => {
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'assumption',
+            status: 'open',
+            title: 'Users tolerate a daily sync delay',
+            statement: 'Users tolerate a daily sync delay',
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'specialist_review',
+        });
+        const refused = useProjectStore.getState().setPlanningRecordDecisionOptions('p1', planningRecordId, {
+            options: [{ id: 'opt-1', label: 'Assume tolerance' }],
+        });
+        expect(refused.ok).toBe(false);
+        expect(useProjectStore.getState().planningRecords.p1[0].decisionOptions).toBeUndefined();
+    });
+
     it('records issue dispositions with user provenance and a context signature', () => {
         const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
             reviewId: 'review-1',
