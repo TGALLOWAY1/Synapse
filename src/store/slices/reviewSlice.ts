@@ -41,7 +41,7 @@ import type {
     ProjectState,
 } from '../types';
 import { validateReviewIssueRecovery } from '../../lib/review';
-import { pruneReviewCollections } from '../../lib/collectionRetention';
+import { findProtectedSubstantiveChallengeId, pruneReviewCollections } from '../../lib/collectionRetention';
 
 export type ReviewSlice = Pick<
     ProjectState,
@@ -166,19 +166,7 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
             // it may be the substantive run readiness reviews rely on even if
             // newer narrow/focus runs pushed it outside the count window.
             const latestSpineId = (state.spineVersions[projectId] ?? []).find(item => item.isLatest)?.id;
-            let substantiveCandidateId: string | undefined;
-            if (latestSpineId) {
-                for (let index = runs.length - 1; index >= 0; index -= 1) {
-                    const candidate = runs[index];
-                    if (candidate.scope.kind === 'project'
-                        && candidate.status === 'complete'
-                        && candidate.synthesisStatus === 'complete'
-                        && candidate.sourceManifest.spineVersionId === latestSpineId) {
-                        substantiveCandidateId = candidate.id;
-                        break;
-                    }
-                }
-            }
+            const substantiveCandidateId = findProtectedSubstantiveChallengeId(runs, latestSpineId);
             return pruneReviewCollections({
                 reviewRuns: { ...state.reviewRuns, [projectId]: runs },
                 specialistRuns: state.specialistRuns,

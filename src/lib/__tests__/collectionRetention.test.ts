@@ -6,6 +6,7 @@ import type {
     ReviewRun,
     SpecialistFinding,
     SpecialistRun,
+    SpineVersion,
 } from '../../types';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from '../planning/downstreamUpdatePlan';
 import type {
@@ -22,6 +23,8 @@ import {
     pruneDownstreamCollections,
     pruneReadinessReviews,
     pruneReviewCollections,
+    sweepRetentionCollections,
+    type RetentionSweepState,
 } from '../collectionRetention';
 
 const projectId = 'p1';
@@ -461,5 +464,115 @@ describe('pruneDownstreamCollections', () => {
         // verification with no resolvable binding is kept conservatively.
         expect(pruned.downstreamArtifactUpdateVerifications[projectId].map(item => item.id)).toEqual(['ver-new', 'ver-unbound']);
         expect(pruned.downstreamArtifactUpdateVerificationEvents[projectId].map(item => item.id)).toEqual(['ve-new']);
+    });
+});
+
+// --- Whole-state rehydrate sweep --------------------------------------------
+
+const spineVersion = (id: string, isLatest: boolean): SpineVersion => ({
+    id,
+    projectId,
+    promptText: 'Prompt',
+    responseText: 'Response',
+    createdAt: 1,
+    isLatest,
+    isFinal: false,
+});
+
+const sweepState = (overrides: Partial<RetentionSweepState> = {}): RetentionSweepState => ({
+    spineVersions: {},
+    reviewRuns: {},
+    specialistRuns: {},
+    reviewFindings: {},
+    reviewIssues: {},
+    readinessReviews: {},
+    readinessCommitmentEvents: {},
+    downstreamUpdatePlans: {},
+    downstreamUpdatePlanEvents: {},
+    downstreamArtifactUpdateProposals: {},
+    downstreamArtifactUpdateReviewEvents: {},
+    downstreamArtifactUpdateApplications: {},
+    downstreamArtifactUpdateVerifications: {},
+    downstreamArtifactUpdateVerificationEvents: {},
+    ...overrides,
+});
+
+describe('sweepRetentionCollections', () => {
+    it('is a no-op with identical references when nothing exceeds a cap', () => {
+        const state = sweepState({
+            spineVersions: { [projectId]: [spineVersion('spine-1', true)] },
+            reviewRuns: { [projectId]: [reviewRun('r1'), reviewRun('r2')] },
+            specialistRuns: { [projectId]: [specialistRun('r1-s', 'r1')] },
+            readinessReviews: { [projectId]: [readinessReview('rr1')] },
+            downstreamUpdatePlans: { [projectId]: [plan('p1', 'a1')] },
+        });
+        const result = sweepRetentionCollections(state);
+        expect(result.pruned).toBe(false);
+        expect(result.collections.reviewRuns).toBe(state.reviewRuns);
+        expect(result.collections.specialistRuns).toBe(state.specialistRuns);
+        expect(result.collections.reviewFindings).toBe(state.reviewFindings);
+        expect(result.collections.reviewIssues).toBe(state.reviewIssues);
+        expect(result.collections.readinessReviews).toBe(state.readinessReviews);
+        expect(result.collections.readinessCommitmentEvents).toBe(state.readinessCommitmentEvents);
+        expect(result.collections.downstreamUpdatePlans).toBe(state.downstreamUpdatePlans);
+        expect(result.collections.downstreamUpdatePlanEvents).toBe(state.downstreamUpdatePlanEvents);
+    });
+
+    it('sweeps every family across every project with the standard caps and cascades', () => {
+        const otherProject = 'p2';
+        const runs = Array.from({ length: REVIEW_RUN_RETENTION_LIMIT + 3 }, (_, index) => reviewRun(`r${index}`));
+        const reviews = Array.from(
+            { length: READINESS_REVIEW_RETENTION_LIMIT + 2 },
+            (_, index) => readinessReview(`rr${index}`),
+        );
+        const plans = Array.from(
+            { length: DOWNSTREAM_PLAN_RETENTION_LIMIT_PER_ARTIFACT + 2 },
+            (_, index) => plan(`pl${index}`, 'a1'),
+        );
+        const otherRuns = [reviewRun('other-run')];
+        const state = sweepState({
+            reviewRuns: { [projectId]: runs, [otherProject]: otherRuns },
+            specialistRuns: { [projectId]: runs.map(run => specialistRun(`${run.id}-s`, run.id)) },
+            readinessReviews: { [projectId]: reviews },
+            downstreamUpdatePlans: { [projectId]: plans },
+        });
+        const result = sweepRetentionCollections(state);
+        expect(result.pruned).toBe(true);
+        expect(result.collections.reviewRuns[projectId]).toHaveLength(REVIEW_RUN_RETENTION_LIMIT);
+        expect(result.collections.specialistRuns[projectId]).toHaveLength(REVIEW_RUN_RETENTION_LIMIT);
+        expect(result.collections.readinessReviews[projectId]).toHaveLength(READINESS_REVIEW_RETENTION_LIMIT);
+        expect(result.collections.downstreamUpdatePlans[projectId]).toHaveLength(DOWNSTREAM_PLAN_RETENTION_LIMIT_PER_ARTIFACT);
+        // A project that was already within its caps keeps its exact reference.
+        expect(result.collections.reviewRuns[otherProject]).toBe(otherRuns);
+    });
+
+    it('applies the same never-prune guarantees as the write-time paths', () => {
+        // The only completed project-scope challenge of the LATEST spine sits
+        // at the very start of the list; every newer run targets an old spine.
+        const substantive = reviewRun('substantive');
+        const staleManifest = { ...substantive.sourceManifest, spineVersionId: 'spine-0' };
+        const newerRuns = Array.from(
+            { length: REVIEW_RUN_RETENTION_LIMIT + 2 },
+            (_, index) => reviewRun(`newer-${index}`, { sourceManifest: staleManifest }),
+        );
+        const reviews = Array.from({ length: READINESS_REVIEW_RETENTION_LIMIT + 4 }, (_, index) => readinessReview(`rr${index}`));
+        const state = sweepState({
+            spineVersions: {
+                [projectId]: [spineVersion('spine-0', false), spineVersion('spine-1', true)],
+            },
+            reviewRuns: { [projectId]: [substantive, ...newerRuns] },
+            readinessReviews: { [projectId]: reviews },
+            // rr0 was committed at some point — it must survive any sweep.
+            readinessCommitmentEvents: { [projectId]: [commitmentEvent('c1', 'rr0')] },
+        });
+        const result = sweepRetentionCollections(state);
+        expect(result.pruned).toBe(true);
+        const keptRunIds = result.collections.reviewRuns[projectId].map(run => run.id);
+        expect(keptRunIds).toContain('substantive');
+        expect(keptRunIds).toHaveLength(REVIEW_RUN_RETENTION_LIMIT + 1);
+        const keptReviewIds = result.collections.readinessReviews[projectId].map(review => review.id);
+        expect(keptReviewIds).toContain('rr0');
+        // Commitment events themselves are user authority — never pruned.
+        expect(result.collections.readinessCommitmentEvents).toBe(state.readinessCommitmentEvents);
     });
 });

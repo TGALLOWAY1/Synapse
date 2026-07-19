@@ -9,10 +9,15 @@
 //   a project id, and a config, they return pruned maps. All store reads happen
 //   in the calling slice's `set((state) => …)` updater, never from a stale
 //   `get()` snapshot.
-// - Pruning is invoked ONLY when a new root record (review run / readiness
-//   review / downstream update plan) is appended. It never fires spontaneously,
-//   so a currentness/aggregate hash that pruning could shift was already
-//   invalidated by the very append that triggered it.
+// - Pruning is invoked when a new root record (review run / readiness review /
+//   downstream update plan) is appended, plus ONE sweep right after the store
+//   rehydrates from localStorage (`sweepRetentionCollections`, wired in
+//   projectStore's `onRehydrateStorage`) so state that grew past the caps
+//   before the caps existed — or while persistence was failing on quota — can
+//   shrink without waiting for a new run. It never fires spontaneously
+//   mid-session, so a currentness/aggregate hash that pruning could shift was
+//   already invalidated by the very append (or full rehydrate) that
+//   triggered it.
 // - Retention is cascade-shaped, never a blind per-collection count cap: a
 //   pruned root takes its entire dependent chain with it, and a retained root
 //   keeps its entire chain, so referential integrity between runs, findings,
@@ -31,6 +36,7 @@ import type {
     ReviewRun,
     SpecialistFinding,
     SpecialistRun,
+    SpineVersion,
 } from '../types';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
 import type {
@@ -256,5 +262,115 @@ export function pruneDownstreamCollections(
             collections.downstreamArtifactUpdateVerificationEvents, projectId, verificationEvents,
             verificationEvents.filter(event => keptVerificationIds.has(event.verificationId)),
         ),
+    };
+}
+
+/**
+ * The review run readiness reviews rely on as the "substantive challenge" of
+ * the latest spine: the most recent COMPLETED project-scope run whose manifest
+ * targets `latestSpineId`. It is always protected from pruning, even when
+ * newer narrow/focus runs push it outside the count window. Shared by the
+ * write-time path (`createReviewRun`) and the rehydrate-time sweep so both
+ * apply the exact same protection — do not fork this policy at a call site.
+ */
+export function findProtectedSubstantiveChallengeId(
+    runs: readonly ReviewRun[],
+    latestSpineId: string | undefined,
+): string | undefined {
+    if (!latestSpineId) return undefined;
+    for (let index = runs.length - 1; index >= 0; index -= 1) {
+        const candidate = runs[index];
+        if (candidate.scope.kind === 'project'
+            && candidate.status === 'complete'
+            && candidate.synthesisStatus === 'complete'
+            && candidate.sourceManifest.spineVersionId === latestSpineId) {
+            return candidate.id;
+        }
+    }
+    return undefined;
+}
+
+/** Every collection the retention engine reads or prunes, in one shape. */
+export type RetentionSweepCollections =
+    ReviewRetentionCollections & ReadinessRetentionCollections & DownstreamRetentionCollections;
+
+export interface RetentionSweepState extends ReviewRetentionCollections,
+    ReadinessRetentionCollections, DownstreamRetentionCollections {
+    /** Read-only input: needed to derive the protected substantive challenge
+     *  per project (never pruned — version history is untouched by retention). */
+    spineVersions: Record<string, SpineVersion[]>;
+}
+
+export interface RetentionSweepResult {
+    /** The (possibly pruned) collections. Every map that had nothing to prune
+     *  keeps its exact input reference, so callers can write back / diff by
+     *  reference without churn. `readinessCommitmentEvents` is always the
+     *  input reference — commitment events are user authority, never pruned. */
+    collections: RetentionSweepCollections;
+    /** True iff anything was actually removed (any root map reference changed). */
+    pruned: boolean;
+}
+
+/**
+ * One-shot retention sweep across EVERY project in a rehydrated state — the
+ * recovery path for state that outgrew the caps while no root append (and thus
+ * no write-time pruning) was happening, e.g. a user stuck behind the
+ * "Storage full" quota toast. Pure state-in/state-out: it applies the exact
+ * same per-project engines (`pruneReviewCollections` with the protected
+ * substantive challenge, `pruneReadinessReviews`, `pruneDownstreamCollections`)
+ * with their default caps and never-prune guarantees, and returns
+ * `pruned: false` with all input references intact when nothing exceeds a cap.
+ */
+export function sweepRetentionCollections(state: RetentionSweepState): RetentionSweepResult {
+    let review: ReviewRetentionCollections = {
+        reviewRuns: state.reviewRuns,
+        specialistRuns: state.specialistRuns,
+        reviewFindings: state.reviewFindings,
+        reviewIssues: state.reviewIssues,
+    };
+    let readinessReviews = state.readinessReviews;
+    let downstream: DownstreamRetentionCollections = {
+        downstreamUpdatePlans: state.downstreamUpdatePlans,
+        downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents,
+        downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals,
+        downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents,
+        downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications,
+        downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications,
+        downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents,
+    };
+    const projectIds = new Set([
+        ...Object.keys(state.reviewRuns),
+        ...Object.keys(state.readinessReviews),
+        ...Object.keys(state.downstreamUpdatePlans),
+    ]);
+    for (const projectId of projectIds) {
+        const latestSpineId = projectArray(state.spineVersions, projectId).find(item => item.isLatest)?.id;
+        const protectedId = findProtectedSubstantiveChallengeId(
+            projectArray(review.reviewRuns, projectId),
+            latestSpineId,
+        );
+        review = pruneReviewCollections(review, projectId, {
+            protectedReviewIds: protectedId ? [protectedId] : [],
+        });
+        readinessReviews = pruneReadinessReviews({
+            readinessReviews,
+            readinessCommitmentEvents: state.readinessCommitmentEvents,
+        }, projectId);
+        downstream = pruneDownstreamCollections(downstream, projectId);
+    }
+    // Dependent collections only ever change when their root map changed (the
+    // cascade lives inside the root prune), so comparing the three root map
+    // references is an exact "did anything get removed" signal.
+    const pruned = review.reviewRuns !== state.reviewRuns
+        || readinessReviews !== state.readinessReviews
+        || downstream.downstreamUpdatePlans !== state.downstreamUpdatePlans;
+    return {
+        collections: {
+            ...review,
+            readinessReviews,
+            readinessCommitmentEvents: state.readinessCommitmentEvents,
+            ...downstream,
+        },
+        pruned,
     };
 }

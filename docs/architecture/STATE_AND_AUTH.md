@@ -112,18 +112,53 @@ persistence. It flushes pending writes on `beforeunload`, `pagehide`, **and**
 events).
 
 **Retention caps (`src/lib/collectionRetention.ts`):** the machine-generated
-review/readiness/downstream history collections are growth-bounded at **write
-time** by one shared, pure, unit-tested engine — pruning runs only inside the
-slice action that appends a new *root* record (`createReviewRun`,
-`createReadinessReview`, and the three downstream plan-append sites), inside
-the same `set((state) => …)` updater (concurrency rule holds; unchanged maps
-keep their reference for selector stability and sync's reference-diffing).
+review/readiness/downstream history collections are growth-bounded by one
+shared, pure, unit-tested engine, invoked in exactly two places: at **write
+time** inside the slice action that appends a new *root* record
+(`createReviewRun`, `createReadinessReview`, and the three downstream
+plan-append sites), inside the same `set((state) => …)` updater (concurrency
+rule holds; unchanged maps keep their reference for selector stability and
+sync's reference-diffing), and once per **rehydrate** (next paragraph).
 Because pruning only ever coincides with an append that already changed the
-relevant currentness/aggregate inputs, it never spontaneously flips a
-current record stale. Pruned data drops out of sync bundles and future
+relevant currentness/aggregate inputs — or with a full rehydrate, where
+nothing derived is live yet — it never spontaneously flips a current record
+stale mid-session. Pruned data drops out of sync bundles and future
 snapshots too (they derive from the same collections) — that is intended;
 nothing in `projectBundle`/snapshot/sync code assumes these collections are
-complete. The caps (deliberately generous):
+complete.
+
+**Rehydrate-time sweep (`sweepRetentionCollections`):** write-time pruning
+alone cannot rescue a user whose localStorage is already over quota (the
+"Storage full — changes are no longer being saved" toast) — persistence keeps
+failing and no new root append ever runs. So `projectStore`'s
+`onRehydrateStorage` callback runs `sweepRetentionCollections` across **all
+projects** on every hydration: initial boot AND every `persist.rehydrate()`,
+which covers the per-user namespace switch in
+`projectUserSync.applyProjectUser()` and the legacy/merged-account imports —
+another account's oversized namespace is swept the moment it loads. The sweep
+is pure state-in/state-out and applies the exact same per-project engines,
+default caps, and never-prune guarantees as the write-time paths; the
+substantive-challenge protection is shared code
+(`findProtectedSubstantiveChallengeId`, used by both `createReviewRun` and the
+sweep) — never fork that policy at a call site. When nothing exceeds a cap the
+sweep returns the input references, `pruned: false`, and the store is left
+completely untouched — no `setState`, no persist write, no re-render. When it
+prunes, the shrunken collections are merged into the hydrated state in place
+(like the other rehydrate fixups) and a deferred no-op `setState` is queued
+via `queueMicrotask`: zustand does **not** write back to storage after a
+normal hydration, and with the synchronous storage the callback can run while
+the store module is still initializing, so the deferred `setState` is what
+schedules the debounced persist of the shrunken state (slice references are
+unchanged, so subscribers' selector outputs stay stable). The sweep runs
+*after* `markInterruptedReviews`, so runs that were in flight at the previous
+unload are settled to `interrupted` first and become ordinary prunable
+history; genuinely active-status runs remain never-pruned. Regression tests:
+`src/store/__tests__/collectionRetentionRehydrate.test.ts` (boot rehydrate,
+under-cap reference stability, namespace switch) plus the
+`sweepRetentionCollections` unit tests in
+`src/lib/__tests__/collectionRetention.test.ts`.
+
+The caps (deliberately generous):
 
 - **Adversarial review** — `reviewRuns` capped at
   `REVIEW_RUN_RETENTION_LIMIT` (20) most-recent runs per project;
