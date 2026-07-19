@@ -24,6 +24,8 @@ const EMPTY_ARTIFACT_VERSIONS: ArtifactVersion[] = [];
 const EMPTY_ARTIFACTS: ReturnType<typeof useProjectStore.getState>['artifacts'][string] = [];
 const EMPTY_VERIFICATIONS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateVerifications'][string] = [];
 const EMPTY_VERIFICATION_EVENTS: ReturnType<typeof useProjectStore.getState>['downstreamArtifactUpdateVerificationEvents'][string] = [];
+const EMPTY_SPINE_VERSIONS: ReturnType<typeof useProjectStore.getState>['spineVersions'][string] = [];
+const EMPTY_PLANNING_RECORDS: ReturnType<typeof useProjectStore.getState>['planningRecords'][string] = [];
 
 type PendingAction = Exclude<DownstreamArtifactUpdateReviewAction, 'accepted' | 'edited'> | 'edit';
 type ContextIntent = 'replace' | 'rename' | 'requiredness' | 'remove' | 'out_of_scope';
@@ -93,8 +95,8 @@ export function DownstreamArtifactUpdateProposalReview({
     const applications = useProjectStore(state => state.downstreamArtifactUpdateApplications[projectId] ?? EMPTY_APPLICATIONS);
     const artifactVersions = useProjectStore(state => state.artifactVersions[projectId] ?? EMPTY_ARTIFACT_VERSIONS);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? EMPTY_ARTIFACTS);
-    const spineVersions = useProjectStore(state => state.spineVersions[projectId] ?? []);
-    const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? []);
+    const spineVersions = useProjectStore(state => state.spineVersions[projectId] ?? EMPTY_SPINE_VERSIONS);
+    const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_PLANNING_RECORDS);
     const verifications = useProjectStore(state => state.downstreamArtifactUpdateVerifications[projectId] ?? EMPTY_VERIFICATIONS);
     const verificationEvents = useProjectStore(state => state.downstreamArtifactUpdateVerificationEvents[projectId] ?? EMPTY_VERIFICATION_EVENTS);
     const generate = useProjectStore(state => state.generateDownstreamArtifactUpdateProposal);
