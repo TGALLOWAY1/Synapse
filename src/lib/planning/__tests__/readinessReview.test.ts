@@ -615,8 +615,8 @@ describe('deterministic readiness review', () => {
     it('uses a current precise update-plan item once instead of duplicating its artifact-wide concern', () => {
         const outputAlignment: ProjectOutputAlignmentSummary = {
             outputs: [{
-                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'definitely_stale',
-                confidence: 'certain', summary: 'Shared-workspace behavior contradicts the current plan.',
+                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'stale',
+                confidence: 'definite', summary: 'Shared-workspace behavior contradicts the current plan.',
                 reasons: ['Collaboration was removed.'], nextAction: 'Review shared workspace.', usefulForExploration: true,
                 blocksBuildReadiness: true, generatedFromSpineId: 'spine-old',
             }], alignedCount: 0, possiblyAffectedCount: 0, staleCount: 1, blockingCount: 1,
@@ -687,8 +687,8 @@ describe('deterministic readiness review', () => {
     it('does not give an advisory region false blocking precision from its artifact', () => {
         const outputAlignment: ProjectOutputAlignmentSummary = {
             outputs: [{
-                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'definitely_stale',
-                confidence: 'certain', summary: 'A proven mismatch remains somewhere in this output.', reasons: ['Mismatch found.'],
+                artifactId: 'screens', nodeId: 'screen_inventory', title: 'Screens', state: 'stale',
+                confidence: 'definite', summary: 'A proven mismatch remains somewhere in this output.', reasons: ['Mismatch found.'],
                 nextAction: 'Review screens.', usefulForExploration: true, blocksBuildReadiness: true,
                 generatedFromSpineId: 'spine-old',
             }], alignedCount: 0, possiblyAffectedCount: 0, staleCount: 1, blockingCount: 1,
