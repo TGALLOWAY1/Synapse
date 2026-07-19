@@ -1,6 +1,6 @@
 // Capture screenshots of the live interactive product tour (/tour) for the
 // README. The tour (src/components/tour/) is entirely live React with no static
-// images, so we drive it with Playwright and snapshot each of its six screens.
+// images, so we drive it with Playwright and snapshot each of its seven screens.
 //
 // Run with: npm run capture:screenshots
 // Requires the Chromium binary: `npx playwright install chromium` (one-time).
@@ -8,7 +8,7 @@
 // The script boots the Vite dev server itself, seeds the tour-completed flag so
 // the tour opens in Overview mode (progress rail visible), forces
 // prefers-reduced-motion so animated sequences settle to their final state, then
-// walks the six screens (ArrowRight) and writes one PNG per beat.
+// walks the seven screens (ArrowRight) and writes one PNG per beat.
 
 import { spawn } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -43,6 +43,7 @@ const SHOTS = [
     'tour-idea.png',
     'tour-spec.png',
     'tour-refine.png',
+    'tour-decisions.png',
     'tour-versions.png',
     'tour-assets.png',
     'tour-connections.png',
@@ -50,7 +51,7 @@ const SHOTS = [
 
 // Per-screen settle time before capture. The Assets screen runs a sequential
 // asset-generation sequence, so it gets the longest wait.
-const SETTLE_MS = [2200, 2600, 2200, 2200, 5000, 3000];
+const SETTLE_MS = [2200, 2600, 2200, 2200, 2200, 5000, 3000];
 
 function startDevServer() {
     const child = spawn('npm', ['run', 'dev', '--', '--port', String(PORT), '--strictPort'], {

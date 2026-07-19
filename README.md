@@ -84,7 +84,7 @@
 > **[🌐 Live app: synapse-prd.vercel.app](https://synapse-prd.vercel.app)** — and take the interactive tour with **no sign-up and no API key**. The tour rebuilds the entire workflow as native, clickable UI on local demo data: it never calls an LLM, never touches the backend, and exposes no user data.
 
 <!--
-### The end-to-end workflow, in six beats
+### The end-to-end workflow, in seven beats
 
 <table>
 <tr>
@@ -113,32 +113,43 @@ Highlight any passage → **Clarify / Expand / Specify / Alternative / Replace**
 </td>
 <td width="50%" valign="top">
 
-**4 · Nothing gets lost** 🕓
-Every change appends a new **version** with a section-aware diff, change-source badge, and one-click restore.
+**4 · Challenge the plan — decisions stay yours** ⚖️
+The **Decision Center** queues the choices and assumptions hiding in the spec. Suggested options carry a visually-distinct (never preselected) recommendation; you record the verdict, **preview its exact plan impact**, and apply it explicitly through a version-safe write.
 
 </td>
 </tr>
 <tr>
 <td><img width="100%" alt="Refine a passage" src="public/screenshots/tour-refine.png" /></td>
-<td><img width="100%" alt="Version timeline with diff" src="public/screenshots/tour-versions.png" /></td>
+<td><img width="100%" alt="Decision Center — record a verdict, preview impact, apply explicitly" src="public/screenshots/tour-decisions.png" /></td>
 </tr>
 <tr>
 <td width="50%" valign="top">
 
-**5 · One PRD → every asset** 🎨
-Mark final → screen inventory, data model, flows, design system, implementation plan + multi-fidelity mockups (generated *or* your own uploads) + annotated SVGs generate **in parallel** from one source of truth.
+**5 · Nothing gets lost** 🕓
+Every change appends a new **version** with a section-aware diff, change-source badge, and one-click restore.
 
 </td>
 <td width="50%" valign="top">
 
-**6 · Everything stays connected** 🔌
+**6 · One PRD → every asset** 🎨
+Mark final → screen inventory, data model, flows, design system, implementation plan + multi-fidelity mockups (generated *or* your own uploads) + annotated SVGs generate **in parallel** from one source of truth.
+
+</td>
+</tr>
+<tr>
+<td><img width="100%" alt="Version timeline with diff" src="public/screenshots/tour-versions.png" /></td>
+<td><img width="100%" alt="Generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" /></td>
+</tr>
+<tr>
+<td colspan="2" valign="top">
+
+**7 · Everything stays connected** 🔌
 Artifacts carry source refs back to the spine; staleness is detected automatically as the PRD evolves.
 
 </td>
 </tr>
 <tr>
-<td><img width="100%" alt="Generate every downstream asset in parallel" src="public/screenshots/tour-assets.png" /></td>
-<td><img width="100%" alt="Connections graph" src="public/screenshots/tour-connections.png" /></td>
+<td colspan="2"><img width="100%" alt="Connections graph" src="public/screenshots/tour-connections.png" /></td>
 </tr>
 </table>
 -->
@@ -192,10 +203,12 @@ How to generate: run a few PRD + artifact bundles, open /metrics, and read the s
 |---|---|
 | **💡 Idea entry** | **🧠 Spec generation (live waves)** |
 | ![Idea](public/screenshots/tour-idea.png) | ![Spec](public/screenshots/tour-spec.png) |
-| **✍️ Refine a passage** | **🕓 Version history & diff** |
-| ![Refine](public/screenshots/tour-refine.png) | ![Versions](public/screenshots/tour-versions.png) |
-| **🎨 Generated assets** | **🔌 Connections graph** |
-| ![Assets](public/screenshots/tour-assets.png) | ![Connections](public/screenshots/tour-connections.png) |
+| **✍️ Refine a passage** | **⚖️ Decision Center** |
+| ![Refine](public/screenshots/tour-refine.png) | ![Decisions](public/screenshots/tour-decisions.png) |
+| **🕓 Version history & diff** | **🎨 Generated assets** |
+| ![Versions](public/screenshots/tour-versions.png) | ![Assets](public/screenshots/tour-assets.png) |
+| **🔌 Connections graph** | |
+| ![Connections](public/screenshots/tour-connections.png) | |
 
 Screenshot gaps to fill: mobile layout, dark mode, the /metrics dashboard, and a generated artifact. Regenerate via npm run capture:screenshots.
 ==================================================================== -->

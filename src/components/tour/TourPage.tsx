@@ -10,11 +10,12 @@ import { TourNav } from './TourNav';
 import { TourProgressRail } from './TourProgressRail';
 import { ModeToggle } from './ModeToggle';
 
-// Each screen is its own lazily-loaded chunk so all six never load at once.
+// Each screen is its own lazily-loaded chunk so all seven never load at once.
 const SCREENS: ComponentType<ScreenProps>[] = [
     lazy(() => import('./screens/ScreenIdea')),
     lazy(() => import('./screens/ScreenSpecGeneration')),
     lazy(() => import('./screens/ScreenRefine')),
+    lazy(() => import('./screens/ScreenDecisions')),
     lazy(() => import('./screens/ScreenVersions')),
     lazy(() => import('./screens/ScreenAssets')),
     lazy(() => import('./screens/ScreenConnections')),

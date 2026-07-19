@@ -47,9 +47,9 @@ artifact or asset type, a behavior shown in the interactive tour
 gate, preflight clarification, snapshots, or the getting-started flow — review
 `README.md` in the same change and update it:
 
-- Keep the feature tour aligned with the live product tour's six-beat narrative
-  (Idea → Spec generation → Refine → Versions → Assets → Connections) so the
-  README and `/tour` tell the same story.
+- Keep the feature tour aligned with the live product tour's seven-beat
+  narrative (Idea → Spec generation → Refine → Decisions → Versions → Assets →
+  Connections) so the README and `/tour` tell the same story.
 - Keep referenced screenshots in `public/screenshots/` and the screenshots a
   feature describes consistent with the current UI; if a screenshot no longer
   matches, flag it rather than leaving a misleading image.

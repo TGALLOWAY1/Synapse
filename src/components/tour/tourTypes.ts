@@ -28,14 +28,15 @@ export interface TourScreenMeta {
 }
 
 /**
- * The six tour screens, in guided order. The index in this array is the single
- * source of truth for "which screen" — reducer, rail, counter and container all
- * key off it.
+ * The seven tour screens, in guided order. The index in this array is the
+ * single source of truth for "which screen" — reducer, rail, counter and
+ * container all key off it.
  */
 export const TOUR_SCREENS: TourScreenMeta[] = [
     { id: 'idea', title: 'Start with a single idea', shortLabel: 'Idea' },
     { id: 'spec', title: 'AI builds the spec section by section', shortLabel: 'Generation' },
     { id: 'refine', title: 'Refine specific parts of the document', shortLabel: 'Refine' },
+    { id: 'decisions', title: 'Challenge the plan — the decisions stay yours', shortLabel: 'Decisions' },
     { id: 'versions', title: 'Nothing gets lost — every change is versioned', shortLabel: 'Versions' },
     { id: 'assets', title: 'Commit the reasoning, then generate outputs', shortLabel: 'Build' },
     { id: 'connections', title: 'Everything stays connected', shortLabel: 'Connected' },

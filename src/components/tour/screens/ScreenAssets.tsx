@@ -11,7 +11,7 @@ const ASSET_GEN_MS = 650;
 const allDone = () => TOUR_ASSETS.map(() => 'done' as StepStatus);
 
 /**
- * Screen 5 (hero) — commitment and output generation are separate actions.
+ * Screen 6 (hero) — commitment and output generation are separate actions.
  * Downstream workspace outputs generate one at a time, grouped like the Build
  * page groups them (Project Foundation → Experience → Architecture →
  * Development). Each finished asset is clickable and opens a lightweight preview

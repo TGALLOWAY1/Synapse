@@ -110,7 +110,119 @@ export const REFINE_DEMO = {
     } satisfies Record<RefineAction, RefineScript>,
 };
 
-/* ── Screen 4 — Version everything ─────────────────────────────────────── */
+/* ── Screen 4 — Decision Center (the Challenge stage) ──────────────────── */
+
+/**
+ * Demo content for the Decision Center screen. Mirrors the real Challenge
+ * stage (`src/components/review/DecisionCenter.tsx` inside `ReviewWorkspace`):
+ * a queue of planning records split into "Needs attention" vs "Resolved &
+ * history", suggested options with a visually-distinct (never preselected)
+ * recommendation, an explicit user verdict, and a plan-alignment impact
+ * preview that is applied through a version-safe write. Keep the vocabulary in
+ * sync with the live component if it changes.
+ */
+
+export interface DecisionOptionDemo {
+    id: string;
+    label: string;
+    description: string;
+    /** Short "benefit · cost" style tradeoff line. */
+    tradeoffs: string;
+}
+
+export interface DecisionProposalDemo {
+    id: string;
+    targetLabel: string;
+    section: string;
+    current: string;
+    proposed: string;
+    reason: string;
+}
+
+export const DECISION_DEMO = {
+    /** Tab strip mirrors the live Challenge workspace tabs. */
+    challengeTabs: ['Review findings', 'Decision Center', 'Review history'],
+    decision: {
+        id: 'collab-model',
+        conditionLabel: 'Needs a decision',
+        title: 'How should collaboration work at launch?',
+        statement:
+            'The spec references "working with collaborators" but never commits to a collaboration model.',
+        whyItMatters:
+            'This choice shapes the data model, the sync architecture, and the size of the first release.',
+        source: 'Adversarial review · Scope specialist',
+        nextAction: 'Record the product choice that should govern the plan.',
+        recommendedId: 'async',
+        recommendationRationale:
+            'Async feedback delivers the core value (finishing songs together) without the real-time infrastructure cost, and it can be upgraded later.',
+        options: [
+            {
+                id: 'async',
+                label: 'Async comments on shared tracks',
+                description: 'Collaborators leave time-stamped comments and version notes on a shared mix.',
+                tradeoffs: 'Ships fast · No live presence',
+            },
+            {
+                id: 'realtime',
+                label: 'Real-time co-editing sessions',
+                description: 'Two musicians edit the same arrangement live, like a shared document.',
+                tradeoffs: 'Strongest demo · Heavy sync infrastructure',
+            },
+        ] satisfies DecisionOptionDemo[],
+        preview: {
+            before: 'Collaboration is mentioned as a goal but no feature, entity, or milestone commits to a model.',
+            after: 'Async comments on shared tracks becomes a v1 feature with a Comment entity and a milestone.',
+            affectedSections: ['4. Key Features', '5. Architecture'],
+            affectedOutputs: ['Data Model', 'Implementation Plan'],
+            proposals: [
+                {
+                    id: 'features',
+                    targetLabel: 'PRD · Key Features',
+                    section: '4. Key Features',
+                    current: '"Collaboration tools for working with other musicians."',
+                    proposed: '"Async collaboration: time-stamped comments and version notes on shared tracks."',
+                    reason: 'The feature list must name the chosen model so downstream outputs stop guessing.',
+                },
+                {
+                    id: 'data-model',
+                    targetLabel: 'Data Model',
+                    section: 'Entities',
+                    current: 'No entity stores collaborator feedback.',
+                    proposed: 'Add a Comment entity (author, track, timestamp, body) linked to Song.',
+                    reason: 'Async comments need a home in the schema before the Build stage.',
+                },
+            ] satisfies DecisionProposalDemo[],
+        },
+    },
+    assumption: {
+        id: 'pay-before-finish',
+        conditionLabel: 'Needs validation',
+        title: 'Musicians will pay before finishing their first song',
+        statement:
+            'The monetization plan assumes users subscribe during onboarding, before the product has proven it can get a song finished.',
+        whyItMatters:
+            'If payment comes after the first finished song instead, the pricing page, onboarding flow, and revenue model all change.',
+        source: 'Imported from PRD · Risks',
+        nextAction:
+            'Decide whether to test this assumption, correct it, or explicitly proceed with the uncertainty.',
+        acceptedNote:
+            'Accepted for planning · not validated. The uncertainty stays visible on the record instead of silently becoming a fact.',
+    },
+    resolved: {
+        id: 'platform',
+        conditionLabel: 'Answer recorded',
+        title: 'Which platform ships first?',
+        resolution: 'Mobile-first on iOS; desktop web follows once capture-to-finish is proven.',
+        rationale: 'Bedroom producers capture ideas on their phones — meet them there first.',
+        source: 'Preflight clarification',
+        history: [
+            { label: 'Confirmed by you', when: 'Yesterday, 4:12 PM' },
+            { label: 'Impact preview applied to plan', when: 'Yesterday, 4:15 PM' },
+        ],
+    },
+};
+
+/* ── Screen 5 — Version everything ─────────────────────────────────────── */
 
 export interface VersionEntry {
     id: string; // 'v1'..'v4'
@@ -180,7 +292,7 @@ export const VERSIONS: VersionEntry[] = [
     },
 ];
 
-/* ── Screens 5 & 6 — Assets + connected workspace ──────────────────────── */
+/* ── Screens 6 & 7 — Assets + connected workspace ──────────────────────── */
 
 export type AssetPreviewKind = 'flow' | 'screens' | 'table' | 'grid' | 'roadmap' | 'palette' | 'prompt';
 
@@ -293,7 +405,7 @@ export const TOUR_ASSETS: TourAsset[] = [
     },
 ];
 
-/* ── Screen 6 — connected workspace chrome ─────────────────────────────── */
+/* ── Screen 7 — connected workspace chrome ─────────────────────────────── */
 
 export const TOUR_PROJECT = {
     name: 'Melody Studio',

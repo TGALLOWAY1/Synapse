@@ -38,7 +38,7 @@ describe('TourNav', () => {
 
     it('gives every dot a >=24px hit-area via sizing classes', () => {
         render(<TourNav activeIndex={0} isLast={false} onPrev={vi.fn()} onNext={vi.fn()} onFinish={vi.fn()} onGoto={vi.fn()} />);
-        const dot = screen.getByRole('button', { name: 'Go to step 1 of 6' });
+        const dot = screen.getByRole('button', { name: `Go to step 1 of ${TOTAL_STEPS}` });
         expect(dot.className).toMatch(/min-h-6/);
         expect(dot.className).toMatch(/min-w-7/);
     });
