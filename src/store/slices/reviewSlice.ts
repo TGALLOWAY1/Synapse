@@ -41,6 +41,7 @@ import type {
     ProjectState,
 } from '../types';
 import { validateReviewIssueRecovery } from '../../lib/review';
+import { pruneReviewCollections } from '../../lib/collectionRetention';
 
 export type ReviewSlice = Pick<
     ProjectState,
@@ -151,12 +152,41 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
                 ...input,
                 id,
                 projectId,
-                sequenceNumber: existing.length + 1,
+                // Max-based (not length-based) so numbering stays unique and
+                // monotonic after retention pruning removes older runs.
+                sequenceNumber: existing.reduce((max, item) => Math.max(max, item.sequenceNumber), 0) + 1,
                 status: 'queued',
                 synthesisStatus: 'pending',
                 createdAt: now,
             };
-            return { reviewRuns: { ...state.reviewRuns, [projectId]: [...existing, run] } };
+            const runs = [...existing, run];
+            // Retention: appending a run is the only moment review history is
+            // pruned (see src/lib/collectionRetention.ts). Protect the most
+            // recent completed project-scope challenge of the LATEST spine —
+            // it may be the substantive run readiness reviews rely on even if
+            // newer narrow/focus runs pushed it outside the count window.
+            const latestSpineId = (state.spineVersions[projectId] ?? []).find(item => item.isLatest)?.id;
+            let substantiveCandidateId: string | undefined;
+            if (latestSpineId) {
+                for (let index = runs.length - 1; index >= 0; index -= 1) {
+                    const candidate = runs[index];
+                    if (candidate.scope.kind === 'project'
+                        && candidate.status === 'complete'
+                        && candidate.synthesisStatus === 'complete'
+                        && candidate.sourceManifest.spineVersionId === latestSpineId) {
+                        substantiveCandidateId = candidate.id;
+                        break;
+                    }
+                }
+            }
+            return pruneReviewCollections({
+                reviewRuns: { ...state.reviewRuns, [projectId]: runs },
+                specialistRuns: state.specialistRuns,
+                reviewFindings: state.reviewFindings,
+                reviewIssues: state.reviewIssues,
+            }, projectId, {
+                protectedReviewIds: substantiveCandidateId ? [substantiveCandidateId] : [],
+            });
         });
         return { reviewId: id };
     },

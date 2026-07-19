@@ -111,6 +111,47 @@ persistence. It flushes pending writes on `beforeunload`, `pagehide`, **and**
 `visibilitychange → hidden` (the last two are the reliable mobile lifecycle
 events).
 
+**Retention caps (`src/lib/collectionRetention.ts`):** the machine-generated
+review/readiness/downstream history collections are growth-bounded at **write
+time** by one shared, pure, unit-tested engine — pruning runs only inside the
+slice action that appends a new *root* record (`createReviewRun`,
+`createReadinessReview`, and the three downstream plan-append sites), inside
+the same `set((state) => …)` updater (concurrency rule holds; unchanged maps
+keep their reference for selector stability and sync's reference-diffing).
+Because pruning only ever coincides with an append that already changed the
+relevant currentness/aggregate inputs, it never spontaneously flips a
+current record stale. Pruned data drops out of sync bundles and future
+snapshots too (they derive from the same collections) — that is intended;
+nothing in `projectBundle`/snapshot/sync code assumes these collections are
+complete. The caps (deliberately generous):
+
+- **Adversarial review** — `reviewRuns` capped at
+  `REVIEW_RUN_RETENTION_LIMIT` (20) most-recent runs per project;
+  `specialistRuns`/`reviewFindings`/`reviewIssues` cascade with their run.
+  Never pruned: in-flight runs (queued/running/synthesizing), runs that still
+  have an **open or deferred** issue, and the most recent completed
+  project-scope challenge of the latest spine (the substantive-challenge
+  candidate readiness relies on). `ReviewRun.sequenceNumber` is now assigned
+  max-based (not `length + 1`) so "Review N" labels stay unique after pruning.
+- **Readiness** — `readinessReviews` capped at
+  `READINESS_REVIEW_RETENTION_LIMIT` (20) per project, but a review referenced
+  by **any** commitment event is kept forever (commit/reopen dereference and
+  integrity-check their review by id). `readinessCommitmentEvents` are **never
+  pruned** — user authority, append-only, user-rate-bounded.
+- **Downstream updates** — `downstreamUpdatePlans` capped at
+  `DOWNSTREAM_PLAN_RETENTION_LIMIT_PER_ARTIFACT` (10) per **artifact lineage**
+  (each selective application rebases into a new plan for the same artifact, so
+  the newest plan per artifact — the only one that can be current — is always
+  kept). All six dependent collections (plan events, proposals, review events,
+  applications, verifications, verification events) cascade with their plan /
+  proposal / verification, so no retained record dereferences a pruned one.
+- **Exempt entirely:** `planningRecords` — the append-only
+  `PlanningRecord`/`DecisionEvent` aggregate of user decisions, assumptions,
+  and risks is durable user authority and MUST NOT be capped (its size is
+  bounded by assumption/decision count, not by run history); version-history
+  collections (`spineVersions`, `artifactVersions`, `historyEvents`,
+  `branches`, …) are also never pruned — history is never mutated or deleted.
+
 ### User accounts, per-user projects & encrypted provider keys
 
 See `docs/AUTH_AND_PROVIDER_KEYS.md` for the full design. Key cross-cutting

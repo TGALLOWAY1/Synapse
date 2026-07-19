@@ -27,6 +27,7 @@ import {
     readinessReviewSnapshotHash,
     sealReadinessCommitmentEvent,
 } from '../../lib/planning/readinessCommitment';
+import { pruneReadinessReviews } from '../../lib/collectionRetention';
 
 export type ReadinessSlice = Pick<ProjectState,
     | 'readinessReviews'
@@ -192,11 +193,18 @@ export const createReadinessSlice: StateCreator<ProjectState, [], [], ReadinessS
                 return state;
             }
             result = { status: 'created', reviewId: review.id, review };
+            // Retention: appending a review is the only moment readiness
+            // checkpoints are pruned. Commitment-referenced reviews are always
+            // kept; commitment events themselves are user authority and are
+            // never pruned (see src/lib/collectionRetention.ts).
             return {
-                readinessReviews: {
-                    ...state.readinessReviews,
-                    [projectId]: [...(state.readinessReviews[projectId] ?? []), review],
-                },
+                readinessReviews: pruneReadinessReviews({
+                    readinessReviews: {
+                        ...state.readinessReviews,
+                        [projectId]: [...(state.readinessReviews[projectId] ?? []), review],
+                    },
+                    readinessCommitmentEvents: state.readinessCommitmentEvents,
+                }, projectId),
                 historyEvents: {
                     ...state.historyEvents,
                     [projectId]: [...(state.historyEvents[projectId] ?? []), {

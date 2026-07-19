@@ -70,6 +70,18 @@ adapts persisted review/planning state into the responsive UI in
   recovery exports, and snapshots. Keep review/planning collections in
   `userScope.MERGEABLE_COLLECTIONS`, demo cleanup, and the explicit
   `PERSISTENT_STORE_ACTIONS` write guard.
+- **Retention:** the machine-generated run/checkpoint history (review runs and
+  their specialist runs/findings/issues, readiness reviews, downstream update
+  plans and their proposal/application/verification chains) is capped at write
+  time through `src/lib/collectionRetention.ts` (see the "Retention caps"
+  section in STATE_AND_AUTH.md for limits and the cascade/protection rules).
+  **`planningRecords` and `readinessCommitmentEvents` are exempt** — they are
+  the append-only user-authority aggregates and are never pruned; do not add a
+  cap to them, and never let a retention pass touch `DecisionEvent[]` or
+  assumption-validation events. Runs with open/deferred issues, commitment-
+  referenced readiness reviews, and the current substantive challenge are
+  protected from pruning so nothing readiness/commitment currently relies on
+  disappears.
 
 The full normalized Planning Knowledge Graph is deliberately future work; see
 `docs/DECISION_CENTER_DESIGN.md`. Do not introduce composite planning-confidence
