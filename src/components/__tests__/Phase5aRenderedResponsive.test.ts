@@ -26,7 +26,7 @@ describe('Phase 5A rendered mobile release regressions', () => {
         expect(artifacts).toContain('role={isMobile && mobileSidebarOpen ? \'dialog\' : undefined}');
         expect(artifacts).toContain('aria-modal={isMobile && mobileSidebarOpen ? true : undefined}');
         expect(artifacts).toContain('aria-hidden={isMobile && mobileSidebarOpen ? true : undefined}');
-        expect(artifacts).toContain('inert={isMobile && mobileSidebarOpen ? \'\' : undefined}');
+        expect(artifacts).toContain('inert={isMobile && mobileSidebarOpen ? true : undefined}');
         expect(artifacts).toContain("if (event.key === 'Escape')");
     });
 });

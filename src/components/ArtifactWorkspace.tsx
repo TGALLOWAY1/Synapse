@@ -1816,7 +1816,7 @@ export function ArtifactWorkspace({
             </aside>
 
             {/* Main pane */}
-            <main ref={mainRef} aria-hidden={isMobile && mobileSidebarOpen ? true : undefined} inert={isMobile && mobileSidebarOpen ? '' : undefined} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
+            <main ref={mainRef} aria-hidden={isMobile && mobileSidebarOpen ? true : undefined} inert={isMobile && mobileSidebarOpen ? true : undefined} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
                 {/* Mobile-only header with sidebar toggle and current artifact name */}
                 <div className="md:hidden sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-white border-b border-neutral-200">
                     <button
