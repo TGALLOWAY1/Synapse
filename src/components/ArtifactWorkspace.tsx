@@ -2071,7 +2071,7 @@ export function ArtifactWorkspace({
                     }));
                 return (
                     <VersionHistoryPanel
-                        title="Artifact version history"
+                        title="Output version history"
                         entries={entries}
                         restoreKind="artifact"
                         getCompareInput={(id) => ({

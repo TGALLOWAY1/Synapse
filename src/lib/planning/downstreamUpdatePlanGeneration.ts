@@ -657,7 +657,7 @@ export function deriveDownstreamUpdatePlans(input: DeriveDownstreamUpdatePlansIn
             },
             items,
             preservedArtifactSummary: items.every(item => item.region.kind === 'artifact_review')
-                ? 'No artifact content will be changed. Existing work remains useful while this bounded review is unresolved.'
+                ? 'No output content will be changed. Existing work remains useful while this focused review is unresolved.'
                 : `Only ${items.length} identified region${items.length === 1 ? '' : 's'} need attention. Unlisted regions remain preserved and usable.`,
             createdAt,
         }));

@@ -247,7 +247,7 @@ describe('DownstreamUpdatePlanReview', () => {
         expect(within(definite).getByText(/Remove only this exact region/)).toBeInTheDocument();
 
         fireEvent.click(await within(definite).findByRole('button', { name: 'Accept proposal' }));
-        expect(await within(definite).findByText(/artifact has not changed yet/)).toBeInTheDocument();
+        expect(await within(definite).findByText(/output has not changed yet/)).toBeInTheDocument();
         expect(useProjectStore.getState().artifactVersions[projectId]).toHaveLength(1);
 
         fireEvent.click(await within(definite).findByRole('button', { name: 'Apply approved change' }));

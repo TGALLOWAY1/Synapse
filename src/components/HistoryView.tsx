@@ -211,7 +211,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                                                         onClick={() => setSelectedReadinessReviewId(event.readinessReviewId!)}
                                                         className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-200 px-3 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 sm:w-auto"
                                                     >
-                                                        Inspect checkpoint
+                                                        Inspect readiness review
                                                     </button>
                                                 )}
                                             </div>

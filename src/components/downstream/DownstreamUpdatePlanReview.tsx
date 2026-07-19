@@ -430,7 +430,7 @@ export function DownstreamUpdatePlanReview({
                             <div className="min-w-0 text-xs leading-relaxed text-neutral-600">
                                 <div className="font-semibold text-neutral-900">Unaffected work is preserved</div>
                                 <p className="mt-0.5 break-words">{plan.preservedArtifactSummary}</p>
-                                <p className="mt-1">Planning does not change artifact content. Only a separately approved selective proposal can create a new version; Synapse does not regenerate the full output or clear alignment automatically.</p>
+                                <p className="mt-1">Planning does not change output content. Only a separately approved proposed change can create a new version; Synapse does not regenerate the full output or clear alignment automatically.</p>
                             </div>
                         </div>
                     </footer>

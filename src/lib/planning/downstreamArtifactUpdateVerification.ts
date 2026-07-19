@@ -136,15 +136,15 @@ export function deriveDownstreamArtifactUpdateVerification(input: {
         // the only manual result that can currently be verified locally.
         if (manualRemovalMatches) {
             result = 'aligned';
-            reasoning = 'A local deterministic check found the exact bounded result in a manually updated artifact version.';
+            reasoning = 'A local deterministic check found the exact proposed result in a manually updated output version.';
             ambiguity = undefined;
         } else if (baseline?.found && current.found && baseline.contentHash === current.contentHash) {
             result = 'update_still_required';
             reasoning = 'The exact affected region is unchanged from the version that required attention.';
-            ambiguity = 'Apply or manually make the bounded change, then verify again.';
+            ambiguity = 'Apply or manually make the focused change, then verify again.';
         } else {
             result = 'review_recommended';
-            reasoning = 'The affected region changed manually, but it does not exactly match the bounded recommendation.';
+            reasoning = 'The affected region changed manually, but it does not exactly match the proposed change.';
             ambiguity = 'Review the current region rather than assuming the manual edit resolved the dependency.';
         }
     } else if (baseline?.found && current.found && baseline.contentHash === current.contentHash) {
@@ -323,7 +323,7 @@ export function projectDownstreamArtifactUpdateVerifications(input: {
                 artifactVersionId: currentVersion.id,
                 outcome,
                 deterministic: outcome === 'aligned',
-                explanation: verification?.reasoning ?? 'This current artifact version has not been re-verified against the affected region.',
+                explanation: verification?.reasoning ?? 'This current output version has not been re-verified against the affected region.',
                 nextAction: outcome === 'aligned'
                     ? 'Continue using the verified region.'
                     : outcome === 'update_still_required'
@@ -457,7 +457,7 @@ export function reconcileProjectOutputAlignment(
             ...output,
             state: 'possibly_affected' as const,
             confidence: relevant.some(item => item.outcome === 'review_recommended') ? 'possible' as const : 'unknown' as const,
-            summary: 'The current artifact version still has one or more affected regions that need bounded review or verification.',
+            summary: 'The current output version still has one or more affected regions that need focused review or verification.',
             reasons: relevant.filter(item => item.outcome !== 'aligned').map(item => item.explanation),
             nextAction: 'Review or verify the remaining exact affected regions.',
             blocksBuildReadiness: relevant.some(item => item.implementationCritical && item.certainty === 'definite'),

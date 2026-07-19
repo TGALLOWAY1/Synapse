@@ -77,14 +77,14 @@ export function rebaseDownstreamUpdatePlanAfterApplication(input: {
                     kind: 'deterministic_reference',
                     quality: resolved.found ? 'direct' : 'incomplete',
                     summary: resolved.found
-                        ? `Rebound to the exact region in artifact version ${input.resultVersion.versionNumber}.`
+                        ? `Matched to the exact region in output Version ${input.resultVersion.versionNumber}.`
                         : `The predecessor region could not be resolved in artifact version ${input.resultVersion.versionNumber}.`,
                     sourceId: input.resultVersion.id,
                     ...(resolved.contentHash ? { contentHash: resolved.contentHash } : {}),
                 },
             ],
             ambiguity: regionState === 'missing'
-                ? 'Review the current artifact structure before choosing a bounded update.'
+                ? 'Review the current output structure before choosing a focused update.'
                 : regionState === 'changed'
                     ? 'A sibling application changed this region; review the fresh proposal before authorizing any update.'
                     : item.ambiguity,
@@ -132,8 +132,8 @@ export function rebaseDownstreamUpdatePlanAfterApplication(input: {
             })),
         },
         preservedArtifactSummary: items.length === 0
-            ? 'All bounded items from this update plan were applied or reconciled. Unlisted artifact work remains preserved.'
-            : `The applied region is preserved in history. ${items.length} remaining region${items.length === 1 ? '' : 's'} were rebound to this exact artifact version.`,
+            ? 'All focused items from this update plan were applied or reconciled. Unlisted output work remains preserved.'
+            : `The applied region is preserved in history. ${items.length} remaining region${items.length === 1 ? '' : 's'} now refer to the new output version.`,
         createdAt: input.createdAt,
     });
 

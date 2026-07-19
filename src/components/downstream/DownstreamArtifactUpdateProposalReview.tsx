@@ -304,9 +304,9 @@ export function DownstreamArtifactUpdateProposalReview({
         setPending(undefined);
         setRationale('');
         setMessage({ kind: 'success', text: action === 'accepted' || action === 'edited'
-            ? 'Your approval is recorded. The artifact has not changed yet.'
+            ? 'Your approval is recorded. The output has not changed yet.'
             : action === 'deferred'
-                ? 'This proposal is deferred. The update-plan item remains unresolved and no artifact content changed.'
+                ? 'This proposal is deferred. The update-plan item remains unresolved and no output content changed.'
             : 'Your review choice is preserved in proposal history.' });
         if (action === 'requested_another' || action === 'provided_context') prepare();
     };
@@ -319,7 +319,7 @@ export function DownstreamArtifactUpdateProposalReview({
         setMessage(result.status === 'applied'
             ? { kind: 'success', text: 'Applied as a new output version. Alignment still requires verification.' }
             : { kind: 'error', text: result.reason === 'stale'
-                ? 'Nothing changed. The proposal is stale and must be prepared again against the current artifact.'
+                ? 'Nothing changed. The proposal is stale and must be prepared again against the current output.'
                 : 'Nothing changed. The approved proposal could not be applied safely.' });
     };
 
@@ -333,7 +333,7 @@ export function DownstreamArtifactUpdateProposalReview({
                 : 'Verification is recorded. The result remains advisory and the affected region still needs attention.' }
             : { kind: 'error', text: result.reason === 'source_stale'
                 ? 'The planning source changed. Create a current update plan before verifying this output.'
-                : 'The current artifact could not be safely bound to this update-plan item.' });
+                : 'The current output could not be safely matched to this update-plan item.' });
     };
 
     const recordVerificationReview = (action: 'confirmed' | 'rejected' | 'deferred') => {
