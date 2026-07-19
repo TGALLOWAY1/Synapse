@@ -228,7 +228,7 @@ ${ctx.platform ? PLATFORM_NOTE[ctx.platform] : ''}`,
 ${features !== UNAVAILABLE ? `Features: ${features}` : ''}
 
 Return JSON with:
-- mvpScope: { mvp (array of feature names/descriptions), v1 (array), later (array), rationale? } — the MVP must be opinionated, coherent, and shippable; defer aggressively rather than listing every feature.
+- mvpScope: { mvp (array), v1 (array), later (array), rationale? } — every mvp/v1/later entry MUST begin with the id and exact name of a feature from the Features list above, formatted "f1: Feature Name — brief scope note" (the scope note is optional). Do NOT introduce capabilities that are not in the Features list: a sub-capability belongs in the scope note of the feature that owns it, never as a standalone scope entry. (Only if the Features list is unavailable, use conservative feature names without ids.) The MVP must be opinionated, coherent, and shippable; defer aggressively rather than listing every feature.
 - successMetrics: array of { name, target? } — 5–8 measurable product success criteria spanning activation, engagement, conversion, quality, and operational metrics. State the decision-level target; do NOT specify instrumentation, event names, or tracking implementation — analytics detail belongs to downstream artifacts.`,
         };
     },
