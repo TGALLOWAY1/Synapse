@@ -3,7 +3,9 @@ import { DEMO_PROJECT_ID } from '../../data/demoProject';
 import {
     ProjectCapabilityError,
     assertProjectCapability,
+    canPerformProjectAction,
     getProjectCapabilities,
+    PERSISTENT_STORE_ACTIONS,
 } from '../projectCapabilities';
 
 describe('project capabilities', () => {
@@ -44,5 +46,21 @@ describe('project capabilities', () => {
     it('rejects a protected demo mutation with a stable user-facing error', () => {
         expect(() => assertProjectCapability({ id: DEMO_PROJECT_ID }, 'canGenerateArtifacts'))
             .toThrow('This example project is read-only.');
+    });
+
+    it('maps the coarse action vocabulary onto the same policy', () => {
+        expect(canPerformProjectAction(DEMO_PROJECT_ID, 'explore')).toBe(true);
+        for (const action of ['persist', 'generate', 'image', 'external'] as const) {
+            expect(canPerformProjectAction(DEMO_PROJECT_ID, action)).toBe(false);
+            expect(canPerformProjectAction('ordinary-project', action)).toBe(true);
+        }
+    });
+
+    it('guards every downstream proposal authority and history write at the shared persistence boundary', () => {
+        for (const action of [
+            'recordDownstreamArtifactUpdateProposal', 'appendDownstreamArtifactUpdateReviewEvent',
+            'recordDownstreamArtifactUpdateApplication', 'recordDownstreamArtifactUpdateVerification',
+            'appendDownstreamArtifactUpdateVerificationEvent',
+        ]) expect(PERSISTENT_STORE_ACTIONS.has(action)).toBe(true);
     });
 });

@@ -11,11 +11,11 @@ export type DemoHydrationResult = { available: boolean };
 // a repeat pass cheap whenever the cached demo is still current.
 let inFlight: Promise<DemoHydrationResult> | null = null;
 
-export function hydrateDemoProject(): Promise<DemoHydrationResult> {
+export function hydrateDemoProject(options?: { force?: boolean }): Promise<DemoHydrationResult> {
     if (!inFlight) {
         inFlight = useProjectStore
             .getState()
-            .loadDemoProject()
+            .loadDemoProject(options)
             .finally(() => {
                 inFlight = null;
             });

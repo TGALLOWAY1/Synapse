@@ -139,6 +139,9 @@ describe('public demo mutation boundary', () => {
             [],
             'prompt',
         )).not.toThrow();
-        expect(useProjectStore.getState().getLatestSpine(editableId)?.isFinal).toBe(true);
+        // The legacy markSpineFinal(…, true) is deliberately inert for ordinary
+        // projects too: only commitReadinessReview may project a reviewed user
+        // commitment onto isFinal (it exists to reopen old commitments).
+        expect(useProjectStore.getState().getLatestSpine(editableId)?.isFinal).toBe(false);
     });
 });

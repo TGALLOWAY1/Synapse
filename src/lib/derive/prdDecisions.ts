@@ -13,20 +13,24 @@ export { resolveScopeFeature } from './scopeFeatureMatch';
 export type { ScopeFeatureMatch } from './scopeFeatureMatch';
 
 const CONFIDENCE_RANK: Record<string, number> = { high: 0, med: 1, low: 2 };
+const MATERIALITY_RANK: Record<string, number> = { blocking: 0, high: 1, normal: 2, low: 3 };
 
 /** Missing/unknown confidence sorts last, after low. */
 const confidenceRank = (a: Assumption): number =>
     CONFIDENCE_RANK[a.confidence] ?? 3;
+const materialityRank = (a: Assumption): number => MATERIALITY_RANK[a.materiality ?? 'normal'] ?? 2;
 
 /**
- * Order assumptions by confidence, highest first. Deterministic and stable:
- * items sharing a confidence keep their original relative order, and
- * missing/unknown confidence values sort last.
+ * Order assumptions by consequence first, then confidence. Confidence is
+ * plausibility, not priority; a speculative product-defining assumption must
+ * appear before an easy but low-impact confirmation.
  */
 export function sortAssumptionsByConfidence(assumptions: Assumption[]): Assumption[] {
     return assumptions
         .map((a, i) => ({ a, i }))
-        .sort((x, y) => confidenceRank(x.a) - confidenceRank(y.a) || x.i - y.i)
+        .sort((x, y) => materialityRank(x.a) - materialityRank(y.a)
+            || confidenceRank(x.a) - confidenceRank(y.a)
+            || x.i - y.i)
         .map(x => x.a);
 }
 
@@ -56,6 +60,7 @@ export type DecisionLogEntry = {
     statement: string;
     note?: string;
     decidedAt?: number;
+    materiality?: Assumption['materiality'];
 };
 
 /**
@@ -80,6 +85,7 @@ export function deriveDecisionLog(prd: StructuredPRD): DecisionLogEntry[] {
             statement: a.statement,
             note: a.decisionNote || undefined,
             decidedAt: a.decidedAt,
+            materiality: a.materiality,
         });
     });
 

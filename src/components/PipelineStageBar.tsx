@@ -1,22 +1,26 @@
-import { FileText, Package, Clock } from 'lucide-react';
+import { FileText, Package, Clock, ShieldCheck } from 'lucide-react';
 import type { PipelineStage } from '../types';
 
 interface PipelineStageBarProps {
     currentStage: PipelineStage;
     onStageChange: (stage: PipelineStage) => void;
-    hasPRD: boolean;
+    canExploreOutputs: boolean;
+    isReadyToBuild: boolean;
+    canReview?: boolean;
 }
 
 const stages: { key: PipelineStage; label: string; description: string; icon: typeof FileText }[] = [
-    { key: 'prd', label: 'Project', description: 'The editable PRD and source of truth for downstream artifacts', icon: FileText },
-    { key: 'workspace', label: 'Assets', description: 'Generated build assets — data model, flows, screens, components, and more', icon: Package },
+    { key: 'prd', label: 'Plan', description: 'The working product plan, its reasoning state, and the most valuable next step', icon: FileText },
+    { key: 'review', label: 'Challenge', description: 'Decisions and adversarial review of the current working plan', icon: ShieldCheck },
+    { key: 'workspace', label: 'Build', description: 'Explore or review downstream outputs without confusing generation with readiness', icon: Package },
     { key: 'history', label: 'History', description: 'Chronological timeline of changes', icon: Clock },
 ];
 
-export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: PipelineStageBarProps) {
+export function PipelineStageBar({ currentStage, onStageChange, canExploreOutputs, isReadyToBuild, canReview = canExploreOutputs }: PipelineStageBarProps) {
     const isEnabled = (stage: PipelineStage): boolean => {
         if (stage === 'prd' || stage === 'history') return true;
-        if (stage === 'workspace') return hasPRD;
+        if (stage === 'review') return canReview;
+        if (stage === 'workspace') return canExploreOutputs;
         return false;
     };
 
@@ -29,11 +33,12 @@ export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: Pipeli
             : currentStage;
 
     return (
-        <div className="flex items-center gap-1 px-4 py-2 bg-neutral-900 border-b border-neutral-800">
+        <nav aria-label="Planning progression" className="grid grid-cols-4 gap-1 border-b border-neutral-800 bg-neutral-900 px-2 py-2 sm:px-4">
             {stages.map((stage) => {
                 const enabled = isEnabled(stage.key);
                 const active = activeKey === stage.key;
                 const Icon = stage.icon;
+                const label = stage.key === 'workspace' && !isReadyToBuild ? 'Explore' : stage.label;
 
                 return (
                     <button
@@ -41,8 +46,8 @@ export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: Pipeli
                         onClick={() => enabled && onStageChange(stage.key)}
                         disabled={!enabled}
                         title={stage.description}
-                        aria-label={`${stage.label}: ${stage.description}`}
-                        className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded-md transition ${
+                        aria-label={`${label}: ${stage.description}`}
+                        className={`flex min-h-11 min-w-0 items-center justify-center gap-1.5 rounded-md px-1.5 text-sm transition sm:px-3 ${
                             active
                                 ? 'bg-indigo-600 text-white'
                                 : enabled
@@ -50,11 +55,11 @@ export function PipelineStageBar({ currentStage, onStageChange, hasPRD }: Pipeli
                                     : 'text-neutral-600 cursor-not-allowed'
                         }`}
                     >
-                        <Icon size={14} />
-                        {stage.label}
+                        <Icon size={14} className="hidden shrink-0 sm:block" />
+                        <span className="truncate">{label}</span>
                     </button>
                 );
             })}
-        </div>
+        </nav>
     );
 }

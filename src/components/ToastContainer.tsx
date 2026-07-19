@@ -13,16 +13,17 @@ export function ToastContainer() {
     const { toasts, removeToast } = useToastStore();
 
     if (toasts.length === 0) return null;
+    const latestToastId = toasts.at(-1)?.id;
 
     return (
-        <div className="fixed bottom-4 right-4 z-[100] flex flex-col gap-2 max-w-sm w-full pointer-events-none">
+        <div className="pointer-events-none fixed bottom-4 left-4 right-4 z-[100] flex w-auto max-w-none flex-col gap-2 sm:left-auto sm:right-4 sm:w-full sm:max-w-sm">
             {toasts.map(toast => {
                 const style = TOAST_STYLES[toast.type];
                 const Icon = style.iconComponent;
                 return (
                     <div
                         key={toast.id}
-                        className={`pointer-events-auto ${style.bg} ${style.border} border rounded-lg shadow-lg p-4 flex items-start gap-3 animate-in slide-in-from-right-5 duration-200`}
+                        className={`pointer-events-auto ${latestToastId === toast.id ? 'flex' : 'hidden sm:flex'} ${style.bg} ${style.border} items-start gap-3 rounded-lg border p-4 shadow-lg animate-in slide-in-from-right-5 duration-200`}
                     >
                         <Icon size={18} className={`shrink-0 mt-0.5 ${style.icon}`} />
                         <div className="flex-1 min-w-0">
@@ -32,10 +33,12 @@ export function ToastContainer() {
                             )}
                         </div>
                         <button
+                            type="button"
+                            aria-label={`Dismiss ${toast.title}`}
                             onClick={() => removeToast(toast.id)}
-                            className="shrink-0 text-neutral-400 hover:text-neutral-600 transition"
+                            className="-m-3 inline-flex min-h-11 min-w-11 shrink-0 items-center justify-center text-neutral-400 transition hover:text-neutral-600"
                         >
-                            <X size={14} />
+                            <X size={14} aria-hidden="true" />
                         </button>
                     </div>
                 );

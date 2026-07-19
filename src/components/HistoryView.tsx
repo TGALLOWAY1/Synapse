@@ -1,6 +1,16 @@
 import { Clock, FileText, Package, MessageSquare, CheckCircle, XCircle, Pencil, RotateCcw } from 'lucide-react';
+import { useState } from 'react';
 import { useProjectStore } from '../store/projectStore';
 import type { HistoryEventType } from '../types';
+import {
+    compareReadinessReviewCurrentness,
+    compareReadinessReviewProjections,
+    deriveReadinessReview,
+} from '../lib/planning';
+import { ReadinessCheckpoint } from './planning/ReadinessCheckpoint';
+import { buildReadinessCheckpointView } from './planning/readinessCheckpointView';
+import { hashReviewValue } from '../lib/review/hash';
+import { buildReviewContextManifest } from '../lib/review/manifest';
 
 interface HistoryViewProps {
     projectId: string;
@@ -18,20 +28,122 @@ const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string
     Edited: { icon: Pencil, color: 'text-violet-600', bgColor: 'bg-violet-50' },
     Reverted: { icon: RotateCcw, color: 'text-amber-600', bgColor: 'bg-amber-50' },
     MarkedCurrent: { icon: CheckCircle, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
+    ReadinessReviewed: { icon: Clock, color: 'text-indigo-600', bgColor: 'bg-indigo-50' },
+    PlanCommitted: { icon: CheckCircle, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
+    PlanReopened: { icon: RotateCcw, color: 'text-amber-600', bgColor: 'bg-amber-50' },
 };
 
 export function HistoryView({ projectId }: HistoryViewProps) {
-    const { getHistoryEvents, getSpineVersions } = useProjectStore();
+    const {
+        getHistoryEvents, getSpineVersions, getProjectOutputAlignment, getProject,
+        readinessReviews, readinessCommitmentEvents, planningRecords,
+        reviewRuns, specialistRuns, reviewIssues, reviewFindings, artifacts, artifactVersions,
+    } = useProjectStore();
+    const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
     const events = getHistoryEvents(projectId);
     const sortedEvents = [...events].sort((a, b) => b.createdAt - a.createdAt);
 
     // Spine ids are opaque (UUIDs for new versions) — show the positional
     // "Version N" label the rest of the workspace uses.
     const spines = getSpineVersions(projectId);
+    const selectedReadinessReview = (readinessReviews[projectId] ?? []).find(review => review.id === selectedReadinessReviewId);
+    const latestSpine = spines.find(spine => spine.isLatest);
+    const project = getProject(projectId);
+    const currentArtifactRefs = (artifacts[projectId] ?? [])
+        .filter(artifact => artifact.status !== 'archived')
+        .flatMap(artifact => {
+            const versions = artifactVersions[projectId] ?? [];
+            const version = artifact.currentVersionId
+                ? versions.find(item => item.id === artifact.currentVersionId)
+                : versions.find(item => item.artifactId === artifact.id && item.isPreferred);
+            return version ? [{
+                artifactId: artifact.id,
+                artifactVersionId: version.id,
+                contentHash: hashReviewValue(version.content),
+            }] : [];
+        });
+    const currentReviewArtifacts = (artifacts[projectId] ?? []).flatMap(artifact => {
+        if (artifact.type !== 'core_artifact' || !artifact.subtype || !artifact.currentVersionId) return [];
+        const version = (artifactVersions[projectId] ?? []).find(item => item.id === artifact.currentVersionId);
+        return version ? [{
+            artifactId: artifact.id,
+            versionId: version.id,
+            subtype: artifact.subtype,
+            title: artifact.title,
+            content: version.content,
+        }] : [];
+    });
+    const currentChallengeContextSignature = project && latestSpine?.structuredPRD
+        ? buildReviewContextManifest({
+            projectId,
+            projectName: project.name,
+            platform: project.platform,
+            productCategory: project.productCategory,
+            spine: {
+                versionId: latestSpine.id,
+                schemaVersion: latestSpine.prdVersion,
+                content: latestSpine.responseText,
+                structuredPRD: latestSpine.structuredPRD,
+                canonicalSpine: latestSpine.canonicalSpine,
+            },
+            artifacts: currentReviewArtifacts,
+            safetyBoundaries: latestSpine.safetyReview?.detectedConcerns ?? [],
+        }).contextSignature
+        : undefined;
     const spineLabel = (spineId: string) => {
         const idx = spines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : spineId;
     };
+    const currentReadinessInput = latestSpine ? {
+        projectId,
+        spine: {
+            versionId: latestSpine.id,
+            content: latestSpine.responseText,
+            structuredPRD: latestSpine.structuredPRD,
+            incompleteSectionCount: latestSpine.generationMeta?.failedSections?.length ?? 0,
+            isCommitted: latestSpine.isFinal,
+            safetyReview: latestSpine.safetyReview && {
+                status: latestSpine.safetyReview.status,
+                classification: latestSpine.safetyReview.classification,
+                detectedConcerns: latestSpine.safetyReview.detectedConcerns,
+                reviewedAt: latestSpine.safetyReview.reviewedAt,
+            },
+        },
+        planningRecords: planningRecords[projectId] ?? [],
+        reviewRuns: reviewRuns[projectId] ?? [],
+        specialistRuns: specialistRuns[projectId] ?? [],
+        reviewIssues: reviewIssues[projectId] ?? [],
+        reviewFindings: reviewFindings[projectId] ?? [],
+        outputAlignment: getProjectOutputAlignment(projectId),
+        currentArtifactRefs,
+        currentChallengeContextSignature,
+    } : undefined;
+    const selectedReadinessCurrentness = selectedReadinessReview && currentReadinessInput
+        ? compareReadinessReviewCurrentness(selectedReadinessReview, currentReadinessInput)
+        : undefined;
+    const readinessComparisonSummary = selectedReadinessReview
+        && selectedReadinessCurrentness
+        && !selectedReadinessCurrentness.current
+        && selectedReadinessCurrentness.integrityValid
+        && currentReadinessInput
+        && latestSpine
+        ? compareReadinessReviewProjections(
+            selectedReadinessReview,
+            deriveReadinessReview({ ...currentReadinessInput, createdAt: selectedReadinessReview.createdAt }),
+            {
+                reviewedVersionLabel: spineLabel(selectedReadinessReview.spineVersionId),
+                currentVersionLabel: spineLabel(latestSpine.id),
+            },
+        )
+        : undefined;
+    const selectedReadinessView = selectedReadinessReview ? buildReadinessCheckpointView(
+        selectedReadinessReview,
+        selectedReadinessCurrentness
+            ?? { current: false, historical: true, integrityValid: true, reasons: ['spine_identity_changed'] },
+        readinessCommitmentEvents[projectId] ?? [],
+        spineLabel(selectedReadinessReview.spineVersionId),
+        readinessComparisonSummary,
+    ) : undefined;
 
     // Group events by date
     const groupedByDate: Record<string, typeof sortedEvents> = {};
@@ -58,7 +170,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                 <div className="text-center py-16 text-neutral-400">
                     <Clock size={48} className="mx-auto mb-4 opacity-30" />
                     <p className="text-lg font-medium text-neutral-500 mb-2">No history yet</p>
-                    <p className="text-sm">Events will appear here as you create and modify artifacts.</p>
+                    <p className="text-sm">Changes to the plan, its reasoning, and downstream outputs will appear here.</p>
                 </div>
             ) : (
                 <div className="space-y-8">
@@ -81,14 +193,7 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                                                 <Icon size={14} className={config.color} />
                                             </div>
                                             <div className="flex-1 min-w-0">
-                                                <div className="flex items-center gap-2">
-                                                    <span className="text-sm font-medium text-neutral-800">
-                                                        {event.description}
-                                                    </span>
-                                                    <span className="text-[10px] px-1.5 py-0.5 rounded bg-neutral-100 text-neutral-500 font-mono shrink-0">
-                                                        {event.type}
-                                                    </span>
-                                                </div>
+                                                <p className="text-sm font-medium text-neutral-800">{event.description}</p>
                                                 <div className="text-xs text-neutral-400 mt-1 flex items-center gap-2">
                                                     <span>{new Date(event.createdAt).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' })}</span>
                                                     {event.spineVersionId && <span>PRD {spineLabel(event.spineVersionId)}</span>}
@@ -100,6 +205,15 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                                                         <p className="text-green-600 truncate">+ {event.diff.matches[0].after}</p>
                                                     </div>
                                                 )}
+                                                {event.readinessReviewId && (
+                                                    <button
+                                                        type="button"
+                                                        onClick={() => setSelectedReadinessReviewId(event.readinessReviewId!)}
+                                                        className="mt-3 inline-flex min-h-11 w-full items-center justify-center rounded-lg border border-neutral-200 px-3 text-xs font-semibold text-neutral-700 hover:bg-neutral-50 sm:w-auto"
+                                                    >
+                                                        Inspect readiness review
+                                                    </button>
+                                                )}
                                             </div>
                                         </div>
                                     );
@@ -108,6 +222,13 @@ export function HistoryView({ projectId }: HistoryViewProps) {
                         </div>
                     ))}
                 </div>
+            )}
+            {selectedReadinessView && (
+                <ReadinessCheckpoint
+                    review={selectedReadinessView}
+                    readOnly
+                    onClose={() => setSelectedReadinessReviewId(null)}
+                />
             )}
         </div>
     );

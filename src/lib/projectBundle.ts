@@ -11,7 +11,15 @@
 import type {
   Project, SpineVersion, HistoryEvent, Branch,
   Artifact, ArtifactVersion, FeedbackItem, ProjectTask, WorkflowRun,
+  ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
+  ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
+import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
+import type {
+  DownstreamArtifactUpdateApplication, DownstreamArtifactUpdateProposal,
+  DownstreamArtifactUpdateReviewEvent, DownstreamArtifactUpdateVerification,
+  DownstreamArtifactUpdateVerificationEvent,
+} from './planning/downstreamArtifactUpdateProposal';
 
 export interface ProjectBundle {
   project: Project;
@@ -23,6 +31,21 @@ export interface ProjectBundle {
   feedbackItems: FeedbackItem[];
   tasks: ProjectTask[];
   workflowRuns: WorkflowRun[];
+  // Optional on the wire for projects saved before adversarial review existed.
+  reviewRuns?: ReviewRun[];
+  specialistRuns?: SpecialistRun[];
+  reviewFindings?: SpecialistFinding[];
+  reviewIssues?: ReviewIssue[];
+  planningRecords?: PlanningRecord[];
+  readinessReviews?: ReadinessReview[];
+  readinessCommitmentEvents?: ReadinessCommitmentEvent[];
+  downstreamUpdatePlans?: DownstreamUpdatePlan[];
+  downstreamUpdatePlanEvents?: DownstreamUpdatePlanEvent[];
+  downstreamArtifactUpdateProposals?: DownstreamArtifactUpdateProposal[];
+  downstreamArtifactUpdateReviewEvents?: DownstreamArtifactUpdateReviewEvent[];
+  downstreamArtifactUpdateApplications?: DownstreamArtifactUpdateApplication[];
+  downstreamArtifactUpdateVerifications?: DownstreamArtifactUpdateVerification[];
+  downstreamArtifactUpdateVerificationEvents?: DownstreamArtifactUpdateVerificationEvent[];
 }
 
 /** The persisted, project-id-keyed slices a bundle is assembled from. */
@@ -36,9 +59,23 @@ export interface BundleSource {
   feedbackItems: Record<string, FeedbackItem[]>;
   tasks: Record<string, ProjectTask[]>;
   workflowRuns: Record<string, WorkflowRun[]>;
+  reviewRuns: Record<string, ReviewRun[]>;
+  specialistRuns: Record<string, SpecialistRun[]>;
+  reviewFindings: Record<string, SpecialistFinding[]>;
+  reviewIssues: Record<string, ReviewIssue[]>;
+  planningRecords: Record<string, PlanningRecord[]>;
+  readinessReviews: Record<string, ReadinessReview[]>;
+  readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
+  downstreamUpdatePlans?: Record<string, DownstreamUpdatePlan[]>;
+  downstreamUpdatePlanEvents?: Record<string, DownstreamUpdatePlanEvent[]>;
+  downstreamArtifactUpdateProposals?: Record<string, DownstreamArtifactUpdateProposal[]>;
+  downstreamArtifactUpdateReviewEvents?: Record<string, DownstreamArtifactUpdateReviewEvent[]>;
+  downstreamArtifactUpdateApplications?: Record<string, DownstreamArtifactUpdateApplication[]>;
+  downstreamArtifactUpdateVerifications?: Record<string, DownstreamArtifactUpdateVerification[]>;
+  downstreamArtifactUpdateVerificationEvents?: Record<string, DownstreamArtifactUpdateVerificationEvent[]>;
 }
 
-// The eight array-valued collections (everything except the `projects` map).
+// The array-valued collections (everything except the `projects` map).
 // This is the single source of truth for "which project-keyed collections
 // exist" — every consumer that used to hand-list these keys (the sync
 // orchestrator, the recovery-bundle builder, the per-user namespace switch,
@@ -53,6 +90,20 @@ export const ARRAY_COLLECTIONS = [
   'feedbackItems',
   'tasks',
   'workflowRuns',
+  'reviewRuns',
+  'specialistRuns',
+  'reviewFindings',
+  'reviewIssues',
+  'planningRecords',
+  'readinessReviews',
+  'readinessCommitmentEvents',
+  'downstreamUpdatePlans',
+  'downstreamUpdatePlanEvents',
+  'downstreamArtifactUpdateProposals',
+  'downstreamArtifactUpdateReviewEvents',
+  'downstreamArtifactUpdateApplications',
+  'downstreamArtifactUpdateVerifications',
+  'downstreamArtifactUpdateVerificationEvents',
 ] as const;
 
 /** Every project-keyed collection, including the `projects` map itself. */
@@ -179,7 +230,8 @@ export function projectSlicesChanged(
 ): boolean {
   if (a.projects[projectId] !== b.projects[projectId]) return true;
   for (const key of ARRAY_COLLECTIONS) {
-    if ((a[key] as Record<string, unknown>)[projectId] !== (b[key] as Record<string, unknown>)[projectId]) {
+    if ((a[key] as Record<string, unknown> | undefined)?.[projectId]
+      !== (b[key] as Record<string, unknown> | undefined)?.[projectId]) {
       return true;
     }
   }

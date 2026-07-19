@@ -58,6 +58,7 @@ function seedStore() {
         artifacts: {},
         artifactVersions: {},
         feedbackItems: {},
+        planningRecords: {},
     });
 }
 
@@ -101,7 +102,7 @@ describe('StructuredPRDView — three-view IA', () => {
     it('defaults to the Overview view with the product brief', () => {
         renderView();
         expect(screen.getByRole('tab', { name: /Overview/ })).toHaveAttribute('aria-selected', 'true');
-        expect(screen.getByRole('heading', { name: 'Scope' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { name: 'Current proposed scope' })).toBeInTheDocument();
         expect(screen.getByText('Success Metrics')).toBeInTheDocument();
         // The Overview shows scope as compact references, NOT the full feature
         // spec — feature detail (user value, criteria) lives in the Features view.
@@ -198,7 +199,7 @@ describe('StructuredPRDView — three-view IA', () => {
         expect(screen.getByRole('tab', { name: /Features/ })).toHaveAttribute('aria-selected', 'true');
         expect(document.getElementById('prd-feature-f1')).not.toBeNull();
         expect(
-            screen.getByRole('button', { name: 'Back to Implementation Summary from Quick Capture' }),
+            screen.getByRole('button', { name: 'Back to current proposed scope from Quick Capture' }),
         ).toBeInTheDocument();
     });
 });
@@ -207,13 +208,13 @@ describe('StructuredPRDView — review workflow', () => {
     it('confirming an assumption appends a new spine version with the decision', () => {
         renderView();
         goTo(/Decisions/);
-        fireEvent.click(screen.getByRole('button', { name: 'Confirm assumption: Weekly cadence works' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Accept for planning, not validated: Weekly cadence works' }));
         const spine = latestSpine();
         expect(spine.id).not.toBe(SPINE_ID);
         const decided = spine.structuredPRD?.assumptions?.find(a => a.id === 'a2');
         expect(decided?.decision).toBe('confirmed');
         expect(decided?.decidedAt).toBeTypeOf('number');
-        expect(spine.provenance?.editSummary).toContain('Confirmed assumption');
+        expect(spine.provenance?.editSummary).toContain('Accepted assumption for planning');
     });
 
     it('rejecting an assumption records the correction note', () => {
@@ -242,7 +243,7 @@ describe('StructuredPRDView — review workflow', () => {
     it('hides confirm/reject actions in read-only mode', () => {
         renderView(true);
         goTo(/Decisions/);
-        expect(screen.queryByRole('button', { name: /Confirm assumption/ })).toBeNull();
+        expect(screen.queryByRole('button', { name: /Accept for planning/ })).toBeNull();
         goTo(/Features/);
         expect(screen.queryByRole('button', { name: /Confirm feature/ })).toBeNull();
     });
@@ -276,7 +277,7 @@ describe('ReviewConfirmSection / DecisionLogSection units', () => {
         );
         expect(screen.getByText('Decision Log')).toBeInTheDocument();
         expect(screen.getByText('Marked incorrect')).toBeInTheDocument();
-        expect(screen.getByText('Confirmed')).toBeInTheDocument();
+        expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
         expect(screen.getByText('Feature confirmed')).toBeInTheDocument();
         expect(screen.getByText(/Teams too/)).toBeInTheDocument();
 
@@ -291,5 +292,112 @@ describe('ReviewConfirmSection / DecisionLogSection units', () => {
         ]);
         expect(unresolved.map(a => a.id)).toEqual(['a1']);
         expect(decided.map(a => a.id)).toEqual(['a2']);
+    });
+});
+
+describe('StructuredPRDView — uncertainty-first planning integration', () => {
+    it('surfaces a calm impact handoff after a consequential direct edit', () => {
+        const onOpenDecisions = vi.fn();
+        render(
+            <StructuredPRDView
+                projectId={PROJECT_ID}
+                spineId={SPINE_ID}
+                structuredPRD={prd}
+                readOnly={false}
+                onOpenDecisions={onOpenDecisions}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit target users' }));
+        fireEvent.change(screen.getByPlaceholderText('One item per line'), {
+            target: { value: 'Independent creators' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        expect(screen.getByText('Plan meaning updated')).toBeInTheDocument();
+        expect(screen.getByText(/related plan areas should be reviewed/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Review planning impact' }));
+        expect(onOpenDecisions).toHaveBeenCalledWith(expect.any(String));
+    });
+
+    it('does not interrupt a copy-only direct edit', () => {
+        renderView();
+        fireEvent.click(screen.getByRole('button', { name: 'Edit vision' }));
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'V.' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        expect(screen.queryByText('Plan meaning updated')).toBeNull();
+        expect(screen.queryByText('This edit may affect the plan')).toBeNull();
+    });
+
+    it('surfaces durable decision-center conflicts in the affected PRD section', () => {
+        useProjectStore.setState({
+            planningRecords: {
+                [PROJECT_ID]: [{
+                    id: 'conflict-1', projectId: PROJECT_ID, type: 'conflict', status: 'open',
+                    title: 'The target market conflicts with the pricing model', statement: 'Resolve the market conflict',
+                    affectedPrdSections: ['Vision'], evidence: [], sourceFindingIds: [], createdBy: 'specialist_review',
+                    affectedPlanLocations: [{ kind: 'claim', section: 'Vision', label: 'Primary market promise', jsonPath: '$.vision' }],
+                    createdAt: 1, updatedAt: 1,
+                }],
+            },
+        });
+        const onOpenDecisions = vi.fn();
+        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+        expect(screen.getByText(/Affected: Primary market promise/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
+        expect(onOpenDecisions).toHaveBeenCalledWith('conflict-1', {
+            destination: { kind: 'prd', anchorId: 'prd-uncertainty-vision' },
+            label: 'Return to Vision',
+        });
+    });
+
+    it('shows the proposed scope vocabulary without a Defer bucket', () => {
+        renderView();
+        expect(screen.getByText('Current proposed scope')).toBeInTheDocument();
+        expect(screen.queryByText('Defer')).toBeNull();
+    });
+
+    it('opens the exact material assumption record for validation', () => {
+        const onOpenDecisions = vi.fn();
+        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+        goTo(/Decisions/);
+        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for assumption: Weekly cadence works' }));
+        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
+            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
+        expect(record).toBeDefined();
+        expect(onOpenDecisions).toHaveBeenCalledWith(record?.id);
+    });
+
+    it('keeps an exact validation action beside a material accepted assumption', () => {
+        const onPlanValidation = vi.fn();
+        const entries = deriveDecisionLog({
+            ...prd,
+            assumptions: [{ id: 'a1', statement: 'Creators will pay', confidence: 'low', materiality: 'high', decision: 'confirmed' }],
+        });
+        render(<DecisionLogSection entries={entries} onUndoAssumption={() => {}} onPlanValidation={onPlanValidation} onUndoFeature={() => {}} readOnly={false} />);
+
+        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for accepted assumption: Creators will pay' }));
+        expect(onPlanValidation).toHaveBeenCalledWith('a1');
+    });
+
+    it('keeps low-impact acceptance lightweight while material assumptions offer validation planning', () => {
+        const onPlanValidation = vi.fn();
+        render(
+            <ReviewConfirmSection
+                assumptions={[
+                    { id: 'material', statement: 'Creators will pay', confidence: 'low', materiality: 'high' },
+                    { id: 'low', statement: 'Users prefer rounded cards', confidence: 'med', materiality: 'low' },
+                ]}
+                onConfirm={() => {}}
+                onPlanValidation={onPlanValidation}
+                onReject={() => {}}
+                readOnly={false}
+            />,
+        );
+
+        expect(screen.getByRole('button', { name: 'Plan validation for assumption: Creators will pay' })).toBeInTheDocument();
+        expect(screen.queryByRole('button', { name: 'Plan validation for assumption: Users prefer rounded cards' })).toBeNull();
+        expect(screen.getAllByText('Accept for planning')).toHaveLength(2);
     });
 });

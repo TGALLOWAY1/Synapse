@@ -37,13 +37,14 @@ function exportContentFor(artifact: Artifact, raw: string): string {
 
 interface ExportModalProps {
     projectId: string;
+    planningReady: boolean;
     onClose: () => void;
 }
 
-export function ExportModal({ projectId, onClose }: ExportModalProps) {
+export function ExportModal({ projectId, planningReady, onClose }: ExportModalProps) {
     const {
         getProject, getLatestSpine, getArtifacts, getArtifactVersions,
-        getSpineVersions,
+        getProjectOutputAlignment, getSpineVersions,
     } = useProjectStore();
     // Canonical freshness — the export manifest's status column reads the same
     // evaluator the workspace headers and Project Map do.
@@ -109,8 +110,10 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         const idx = spines.findIndex(s => s.id === spineId);
         return idx >= 0 ? `Version ${idx + 1}` : undefined;
     };
+    const outputAlignment = getProjectOutputAlignment(projectId);
     const manifestEntries: ExportManifestEntry[] = [...orderedCoreArtifacts, ...mockupArtifacts].map(a => {
         const preferred = getArtifactVersions(projectId, a.id).find(v => v.isPreferred);
+        const alignment = outputAlignment.outputs.find(output => output.artifactId === a.id);
         return {
             title: displayTitle(a),
             versionNumber: preferred?.versionNumber,
@@ -119,6 +122,12 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
             ),
             // Missing (no preferred version) honestly reads "Not generated".
             status: freshness.byArtifactId.get(a.id)?.status ?? 'missing',
+            alignmentState: alignment?.state,
+            alignmentConfidence: alignment?.confidence,
+            alignmentSummary: alignment?.summary,
+            alignmentNextAction: alignment?.nextAction,
+            usefulForExploration: alignment?.usefulForExploration,
+            blocksBuildReadiness: alignment?.blocksBuildReadiness,
         };
     });
     const manifest = buildExportManifest({
@@ -126,7 +135,9 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
         prdLabel: spineLabelOf(latestSpine?.id),
         entries: manifestEntries,
     });
-    const staleTitles = manifestEntries.filter(e => isStaleStatus(e.status)).map(e => e.title);
+    const reviewTitles = manifestEntries
+        .filter(entry => entry.alignmentState ? entry.alignmentState !== 'aligned' : isStaleStatus(entry.status))
+        .map(entry => entry.title);
 
     // The default PRD export is one coherent three-part document. Prefer
     // rendering it from the canonical structured object so the Part I/II/III
@@ -183,6 +194,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                     title: displayTitle(a),
                     content: preferred?.content || '',
                     versionNumber: preferred?.versionNumber,
+                    alignment: outputAlignment.outputs.find(output => output.artifactId === a.id),
                 };
             }),
         };
@@ -221,6 +233,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
             projectName: project?.name || 'This product',
             prdMarkdown: latestSpine ? prdMarkdown() : undefined,
             manifestMarkdown: renderManifestMarkdown(manifest),
+            exploratory: !latestSpine?.isFinal || !planningReady,
             artifacts: orderedCoreArtifacts.map(a => ({
                 subtype: a.subtype ?? '',
                 title: displayTitle(a),
@@ -280,19 +293,21 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                         </div>
                     )}
 
-                    {manifest.staleCount > 0 && (
+                    {manifest.reviewCount > 0 && (
                         <div className="rounded-lg border border-amber-300 bg-amber-50 p-3 text-amber-900">
                             <div className="flex items-start gap-2">
                                 <AlertTriangle size={15} className="mt-0.5 shrink-0 text-amber-600" />
                                 <div className="min-w-0 flex-1">
                                     <p className="text-sm font-medium">
-                                        {manifest.staleCount} asset{manifest.staleCount === 1 ? '' : 's'} may be out of
-                                        date with the current PRD
+                                        {manifest.blockingCount > 0
+                                            ? `${manifest.blockingCount} output${manifest.blockingCount === 1 ? '' : 's'} need alignment review before build`
+                                            : `${manifest.reviewCount} output${manifest.reviewCount === 1 ? '' : 's'} have advisory alignment notes`}
                                     </p>
                                     <p className="mt-0.5 text-xs text-amber-800">
-                                        {staleTitles.join(', ')} — exports include each asset&rsquo;s latest saved
-                                        version and note this in the export manifest. Review them in Project Map →
-                                        Dependency Graph first, or export anyway.
+                                        {reviewTitles.join(', ')} — exports preserve each saved version and explain
+                                        whether the impact is definite, possible, or unknown. The work remains useful
+                                        for exploration. Review it in Project Map → Dependency Graph before relying on
+                                        it for implementation, or export anyway.
                                     </p>
                                 </div>
                             </div>
@@ -301,6 +316,12 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
 
                     {/* --- EXPORT: whole-project bundles --- */}
                     <span className="text-xs font-medium text-neutral-400 uppercase tracking-wider">Export</span>
+
+                    {(!latestSpine?.isFinal || !planningReady) && (
+                        <div className="rounded-lg border border-sky-200 bg-sky-50 p-3 text-sm text-sky-900">
+                            <strong>Exploratory export.</strong> This plan is not ready to serve as a trusted implementation foundation. Exports retain that warning so polished documents do not imply settled reasoning.
+                        </div>
+                    )}
 
                     {/* Agent handoff — the build-companion preset */}
                     <div className="flex items-stretch gap-2">
@@ -312,7 +333,7 @@ export function ExportModal({ projectId, onClose }: ExportModalProps) {
                             <Bot size={18} className="text-violet-600 shrink-0" />
                             <div className="min-w-0">
                                 <div className="text-sm font-medium text-violet-900">Copy for coding agent</div>
-                                <div className="text-xs text-violet-700">PRD + plan + prompts, ready to paste into Claude Code / Cursor</div>
+                                <div className="text-xs text-violet-700">{latestSpine?.isFinal && planningReady ? 'Committed plan + aligned implementation context' : 'Plan + explicit exploratory warning'}</div>
                             </div>
                             {copiedKey === 'handoff'
                                 ? <Check size={16} className="text-violet-600 shrink-0 ml-auto" />

@@ -281,8 +281,11 @@ const assumptionSchema = {
         id: { type: "STRING" },
         statement: { type: "STRING" },
         confidence: { type: "STRING", enum: ["low", "med", "high"] },
+        materiality: { type: "STRING", enum: ["blocking", "high", "normal", "low"] },
+        whyItMatters: { type: "STRING" },
+        affectedPrdSections: { type: "ARRAY", items: { type: "STRING" } },
     },
-    required: ["id", "statement", "confidence"],
+    required: ["id", "statement", "confidence", "materiality", "whyItMatters", "affectedPrdSections"],
 };
 
 export const structuredPRDSchema = {
@@ -472,4 +475,3 @@ export const SECTION_SCHEMAS: Record<SectionId, object> = {
     quality_risks: qualityRisksSliceSchema,
     metrics_scope: metricsScopeSliceSchema,
 };
-

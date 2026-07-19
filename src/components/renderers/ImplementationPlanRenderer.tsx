@@ -10,6 +10,7 @@ import {
     type ImplementationPlanProgress,
 } from '../../lib/services/implementationPlanInsights';
 import { ConsolidatedPlanView } from './implementationPlan/ConsolidatedPlanView';
+import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
 
 // Render an `implementation_plan` artifact.
 //
@@ -46,6 +47,10 @@ interface Props {
     metadata?: Record<string, unknown>;
     /** Persists the copy/gate-status progress overlay onto the version. */
     onUpdatePlanProgress?: (next: ImplementationPlanProgress) => void;
+    /** Opens the exact milestone selected from a bounded downstream update plan. */
+    initialMilestoneId?: string;
+    /** Opens an exact architecture or delivery-plan region when it can be resolved safely. */
+    initialNavigationTarget?: ImplementationPlanNavigationTarget;
 }
 
 // Minimal fallback for content the consolidated adapter can't build (malformed
@@ -88,6 +93,8 @@ export function ImplementationPlanRenderer({
     onConvertToTasks,
     metadata,
     onUpdatePlanProgress,
+    initialMilestoneId,
+    initialNavigationTarget,
 }: Props) {
     const consolidated = useMemo(
         () => {
@@ -105,6 +112,7 @@ export function ImplementationPlanRenderer({
     if (consolidated) {
         return (
             <ConsolidatedPlanView
+                key={initialNavigationTarget?.anchorId ?? initialMilestoneId ?? 'implementation-plan'}
                 plan={consolidated}
                 prdVersionLabel={prdVersionLabel}
                 staleness={staleness}
@@ -113,6 +121,8 @@ export function ImplementationPlanRenderer({
                 onConvertToTasks={onConvertToTasks}
                 progress={onUpdatePlanProgress ? progress : undefined}
                 onUpdateProgress={onUpdatePlanProgress}
+                initialMilestoneId={initialMilestoneId}
+                initialNavigationTarget={initialNavigationTarget}
             />
         );
     }

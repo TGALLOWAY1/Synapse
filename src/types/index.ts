@@ -1,6 +1,6 @@
 // Navigation stages. 'mockups' and 'artifacts' are legacy values preserved
 // for migration of older persisted projects; the active UI uses 'workspace'.
-export type PipelineStage = 'prd' | 'workspace' | 'history' | 'mockups' | 'artifacts';
+export type PipelineStage = 'prd' | 'workspace' | 'review' | 'history' | 'mockups' | 'artifacts';
 
 export type ProjectPlatform = 'app' | 'web';
 
@@ -19,6 +19,8 @@ export type Project = {
     // has pinned a newer demo snapshot and re-fetch instead of serving stale
     // local cache. Optional so legacy persisted projects keep working.
     demoSourceSnapshotId?: string;
+    /** Bumps when the public demo cache policy changes. */
+    demoCachePolicyVersion?: number;
     // The user-chosen design-system direction (a `DESIGN_SYSTEM_PRESETS` id,
     // e.g. 'saas_minimal' or 'custom'), picked once before artifact generation.
     // Steers design_system generation and, through it, the visual language of
@@ -257,6 +259,11 @@ export type Assumption = {
     id: string;
     statement: string;
     confidence: 'low' | 'med' | 'high';
+    /** Consequence if wrong, distinct from how plausible the inference seems. */
+    materiality?: 'blocking' | 'high' | 'normal' | 'low';
+    whyItMatters?: string;
+    affectedPrdSections?: string[];
+    affectedPlanLocations?: PlanningLocation[];
     // --- User review (all optional; legacy PRDs lack them) ---
     decision?: AssumptionDecision;
     decisionNote?: string;            // user clarification / correction
@@ -1277,6 +1284,886 @@ export type FeedbackItem = {
     updatedAt: number;
 };
 
+// --- Adversarial planning review + Decision Center -------------------------
+// Reviews are durable, version-pinned workflows. AI observations never become
+// confirmed project decisions implicitly: SpecialistFinding -> ReviewIssue ->
+// PlanningRecord are deliberately separate records, and a review-created
+// PlanningRecord starts proposed/open.
+
+export type ReviewRunStatus =
+    | 'queued'
+    | 'running'
+    | 'synthesizing'
+    | 'complete'
+    | 'partial'
+    | 'failed'
+    | 'cancelled'
+    | 'interrupted';
+
+export type ReviewSynthesisStatus = 'pending' | 'running' | 'complete' | 'failed' | 'interrupted';
+
+export type ReviewSourceArtifactRef = {
+    artifactId: string;
+    artifactVersionId: string;
+    subtype?: CoreArtifactSubtype;
+    contentHash: string;
+};
+
+export type PersistedReviewContextManifest = {
+    spineVersionId: string;
+    spineContentHash: string;
+    canonicalSpineSchemaVersion?: number;
+    artifactRefs: ReviewSourceArtifactRef[];
+    missingArtifactSubtypes?: CoreArtifactSubtype[];
+    capturedAt: number;
+    contextSignature: string;
+};
+
+export type ReviewSpecialistSelection = {
+    specialistId: string;
+    label: string;
+    reason: string;
+};
+
+export type ReviewRun = {
+    id: string;
+    projectId: string;
+    sequenceNumber: number;
+    scope: {
+        kind: 'project' | 'artifact' | 'focus';
+        artifactIds?: string[];
+        focus?: string;
+    };
+    sourceManifest: PersistedReviewContextManifest;
+    selectedSpecialists: ReviewSpecialistSelection[];
+    /** Deterministic project-specific coverage required when the run started.
+     * A user may run a narrower exploratory review, but it cannot satisfy
+     * build readiness by omitting an applicable specialist boundary. */
+    requiredSpecialistIds?: string[];
+    status: ReviewRunStatus;
+    synthesisStatus: ReviewSynthesisStatus;
+    previousReviewId?: string;
+    modelPolicyVersion?: number;
+    createdAt: number;
+    startedAt?: number;
+    completedAt?: number;
+};
+
+export type SpecialistRunStatus =
+    | 'queued'
+    | 'running'
+    | 'complete'
+    | 'failed'
+    | 'timed_out'
+    | 'invalid'
+    | 'cancelled'
+    | 'interrupted';
+
+export type SpecialistRun = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    specialistId: string;
+    responsibility: string;
+    boundaries: string[];
+    contextRefIds: string[];
+    model?: string;
+    provider?: string;
+    status: SpecialistRunStatus;
+    attemptCount: number;
+    findingIds: string[];
+    coverageSummary?: string;
+    resolvedAreas?: string[];
+    /** Structured, evidence-grounded no-finding/coverage conclusions. Freeform
+     * summaries alone never satisfy build-readiness challenge coverage. */
+    coverageChecks?: Array<{
+        area: 'problem' | 'primary_user' | 'intended_outcome' | 'first_release_scope' | 'material_assumptions' | 'specialist_boundary';
+        conclusion: string;
+        evidence: ReviewEvidenceRef[];
+    }>;
+    validation?: {
+        valid: boolean;
+        unsupportedEvidenceIds: string[];
+        warnings: string[];
+    };
+    error?: { message: string; category?: string };
+    createdAt: number;
+    startedAt?: number;
+    completedAt?: number;
+};
+
+export type ReviewEvidenceRef = {
+    id: string;
+    sourceType: 'spine' | 'artifact';
+    sourceId: string;
+    sourceVersionId: string;
+    artifactSubtype?: CoreArtifactSubtype;
+    locator?: {
+        section?: string;
+        jsonPath?: string;
+        entityType?: string;
+        entityId?: string;
+    };
+    excerpt?: string;
+    excerptHash?: string;
+    verified: boolean;
+};
+
+export type SpecialistFindingKind =
+    | 'contradiction'
+    | 'risk'
+    | 'missing_information'
+    | 'assumption'
+    | 'recommendation'
+    | 'optional_improvement'
+    | 'user_judgment';
+
+export type SpecialistFinding = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    specialistRunId: string;
+    specialistId: string;
+    kind: SpecialistFindingKind;
+    title: string;
+    observation: string;
+    whyItMatters: string;
+    consequence?: string;
+    recommendedAction?: string;
+    severity: 'critical' | 'high' | 'medium' | 'low';
+    confidence: 'high' | 'medium' | 'low';
+    implementationImpact: 'blocker' | 'resolve_before_build' | 'deferrable';
+    evidence: ReviewEvidenceRef[];
+    fingerprint: string;
+    grounded: boolean;
+    createdAt: number;
+};
+
+export type ReviewIssueStatus =
+    | 'open'
+    | 'acted'
+    | 'deferred'
+    | 'dismissed'
+    | 'already_addressed'
+    | 'superseded';
+
+export type ReviewIssueDisposition = {
+    action:
+        | 'propose_record'
+        | 'link_existing'
+        | 'challenge_existing'
+        | 'request_revision'
+        | 'defer'
+        | 'dismiss'
+        | 'already_addressed'
+        | 'reopen';
+    actor: 'user';
+    at: number;
+    contextSignature: string;
+    reason?: string;
+    planningRecordId?: string;
+    resultingSpineVersionId?: string;
+    resultingArtifactVersionId?: string;
+};
+
+export type ReviewIssue = {
+    id: string;
+    projectId: string;
+    reviewId: string;
+    title: string;
+    summary: string;
+    kind: SpecialistFindingKind;
+    findingIds: string[];
+    specialistIds: string[];
+    relationship: 'standalone' | 'duplicate' | 'reinforcing' | 'disagreement';
+    perspectives?: Array<{ findingIds: string[]; recommendation: string; tradeoff?: string }>;
+    severity: SpecialistFinding['severity'];
+    confidence: SpecialistFinding['confidence'];
+    implementationImpact: SpecialistFinding['implementationImpact'];
+    status: ReviewIssueStatus;
+    dispositions: ReviewIssueDisposition[];
+    relatedPlanningRecordIds: string[];
+    createdAt: number;
+    updatedAt: number;
+};
+
+export type PlanningRecordType = 'decision' | 'assumption' | 'risk' | 'open_question' | 'conflict';
+export type PlanningRecordStatus =
+    | 'proposed'
+    | 'open'
+    | 'confirmed'
+    | 'rejected'
+    | 'deferred'
+    | 'resolved'
+    | 'invalidated'
+    | 'superseded';
+
+/** Version of the durable planning-record contract (legacy records omit it). */
+export const PLANNING_RECORD_SCHEMA_VERSION = 1;
+
+export type PlanningDecisionOption = {
+    id: string;
+    label: string;
+    description?: string;
+    tradeoffs?: Array<{
+        kind: 'benefit' | 'cost' | 'risk' | 'constraint';
+        summary: string;
+    }>;
+};
+
+export type PlanningRecommendation = {
+    optionId?: string;
+    summary: string;
+    rationale?: string;
+    confidence?: 'high' | 'medium' | 'low';
+};
+
+/** Stable locator back to the context that caused a planning record to exist. */
+export type PlanningSourceRef = {
+    /** Stable, project-scoped identity used for idempotent imports. */
+    key: string;
+    sourceType: 'prd_assumption' | 'prd' | 'artifact' | 'preflight' | 'feedback' | 'review' | 'user';
+    sourceId: string;
+    sourceVersionId?: string;
+    artifactSubtype?: CoreArtifactSubtype;
+    locator?: ReviewEvidenceRef['locator'];
+};
+
+export type DecisionEventActor = 'user' | 'synapse' | 'migration';
+
+type DecisionEventBase = {
+    id: string;
+    planningRecordId: string;
+    at: number;
+    rationale?: string;
+};
+
+/**
+ * Consequential verdict events are structurally user-only. This makes it
+ * impossible for an assessment/model response to masquerade as approval.
+ */
+export type DecisionVerdictEvent = DecisionEventBase & { actor: 'user' } & (
+    | { type: 'option_selected'; optionId: string; answer?: string }
+    | { type: 'custom_answered'; answer: string }
+    | { type: 'deferred'; revisitAt?: number }
+    | { type: 'premise_rejected'; reason: string }
+    | { type: 'reopened' }
+    | { type: 'revised'; previousEventId: string; optionId?: string; answer?: string }
+    | { type: 'invalidated'; reason: string }
+    | { type: 'superseded'; supersededById: string }
+);
+
+export type DecisionEvent =
+    | DecisionVerdictEvent
+    | (DecisionEventBase & {
+        type: 'created' | 'imported';
+        actor: DecisionEventActor;
+        sourceKey?: string;
+    })
+    | (DecisionEventBase & {
+        type: 'impact_preview_requested';
+        actor: 'user';
+        baselineSpineVersionId: string;
+    })
+    | (DecisionEventBase & {
+        type: 'alignment_change_reviewed';
+        actor: 'user';
+        impactPreviewId: string;
+        proposalId: string;
+        disposition: 'accepted' | 'rejected' | 'edited' | 'deferred' | 'confirmed_aligned' | 'confirmed_not_applicable';
+        /** User wording is authoritative only for this proposed plan change;
+         * it does not revise the underlying decision verdict. */
+        editedValue?: unknown;
+        editedSummary?: string;
+        /** Canonical hash of the exact proposal revision the user reviewed.
+         * Required for model-authored Phase 2 proposals. */
+        proposalContentHash?: string;
+    })
+    | (DecisionEventBase & {
+        type: 'alignment_context_provided';
+        actor: 'user';
+        impactPreviewId: string;
+        proposalId: string;
+        requestKind: 'missing_info' | 'different_interpretation';
+        /** User-authored context for proposal reasoning. This is evidence, not
+         * a verdict and not acceptance of any generated interpretation. */
+        context: string;
+    })
+    | (DecisionEventBase & {
+        type: 'applied_to_plan';
+        actor: 'user';
+        impactPreviewId: string;
+        baselineSpineVersionId: string;
+        resultingSpineVersionId: string;
+    });
+
+export type DecisionImpactPreviewStatus = 'generating' | 'ready' | 'stale' | 'failed' | 'applied' | 'superseded';
+
+/** A stable, human-readable pointer to the smallest meaningful unit of plan
+ * content available. Legacy records can continue using broad section names. */
+export type PlanningLocation = {
+    kind: 'section' | 'claim' | 'feature' | 'requirement' | 'behavior' | 'scope' | 'flow_step' | 'business_rule' | 'success_criterion' | 'constraint' | 'data_expectation' | 'api_expectation';
+    section: string;
+    label: string;
+    jsonPath?: string;
+    entityType?: string;
+    entityId?: string;
+    excerpt?: string;
+};
+
+export type PlanningAlignmentHint = {
+    target: PlanningLocation;
+    operation: 'replace' | 'add' | 'remove';
+    proposedValue?: unknown;
+    proposedSummary?: string;
+    reason: string;
+    confidence?: 'definite' | 'likely' | 'possible';
+    /** Confidence in the model's reasoning, distinct from impact relevance. */
+    reasoningConfidence?: AlignmentReasoningConfidence;
+    /** How directly the cited evidence supports the interpretation. */
+    evidenceCharacter?: AlignmentEvidenceCharacter;
+    analysisStatus?: AlignmentProposalAnalysisStatus;
+    analysisMethod?: 'deterministic' | 'model';
+    model?: string;
+    provider?: string;
+    failureReason?: string;
+    ambiguity?: string;
+    questions?: string[];
+    evidenceSummary?: string[];
+    /** True when leaving the current value in place would directly contradict
+     * the recorded verdict, rather than merely leave a downstream review open. */
+    requiredForVerdictAlignment?: boolean;
+};
+
+export type AlignmentProposalAnalysisStatus =
+    | 'advisory_candidate'
+    | 'bounded_applicable'
+    | 'already_aligned'
+    | 'not_applicable'
+    | 'needs_input'
+    | 'rejected'
+    | 'failed';
+
+export type AlignmentReasoningConfidence = 'high' | 'medium' | 'low';
+export type AlignmentEvidenceCharacter = 'direct' | 'supported_inference' | 'plausible_inference';
+
+export type AlignmentProposalEvidenceBinding = {
+    refId: string;
+    source?: 'record_evidence' | 'user_context';
+    sourceVersionId: string;
+    contentHash: string;
+};
+
+export type AlignmentProposalContract = {
+    version: 1;
+    analysisStatus: AlignmentProposalAnalysisStatus;
+    authoredBy: 'synapse';
+    method: 'deterministic' | 'model';
+    model?: string;
+    provider?: string;
+    baselineSpineVersionId: string;
+    baselineSpineContentHash: string;
+    decisionEventId: string;
+    targetValueHash?: string;
+    preservedContentHash?: string;
+    evidence: AlignmentProposalEvidenceBinding[];
+    maxTouchedTargets: 1;
+    /** Recomputed locally from the full proposal payload; also copied into the
+     * user review event so later joint proposal+patch tampering fails closed. */
+    proposalContentHash?: string;
+    failureReason?: string;
+    reasoningConfidence?: AlignmentReasoningConfidence;
+    evidenceCharacter?: AlignmentEvidenceCharacter;
+};
+
+export type AlignmentProposal = {
+    id: string;
+    target: PlanningLocation;
+    operation: 'replace' | 'add' | 'remove' | 'review';
+    beforeSummary?: string;
+    proposedSummary?: string;
+    proposedValue?: unknown;
+    reason: string;
+    confidence: 'definite' | 'likely' | 'possible';
+    reasoningConfidence?: AlignmentReasoningConfidence;
+    evidenceCharacter?: AlignmentEvidenceCharacter;
+    ambiguity?: string;
+    questions?: string[];
+    evidenceSummary?: string[];
+    /** Machine-authored analysis contract. User authority is recorded only in
+     * DecisionEvent and can never be supplied here by a model/provider. */
+    contract?: AlignmentProposalContract;
+    /** Rejecting an exact source-claim update preserves a known contradiction;
+     * rejecting a generic downstream review target may safely mean not affected. */
+    requiredForVerdictAlignment?: boolean;
+    /** A review-only target is useful context but cannot be applied until the
+     * user or a later reasoning pass supplies a safe structured value. */
+    requiresInput?: boolean;
+};
+
+export type DecisionImpactPreview = {
+    id: string;
+    projectId: string;
+    planningRecordId: string;
+    decisionEventId: string;
+    status: DecisionImpactPreviewStatus;
+    /** Present on Phase 2+ previews. Missing denotes a legacy preview only. */
+    proposalContractVersion?: 1;
+    baseline: {
+        spineVersionId: string;
+        spineContentHash: string;
+        dependencySignature?: string;
+    };
+    proposedPrdPatch?: Array<{
+        proposalId?: string;
+        section: string;
+        operation: 'replace' | 'add' | 'remove';
+        entityId?: string;
+        entityType?: string;
+        jsonPath?: string;
+        beforeSummary?: string;
+        afterSummary?: string;
+        value?: unknown;
+    }>;
+    /** Hash of the exact complete PRD represented by the patch. Required by
+     * the atomic apply boundary; absent for advisory-only previews. */
+    proposedResultHash?: string;
+    affectedPrdSections: string[];
+    alignmentProposals?: AlignmentProposal[];
+    affectedArtifactSlots: ArtifactSlotKey[];
+    possibleConflictRecordIds: string[];
+    explanation?: string;
+    error?: string;
+    createdAt: number;
+    appliedAt?: number;
+    resultingSpineVersionId?: string;
+};
+
+export type DecisionAssessment = {
+    id: string;
+    projectId: string;
+    planningRecordId: string;
+    sourceSpineVersionId: string;
+    status: 'fresh' | 'stale' | 'failed' | 'superseded';
+    recommendation?: PlanningRecommendation;
+    evidence: ReviewEvidenceRef[];
+    inferredAssumptions: string[];
+    possibleConflictRecordIds: string[];
+    impactPreview?: DecisionImpactPreview;
+    model?: string;
+    provider?: string;
+    createdAt: number;
+};
+
+// --- Assumption validation -------------------------------------------------
+// Validation lives on the existing planning record so it cannot become a
+// parallel source of planning truth. Machine-authored plans and
+// interpretations are proposals; only append-only user events establish the
+// project's treatment or accepted conclusion.
+
+export const ASSUMPTION_VALIDATION_SCHEMA_VERSION = 1;
+export const ASSUMPTION_VALIDATION_CONTRACT_VERSION = 1;
+
+export type AssumptionValidationWorkflowState =
+    | 'not_planned'
+    | 'planned'
+    | 'in_progress'
+    | 'completed'
+    | 'due_for_review';
+
+export type AssumptionEvidenceConclusion =
+    | 'unsupported'
+    | 'supported'
+    | 'partially_supported'
+    | 'contradicted'
+    | 'inconclusive'
+    | 'more_evidence_needed';
+
+export type AssumptionUncertaintyTreatment =
+    | 'accepted_without_validation'
+    | 'temporarily_tolerated'
+    | 'deferred';
+
+export type AssumptionValidationMethodKind =
+    | 'user_interviews'
+    | 'usability_observation'
+    | 'technical_test'
+    | 'prototype'
+    | 'analytics_measurement'
+    | 'stakeholder_statement'
+    | 'expert_review'
+    | 'document_review'
+    | 'direct_observation'
+    | 'other';
+
+export type AssumptionEvidenceSourceType =
+    | 'user_interview'
+    | 'usability_observation'
+    | 'technical_test'
+    | 'prototype'
+    | 'analytics_measurement'
+    | 'stakeholder_statement'
+    | 'expert_review'
+    | 'document'
+    | 'external_source'
+    | 'direct_observation'
+    | 'other';
+
+export type AssumptionValidationMethod = {
+    kind: AssumptionValidationMethodKind;
+    label: string;
+    description?: string;
+};
+
+export type AssumptionValidationPlan = {
+    id: string;
+    question: string;
+    method: AssumptionValidationMethod;
+    supportSignals: string[];
+    contradictionSignals: string[];
+    inconclusiveConditions: string[];
+    limitations: string[];
+    revisitCondition?: string;
+    expiresAt?: number;
+    authoredBy: 'user';
+    createdAt: number;
+    /** Hash excludes this field and makes later mutation fail closed. */
+    contentHash: string;
+};
+
+export type AssumptionValidationPlanProposal = {
+    id: string;
+    planningRecordId: string;
+    contractVersion: typeof ASSUMPTION_VALIDATION_CONTRACT_VERSION;
+    authoredBy: 'synapse';
+    question: string;
+    method: AssumptionValidationMethod;
+    supportSignals: string[];
+    contradictionSignals: string[];
+    inconclusiveConditions: string[];
+    limitations: string[];
+    revisitCondition?: string;
+    expiresAt?: number;
+    assumptionStatementHash: string;
+    evidenceSetHash: string;
+    sourceSpineVersionId?: string;
+    sourceSpineContentHash?: string;
+    model?: string;
+    provider?: string;
+    createdAt: number;
+    contentHash: string;
+};
+
+export type AssumptionEvidenceRecord = {
+    id: string;
+    planningRecordId: string;
+    sourceType: AssumptionEvidenceSourceType;
+    /** Human-readable provenance shown to the user. */
+    source: string;
+    /** Stable URL, file id, session id, experiment id, or other provenance. */
+    sourceIdentity: string;
+    observedAt: number;
+    recordedAt: number;
+    observation: string;
+    validationQuestion: string;
+    scopeOrSample?: string;
+    limitations: string[];
+    character: 'direct' | 'interpretation';
+    /** User-recorded relevance to the validation question. This is distinct
+     * from whether the record is a direct observation or an interpretation. */
+    relation: 'supports' | 'contradicts' | 'inconclusive' | 'irrelevant';
+    assumptionStatementHash: string;
+    validationPlanHash?: string;
+    sourceFingerprint: string;
+    authoredBy: 'user';
+    contentHash: string;
+};
+
+export type AssumptionInterpretationProposal = {
+    id: string;
+    planningRecordId: string;
+    contractVersion: typeof ASSUMPTION_VALIDATION_CONTRACT_VERSION;
+    authoredBy: 'synapse';
+    recommendedConclusion: AssumptionEvidenceConclusion;
+    reasoning: string;
+    supportingEvidenceIds: string[];
+    contradictingEvidenceIds: string[];
+    inconclusiveEvidenceIds: string[];
+    irrelevantEvidenceIds: string[];
+    duplicateEvidenceIds: string[];
+    limitations: string[];
+    assumptionStatementHash: string;
+    validationPlanHash: string;
+    evidenceSetHash: string;
+    sourceSpineVersionId?: string;
+    sourceSpineContentHash?: string;
+    model?: string;
+    provider?: string;
+    createdAt: number;
+    contentHash: string;
+};
+
+type AssumptionValidationEventBase = {
+    id: string;
+    planningRecordId: string;
+    actor: 'user';
+    at: number;
+    assumptionStatementHash: string;
+    expectedSpineVersionId?: string;
+    expectedSpineContentHash?: string;
+    integrityHash: string;
+};
+
+export type AssumptionValidationEvent =
+    | (AssumptionValidationEventBase & {
+        type: 'validation_plan_recorded';
+        plan: AssumptionValidationPlan;
+        expectedEvidenceSetHash: string;
+        sourceProposalId?: string;
+        sourceProposalContentHash?: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_evidence_recorded';
+        evidence: AssumptionEvidenceRecord;
+        expectedEvidenceSetHash: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_evidence_retracted';
+        evidenceId: string;
+        evidenceContentHash: string;
+        expectedEvidenceSetHash: string;
+        reason: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_outcome_recorded';
+        conclusion: AssumptionEvidenceConclusion;
+        caveats?: string;
+        expectedValidationPlanHash: string;
+        expectedEvidenceSetHash: string;
+        sourceInterpretationId?: string;
+        sourceInterpretationContentHash?: string;
+        revisitAt?: number;
+        revisitCondition?: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_outcome_reopened';
+        previousOutcomeEventId: string;
+        reason: string;
+        expectedValidationPlanHash: string;
+        expectedEvidenceSetHash: string;
+    })
+    | (AssumptionValidationEventBase & {
+        type: 'validation_uncertainty_treatment_recorded';
+        treatment: AssumptionUncertaintyTreatment;
+        rationale: string;
+        revisitAt?: number;
+        revisitCondition?: string;
+        expectedEvidenceSetHash: string;
+    });
+
+export type AssumptionValidationState = {
+    schemaVersion: typeof ASSUMPTION_VALIDATION_SCHEMA_VERSION;
+    events: AssumptionValidationEvent[];
+    planProposals: AssumptionValidationPlanProposal[];
+    interpretationProposals: AssumptionInterpretationProposal[];
+};
+
+export type PlanningRecord = {
+    id: string;
+    projectId: string;
+    type: PlanningRecordType;
+    status: PlanningRecordStatus;
+    title: string;
+    statement: string;
+    /** Legacy display-only options; retained for stored records and callers. */
+    options?: string[];
+    /** Structured choice model used by the Decision Center. */
+    decisionOptions?: PlanningDecisionOption[];
+    recommendation?: string;
+    recommendationDetail?: PlanningRecommendation;
+    resolution?: string;
+    rationale?: string;
+    evidence: ReviewEvidenceRef[];
+    sourceFindingIds: string[];
+    sourceReviewIssueId?: string;
+    challengesRecordId?: string;
+    createdBy: 'user' | 'specialist_review' | 'synapse' | 'migration';
+    createdAt: number;
+    updatedAt: number;
+    confirmedAt?: number;
+    resultingSpineVersionId?: string;
+    supersedesId?: string;
+    schemaVersion?: typeof PLANNING_RECORD_SCHEMA_VERSION;
+    sources?: PlanningSourceRef[];
+    relatedPlanningRecordIds?: string[];
+    affectedFeatureIds?: string[];
+    materiality?: 'blocking' | 'high' | 'normal' | 'low';
+    /** Consequence if this planning premise is wrong. Preserved separately
+     * from evidence so an imported assumption does not present rationale as proof. */
+    whyItMatters?: string;
+    affectedPrdSections?: string[];
+    affectedPlanLocations?: PlanningLocation[];
+    /** Machine-authored candidate changes. They do not modify the plan until
+     * reviewed by the user and applied through a version guard. */
+    alignmentHints?: PlanningAlignmentHint[];
+    affectedArtifactSlots?: ArtifactSlotKey[];
+    /** Non-authoritative source drift signal. User verdict history is preserved
+     * until the user explicitly revises or invalidates it. */
+    sourceState?: 'current' | 'changed' | 'missing';
+    currentSourceStatement?: string;
+    /** Append-only authority log. Legacy records derive from top-level fields. */
+    events?: DecisionEvent[];
+    /** Machine-authored analysis kept distinct from user-authored events. */
+    assessments?: DecisionAssessment[];
+    /** Optional validation lifecycle for assumption records. Legacy records
+     * omit it and project conservatively as unvalidated. */
+    assumptionValidation?: AssumptionValidationState;
+};
+
+// --- Deterministic build-readiness review ---------------------------------
+// A readiness review is a persistable, version-pinned explanation of whether
+// the current planning foundation is ready to drive implementation. It is a
+// deterministic projection over existing project state; no model-authored
+// value in this contract can confer user approval.
+
+export const READINESS_REVIEW_SCHEMA_VERSION = 1;
+// v2 adds integrity-valid, current downstream update-plan state to the
+// downstream-alignment criterion. Historical v1 reviews remain verifiable,
+// but are not silently interpreted using the newer readiness boundary.
+export const READINESS_CRITERIA_VERSION = 2;
+
+export type ReadinessReviewConclusion = 'ready_to_build' | 'not_ready';
+export type ReadinessReviewCriterionId =
+    | 'problem'
+    | 'user'
+    | 'outcome'
+    | 'scope'
+    | 'decisions'
+    | 'assumptions'
+    | 'risks'
+    | 'plan_alignment'
+    | 'challenge'
+    | 'downstream_alignment';
+
+export type ReadinessCriterionEvidenceQuality = 'direct' | 'inferred' | 'incomplete';
+
+export type ReadinessCriterionEvidence = {
+    id: string;
+    quality: ReadinessCriterionEvidenceQuality;
+    summary: string;
+    sourceType: 'prd' | 'planning_record' | 'challenge' | 'alignment' | 'downstream' | 'generation';
+    sourceId?: string;
+    sourceVersionId?: string;
+    contentHash?: string;
+};
+
+export type ReadinessActionTarget =
+    | { kind: 'prd'; section: 'problem' | 'user' | 'outcome' }
+    | { kind: 'feature'; featureId?: string }
+    | { kind: 'planning_record'; planningRecordId: string }
+    | { kind: 'challenge'; reviewId?: string; issueId?: string; findingId?: string }
+    | { kind: 'update_plan'; planId: string; itemId: string; artifactId: string; nodeId: ArtifactSlotKey }
+    | { kind: 'output'; artifactId: string; nodeId: ArtifactSlotKey };
+
+export type ReadinessReviewCriterion = {
+    id: ReadinessReviewCriterionId;
+    label: string;
+    status: 'met' | 'attention' | 'not_started';
+    blocking: boolean;
+    explanation: string;
+    evidence: ReadinessCriterionEvidence[];
+    actionTarget?: ReadinessActionTarget;
+};
+
+export type ReadinessConcernKind =
+    | 'decision'
+    | 'assumption'
+    | 'conflict'
+    | 'risk'
+    | 'propagation'
+    | 'challenge'
+    | 'downstream'
+    | 'foundation'
+    | 'scope';
+
+export type ReadinessConcernSource = {
+    type: ReadinessCriterionEvidence['sourceType'];
+    sourceId?: string;
+    sourceVersionId?: string;
+};
+
+export type ReadinessReviewConcern = {
+    id: string;
+    criterionId: ReadinessReviewCriterionId;
+    kind: ReadinessConcernKind;
+    title: string;
+    consequence: string;
+    blocking: boolean;
+    evidenceQuality: ReadinessCriterionEvidenceQuality;
+    source: ReadinessConcernSource;
+    actionTarget: ReadinessActionTarget;
+};
+
+export type ReadinessReviewSnapshotHashes = {
+    spineIdentity: string;
+    spineContent: string;
+    planningState: string;
+    challenge: string;
+    alignment: string;
+    downstream: string;
+    aggregate: string;
+};
+
+export type ReadinessReview = {
+    id: string;
+    projectId: string;
+    schemaVersion: typeof READINESS_REVIEW_SCHEMA_VERSION;
+    criteriaVersion: typeof READINESS_CRITERIA_VERSION;
+    conclusion: ReadinessReviewConclusion;
+    spineVersionId: string;
+    snapshotHashes: ReadinessReviewSnapshotHashes;
+    criteria: ReadinessReviewCriterion[];
+    concerns: ReadinessReviewConcern[];
+    caveats: string[];
+    createdAt: number;
+    /** Hash of every persisted field above. Recomputed locally on restore. */
+    integrityHash: string;
+};
+
+type ReadinessCommitmentEventBase = {
+    eventSchemaVersion: 1;
+    /** Local append-only payload integrity. Legacy events without this value
+     * remain historical provenance but cannot confer current authority. */
+    eventIntegrityHash: string;
+    id: string;
+    projectId: string;
+    reviewId: string;
+    actor: 'user';
+    at: number;
+    spineVersionId: string;
+    /** Exact immutable review snapshot the event authorizes or references. */
+    snapshotHash: string;
+    integrityHash: string;
+    aggregateHash: string;
+};
+
+export type ReadinessCommitmentEvent =
+    | (ReadinessCommitmentEventBase & {
+        type: 'commit_authorized';
+        acceptedConcernIds: string[];
+        rationale: string;
+        containmentPlan?: string;
+    })
+    | (ReadinessCommitmentEventBase & {
+        type: 'plan_committed';
+        authorizationEventId: string;
+    })
+    | (ReadinessCommitmentEventBase & {
+        type: 'plan_reopened';
+        priorCommitEventId: string;
+        reason?: string;
+    });
+
 // --- Persisted implementation tasks --------------------------------------
 // `ImplementationTask` (src/types/tasks.ts) is the *transient* extraction
 // shape produced from an Implementation Plan. `ProjectTask` is its persisted
@@ -1531,7 +2418,10 @@ export type HistoryEventType =
     | 'GenerationFailed'
     | 'Edited'
     | 'Reverted'
-    | 'MarkedCurrent';
+    | 'MarkedCurrent'
+    | 'ReadinessReviewed'
+    | 'PlanCommitted'
+    | 'PlanReopened';
 
 // --- Version provenance ----------------------------------------------------
 // Attribution for "who/what produced this version". Attached to both
@@ -1566,6 +2456,7 @@ export type HistoryEvent = {
     spineVersionId?: string;
     artifactId?: string;
     artifactVersionId?: string;
+    readinessReviewId?: string;
     type: HistoryEventType;
     description: string;
     diff?: {

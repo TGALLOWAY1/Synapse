@@ -4,7 +4,7 @@
 
 ### State (`src/store/`)
 
-`useProjectStore` is one Zustand store composed from 9 slices in
+`useProjectStore` is one Zustand store composed from the slices in
 `src/store/slices/`:
 
 - `projectSlice` — Project CRUD, current stage
@@ -53,6 +53,16 @@
   (todo/in_progress/done) and `recordTaskExports` (attach created
   GitHub/Linear issue refs) drive progress tracking. **Persisted** — not
   stripped from localStorage.
+- `reviewSlice` — Persisted adversarial-review state (reviewRuns,
+  specialistRuns, reviewFindings, reviewIssues, planningRecords). Append-only
+  authority events; see docs/architecture/PLANNING_AND_DECISIONS.md.
+- `readinessSlice` — Persisted readiness reviews + commitment events
+  (version-pinned; commitment display goes through
+  `commitmentRemainsCurrent`).
+- `downstreamUpdatePlanSlice` — Persisted downstream update plans, artifact
+  update proposals/applications/verifications, plus the derived
+  output-alignment getters (`getProjectOutputAlignment` /
+  `getArtifactAlignment` — read-side only, never persisted).
 - `metricsSlice` — Persisted orchestration metrics (`WorkflowRun[]` keyed by
   projectId, newest-first, capped at 50/project). `recordWorkflowRun` appends a
   run; `getWorkflowRuns`/`getAllWorkflowRuns`/`clearWorkflowRuns` read/clear.

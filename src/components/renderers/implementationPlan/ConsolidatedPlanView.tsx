@@ -3,6 +3,10 @@ import { ArrowRight, ClipboardList } from 'lucide-react';
 import type { ConsolidatedImplementationPlan, ProjectTask } from '../../../types';
 import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
 import {
+    implementationPlanAnchor,
+    type ImplementationPlanNavigationTarget,
+} from '../../../lib/planning/implementationPlanNavigation';
+import {
     collectAllPromptPacks,
     consolidatedPlanToMarkdown,
     promptPackToClipboardText,
@@ -39,6 +43,8 @@ interface Props {
      * session-local state when persistence isn't wired (tests, previews). */
     progress?: ImplementationPlanProgress;
     onUpdateProgress?: (next: ImplementationPlanProgress) => void;
+    initialMilestoneId?: string;
+    initialNavigationTarget?: ImplementationPlanNavigationTarget;
 }
 
 /**
@@ -60,9 +66,22 @@ export function ConsolidatedPlanView({
     onConvertToTasks,
     progress: externalProgress,
     onUpdateProgress,
+    initialMilestoneId,
+    initialNavigationTarget,
 }: Props) {
-    const [tab, setTab] = useState<TabId>('overview');
-    const [focusMilestoneId, setFocusMilestoneId] = useState<string | null>(null);
+    const legacyMilestoneTarget = initialMilestoneId ? {
+        tab: 'milestones' as const,
+        anchorId: implementationPlanAnchor.milestone(initialMilestoneId),
+        milestoneId: initialMilestoneId,
+    } : undefined;
+    const initialTarget = initialNavigationTarget ?? legacyMilestoneTarget;
+    const initialMilestoneExists = Boolean(initialTarget?.milestoneId
+        && plan.milestones.some(milestone => milestone.id === initialTarget.milestoneId));
+    const initialTab = initialTarget?.tab === 'quality_gates' ? 'quality_gates'
+        : initialTarget?.tab === 'milestones' && initialMilestoneExists ? 'milestones' : 'overview';
+    const [tab, setTab] = useState<TabId>(initialTab);
+    const [focusMilestoneId, setFocusMilestoneId] = useState<string | null>(initialMilestoneExists ? initialTarget!.milestoneId! : null);
+    const [focusAnchorId, setFocusAnchorId] = useState<string | null>(initialTarget?.anchorId ?? null);
     // Session-local fallback so copy/gate tracking still works when no
     // persistence callback is wired (e.g. isolated renders).
     const [localProgress, setLocalProgress] = useState<ImplementationPlanProgress>(EMPTY_PLAN_PROGRESS);
@@ -107,14 +126,16 @@ export function ConsolidatedPlanView({
     const openMilestone = (milestoneId: string) => {
         setTab('milestones');
         setFocusMilestoneId(milestoneId);
+        setFocusAnchorId(implementationPlanAnchor.milestone(milestoneId));
     };
 
-    // Scroll a focused milestone into view once the Roadmap tab has rendered.
+    // Scroll the exact resolved region into view once its owning tab has rendered.
     useEffect(() => {
-        if (tab !== 'milestones' || !focusMilestoneId) return;
-        document.getElementById(`impl-milestone-${focusMilestoneId}`)
-            ?.scrollIntoView({ behavior: 'smooth', block: 'start' });
-    }, [tab, focusMilestoneId]);
+        if (!focusAnchorId) return;
+        const target = document.getElementById(focusAnchorId);
+        target?.scrollIntoView({ behavior: 'smooth', block: 'start' });
+        target?.focus({ preventScroll: true });
+    }, [tab, focusAnchorId]);
 
     const tabs: Array<{ id: TabId; label: string; count?: number }> = [
         { id: 'overview', label: 'Build Brief' },
@@ -193,6 +214,7 @@ export function ConsolidatedPlanView({
                                 copiedPackIds={copiedPackIds}
                                 onPackCopied={markPackCopied}
                                 onPacksCopied={markPacksCopied}
+                                focusAnchorId={focusMilestoneId === m.id ? focusAnchorId ?? undefined : undefined}
                             />
                         ))
                     )}

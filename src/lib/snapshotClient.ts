@@ -24,6 +24,8 @@ import type {
     Artifact, ArtifactVersion, FeedbackItem, MockupImageRecord,
     ScreenInventoryImageRecord, ProjectTask, WorkflowRun,
     MockupVariantImageRecord,
+    ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue, PlanningRecord,
+    ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import { useProjectStore } from '../store/projectStore';
 import { buildImageKey, listImagesForVersion, putImage, deleteImagesForVersion } from './mockupImageStore';
@@ -47,6 +49,12 @@ import {
     type MockupVariantImageSnapshot,
 } from './mockupVariantSnapshot';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
+import type { DownstreamUpdatePlan, DownstreamUpdatePlanEvent } from './planning/downstreamUpdatePlan';
+import type {
+    DownstreamArtifactUpdateApplication, DownstreamArtifactUpdateProposal,
+    DownstreamArtifactUpdateReviewEvent, DownstreamArtifactUpdateVerification,
+    DownstreamArtifactUpdateVerificationEvent,
+} from './planning/downstreamArtifactUpdateProposal';
 import { auditMockupImageCoverage, countMockupSpecScreens } from './snapshotImageAudit';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
@@ -65,6 +73,20 @@ export type SnapshotProjectBundle = {
     // existed won't have them, and restore defaults to [].
     tasks?: ProjectTask[];
     workflowRuns?: WorkflowRun[];
+    reviewRuns?: ReviewRun[];
+    specialistRuns?: SpecialistRun[];
+    reviewFindings?: SpecialistFinding[];
+    reviewIssues?: ReviewIssue[];
+    planningRecords?: PlanningRecord[];
+    readinessReviews?: ReadinessReview[];
+    readinessCommitmentEvents?: ReadinessCommitmentEvent[];
+    downstreamUpdatePlans?: DownstreamUpdatePlan[];
+    downstreamUpdatePlanEvents?: DownstreamUpdatePlanEvent[];
+    downstreamArtifactUpdateProposals?: DownstreamArtifactUpdateProposal[];
+    downstreamArtifactUpdateReviewEvents?: DownstreamArtifactUpdateReviewEvent[];
+    downstreamArtifactUpdateApplications?: DownstreamArtifactUpdateApplication[];
+    downstreamArtifactUpdateVerifications?: DownstreamArtifactUpdateVerification[];
+    downstreamArtifactUpdateVerificationEvents?: DownstreamArtifactUpdateVerificationEvent[];
     // Phase 3D: per-variant mockup images (the Screens Mockups-tab variant
     // gallery) live in a dedicated IndexedDB store. They ride INSIDE the bundle
     // (which the server persists verbatim) in their WIRE form — image bytes are
@@ -181,6 +203,20 @@ export const collectProjectBundle = (projectId: string): SnapshotProjectBundle =
         feedbackItems: state.feedbackItems[projectId] ?? [],
         tasks: state.tasks[projectId] ?? [],
         workflowRuns: state.workflowRuns[projectId] ?? [],
+        reviewRuns: state.reviewRuns[projectId] ?? [],
+        specialistRuns: state.specialistRuns[projectId] ?? [],
+        reviewFindings: state.reviewFindings[projectId] ?? [],
+        reviewIssues: state.reviewIssues[projectId] ?? [],
+        planningRecords: state.planningRecords[projectId] ?? [],
+        readinessReviews: state.readinessReviews[projectId] ?? [],
+        readinessCommitmentEvents: state.readinessCommitmentEvents[projectId] ?? [],
+        downstreamUpdatePlans: state.downstreamUpdatePlans[projectId] ?? [],
+        downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents[projectId] ?? [],
+        downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
+        downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
+        downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
+        downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
+        downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
     };
 };
 
@@ -659,6 +695,23 @@ export const restoreSnapshot = async (snapshot: SnapshotPayload): Promise<string
         feedbackItems: { ...state.feedbackItems, [projectId]: bundle.feedbackItems },
         tasks: { ...state.tasks, [projectId]: bundle.tasks ?? [] },
         workflowRuns: { ...state.workflowRuns, [projectId]: bundle.workflowRuns ?? [] },
+        reviewRuns: { ...state.reviewRuns, [projectId]: bundle.reviewRuns ?? [] },
+        specialistRuns: { ...state.specialistRuns, [projectId]: bundle.specialistRuns ?? [] },
+        reviewFindings: { ...state.reviewFindings, [projectId]: bundle.reviewFindings ?? [] },
+        reviewIssues: { ...state.reviewIssues, [projectId]: bundle.reviewIssues ?? [] },
+        planningRecords: { ...state.planningRecords, [projectId]: bundle.planningRecords ?? [] },
+        readinessReviews: { ...state.readinessReviews, [projectId]: bundle.readinessReviews ?? [] },
+        readinessCommitmentEvents: {
+            ...state.readinessCommitmentEvents,
+            [projectId]: bundle.readinessCommitmentEvents ?? [],
+        },
+        downstreamUpdatePlans: { ...state.downstreamUpdatePlans, [projectId]: bundle.downstreamUpdatePlans ?? [] },
+        downstreamUpdatePlanEvents: { ...state.downstreamUpdatePlanEvents, [projectId]: bundle.downstreamUpdatePlanEvents ?? [] },
+        downstreamArtifactUpdateProposals: { ...state.downstreamArtifactUpdateProposals, [projectId]: bundle.downstreamArtifactUpdateProposals ?? [] },
+        downstreamArtifactUpdateReviewEvents: { ...state.downstreamArtifactUpdateReviewEvents, [projectId]: bundle.downstreamArtifactUpdateReviewEvents ?? [] },
+        downstreamArtifactUpdateApplications: { ...state.downstreamArtifactUpdateApplications, [projectId]: bundle.downstreamArtifactUpdateApplications ?? [] },
+        downstreamArtifactUpdateVerifications: { ...state.downstreamArtifactUpdateVerifications, [projectId]: bundle.downstreamArtifactUpdateVerifications ?? [] },
+        downstreamArtifactUpdateVerificationEvents: { ...state.downstreamArtifactUpdateVerificationEvents, [projectId]: bundle.downstreamArtifactUpdateVerificationEvents ?? [] },
     }));
 
     return projectId;
@@ -725,6 +778,17 @@ export const namespaceSnapshotForRestore = (
     }
 
     const bundle = rewriteIds(snapshot.project, idMap);
+    // Proposal/review/application integrity hashes bind exact project and
+    // artifact-version ids. A namespaced read-only demo cannot rewrite those
+    // ids without invalidating the seals, and must never manufacture equivalent
+    // user authority by resealing them. Same-project restores preserve the full
+    // lifecycle via the no-op branch above; namespaced restores start this
+    // lifecycle empty and conservative.
+    bundle.downstreamArtifactUpdateProposals = [];
+    bundle.downstreamArtifactUpdateReviewEvents = [];
+    bundle.downstreamArtifactUpdateApplications = [];
+    bundle.downstreamArtifactUpdateVerifications = [];
+    bundle.downstreamArtifactUpdateVerificationEvents = [];
     // The variant snapshot's composite `key` embeds the versionId (with colons),
     // so exact-string rewriteIds can't fix it — rebuild the keys (and projectId)
     // deterministically from the source snapshot so re-restores stay idempotent.
@@ -778,6 +842,23 @@ export const restoreSnapshotAs = async (
         feedbackItems: { ...state.feedbackItems, [targetProjectId]: remapped.feedbackItems ?? [] },
         tasks: { ...state.tasks, [targetProjectId]: remapped.tasks ?? [] },
         workflowRuns: { ...state.workflowRuns, [targetProjectId]: remapped.workflowRuns ?? [] },
+        reviewRuns: { ...state.reviewRuns, [targetProjectId]: remapped.reviewRuns ?? [] },
+        specialistRuns: { ...state.specialistRuns, [targetProjectId]: remapped.specialistRuns ?? [] },
+        reviewFindings: { ...state.reviewFindings, [targetProjectId]: remapped.reviewFindings ?? [] },
+        reviewIssues: { ...state.reviewIssues, [targetProjectId]: remapped.reviewIssues ?? [] },
+        planningRecords: { ...state.planningRecords, [targetProjectId]: remapped.planningRecords ?? [] },
+        readinessReviews: { ...state.readinessReviews, [targetProjectId]: remapped.readinessReviews ?? [] },
+        readinessCommitmentEvents: {
+            ...state.readinessCommitmentEvents,
+            [targetProjectId]: remapped.readinessCommitmentEvents ?? [],
+        },
+        downstreamUpdatePlans: { ...state.downstreamUpdatePlans, [targetProjectId]: remapped.downstreamUpdatePlans ?? [] },
+        downstreamUpdatePlanEvents: { ...state.downstreamUpdatePlanEvents, [targetProjectId]: remapped.downstreamUpdatePlanEvents ?? [] },
+        downstreamArtifactUpdateProposals: { ...state.downstreamArtifactUpdateProposals, [targetProjectId]: remapped.downstreamArtifactUpdateProposals ?? [] },
+        downstreamArtifactUpdateReviewEvents: { ...state.downstreamArtifactUpdateReviewEvents, [targetProjectId]: remapped.downstreamArtifactUpdateReviewEvents ?? [] },
+        downstreamArtifactUpdateApplications: { ...state.downstreamArtifactUpdateApplications, [targetProjectId]: remapped.downstreamArtifactUpdateApplications ?? [] },
+        downstreamArtifactUpdateVerifications: { ...state.downstreamArtifactUpdateVerifications, [targetProjectId]: remapped.downstreamArtifactUpdateVerifications ?? [] },
+        downstreamArtifactUpdateVerificationEvents: { ...state.downstreamArtifactUpdateVerificationEvents, [targetProjectId]: remapped.downstreamArtifactUpdateVerificationEvents ?? [] },
     }));
 
     return targetProjectId;

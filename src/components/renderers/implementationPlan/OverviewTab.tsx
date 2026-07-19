@@ -2,6 +2,7 @@ import { useMemo } from 'react';
 import { ChevronRight, Flag, Layers, Sparkles } from 'lucide-react';
 import type { ConsolidatedImplementationPlan } from '../../../types';
 import { resolveCriticalPath } from '../../../lib/services/implementationPlanInsights';
+import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 
 interface Props {
     plan: ConsolidatedImplementationPlan;
@@ -115,7 +116,7 @@ export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">Critical Path</p>
                     <div className="flex flex-wrap items-center gap-1.5">
                         {criticalPath.map((step, i) => (
-                            <span key={i} className="flex items-center gap-1.5">
+                            <span id={implementationPlanAnchor.criticalPath(i)} tabIndex={-1} key={i} className="flex scroll-mt-24 items-center gap-1.5">
                                 {step.milestoneId ? (
                                     <button
                                         type="button"
@@ -147,7 +148,7 @@ export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
                     </p>
                     <ul className="divide-y divide-neutral-100">
                         {plan.risks.map((r, i) => (
-                            <li key={i} className="py-2 first:pt-0 last:pb-0 flex items-start gap-2">
+                            <li id={implementationPlanAnchor.risk(i)} tabIndex={-1} key={i} className="flex scroll-mt-24 items-start gap-2 py-2 first:pt-0 last:pb-0">
                                 <Flag size={13} className="mt-0.5 shrink-0 text-red-500" />
                                 <div className="min-w-0">
                                     <p className="text-sm text-neutral-800">{r.description}</p>
@@ -170,7 +171,7 @@ export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
                     <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">Architecture Decisions</p>
                     <ul className="space-y-1 text-sm text-neutral-800">
                         {plan.architecture.map((a, i) => (
-                            <li key={i} className="flex items-start gap-2">
+                            <li id={implementationPlanAnchor.architecture(i)} tabIndex={-1} key={i} className="flex scroll-mt-24 items-start gap-2">
                                 <Layers size={13} className="mt-0.5 shrink-0 text-neutral-400" />
                                 <span>{a}</span>
                             </li>

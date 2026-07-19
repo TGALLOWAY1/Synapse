@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, History, Lock, ShieldAlert, ShieldCheck,
-    Layers, Database, Code2, AppWindow, Waypoints,
+    Layers, Database, Code2, AppWindow, Waypoints, ListChecks,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -21,6 +21,8 @@ import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
 import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
+import { OutputAlignmentBadge, OutputAlignmentDot, OutputAlignmentNotice } from './OutputAlignmentStatus';
+import { DownstreamUpdatePlanReview } from './downstream/DownstreamUpdatePlanReview';
 import { FreshnessBadge } from './FreshnessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
@@ -57,6 +59,16 @@ import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
+import type { OutputAlignment } from '../lib/planning/outputAlignment';
+import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../lib/planning/downstreamUpdatePlan';
+import {
+    implementationPlanNavigationTarget,
+} from '../lib/planning/implementationPlanNavigation';
+import type {
+    PlanningArtifactRegionTarget,
+    PlanningNavigationIntent,
+    PlanningReturnTarget,
+} from '../lib/planning/planningNavigation';
 import { useProjectFreshness } from '../hooks/useProjectFreshness';
 import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
 import type {
@@ -73,6 +85,7 @@ const EMPTY_TASKS: ProjectTask[] = [];
 
 // Stable empty flows list for the screen-experience join memo.
 const EMPTY_FLOWS: ParsedFlow[] = [];
+const EMPTY_UPDATE_PLANS: DownstreamUpdatePlan[] = [];
 
 interface ArtifactWorkspaceProps {
     projectId: string;
@@ -86,6 +99,16 @@ interface ArtifactWorkspaceProps {
     // so closing the drawer never triggers a reopen.
     autoOpenIntent?: boolean;
     onAutoOpenConsumed?: () => void;
+    /** Exact readiness target. Unlike autoOpenIntent, this must not pick a
+     * different output merely because it is earlier in display order. */
+    initialSelection?: ArtifactSlotKey;
+    initialArtifactId?: string;
+    initialRegion?: PlanningArtifactRegionTarget;
+    initialUpdatePlanId?: string;
+    initialUpdatePlanItemId?: string;
+    onInitialSelectionConsumed?: () => void;
+    onOpenPlanningRecord?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
+    onNavigatePlanning?: (intent: PlanningNavigationIntent) => void;
 }
 
 // 'screens' is the Experience workspace's screen-centric view — a read-side
@@ -256,14 +279,17 @@ function AssetLock() {
 
 export function ArtifactWorkspace({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
-    autoOpenIntent, onAutoOpenConsumed,
+    autoOpenIntent, onAutoOpenConsumed, initialSelection, initialArtifactId,
+    initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
+    onOpenPlanningRecord, onNavigatePlanning,
 }: ArtifactWorkspaceProps) {
     const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
     const {
-        getArtifacts, getPreferredVersion, getJob, getProject,
+        getArtifacts, getArtifact, getPreferredVersion, getProjectOutputAlignment, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
+        generateDownstreamUpdatePlans,
     } = useProjectStore();
     // Canonical freshness for every artifact-status surface in this workspace
     // (version-controls strip, Screens artifact controls, mockup drift banner,
@@ -274,9 +300,12 @@ export function ArtifactWorkspace({
     const designSystemPreset = useProjectStore(s => s.projects[projectId]?.designSystemPreset);
     // Which artifact's version-history panel is open (null = none).
     const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
+    const [updatePlanId, setUpdatePlanId] = useState<string | null>(null);
+    const [updatePlanRegionTarget, setUpdatePlanRegionTarget] = useState<PlanningArtifactRegionTarget | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
+    const downstreamUpdatePlans = useProjectStore(s => s.downstreamUpdatePlans[projectId] ?? EMPTY_UPDATE_PLANS);
     // Active design tokens, so the Screen Inventory copy-prompt embeds the same
     // Design System Brief the internal mockups use. selectPreferredDesignTokens
     // is reference-stable per ArtifactVersion, so it's safe inside a selector.
@@ -284,12 +313,28 @@ export function ArtifactWorkspace({
 
     const slotMetas = useMemo(() => buildSlotMetas(), []);
     const [selected, setSelected] = useState<WorkspaceSelection>('prd');
+    const [selectedArtifactId, setSelectedArtifactId] = useState<string>();
+
+    useEffect(() => {
+        if (!initialSelection) return;
+        const target: WorkspaceSelection = initialSelection === 'screen_inventory' || initialSelection === 'mockup'
+            ? 'screens'
+            : initialSelection;
+        if (target === 'screens' || slotMetas.some(meta => meta.key === target)) {
+            setSelected(target);
+            setSelectedArtifactId(initialArtifactId);
+            if (isMobile) setMobileSidebarOpen(false);
+        }
+        onInitialSelectionConsumed?.();
+    }, [initialSelection, initialArtifactId, isMobile, onInitialSelectionConsumed, slotMetas]);
     // The scrollable content pane. Reset to the top whenever the user switches
     // pages so a new artifact never inherits the previous page's scroll offset.
     const mainRef = useRef<HTMLElement>(null);
     // Mobile-only: the left rail is a slide-in drawer below the md breakpoint.
     // Closed by default so the content pane is fully visible on first paint.
     const [mobileSidebarOpen, setMobileSidebarOpen] = useState(false);
+    const mobileDrawerRef = useRef<HTMLElement>(null);
+    const mobileDrawerTriggerRef = useRef<HTMLButtonElement>(null);
     // Holds the artifact id + content the modal should extract tasks from.
     // Stored as state (rather than derived) so the modal keeps working even
     // if the user mutates the artifact in another tab while it's open.
@@ -308,6 +353,42 @@ export function ArtifactWorkspace({
     const [designRegenConfirm, setDesignRegenConfirm] = useState<
         { nextVersion: number } | null
     >(null);
+
+    useEffect(() => {
+        if (!isMobile || !mobileSidebarOpen) return;
+        const previouslyFocused = document.activeElement instanceof HTMLElement ? document.activeElement : null;
+        const focusableSelector = 'button:not([disabled]), [href], input:not([disabled]), select:not([disabled]), textarea:not([disabled]), [tabindex]:not([tabindex="-1"])';
+        const focusFirst = () => {
+            const first = mobileDrawerRef.current?.querySelector<HTMLElement>(focusableSelector);
+            first?.focus();
+        };
+        const focusFrame = window.requestAnimationFrame(focusFirst);
+        const onKeyDown = (event: KeyboardEvent) => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                setMobileSidebarOpen(false);
+                return;
+            }
+            if (event.key !== 'Tab' || !mobileDrawerRef.current) return;
+            const focusable = [...mobileDrawerRef.current.querySelectorAll<HTMLElement>(focusableSelector)];
+            if (focusable.length === 0) return;
+            const first = focusable[0];
+            const last = focusable[focusable.length - 1];
+            if (event.shiftKey && document.activeElement === first) {
+                event.preventDefault();
+                last.focus();
+            } else if (!event.shiftKey && document.activeElement === last) {
+                event.preventDefault();
+                first.focus();
+            }
+        };
+        window.addEventListener('keydown', onKeyDown);
+        return () => {
+            window.cancelAnimationFrame(focusFrame);
+            window.removeEventListener('keydown', onKeyDown);
+            previouslyFocused?.focus();
+        };
+    }, [isMobile, mobileSidebarOpen]);
     // Experience workspace (Screens) navigation state — URL-addressable:
     // /p/:projectId?screen=<canonical id>[&screenTab=flow|mockups]. The URL
     // is the single source of truth for which screen is open, so deep links,
@@ -352,6 +433,22 @@ export function ArtifactWorkspace({
         }, { replace: opts?.replace });
     };
 
+    useEffect(() => {
+        if (initialRegion) {
+            setUpdatePlanRegionTarget(initialRegion);
+            if (initialRegion.screenId) setScreenParams(initialRegion.screenId, 'overview', { replace: true });
+        }
+        if (initialUpdatePlanId) {
+            setUpdatePlanId(initialUpdatePlanId);
+            if (initialUpdatePlanItemId) {
+                window.requestAnimationFrame(() => document.getElementById(`update-plan-item-${initialUpdatePlanItemId}`)?.scrollIntoView?.({ block: 'center' }));
+            }
+        }
+    // setScreenParams intentionally reads the current search params so exact
+    // region entry preserves the presentation-only planning intent.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    }, [initialRegion, initialUpdatePlanId, initialUpdatePlanItemId]);
+
     // The rendered selection: an open screen param always means the Screens
     // view (derived — never synced), so back/forward re-entering ?screen=…
     // reopens the detail page even if another artifact row was selected.
@@ -364,12 +461,38 @@ export function ArtifactWorkspace({
     // objects are stable references in the store until a new version lands,
     // so they are safe useMemo dependencies.
     const coreArtifacts = getArtifacts(projectId, 'core_artifact');
-    const invArtifact = coreArtifacts.find(a => a.subtype === 'screen_inventory');
+    const exactSelectedArtifact = selectedArtifactId ? getArtifact(projectId, selectedArtifactId) : undefined;
+    const invArtifact = exactSelectedArtifact?.type === 'core_artifact' && exactSelectedArtifact.subtype === 'screen_inventory'
+        ? exactSelectedArtifact
+        : coreArtifacts.find(a => a.subtype === 'screen_inventory');
     const invPreferred = invArtifact ? getPreferredVersion(projectId, invArtifact.id) : undefined;
-    const flowsArtifact = coreArtifacts.find(a => a.subtype === 'user_flows');
+    const flowsArtifact = exactSelectedArtifact?.type === 'core_artifact' && exactSelectedArtifact.subtype === 'user_flows'
+        ? exactSelectedArtifact
+        : coreArtifacts.find(a => a.subtype === 'user_flows');
     const flowsPreferred = flowsArtifact ? getPreferredVersion(projectId, flowsArtifact.id) : undefined;
-    const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
+    const mockupArtifact = exactSelectedArtifact?.type === 'mockup'
+        ? exactSelectedArtifact
+        : getArtifacts(projectId, 'mockup')[0];
     const mockupPreferred = mockupArtifact ? getPreferredVersion(projectId, mockupArtifact.id) : undefined;
+    const projectOutputAlignment = getProjectOutputAlignment(projectId);
+    const alignmentByNode = new Map(
+        projectOutputAlignment.outputs.map(output => [output.nodeId, output]),
+    );
+
+    const alignmentForSelection = (selection: WorkspaceSelection): OutputAlignment | undefined => {
+        if (selection === 'screens') {
+            const candidates = [alignmentByNode.get('screen_inventory'), alignmentByNode.get('mockup')]
+                .filter((item): item is OutputAlignment => Boolean(item));
+            return candidates.sort((a, b) => {
+                const weight = (item: OutputAlignment) => item.state === 'stale'
+                    ? 3
+                    : item.blocksBuildReadiness ? 2 : item.state === 'possibly_affected' ? 1 : 0;
+                return weight(b) - weight(a);
+            })[0];
+        }
+        if (selection === 'prd' || selection === 'dependency_graph') return undefined;
+        return alignmentByNode.get(selection as ArtifactSlotKey);
+    };
 
     // Phase 5B: Data Model + Implementation Plan content for the screen → artifact
     // trace bridge (read-only correlation on the Handoff tab). Resolved to their
@@ -557,6 +680,7 @@ export function ArtifactWorkspace({
     // stable across renders. Presence is tracked separately from the version id
     // so an absent artifact is a caveat, never a defect (Phase 5B rule).
     const projectName = getProject(projectId)?.name;
+    const screensOutputAlignment = projectOutputAlignment.outputs.find(output => output.nodeId === 'screen_inventory');
     const exportManifest = useMemo(() => ({
         prdVersionId: spineVersionId,
         screensArtifactVersionId: invPreferred?.id,
@@ -565,9 +689,15 @@ export function ArtifactWorkspace({
         designSystemVersionId,
         dataModelPresent: Boolean(dataModelArtifact),
         implementationPlanPresent: Boolean(implPlanArtifact),
+        ...(screensOutputAlignment ? { alignment: {
+            state: screensOutputAlignment.state,
+            summary: screensOutputAlignment.summary,
+            nextAction: screensOutputAlignment.nextAction,
+            blocksBuildReadiness: screensOutputAlignment.blocksBuildReadiness,
+        } } : {}),
     }), [
         spineVersionId, invPreferred?.id, dataModelPreferred?.id, implPlanPreferred?.id,
-        designSystemVersionId, dataModelArtifact, implPlanArtifact,
+        designSystemVersionId, dataModelArtifact, implPlanArtifact, screensOutputAlignment,
     ]);
 
     // Validation issues minus the user's persisted dismissals.
@@ -856,6 +986,127 @@ export function ArtifactWorkspace({
     const allSpines = getSpineVersions(projectId);
     const latestSpineId = allSpines.find(s => s.isLatest)?.id;
 
+    const supportedUpdatePlanArtifact = (artifactId: string) => {
+        const artifact = getArtifact(projectId, artifactId);
+        return artifact?.type === 'core_artifact'
+            && (artifact.subtype === 'screen_inventory'
+                || artifact.subtype === 'user_flows'
+                || artifact.subtype === 'data_model'
+                || artifact.subtype === 'implementation_plan');
+    };
+
+    const currentUpdatePlanFor = (artifactId: string) => downstreamUpdatePlans
+        .filter(plan => plan.artifact.artifactId === artifactId)
+        .sort((a, b) => b.createdAt - a.createdAt)
+        .find(plan => useProjectStore.getState().getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current);
+
+    const openUpdatePlanForArtifact = (artifactId: string) => {
+        if (!supportedUpdatePlanArtifact(artifactId)) return;
+        const existing = currentUpdatePlanFor(artifactId);
+        if (existing) {
+            setUpdatePlanId(existing.id);
+            return;
+        }
+        generateDownstreamUpdatePlans(projectId);
+        const generated = (useProjectStore.getState().downstreamUpdatePlans[projectId] ?? [])
+            .filter(plan => plan.artifact.artifactId === artifactId)
+            .sort((a, b) => b.createdAt - a.createdAt)
+            .find(plan => useProjectStore.getState().getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current);
+        if (generated) setUpdatePlanId(generated.id);
+    };
+
+    const openUpdatePlanOutput = (plan: DownstreamUpdatePlan, item: DownstreamUpdatePlanItem) => {
+        setUpdatePlanId(null);
+        setSelectedArtifactId(plan.artifact.artifactId);
+        const region = item.region;
+        const implementationTarget = implementationPlanNavigationTarget(region);
+        const label = region.kind === 'screen' ? region.screenName
+            : region.kind === 'flow' ? `${region.flowName}${region.stepIndex === undefined ? '' : ` · Step ${region.stepIndex + 1}`}`
+                : region.kind === 'data_model' ? `${region.entityName}${region.memberName ? ` · ${region.memberName}` : ''}`
+                    : region.kind === 'implementation_plan' ? `${region.section === 'architecture' ? 'Architecture' : region.aspect.replace(/_/g, ' ')} · ${region.entryLabel}`
+                    : region.label;
+        setUpdatePlanRegionTarget({
+            planId: plan.id,
+            itemId: item.id,
+            label,
+            ...(region.kind === 'screen' && { screenId: region.screenId }),
+            ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
+            ...(region.kind === 'data_model' && {
+                dataEntityName: region.entityName,
+                ...(region.memberName && region.aspect !== 'entity' ? {
+                    dataMemberName: region.memberName,
+                    dataMemberAspect: region.aspect,
+                } : {}),
+            }),
+            ...(implementationTarget ? { implementationTarget } : {}),
+        });
+        const navigationRegion: PlanningArtifactRegionTarget = {
+            planId: plan.id,
+            itemId: item.id,
+            label,
+            ...(region.kind === 'screen' && { screenId: region.screenId }),
+            ...(region.kind === 'flow' && { flowId: region.flowId, flowStepIndex: region.stepIndex }),
+            ...(region.kind === 'data_model' && {
+                dataEntityName: region.entityName,
+                ...(region.memberName && region.aspect !== 'entity' ? {
+                    dataMemberName: region.memberName,
+                    dataMemberAspect: region.aspect,
+                } : {}),
+            }),
+            ...(implementationTarget ? { implementationTarget } : {}),
+        };
+        onNavigatePlanning?.({
+            destination: {
+                kind: 'artifact',
+                artifactId: plan.artifact.artifactId,
+                nodeId: plan.artifact.slot,
+                region: navigationRegion,
+            },
+            returnTo: {
+                destination: {
+                    kind: 'update_plan',
+                    planId: plan.id,
+                    itemId: item.id,
+                    artifactId: plan.artifact.artifactId,
+                    nodeId: plan.artifact.slot,
+                },
+                label: 'Return to update plan',
+            },
+        });
+        if (plan.artifact.slot === 'screen_inventory') {
+            setSelected('screens');
+            if (region.kind === 'screen') setScreenParams(region.screenId, 'overview', { replace: true });
+        } else {
+            setSelected(plan.artifact.slot);
+            if (selectedScreenId) setScreenParams(null, 'overview', { replace: true });
+        }
+        setMobileSidebarOpen(false);
+    };
+
+    const openUpdatePlanSource = (recordId?: string) => {
+        const plan = downstreamUpdatePlans.find(candidate => candidate.id === updatePlanId);
+        const returnTo: PlanningReturnTarget | undefined = plan ? {
+            destination: {
+                kind: 'update_plan',
+                planId: plan.id,
+                artifactId: plan.artifact.artifactId,
+                nodeId: plan.artifact.slot,
+            },
+            label: 'Return to update plan',
+        } : undefined;
+        setUpdatePlanId(null);
+        if (recordId && onOpenPlanningRecord) {
+            onOpenPlanningRecord(recordId, returnTo);
+            return;
+        }
+        if (onNavigatePlanning) {
+            onNavigatePlanning({ destination: { kind: 'prd' }, ...(returnTo ? { returnTo } : {}) });
+            return;
+        }
+        setSelected('prd');
+        if (selectedScreenId) setScreenParams(null);
+    };
+
     // Header strip shown above a generated artifact: provenance chip ("Generated
     // from PRD Version X"), freshness badge (+ what-changed detail), a
     // "Mark up to date" escape hatch when stale, and a Version history entry.
@@ -867,44 +1118,66 @@ export function ArtifactWorkspace({
     ) => {
         const ev = freshness.byArtifactId.get(artifactId);
         const status = ev?.status;
+        const alignment = projectOutputAlignment.outputs.find(output => output.artifactId === artifactId);
         const spineRef = preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
         const prdLabel = resolveSpineLabel(spineRef);
         const changeSummary = ev?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary ?? null;
         return (
-            <div className="flex items-center gap-2 flex-wrap">
-                {prdLabel && (
-                    <span className="text-[11px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-medium">
-                        Generated from PRD {prdLabel}
-                    </span>
-                )}
-                <FreshnessBadge
-                    status={status}
-                    detail={changeSummary
-                        ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
-                        : undefined}
-                />
-                {changeSummary?.hasChanges && (
-                    <span className="text-[11px] text-amber-700 truncate max-w-full">
-                        Since {prdLabel ?? 'generation'}: {changeSummary.headline}
-                    </span>
-                )}
-                {capabilities.canReviewArtifacts && isStaleStatus(status) && latestSpineId && (
+            <div className="space-y-2">
+                <div className="flex items-center gap-2 flex-wrap">
+                    {prdLabel && (
+                        <span className="text-[11px] px-2 py-0.5 rounded-full bg-neutral-100 text-neutral-600 font-medium">
+                            Generated from PRD {prdLabel}
+                        </span>
+                    )}
+                    {alignment ? (
+                        <OutputAlignmentBadge alignment={alignment} />
+                    ) : (
+                        <FreshnessBadge
+                            status={status}
+                            detail={changeSummary
+                                ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
+                                : undefined}
+                        />
+                    )}
+                    {alignment && alignment.state !== 'aligned' && capabilities.canReviewArtifacts && latestSpineId && (
+                        <button
+                            type="button"
+                            onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
+                            title="Confirm this output remains aligned with the current plan without regenerating it"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                        >
+                            <ShieldCheck size={12} /> Confirm aligned
+                        </button>
+                    )}
+                    {alignment && alignment.state !== 'aligned' && supportedUpdatePlanArtifact(artifactId) && (
+                        <button
+                            type="button"
+                            onClick={() => openUpdatePlanForArtifact(artifactId)}
+                            className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
+                        >
+                            <ListChecks size={13} /> {currentUpdatePlanFor(artifactId) ? 'Review update plan' : 'Create update plan'}
+                        </button>
+                    )}
+                    {!alignment && capabilities.canReviewArtifacts && isStaleStatus(status) && latestSpineId && (
+                        <button
+                            type="button"
+                            onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
+                            title="Confirm this artifact is still valid for the current PRD without regenerating it"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                        >
+                            <ShieldCheck size={12} /> Confirm aligned
+                        </button>
+                    )}
                     <button
                         type="button"
-                        onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
-                        title="Confirm this artifact is still valid for the current PRD without regenerating it"
-                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                        onClick={() => setVersionHistoryArtifactId(artifactId)}
+                        className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
                     >
-                        <ShieldCheck size={12} /> Mark up to date
+                        <History size={12} /> Version history
                     </button>
-                )}
-                <button
-                    type="button"
-                    onClick={() => setVersionHistoryArtifactId(artifactId)}
-                    className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
-                >
-                    <History size={12} /> Version history
-                </button>
+                </div>
+                {alignment && <OutputAlignmentNotice alignment={alignment} />}
             </div>
         );
     };
@@ -935,6 +1208,7 @@ export function ArtifactWorkspace({
                     structuredPRD={structuredPRD}
                     projectPlatform={projectPlatform}
                     onOpenNode={handleOpenGraphNode}
+                    onOpenUpdatePlan={openUpdatePlanForArtifact}
                 />
             );
         }
@@ -1092,6 +1366,23 @@ export function ArtifactWorkspace({
             // Stale screen id (e.g. inventory regenerated) falls back to the list.
             return (
                 <div className="space-y-4">
+                    {invArtifact && alignmentByNode.get('screen_inventory') && alignmentByNode.get('screen_inventory')?.state !== 'aligned' && (
+                        <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 xl:max-w-5xl sm:flex-row sm:items-center sm:justify-between">
+                            <div className="min-w-0">
+                                <p className="text-sm font-semibold text-indigo-950">Plan a focused screen review</p>
+                                <p className="mt-0.5 text-xs leading-relaxed text-indigo-800">
+                                    Identify the exact screens or states that need attention while preserving unrelated work.
+                                </p>
+                            </div>
+                            <button
+                                type="button"
+                                onClick={() => openUpdatePlanForArtifact(invArtifact.id)}
+                                className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white hover:bg-indigo-700"
+                            >
+                                <ListChecks size={14} /> {currentUpdatePlanFor(invArtifact.id) ? 'Review update plan' : 'Create update plan'}
+                            </button>
+                        </div>
+                    )}
                     {visibleScreenIssues.length > 0 && (
                         <div className="max-w-3xl xl:max-w-5xl mx-auto">
                             <ReferenceWarningsPanel
@@ -1270,7 +1561,9 @@ export function ArtifactWorkspace({
 
         // Core artifact done state.
         const subtype = activeSelection;
-        const artifact = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
+        const artifact = exactSelectedArtifact?.type === 'core_artifact' && exactSelectedArtifact.subtype === subtype
+            ? exactSelectedArtifact
+            : getArtifacts(projectId, 'core_artifact').find(a => a.subtype === subtype);
         const preferred = artifact ? getPreferredVersion(projectId, artifact.id) : undefined;
         if (!artifact || !preferred) {
             return <EmptyState message="Not generated yet" />;
@@ -1425,6 +1718,12 @@ export function ArtifactWorkspace({
                         implementationPlan={subtype === 'user_flows' ? structuredPRD.implementationPlan : undefined}
                         onNavigateToScreen={subtype === 'user_flows' ? handleNavigateToScreen : undefined}
                         availableScreenSlugs={subtype === 'user_flows' ? screenIndex.availableSlugs : undefined}
+                        initialFlowId={subtype === 'user_flows' ? updatePlanRegionTarget?.flowId : undefined}
+                        initialFlowStepIndex={subtype === 'user_flows' ? updatePlanRegionTarget?.flowStepIndex : undefined}
+                        initialDataEntityName={subtype === 'data_model' ? updatePlanRegionTarget?.dataEntityName : undefined}
+                        initialDataMemberName={subtype === 'data_model' ? updatePlanRegionTarget?.dataMemberName : undefined}
+                        initialDataMemberAspect={subtype === 'data_model' ? updatePlanRegionTarget?.dataMemberAspect : undefined}
+                        initialImplementationTarget={subtype === 'implementation_plan' ? updatePlanRegionTarget?.implementationTarget : undefined}
                         promptPackContent={legacyPromptPackContent}
                         savedTasks={planSavedTasks}
                         onConvertToTasks={handleConvertToTasks}
@@ -1453,6 +1752,7 @@ export function ArtifactWorkspace({
     const selectedMeta = slotMetas.find(s => s.key === activeSelection);
     const handleSelect = (key: WorkspaceSelection) => {
         setSelected(key);
+        setSelectedArtifactId(undefined);
         // Any sidebar selection (including re-clicking "Screens") lands on the
         // top of that view, closing an open Screen Detail (clears the URL
         // params, so Back can return to the screen).
@@ -1474,6 +1774,12 @@ export function ArtifactWorkspace({
 
             {/* Left rail — fixed sidebar on md+, slide-in drawer on mobile */}
             <aside
+                ref={mobileDrawerRef}
+                id="mobile-artifact-navigation"
+                role={isMobile && mobileSidebarOpen ? 'dialog' : undefined}
+                aria-modal={isMobile && mobileSidebarOpen ? true : undefined}
+                aria-labelledby={isMobile && mobileSidebarOpen ? 'mobile-artifact-navigation-title' : undefined}
+                aria-hidden={isMobile && !mobileSidebarOpen ? true : undefined}
                 className={`
                     absolute md:static inset-y-0 left-0 z-40 w-64 shrink-0
                     border-r border-neutral-200 bg-white overflow-y-auto
@@ -1483,12 +1789,12 @@ export function ArtifactWorkspace({
                 `}
             >
                 <div className="md:hidden flex items-center justify-between px-3 py-2 border-b border-neutral-100">
-                    <span className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Artifacts</span>
+                    <span id="mobile-artifact-navigation-title" className="text-xs font-bold text-neutral-500 uppercase tracking-wider">Artifacts</span>
                     <button
                         type="button"
                         onClick={() => setMobileSidebarOpen(false)}
                         aria-label="Close artifact list"
-                        className="p-1.5 -mr-1 text-neutral-500 hover:text-neutral-900"
+                        className="-mr-1 flex min-h-11 min-w-11 items-center justify-center text-neutral-500 hover:text-neutral-900"
                     >
                         <X size={18} />
                     </button>
@@ -1546,6 +1852,9 @@ export function ArtifactWorkspace({
                                                             {slot.key === 'screens' ? (
                                                                 <ScreensStatusDot inventory={status} mockup={mockupStatus} />
                                                             ) : slot.key !== 'dependency_graph' && <StatusDot status={status} />}
+                                                            {status === 'done' && (
+                                                                <OutputAlignmentDot alignment={alignmentForSelection(slot.key)} />
+                                                            )}
                                                             {status === 'done' && isLockedAsset(slot.key) && (
                                                                 <AssetLock />
                                                             )}
@@ -1566,14 +1875,17 @@ export function ArtifactWorkspace({
             </aside>
 
             {/* Main pane */}
-            <main ref={mainRef} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
+            <main ref={mainRef} aria-hidden={isMobile && mobileSidebarOpen ? true : undefined} inert={isMobile && mobileSidebarOpen ? true : undefined} className="flex-1 min-w-0 overflow-y-auto bg-neutral-50 relative">
                 {/* Mobile-only header with sidebar toggle and current artifact name */}
                 <div className="md:hidden sticky top-0 z-10 flex items-center gap-2 px-3 py-2 bg-white border-b border-neutral-200">
                     <button
+                        ref={mobileDrawerTriggerRef}
                         type="button"
                         onClick={() => setMobileSidebarOpen(true)}
                         aria-label="Open artifact list"
-                        className="p-1.5 -ml-1 text-neutral-700 hover:text-neutral-900"
+                        aria-expanded={mobileSidebarOpen}
+                        aria-controls="mobile-artifact-navigation"
+                        className="-ml-1 flex min-h-11 min-w-11 items-center justify-center text-neutral-700 hover:text-neutral-900"
                     >
                         <Menu size={20} />
                     </button>
@@ -1587,6 +1899,9 @@ export function ArtifactWorkspace({
                             ) : (
                                 <StatusDot status={slotStatusFor(activeSelection)} />
                             )}
+                            {slotStatusFor(activeSelection) === 'done' && (
+                                <OutputAlignmentDot alignment={alignmentForSelection(activeSelection)} />
+                            )}
                             {slotStatusFor(activeSelection) === 'done' && isLockedAsset(activeSelection) && (
                                 <AssetLock />
                             )}
@@ -1594,9 +1909,34 @@ export function ArtifactWorkspace({
                     )}
                 </div>
                 <div className="p-4 md:p-8">
+                    {updatePlanRegionTarget && (
+                        <div className="sticky top-14 z-[9] mb-3 flex min-w-0 flex-wrap items-center justify-between gap-2 rounded-xl border border-indigo-200 bg-indigo-50 px-3 py-2.5 text-sm text-indigo-950 shadow-sm md:top-3">
+                            <span className="min-w-0 break-words">
+                                Viewing update-plan region: <strong>{updatePlanRegionTarget.label}</strong>
+                            </span>
+                            <button
+                                type="button"
+                                onClick={() => setUpdatePlanId(updatePlanRegionTarget.planId)}
+                                className="min-h-11 shrink-0 rounded-lg border border-indigo-200 bg-white px-3 text-xs font-semibold text-indigo-800 hover:bg-indigo-100"
+                            >
+                                Return to update plan
+                            </button>
+                        </div>
+                    )}
                     {renderMain()}
                 </div>
             </main>
+
+            {updatePlanId && (
+                <DownstreamUpdatePlanReview
+                    projectId={projectId}
+                    initialPlanId={updatePlanId}
+                    initialItemId={updatePlanRegionTarget?.planId === updatePlanId ? updatePlanRegionTarget.itemId : undefined}
+                    onClose={() => setUpdatePlanId(null)}
+                    onOpenSource={openUpdatePlanSource}
+                    onOpenOutput={openUpdatePlanOutput}
+                />
+            )}
 
             {tasksModalSource && capabilities.canPersistWorkflowState && (
                 <ConvertToTasksModal
@@ -1709,7 +2049,7 @@ export function ArtifactWorkspace({
                     }));
                 return (
                     <VersionHistoryPanel
-                        title="Artifact version history"
+                        title="Output version history"
                         entries={entries}
                         restoreKind="artifact"
                         getCompareInput={(id) => ({

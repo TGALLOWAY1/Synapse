@@ -111,7 +111,7 @@ beforeEach(() => {
 });
 
 describe('DependencyGraphView', () => {
-    it('fresh project: shows every artifact node as not generated and offers a batch update', () => {
+    it('fresh project: shows every output without turning the map into a batch generation queue', () => {
         seedStore({ spines: [spine(SPINE_V1, true)], generated: false });
         renderView();
         expect(screen.getByText('Dependency Graph')).toBeTruthy();
@@ -123,35 +123,39 @@ describe('DependencyGraphView', () => {
             expect(screen.getAllByText(title).length).toBeGreaterThan(0);
         }
         expect(screen.getAllByText('Not generated').length).toBeGreaterThan(0);
-        expect(screen.getByText(/Update 6 impacted/)).toBeTruthy();
+        expect(screen.getByText(/6 not generated/)).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /Generate 6 outputs/i })).toBeNull();
     });
 
     it('consistent project: everything reads up to date with no batch update offer', () => {
         seedStore({ spines: [spine(SPINE_V1, true)], generated: true });
         renderView();
-        expect(screen.getAllByText('Up to date').length).toBeGreaterThan(0);
+        expect(screen.getByText(/6 aligned/)).toBeTruthy();
         expect(screen.queryByText(/impacted$/)).toBeNull();
-        expect(screen.queryByText('Needs update')).toBeNull();
+        expect(screen.queryByText('Update required')).toBeNull();
     });
 
-    it('PRD drift: artifacts generated from an older spine surface as needing update, with reasons in the detail panel', () => {
+    it('legacy PRD drift stays advisory and explains the uncertainty in the detail panel', () => {
         seedStore({
             spines: [spine(SPINE_V1, false), spine(SPINE_V2, true)],
             generated: true,
             artifactSpineId: SPINE_V1,
         });
         renderView();
-        expect(screen.getAllByText('Needs update').length).toBeGreaterThan(0);
-        expect(screen.getByText(/Update 6 impacted/)).toBeTruthy();
+        expect(screen.getAllByText('Review recommended').length).toBeGreaterThan(0);
+        expect(screen.getByText(/6 advisory/)).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /Review 6 affected/i })).toBeNull();
 
         // Open the Data Model node → detail panel explains the PRD drift.
         fireEvent.click(screen.getAllByText('Data Model')[0]);
-        expect(screen.getByText('Why update?')).toBeTruthy();
+        expect(screen.getByText('Why review?')).toBeTruthy();
+        expect(screen.getByText(/remains useful for exploration/)).toBeTruthy();
         expect(
             screen.getAllByText(/The PRD changed after this was generated/).length,
         ).toBeGreaterThan(0);
         // "Generated from PRD Version 1" metadata row.
         expect(screen.getByText('PRD Version 1')).toBeTruthy();
+        expect(screen.queryByRole('button', { name: /Update this \+ downstream artifacts/i })).toBeNull();
     });
 
     it('impact view lists dependencies and downstream impacts for a selected artifact', () => {

@@ -11,7 +11,7 @@ import { useIsMobile } from '../lib/useIsMobile';
 import { SelectionActionDialog } from './SelectionActionDialog';
 import { MobileSelectionToolbar } from './MobileSelectionToolbar';
 import { v4 as uuidv4 } from 'uuid';
-import type { StructuredPRD, Feature } from '../types';
+import type { StructuredPRD, Feature, PlanningRecord } from '../types';
 import {
     parseEntities,
     parseActions,
@@ -24,6 +24,10 @@ import { DeferredRisksSection } from './prd/DeferredRisksSection';
 import { PrdViewTabs } from './prd/PrdViewTabs';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
 import { deriveDecisionLog, isDisplayableFeatureId } from '../lib/derive/prdDecisions';
+import { assumptionSourceKey } from '../lib/planning/assumptionImport';
+import { projectDecision } from '../lib/planning/decisionProjection';
+import type { ConsequentialPrdEditRecognition } from '../lib/planning';
+import type { PlanningReturnTarget } from '../lib/planning/planningNavigation';
 import {
     deriveDeferredFeatureIds,
     deriveImplementationSummary,
@@ -70,7 +74,10 @@ interface StructuredPRDViewProps {
      */
     view?: PrdViewId;
     onViewChange?: (view: PrdViewId) => void;
+    onOpenDecisions?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
 }
+
+const EMPTY_PLANNING_RECORDS: PlanningRecord[] = [];
 
 type EditingSection =
     | 'vision'
@@ -91,12 +98,14 @@ const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'target
     risks: 'Risks',
 };
 
-export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange }: StructuredPRDViewProps) {
+export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange, onOpenDecisions }: StructuredPRDViewProps) {
     const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
+    const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_PLANNING_RECORDS);
     const [editingSection, setEditingSection] = useState<EditingSection>(null);
     const [editValue, setEditValue] = useState('');
     const [intent, setIntent] = useState('');
     const [isSubmitting, setIsSubmitting] = useState(false);
+    const [editRecognition, setEditRecognition] = useState<ConsequentialPrdEditRecognition | null>(null);
     const contentRef = useRef<HTMLDivElement>(null);
 
     // View state: controlled by the host (URL) when `view` is provided, else
@@ -219,12 +228,18 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     // Edits must NOT overwrite the current version in place — append a new
     // version (preserving history) via editSpineStructuredPRD. Each call site
     // passes a useful default summary; no manual entry required.
-    const savePRD = (updated: StructuredPRD, editSummary: string) => {
-        editSpineStructuredPRD(projectId, spineId, updated, {
+    const savePRD = (
+        updated: StructuredPRD,
+        editSummary: string,
+        options?: { recognizeConsequentialEdit?: boolean },
+    ) => {
+        const result = editSpineStructuredPRD(projectId, spineId, updated, {
             responseText: structuredPRDToMarkdown(updated),
             changeSource: 'user_edit',
             editSummary,
+            recognizeConsequentialEdit: options?.recognizeConsequentialEdit,
         });
+        setEditRecognition(result.recognition?.classification === 'copy_edit' ? null : result.recognition ?? null);
     };
 
     // Decisions-tab confirm/reject/undo edits. These coalesce onto the latest
@@ -316,7 +331,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     ? regenerated.primaryActions
                     : structuredPRD.primaryActions,
             };
-            savePRD(merged, 'Updated grounding fields');
+            // Grounding backfill is generated assistance, not an explicit user
+            // decision about entities/actions. Preserve the version but do not
+            // attribute its interpretation to the user.
+            savePRD(merged, 'Updated grounding fields', { recognizeConsequentialEdit: false });
         } catch (e) {
             if (e instanceof SafetyBlockedError) {
                 setRefreshError(
@@ -361,13 +379,68 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         saveDecision(updated, editSummary, kind);
     };
 
+    const findOrImportAssumptionRecord = (assumptionId: string): PlanningRecord | undefined => {
+        const state = useProjectStore.getState();
+        const sourceKey = assumptionSourceKey(assumptionId);
+        let record = (state.planningRecords[projectId] ?? []).find(item =>
+            (item.sources ?? []).some(source => source.key === sourceKey),
+        );
+        // Keep legacy projects and direct PRD deep links self-contained.
+        if (!record) {
+            state.importPlanningAssumptions(projectId, spineId, structuredPRD);
+            record = (useProjectStore.getState().planningRecords[projectId] ?? []).find(item =>
+                (item.sources ?? []).some(source => source.key === sourceKey),
+            );
+        }
+        return record;
+    };
+
+    const appendAssumptionVerdict = (
+        assumptionId: string,
+        event: Parameters<ReturnType<typeof useProjectStore.getState>['appendPlanningDecisionEvent']>[2],
+    ): number | undefined => {
+        const record = findOrImportAssumptionRecord(assumptionId);
+        if (record) {
+            // Persisted projects can contain future-skewed timestamps (and
+            // tests deliberately pin clocks). Preserve append-only ordering
+            // without changing the meaning of this user action.
+            const at = Math.max(event.at, record.events?.at(-1)?.at ?? event.at);
+            const result = useProjectStore.getState().appendPlanningDecisionEvent(projectId, record.id, {
+                ...event,
+                planningRecordId: record.id,
+                at,
+            });
+            if (!result.ok) {
+                console.error('[planning] Could not preserve PRD assumption verdict:', result.reason);
+                return undefined;
+            }
+            return at;
+        }
+        return undefined;
+    };
+
+    const handlePlanAssumptionValidation = (assumptionId: string) => {
+        const record = findOrImportAssumptionRecord(assumptionId);
+        if (record && onOpenDecisions) onOpenDecisions(record.id);
+    };
+
     const handleConfirmAssumption = (assumptionId: string) => {
         const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
         if (!a) return;
+        const decidedAt = Date.now();
+        const recordedAt = appendAssumptionVerdict(assumptionId, {
+            id: uuidv4(),
+            planningRecordId: '',
+            type: 'custom_answered',
+            actor: 'user',
+            at: decidedAt,
+            answer: a.statement,
+        });
+        if (recordedAt === undefined) return;
         patchAssumption(
             assumptionId,
-            { decision: 'confirmed', decisionNote: undefined, decidedAt: Date.now() },
-            `Confirmed assumption: ${truncate(a.statement)}`,
+            { decision: 'confirmed', decisionNote: undefined, decidedAt: recordedAt },
+            `Accepted assumption for planning: ${truncate(a.statement)}`,
             'confirmed',
         );
     };
@@ -375,9 +448,20 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     const handleRejectAssumption = (assumptionId: string, note: string) => {
         const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
         if (!a) return;
+        const decidedAt = Date.now();
+        const recordedAt = appendAssumptionVerdict(assumptionId, {
+            id: uuidv4(),
+            planningRecordId: '',
+            type: 'premise_rejected',
+            actor: 'user',
+            at: decidedAt,
+            reason: note || 'Rejected in the working plan',
+            rationale: note || undefined,
+        });
+        if (recordedAt === undefined) return;
         patchAssumption(
             assumptionId,
-            { decision: 'rejected', decisionNote: note || undefined, decidedAt: Date.now() },
+            { decision: 'rejected', decisionNote: note || undefined, decidedAt: recordedAt },
             `Marked assumption incorrect: ${truncate(a.statement)}`,
             'corrected',
         );
@@ -386,6 +470,14 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     const handleUndoAssumption = (assumptionId: string) => {
         const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
         if (!a) return;
+        const recordedAt = appendAssumptionVerdict(assumptionId, {
+            id: uuidv4(),
+            planningRecordId: '',
+            type: 'reopened',
+            actor: 'user',
+            at: Date.now(),
+        });
+        if (recordedAt === undefined) return;
         patchAssumption(
             assumptionId,
             { decision: undefined, decisionNote: undefined, decidedAt: undefined },
@@ -405,13 +497,34 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             setConfirmAllStep('idle');
             return;
         }
+        // Mirror each acceptance into the durable planning record first; only
+        // assumptions whose verdict event was preserved get patched, so the PRD
+        // and the decision register can never disagree about user authority.
+        const acceptedAt = new Map<string, number>();
+        for (const a of unresolved) {
+            const recordedAt = appendAssumptionVerdict(a.id, {
+                id: uuidv4(),
+                planningRecordId: '',
+                type: 'custom_answered',
+                actor: 'user',
+                at: now,
+                answer: a.statement,
+            });
+            if (recordedAt !== undefined) acceptedAt.set(a.id, recordedAt);
+        }
+        if (acceptedAt.size === 0) {
+            setConfirmAllStep('idle');
+            return;
+        }
         const updated = {
             ...structuredPRD,
             assumptions: (structuredPRD.assumptions ?? []).map(a =>
-                a.decision ? a : { ...a, decision: 'confirmed' as const, decisionNote: undefined, decidedAt: now },
+                a.decision || !acceptedAt.has(a.id)
+                    ? a
+                    : { ...a, decision: 'confirmed' as const, decisionNote: undefined, decidedAt: acceptedAt.get(a.id) },
             ),
         };
-        saveDecision(updated, `Confirmed ${unresolved.length} assumptions`, 'confirmed', unresolved.length);
+        saveDecision(updated, `Accepted ${acceptedAt.size} assumptions for planning`, 'confirmed', acceptedAt.size);
         setConfirmAllStep('idle');
     };
 
@@ -529,6 +642,84 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             features: structuredPRD.features.filter(f => f.id !== featureId),
         };
         savePRD(updated, `Removed feature: ${removed?.name || 'Untitled'}`);
+    };
+
+    const unresolvedAssumptions = [...needsInput, ...toValidate];
+    const normalizeSectionName = (value: string) => value.toLowerCase().replace(/[^a-z0-9]+/g, ' ').trim();
+    const assumptionsAffecting = (section: string) => {
+        const target = normalizeSectionName(section);
+        return unresolvedAssumptions.filter(assumption => [
+            ...(assumption.affectedPrdSections ?? []),
+            ...(assumption.affectedPlanLocations ?? []).map(location => location.section),
+        ].some(raw => {
+            const source = normalizeSectionName(raw);
+            return source === target || source.includes(target) || target.includes(source);
+        }));
+    };
+    const planningRecordsAffecting = (section: string) => {
+        const target = normalizeSectionName(section);
+        return planningRecords.filter(record => {
+            // PRD assumptions already render through their compatibility
+            // projection above; do not count the imported record twice.
+            if (record.sources?.some(source => source.sourceType === 'prd_assumption')) return false;
+            const status = projectDecision(record).status;
+            if (status !== 'open' && status !== 'proposed' && !(record.type === 'conflict' && status === 'deferred')) return false;
+            return [
+                ...(record.affectedPrdSections ?? []),
+                ...(record.affectedPlanLocations ?? []).map(location => location.section),
+            ].some(raw => {
+                const source = normalizeSectionName(raw);
+                return source === target || source.includes(target) || target.includes(source);
+            });
+        });
+    };
+    const renderSectionUncertainty = (section: string) => {
+        const assumptions = assumptionsAffecting(section);
+        const durableRecords = planningRecordsAffecting(section);
+        const affectedCount = assumptions.length + durableRecords.length;
+        if (affectedCount === 0) return null;
+        const preciseLabels = [...assumptions.flatMap(assumption =>
+            (assumption.affectedPlanLocations ?? [])
+                .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
+                .map(location => location.label),
+        ), ...durableRecords.flatMap(record =>
+            (record.affectedPlanLocations ?? [])
+                .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
+                .map(location => location.label),
+        )].filter((label, index, labels) => labels.indexOf(label) === index);
+        const assumptionRecords = assumptions.flatMap(assumption => {
+            const sourceKey = assumptionSourceKey(assumption.id);
+            const record = planningRecords.find(candidate => candidate.sources?.some(source => source.key === sourceKey));
+            return record ? [record] : [];
+        });
+        const materialityOrder: Record<NonNullable<PlanningRecord['materiality']>, number> = {
+            blocking: 0, high: 1, normal: 2, low: 3,
+        };
+        const exactRecord = [...assumptionRecords, ...durableRecords]
+            .filter((record, index, records) => records.findIndex(candidate => candidate.id === record.id) === index)
+            .sort((a, b) => (materialityOrder[a.materiality ?? 'high'] - materialityOrder[b.materiality ?? 'high'])
+                || a.createdAt - b.createdAt)[0];
+        const anchorId = `prd-uncertainty-${normalizeSectionName(section).replace(/\s+/g, '-')}`;
+        return (
+            <button
+                id={anchorId}
+                type="button"
+                onClick={() => {
+                    if (onOpenDecisions) onOpenDecisions(exactRecord?.id, {
+                        destination: { kind: 'prd', anchorId },
+                        label: `Return to ${section}`,
+                    });
+                    else setView('decisions');
+                }}
+                className="mb-3 flex w-full scroll-mt-24 items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
+            >
+                <span className="text-xs leading-5">
+                    <strong>{affectedCount} planning item{affectedCount === 1 ? ' needs' : 's need'} review</strong> in this section.
+                    {preciseLabels.length > 0 && <span className="mt-0.5 block text-amber-800">Affected: {preciseLabels.slice(0, 2).join(', ')}{preciseLabels.length > 2 ? ` +${preciseLabels.length - 2} more` : ''}</span>}
+                </span>
+                <span className="shrink-0 text-xs font-semibold underline underline-offset-2">Review</span>
+            </button>
+        );
     };
 
     const renderTextSection = (
@@ -934,16 +1125,16 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         return (
             <div className="mb-8 scroll-mt-24" id="prd-implementation-summary">
                 <div className="flex items-center justify-between mb-3 border-b border-neutral-200 pb-2">
-                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Scope</h3>
+                    <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Current proposed scope</h3>
                 </div>
                 {rationale && (
                     <div className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-neutral-800">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mr-1.5">Decision</span>
+                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mr-1.5">Synapse proposal</span>
                         {rationale}
                     </div>
                 )}
                 <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
-                    {renderScopeGroup('Build first (MVP — Minimum Viable Product)', summary.buildFirst)}
+                    {renderScopeGroup('Proposed first release (MVP — Minimum Viable Product)', summary.buildFirst)}
                     {renderScopeGroup('Build next', summary.buildNext)}
                     {deferredCount > 0 && (
                         <p className="text-xs text-neutral-500 mt-2">
@@ -983,12 +1174,14 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             )}
 
             {/* Problem & Opportunity, then Vision / Value proposition. */}
+            {renderSectionUncertainty('Core Problem')}
             {renderTextSection('Core Problem', 'coreProblem', structuredPRD.coreProblem)}
 
             {structuredPRD.productThesis && (
                 <ProductThesisSection thesis={structuredPRD.productThesis} />
             )}
 
+            {renderSectionUncertainty('Vision')}
             {renderTextSection('Vision', 'vision', structuredPRD.vision)}
 
             {structuredPRD.principles && structuredPRD.principles.length > 0 && (
@@ -996,6 +1189,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             )}
 
             {/* Target Users — JTBD if available, else legacy targetUsers list */}
+            {renderSectionUncertainty('Target Users')}
             {structuredPRD.jtbd && structuredPRD.jtbd.length > 0
                 ? <JtbdSection jtbd={structuredPRD.jtbd} />
                 : renderListSection('Target Users', 'targetUsers', structuredPRD.targetUsers)}
@@ -1031,6 +1225,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     </button>
                     {showTechnicalDetail && (
                         <div className="mt-4">
+                            {renderSectionUncertainty('Architecture')}
                             {structuredPRD.architecture &&
                                 renderTextSection('Architecture', 'architecture', structuredPRD.architecture)}
                             {structuredPRD.architectureFlows && structuredPRD.architectureFlows.length > 0 && (
@@ -1184,6 +1379,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             <ReviewConfirmSection
                 assumptions={needsInput}
                 onConfirm={handleConfirmAssumption}
+                onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
                 onReject={handleRejectAssumption}
                 readOnly={readOnly}
                 id="prd-needs-input"
@@ -1194,6 +1390,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             <ReviewConfirmSection
                 assumptions={toValidate}
                 onConfirm={handleConfirmAssumption}
+                onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
                 onReject={handleRejectAssumption}
                 readOnly={readOnly}
                 id="prd-assumptions"
@@ -1203,6 +1400,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             <DecisionLogSection
                 entries={decisionLog}
                 onUndoAssumption={handleUndoAssumption}
+                onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
                 onUndoFeature={(featureId) => {
                     const f = structuredPRD.features.find(x => x.id === featureId);
                     if (f) handleToggleFeatureConfirm(f);
@@ -1220,8 +1418,65 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     const decisionsPending = needsInput.length + toValidate.length;
 
+    const renderEditRecognition = () => {
+        if (!editRecognition) return null;
+        const definite = editRecognition.classification === 'meaning_changed';
+        const conflicts = editRecognition.possibleConflictRecordIds.length;
+        return (
+            <div className="mb-6 rounded-lg border border-indigo-200 bg-indigo-50/70 p-4" role="status">
+                <div className="flex items-start justify-between gap-3">
+                    <div className="min-w-0">
+                        <p className="text-sm font-semibold text-indigo-950">
+                            {definite ? 'Plan meaning updated' : 'This edit may affect the plan'}
+                        </p>
+                        <p className="mt-1 text-xs leading-5 text-indigo-800">
+                            {editRecognition.reason}{' '}
+                            {editRecognition.affectedPrdSections.length > 0
+                                ? `${editRecognition.affectedPrdSections.length} related plan area${editRecognition.affectedPrdSections.length === 1 ? '' : 's'} should be reviewed.`
+                                : ''}
+                            {conflicts > 0 ? ` Synapse also found ${conflicts} possible conflict${conflicts === 1 ? '' : 's'}.` : ''}
+                        </p>
+                        {onOpenDecisions && (
+                            <button
+                                type="button"
+                                onClick={() => onOpenDecisions(editRecognition.planningRecordIds[0])}
+                                className="mt-2 text-xs font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900"
+                            >
+                                Review planning impact
+                            </button>
+                        )}
+                    </div>
+                    <button
+                        type="button"
+                        onClick={() => setEditRecognition(null)}
+                        className="shrink-0 rounded p-1 text-indigo-400 hover:bg-indigo-100 hover:text-indigo-700"
+                        aria-label="Dismiss edit impact notice"
+                    >
+                        <X size={15} />
+                    </button>
+                </div>
+            </div>
+        );
+    };
+
     return (
         <div className="relative">
+            {/* On mobile, offer edit mode in the document flow so the idle
+                control never covers the planning overview or its next action.
+                The active toolbar remains pinned only after the user opts in. */}
+            {isMobile && !readOnly && !editingSection && !selection && (
+                <MobileSelectionToolbar
+                    active={mobileSelectMode}
+                    hasSelection={!!pendingText}
+                    pendingText={pendingText}
+                    onActivate={() => setMobileSelectMode(true)}
+                    onEdit={commit}
+                    onCancel={() => {
+                        setMobileSelectMode(false);
+                        clear();
+                    }}
+                />
+            )}
             <PrdViewTabs
                 active={activeView}
                 onChange={setView}
@@ -1238,8 +1493,14 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 tabIndex={0}
                 className="space-y-2 focus:outline-none"
             >
+                {renderEditRecognition()}
                 {activeView === 'overview' && renderOverview()}
-                {activeView === 'features' && renderFeatures()}
+                {activeView === 'features' && (
+                    <>
+                        {renderSectionUncertainty('Features')}
+                        {renderFeatures()}
+                    </>
+                )}
                 {activeView === 'decisions' && renderDecisions()}
             </div>
 
@@ -1255,22 +1516,6 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 />
             )}
 
-            {/* Mobile-only: explicit selection mode so the iOS toolbar and the
-                Synapse action sheet don't fight. Hidden while the sheet is open
-                or while inline-editing a section. */}
-            {isMobile && !readOnly && !editingSection && !selection && (
-                <MobileSelectionToolbar
-                    active={mobileSelectMode}
-                    hasSelection={!!pendingText}
-                    pendingText={pendingText}
-                    onActivate={() => setMobileSelectMode(true)}
-                    onEdit={commit}
-                    onCancel={() => {
-                        setMobileSelectMode(false);
-                        clear();
-                    }}
-                />
-            )}
         </div>
     );
 }

@@ -336,6 +336,28 @@ describe('buildScreensHandoffExportPackage', () => {
             screens: [{ item: item(bare, 'legacy'), model: reviewModel({ userStatus: undefined, freshness: 'unknown' }), variants: [] }],
         })).not.toThrow();
     });
+
+    it('16. carries reconciled alignment into coding-agent handoffs and downgrades unresolved output truthfully', () => {
+        const pkg = buildPackage({
+            screens: [{ item: item(screen()), model: reviewModel({ userStatus: 'implementation_ready' }) }],
+            dataModel: DATA_MODEL,
+            plan: PLAN,
+            manifest: {
+                dataModelPresent: true,
+                implementationPlanPresent: true,
+                alignment: {
+                    state: 'possibly_affected',
+                    summary: 'One exact affected region still needs verification.',
+                    nextAction: 'Verify the current output.',
+                    blocksBuildReadiness: true,
+                },
+            },
+        });
+        expect(pkg.status).toBe('not_ready');
+        expect(pkg.manifest.alignment).toMatchObject({ state: 'possibly_affected', blocksBuildReadiness: true });
+        expect(pkg.manifest.caveats.join(' ')).toContain('Verify the current output');
+        expect(renderScreensHandoffExportMarkdown(pkg)).toContain('Screens alignment:');
+    });
 });
 
 describe('deriveScreensExportStatus', () => {

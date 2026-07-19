@@ -5,6 +5,7 @@
 // Pure: the caller (ExportModal) prepares the entries from live store state;
 // nothing here reads the store or is persisted.
 
+import type { OutputAlignmentConfidence, OutputAlignmentState } from './planning/outputAlignment';
 import type { DependencyNodeStatus } from './artifactDependencyGraph';
 import { DEPENDENCY_STATUS_LABELS, isStaleStatus } from './artifactFreshness';
 
@@ -15,6 +16,12 @@ export interface ExportManifestEntry {
     generatedFromPrdLabel?: string;
     /** Canonical freshness status (missing → "Not generated"). */
     status: DependencyNodeStatus;
+    alignmentState?: OutputAlignmentState;
+    alignmentConfidence?: OutputAlignmentConfidence;
+    alignmentSummary?: string;
+    alignmentNextAction?: string;
+    usefulForExploration?: boolean;
+    blocksBuildReadiness?: boolean;
 }
 
 export interface ExportManifest {
@@ -26,6 +33,10 @@ export interface ExportManifest {
     entries: ExportManifestEntry[];
     /** Entries whose status is stale (needs_update / update_recommended). */
     staleCount: number;
+    /** Outputs that deserve review, including advisory/legacy uncertainty. */
+    reviewCount: number;
+    /** Consequential unresolved alignment that prevents build-ready treatment. */
+    blockingCount: number;
 }
 
 export function buildExportManifest(input: {
@@ -40,8 +51,19 @@ export function buildExportManifest(input: {
         prdLabel: input.prdLabel,
         entries: input.entries,
         staleCount: input.entries.filter((e) => isStaleStatus(e.status)).length,
+        reviewCount: input.entries.filter((e) => (
+            e.alignmentState ? e.alignmentState !== 'aligned' : isStaleStatus(e.status)
+        )).length,
+        blockingCount: input.entries.filter((e) => e.blocksBuildReadiness === true).length,
     };
 }
+
+const ALIGNMENT_LABELS: Record<OutputAlignmentState, string> = {
+    aligned: 'Aligned',
+    possibly_affected: 'Review recommended',
+    stale: 'Update required',
+};
+
 
 /**
  * Render the manifest as a markdown block for the bundle / handoff exports.
@@ -60,14 +82,32 @@ export function renderManifestMarkdown(manifest: ExportManifest): string {
         lines.push('', '| Asset | Version | Generated from | Status |', '| --- | --- | --- | --- |');
         for (const e of manifest.entries) {
             lines.push(
-                `| ${e.title} | ${e.versionNumber !== undefined ? `v${e.versionNumber}` : '—'} | ${e.generatedFromPrdLabel ?? '—'} | ${DEPENDENCY_STATUS_LABELS[e.status]} |`,
+                `| ${e.title} | ${e.versionNumber !== undefined ? `v${e.versionNumber}` : '—'} | ${e.generatedFromPrdLabel ?? '—'} | ${e.alignmentState ? ALIGNMENT_LABELS[e.alignmentState] : DEPENDENCY_STATUS_LABELS[e.status]} |`,
             );
         }
     }
-    if (manifest.staleCount > 0) {
+    const alignmentNotes = manifest.entries.filter(entry => (
+        entry.alignmentState && entry.alignmentState !== 'aligned'
+    ));
+    if (alignmentNotes.length > 0) {
+        lines.push('', '### Alignment notes', '');
+        for (const entry of alignmentNotes) {
+            const confidence = entry.alignmentConfidence === 'definite'
+                ? 'definite impact'
+                : entry.alignmentConfidence === 'unknown' ? 'unknown' : 'possible impact';
+            const next = entry.alignmentNextAction ? ` Next: ${entry.alignmentNextAction}` : '';
+            lines.push(`- **${entry.title} — ${confidence}:** ${entry.alignmentSummary ?? 'Review against the current plan.'}${next}`);
+        }
+    }
+    if (manifest.blockingCount > 0) {
         lines.push(
             '',
-            `> ⚠️ ${manifest.staleCount} asset${manifest.staleCount === 1 ? '' : 's'} in this export ${manifest.staleCount === 1 ? 'was' : 'were'} flagged as possibly out of date with the current PRD at export time. Treat the PRD as the source of truth where they disagree.`,
+            `> ⚠️ ${manifest.blockingCount} output${manifest.blockingCount === 1 ? '' : 's'} in this export ${manifest.blockingCount === 1 ? 'requires' : 'require'} alignment review before build. The saved work remains useful for exploration; treat the current PRD as the source of truth where they disagree.`,
+        );
+    } else if (manifest.reviewCount > 0) {
+        lines.push(
+            '',
+            `> ${manifest.reviewCount} output${manifest.reviewCount === 1 ? '' : 's'} ${manifest.reviewCount === 1 ? 'has' : 'have'} an advisory alignment note. No definite contradiction was found; review before relying on ${manifest.reviewCount === 1 ? 'it' : 'them'} for implementation.`,
         );
     }
     return lines.join('\n');

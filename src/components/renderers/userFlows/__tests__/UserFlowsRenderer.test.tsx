@@ -41,6 +41,22 @@ const FEATURES: Feature[] = [
 ];
 
 describe('UserFlowsRenderer', () => {
+    it('selects and expands the exact flow step supplied by an update plan', () => {
+        const content = `${SAMPLE_MARKDOWN}\n\n### Flow: Update preferences\n**Goal:** Save a local preference.\n**Steps:**\n1. [Settings] — User changes theme → System saves locally\n**Success Outcome:** Preference saved.`;
+        const { container } = render(
+            <UserFlowsRenderer
+                content={content}
+                features={FEATURES}
+                initialFlowId="update-preferences"
+                initialStepIndex={0}
+            />,
+        );
+
+        expect(screen.getByText(/Flow 2/i)).toBeInTheDocument();
+        expect(container.querySelector('#flow-1-step-0')).toBeInTheDocument();
+        expect(screen.getAllByText(/System saves locally/i).length).toBeGreaterThan(0);
+    });
+
     it('does not render the legacy Summary / Detailed / Debug toggle', () => {
         render(<UserFlowsRenderer content={SAMPLE_MARKDOWN} features={FEATURES} />);
         // The toggle was a [role=tablist] aria-label="View mode".

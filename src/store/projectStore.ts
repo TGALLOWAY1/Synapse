@@ -12,13 +12,18 @@ import { createGenerationJobsSlice } from './slices/generationJobsSlice';
 import { createPrdProgressSlice } from './slices/prdProgressSlice';
 import { createTasksSlice } from './slices/tasksSlice';
 import { createMetricsSlice } from './slices/metricsSlice';
+import { createReviewSlice } from './slices/reviewSlice';
+import { createReadinessSlice } from './slices/readinessSlice';
+import { createDownstreamUpdatePlanSlice } from './slices/downstreamUpdatePlanSlice';
 import { markInterruptedGenerations } from './interruptedGeneration';
+import { markInterruptedReviews } from './interruptedReviews';
+import { guardProjectStoreActions } from '../lib/projectCapabilities';
 
 export type { ProjectState } from './types';
 
 export const useProjectStore = create<ProjectState>()(
     persist(
-        (...a) => ({
+        (...a) => guardProjectStoreActions({
             ...createProjectSlice(...a),
             ...createSpineSlice(...a),
             ...createBranchSlice(...a),
@@ -28,6 +33,9 @@ export const useProjectStore = create<ProjectState>()(
             ...createPrdProgressSlice(...a),
             ...createTasksSlice(...a),
             ...createMetricsSlice(...a),
+            ...createReviewSlice(...a),
+            ...createReadinessSlice(...a),
+            ...createDownstreamUpdatePlanSlice(...a),
         }),
         {
             name: 'synapse-projects-storage',
@@ -49,6 +57,14 @@ export const useProjectStore = create<ProjectState>()(
                     // persisted mid-generation must be converted to a settled
                     // error — otherwise the UI shows "Generating…" forever.
                     markInterruptedGenerations(state.spineVersions);
+                    markInterruptedReviews(state.reviewRuns ?? {}, state.specialistRuns ?? {});
+                    state.downstreamUpdatePlans ??= {};
+                    state.downstreamUpdatePlanEvents ??= {};
+                    state.downstreamArtifactUpdateProposals ??= {};
+                    state.downstreamArtifactUpdateReviewEvents ??= {};
+                    state.downstreamArtifactUpdateApplications ??= {};
+                    state.downstreamArtifactUpdateVerifications ??= {};
+                    state.downstreamArtifactUpdateVerificationEvents ??= {};
                     // Migrate legacy currentStage values. The active pipeline
                     // bar exposes only prd / workspace / history, so any
                     // lingering 'devplan' / 'prompts' / 'mockups' / 'artifacts'

@@ -1,8 +1,8 @@
-# Assets Workspace, Artifact Groups & Implementation Plan
+# Build Workspace, Artifact Groups & Implementation Plan
 
 > Extracted from CLAUDE.md. Post-finalization flow, hidden/retired artifact subtypes, the consolidated Implementation Plan, the Artifact Dependency Graph (Project Map), and implementation tasks.
 
-### Post-finalization transition (Mark Final → Assets)
+### Post-commitment transition (Commit Plan → Build)
 
 The artifact sidebar is organized into four workflow-named sections —
 **Project Foundation** (PRD **and** Design System — the design system sits
@@ -46,15 +46,13 @@ separate generation-status panel on the right — per-slot status lives
 inline on each sidebar row (the `StatusDot` next to the title) and in
 the mobile header beside the selected artifact name.
 
-Marking a spine final must not dump the user back on something that looks like
-the PRD again. `ProjectWorkspace.handleToggleFinal` (on the finalize edge)
-starts artifact generation and shows `FinalizationSuccessModal` ("PRD
-Finalized" — *being created* vs *ready*, keyed off an `assetsReady` presence
-check of the non-hidden, non-retired core artifacts + mockups) **without**
-switching stage. Its
-**Open Assets** action (`handleOpenAssets`) switches `currentStage` to
-`workspace` and arms a one-shot `finalizeAutoOpen` flag passed to
-`ArtifactWorkspace` as `autoOpenIntent`. `ArtifactWorkspace` consumes it once
+Committing a spine records implementation intent but does not start artifact
+generation. `ProjectWorkspace.handleToggleFinal` first presents categorical
+planning readiness and any incomplete-source acknowledgement, then shows
+`FinalizationSuccessModal`. The modal makes **Generate build foundation** an
+explicit second action. Existing-output projects can instead **Review outputs**;
+that action switches `currentStage` to `workspace` and arms a one-shot
+`finalizeAutoOpen` flag passed to `ArtifactWorkspace`. `ArtifactWorkspace` consumes it once
 (via `onAutoOpenConsumed`): it auto-selects the first **non-PRD** artifact —
 preferring `done`, then `generating`, then `queued`, else the first slot in
 `ARTIFACT_GROUPS` order (design_system → user_flows → screens → … →

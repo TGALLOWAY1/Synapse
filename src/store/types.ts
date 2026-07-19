@@ -8,10 +8,33 @@ import type {
     PreflightMode, PreflightQuestion,
     ProjectTask, TaskStatus, TaskExternalRef,
     WorkflowRun, VersionProvenance,
+    ReviewRun, SpecialistRun, SpecialistFinding, ReviewIssue,
+    ReviewIssueDisposition, PlanningRecord, PlanningRecordStatus,
+    DecisionEvent, DecisionAssessment,
+    AssumptionEvidenceRecord, AssumptionEvidenceSourceType,
+    AssumptionValidationEvent, AssumptionValidationPlanProposal, AssumptionInterpretationProposal,
+    ReadinessReview, ReadinessCommitmentEvent,
 } from '../types';
 import type { ImplementationTask } from '../types/tasks';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { PrdSectionStatusEntry } from './slices/prdProgressSlice';
+import type { OutputAlignment, ProjectOutputAlignmentSummary } from '../lib/planning/outputAlignment';
+import type {
+    DownstreamUpdateDisposition,
+    DownstreamUpdatePlan,
+    DownstreamUpdatePlanCurrentness,
+    DownstreamUpdatePlanEvent,
+    DownstreamUpdatePlanSummary,
+} from '../lib/planning/downstreamUpdatePlan';
+import type {
+    DownstreamArtifactUpdateApplication,
+    DownstreamArtifactUpdateProposal,
+    DownstreamArtifactUpdateProposalCurrentness,
+    DownstreamArtifactUpdateReviewEvent,
+    DownstreamArtifactUpdateVerification,
+    DownstreamArtifactUpdateVerificationEvent,
+    DownstreamArtifactUpdateOperation,
+} from '../lib/planning/downstreamArtifactUpdateProposal';
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
@@ -19,6 +42,83 @@ export interface SpineGenerationMetaInput {
     model?: string;
     prdVersion?: number;
 }
+
+export type CompareAndAppendStructuredPRDResult =
+    | { status: 'applied'; newSpineId: string }
+    | {
+        status: 'stale';
+        expectedLatestSpineId: string;
+        actualLatestSpineId?: string;
+        reason?: 'spine_changed' | 'content_changed' | 'decision_changed';
+    };
+
+export type EditSpineStructuredPRDResult = {
+    newSpineId: string;
+    /** Present only when a user-authored content edit ran the bounded
+     * consequential-edit recognizer. */
+    recognition?: import('../lib/planning/consequentialEditRecognition').ConsequentialPrdEditRecognition;
+};
+
+export type ReadinessMutationFailureReason =
+    | 'project_not_found'
+    | 'review_not_found'
+    | 'authorization_not_found'
+    | 'authorization_consumed'
+    | 'commitment_not_found'
+    | 'stale'
+    | 'tampered'
+    | 'hash_mismatch'
+    | 'accepted_concerns_mismatch'
+    | 'rationale_required'
+    | 'containment_required'
+    | 'safety_blocked'
+    | 'already_committed'
+    | 'not_committed';
+
+export type CreateReadinessReviewResult =
+    | { status: 'created'; reviewId: string; review: ReadinessReview }
+    | { status: 'rejected'; reason: 'project_not_found' | 'safety_blocked' | 'stale' };
+
+export type AuthorizeReadinessCommitmentResult =
+    | { status: 'authorized'; authorizationEventId: string }
+    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
+export type CommitReadinessReviewResult =
+    | { status: 'committed'; commitmentEventId: string }
+    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
+export type ReopenReadinessCommitmentResult =
+    | { status: 'reopened'; reopenEventId: string }
+    | { status: 'rejected'; reason: ReadinessMutationFailureReason };
+
+export type AssumptionEvidenceMutationGuard = {
+    evidenceId: string;
+    expectedEvidenceContentHash: string;
+    expectedEvidenceSetHash: string;
+    expectedSpineVersionId: string;
+    expectedSpineContentHash: string;
+    reason: string;
+};
+
+export type AssumptionEvidenceReplacementInput = {
+    sourceType: AssumptionEvidenceSourceType;
+    source: string;
+    sourceIdentity: string;
+    observedAt: number;
+    observation: string;
+    scopeOrSample?: string;
+    limitations: string[];
+    character: 'direct' | 'interpretation';
+    relation: AssumptionEvidenceRecord['relation'];
+};
+
+export type AssumptionEvidenceCorrectionInput = AssumptionEvidenceMutationGuard & {
+    replacement: AssumptionEvidenceReplacementInput;
+};
+
+export type AssumptionEvidenceMutationResult =
+    | { ok: true; evidenceId?: string; eventIds: string[] }
+    | { ok: false; reason: string };
 
 export interface ProjectState {
     projects: Record<string, Project>;
@@ -30,6 +130,23 @@ export interface ProjectState {
     artifacts: Record<string, Artifact[]>;
     artifactVersions: Record<string, ArtifactVersion[]>;
     feedbackItems: Record<string, FeedbackItem[]>;
+
+    // Durable adversarial reviews and Decision Center records. These are
+    // persisted independently so partial specialist success survives failure.
+    reviewRuns: Record<string, ReviewRun[]>;
+    specialistRuns: Record<string, SpecialistRun[]>;
+    reviewFindings: Record<string, SpecialistFinding[]>;
+    reviewIssues: Record<string, ReviewIssue[]>;
+    planningRecords: Record<string, PlanningRecord[]>;
+    readinessReviews: Record<string, ReadinessReview[]>;
+    readinessCommitmentEvents: Record<string, ReadinessCommitmentEvent[]>;
+    downstreamUpdatePlans: Record<string, DownstreamUpdatePlan[]>;
+    downstreamUpdatePlanEvents: Record<string, DownstreamUpdatePlanEvent[]>;
+    downstreamArtifactUpdateProposals: Record<string, DownstreamArtifactUpdateProposal[]>;
+    downstreamArtifactUpdateReviewEvents: Record<string, DownstreamArtifactUpdateReviewEvent[]>;
+    downstreamArtifactUpdateApplications: Record<string, DownstreamArtifactUpdateApplication[]>;
+    downstreamArtifactUpdateVerifications: Record<string, DownstreamArtifactUpdateVerification[]>;
+    downstreamArtifactUpdateVerificationEvents: Record<string, DownstreamArtifactUpdateVerificationEvent[]>;
 
     // Persisted implementation tasks, keyed by projectId.
     tasks: Record<string, ProjectTask[]>;
@@ -66,7 +183,8 @@ export interface ProjectState {
     // Demo project hydration. Returns the stable DEMO_PROJECT_ID and whether
     // a demo snapshot was available. When `available` is false, the home
     // page surfaces a friendly "no demo set" message.
-    loadDemoProject: () => Promise<{ projectId: string; available: boolean }>;
+    loadDemoProject: (options?: { force?: boolean }) => Promise<{ projectId: string; available: boolean }>;
+    clearDemoProject: () => Promise<void>;
 
     // SYN-001: deterministic "Reset Demo" — wipes every local trace of the
     // demo project (all nine project-keyed store maps, transient job/
@@ -101,12 +219,35 @@ export interface ProjectState {
             editSummary?: string;
             changeSource?: import('../types').VersionChangeSource;
             meta?: SpineGenerationMetaInput;
+            /** Machine-generated merges can opt out even when they share the
+             * user-edit append path. */
+            recognizeConsequentialEdit?: boolean;
             // Per-edit decision tally delta (Decisions-tab confirm/reject/undo).
             // Merged into the version's provenance.decisionCounts; drives the
             // in-place amend coalescing when changeSource === 'decision_edit'.
             decisionDelta?: Partial<{ confirmed: number; corrected: number; reopened: number }>;
         },
-    ) => { newSpineId: string };
+    ) => EditSpineStructuredPRDResult;
+    // Guarded append for changes prepared against a known PRD baseline (for
+    // example, a future Decision Center impact preview). The latest-version
+    // comparison and append happen in the same Zustand transaction.
+    compareAndAppendStructuredPRD: (
+        projectId: string,
+        expectedLatestSpineId: string,
+        nextStructuredPRD: StructuredPRD,
+        opts?: {
+            editSummary?: string;
+            changeSource?: import('../types').VersionChangeSource;
+            meta?: SpineGenerationMetaInput;
+            expectedPrdHash?: string;
+            decisionApplication?: {
+                planningRecordId: string;
+                decisionEventId: string;
+                impactPreviewId: string;
+                appliedEventId: string;
+            };
+        },
+    ) => CompareAndAppendStructuredPRDResult;
     // Versioning: restore a historical spine by appending a new latest version
     // cloning its content. Never mutates or deletes the source version.
     revertSpineToVersion: (projectId: string, sourceSpineId: string) => { newSpineId: string };
@@ -199,6 +340,204 @@ export interface ProjectState {
     updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => void;
     getFeedbackItems: (projectId: string, status?: FeedbackStatus) => FeedbackItem[];
 
+    // Adversarial planning review + Decision Center actions.
+    createReviewRun: (
+        projectId: string,
+        input: Omit<ReviewRun, 'id' | 'projectId' | 'sequenceNumber' | 'status' | 'synthesisStatus' | 'createdAt'>,
+    ) => { reviewId: string };
+    updateReviewRun: (
+        projectId: string,
+        reviewId: string,
+        patch: Partial<Pick<ReviewRun, 'status' | 'synthesisStatus' | 'startedAt' | 'completedAt'>>,
+    ) => void;
+    createSpecialistRun: (
+        projectId: string,
+        input: Omit<SpecialistRun, 'id' | 'projectId' | 'status' | 'attemptCount' | 'findingIds' | 'createdAt'>,
+    ) => { specialistRunId: string };
+    updateSpecialistRun: (
+        projectId: string,
+        specialistRunId: string,
+        patch: Partial<Omit<SpecialistRun, 'id' | 'projectId' | 'reviewId' | 'specialistId' | 'createdAt'>>,
+    ) => void;
+    addReviewFinding: (
+        projectId: string,
+        finding: Omit<SpecialistFinding, 'id' | 'projectId'> & { id?: string },
+    ) => { findingId: string };
+    addReviewIssue: (
+        projectId: string,
+        issue: Omit<ReviewIssue, 'id' | 'projectId' | 'status' | 'dispositions' | 'createdAt' | 'updatedAt'>
+            & { id?: string; createdAt?: number },
+    ) => { issueId: string };
+    supersedeOpenReviewIssues: (projectId: string, reviewId: string, retainedIssueIds: string[]) => void;
+    applyReviewIssueDisposition: (
+        projectId: string,
+        reviewId: string,
+        issueId: string,
+        disposition: Omit<ReviewIssueDisposition, 'actor' | 'at' | 'action'> & {
+            action: Exclude<ReviewIssueDisposition['action'], 'reopen'>;
+            at?: number;
+        },
+    ) => void;
+    reopenReviewIssue: (
+        projectId: string,
+        reviewId: string,
+        issueId: string,
+        input: import('../lib/review').ReviewIssueRecoveryGuard & { at?: number },
+    ) => { ok: true } | { ok: false; reason: string };
+    createPlanningRecord: (
+        projectId: string,
+        input: Omit<PlanningRecord, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>,
+    ) => { planningRecordId: string };
+    updatePlanningRecordStatusByUser: (
+        projectId: string,
+        planningRecordId: string,
+        status: PlanningRecordStatus,
+        patch?: Partial<Pick<PlanningRecord, 'resolution' | 'rationale' | 'resultingSpineVersionId' | 'supersedesId'>>,
+    ) => void;
+    appendPlanningDecisionEvent: (
+        projectId: string,
+        planningRecordId: string,
+        event: DecisionEvent,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    importPlanningAssumptions: (
+        projectId: string,
+        sourceSpineVersionId: string,
+        structuredPRD: StructuredPRD,
+        preflightSession?: import('../types').PreflightSession,
+    ) => { imported: number; existing: number };
+    addPlanningAssessment: (
+        projectId: string,
+        planningRecordId: string,
+        assessment: DecisionAssessment,
+    ) => void;
+    appendAssumptionValidationEvent: (
+        projectId: string,
+        planningRecordId: string,
+        event: AssumptionValidationEvent,
+    ) => { ok: true; duplicate: boolean; duplicateEvidenceOf?: string } | { ok: false; reason: string };
+    retractAssumptionEvidence: (
+        projectId: string,
+        planningRecordId: string,
+        input: AssumptionEvidenceMutationGuard,
+    ) => AssumptionEvidenceMutationResult;
+    correctAssumptionEvidence: (
+        projectId: string,
+        planningRecordId: string,
+        input: AssumptionEvidenceCorrectionInput,
+    ) => AssumptionEvidenceMutationResult;
+    addAssumptionValidationPlanProposal: (
+        projectId: string,
+        planningRecordId: string,
+        proposal: AssumptionValidationPlanProposal,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    addAssumptionInterpretationProposal: (
+        projectId: string,
+        planningRecordId: string,
+        proposal: AssumptionInterpretationProposal,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+
+    // Durable readiness checkpoints. Reviews are immutable snapshots; user
+    // authority is recorded separately as append-only commitment events.
+    createReadinessReview: (projectId: string) => CreateReadinessReviewResult;
+    authorizeReadinessCommitment: (
+        projectId: string,
+        reviewId: string,
+        input: {
+            expectedIntegrityHash: string;
+            expectedAggregateHash: string;
+            acceptedConcernIds: string[];
+            rationale?: string;
+            containmentPlan?: string;
+        },
+    ) => AuthorizeReadinessCommitmentResult;
+    commitReadinessReview: (
+        projectId: string,
+        reviewId: string,
+        authorizationEventId: string,
+    ) => CommitReadinessReviewResult;
+    reopenReadinessCommitment: (
+        projectId: string,
+        commitmentEventId: string,
+        reason?: string,
+    ) => ReopenReadinessCommitmentResult;
+
+    // Immutable, version-bound downstream update plans. Generated snapshots
+    // carry no user authority; review choices are separate append-only events.
+    recordDownstreamUpdatePlan: (
+        projectId: string,
+        plan: DownstreamUpdatePlan,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    generateDownstreamUpdatePlans: (
+        projectId: string,
+    ) => { status: 'generated'; planIds: string[]; created: number } | { status: 'rejected'; reason: string };
+    appendDownstreamUpdatePlanEvent: (
+        projectId: string,
+        planId: string,
+        itemId: string,
+        input: { type: 'disposition_recorded'; disposition: DownstreamUpdateDisposition; rationale?: string; at?: number }
+            | { type: 'priority_changed'; priority: number; at?: number },
+    ) => { ok: true; eventId: string; duplicate: boolean } | { ok: false; reason: string };
+    getDownstreamUpdatePlanCurrentness: (
+        projectId: string,
+        planId: string,
+    ) => DownstreamUpdatePlanCurrentness | undefined;
+    getDownstreamUpdatePlanSummary: (projectId: string) => DownstreamUpdatePlanSummary;
+
+    // Phase 5 proposal foundation extends one exact update-plan item. Generated
+    // proposals and verifications are advisory; user authority is append-only.
+    recordDownstreamArtifactUpdateProposal: (
+        projectId: string,
+        proposal: DownstreamArtifactUpdateProposal,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    generateDownstreamArtifactUpdateProposal: (
+        projectId: string,
+        planId: string,
+        itemId: string,
+    ) => { status: 'generated'; proposalId: string; operation: DownstreamArtifactUpdateOperation }
+        | { status: 'rejected'; reason: string };
+    appendDownstreamArtifactUpdateReviewEvent: (
+        projectId: string,
+        proposalId: string,
+        input:
+            | { action: 'accepted'; rationale?: string; at?: number }
+            | { action: 'edited'; operation: Exclude<DownstreamArtifactUpdateOperation, 'review_only'>; editedContent: string | null; rationale: string; at?: number }
+            | { action: 'rejected' | 'preserved' | 'deferred' | 'requested_another'; rationale: string; at?: number }
+            | { action: 'provided_context'; context: string; at?: number },
+    ) => { ok: true; eventId: string; duplicate: boolean } | { ok: false; reason: string };
+    recordDownstreamArtifactUpdateApplication: (
+        projectId: string,
+        application: DownstreamArtifactUpdateApplication,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    applyDownstreamArtifactUpdateProposal: (
+        projectId: string,
+        proposalId: string,
+    ) => { status: 'applied'; applicationId: string; artifactVersionId: string }
+        | { status: 'rejected'; reason: string };
+    recordDownstreamArtifactUpdateVerification: (
+        projectId: string,
+        verification: DownstreamArtifactUpdateVerification,
+    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+    verifyDownstreamArtifactUpdateItem: (
+        projectId: string,
+        planId: string,
+        itemId: string,
+    ) => { status: 'verified'; verificationId: string; result: DownstreamArtifactUpdateVerification['result'] }
+        | { status: 'rejected'; reason: string };
+    appendDownstreamArtifactUpdateVerificationEvent: (
+        projectId: string,
+        verificationId: string,
+        input: {
+            action: 'confirmed' | 'rejected' | 'deferred' | 'requested_another' | 'provided_context';
+            rationale?: string;
+            context?: string;
+            at?: number;
+        },
+    ) => { ok: true; eventId: string; duplicate: boolean } | { ok: false; reason: string };
+    getDownstreamArtifactUpdateProposalCurrentness: (
+        projectId: string,
+        proposalId: string,
+    ) => DownstreamArtifactUpdateProposalCurrentness | undefined;
+
     // Implementation task tracking. `saveTasks` persists an extracted set for a
     // given Implementation Plan artifact, replacing any prior set for that
     // artifact while preserving status/externalRefs of tasks whose id still
@@ -227,6 +566,12 @@ export interface ProjectState {
     getWorkflowRuns: (projectId: string) => WorkflowRun[];
     getAllWorkflowRuns: () => WorkflowRun[];
     clearWorkflowRuns: (projectId: string) => void;
+
+    // Derived output-alignment projection (read-side only; lives on the
+    // downstream update plan slice).
+    getArtifactAlignment: (projectId: string, artifactId: string) => OutputAlignment | undefined;
+    getProjectOutputAlignment: (projectId: string) => ProjectOutputAlignmentSummary;
+
 
     // Background generation jobs (transient — excluded from persist)
     jobs: Record<string, ProjectJobState | undefined>;

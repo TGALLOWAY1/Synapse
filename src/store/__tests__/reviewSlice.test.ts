@@ -1,0 +1,277 @@
+import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest';
+import { useProjectStore } from '../projectStore';
+import { markInterruptedReviews } from '../interruptedReviews';
+import type { PersistedReviewContextManifest, ReviewRun, SpecialistRun } from '../../types';
+
+const manifest: PersistedReviewContextManifest = {
+    spineVersionId: 'spine-v2',
+    spineContentHash: 'spine-hash',
+    artifactRefs: [
+        { artifactId: 'artifact-1', artifactVersionId: 'artifact-v3', subtype: 'data_model', contentHash: 'artifact-hash' },
+    ],
+    capturedAt: 100,
+    contextSignature: 'context-hash',
+};
+
+beforeEach(() => {
+    vi.spyOn(Date, 'now').mockReturnValue(1_000);
+    useProjectStore.setState({
+        reviewRuns: {},
+        specialistRuns: {},
+        reviewFindings: {},
+        reviewIssues: {},
+        planningRecords: {},
+    });
+});
+
+afterEach(() => {
+    vi.restoreAllMocks();
+});
+
+describe('adversarial review domain', () => {
+    it('creates a durable version-pinned review and independent specialist run', () => {
+        const store = useProjectStore.getState();
+        const { reviewId } = store.createReviewRun('p1', {
+            scope: { kind: 'project' },
+            sourceManifest: manifest,
+            selectedSpecialists: [{ specialistId: 'security_privacy', label: 'Security & Privacy', reason: 'Auth is in scope' }],
+        });
+        const { specialistRunId } = useProjectStore.getState().createSpecialistRun('p1', {
+            reviewId,
+            specialistId: 'security_privacy',
+            responsibility: 'Review trust boundaries',
+            boundaries: ['Do not invent legal requirements'],
+            contextRefIds: ['spine-v2', 'artifact-v3'],
+        });
+
+        const state = useProjectStore.getState();
+        expect(state.reviewRuns.p1[0]).toMatchObject({
+            id: reviewId,
+            sequenceNumber: 1,
+            status: 'queued',
+            synthesisStatus: 'pending',
+            sourceManifest: manifest,
+        });
+        expect(state.specialistRuns.p1[0]).toMatchObject({
+            id: specialistRunId,
+            reviewId,
+            status: 'queued',
+            findingIds: [],
+        });
+    });
+
+    it('never auto-confirms a record proposed by specialist review', () => {
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'decision',
+            status: 'confirmed', // unsafe caller input is intentionally ignored
+            title: 'Choose retention policy',
+            statement: 'How long should audit events be retained?',
+            evidence: [],
+            sourceFindingIds: ['finding-1'],
+            createdBy: 'specialist_review',
+            confirmedAt: 500,
+        });
+        const record = useProjectStore.getState().planningRecords.p1.find(r => r.id === planningRecordId)!;
+        expect(record.status).toBe('proposed');
+        expect(record.confirmedAt).toBeUndefined();
+
+        useProjectStore.getState().updatePlanningRecordStatusByUser('p1', planningRecordId, 'confirmed', {
+            resolution: 'Retain for 90 days',
+        });
+        expect(useProjectStore.getState().planningRecords.p1[0]).toMatchObject({
+            status: 'confirmed',
+            confirmedAt: 1_000,
+            resolution: 'Retain for 90 days',
+        });
+    });
+
+    it('never treats a Synapse-authored recommendation as user-confirmed', () => {
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'decision',
+            status: 'confirmed',
+            title: 'Choose an onboarding model',
+            statement: 'Allow guest access',
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'synapse',
+            confirmedAt: 500,
+        });
+
+        expect(useProjectStore.getState().planningRecords.p1.find(record => record.id === planningRecordId)).toMatchObject({
+            status: 'proposed',
+            confirmedAt: undefined,
+        });
+    });
+
+    it('records issue dispositions with user provenance and a context signature', () => {
+        const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
+            reviewId: 'review-1',
+            title: 'Authorization is undefined',
+            summary: 'The data model has roles but the API behavior has no authorization rule.',
+            kind: 'missing_information',
+            findingIds: ['finding-1'],
+            specialistIds: ['security_privacy'],
+            relationship: 'standalone',
+            severity: 'high',
+            confidence: 'high',
+            implementationImpact: 'resolve_before_build',
+            relatedPlanningRecordIds: [],
+        });
+        useProjectStore.getState().applyReviewIssueDisposition('p1', 'review-1', issueId, {
+            action: 'dismiss',
+            reason: 'Handled in an external security specification',
+            contextSignature: manifest.contextSignature,
+        });
+
+        expect(useProjectStore.getState().reviewIssues.p1[0]).toMatchObject({
+            status: 'dismissed',
+            dispositions: [{
+                action: 'dismiss',
+                actor: 'user',
+                at: 1_000,
+                contextSignature: 'context-hash',
+            }],
+        });
+    });
+
+    it('reopens a closed finding with append-only user history without mutating its linked planning record', () => {
+        const { reviewId } = useProjectStore.getState().createReviewRun('p1', {
+            scope: { kind: 'project' },
+            sourceManifest: manifest,
+            selectedSpecialists: [],
+        });
+        const { planningRecordId } = useProjectStore.getState().createPlanningRecord('p1', {
+            type: 'risk',
+            status: 'open',
+            title: 'Recovery risk',
+            statement: 'Failed uploads may be lost.',
+            evidence: [],
+            sourceFindingIds: [],
+            createdBy: 'user',
+        });
+        const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
+            reviewId,
+            title: 'Recovery is incomplete', summary: 'Failed uploads have no recovery path.', kind: 'risk',
+            findingIds: [], specialistIds: [], relationship: 'standalone', severity: 'high', confidence: 'high',
+            implementationImpact: 'resolve_before_build', relatedPlanningRecordIds: [],
+        });
+        useProjectStore.getState().applyReviewIssueDisposition('p1', reviewId, issueId, {
+            action: 'link_existing',
+            planningRecordId,
+            reason: 'Track this in the existing risk.',
+            contextSignature: manifest.contextSignature,
+        });
+        const recordBefore = useProjectStore.getState().planningRecords.p1.find(record => record.id === planningRecordId);
+        const issueBefore = useProjectStore.getState().reviewIssues.p1.find(issue => issue.id === issueId)!;
+
+        const result = useProjectStore.getState().reopenReviewIssue('p1', reviewId, issueId, {
+            reason: 'New failure evidence requires another treatment.',
+            expectedContextSignature: manifest.contextSignature,
+            currentContextSignature: manifest.contextSignature,
+            expectedUpdatedAt: issueBefore.updatedAt,
+            at: 1_001,
+        });
+
+        expect(result).toEqual({ ok: true });
+        expect(useProjectStore.getState().reviewIssues.p1.find(issue => issue.id === issueId)).toMatchObject({
+            status: 'open',
+            dispositions: [
+                { action: 'link_existing', actor: 'user' },
+                { action: 'reopen', actor: 'user', reason: 'New failure evidence requires another treatment.', at: 1_001 },
+            ],
+        });
+        expect(useProjectStore.getState().planningRecords.p1.find(record => record.id === planningRecordId)).toEqual(recordBefore);
+    });
+
+    it('fails closed when recovery uses stale Challenge context or issue state', () => {
+        const { reviewId } = useProjectStore.getState().createReviewRun('p1', {
+            scope: { kind: 'project' }, sourceManifest: manifest, selectedSpecialists: [],
+        });
+        const { issueId } = useProjectStore.getState().addReviewIssue('p1', {
+            reviewId, title: 'Risk', summary: 'Summary', kind: 'risk', findingIds: [], specialistIds: [],
+            relationship: 'standalone', severity: 'high', confidence: 'high', implementationImpact: 'deferrable', relatedPlanningRecordIds: [],
+        });
+        useProjectStore.getState().applyReviewIssueDisposition('p1', reviewId, issueId, {
+            action: 'dismiss', reason: 'Previously judged irrelevant.', contextSignature: manifest.contextSignature,
+        });
+        const issue = useProjectStore.getState().reviewIssues.p1.find(item => item.id === issueId)!;
+        const staleContext = useProjectStore.getState().reopenReviewIssue('p1', reviewId, issueId, {
+            reason: 'This now deserves another explicit review.', expectedContextSignature: manifest.contextSignature,
+            currentContextSignature: 'changed-context', expectedUpdatedAt: issue.updatedAt,
+        });
+        const concurrentChange = useProjectStore.getState().reopenReviewIssue('p1', reviewId, issueId, {
+            reason: 'This now deserves another explicit review.', expectedContextSignature: manifest.contextSignature,
+            currentContextSignature: manifest.contextSignature, expectedUpdatedAt: issue.updatedAt - 1,
+        });
+
+        expect(staleContext).toMatchObject({ ok: false, reason: expect.stringMatching(/Review the current plan again/i) });
+        expect(concurrentChange).toMatchObject({ ok: false, reason: expect.stringMatching(/finding changed/i) });
+        expect(useProjectStore.getState().reviewIssues.p1.find(item => item.id === issueId)?.status).toBe('dismissed');
+    });
+
+    it('scopes dispositions by review when deterministic issue ids repeat', () => {
+        const issue = {
+            id: 'repeated-issue',
+            title: 'Repeated issue',
+            summary: 'The same issue appeared twice.',
+            kind: 'risk' as const,
+            findingIds: [],
+            specialistIds: ['reliability_qa'],
+            relationship: 'standalone' as const,
+            severity: 'medium' as const,
+            confidence: 'high' as const,
+            implementationImpact: 'deferrable' as const,
+            relatedPlanningRecordIds: [],
+        };
+        useProjectStore.getState().addReviewIssue('p1', { ...issue, reviewId: 'review-1' });
+        useProjectStore.getState().addReviewIssue('p1', { ...issue, reviewId: 'review-2' });
+
+        useProjectStore.getState().applyReviewIssueDisposition('p1', 'review-2', issue.id, {
+            action: 'dismiss',
+            reason: 'Dismiss only the second review.',
+            contextSignature: 'context-2',
+        });
+
+        const [first, second] = useProjectStore.getState().reviewIssues.p1;
+        expect(first.status).toBe('open');
+        expect(first.dispositions).toEqual([]);
+        expect(second.status).toBe('dismissed');
+    });
+
+    it('supersedes only obsolete open clusters during retry synthesis', () => {
+        const base = {
+            reviewId: 'review-1',
+            title: 'Issue', summary: 'Summary', kind: 'risk' as const,
+            findingIds: [], specialistIds: ['reliability_qa'], relationship: 'standalone' as const,
+            severity: 'medium' as const, confidence: 'high' as const,
+            implementationImpact: 'deferrable' as const, relatedPlanningRecordIds: [],
+        };
+        useProjectStore.getState().addReviewIssue('p1', { ...base, id: 'keep' });
+        useProjectStore.getState().addReviewIssue('p1', { ...base, id: 'replace' });
+        useProjectStore.getState().supersedeOpenReviewIssues('p1', 'review-1', ['keep']);
+        expect(useProjectStore.getState().reviewIssues.p1.map(issue => issue.status)).toEqual(['open', 'superseded']);
+    });
+});
+
+describe('review interruption recovery', () => {
+    it('interrupts active work while preserving completed specialists', () => {
+        const active = {
+            id: 'r1', projectId: 'p1', sequenceNumber: 1, scope: { kind: 'project' as const },
+            sourceManifest: manifest, selectedSpecialists: [], status: 'synthesizing' as const,
+            synthesisStatus: 'running' as const, createdAt: 1,
+        } satisfies ReviewRun;
+        const running = {
+            id: 's1', projectId: 'p1', reviewId: 'r1', specialistId: 'security_privacy',
+            responsibility: 'Security', boundaries: [], contextRefIds: [], status: 'running' as const,
+            attemptCount: 1, findingIds: [], createdAt: 1,
+        } satisfies SpecialistRun;
+        const complete = { ...running, id: 's2', specialistId: 'product_scope', status: 'complete' as const };
+        const runs = { p1: [active] };
+        const specialists = { p1: [running, complete] };
+
+        markInterruptedReviews(runs, specialists);
+
+        expect(runs.p1[0]).toMatchObject({ status: 'interrupted', synthesisStatus: 'interrupted' });
+        expect(specialists.p1.map(run => run.status)).toEqual(['interrupted', 'complete']);
+    });
+});

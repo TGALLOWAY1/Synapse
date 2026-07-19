@@ -74,17 +74,29 @@ describe('projectStore', () => {
             const { projectId } = store.createProject('Test', 'prompt');
 
             expect(useProjectStore.getState().projects[projectId]).toBeDefined();
+            useProjectStore.setState({
+                downstreamArtifactUpdateProposals: { [projectId]: [{ id: 'proposal' }] as never[] },
+                downstreamArtifactUpdateReviewEvents: { [projectId]: [{ id: 'review' }] as never[] },
+                downstreamArtifactUpdateApplications: { [projectId]: [{ id: 'application' }] as never[] },
+                downstreamArtifactUpdateVerifications: { [projectId]: [{ id: 'verification' }] as never[] },
+                downstreamArtifactUpdateVerificationEvents: { [projectId]: [{ id: 'verification-event' }] as never[] },
+            });
 
             useProjectStore.getState().deleteProject(projectId);
 
             expect(useProjectStore.getState().projects[projectId]).toBeUndefined();
             expect(useProjectStore.getState().spineVersions[projectId]).toBeUndefined();
             expect(useProjectStore.getState().historyEvents[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateProposals[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateReviewEvents[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateApplications[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateVerifications[projectId]).toBeUndefined();
+            expect(useProjectStore.getState().downstreamArtifactUpdateVerificationEvents[projectId]).toBeUndefined();
         });
     });
 
     describe('markSpineFinal', () => {
-        it('marks a spine as final', () => {
+        it('cannot manufacture commitment authority by toggling a boolean', () => {
             const store = useProjectStore.getState();
             const { projectId, spineId } = store.createProject('Test', 'prompt');
 
@@ -92,14 +104,21 @@ describe('projectStore', () => {
 
             const spines = useProjectStore.getState().spineVersions[projectId];
             const spine = spines.find(s => s.id === spineId);
-            expect(spine?.isFinal).toBe(true);
+            expect(spine?.isFinal).toBe(false);
         });
 
-        it('can unmark a spine as final', () => {
+        it('can reopen a legacy spine that was already final', () => {
             const store = useProjectStore.getState();
             const { projectId, spineId } = store.createProject('Test', 'prompt');
 
-            useProjectStore.getState().markSpineFinal(projectId, spineId, true);
+            useProjectStore.setState(state => ({
+                spineVersions: {
+                    ...state.spineVersions,
+                    [projectId]: state.spineVersions[projectId].map(spine => (
+                        spine.id === spineId ? { ...spine, isFinal: true } : spine
+                    )),
+                },
+            }));
             useProjectStore.getState().markSpineFinal(projectId, spineId, false);
 
             const spines = useProjectStore.getState().spineVersions[projectId];

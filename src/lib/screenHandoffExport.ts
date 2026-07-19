@@ -127,6 +127,12 @@ export interface ScreensHandoffExportManifest {
     designSystemVersionId?: string;
     includedArtifacts: ScreensHandoffExportManifestArtifact[];
     caveats: string[];
+    alignment?: {
+        state: 'aligned' | 'possibly_affected' | 'stale';
+        summary: string;
+        nextAction: string;
+        blocksBuildReadiness: boolean;
+    };
 }
 
 export interface ScreensHandoffExportPackage {
@@ -156,6 +162,8 @@ export interface ScreensHandoffExportManifestInput {
     dataModelPresent?: boolean;
     /** True when an Implementation Plan artifact exists. */
     implementationPlanPresent?: boolean;
+    /** Current derived alignment, including exact Stage 4 verification. */
+    alignment?: ScreensHandoffExportManifest['alignment'];
 }
 
 export interface ScreensHandoffExportInput {
@@ -420,7 +428,15 @@ function buildManifest(
         implementationPlanArtifactVersionId: m.implementationPlanArtifactVersionId,
         designSystemVersionId: m.designSystemVersionId,
         includedArtifacts,
-        caveats: [...SCREENS_HANDOFF_EXPORT_CAVEATS, ...absenceCaveats, ...dynamicCaveats],
+        caveats: [
+            ...SCREENS_HANDOFF_EXPORT_CAVEATS,
+            ...absenceCaveats,
+            ...(m.alignment && m.alignment.state !== 'aligned'
+                ? [`Screens alignment: ${m.alignment.summary} Next: ${m.alignment.nextAction}`]
+                : []),
+            ...dynamicCaveats,
+        ],
+        alignment: m.alignment,
     };
 }
 
@@ -482,7 +498,12 @@ export function deriveScreensExportStatus(
 export function buildScreensHandoffExportPackage(
     input: ScreensHandoffExportInput,
 ): ScreensHandoffExportPackage {
-    const status = deriveScreensExportStatus(input.preflight, input.handoffRollup);
+    const derivedStatus = deriveScreensExportStatus(input.preflight, input.handoffRollup);
+    const status = input.manifest?.alignment?.blocksBuildReadiness
+        ? 'not_ready'
+        : input.manifest?.alignment?.state === 'possibly_affected'
+            ? worseStatus(derivedStatus, 'review_recommended')
+            : derivedStatus;
     const summary = buildSummary(input.handoffs, input.reviewModels, input.p0Ids);
 
     const screens = input.handoffs.map(h => projectScreen(h, input.reviewModels.get(h.screenId)));

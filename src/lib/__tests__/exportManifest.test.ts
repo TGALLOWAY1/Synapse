@@ -29,7 +29,7 @@ describe('renderManifestMarkdown', () => {
         expect(md).toContain('- PRD: Version 3');
         expect(md).toContain('| Design System | v2 | Version 3 | Up to date |');
         expect(md).toContain('| Data Model | v1 | Version 1 | Needs update |');
-        expect(md).toContain('1 asset in this export was flagged');
+        expect(md).toContain('1 output has an advisory alignment note');
     });
 
     it('renders "Not generated" for an artifact with no preferred version (missing)', () => {
@@ -48,6 +48,30 @@ describe('renderManifestMarkdown', () => {
             entries: [{ title: 'Data Model', versionNumber: 1, status: 'up_to_date' }],
         }));
         expect(md).not.toContain('flagged');
+        expect(md).not.toContain('alignment note');
+    });
+
+    it('distinguishes a definite build blocker from a possible impact', () => {
+        const md = renderManifestMarkdown(buildExportManifest({
+            projectName: 'Acme',
+            entries: [{
+                title: 'Screens',
+                versionNumber: 1,
+                status: 'update_recommended',
+                alignmentState: 'stale',
+                alignmentConfidence: 'definite',
+                alignmentSummary: 'Shared workspaces remain in this output.',
+                alignmentNextAction: 'Review and update Screens.',
+                blocksBuildReadiness: true,
+                usefulForExploration: true,
+            }],
+        }));
+        expect(md).toContain('| Screens | v1 | — | Update required |');
+        expect(md).toContain('requires alignment review before build');
+        expect(md).toContain('remains useful for exploration');
+        expect(md).toContain('Screens — definite impact');
+        expect(md).toContain('Shared workspaces remain in this output.');
+        expect(md).toContain('Next: Review and update Screens.');
     });
 });
 

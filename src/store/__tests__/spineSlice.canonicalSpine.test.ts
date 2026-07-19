@@ -62,7 +62,7 @@ describe('updateSpineStructuredPRD — canonical spine attachment', () => {
         expect(spine.canonicalSpine).toBeUndefined();
     });
 
-    it('drops the inherited (stale) canonicalSpine on an appended edit version', () => {
+    it('rebuilds (never inherits) the canonicalSpine on an appended edit version', () => {
         const store = useProjectStore.getState();
         const { projectId } = store.createProject('MoodTune', 'idea');
         const v1 = useProjectStore.getState().spineVersions[projectId][0];
@@ -70,7 +70,9 @@ describe('updateSpineStructuredPRD — canonical spine attachment', () => {
         store.updateSpineStructuredPRD(projectId, v1.id, prd, 'md', { generationMeta: meta, prdVersion: 2 });
         expect(useProjectStore.getState().spineVersions[projectId][0].canonicalSpine).toBeDefined();
 
-        // An edit clones v1 but must not carry its now-stale canonicalSpine.
+        // An edit clones v1 but must not carry its now-stale canonicalSpine —
+        // the contract is rebuilt fresh and bound to the NEW version id, so a
+        // review manifest can never cite a stale spine under a new identity.
         store.editSpineStructuredPRD(projectId, v1.id, { ...prd, vision: 'Edited.' }, {
             responseText: 'edited md',
             editSummary: 'Updated section: Vision',
@@ -78,6 +80,7 @@ describe('updateSpineStructuredPRD — canonical spine attachment', () => {
 
         const latest = useProjectStore.getState().spineVersions[projectId].find(s => s.isLatest)!;
         expect(latest.id).not.toBe(v1.id);
-        expect(latest.canonicalSpine).toBeUndefined();
+        expect(latest.canonicalSpine?.meta.sourceSpineVersionId).toBe(latest.id);
+        expect(latest.canonicalSpine?.identity.description).toBe('Edited.');
     });
 });

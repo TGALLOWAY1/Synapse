@@ -11,27 +11,25 @@ const ASSET_GEN_MS = 650;
 const allDone = () => TOUR_ASSETS.map(() => 'done' as StepStatus);
 
 /**
- * Screen 5 (hero) — "Mark as Final" finalizes the PRD and the downstream
- * workspace assets generate one at a time, grouped exactly as the real Assets
+ * Screen 5 (hero) — commitment and output generation are separate actions.
+ * Downstream workspace outputs generate one at a time, grouped like the Build
  * page groups them (Project Foundation → Experience → Architecture →
  * Development). Each finished asset is clickable and opens a lightweight preview
  * drawer. This is the key onboarding moment.
  */
 export default function ScreenAssets({ reducedMotion }: ScreenProps) {
     // The screen remounts fresh each time it becomes active, so the hero moment
-    // (Mark as Final → assets generate) replays on every return.
-    const [finalized, setFinalized] = useState(false);
-    const [statuses, setStatuses] = useState<StepStatus[]>(() =>
-        reducedMotion ? allDone() : TOUR_ASSETS.map(() => 'queued'),
-    );
+    const [committed, setCommitted] = useState(false);
+    const [generationStarted, setGenerationStarted] = useState(false);
+    const [statuses, setStatuses] = useState<StepStatus[]>(() => TOUR_ASSETS.map(() => 'queued'));
     const [openAsset, setOpenAsset] = useState<TourAsset | null>(null);
     const timers = useRef<number[]>([]);
 
     // Clear any in-flight generation timers on unmount.
     useEffect(() => () => timers.current.forEach(clearTimeout), []);
 
-    const markFinal = () => {
-        setFinalized(true);
+    const generateFoundation = () => {
+        setGenerationStarted(true);
         if (reducedMotion) {
             setStatuses(allDone());
             return;
@@ -49,13 +47,13 @@ export default function ScreenAssets({ reducedMotion }: ScreenProps) {
     };
 
     const doneCount = statuses.filter((s) => s === 'done').length;
-    const generating = finalized && doneCount < TOUR_ASSETS.length;
+    const generating = generationStarted && doneCount < TOUR_ASSETS.length;
 
     return (
         <ScreenShell
-            title="One finalized PRD"
-            accent="powers the entire workspace."
-            subtitle="Mark your PRD as final and Synapse generates all the assets you need to build."
+            title="Commit the reasoning."
+            accent="Then generate what helps you build."
+            subtitle="A working plan can support exploration. Commitment and output generation remain explicit, separate choices."
         >
             <div className="grid items-start gap-4 lg:grid-cols-[minmax(0,1fr)_auto_minmax(0,1.3fr)]">
                 {/* PRD card */}
@@ -70,17 +68,22 @@ export default function ScreenAssets({ reducedMotion }: ScreenProps) {
                         ))}
                     </div>
                     <div className="mb-4 inline-flex items-center gap-1.5 rounded-full bg-emerald-500/15 px-2.5 py-1 text-xs text-emerald-300">
-                        <Check size={13} /> Looks complete!
+                        <Check size={13} /> Reasoning reviewed
                     </div>
                     <button
                         type="button"
-                        onClick={markFinal}
-                        disabled={finalized}
+                        onClick={() => setCommitted(true)}
+                        disabled={committed}
                         className="flex w-full items-center justify-center gap-2 rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:bg-emerald-600 disabled:opacity-100"
                     >
-                        {finalized ? <Check size={16} /> : <Sparkles size={16} />}
-                        {finalized ? 'PRD finalized' : 'Mark as Final'}
+                        {committed ? <Check size={16} /> : <Sparkles size={16} />}
+                        {committed ? 'Plan committed' : 'Commit plan'}
                     </button>
+                    {committed && !generationStarted && (
+                        <button type="button" onClick={generateFoundation} className="mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-indigo-400/40 px-4 py-2.5 text-sm font-semibold text-indigo-200 hover:bg-indigo-500/10">
+                            <Zap size={16} /> Generate build foundation
+                        </button>
+                    )}
                 </div>
 
                 {/* Generating orb (decorative, desktop) */}

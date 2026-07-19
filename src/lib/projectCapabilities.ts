@@ -81,3 +81,72 @@ export function assertProjectCapability(
         throw new ProjectCapabilityError(project, capability);
     }
 }
+
+// ---------------------------------------------------------------------------
+// Id-based convenience layer used by the planning/review surfaces and the
+// store-action guard. It maps the coarse action vocabulary onto the capability
+// model above so both express ONE policy.
+
+export type ProjectAction = 'explore' | 'persist' | 'generate' | 'image' | 'external';
+
+const ACTION_CAPABILITY: Record<ProjectAction, keyof ProjectCapabilities> = {
+    explore: 'canExplore',
+    persist: 'canPersistWorkflowState',
+    generate: 'canGenerateArtifacts',
+    image: 'canGenerateArtifacts',
+    external: 'canExportExternally',
+};
+
+/** Unlike `getProjectCapabilities`, an unknown id is treated as a standard
+ * project — call sites pass ids from live routes/stores, and the demo id is
+ * the only read-only identity. */
+export function canPerformProjectAction(projectId: string | undefined, action: ProjectAction): boolean {
+    const capabilities = projectId === DEMO_PROJECT_ID ? READ_ONLY_CAPABILITIES : EDITABLE_CAPABILITIES;
+    return capabilities[ACTION_CAPABILITY[action]];
+}
+
+/** Store actions which change persisted project data. Keep this list explicit:
+ * adding a new write is a conscious policy decision, not a UI convention. */
+export const PERSISTENT_STORE_ACTIONS = new Set<string>([
+    'updateSpineText', 'regenerateSpine', 'markSpineFinal', 'createBranch', 'addBranchMessage',
+    'mergeBranch', 'deleteBranch', 'updateStructuredPRD', 'updateSpineStructuredPRD',
+    'editSpineStructuredPRD', 'compareAndAppendStructuredPRD', 'revertSpineToVersion', 'updateSpineQualityScores',
+    'updateProjectProductMetadata', 'markSpineGenerationStarted', 'setSpineSafetyReview',
+    'setSpineError', 'initPreflightSession', 'setPreflightQuestions', 'setPreflightAnswer',
+    'setPreflightIndex', 'setPreflightSummary', 'completePreflightSession', 'setPreflightError',
+    'setProjectDesignSystemPreset', 'markDesignSetupComplete', 'createArtifact', 'updateArtifact',
+    'deleteArtifact', 'createArtifactVersion', 'revertArtifactToVersion', 'markArtifactCurrentForSpine',
+    'setPreferredVersion', 'updateArtifactVersionMetadata', 'createFeedbackItem',
+    'updateFeedbackStatus', 'saveTasks', 'setTaskStatus', 'removeProjectTask', 'recordTaskExports',
+    'createReviewRun', 'updateReviewRun', 'createSpecialistRun', 'updateSpecialistRun',
+    'addReviewFinding', 'addReviewIssue', 'applyReviewIssueDisposition', 'reopenReviewIssue', 'createPlanningRecord',
+    'supersedeOpenReviewIssues',
+    'updatePlanningRecordStatusByUser', 'appendPlanningDecisionEvent', 'importPlanningAssumptions',
+    'addPlanningAssessment',
+    'createReadinessReview', 'authorizeReadinessCommitment',
+    'commitReadinessReview', 'reopenReadinessCommitment',
+    'recordDownstreamUpdatePlan', 'generateDownstreamUpdatePlans', 'appendDownstreamUpdatePlanEvent',
+    'recordDownstreamArtifactUpdateProposal', 'appendDownstreamArtifactUpdateReviewEvent',
+    'recordDownstreamArtifactUpdateApplication', 'recordDownstreamArtifactUpdateVerification',
+    'appendDownstreamArtifactUpdateVerificationEvent',
+]);
+
+/** Wrap store writes once, at their authoritative shared boundary. Rejections
+ * are loud (`ProjectCapabilityError`), matching `assertProjectCapability` —
+ * UI surfaces pre-check with `canPerformProjectAction`/`useProjectCapabilities`
+ * so an ordinary demo session never reaches this throw. */
+export function guardProjectStoreActions<T extends Record<string, unknown>>(state: T): T {
+    const mutable = state as Record<string, unknown>;
+    for (const name of PERSISTENT_STORE_ACTIONS) {
+        const original = mutable[name];
+        if (typeof original !== 'function') continue;
+        mutable[name] = ((...args: unknown[]) => {
+            const projectId = typeof args[0] === 'string' ? args[0] : undefined;
+            if (!canPerformProjectAction(projectId, 'persist')) {
+                throw new ProjectCapabilityError(projectId ? { id: projectId } : undefined, 'canPersistWorkflowState');
+            }
+            return (original as (...callArgs: unknown[]) => unknown)(...args);
+        });
+    }
+    return state;
+}

@@ -3,6 +3,8 @@ import type {
 } from '../../types';
 import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import type { ImplementationPlanProgress } from '../../lib/services/implementationPlanInsights';
+import type { ImplementationPlanNavigationTarget } from '../../lib/planning/implementationPlanNavigation';
+import type { PlanningArtifactRegionTarget } from '../../lib/planning/planningNavigation';
 import { ScreenInventoryRenderer } from './ScreenInventoryRenderer';
 import type { ScreenImageGalleryContext } from './ScreenImageGallery';
 import { DataModelRenderer } from './DataModelRenderer';
@@ -40,6 +42,14 @@ interface DispatchProps {
      * journey nodes can open the matching Screen Detail view. */
     onNavigateToScreen?: (screenSlug: string) => void;
     availableScreenSlugs?: ReadonlySet<string>;
+    /** Phase 5A region navigation. These values select and reveal the exact
+     * flow/data-model region without changing either artifact. */
+    initialFlowId?: string;
+    initialFlowStepIndex?: number;
+    initialDataEntityName?: string;
+    initialDataMemberName?: string;
+    initialDataMemberAspect?: PlanningArtifactRegionTarget['dataMemberAspect'];
+    initialImplementationTarget?: ImplementationPlanNavigationTarget;
     /** Only consumed by `implementation_plan`: content of the project's legacy
      * standalone prompt_pack artifact, adapted into the consolidated view. */
     promptPackContent?: string;
@@ -106,6 +116,12 @@ export function ArtifactContentRenderer({
     implementationPlan,
     onNavigateToScreen,
     availableScreenSlugs,
+    initialFlowId,
+    initialFlowStepIndex,
+    initialDataEntityName,
+    initialDataMemberName,
+    initialDataMemberAspect,
+    initialImplementationTarget,
     promptPackContent,
     savedTasks,
     onConvertToTasks,
@@ -120,7 +136,16 @@ export function ArtifactContentRenderer({
     if (subtype === 'data_model') {
         // PRD provenance (`prdVersionLabel`) is shown once at the page level, not
         // repeated inside the Data Model summary card — so it isn't passed here.
-        return <DataModelRenderer content={content} staleness={staleness} />;
+        return (
+            <DataModelRenderer
+                key={`${initialDataEntityName ?? 'data-model'}:${initialDataMemberAspect ?? ''}:${initialDataMemberName ?? ''}`}
+                content={content}
+                staleness={staleness}
+                initialEntityName={initialDataEntityName}
+                initialMemberName={initialDataMemberName}
+                initialMemberAspect={initialDataMemberAspect}
+            />
+        );
     }
     if (subtype === 'design_system') {
         return <DesignSystemRenderer content={content} metadata={metadata} projectId={projectId} />;
@@ -128,6 +153,7 @@ export function ArtifactContentRenderer({
     if (subtype === 'user_flows') {
         return (
             <UserFlowsRenderer
+                key={`${initialFlowId ?? 'flows'}:${initialFlowStepIndex ?? 'all'}`}
                 content={content}
                 features={features}
                 uxPages={uxPages}
@@ -136,6 +162,8 @@ export function ArtifactContentRenderer({
                 implementationPlan={implementationPlan}
                 onNavigateToScreen={onNavigateToScreen}
                 availableScreenSlugs={availableScreenSlugs}
+                initialFlowId={initialFlowId}
+                initialStepIndex={initialFlowStepIndex}
             />
         );
     }
@@ -151,6 +179,7 @@ export function ArtifactContentRenderer({
                 onConvertToTasks={onConvertToTasks}
                 metadata={metadata}
                 onUpdatePlanProgress={onUpdatePlanProgress}
+                initialNavigationTarget={initialImplementationTarget}
             />
         );
     }

@@ -114,7 +114,7 @@ describe('SYN-005 — every freshness surface agrees on one verdict', () => {
         expect(isStaleStatus(planStatus)).toBe(true);
         const md = renderManifestMarkdown(manifest);
         expect(md).toContain('| Implementation Plan | v1 | — | Needs update |');
-        expect(md).toContain('1 asset in this export was flagged');
+        expect(md).toContain('1 output has an advisory alignment note');
 
         // (c) The Project Map's recommended-update batch includes the plan.
         const recommended = computeRecommendedUpdates(context.graph, evaluations);

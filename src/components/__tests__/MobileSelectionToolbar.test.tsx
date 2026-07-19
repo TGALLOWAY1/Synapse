@@ -23,6 +23,7 @@ describe('MobileSelectionToolbar', () => {
 
         const button = screen.getByRole('button', { name: 'Select text to edit' });
         expect(screen.queryByRole('toolbar')).toBeNull();
+        expect(button.parentElement).not.toHaveClass('fixed');
 
         fireEvent.click(button);
         expect(props.onActivate).toHaveBeenCalledTimes(1);

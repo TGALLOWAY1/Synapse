@@ -12,6 +12,7 @@ import type { ImplementationPromptPack } from '../../../types';
 import { promptPackToClipboardText } from '../../../lib/services/implementationPlanAdapter';
 import { parsePromptSections } from '../../../lib/services/implementationPlanInsights';
 import { CopyTextButton } from './CopyTextButton';
+import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 
 interface Props {
     pack: ImplementationPromptPack;
@@ -31,6 +32,8 @@ interface Props {
     defaultCollapsed?: boolean;
     /** Visually mark this pack as the recommended next prompt. */
     highlight?: boolean;
+    navigationMilestoneId?: string;
+    focusedAcceptanceCriterionIndex?: number;
 }
 
 /**
@@ -50,8 +53,10 @@ export function PromptPackCard({
     onCopied,
     defaultCollapsed = false,
     highlight = false,
+    navigationMilestoneId,
+    focusedAcceptanceCriterionIndex = -1,
 }: Props) {
-    const [expanded, setExpanded] = useState(!defaultCollapsed);
+    const [expanded, setExpanded] = useState(focusedAcceptanceCriterionIndex >= 0 || !defaultCollapsed);
     const sections = useMemo(() => parsePromptSections(pack.prompt), [pack.prompt]);
     const structured = sections.length > 1;
 
@@ -178,7 +183,16 @@ export function PromptPackCard({
                                 <Target size={11} /> Acceptance Criteria
                             </p>
                             <ul className="space-y-0.5 text-xs text-neutral-700">
-                                {pack.acceptanceCriteria.map((c, i) => <li key={i}>• {c}</li>)}
+                                {pack.acceptanceCriteria.map((c, i) => (
+                                    <li
+                                        id={navigationMilestoneId ? implementationPlanAnchor.promptCriterion(navigationMilestoneId, pack.id, i) : undefined}
+                                        tabIndex={navigationMilestoneId ? -1 : undefined}
+                                        key={i}
+                                        className="scroll-mt-24"
+                                    >
+                                        • {c}
+                                    </li>
+                                ))}
                             </ul>
                         </div>
                     )}

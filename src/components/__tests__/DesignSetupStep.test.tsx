@@ -48,7 +48,7 @@ describe('DesignSetupStep', () => {
                 prdGenerating={false}
             />,
         );
-        expect(screen.getByText(/Your PRD is ready/i)).toBeTruthy();
+        expect(screen.getByText(/Your working plan is drafted/i)).toBeTruthy();
     });
 
     it('recommends and preselects a preset from the project idea', () => {

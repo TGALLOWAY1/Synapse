@@ -18,6 +18,15 @@ import { buildScreenImagePrompt } from '../services/mockupImageService';
 import { buildExternalMockupPrompt } from '../services/screenInventoryImageService';
 import { normalizeDesignTokens } from '../designTokens';
 import { DEFAULT_PRD_SECTIONS } from '../services/progressivePrdGeneration';
+import { buildSpecialistPrompt } from '../review/prompt';
+import { SPECIALIST_REGISTRY } from '../review/specialists';
+import type { ReviewSpecialistId } from '../review/types';
+import { makeManifest } from '../review/__tests__/reviewTestUtils';
+import {
+    reasonAboutComplexPlanningTargets,
+    type ComplexTargetReasoningTransport,
+} from '../planning/complexTargetReasoning';
+import { creatorWorkspaceReasoningInput } from '../planning/__tests__/fixtures/complexTargetReasoningFixtures';
 import type { MockupPayload, MockupScreen, MockupSettings, ScreenItem, StructuredPRD } from '../../types';
 
 const FIXTURE_IDEA = 'A trip-planning app for weekend hikers that builds routes from difficulty and season.';
@@ -131,5 +140,33 @@ describe('prompt surfaces — snapshot net', () => {
         expect(
             buildExternalMockupPrompt(screen, { ...context, designTokens: tokens }),
         ).toMatchSnapshot('with design system');
+    });
+
+    it('adversarial review specialist prompts', () => {
+        const manifest = makeManifest();
+        const specialistIds = Object.keys(SPECIALIST_REGISTRY) as ReviewSpecialistId[];
+        for (const specialistId of specialistIds) {
+            expect(buildSpecialistPrompt(manifest, specialistId)).toMatchSnapshot(specialistId);
+        }
+        expect(
+            buildSpecialistPrompt(manifest, specialistIds[0], 'Focus on offline support.'),
+        ).toMatchSnapshot('with user focus');
+    });
+
+    it('bounded planning-alignment reasoning prompt', async () => {
+        // The system/user prompts are module-private, so capture them through the
+        // injectable transport instead of exporting them just for the test.
+        const calls: { system: string; prompt: string }[] = [];
+        const transport: ComplexTargetReasoningTransport = async ({ system, prompt }) => {
+            calls.push({ system, prompt });
+            return JSON.stringify({ candidates: [] });
+        };
+        await reasonAboutComplexPlanningTargets(creatorWorkspaceReasoningInput, {
+            transport,
+            model: 'snapshot-test',
+        });
+        expect(calls.length).toBeGreaterThan(0);
+        expect(calls[0].system).toMatchSnapshot('system');
+        expect(calls[0].prompt).toMatchSnapshot('user');
     });
 });

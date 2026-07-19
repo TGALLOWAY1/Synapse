@@ -33,7 +33,11 @@ interface Props {
      * optional — omitted, the journey keeps its scroll-only behavior. */
     onNavigateToScreen?: (screenSlug: string) => void;
     availableScreenSlugs?: ReadonlySet<string>;
+    initialFlowId?: string;
+    initialStepIndex?: number;
 }
+
+const flowId = (title: string): string => title.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '') || 'flow';
 
 const TTV_RE = /<\s*(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\b|\b(\d+(?:\.\d+)?)\s*(s|sec|seconds|m|min|minutes|h|hr|hours)\s+to\s+value\b/i;
 
@@ -49,7 +53,7 @@ function inferTimeToValue(sources: Array<string | undefined>): string | null {
 
 export function UserFlowsRenderer({
     content, features, uxPages, domainEntities, featureSystems, implementationPlan,
-    onNavigateToScreen, availableScreenSlugs,
+    onNavigateToScreen, availableScreenSlugs, initialFlowId, initialStepIndex,
 }: Props) {
     const flows = useMemo(() => parseFlows(content), [content]);
     const featuresById = useMemo(() => {
@@ -68,7 +72,11 @@ export function UserFlowsRenderer({
         [flows],
     );
 
-    const [selectedIndex, setSelectedIndex] = useState(0);
+    const [selectedIndex, setSelectedIndex] = useState(() => {
+        if (!initialFlowId) return 0;
+        const index = flows.findIndex(flow => flowId(flow.title) === initialFlowId);
+        return index >= 0 ? index : 0;
+    });
     const [mobileNavOpen, setMobileNavOpen] = useState(false);
     const [drawerRef, setDrawerRef] = useState<FeatureRef | null>(null);
     const [drawerPinned, setDrawerPinned] = useState(false);
@@ -156,6 +164,7 @@ export function UserFlowsRenderer({
                     issuesByStep={issuesByStep}
                     onNavigateToScreen={onNavigateToScreen}
                     availableScreenSlugs={availableScreenSlugs}
+                    initialExpandedStepIndex={initialStepIndex}
                     renderStepDetail={(stepIndex) => {
                         const step = flow.steps[stepIndex];
                         if (!step) return null;

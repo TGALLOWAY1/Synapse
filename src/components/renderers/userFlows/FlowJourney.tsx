@@ -1,4 +1,4 @@
-import { useState, type ReactNode } from 'react';
+import { useEffect, useState, type ReactNode } from 'react';
 import {
     AppWindow, ChevronRight, Cog, GitBranch, Layers, MousePointerClick,
     Sparkles, Workflow,
@@ -32,6 +32,7 @@ interface Props {
      * below (audit H5). Omitted → legacy scroll-to-card behavior.
      */
     renderStepDetail?: (stepIndex: number) => ReactNode;
+    initialExpandedStepIndex?: number;
 }
 
 const KIND_ICON: Record<FlowJourneyNodeKind, typeof AppWindow> = {
@@ -86,10 +87,17 @@ function Legend() {
 export function FlowJourney({
     flowIndex, steps, issuesByStep,
     onNavigateToScreen, availableScreenSlugs, highlightedStepIndices,
-    renderStepDetail,
+    renderStepDetail, initialExpandedStepIndex,
 }: Props) {
     const [legendOpen, setLegendOpen] = useState(false);
-    const [expandedSteps, setExpandedSteps] = useState<ReadonlySet<number>>(new Set());
+    const [expandedSteps, setExpandedSteps] = useState<ReadonlySet<number>>(
+        () => initialExpandedStepIndex === undefined ? new Set() : new Set([initialExpandedStepIndex]),
+    );
+    useEffect(() => {
+        if (initialExpandedStepIndex === undefined) return;
+        const target = document.getElementById(`flow-${flowIndex}-step-${initialExpandedStepIndex}`);
+        target?.scrollIntoView?.({ block: 'center' });
+    }, [flowIndex, initialExpandedStepIndex]);
     const toggleStep = (stepIndex: number) => setExpandedSteps(prev => {
         const next = new Set(prev);
         if (next.has(stepIndex)) next.delete(stepIndex); else next.add(stepIndex);

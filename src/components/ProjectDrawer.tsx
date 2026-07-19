@@ -5,6 +5,8 @@ import { X, Trash2, Smartphone, Monitor } from 'lucide-react';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { SyncStatusBanner, ProjectSyncDot } from './sync/ProjectSyncStatus';
 import { useProjectSyncStore } from '../store/projectSyncStore';
+import { commitmentRemainsCurrent, compareReadinessReviewCurrentness, deriveReadinessCommitmentState, hasReadinessProvenanceForSpine, projectCommitmentCopy } from '../lib/planning';
+import { buildReadinessReviewInputFromState } from '../store/slices/readinessSlice';
 
 interface ProjectDrawerProps {
     isOpen: boolean;
@@ -12,7 +14,8 @@ interface ProjectDrawerProps {
 }
 
 export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
-    const { projects, deleteProject, getLatestSpine } = useProjectStore();
+    const store = useProjectStore();
+    const { projects, deleteProject, getLatestSpine } = store;
     const user = useAuthStore((s) => s.user);
     const authError = useAuthStore((s) => s.authError);
     const authLoading = useAuthStore((s) => s.loading);
@@ -26,15 +29,41 @@ export function ProjectDrawer({ isOpen, onClose }: ProjectDrawerProps) {
 
     const stageBadges: Record<string, { label: string; color: string }> = {
         history: { label: 'History', color: 'bg-purple-900/30 text-purple-400 border-purple-800' },
-        artifacts: { label: 'Artifacts', color: 'bg-emerald-900/30 text-emerald-400 border-emerald-800' },
-        mockups: { label: 'Mockups', color: 'bg-blue-900/30 text-blue-400 border-blue-800' },
+        review: { label: 'Challenge', color: 'bg-indigo-900/30 text-indigo-400 border-indigo-800' },
+        workspace: { label: 'Exploring outputs', color: 'bg-sky-900/30 text-sky-400 border-sky-800' },
     };
 
     const getBadge = (projectId: string, stage: string) => {
         const spine = getLatestSpine(projectId);
-        return stageBadges[stage] || (spine?.isFinal
-            ? { label: 'PRD Final', color: 'bg-green-900/30 text-green-400 border-green-800' }
-            : { label: 'PRD', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' });
+        const input = buildReadinessReviewInputFromState(store, projectId);
+        const events = store.readinessCommitmentEvents[projectId] ?? [];
+        const reviewStates = (store.readinessReviews[projectId] ?? []).map(review => ({
+            review,
+            currentness: input ? compareReadinessReviewCurrentness(review, input) : undefined,
+            commitment: deriveReadinessCommitmentState(review, events),
+        }));
+        const currentReview = reviewStates.find(item => item.currentness && commitmentRemainsCurrent(item.currentness) && item.commitment.activeCommit)?.review;
+        if (currentReview?.conclusion === 'ready_to_build') {
+            return { label: projectCommitmentCopy('plan_committed').label, color: 'bg-green-900/30 text-green-400 border-green-800' };
+        }
+        if (currentReview) {
+            return { label: projectCommitmentCopy('proceeding_with_accepted_risk').label, color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
+        }
+        if (reviewStates.some(item => item.currentness && !item.currentness.integrityValid)) {
+            return { label: projectCommitmentCopy('needs_fresh_review').label, color: 'bg-red-900/30 text-red-300 border-red-800' };
+        }
+        if (reviewStates.some(item => item.commitment.latestCommit)) {
+            return { label: projectCommitmentCopy('changed_since_commitment').label, color: 'bg-amber-900/30 text-amber-300 border-amber-800' };
+        }
+        if (spine?.isFinal && hasReadinessProvenanceForSpine(
+            store.readinessReviews[projectId] ?? [], events, spine.id,
+        )) {
+            return { label: projectCommitmentCopy('needs_fresh_review').label, color: 'bg-red-900/30 text-red-300 border-red-800' };
+        }
+        if (spine?.isFinal) {
+            return { label: projectCommitmentCopy('legacy_commitment').label, color: 'bg-neutral-700 text-neutral-300 border-neutral-600' };
+        }
+        return stageBadges[stage] || { label: 'Working plan', color: 'bg-neutral-700 text-neutral-400 border-neutral-600' };
     };
 
     return (

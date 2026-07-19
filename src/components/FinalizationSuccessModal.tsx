@@ -2,23 +2,20 @@ import { useEffect } from 'react';
 import { CheckCircle2, ArrowRight, Loader2 } from 'lucide-react';
 
 interface FinalizationSuccessModalProps {
-    // True once every build asset already has a generated version (e.g. the
-    // user re-finalized a spine whose artifacts were generated earlier).
-    // Drives the "ready" vs "being created" copy.
-    assetsReady: boolean;
+    assetsGenerated: boolean;
+    assetsBuilding: boolean;
+    readyToBuild: boolean;
     onOpenAssets: () => void;
+    onGenerateAssets: () => void;
     onClose: () => void;
 }
 
 /**
- * Post-finalization transition. Shown immediately after the user marks a PRD
- * as final so the change is unmistakable: the PRD is locked, build assets are
- * underway, and the next action is to review them. "Open Assets" navigates to
- * the Assets view, opens the artifact panel, and selects the first non-PRD
- * artifact (handled by the parent).
+ * Post-commitment transition. Committing the reasoning foundation and
+ * generating downstream output are deliberately separate choices.
  */
 export function FinalizationSuccessModal({
-    assetsReady, onOpenAssets, onClose,
+    assetsGenerated, assetsBuilding, readyToBuild, onOpenAssets, onGenerateAssets, onClose,
 }: FinalizationSuccessModalProps) {
     // Escape closes the modal (without navigating) — the PRD stays final.
     useEffect(() => {
@@ -45,24 +42,25 @@ export function FinalizationSuccessModal({
                     <CheckCircle2 size={30} className="text-green-600" />
                 </div>
                 <h2 id="finalize-success-title" className="text-xl font-bold mb-2">
-                    PRD Finalized
+                    {readyToBuild ? 'Plan committed' : 'Proceeding with accepted risk'}
                 </h2>
                 <p className="text-neutral-600 text-sm mb-6 flex items-center justify-center gap-1.5">
-                    {assetsReady ? (
-                        'Your build assets are ready.'
-                    ) : (
+                    {assetsBuilding ? (
                         <>
                             <Loader2 size={14} className="text-indigo-500 animate-spin shrink-0" />
-                            Your build assets are being created.
+                            Downstream outputs are being created from this committed plan.
                         </>
-                    )}
+                    ) : assetsGenerated ? 'Existing outputs remain available for alignment review.' : readyToBuild
+                        ? 'This version is now the intended basis for implementation. No outputs were generated automatically.'
+                        : 'The version is committed, but unresolved reasoning remains visible. Any outputs stay exploratory until readiness improves.'}
                 </p>
                 <button
                     type="button"
-                    onClick={onOpenAssets}
+                    autoFocus
+                    onClick={assetsGenerated || assetsBuilding ? onOpenAssets : onGenerateAssets}
                     className="w-full flex items-center justify-center gap-2 px-4 py-3 bg-indigo-600 hover:bg-indigo-700 text-white font-medium rounded-xl transition"
                 >
-                    Open Assets
+                    {assetsGenerated || assetsBuilding ? 'Review outputs' : readyToBuild ? 'Generate build foundation' : 'Explore outputs'}
                     <ArrowRight size={16} />
                 </button>
                 <button
@@ -70,7 +68,7 @@ export function FinalizationSuccessModal({
                     onClick={onClose}
                     className="mt-3 w-full px-4 py-2 text-sm text-neutral-500 hover:text-neutral-700 transition"
                 >
-                    Stay on the PRD
+                    Keep reviewing the plan
                 </button>
             </div>
         </div>

@@ -14,31 +14,31 @@ const OPTIONS: {
     detail: string;
 }[] = [
     {
-        mode: 'none',
-        icon: Zap,
-        title: 'Generate Immediately',
-        subtitle: 'Fastest',
-        detail: 'Skip clarification and generate the PRD straight from your idea.',
-    },
-    {
         mode: 'quick',
         icon: MessagesSquare,
-        title: 'Quick Clarification',
-        subtitle: '5 questions',
-        detail: 'Answer 5 targeted questions so the PRD captures your intent.',
+        title: 'Develop the idea',
+        subtitle: 'Recommended',
+        detail: 'Resolve a focused set of questions that could materially change the product.',
+    },
+    {
+        mode: 'none',
+        icon: Zap,
+        title: 'Draft a working plan',
+        subtitle: 'Fastest',
+        detail: 'Start from the idea now. Synapse will keep inferred assumptions visible for later review.',
     },
     {
         mode: 'deep',
         icon: Compass,
-        title: 'Deep Discovery',
-        subtitle: '10 questions',
-        detail: 'Answer 10 questions for the most tailored, thorough PRD.',
+        title: 'Explore deeply',
+        subtitle: 'Broader discovery',
+        detail: 'Examine users, outcomes, constraints, and edge cases before drafting the working plan.',
     },
 ];
 
 /**
- * Post-idea choice: how to start. Generate Immediately preserves the existing
- * behavior; Quick/Deep enter the preflight clarification flow. Responsive —
+ * Post-idea choice: how to reduce initial uncertainty. A fast working-plan
+ * draft remains available without implying that generated detail is settled.
  * centered dialog on desktop, full-width bottom sheet on mobile.
  */
 export function PreflightModeChoice({ onChoose, onClose }: PreflightModeChoiceProps) {
@@ -63,7 +63,7 @@ export function PreflightModeChoice({ onChoose, onClose }: PreflightModeChoicePr
                     </button>
                 </div>
                 <p className="px-6 text-sm text-neutral-400 mb-4">
-                    A few quick questions can sharpen the PRD. This step is optional.
+                    Start with the level of discovery that is useful now. You can keep exploring after the plan is drafted.
                 </p>
                 <div className="px-4 pb-5 space-y-2">
                     {OPTIONS.map(({ mode, icon: Icon, title, subtitle, detail }) => (

@@ -5,10 +5,20 @@ import type {
     SpineSafetyReview,
     PreflightSession,
 } from '../../types';
-import type { ProjectState, SpineGenerationMetaInput } from '../types';
+import type { ProjectState, SpineGenerationMetaInput, CompareAndAppendStructuredPRDResult } from '../types';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 import { buildDecisionEditSummary } from '../../lib/derive/prdDecisions';
+import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
+import {
+    appendDecisionEvent,
+    buildReviewedDecisionImpact,
+    planningContentHash,
+    projectDecision,
+    recordConsequentialPrdEdit,
+    deriveReadinessCommitmentState,
+    type ConsequentialPrdEditRecognition,
+} from '../../lib/planning';
 
 export type SpineSlice = {
     spineVersions: Record<string, SpineVersion[]>;
@@ -20,6 +30,7 @@ export type SpineSlice = {
     updateStructuredPRD: ProjectState['updateStructuredPRD'];
     updateSpineStructuredPRD: ProjectState['updateSpineStructuredPRD'];
     editSpineStructuredPRD: ProjectState['editSpineStructuredPRD'];
+    compareAndAppendStructuredPRD: ProjectState['compareAndAppendStructuredPRD'];
     revertSpineToVersion: ProjectState['revertSpineToVersion'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
@@ -121,7 +132,20 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
 
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => {
         assertProjectCapability(get().projects[projectId], 'canChangeFinality');
+        // Phase 3 authority boundary: only commitReadinessReview may project a
+        // reviewed user commitment onto `isFinal`. Keep this legacy action for
+        // reopening old persisted commitments, but never let a caller create
+        // new authority by toggling a boolean directly.
+        if (isFinal) return;
         set((state) => {
+            const hasDurableCommitment = (state.readinessReviews[projectId] ?? []).some(review => (
+                review.spineVersionId === spineId
+                && Boolean(deriveReadinessCommitmentState(
+                    review,
+                    state.readinessCommitmentEvents[projectId] ?? [],
+                ).activeCommit)
+            ));
+            if (hasDurableCommitment) return state;
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
                 s.id === spineId ? { ...s, isFinal } : s
@@ -336,6 +360,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         const historyEventId = uuidv4();
         const changeSource = opts?.changeSource ?? 'user_edit';
         const editSummary = opts?.editSummary ?? 'Edited PRD';
+        let recognition: ConsequentialPrdEditRecognition | undefined;
         const decisionDelta = opts?.decisionDelta;
         const zeroCounts = () => ({ confirmed: 0, corrected: 0, reopened: 0 });
 
@@ -453,18 +478,32 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 generationPhase: 'complete',
                 // A historical edit must not inherit a stale error/safety stub.
                 generationError: undefined,
-                // The inherited canonicalSpine is stale the moment structuredPRD
-                // changes; drop it (nothing reads SpineVersion.canonicalSpine —
-                // artifact generation always rebuilds it lazily from structuredPRD)
-                // to keep edit versions small and avoid localStorage quota blowout.
-                canonicalSpine: undefined,
                 provenance,
+                // Never carry the source version's canonical metadata onto a
+                // new id. Rebuilt below after all metadata overrides settle.
+                canonicalSpine: undefined,
             };
             // Optional generation-meta overrides (e.g. updated failedSections).
             if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
             if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
             if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
             if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
+
+            try {
+                const project = state.projects[projectId];
+                newSpine.canonicalSpine = buildCanonicalPrdSpine(nextStructuredPRD, {
+                    projectName: project?.productName || project?.name,
+                    platform: project?.platform,
+                    designSystemPreset: project?.designSystemPreset,
+                    safetyReview: newSpine.safetyReview,
+                    sourceSpineVersionId: newSpineId,
+                    sourcePrdVersion: newSpine.prdVersion ?? src.canonicalSpine?.meta.sourcePrdVersion,
+                });
+            } catch {
+                // Preserve the edit while leaving no misleading canonical cache;
+                // artifact generation rebuilds this contract lazily.
+                newSpine.canonicalSpine = undefined;
+            }
 
             const editEvent: HistoryEvent = {
                 id: historyEventId,
@@ -475,13 +514,205 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
             };
 
+            const shouldRecognize = changeSource === 'user_edit'
+                && opts?.recognizeConsequentialEdit !== false
+                && !!src.structuredPRD;
+            let planningRecords = state.planningRecords;
+            if (shouldRecognize && src.structuredPRD) {
+                const recognitionAt = (state.planningRecords[projectId] ?? [])
+                    .flatMap(record => record.events ?? [])
+                    .reduce((latest, event) => Math.max(latest, event.at), now);
+                const result = recordConsequentialPrdEdit({
+                    projectId,
+                    sourceSpineVersionId: newSpineId,
+                    before: src.structuredPRD,
+                    after: nextStructuredPRD,
+                    existingRecords: state.planningRecords[projectId] ?? [],
+                    at: recognitionAt,
+                    idFactory: uuidv4,
+                });
+                recognition = result.recognition;
+                if (result.records !== state.planningRecords[projectId]) {
+                    planningRecords = { ...state.planningRecords, [projectId]: result.records };
+                }
+            }
+
             return {
                 spineVersions: { ...state.spineVersions, [projectId]: [...mappedOld, newSpine] },
                 historyEvents: { ...state.historyEvents, [projectId]: [...(state.historyEvents[projectId] || []), editEvent] },
+                planningRecords,
             };
         });
 
-        return { newSpineId: amendedSpineId ?? newSpineId };
+        return { newSpineId: amendedSpineId ?? newSpineId, recognition };
+    },
+
+    // Compare-and-append is the write barrier for a structured PRD change
+    // prepared from a version-bound preview. Crucially, the latest check lives
+    // inside set(): checking with get() first would leave a race between the
+    // check and append and could silently apply a stale preview.
+    compareAndAppendStructuredPRD: (
+        projectId,
+        expectedLatestSpineId,
+        nextStructuredPRD,
+        opts,
+    ) => {
+        const now = Date.now();
+        const newSpineId = uuidv4();
+        const historyEventId = uuidv4();
+        const editSummary = opts?.editSummary ?? 'Applied structured PRD revision';
+        let result: CompareAndAppendStructuredPRDResult = {
+            status: 'stale',
+            expectedLatestSpineId,
+        };
+
+        set((state) => {
+            const currentVersions = state.spineVersions[projectId] || [];
+            const latest = currentVersions.find(version => version.isLatest);
+            if (!latest || latest.id !== expectedLatestSpineId) {
+                result = {
+                    status: 'stale',
+                    expectedLatestSpineId,
+                    ...(latest ? { actualLatestSpineId: latest.id } : {}),
+                    reason: 'spine_changed',
+                };
+                return state;
+            }
+            if (opts?.expectedPrdHash
+                && (!latest.structuredPRD || planningContentHash(latest.structuredPRD) !== opts.expectedPrdHash)) {
+                result = {
+                    status: 'stale',
+                    expectedLatestSpineId,
+                    actualLatestSpineId: latest.id,
+                    reason: 'content_changed',
+                };
+                return state;
+            }
+
+            let appliedPlanningRecord: import('../../types').PlanningRecord | undefined;
+            if (opts?.decisionApplication) {
+                const record = (state.planningRecords[projectId] ?? [])
+                    .find(item => item.id === opts.decisionApplication?.planningRecordId);
+                const assessment = record?.assessments?.find(item =>
+                    item.impactPreview?.id === opts.decisionApplication?.impactPreviewId,
+                );
+                const preview = assessment?.impactPreview;
+                const reviewedImpact = record && preview && latest.structuredPRD
+                    ? buildReviewedDecisionImpact({ record, preview, structuredPRD: latest.structuredPRD })
+                    : undefined;
+                const reviewedResultMatches = preview?.alignmentProposals
+                    ? !!reviewedImpact?.nextPrd
+                        && reviewedImpact.acceptedProposalIds.length > 0
+                        && reviewedImpact.rejectedProposalIds.length === 0
+                        && planningContentHash(reviewedImpact.nextPrd) === planningContentHash(nextStructuredPRD)
+                    : !!preview?.proposedResultHash
+                        && preview.proposedResultHash === planningContentHash(nextStructuredPRD);
+                const previewMatches = assessment?.status === 'fresh'
+                    && preview?.status === 'ready'
+                    && preview.decisionEventId === opts.decisionApplication.decisionEventId
+                    && preview.baseline.spineVersionId === expectedLatestSpineId
+                    && preview.baseline.spineContentHash === planningContentHash(latest.structuredPRD)
+                    && reviewedResultMatches;
+                if (!record
+                    || projectDecision(record).latestVerdictEventId !== opts.decisionApplication.decisionEventId
+                    || !previewMatches) {
+                    result = {
+                        status: 'stale',
+                        expectedLatestSpineId,
+                        actualLatestSpineId: latest.id,
+                        reason: 'decision_changed',
+                    };
+                    return state;
+                }
+                const appended = appendDecisionEvent(record, {
+                    id: opts.decisionApplication.appliedEventId,
+                    planningRecordId: record.id,
+                    type: 'applied_to_plan',
+                    actor: 'user',
+                    impactPreviewId: opts.decisionApplication.impactPreviewId,
+                    baselineSpineVersionId: expectedLatestSpineId,
+                    resultingSpineVersionId: newSpineId,
+                    at: now,
+                });
+                if (!appended.ok) {
+                    result = {
+                        status: 'stale',
+                        expectedLatestSpineId,
+                        actualLatestSpineId: latest.id,
+                        reason: 'decision_changed',
+                    };
+                    return state;
+                }
+                appliedPlanningRecord = appended.record;
+            }
+
+            const project = state.projects[projectId];
+            const prdVersion = opts?.meta?.prdVersion
+                ?? latest.prdVersion
+                ?? latest.canonicalSpine?.meta.sourcePrdVersion;
+            const canonicalSpine = buildCanonicalPrdSpine(nextStructuredPRD, {
+                projectName: project?.productName || project?.name,
+                platform: project?.platform,
+                designSystemPreset: project?.designSystemPreset,
+                safetyReview: latest.safetyReview,
+                sourceSpineVersionId: newSpineId,
+                sourcePrdVersion: prdVersion,
+            });
+
+            const newSpine: SpineVersion = {
+                ...latest,
+                id: newSpineId,
+                createdAt: now,
+                isLatest: true,
+                isFinal: false,
+                structuredPRD: nextStructuredPRD,
+                responseText: renderPremiumMarkdown(nextStructuredPRD),
+                generationPhase: 'complete',
+                generationError: undefined,
+                provenance: {
+                    changeSource: opts?.changeSource ?? 'user_edit',
+                    editSummary,
+                },
+                canonicalSpine,
+            };
+            if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
+            if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
+            if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
+            if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
+
+            const historyEvent: HistoryEvent = {
+                id: historyEventId,
+                projectId,
+                spineVersionId: newSpineId,
+                type: 'Edited',
+                description: editSummary,
+                createdAt: now,
+            };
+
+            result = { status: 'applied', newSpineId };
+            return {
+                spineVersions: {
+                    ...state.spineVersions,
+                    [projectId]: [
+                        ...currentVersions.map(version => ({ ...version, isLatest: false })),
+                        newSpine,
+                    ],
+                },
+                historyEvents: {
+                    ...state.historyEvents,
+                    [projectId]: [...(state.historyEvents[projectId] || []), historyEvent],
+                },
+                ...(appliedPlanningRecord ? {
+                    planningRecords: {
+                        ...state.planningRecords,
+                        [projectId]: (state.planningRecords[projectId] ?? []).map(record =>
+                            record.id === appliedPlanningRecord?.id ? appliedPlanningRecord : record),
+                    },
+                } : {}),
+            };
+        });
+
+        return result;
     },
 
     // Versioning: restore a historical spine by appending a NEW latest version
@@ -519,7 +750,24 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     revertedFromVersionId: sourceSpineId,
                     editSummary: `Restored from ${sourceLabel}`,
                 },
+                // A restored version has a new identity even though its PRD
+                // content is historical; rebuild metadata for that identity.
+                canonicalSpine: undefined,
             };
+
+            if (newSpine.structuredPRD) try {
+                const project = state.projects[projectId];
+                newSpine.canonicalSpine = buildCanonicalPrdSpine(newSpine.structuredPRD, {
+                    projectName: project?.productName || project?.name,
+                    platform: project?.platform,
+                    designSystemPreset: project?.designSystemPreset,
+                    safetyReview: newSpine.safetyReview,
+                    sourceSpineVersionId: newSpineId,
+                    sourcePrdVersion: newSpine.prdVersion ?? src.canonicalSpine?.meta.sourcePrdVersion,
+                });
+            } catch {
+                newSpine.canonicalSpine = undefined;
+            }
 
             const revertEvent: HistoryEvent = {
                 id: historyEventId,

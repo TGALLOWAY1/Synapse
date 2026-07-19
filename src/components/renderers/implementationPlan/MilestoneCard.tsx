@@ -16,6 +16,7 @@ import {
     TerminalSquare,
 } from 'lucide-react';
 import type { ImplementationPlanMilestone, ImplementationPromptPack, ProjectTask } from '../../../types';
+import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 import { promptPackToClipboardText } from '../../../lib/services/implementationPlanAdapter';
 import type { QualityGateRunStatus } from '../../../lib/services/implementationPlanInsights';
 import { PromptPackCard } from './PromptPackCard';
@@ -63,6 +64,8 @@ interface Props {
     onPackCopied?: (packId: string) => void;
     /** Bulk variant for "Copy milestone prompts" — one progress update. */
     onPacksCopied?: (packIds: string[]) => void;
+    /** Exact update-plan region to reveal inside this expanded milestone. */
+    focusAnchorId?: string;
 }
 
 /**
@@ -83,6 +86,7 @@ export function MilestoneCard({
     copiedPackIds,
     onPackCopied,
     onPacksCopied,
+    focusAnchorId,
 }: Props) {
     const [expanded, setExpanded] = useState(defaultExpanded);
     const packs: ImplementationPromptPack[] = m.promptPacks ?? [];
@@ -104,7 +108,7 @@ export function MilestoneCard({
         .filter(row => row.items.length > 0);
 
     return (
-        <article id={`impl-milestone-${m.id}`} className="bg-white rounded-xl border border-neutral-200 scroll-mt-24">
+        <article id={implementationPlanAnchor.milestone(m.id)} tabIndex={-1} className="bg-white rounded-xl border border-neutral-200 scroll-mt-24">
             {/* --- Roadmap header (always visible) --------------------------- */}
             <button
                 type="button"
@@ -139,10 +143,21 @@ export function MilestoneCard({
                         {counts.map((c, i) => <span key={i}>{c}</span>)}
                     </div>
                     {deps.length > 0 && (
-                        <p className="flex items-center gap-1 text-[11px] text-neutral-500 mt-1">
+                        <div className="flex items-start gap-1 text-[11px] text-neutral-500 mt-1">
                             <GitBranch size={11} className="shrink-0" />
-                            <span className="truncate">Depends on: {deps.join(', ')}</span>
-                        </p>
+                            <span className="min-w-0">Depends on: {' '}
+                                {deps.map((dependency, dependencyIndex) => (
+                                    <span
+                                        id={implementationPlanAnchor.dependency(m.id, dependencyIndex)}
+                                        tabIndex={-1}
+                                        key={`${dependency}-${dependencyIndex}`}
+                                        className="scroll-mt-24"
+                                    >
+                                        {dependency}{dependencyIndex < deps.length - 1 ? ', ' : ''}
+                                    </span>
+                                ))}
+                            </span>
+                        </div>
                     )}
                 </div>
                 <span className="shrink-0 mt-1 text-neutral-400">
@@ -208,7 +223,7 @@ export function MilestoneCard({
                                         ? 'text-emerald-600'
                                         : inProgress ? 'text-amber-500' : 'text-neutral-300';
                                     return (
-                                        <li key={t.id} className="flex items-start gap-2 text-sm text-neutral-800">
+                                        <li id={implementationPlanAnchor.task(m.id, t.id)} tabIndex={-1} key={t.id} className="flex scroll-mt-24 items-start gap-2 text-sm text-neutral-800">
                                             <Icon size={15} className={`mt-0.5 shrink-0 ${iconCls}`} aria-hidden="true" />
                                             <span className="min-w-0">
                                                 <span className={done ? 'text-neutral-400 line-through' : undefined}>{t.title}</span>
@@ -253,6 +268,10 @@ export function MilestoneCard({
                                         relatedGateTitles={gates.map(g => g.title)}
                                         copied={copiedPackIds?.has(pack.id) ?? false}
                                         onCopied={onPackCopied ? () => onPackCopied(pack.id) : undefined}
+                                        navigationMilestoneId={m.id}
+                                        focusedAcceptanceCriterionIndex={pack.acceptanceCriteria.findIndex((_criterion, criterionIndex) => (
+                                            implementationPlanAnchor.promptCriterion(m.id, pack.id, criterionIndex) === focusAnchorId
+                                        ))}
                                     />
                                 ))}
                             </div>
@@ -286,7 +305,9 @@ export function MilestoneCard({
                                 <TerminalSquare size={11} /> Validation Commands
                             </p>
                             <div className="bg-neutral-900 text-neutral-100 rounded-lg px-3 py-2 text-xs font-mono space-y-0.5 overflow-x-auto">
-                                {m.validationCommands!.map((c, i) => <p key={i}>$ {c}</p>)}
+                                {m.validationCommands!.map((c, i) => (
+                                    <p id={implementationPlanAnchor.validationCommand(m.id, i)} tabIndex={-1} key={i} className="scroll-mt-24">$ {c}</p>
+                                ))}
                             </div>
                         </div>
                     )}
@@ -298,7 +319,7 @@ export function MilestoneCard({
                             </p>
                             <ul className="space-y-1">
                                 {m.definitionOfDone!.map((d, i) => (
-                                    <li key={i} className="flex items-start gap-2 text-sm text-neutral-800">
+                                    <li id={implementationPlanAnchor.definitionOfDone(m.id, i)} tabIndex={-1} key={i} className="flex scroll-mt-24 items-start gap-2 text-sm text-neutral-800">
                                         <Square size={13} className="mt-1 shrink-0 text-emerald-400" aria-hidden="true" />
                                         <span>{d}</span>
                                     </li>
