@@ -20,6 +20,7 @@ import { buildScreenScopeKey } from '../../lib/mockupImageStore';
 import { hasOpenAIKey } from '../../lib/openaiClient';
 import { getMockupImageMode, resolveMockupRender } from '../../lib/artifactModelSettings';
 import { MockupScreenUpload } from './MockupScreenUpload';
+import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
 
 interface Props {
     projectId: string;
@@ -51,6 +52,7 @@ const pickInitialQuality = (records: MockupImageRecord[]): MockupImageQuality | 
 };
 
 export function MockupScreenImage({ projectId, artifactId, versionId, screen, payload, settings, onGenerated }: Props) {
+    const capabilities = useProjectCapabilities(projectId);
     const scope = buildScreenScopeKey(versionId, screen.id);
     // Subscribe to the whole image map; filtered records are derived below.
     // The previous implementation subscribed only to a single keyed entry,
@@ -145,6 +147,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
     }
 
     const handleGenerate = (quality: MockupImageQuality) => {
+        if (!capabilities.canGenerateArtifacts) return;
         // High quality is the expensive variant — confirm before spending. Paid
         // OpenAI usage is billed to the user's own account via their key.
         if (quality === 'high' && typeof window !== 'undefined') {
@@ -219,7 +222,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                         </div>
                     </div>
                 )}
-                <div className="px-4 py-2 border-t border-neutral-100 flex items-center justify-end">
+                {capabilities.canGenerateArtifacts && <div className="px-4 py-2 border-t border-neutral-100 flex items-center justify-end">
                     <button
                         type="button"
                         disabled={!keyPresent}
@@ -230,7 +233,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                         <RefreshCw size={12} />
                         Regenerate
                     </button>
-                </div>
+                </div>}
             </div>
         );
     }
@@ -260,7 +263,7 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
                     <span className="text-left break-words">{error}</span>
                 </div>
             )}
-            <button
+            {capabilities.canGenerateArtifacts && <button
                 type="button"
                 disabled={!keyPresent}
                 onClick={() => handleGenerate('low')}
@@ -269,8 +272,8 @@ export function MockupScreenImage({ projectId, artifactId, versionId, screen, pa
             >
                 <Sparkles size={14} />
                 Generate AI image (low quality)
-            </button>
-            {!keyPresent && (
+            </button>}
+            {capabilities.canGenerateArtifacts && !keyPresent && (
                 <div className="mt-3 inline-flex items-center gap-1.5 text-[11px] text-neutral-500">
                     <SettingsIcon size={11} />
                     Add an OpenAI API key in Settings (gear icon) to enable.

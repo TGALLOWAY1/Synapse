@@ -1,6 +1,12 @@
 import { describe, it, expect, beforeEach } from 'vitest';
 import { useProjectStore } from '../projectStore';
+import { evaluateProjectFreshness } from '../../lib/artifactFreshness';
 import type { SourceRef, StructuredPRD } from '../../types';
+
+// Freshness is now read exclusively through the canonical evaluator (SYN-005);
+// the legacy getArtifactStaleness slice was deleted.
+const statusOf = (projectId: string, slot: 'data_model' | 'mockup'): string | undefined =>
+    evaluateProjectFreshness(useProjectStore.getState(), projectId).evaluations.get(slot)?.status;
 
 beforeEach(() => {
     useProjectStore.setState({
@@ -43,7 +49,7 @@ describe('markArtifactCurrentForSpine', () => {
 
         // A PRD edit makes a newer spine latest — the artifact goes stale.
         const { newSpineId } = store.editSpineStructuredPRD(projectId, v1.id, prd('v2'));
-        expect(useProjectStore.getState().getArtifactStaleness(projectId, artifactId)).toBe('possibly_outdated');
+        expect(statusOf(projectId, 'data_model')).toBe('needs_update');
 
         const { versionId } = store.markArtifactCurrentForSpine(projectId, artifactId, newSpineId);
 
@@ -62,7 +68,7 @@ describe('markArtifactCurrentForSpine', () => {
         const events = useProjectStore.getState().historyEvents[projectId];
         expect(events.some(e => e.type === 'MarkedCurrent' && e.artifactVersionId === versionId)).toBe(true);
 
-        expect(useProjectStore.getState().getArtifactStaleness(projectId, artifactId)).toBe('current');
+        expect(statusOf(projectId, 'data_model')).toBe('up_to_date');
     });
 
     it('rebases dependency refs onto their current preferred versions (incl. tokensHash anchor)', () => {
@@ -97,8 +103,8 @@ describe('markArtifactCurrentForSpine', () => {
         const designPreferred = useProjectStore.getState().getPreferredVersion(projectId, designId)!;
         expect(depRef.sourceArtifactVersionId).toBe(designPreferred.id);
         expect(depRef.anchorInfo).toBe('hash-new');
-        // With spine + dep + hash all rebased, the mockup is fully current.
-        expect(useProjectStore.getState().getArtifactStaleness(projectId, mockupId)).toBe('current');
+        // With spine + dep + hash all rebased, the mockup is fully up to date.
+        expect(statusOf(projectId, 'mockup')).toBe('up_to_date');
     });
 
     it('throws when the artifact has no preferred version', () => {

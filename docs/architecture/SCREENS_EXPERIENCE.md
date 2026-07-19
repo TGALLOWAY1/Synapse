@@ -101,8 +101,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     details" disclosure) → PRD features (collapsed) → Screen details (collapsed:
     navigation, core UI regions, data, states). The noisy provenance badges
     ("Derived / Estimated / Mapped at generation / For your information") are gone.
-    `ScreenDownstreamImpactSection` is no longer shown in Screen Detail (its data
-    still feeds the list/coverage/preflight surfaces).
+    The `ScreenDownstreamImpactSection` component (which used to render this
+    data inline in Screen Detail) has been **deleted as unreachable UI** —
+    Screen Detail never rendered it after this simplification pass; the
+    underlying `screenDownstreamImpact.ts` derivation lib is unchanged and
+    still feeds the list/coverage/preflight surfaces below.
 - **Views** — `src/components/experience/`: `ScreenListView` (a **flow-first**
   list — screens are the primary focus, implementation/traceability/readiness
   data is kept but visually secondary), `ScreenDetailView` +
@@ -354,11 +357,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   preflight (blocking / review / info / recommended next steps / export-snapshot
   caveats — e.g. the Phase 3D variant-image cross-device-sync gap).
   `analyzeScreensDownstream(index, reviewModels, artifactReview)` is the single
-  entry point the workspace calls. **UI:** `ScreenDownstreamImpactSection`
-  (the component still exists and renders the impacted-artifact list / calm
-  empty states, but per the design-review simplification it is **no longer shown
-  in Screen Detail** — downstream-impact data now surfaces only via the list +
-  coverage + preflight surfaces), a compact downstream note in each `ScreenListView`
+  entry point the workspace calls. **UI:** the `ScreenDownstreamImpactSection`
+  component (which rendered the impacted-artifact list / calm empty states) has
+  been **removed** — per the design-review simplification it was never shown in
+  Screen Detail after this pass, so downstream-impact data now surfaces only via
+  a compact downstream note in each `ScreenListView`
   card's "Show details" disclosure (only when a blocking/review impact exists —
   info-only shows nothing), a
   **Downstream impact** section in `ScreenCoveragePanel` (which, per the
@@ -413,8 +416,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   screen on a legacy project read "review recommended" — both still surface in
   the QA checklist only.
   `buildScreensHandoffRollup(handoffs, p0Ids)` rolls up ready/review/blocked
-  **gated on P0**; `renderHandoffMarkdown` is the copy-to-clipboard export;
-  `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
+  **gated on P0** (the export panel uses `renderScreensHandoffExportMarkdown`
+  from `screenHandoffExport.ts` — see Phase 5C below; the per-screen
+  `renderHandoffMarkdown` copy export was deleted as dead code once that panel
+  shipped); `buildHandoffPreflightContribution` feeds the Phase 4B preflight via the
   structural `PreflightContribution` param on `buildScreensPreflight` /
   `analyzeScreensDownstream` (screenDownstreamImpact **never imports** the handoff
   module — that would cycle; the caller passes the contribution in). **UI (per
@@ -483,10 +488,11 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `traceBridge`, adds trace-review **readiness** signals
     (`dataModelTraceMissing` / `planBridgeMissing` (accepted P0 only) /
     `traceConfidenceWeakForP0` — all **review-recommended, never blocking**; they
-    fire only when the relevant artifact was PRESENT), extends
-    `renderHandoffMarkdown` with `## Trace Confidence` / `## Data Model Support` /
-    `## Related Implementation Plan Items`, and folds trace guidance into
-    `buildHandoffPreflightContribution`. `buildScreensHandoffRollup` gained a
+    fire only when the relevant artifact was PRESENT), and folds trace guidance
+    into `buildHandoffPreflightContribution` (the since-deleted
+    `renderHandoffMarkdown` used to render matching `## Trace Confidence` /
+    `## Data Model Support` / `## Related Implementation Plan Items` sections;
+    the Phase 5C export below covers this ground now). `buildScreensHandoffRollup` gained a
     `ScreensTraceRollup` (strong/estimated/missing counts + P0 plan/data-model
     gaps; null when no screen carried a bridge).
   - **UI.** The per-screen `ScreenHandoffView` (which rendered the **Trace
@@ -600,7 +606,38 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     for the Mockups-tab gallery + screen-card summary + coverage-panel rollup.
     A legacy single-image mockup normalizes to **`Desktop · Default`**
     (`source: 'legacy'`, `coverageStatus: 'unknown'` — no per-variant coverage
-    metadata was ever captured). Recommendations are DERIVED estimates:
+    metadata was ever captured). **The primary Default variant's `generated`
+    status is gated on ACTUAL image presence, not the spec join alone (SYN-003).**
+    `buildScreenMockupVariants` takes an optional
+    `BuildVariantOptions.defaultImagePresence` (`present` | `absent` | `checking`
+    | `unknown`) — the authoritative image-store evidence for the Default slot,
+    derived by the pure `src/lib/mockupImagePresence.ts`
+    (`deriveDefaultImagePresence`: ANY record in the AI mockup store OR the
+    screen-inventory upload store → `present`; both stores settled + none →
+    `absent`; otherwise `checking`). The Default is `generated`/`legacy` only when
+    the spec join exists AND presence `!== 'absent'`; an image-absent default is
+    honest `missing` with **`source: 'derived_missing'`**, `coverageStatus:
+    'unknown'`, and a "spec exists but no rendered image was found" note.
+    `checking` keeps it `generated` (no flap mid-hydration) and the UI shows a
+    neutral "Checking…" pill (`imagePresence` rides on every
+    `DerivedMockupVariant`). **Unset / `'unknown'` = EXACT legacy behavior**, so
+    un-wired callers and pure tests are unchanged. Callers resolve presence from
+    the reactive stores and pass it down: `ArtifactWorkspace` builds a memoized
+    `defaultImagePresenceByScreen(screenId)` (loading `mockupImageStore` +
+    `screenInventoryImageStore` for the mockup version — the list/coverage views
+    used to never load them) and threads it into
+    `buildMockupVariantCoverageSummary` / `buildScreenReviewIndex` (both gained a
+    per-screen `defaultImagePresenceByScreen` option) and `ScreenListView`;
+    `ScreenDetailView` derives its own for the open screen. `mockupImageStore`
+    gained a `loadedVersions` settled-signal (set on BOTH the records-found and
+    the empty path) so a consumer can tell "no image yet, still loading" from
+    "provably absent". **Deliberate non-change:** `screenReadiness.ts`
+    `buildMockupVariantRows` / the `missing_mockup_p0` gap stay SPEC-derived —
+    readiness gaps are work-planning signals in pure batch derivations with no
+    reactive store access; making them device-image-aware would flip statuses
+    transiently during hydration and conflate "asset missing on this device" with
+    "work not done". The variant layer is the visual-truth surface.
+    Recommendations are DERIVED estimates:
     `Desktop · Default` for every primary screen, `Mobile · Default` **only
     when the project is `mobileRelevant`** (mobile-first / responsive — then on
     every screen, P0 included), and important documented states. **A web/desktop
@@ -644,9 +681,13 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
     `src/components/experience/MockupVariantImage.tsx`)** — the Mockups tab can
     now GENERATE / regenerate / retry ONE specific non-default variant
     (`Mobile · Default`, `Desktop · Empty History`, …). The **default variant
-    (`id === 'default'`) is deliberately left on the legacy `MockupScreenImage`
-    path unchanged** (keys `versionId:screenId:quality`, coverage stays
-    "unknown"); every OTHER variant uses a **dedicated, independent** per-variant
+    (`id === 'default'`) still RENDERS through the legacy `MockupScreenImage`
+    path** (keys `versionId:screenId:quality`, coverage stays "unknown") — in
+    `MockupVariantsPanel` the `isPrimaryImageSlot` router mounts it even for an
+    image-absent (`derived_missing`) default, because that component is also the
+    generate/upload CTA. Its `generated` *status*, though, is now gated on real
+    image presence (`defaultImagePresence` — see the Phase 3A bullet), NOT the
+    spec join alone. Every OTHER variant uses a **dedicated, independent** per-variant
     IDB store keyed **`versionId:screenId:variantId:quality`** so generating one
     variant never overwrites another. `buildVariantGenerationRequest` assembles a
     variant-scoped request (viewport + state + core regions/actions/criteria/

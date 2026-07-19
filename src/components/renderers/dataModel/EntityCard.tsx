@@ -30,18 +30,22 @@ interface Props {
     initialMemberAspect?: DataModelMemberAspect;
 }
 
-function CountChip({ icon: Icon, count, label, tone = 'neutral' }: {
-    icon: typeof Database; count: number; label: string; tone?: 'neutral' | 'rose';
+/**
+ * A quiet, compact metadata item for the card footer — small icon + count +
+ * correctly pluralised label (e.g. "1 field" / "2 fields", "1 privacy rule").
+ * Neutral bordered by default; colour is reserved for the privacy warning tone.
+ */
+function CountChip({ icon: Icon, count, singular, plural, tone = 'neutral' }: {
+    icon: typeof Database; count: number; singular: string; plural: string; tone?: 'neutral' | 'rose';
 }) {
     if (count <= 0) return null;
     const toneCls = tone === 'rose'
-        ? 'bg-rose-50 text-rose-600 ring-rose-200'
-        : 'bg-neutral-100 text-neutral-600 ring-neutral-200';
+        ? 'border-rose-200 bg-rose-50 text-rose-600'
+        : 'border-neutral-200 bg-white text-neutral-500';
     return (
-        <span className={`inline-flex items-center gap-1 text-[10px] font-medium px-1.5 py-0.5 rounded-full ring-1 ${toneCls}`}>
-            <Icon size={10} className="shrink-0" />
-            <span className="tabular-nums">{count}</span>
-            <span className="hidden sm:inline">{label}</span>
+        <span className={`inline-flex items-center gap-1 text-[11px] font-medium px-1.5 py-0.5 rounded-md border ${toneCls}`}>
+            <Icon size={11} className="shrink-0" />
+            <span className="tabular-nums">{count} {count === 1 ? singular : plural}</span>
         </span>
     );
 }
@@ -139,44 +143,60 @@ export function EntityCard({
             id={entityAnchorId(entity.name)}
             tabIndex={-1}
             aria-current={focusedEntity ? 'true' : undefined}
-            className={`scroll-mt-24 overflow-hidden rounded-xl border bg-white shadow-sm outline-none focus:ring-2 focus:ring-indigo-500 ${focusedEntity ? 'border-indigo-300 ring-2 ring-indigo-300' : 'border-neutral-200'}`}
+            className={`scroll-mt-24 overflow-hidden rounded-xl border bg-white shadow-sm outline-none transition focus:ring-2 focus:ring-indigo-500 ${
+                focusedEntity
+                    ? 'border-indigo-300 ring-2 ring-indigo-300'
+                    : expanded
+                        ? 'border-indigo-300 ring-1 ring-indigo-200/70 shadow'
+                        : 'border-neutral-200'
+            }`}
         >
             {/* Header — always visible, toggles expansion */}
             <button
                 type="button"
                 onClick={onToggle}
                 aria-expanded={expanded}
-                className="w-full text-left px-4 py-3 hover:bg-neutral-50/60 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset"
+                className={`w-full text-left px-4 py-3 transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-500 focus-visible:ring-inset ${
+                    expanded ? 'bg-indigo-50/40' : 'hover:bg-neutral-50/60'
+                }`}
             >
-                {/* Title row — icon, name, and chevron sit on one center-aligned line. */}
-                <div className="flex items-center gap-3">
-                    <div className="p-1.5 rounded-lg bg-neutral-100 text-neutral-500 shrink-0">
+                <div className="flex items-start gap-3">
+                    <div className="mt-0.5 p-1.5 rounded-lg bg-neutral-100 text-neutral-500 shrink-0">
                         <Database size={15} />
                     </div>
-                    <h4 className="min-w-0 flex-1 text-sm font-semibold text-neutral-900 truncate">{entity.name}</h4>
+
+                    <div className="min-w-0 flex-1">
+                        {/* Name + status labels — name and its chips share one row on
+                            desktop (chips pushed right); on mobile the chips wrap below. */}
+                        <div className="flex items-center gap-x-2 gap-y-1.5 flex-wrap">
+                            <h4 className="min-w-0 max-w-full text-sm font-semibold text-neutral-900 truncate">{entity.name}</h4>
+                            <div className="flex items-center gap-1.5 flex-wrap sm:ml-auto">
+                                {showCategory && <CategoryBadge category={node.category} size="xs" />}
+                                <EntityAttributeBadges node={node} collapsed={isMobile && !expanded} />
+                            </div>
+                        </div>
+
+                        {entity.description && (
+                            <p className={`mt-1.5 text-xs text-neutral-500 ${expanded ? '' : 'line-clamp-2'}`}>
+                                {entity.description}
+                            </p>
+                        )}
+
+                        {/* Quantitative metadata footer — quieter than name/description. */}
+                        <div className="mt-2 flex items-center gap-1.5 flex-wrap">
+                            <CountChip icon={ListTree} count={node.fieldCount} singular="field" plural="fields" />
+                            <CountChip icon={GitBranch} count={node.relationshipCount} singular="relationship" plural="relationships" />
+                            <CountChip icon={SlidersHorizontal} count={node.constraintCount} singular="constraint" plural="constraints" />
+                            <CountChip icon={ShieldAlert} count={node.privacyCount} singular="privacy rule" plural="privacy rules" tone="rose" />
+                            <CountChip icon={KeyRound} count={node.indexCount} singular="index" plural="indexes" />
+                        </div>
+                    </div>
+
                     <ChevronDown
                         size={18}
-                        className={`shrink-0 text-neutral-400 transition-transform ${expanded ? 'rotate-180' : ''}`}
+                        className={`mt-0.5 shrink-0 text-neutral-400 transition-transform ${expanded ? 'rotate-180 text-indigo-500' : ''}`}
                         aria-hidden="true"
                     />
-                </div>
-
-                {/* Detail — description, attribute chips, and counts, full-width below. */}
-                {entity.description && (
-                    <p className={`mt-2 text-xs text-neutral-500 ${expanded ? '' : 'line-clamp-1'}`}>
-                        {entity.description}
-                    </p>
-                )}
-                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                    {showCategory && <CategoryBadge category={node.category} size="xs" />}
-                    <EntityAttributeBadges node={node} collapsed={isMobile && !expanded} />
-                </div>
-                <div className="mt-2 flex items-center gap-1.5 flex-wrap">
-                    <CountChip icon={ListTree} count={node.fieldCount} label="fields" />
-                    <CountChip icon={GitBranch} count={node.relationshipCount} label="relationships" />
-                    <CountChip icon={SlidersHorizontal} count={node.constraintCount} label="constraints" />
-                    <CountChip icon={ShieldAlert} count={node.privacyCount} label="privacy" tone="rose" />
-                    <CountChip icon={KeyRound} count={node.indexCount} label="indexes" />
                 </div>
             </button>
 

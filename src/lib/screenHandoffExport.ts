@@ -28,11 +28,13 @@ import type { ScreensPreflightModel } from './screenDownstreamImpact';
 import type {
     ScreenImplementationHandoff, ScreensHandoffRollup,
 } from './screenImplementationHandoff';
-import type { TraceConfidence } from './screenArtifactTraceBridge';
+import {
+    TRACE_CONFIDENCE_LABELS, toExportStatus, type ScreensExportStatus,
+} from './screenStatusShared';
 
 // --- Types -------------------------------------------------------------------
 
-export type ScreensHandoffExportStatus = 'ready' | 'review_recommended' | 'not_ready';
+export type ScreensHandoffExportStatus = ScreensExportStatus;
 
 export type ScreensHandoffExportFormat = 'markdown' | 'json';
 
@@ -243,14 +245,6 @@ const REVIEW_FRESHNESS_LABELS: Record<string, string> = {
     current: 'Current',
     outdated: 'Changed after sign-off',
     unknown: 'Unknown',
-};
-
-const TRACE_CONFIDENCE_LABELS: Record<TraceConfidence, string> = {
-    explicit: 'Explicit trace',
-    strong: 'Strong match',
-    weak: 'Weak match',
-    estimated: 'Estimated',
-    missing: 'Missing',
 };
 
 // --- Per-screen projection ---------------------------------------------------
@@ -489,10 +483,7 @@ export function deriveScreensExportStatus(
 ): ScreensHandoffExportStatus {
     // The handoff rollup speaks the per-screen vocabulary ('blocked'); map it to
     // the export/preflight vocabulary ('not_ready') before folding.
-    const rollupStatus: ScreensHandoffExportStatus =
-        handoffRollup.status === 'blocked' ? 'not_ready'
-            : handoffRollup.status === 'review_recommended' ? 'review_recommended'
-                : 'ready';
+    const rollupStatus = toExportStatus(handoffRollup.status);
     return worseStatus(preflight.status, rollupStatus);
 }
 

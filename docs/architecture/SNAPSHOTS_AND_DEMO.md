@@ -35,6 +35,90 @@ add it to `collectProjectBundle`/`collectScreenImages`/`collectVariantImages`, t
 restore writers, and `namespaceSnapshotForRestore`, or it silently won't travel
 in snapshots.
 
+- **Save-time mockup-image audit (`src/lib/snapshotImageAudit.ts`, pure).**
+  Mockup SPECS (the `mockup` artifact version JSON) and mockup IMAGES (IDB blobs
+  shipped one-per-request) are collected independently, so nothing forces them to
+  agree — it was possible to save, then pin as the public demo, a snapshot whose
+  mockup spec listed screens but carried **zero** images (images generated in
+  another browser, IDB cleared, or only the spec regenerated), and the demo then
+  rendered mockup specs with no previews (the mockups "disappeared"). This is the
+  root cause of the "demo lost its mockups" bug: the pinned demo blob genuinely
+  had `imageCount: 0`. `auditMockupImageCoverage` runs inside `saveSnapshot` and,
+  when the mockup version has ≥1 screen but no mockup image (AI / uploaded /
+  variant) was collected for that version id, returns a warning surfaced through
+  the existing `onWarnings` → `SnapshotsPanel` amber notice. **Saving is still
+  never blocked** (specs are worth keeping) — the save-time audit only makes the
+  gap visible. `snapshotImageAudit.ts` also exports the pure
+  **`countMockupSpecScreens(artifacts, artifactVersions)`** (preferred mockup
+  version → `{ versionId, screenCount }`, incl. the `extraScreens` overlay;
+  `auditMockupImageCoverage` reuses it) — the shared "how many mockup screens
+  does this snapshot claim?" number the pin-time gate keys off. A snapshot with
+  no images is a data condition the owner must fix by regenerating the mockup
+  images and re-saving/re-pinning; no restore/render change can recover images
+  the blob never contained.
+
+- **Pin-time completeness gate (SYN-003) — a HARD BLOCK, unlike the save-time
+  audit.** Pinning a snapshot as the public demo is where a zero-image mockup
+  spec does real damage (the demo claims "Generated" screens it can't show), so
+  the pin is gated, not merely warned. `saveSnapshot` records
+  `manifest.mockupScreenCount` (from `countMockupSpecScreens`) and
+  `manifest.variantImageCount` (both optional on the wire — legacy manifests lack
+  them; the client gate covers those). **Client hard block**
+  (`SnapshotsPanel.handleSetDemo`, no override — pre-launch, the owner's recourse
+  is regenerate + re-save): when `mockupScreenCount > 0` and total images
+  (`imageCount + screenImageCount + variantImageCount`) is 0, it shows an
+  actionable error and does NOT call `setDemoSnapshot`; a **legacy** summary (no
+  `mockupScreenCount`) with zero images also blocks, asking for a re-save with
+  the current app version; `mockupScreenCount === 0` (a legitimate PRD-only demo)
+  pins cleanly; the unpin path is never gated. **Server backstop**
+  (`api/snapshots.js` `handlePutDemo`): it counts the snapshot's per-image blobs
+  (keys under `.../images/`) and, when that count is 0 and the manifest's
+  `mockupScreenCount > 0`, rejects **422 `demo_snapshot_incomplete`** (a readable
+  message surfaced through the client `setDemoSnapshot` error path); legacy
+  manifests without the field pass (client gate covers them).
+
+- **The public demo has one read-only capability boundary.**
+  `src/lib/projectCapabilities.ts` is authoritative for durable project actions;
+  `getProjectCapabilities` fails conservatively for a missing project and denies
+  project/spine edits, finality, artifact/version/metadata changes, reviews,
+  generation, design-system changes, persisted workflow/task state, and external
+  task exports for `DEMO_PROJECT_ID`. Persisted Zustand slice actions, artifact
+  generation controllers, and IndexedDB image writers assert the relevant
+  capability before doing work. React surfaces consume
+  `useProjectCapabilities` to hide mutation-only controls; the demo's pipeline
+  stage is component state so PRD / Assets / History navigation remains
+  explorable without persisting `currentStage`. Do not add raw demo-id mutation
+  checks or a second demo store/workspace—extend the capability categories when
+  a new durable mutation domain is introduced. Local copy/download exports that
+  do not mutate project state remain available.
+
+- **Reset Demo (SYN-001) — a deterministic "restore to pinned snapshot",
+  route/store-owned like `loadDemoProject` itself.** `projectSlice.resetDemoProject()`
+  deliberately bypasses the read-only capability guards above rather than
+  extending them (this is a session/route-level concern, not a durable project
+  mutation): it wipes all nine project-keyed store maps plus the transient
+  `jobs`/`prdProgress`/`prdSectionStatus` slices for `DEMO_PROJECT_ID`, deletes
+  every mockup/screen-inventory/variant IDB image record for the demo's
+  artifact version ids (`deleteImagesForVersion` / `deleteScreenImagesForArtifactVersion`
+  / `deleteVariantImagesForVersion`, each best-effort/try-caught so one failed
+  delete can't abort the reset), and explicitly clears the matching reactive
+  Zustand caches (`clearVersions` on all three of `mockupImageStore` /
+  `screenInventoryImageStore` / `mockupVariantImageStore`) — required because
+  `restoreSnapshotAs` never proactively evicts those caches itself (the mockup/
+  screen-inventory caches only self-heal lazily via `loadForVersion`, and the
+  variant cache's `mergeRecords` only ever adds/updates keys, never removes a
+  stale one), so without this a demo reset could leave a corrupted record
+  visible in memory even after IndexedDB was wiped. Deleting
+  `projects[DEMO_PROJECT_ID]` drops the `demoSourceSnapshotId` stamp, so the
+  action's final step — calling `loadDemoProject()` — can never cache-short-circuit;
+  it always performs a full re-fetch + restore. `src/lib/demoRouteHydration.ts`'s
+  `resetDemoProjectSingleFlight()` shares the module's `inFlight` slot with
+  `hydrateDemoProject()` so a reset can't race a concurrent hydration pass:
+  it waits out any in-flight hydration first, then registers its own promise
+  as the new `inFlight` slot. UI: a "Reset demo" control with an inline
+  confirm on `DemoReadOnlyNotice`, and a "Reset & reload demo" action on
+  `DemoRouteGate`'s failed state (alongside Retry / Return home).
+
 - **Demo hydration is route-owned.** The public demo route
   (`/p/<DEMO_PROJECT_ID>` in `App.tsx`'s `ProjectRoute`) wraps
   `ProjectWorkspace` in `DemoRouteGate` (`src/components/DemoRouteGate.tsx`),
@@ -68,11 +152,22 @@ in snapshots.
   (`fetchImageWithRetry`); on the public demo path (`loadDemoSnapshotPublic`)
   an image that still fails is **dropped** (`imagesComplete: false` on the
   returned payload, a client-only field) instead of rejecting the whole
-  snapshot. `loadDemoProject` restores an incomplete payload (fresh-partial
-  beats stale cache) but skips stamping `demoSourceSnapshotId`, so the next
-  open re-fetches and self-heals. This is the fix for "mobile shows the demo
-  without its screen-inventory images": one failed image fetch used to reject
-  the entire fresh snapshot and silently fall back to the stale cached demo.
+  snapshot. `loadDemoProject` restores an incomplete payload but **skips
+  stamping `demoSourceSnapshotId`**, so the next open re-fetches and self-heals.
+  This is the fix for "mobile shows the demo without its screen-inventory
+  images": one failed image fetch used to reject the entire fresh snapshot and
+  silently fall back to the stale cached demo.
+  **Stamp = known-complete; the freshness precedence keys off it (SYN-003).**
+  Because `demoSourceSnapshotId` is written **only** when the restore was NOT
+  image-incomplete, a *stamped* cache is provably a full restore. So the
+  precedence is: a **stamped (known-complete) cache beats a fresh-but-partial
+  fetch** — when the pointer changed but the fresh fetch returns
+  `imagesComplete: false` AND a stamped cache exists, `loadDemoProject` keeps
+  serving the complete cache and does NOT overwrite it (the now-stale stamp vs.
+  the live pointer already drives a re-fetch / self-heal on the next open).
+  **Fresh-partial still beats no cache or an un-stamped cache** (a partial demo
+  is better than an empty one), and it still leaves the stamp off so it heals.
+  Do NOT restore a partial fetch over a stamped cache.
   Owner-token `loadSnapshot` keeps strict all-or-nothing semantics (a restore
   over real data must not be partial). Server side, the public demo GET
   channel has its own rate-limit scope (`snapshots-demo`, 300/min in

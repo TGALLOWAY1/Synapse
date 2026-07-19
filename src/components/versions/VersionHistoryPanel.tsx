@@ -26,7 +26,7 @@ interface VersionHistoryPanelProps {
     getCompareInput: (id: string) => CompareInput;
     // PRD only: downstream artifacts that would go stale on restore.
     getStaleArtifactTitles?: () => string[];
-    onRestore: (id: string) => void;
+    onRestore?: (id: string) => void;
     onClose: () => void;
 }
 
@@ -39,6 +39,7 @@ const SOURCE_LABEL: Record<VersionChangeSource, string> = {
     revert: 'Restored',
     consistency_review: 'Consistency review',
     marked_current: 'Confirmed current',
+    decision_edit: 'Decisions',
 };
 
 const SOURCE_CLASS: Record<VersionChangeSource, string> = {
@@ -50,6 +51,7 @@ const SOURCE_CLASS: Record<VersionChangeSource, string> = {
     revert: 'bg-amber-50 text-amber-700 border-amber-200',
     consistency_review: 'bg-teal-50 text-teal-700 border-teal-200',
     marked_current: 'bg-emerald-50 text-emerald-700 border-emerald-200',
+    decision_edit: 'bg-violet-50 text-violet-700 border-violet-200',
 };
 
 function formatTime(ts: number): string {
@@ -68,6 +70,7 @@ export function VersionHistoryPanel({
     const confirmEntry = entries.find(e => e.id === confirmId) ?? null;
 
     const doRestore = (id: string) => {
+        if (!onRestore) return;
         onRestore(id);
         setConfirmId(null);
         setCompareId(null);
@@ -139,13 +142,15 @@ export function VersionHistoryPanel({
                                             >
                                                 <GitCompare size={12} /> Compare
                                             </button>
-                                            <button
-                                                type="button"
-                                                onClick={() => setConfirmId(entry.id)}
-                                                className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition min-h-[36px]"
-                                            >
-                                                <RotateCcw size={12} /> Restore
-                                            </button>
+                                            {onRestore && (
+                                                <button
+                                                    type="button"
+                                                    onClick={() => setConfirmId(entry.id)}
+                                                    className="inline-flex items-center gap-1 px-2.5 py-1.5 text-xs bg-indigo-600 hover:bg-indigo-700 text-white rounded-md transition min-h-[36px]"
+                                                >
+                                                    <RotateCcw size={12} /> Restore
+                                                </button>
+                                            )}
                                         </div>
                                     )}
                                 </div>
@@ -161,7 +166,7 @@ export function VersionHistoryPanel({
                     fromLabel={compareEntry.label}
                     toLabel="Current"
                     onClose={() => setCompareId(null)}
-                    onRestore={() => setConfirmId(compareEntry.id)}
+                    onRestore={onRestore ? () => setConfirmId(compareEntry.id) : undefined}
                 />
             )}
 

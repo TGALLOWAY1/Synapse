@@ -19,7 +19,6 @@ import type {
     UserLoop,
     Principle,
     RolePermission,
-    RiskDetailed,
     SuccessMetric,
     ArchFlow,
     PrdEntity,
@@ -31,7 +30,8 @@ import {
     isImplementationSummaryEmpty,
     splitFeaturesByTier,
 } from '../derive/implementationSummary';
-import { splitAssumptions, deriveDecisionLog } from '../derive/prdDecisions';
+import { deriveDecisionLog } from '../derive/prdDecisions';
+import { splitDecisionInputs, deriveRisks } from '../derive/prdViews';
 import { sanitizeRolePermissions } from '../prdRolesSanitizer';
 import { stripLeadingListNumber } from '../utils/stripLeadingListNumber';
 
@@ -230,16 +230,6 @@ const renderArchFlows = (flows: ArchFlow[]): string[] => {
     return lines;
 };
 
-const renderRisksDetailed = (risks: RiskDetailed[]): string[] => {
-    const lines: string[] = [];
-    lines.push('| Risk | Likelihood | Impact | Mitigation | Owner |');
-    lines.push('|---|---|---|---|---|');
-    risks.forEach(r => {
-        lines.push(`| ${escapeCell(r.risk)} | ${r.likelihood} | ${escapeCell(r.impact)} | ${escapeCell(r.mitigation)} | ${escapeCell(r.owner || '—')} |`);
-    });
-    return lines;
-};
-
 // Instrumentation was dropped from this table: new generations no longer
 // produce it (analytics detail belongs to downstream artifacts) so the column
 // rendered blank. Mirrors MetricsSection in PremiumSections.tsx.
@@ -253,122 +243,27 @@ const renderMetrics = (metrics: SuccessMetric[]): string[] => {
     return lines;
 };
 
-/**
- * Render a StructuredPRD to canonical premium markdown. Always defensive —
- * legacy PRDs missing the new sections still render cleanly using the legacy
- * fields (vision, targetUsers, coreProblem, features, architecture, risks).
- */
-export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
+// ── Part I — Product Overview ────────────────────────────────────────────────
+const overviewLines = (prd: StructuredPRD): string[] => {
     const lines: string[] = [];
 
-    // Title
-    const title = prd.productName || 'Product Requirements Document';
-    lines.push(`# ${title}`);
-    if (prd.productCategory) lines.push(`*${prd.productCategory}*`);
-    lines.push('');
-
-    // Executive Summary
     if (prd.executiveSummary) {
         lines.push('## Executive Summary');
         lines.push(prd.executiveSummary);
         lines.push('');
     }
 
-    // Implementation Summary — synthesized from features/risks/assumptions so
-    // exports (PDF, markdown download) carry the same "what to build first"
-    // entry point the in-app PRD now shows. THE section presenting MVP/V1
-    // scope (the old `## MVP Scope` block duplicated it and was removed);
-    // the scope rationale renders here as the decision callout.
-    const summary = deriveImplementationSummary(prd);
-    if (!isImplementationSummaryEmpty(summary) || prd.mvpScope?.rationale) {
-        lines.push('## Implementation Summary');
-        lines.push('');
-        if (prd.mvpScope?.rationale) {
-            lines.push(`> [!DECISION] ${prd.mvpScope.rationale}`);
-            lines.push('');
-        }
-        if (summary.buildFirst.length > 0) {
-            lines.push('### Build First');
-            summary.buildFirst.forEach((f, i) => {
-                const id = f.id ? `**${f.id}** ` : '';
-                const reason = f.reason ? ` — ${f.reason}` : '';
-                lines.push(`${i + 1}. ${id}${f.name}${reason}`);
-            });
-            lines.push('');
-        }
-        if (summary.buildNext.length > 0) {
-            lines.push('### Build Next');
-            summary.buildNext.forEach(f => {
-                const id = f.id ? `**${f.id}** ` : '';
-                const reason = f.reason ? ` — ${f.reason}` : '';
-                lines.push(`- ${id}${f.name}${reason}`);
-            });
-            lines.push('');
-        }
-        if (summary.highestRisks.length > 0) {
-            lines.push('### Highest Risks');
-            summary.highestRisks.forEach(r => {
-                const tag = r.likelihood !== 'unknown' ? ` (${r.likelihood})` : '';
-                const impact = r.impact ? ` — ${r.impact}` : '';
-                lines.push(`- ${r.risk}${tag}${impact}`);
-            });
-            lines.push('');
-        }
-    }
+    // Problem & Opportunity → Vision → Value proposition (Product Thesis).
+    lines.push('## Problem and Opportunity');
+    lines.push(prd.coreProblem);
+    lines.push('');
 
-    // ── Review & Confirm / Decision Log — mirrors ReviewConfirmSection and
-    // DecisionLogSection in the structured view. Unresolved assumptions
-    // surface as items awaiting user confirmation (highest confidence first);
-    // decided ones read as a running log of confirmed user choices.
-    const { unresolved: unresolvedAssumptions } = splitAssumptions(prd.assumptions);
-    const decisionLog = deriveDecisionLog(prd);
-    if (unresolvedAssumptions.length > 0) {
-        lines.push('## Review & Confirm');
-        lines.push('Assumptions made while drafting this PRD that still need user confirmation or correction:');
-        unresolvedAssumptions.forEach(a => {
-            lines.push(`- **${a.confidence} confidence** — ${a.statement}`);
-        });
-        lines.push('');
-    }
-    if (decisionLog.length > 0) {
-        lines.push('## Decision Log');
-        decisionLog.forEach(e => {
-            const verdict = e.verdict === 'deferred'
-                ? 'Deferred'
-                : e.kind === 'feature'
-                    ? 'Feature confirmed'
-                    : e.verdict === 'confirmed' ? 'Confirmed' : 'Marked incorrect';
-            const notePrefix = e.verdict === 'rejected' ? ' — Correction: ' : ' — ';
-            const note = e.note ? `${notePrefix}${e.note}` : '';
-            const label = e.label ? ` (${e.label})` : '';
-            lines.push(`- **${verdict}**${label}: ${e.statement}${note}`);
-        });
-        lines.push('');
-    }
-
-    // ── Section order is a logical reading flow (see StructuredPRDView, which
-    // mirrors it): Product Overview → Target Users → Features → UX → Metrics
-    // → Risks → Technical Architecture → Data Model → State Machines → NFRs →
-    // reference appendix → Where the Detail Lives (static handoff appendix).
-    // MVP/V1 scope lives in the Implementation Summary above; deferred scope
-    // in the Decision Log. This ordering is presentation-only; downstream
-    // artifacts consume the StructuredPRD object by field, not this markdown,
-    // so blocks may be reordered freely without affecting generation.
-
-    // ── Product Overview ────────────────────────────────────────────────
-    // Vision (always present in legacy spec)
     lines.push('## Vision');
     lines.push(prd.vision);
     lines.push('');
 
-    // Core Problem
-    lines.push('## Core Problem');
-    lines.push(prd.coreProblem);
-    lines.push('');
-
-    // Product Thesis (the "why this / why now / differentiation" solution rationale)
     if (prd.productThesis) {
-        lines.push('## Product Thesis');
+        lines.push('## Value Proposition');
         lines.push(`**Why this should exist:** ${prd.productThesis.whyExist}`);
         if (prd.productThesis.whyNow) lines.push(`**Why now:** ${prd.productThesis.whyNow}`);
         lines.push(`**Differentiation:** ${prd.productThesis.differentiation}`);
@@ -385,43 +280,85 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         lines.push('');
     }
 
-    // Principles
     if (prd.principles?.length) {
         lines.push('## Product Principles');
         renderPrinciples(prd.principles).forEach(l => lines.push(l));
         lines.push('');
     }
 
-    // ── Target Users ────────────────────────────────────────────────────
     if (prd.jtbd?.length) {
-        lines.push('## Target Users & Jobs-to-be-Done');
+        lines.push('## Target Users and Jobs');
         renderJtbdTable(prd.jtbd).forEach(l => lines.push(l));
         lines.push('');
     } else if (prd.targetUsers?.length) {
-        lines.push('## Target Users');
+        lines.push('## Target Users and Jobs');
         prd.targetUsers.forEach(u => lines.push(`- ${u}`));
         lines.push('');
     }
 
-    // ── Core Features ───────────────────────────────────────────────────
-    // Detailed Features first — the concrete features — then the Feature
-    // Systems grouping (mirrors StructuredPRDView's order). MVP (and
-    // unclassified) features render first, V1 features after (collapsed in
-    // the app); deferred features are excluded — they appear only as
-    // Deferred entries in the Decision Log above.
-    const featureGroups = splitFeaturesByTier(prd.features, deriveDeferredFeatureIds(prd));
-    lines.push('## Detailed Features');
-    featureGroups.mvp.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
-    featureGroups.v1.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
+    if (prd.successMetrics?.length) {
+        lines.push('## Goals and Success Metrics');
+        renderMetrics(prd.successMetrics).forEach(l => lines.push(l));
+        lines.push('');
+    }
 
-    // Feature Systems — never reference deferred features (Decision Log only).
+    // Scope & Constraints — the single MVP/V1 scope surface (build-first order
+    // + rationale); risks live in Part III to avoid duplicating them here.
+    const summary = deriveImplementationSummary(prd);
+    const hasScope = !isImplementationSummaryEmpty(summary) || !!prd.mvpScope?.rationale;
+    if (hasScope || prd.constraints?.length || prd.nonFunctionalRequirements?.length) {
+        lines.push('## Scope and Constraints');
+        lines.push('');
+        if (prd.mvpScope?.rationale) {
+            lines.push(`> [!DECISION] ${prd.mvpScope.rationale}`);
+            lines.push('');
+        }
+        if (summary.buildFirst.length > 0) {
+            lines.push('### Build First (MVP — Minimum Viable Product)');
+            summary.buildFirst.forEach((f, i) => {
+                const id = f.id ? `**${f.id}** ` : '';
+                const reason = f.reason ? ` — ${f.reason}` : '';
+                lines.push(`${i + 1}. ${id}${f.name}${reason}`);
+            });
+            lines.push('');
+        }
+        if (summary.buildNext.length > 0) {
+            lines.push('### Build Next');
+            summary.buildNext.forEach(f => {
+                const id = f.id ? `**${f.id}** ` : '';
+                const reason = f.reason ? ` — ${f.reason}` : '';
+                lines.push(`- ${id}${f.name}${reason}`);
+            });
+            lines.push('');
+        }
+        if (prd.constraints?.length) {
+            lines.push('### Constraints');
+            prd.constraints.forEach(c => lines.push(`- ${c}`));
+            lines.push('');
+        }
+        if (prd.nonFunctionalRequirements?.length) {
+            lines.push('### Quality & Performance Requirements');
+            prd.nonFunctionalRequirements.forEach(r => lines.push(`- ${r}`));
+            lines.push('');
+        }
+    }
+
+    return lines;
+};
+
+// ── Part II — Feature Specification ──────────────────────────────────────────
+const featuresLines = (prd: StructuredPRD): string[] => {
+    const lines: string[] = [];
+    const featureGroups = splitFeaturesByTier(prd.features, deriveDeferredFeatureIds(prd));
     const deferredIds = new Set(featureGroups.deferred.map(f => f.id.toLowerCase()));
+
+    // Feature Systems first (the high-level capability groups), then detail.
     if (prd.featureSystems?.length) {
         lines.push('## Feature Systems');
         prd.featureSystems.forEach(s => {
             lines.push(`### ${s.name}`);
             lines.push(`**Purpose:** ${s.purpose}`);
-            if (s.endToEndBehavior) lines.push(`**End-to-end behavior:** ${s.endToEndBehavior}`);
+            if (s.endToEndBehavior) lines.push(`**User outcome:** ${s.endToEndBehavior}`);
             const visibleIds = (s.featureIds ?? []).filter(id => !deferredIds.has(id.toLowerCase()));
             if (visibleIds.length) lines.push(`**Features:** ${visibleIds.join(', ')}`);
             if (s.dependencies?.length) lines.push(`**Dependencies:** ${s.dependencies.join(', ')}`);
@@ -429,86 +366,154 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
                 lines.push('**Edge cases:**');
                 s.edgeCases.forEach(e => lines.push(`- ${e}`));
             }
-            if (s.mvpVsLater) lines.push(`**MVP vs later:** ${s.mvpVsLater}`);
             lines.push('');
         });
     }
 
-    // ── User Experience ─────────────────────────────────────────────────
-    // UX Architecture
-    if (prd.uxPages?.length) {
-        lines.push('## UX Architecture');
-        renderUxPages(prd.uxPages).forEach(l => lines.push(l));
-    }
+    lines.push('## Detailed Features');
+    featureGroups.mvp.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
+    featureGroups.v1.forEach(f => renderFeature(f).forEach(l => lines.push(l)));
 
-    // User Loops
-    if (prd.userLoops?.length) {
-        lines.push('## Core User Loops');
-        renderUserLoops(prd.userLoops).forEach(l => lines.push(l));
+    // Cross-Feature Dependencies — explicit dependency edges only.
+    const byId = new Map(prd.features.map(f => [f.id, f]));
+    const depLines: string[] = [];
+    prd.features.forEach(f => {
+        const deps = (f.dependencies ?? []).map(id => byId.get(id)?.name).filter(Boolean) as string[];
+        if (deps.length) depLines.push(`- **${f.name}** depends on ${deps.join(', ')}`);
+    });
+    if (depLines.length) {
+        lines.push('## Cross-Feature Dependencies');
+        depLines.forEach(l => lines.push(l));
         lines.push('');
     }
 
-    // ── Success Metrics ─────────────────────────────────────────────────
-    if (prd.successMetrics?.length) {
-        lines.push('## Success Metrics');
-        renderMetrics(prd.successMetrics).forEach(l => lines.push(l));
+    return lines;
+};
+
+// ── Part III — Decisions and Validation ──────────────────────────────────────
+const decisionsLines = (prd: StructuredPRD): string[] => {
+    const lines: string[] = [];
+    const { needsInput, toValidate } = splitDecisionInputs(prd.assumptions);
+    const decisionLog = deriveDecisionLog(prd).filter(e => e.verdict !== 'deferred');
+    const deferred = deriveDecisionLog(prd).filter(e => e.verdict === 'deferred');
+    const risks = deriveRisks(prd);
+
+    if (needsInput.length > 0) {
+        lines.push('## Open Questions');
+        lines.push('Low-confidence assumptions that need a decision before the PRD relies on them:');
+        needsInput.forEach(a => lines.push(`- ${a.statement}`));
         lines.push('');
     }
 
-    // ── Risks ───────────────────────────────────────────────────────────
-    if (prd.risksDetailed?.length) {
-        lines.push('## Risks');
-        renderRisksDetailed(prd.risksDetailed).forEach(l => lines.push(l));
-        lines.push('');
-    } else if (prd.risks?.length) {
-        lines.push('## Risks');
-        prd.risks.forEach(r => lines.push(`- ${r}`));
+    if (toValidate.length > 0) {
+        lines.push('## Assumptions to Validate');
+        toValidate.forEach(a => lines.push(`- **${a.confidence} confidence** — ${a.statement}`));
         lines.push('');
     }
 
-    // ── Technical Architecture ──────────────────────────────────────────
-    lines.push('## Architecture');
-    lines.push(prd.architecture);
-    lines.push('');
-    if (prd.architectureFlows?.length) {
-        lines.push('### Example Flows');
-        renderArchFlows(prd.architectureFlows).forEach(l => lines.push(l));
-    }
-
-    // Roles
-    if (prd.roles?.length) {
-        lines.push('## Permissions & Roles');
-        renderRoles(prd.roles).forEach(l => lines.push(l));
-    }
-
-    // Data Model
-    if (prd.richDataModel?.entities?.length) {
-        lines.push('## Data Model');
-        prd.richDataModel.entities.forEach(e => renderEntity(e).forEach(l => lines.push(l)));
-    }
-
-    // State Machines
-    if (prd.stateMachines?.length) {
-        lines.push('## State Machines');
-        prd.stateMachines.forEach(m => renderStateMachine(m).forEach(l => lines.push(l)));
-    }
-
-    // NFRs
-    if (prd.nonFunctionalRequirements?.length) {
-        lines.push('## Non-Functional Requirements');
-        prd.nonFunctionalRequirements.forEach(r => lines.push(`- ${r}`));
+    if (decisionLog.length > 0) {
+        lines.push('## Decision Log');
+        decisionLog.forEach(e => {
+            const verdict = e.kind === 'feature'
+                ? 'Feature confirmed'
+                : e.verdict === 'confirmed' ? 'Confirmed' : 'Marked incorrect';
+            const notePrefix = e.verdict === 'rejected' ? ' — Correction: ' : ' — ';
+            const note = e.note ? `${notePrefix}${e.note}` : '';
+            const label = e.label ? ` (${e.label})` : '';
+            lines.push(`- **${verdict}**${label}: ${e.statement}${note}`);
+        });
         lines.push('');
     }
 
-    // ── Appendix / Reference Material ───────────────────────────────────
-    // Constraints
-    if (prd.constraints?.length) {
-        lines.push('## Constraints');
-        prd.constraints.forEach(c => lines.push(`- ${c}`));
+    if (deferred.length > 0 || risks.length > 0) {
+        lines.push('## Risks and Deferred Items');
+        lines.push('');
+        if (deferred.length > 0) {
+            lines.push('### Deferred');
+            deferred.forEach(e => {
+                const label = e.label ? `**${e.label}** ` : '';
+                const note = e.note ? ` — ${e.note}` : '';
+                lines.push(`- ${label}${e.statement}${note}`);
+            });
+            lines.push('');
+        }
+        if (risks.length > 0) {
+            lines.push('### Risks');
+            risks.forEach(r => {
+                const tag = r.likelihood ? ` (${r.likelihood})` : '';
+                const impact = r.impact ? ` — ${r.impact}` : '';
+                const mit = r.mitigation ? ` Mitigation: ${r.mitigation}` : '';
+                lines.push(`- ${r.risk}${tag}${impact}${mit}`);
+            });
+            lines.push('');
+        }
+    }
+
+    return lines;
+};
+
+// ── Appendices — technical context, traceability, handoff ────────────────────
+const appendixLines = (prd: StructuredPRD): string[] => {
+    const lines: string[] = [];
+
+    // Architecture & additional technical context (legacy sections preserved).
+    const hasArch = prd.architecture || prd.architectureFlows?.length || prd.roles?.length
+        || prd.uxPages?.length || prd.userLoops?.length || prd.richDataModel?.entities?.length
+        || prd.stateMachines?.length;
+    if (hasArch) {
+        lines.push('## Architecture and Additional Context');
+        lines.push('');
+        if (prd.architecture) {
+            lines.push('### Architecture');
+            lines.push(prd.architecture);
+            lines.push('');
+        }
+        if (prd.architectureFlows?.length) {
+            lines.push('### Example Flows');
+            renderArchFlows(prd.architectureFlows).forEach(l => lines.push(l));
+        }
+        if (prd.roles?.length) {
+            lines.push('### Permissions & Roles');
+            renderRoles(prd.roles).forEach(l => lines.push(l));
+        }
+        if (prd.uxPages?.length) {
+            lines.push('### UX Architecture');
+            renderUxPages(prd.uxPages).forEach(l => lines.push(l));
+        }
+        if (prd.userLoops?.length) {
+            lines.push('### Core User Loops');
+            renderUserLoops(prd.userLoops).forEach(l => lines.push(l));
+            lines.push('');
+        }
+        if (prd.richDataModel?.entities?.length) {
+            lines.push('### Data Model');
+            prd.richDataModel.entities.forEach(e => renderEntity(e).forEach(l => lines.push(l)));
+        }
+        if (prd.stateMachines?.length) {
+            lines.push('### State Machines');
+            prd.stateMachines.forEach(m => renderStateMachine(m).forEach(l => lines.push(l)));
+        }
+    }
+
+    // Traceability Index — feature → system + dependency edges (explicit only).
+    const byId = new Map(prd.features.map(f => [f.id, f]));
+    const systemOf = (fid: string): string | undefined =>
+        (prd.featureSystems ?? []).find(s => (s.featureIds ?? []).includes(fid))?.name;
+    const traceRows = prd.features.map(f => {
+        const parts: string[] = [];
+        const sys = systemOf(f.id) ?? f.system;
+        if (sys) parts.push(`system: ${sys}`);
+        const deps = (f.dependencies ?? []).map(id => byId.get(id)?.name).filter(Boolean) as string[];
+        if (deps.length) parts.push(`depends on: ${deps.join(', ')}`);
+        return { f, detail: parts.join('; ') };
+    }).filter(r => r.detail);
+    if (traceRows.length) {
+        lines.push('## Traceability Index');
+        traceRows.forEach(({ f, detail }) => lines.push(`- **${f.id}** ${f.name} — ${detail}`));
         lines.push('');
     }
 
-    // Domain Entities (legacy grounding — still useful for downstream)
+    // Domain grounding (still consumed by downstream mockup engine).
     if (prd.domainEntities?.length) {
         lines.push('## Domain Entities');
         prd.domainEntities.forEach(entity => {
@@ -520,28 +525,65 @@ export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
         });
         lines.push('');
     }
-
-    // Primary Actions (legacy grounding)
     if (prd.primaryActions?.length) {
         lines.push('## Primary Actions');
         prd.primaryActions.forEach(a => lines.push(`- ${a.verb} ${a.target}`));
         lines.push('');
     }
 
-    // (Assumptions no longer render as a trailing section — they surface in
-    // the Review & Confirm / Decision Log blocks near the top.)
+    return lines;
+};
 
-    // Static handoff appendix — always rendered (legacy PRDs included).
-    // Wording must stay bullet-for-bullet identical to HandoffAppendixSection
-    // in src/components/prd/PremiumSections.tsx (mirrored-renderer rule).
-    lines.push('## Where the Detail Lives');
-    lines.push('This PRD stays at the product-decision level. The deep specification is generated as dedicated downstream artifacts:');
-    lines.push('- **Data Model** — entities, fields, relationships, and state machines');
-    lines.push('- **Screens (Screen Inventory)** — per-screen components, states, and interactions');
-    lines.push('- **User Flows** — step-by-step journeys and decision points');
-    lines.push('- **Design System** — visual tokens and component conventions');
-    lines.push('- **Implementation Plan** — phased milestones, tasks, and quality gates');
+const titleLines = (prd: StructuredPRD): string[] => {
+    const lines: string[] = [];
+    const title = prd.productName || 'Product Requirements Document';
+    lines.push(`# ${title}`);
+    if (prd.productCategory) lines.push(`*${prd.productCategory}*`);
     lines.push('');
+    return lines;
+};
 
+/** The three coordinated export parts, matching the in-app views. */
+export type PrdExportSection = 'overview' | 'features' | 'decisions';
+
+const PART_HEADERS: Record<PrdExportSection, string> = {
+    overview: '# Part I — Product Overview',
+    features: '# Part II — Feature Specification',
+    decisions: '# Part III — Decisions and Validation',
+};
+
+/**
+ * Render a single export section (Product Overview / Feature Specification /
+ * Decisions and Validation) as a self-contained markdown document. Used by the
+ * section-specific export option; the default export is the full document below.
+ */
+export const renderPrdSectionMarkdown = (prd: StructuredPRD, section: PrdExportSection): string => {
+    const body =
+        section === 'overview' ? overviewLines(prd)
+        : section === 'features' ? featuresLines(prd)
+        : decisionsLines(prd);
+    const lines = [...titleLines(prd), PART_HEADERS[section], '', ...body];
+    return lines.join('\n').trimEnd() + '\n';
+};
+
+/**
+ * Render a StructuredPRD to canonical premium markdown — one coherent document
+ * organized into three parts (Product Overview, Feature Specification, Decisions
+ * and Validation) plus appendices, mirroring the in-app Overview/Features/
+ * Decisions views. Always defensive — legacy PRDs missing the newer sections
+ * still render cleanly using the legacy fields. Reordering is presentation-only;
+ * downstream artifacts consume the StructuredPRD object by field, not this
+ * markdown, so blocks may be reorganized without affecting generation.
+ */
+export const renderPremiumMarkdown = (prd: StructuredPRD): string => {
+    const lines: string[] = [...titleLines(prd)];
+    lines.push(PART_HEADERS.overview, '');
+    lines.push(...overviewLines(prd));
+    lines.push(PART_HEADERS.features, '');
+    lines.push(...featuresLines(prd));
+    lines.push(PART_HEADERS.decisions, '');
+    lines.push(...decisionsLines(prd));
+    lines.push('# Appendices', '');
+    lines.push(...appendixLines(prd));
     return lines.join('\n').trimEnd() + '\n';
 };

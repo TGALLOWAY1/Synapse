@@ -14,10 +14,28 @@ appended to each affected finding.
 
 | Finding | Status | Resolved by | Summary |
 | --- | --- | --- | --- |
+| SYN-001 | ✅ Resolved (2026-07-11) | PRs [#269](https://github.com/TGALLOWAY1/Synapse/pull/269) + [#276](https://github.com/TGALLOWAY1/Synapse/pull/276) (commit `194c935`) | The read-only capability policy shipped in PR #269; PR #276 closes the deferred remainder with a deterministic **Reset Demo**: `resetDemoProject()` wipes only the demo namespace (nine store maps + transient job/progress slices + all three IndexedDB image stores + reactive caches) and reloads the pinned snapshot, exposed as "Reset demo" on the read-only notice and "Reset & reload demo" on the demo route gate's failure state. See the Resolution blocks under SYN-001. |
 | SYN-002 | ✅ Resolved (2026-07-10) | PR [#267](https://github.com/TGALLOWAY1/Synapse/pull/267), commit `59a92d5`, branch `claude/demo-route-hydration-jyalya` | Demo hydration moved to the route boundary: `DemoRouteGate` wraps `ProjectWorkspace` on `/p/<DEMO_PROJECT_ID>` and runs `loadDemoProject()` before mount; entry buttons navigate only. See the Resolution block under SYN-002. |
-| All other findings | Open | — | — |
+| SYN-003 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275), branch `claude/synapse-audit-review-sycska` | The primary Default mockup variant only reads "Generated" when a rendered image actually exists (image-store-derived `defaultImagePresence` with a neutral "Checking…" hydration state); a known-complete cached demo is never overwritten by a partial hydration; pinning a zero-image demo snapshot is hard-blocked client-side and rejected 422 server-side. See the Resolution block under SYN-003. |
+| SYN-004 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | `rehype-raw` removed from the Design System markdown fallback and from dependencies; hex swatches render as plain React nodes; raw HTML in artifact content stays inert. See the Resolution block under SYN-004. |
+| SYN-007 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Auth inputs carry visually-hidden labels, `aria-invalid`, and `aria-describedby` error associations. See the Resolution block under SYN-007. |
+| SYN-009 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Screens filter selects constrained (`min-w-0 max-w-full`, options no longer duplicate the label), removing the 360 px page overflow. See the Resolution block under SYN-009. |
+| SYN-014 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Mocked Linear provider deleted entirely (registry, adapter, UI branches, `mock` flag, `'linear'` target id). See the Resolution block under SYN-014. |
+| SYN-018 | ✅ Resolved (2026-07-11) | PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) | Disabled "Forgot password?" affordance removed; `docs/auth.md` aligned. See the Resolution block under SYN-018. |
+| SYN-005 | ✅ Resolved (2026-07-11) | PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commits `07b4393`, `a41fdbc`, `7b146d2`, `e7bb357`, `be81335`, `0918db9` | Both freshness engines replaced by the single canonical evaluator (`evaluateDependencyGraph`) behind a new pure input-assembly seam (`src/lib/artifactFreshness.ts`) and React hook (`useProjectFreshness`); `stalenessSlice`, `StalenessState`, `StalenessBadge`, both duplicated assembly loops, and all three duplicated tokensHash checks deleted. See the Resolution block under SYN-005. |
+| SYN-016 | ✅ Resolved (2026-07-11) | PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `f7667bc` | Tailwind CSS-parse warning, mixed static/dynamic import warnings, and the expired Gemini model migration block removed. See the Resolution block under SYN-016. |
+| SYN-017 | ✅ Resolved (2026-07-11) | PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `5850464` | Tour progress dots use honest button semantics (`aria-current="step"`, no fake tablist) with ≥24×24 targets; hidden Previous button no longer focusable. See the Resolution block under SYN-017. |
+| SYN-006, SYN-008, SYN-010–SYN-013, SYN-015 | Open | — | — |
 
 ## 1. Executive summary
+
+## Development-stage assumptions
+
+**Clarification applied after the point-in-time review:** Synapse is pre-launch. It has no active production users and no production user projects or historical data to preserve. Breaking internal schemas, artifact metadata, internal APIs, fixtures, and seeded data is acceptable when it produces a cleaner, more reliable intended architecture.
+
+Development `localStorage`, IndexedDB records, cached snapshots, and local projects may be invalidated or cleared. Seeded demo projects and pinned snapshots may be regenerated or republished. Existing fixtures and tests may be rewritten around the canonical model, and obsolete compatibility layers may be deleted. Create a migration only when it is materially simpler or safer than resetting development data—not because of hypothetical user impact. Prefer one canonical representation over old/new adapters or compatibility windows; use a quick repository/code-path check when an active consumer is uncertain.
+
+**Regression boundary:** breaking obsolete development data is acceptable. Breaking the intended current product experience is not. Continue strong regression protection for the public recruiter-facing demo; authentication and project isolation; current project creation, generation, and intended cloud sync; security boundaries; artifact dependency correctness; promised versioning behavior; responsive and accessible UI; build/lint/unit/integration/E2E behavior; and canonical seeded projects or demo fixtures used for product validation.
 
 Synapse is healthier than its size and domain complexity initially suggest. A clean install produces a passing TypeScript production build, a clean lint run, and **1,495 passing Vitest tests across 162 files**. The codebase has several strong foundations: project data is namespaced per user, cloud sync is local-first with explicit revision-conflict handling, interrupted generations are reconciled after reload, artifact generation is dependency-aware, partial PRD output is not silently treated as complete, and server APIs consistently enforce session ownership. The live Data Model and Implementation Plan views were visually strong on both desktop and mobile, and the deployed journey produced no browser-console errors during the audit.
 
@@ -33,7 +51,7 @@ Two systemic issues matter beyond the demo. First, artifact freshness is calcula
 
 The most concrete security issue is local and fixable: the legacy Design System Markdown renderer enables unsanitized raw HTML. Generated or restored content can therefore create arbitrary elements such as an `iframe` with `srcdoc`. Removing raw-HTML parsing is preferable to introducing a large sanitization policy because its only current purpose is a hex-color annotation that can be rendered safely in React.
 
-The main simplification opportunities are not a rewrite. They are: make demo mode a single explicit boundary; consolidate freshness behind one evaluator; separate immutable content revisions from mutable workflow overlays; route-split the workspace; and progressively extract controller/state-selection responsibilities from the two 1,400–1,800-line workspace components. Most urgent fixes are local or cross-component. The state/version issues are cross-artifact and require deliberate migration and regression coverage.
+The main simplification opportunities are not a rewrite. They are: make demo mode a single explicit boundary; consolidate freshness behind one evaluator; separate immutable content revisions from mutable workflow overlays; route-split the workspace; and progressively extract controller/state-selection responsibilities from the two 1,400–1,800-line workspace components. Most urgent fixes are local or cross-component. The state/version issues are cross-artifact and require coordinated replacement plus deliberate regression coverage, not preservation of discarded development records.
 
 No P0 issue was found. Seven P1 findings should be addressed before treating the demo as a dependable first-class acquisition surface.
 
@@ -64,7 +82,7 @@ No P0 issue was found. Seven P1 findings should be addressed before treating the
 - `design_system` and `data_model` depend directly on the PRD.
 - `implementation_plan` depends on `screen_inventory` and `data_model`.
 - Mockups depend on `screen_inventory`, hidden `component_inventory`, and `design_system`.
-- `prompt_pack` is retired from new generation but retained for legacy rendering/export and migration compatibility.
+- Prompt Packs are a current, critical part of the Implementation Plan: the consolidated plan exposes them for implementation work. The separate `prompt_pack` artifact subtype is retired from new generation because its content is folded into that canonical Implementation Plan representation. Retain the adapter and renderer path that serves the current consolidated plan; only delete obsolete standalone persistence compatibility after confirming it is not needed by current exports or canonical fixtures.
 - `src/lib/coreArtifactPipeline.ts` is the canonical dependency definition; `src/lib/artifactDependencyGraph.ts` derives the visible graph from it and collapses hidden nodes transitively.
 
 ### State concepts
@@ -169,7 +187,7 @@ No P0 finding was supported by the evidence gathered.
 
 - Importance: P1 — High
 - Bug severity: S2 — Significant
-- Effort: M
+- Effort: S–M (replacement preferred)
 - Confidence: High
 - Category: Demo
 - Scope: Cross-component
@@ -374,6 +392,8 @@ gate surfaces no indicator for it — recorded as a follow-up in PR #267).
 
 ## [SYN-003] Mockup “Generated” status does not require an actual image
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275) (`claude/synapse-audit-review-sycska`). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P1 — High
@@ -398,7 +418,7 @@ Generation specification, image presence, coverage metadata, and snapshot transp
 
 **Concrete recommendation**
 
-Make actual image presence a requirement for `generated`. Represent `spec_ready`, `image_missing`, and `generated` distinctly only where the distinction helps recovery. At demo pin time, validate a manifest of required primary images and reject an incomplete snapshot. During runtime, keep a previously complete cached demo rather than replacing it with an incomplete fetch; otherwise show one explicit degraded-demo state. Preserve retries, but do not label missing data as success.
+Make actual image presence a requirement for `generated`, with one authoritative image/status model. Delete `legacyGenerated` and overlapping legacy/screen/variant representations where they are not needed by the intended application; consolidate them if that makes the model simpler. Regenerate or repin the public demo, invalidate old demo caches, clear development IndexedDB/localStorage, and rewrite fixtures/seeded data to the canonical representation. Reject incomplete snapshots rather than indefinitely supporting partial legacy shapes; remove obsolete mockup specs with no active consumer. At demo pin time validate a required-image manifest; at runtime retain a known-complete current-format cache or show one honest degraded state.
 
 **Acceptance criteria**
 
@@ -409,13 +429,25 @@ Make actual image presence a requirement for `generated`. Represent `spec_ready`
 
 **Dependencies and risks**
 
-Image records span legacy mockup, screen, and variant stores. Migration must not erase old specs when an image is genuinely unavailable.
+Image records span legacy mockup, screen, and variant stores. First identify the current demo and generation consumers, then replace the overlapping model in one focused change. No migration is warranted for obsolete local records.
 
 **Suggested validation**
 
 Unit-test status derivation with spec/no image, image/no sidecar, and complete records. Integration-test partial snapshot fallback. E2E-test that every visible “Generated” primary demo card has a rendered image.
 
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+- **Image-aware status.** `buildVariant` (`src/lib/mockupVariants.ts`) now gates the primary Default variant on real image-store evidence: a new `MockupImagePresence` (`present`/`absent`/`checking`/`unknown`) threads from the AI mockup store ∪ the screen-inventory upload store (pure helper `src/lib/mockupImagePresence.ts`; new `loadedVersions` settled-signal in `src/store/mockupImageStore.ts`). A spec join with a provably absent image is honest `missing` (`source: 'derived_missing'`, coverage `unknown`, actionable note); `checking` avoids a mid-hydration flap and renders a neutral “Checking…” pill. Un-wired callers keep exact legacy behavior. Wired through `ArtifactWorkspace`, `ScreenListView`, `ScreenDetailView`, and the review index; the readiness layer’s `missing_mockup_p0` deliberately stays spec-derived (work-planning signal, not device-local presence — rationale recorded in `screenReadiness.ts`).
+- **Cache preference.** `loadDemoProject` no longer overwrites a stamped (provably known-complete) cached demo with a partial (`imagesComplete: false`) hydration; fresh-partial still beats no cache or an un-stamped partial cache.
+- **Pin-time gate.** Snapshot saves record `mockupScreenCount`/`variantImageCount` in the manifest; `SnapshotsPanel.handleSetDemo` hard-blocks pinning a zero-image snapshot whose spec describes screens (no override; actionable message), and `api/snapshots.js handlePutDemo` rejects `422 demo_snapshot_incomplete` as a server backstop (legacy manifests without the field pass server-side; the client gate covers them).
+
+*Tests:* extended `mockupVariants` (presence matrix, override precedence, rollup), `loadDemoProject` (cache-preference matrix), `snapshotImageAudit` (`countMockupSpecScreens`); new `mockupImagePresence`, `SnapshotsPanel`, and `api/__tests__/snapshots.test.js` suites. Full gate: `npm run build`, `npm run lint`, `npm test` (1,611 tests / 174 files) all pass.
+
+*Residual:* the pinned public demo still carries its zero-image snapshot — the UI now says so honestly (“Not generated” + guidance) instead of claiming “Generated”. Fully restoring the demo story requires the owner to regenerate mockup images and re-pin a complete snapshot (now enforced by the gate); that canonical fixture is also the prerequisite for SYN-006.
+
 ## [SYN-004] Legacy Design System Markdown permits unsanitized raw HTML
+
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -447,23 +479,29 @@ Remove `rehypeRaw` and the `rehype-raw` dependency. Tokenize hex values into Rea
 
 - `<script>`, `<iframe>`, `srcdoc`, event handlers, and raw `<img>` HTML cannot create DOM elements from artifact content.
 - Hex swatches still render.
-- Existing tokenized and legacy Design Systems remain readable.
+- The current canonical seeded Design System and demo remain readable.
 
 **Dependencies and risks**
 
-Visually compare legacy Design Systems that may contain intentional HTML. If any exists, migrate it to Markdown/structured data rather than expanding an allowlist without evidence.
+Prefer deletion: remove the legacy Markdown fallback entirely when it has no intended current consumer, remove `rehypeRaw`/`rehype-raw`, delete obsolete raw-HTML fixtures, and convert the canonical seed/demo to structured data. Do not retain intentional raw HTML from development snapshots. If a current canonical path still requires fallback rendering, keep only a safe non-raw renderer.
 
 **Suggested validation**
 
-Renderer tests with malicious HTML and benign hex Markdown, plus a browser CSP regression test. Search snapshots for intentional raw HTML before removal.
+Renderer tests with malicious HTML and safe hex-token visualization, plus a browser CSP regression test. Validate the canonical demo rather than preserving old raw-HTML snapshots.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+Implemented along the recommended shape — deletion of raw-HTML parsing rather than a sanitization policy: removed `rehypeRaw` from `FallbackMarkdown` and the `rehype-raw` package from dependencies (its only usage). The `annotateHexes` raw-`<span>` injection and the `data-hex` span override were replaced by a pure text transform (`renderTextWithHexSwatches`/`withHexSwatches`) applied through react-markdown `components` overrides (`p`/`li`/`td`/`code`/`strong`/`em`), so hex swatches still render while raw HTML in content stays inert text under react-markdown defaults. New `src/components/__tests__/DesignSystemRenderer.test.tsx` proves `<script>`, `<iframe srcdoc>`, and `<img onerror>` create no DOM elements, swatches survive, and legacy markdown design systems stay readable. The legacy fallback path itself was retained — token-less design systems in existing dev projects still render — but it no longer widens the trust boundary.
 
 ## [SYN-005] Two freshness engines can give the same artifact incompatible statuses
+
+**Status: ✅ Resolved — 2026-07-11, PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276). See the Resolution block at the end of this finding.**
 
 **Labels**
 
 - Importance: P1 — High
 - Bug severity: S2 — Significant
-- Effort: M
+- Effort: M (broad call sites; no data migration)
 - Confidence: High
 - Category: State model
 - Scope: Cross-artifact
@@ -483,7 +521,7 @@ The earlier spine-only model remained in the store after a richer graph evaluato
 
 **Concrete recommendation**
 
-Make the dependency evaluator the single canonical artifact-health computation. Expose small selectors/adapters for display vocabulary, but do not reimplement the rules. Decide explicitly how `likelyUnaffected`, manual “mark current,” missing provenance, job state, and token-identical regeneration map into each UI. Deprecate and delete `stalenessSlice` only after all call sites and persisted escape-hatch behavior migrate.
+Replace both freshness implementations with one canonical evaluator. Change internal status types and persisted metadata shapes freely, migrate all consumers together where that is safer than transitional adapters, and delete `stalenessSlice`, obsolete selectors, duplicate mappings, timestamp-only provenance handling, and manual “mark current” behavior when they do not fit the desired model. Rewrite project fixtures, provenance, and seeded artifacts; reset local development projects on schema change. Characterization tests define desired canonical behavior, not contradictory historical behavior.
 
 **Acceptance criteria**
 
@@ -493,11 +531,65 @@ Make the dependency evaluator the single canonical artifact-health computation. 
 
 **Dependencies and risks**
 
-This touches gating and regeneration decisions. Preserve conservative legacy timestamp handling and the mockup token-hash rule. Migrate in small commits with characterization tests.
+This touches gating and regeneration decisions. Retain the mockup token/design-system dependency rules and the distinction between system freshness, user review, and implementation readiness. The risk is broad call-site behavior, not migration: use focused commits and characterization tests, then make the coordinated cutover.
 
 **Suggested validation**
 
 Table-driven tests for PRD drift, hard-dependency drift, identical token regeneration, missing refs, manual mark-current, and in-flight/error jobs; one integration test should assert all consuming surfaces agree.
+
+**Resolution (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commits `07b4393`, `a41fdbc`, `7b146d2`, `e7bb357`, `be81335`, `0918db9`)**
+
+Implemented exactly along the recommended replacement shape — one canonical
+evaluator, no transitional adapters:
+
+- **Engine B wins.** `evaluateDependencyGraph` (unchanged) is the single
+  freshness engine; a characterization suite
+  (`src/lib/__tests__/artifactFreshnessCharacterization.test.ts`) first proved
+  it subsumes every Engine-A scenario, including the headline contradiction
+  (data_model regenerated → implementation_plan header said "Current" while
+  the graph said "Needs update").
+- **One input-assembly seam.** New pure `src/lib/artifactFreshness.ts`
+  (`buildDependencyEvaluationInput` / `evaluateProjectFreshness` /
+  `invertToArtifactIds`) replaces the two hand-rolled, duplicated assembly
+  loops in `DependencyGraphView` and `ProjectWorkspace`; it also owns the ONE
+  status label map (`DEPENDENCY_STATUS_LABELS`) plus `isStaleStatus` /
+  `hasDesignTokenDrift`. New `useProjectFreshness(projectId)` hook
+  (selector-stable, memoized — also fixing the graph view's previously
+  unmemoized per-render evaluation) serves React consumers.
+- **All consumers migrated together:** artifact header strip + Mark-up-to-date
+  gate, Screens artifact controls, MockupViewer, Data Model overview pill,
+  Implementation Plan header/coverage, export manifest (`staleness` →
+  `status`; a missing preferred version now honestly reads "Not generated"),
+  revert warning (`getStaleArtifactTitles`), dependency graph, and the
+  Update Assets plan. The three duplicated mockup-tokensHash drift checks
+  converged on the evaluator's `design_tokens_changed` reason.
+- **Deleted:** `stalenessSlice.ts`, the `StalenessState` type,
+  `StalenessBadge` (superseded by `FreshnessBadge`), both duplicated assembly
+  loops, and the duplicate `PLAN_STATUS_LABELS`/`STATUS_LABELS` maps. The
+  documented vocabulary split (system freshness `DependencyNodeStatus` vs
+  user review/readiness) is recorded in CLAUDE.md and
+  `docs/ARTIFACT_DEPENDENCY_GRAPH.md`.
+- **Deliberate tightenings:** the Mark-up-to-date affordance is gated on
+  `isStaleStatus` (it previously also showed for missing-version states where
+  the action throws); hard evidence (`needs_update`) and advisory heuristics
+  (`update_recommended`) remain distinct everywhere; `no_provenance` stays
+  advisory.
+
+*Acceptance status:* all three criteria met — every surface derives from the
+same evaluation result (pinned by the new integration test
+`src/store/__tests__/freshnessSurfacesAgree.test.ts`: after a hard-dependency
+regeneration, the hook/evaluator, export manifest, recommended updates, and
+renderer labels must agree); regenerating a hard dependency now flips the
+header, export, graph, and plan consistently; one documented status
+vocabulary separates system evidence from user review/readiness.
+
+*Tests:* characterization suite (8 scenarios), `artifactFreshness.test.ts`
+(table-driven against a real store incl. mark-current and revert round trips,
+absorbing the deleted `stalenessAfterRevert` / `stalenessSlice.designTokens`
+suites), hook stability + badge tests, rewritten `exportManifest.test.ts`,
+extended `artifactSlice.markCurrent.test.ts`, and the surfaces-agree
+integration test. Full gate: `npm run build`, `npm run lint`, `npm test`
+(1,640 tests / 178 files) all pass.
 
 ## [SYN-006] There is no end-to-end contract protecting the public demo
 
@@ -525,7 +617,7 @@ Test investment is concentrated in pure domain/store behavior and renderer fragm
 
 **Concrete recommendation**
 
-Add a minimal Playwright suite using the already-installed dependency. Protect only high-value contracts: cold direct demo link, baseline read-only/reset behavior, all generated primary mockups have images, navigation through PRD/Screens/Data Model/Plan/history, refresh, no console errors, and no 360 px overflow. Keep visual snapshots sparse and stable; prefer semantic assertions.
+Add a minimal Playwright suite using the already-installed dependency. Protect the canonical implementation: cold direct demo entry, current-format cached refresh, read-only behavior, real images behind every `Generated` status, navigation through PRD/Screens/Data Model/Plan/history, no console errors, honest incomplete current-format image hydration, and no horizontal overflow on desktop or mobile. Regenerate deterministic E2E fixtures and replace old demo snapshots/caches as schemas change; test only supported formats. Keep visual snapshots sparse and stable; prefer semantic assertions.
 
 **Acceptance criteria**
 
@@ -535,13 +627,15 @@ Add a minimal Playwright suite using the already-installed dependency. Protect o
 
 **Dependencies and risks**
 
-Fix SYN-001–003 first or mark tests as expected failures only on a short-lived branch. Avoid testing third-party LLM generation.
+Implement after the canonical demo fixture is available; do not add compatibility tests for intentionally invalidated caches/snapshots. Avoid testing third-party LLM generation.
 
 **Suggested validation**
 
 Run the suite in clean and cached contexts at 1,440 and 360 px; repeat several times to expose snapshot/image races.
 
 ## [SYN-007] Authentication inputs have no programmatic labels or error associations
+
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -582,6 +676,10 @@ Low visual risk. Ensure tab switching does not leave stale error references.
 **Suggested validation**
 
 Testing Library `getByRole('textbox', {name: ...})` assertions, keyboard-only sign-in/sign-up, and VoiceOver or NVDA verification of invalid submissions.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+Name, email, and password inputs in `LoginPage.tsx` now carry visually-hidden `<label htmlFor>` elements with stable ids (`login-name`/`login-email`/`login-password`), set `aria-invalid` when invalid, and reference their per-field error message via `aria-describedby` only while the message exists (so the sign-in/sign-up switch can never leave a dangling reference). Placeholders, icons, autocomplete attributes, and all visual styling are unchanged; the existing `role="alert" aria-live="polite"` form-level banner is retained. New `src/components/__tests__/LoginPageA11y.test.tsx` covers role/name resolution, invalid-submit `aria-invalid` + described-by association, and tab-switch cleanup. Screen-reader (VoiceOver/NVDA) verification was not performed in this environment and remains a manual follow-up.
 
 ### P2 — Medium
 
@@ -629,6 +727,8 @@ Five-user comprehension check: ask what each CTA does, what changed between vers
 
 ## [SYN-009] The Flow filter causes horizontal overflow at 360 px
 
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P2 — Medium
@@ -668,6 +768,10 @@ Native select rendering varies by platform; test Safari/iOS as well as Chromium.
 
 Component fixture with a 100-character flow name plus E2E width assertions and mobile screenshots.
 
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+`SelectControl` in `ScreenListView.tsx` now constrains intrinsic width: the control row, label wrapper, and native `<select>` carry `min-w-0` / `max-w-full`, and `<option>` text no longer duplicates the control label (`Flow: …`), which had doubled intrinsic width with long generated flow names. The accessible name is preserved (existing `sr-only` span + `aria-label`). A component test with a ~100-character flow title asserts the constraint classes and option text shape (jsdom cannot measure layout; the E2E width assertion belongs to the deferred SYN-006 suite).
+
 ## [SYN-010] User content edits mutate an existing artifact version in place
 
 **Labels**
@@ -694,7 +798,7 @@ Metadata became a convenient shared persistence channel for both content customi
 
 **Concrete recommendation**
 
-Define the boundary explicitly: content-changing screen/prompt edits append an immutable artifact revision (or an immutable overlay revision linked to the base); review state, checklist progress, dismissals, and similar workflow state live in a separate keyed record that can mutate. Avoid versioning every checkbox. Provide migration that treats existing metadata as the current overlay/base.
+Redesign `ArtifactVersion` around the explicit boundary: content-changing screen/prompt edits append immutable, comparable, restorable revisions, while review state, checklist progress, dismissals, and similar workflow state live in a separately mutable keyed record. Avoid versioning every checkbox. Invalidate development project data, delete the mixed metadata representation, and rebuild canonical demo/test projects under the new model instead of adding compatibility adapters or a migration for obsolete local projects.
 
 **Acceptance criteria**
 
@@ -705,11 +809,11 @@ Define the boundary explicitly: content-changing screen/prompt edits append an i
 
 **Dependencies and risks**
 
-Requires a product decision about what counts as content. Existing saved data, exports, screen joins, and sync bundles need migration/compatibility handling.
+Requires a product decision about what counts as content. Preserve current sync, project isolation, exports, and screen joins under the new schema; rewrite their canonical fixtures and contracts. Migration complexity is not a risk because there is no production data.
 
 **Suggested validation**
 
-Store tests for edit/edit/compare/revert; migration fixtures from current metadata; cross-device sync conflict tests; UI journey through screen edit history.
+Store tests for edit/edit/compare/revert; new canonical fixtures; cross-device sync conflict tests; and a UI journey through screen edit history.
 
 ## [SYN-011] The anonymous entry route downloads a 576 kB gzip application bundle
 
@@ -779,7 +883,7 @@ Product workflows accumulated in page components while pure domain helpers evolv
 
 **Concrete recommendation**
 
-Refactor incrementally around demonstrated seams: route/demo loader, finalize/update-plan controller, artifact-health selector, and per-artifact view models. Replace whole-store hooks with narrow selectors and shallow comparison. Keep pure derivation in existing `src/lib` modules. Do not create a generic framework or rewrite the store.
+Refactor incrementally around demonstrated seams: route/demo loader, finalize/update-plan controller, artifact-health selector, and per-artifact view models. Replace whole-store hooks with narrow selectors and shallow comparison. Keep pure derivation in existing `src/lib` modules. Do not create a generic framework or rewrite the store. Incremental commits are for reviewability and regression isolation—not rollout or preservation of historical records.
 
 **Acceptance criteria**
 
@@ -822,7 +926,7 @@ Documentation remained tied to the original local-only SPA while backend/auth/sy
 
 **Concrete recommendation**
 
-Replace the architecture page with the current system map and make one setup guide canonical. Document the command that serves both frontend and `/api` functions (likely `vercel dev`) and required environment categories; explicitly label `npm run dev` as tour/static-frontend-only if retained. Update route/test counts. Avoid duplicating setup instructions across multiple files.
+Replace obsolete architecture/setup descriptions with the current system map and make one intended-stack workflow canonical. Document the command that serves both frontend and `/api` functions (likely `vercel dev`) and required environment categories; explicitly label `npm run dev` as tour/static-frontend-only if retained. Update route/test counts. Avoid duplicating setup instructions or preserving outdated setup paths for compatibility.
 
 **Acceptance criteria**
 
@@ -839,6 +943,8 @@ Verify the supported local backend command/env list on a clean machine before pu
 Time a clean-clone setup by someone unfamiliar with the repo; run every documented command verbatim.
 
 ## [SYN-014] A mocked Linear provider reports fake production success
+
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -879,6 +985,10 @@ Check analytics or product commitments before deletion. This does not require bu
 **Suggested validation**
 
 Provider-registry unit test and task-export UI smoke test confirming only supported destinations appear.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+Deleted entirely per the owner's decision (no local “Linear-ready JSON” replacement): `linearExporter.ts`, its registry entry, the `ConvertToTasksModal` mock-success toast and Linear attach branches, the `ExportResult.mock` flag, the `'linear'` `ExportTargetId` member, and the mock-pinning test. GitHub and Markdown exports are unchanged; a new `taskExportRegistry.test.ts` pins `EXPORT_PROVIDERS` to exactly the real providers. `docs/backlog/BACKLOG.md`'s external-tracker entry was rewritten to record the deletion and scope a from-scratch real Linear integration. Persisted `externalRefs` data is unaffected — the feature was always mocked, so no real `target: 'linear'` record could exist.
 
 ## [SYN-015] Dependency advisories need routine upgrades, not emergency remediation
 
@@ -925,6 +1035,8 @@ Record before/after `npm audit`, lockfile diff, full validation suite, and direc
 
 ## [SYN-016] Production build succeeds but emits invalid generated CSS and ineffective split hints
 
+**Status: ✅ Resolved — 2026-07-11, PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `f7667bc`. See the Resolution block at the end of this finding.**
+
 **Labels**
 
 - Importance: P3 — Low
@@ -964,7 +1076,32 @@ Avoid broad scanner exclusions that could remove real classes.
 
 Production build plus focused data-model Markdown tests and a grep of emitted CSS.
 
+**Resolution (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `f7667bc`)**
+
+- The three identical table-separator regexes in `dataModelMarkdown.ts` were
+  extracted into one module-level `TABLE_SEPARATOR_ROW` constant with the
+  character class reordered to `[\s:|-]` (identical matching semantics), so
+  Tailwind's content scanner no longer sees an arbitrary-property token. A
+  first attempt that repeated the old bracket sequence in a code comment
+  reproduced the warning — the comment describes the fix without spelling the
+  sequence.
+- The `toastStore`/`llmProvider` dynamic imports in `ProjectWorkspace`,
+  `HomePage`, and `runPrdGeneration` were made consistently static (the
+  route-splitting decision belongs to SYN-011), deleting the now-dead
+  dynamic-import failure fallback in `runPrdGeneration`.
+- The expired 2026-04 Gemini model localStorage migration
+  (`migrateGeminiModel` + sentinel key + retired `synapse-meet-dismissed`
+  sweep) was deleted from `App.tsx` per the audit's safe-deletion candidate;
+  a stale doc-comment referencing it in `tourPersistence.ts` was corrected.
+
+*Acceptance:* `npm run build` emits neither warning; the emitted CSS contains
+no `-: |` declaration (grep verified); only the pre-existing large-chunk
+warning (SYN-011) remains. Parser behavior stays pinned by the existing
+dataModelMarkdown tests.
+
 ## [SYN-017] Tour progress controls use incomplete tab semantics and undersized targets
+
+**Status: ✅ Resolved — 2026-07-11, PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `5850464`. See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -1006,7 +1143,26 @@ Changing semantics may require adjusting TourPage headings/focus after step chan
 
 Keyboard/VoiceOver pass, Testing Library role assertions, and 360 px target-box measurement.
 
+**Resolution (2026-07-11 — PR [#276](https://github.com/TGALLOWAY1/Synapse/pull/276), commit `5850464`)**
+
+Implemented the "ordinary named buttons" option the finding offered: the
+progress-dot container is now `role="group"` with `aria-label="Tour
+progress"`; each dot keeps its "Go to step N of 6" name and exposes
+`aria-current="step"` on the active step instead of the fake
+`role="tab"`/`aria-selected` pattern (the tour's existing global arrow-key
+handling in `TourPage` is the keyboard model). Each dot's hit area grew to
+≥24×24 CSS pixels (`min-h-6 min-w-7`, non-overlapping) while the small
+animated visual pill is unchanged; the Previous button is `disabled` while
+visually hidden at step 0, removing it from the tab order.
+`TourProgressRail` was reviewed and already used honest semantics and
+adequate targets. New `src/components/__tests__/TourNav.test.tsx` (8 cases)
+pins the semantics, names, `aria-current`, sizing classes, and disabled
+state; `TourPage.test.tsx` remains green. The VoiceOver/NVDA pass remains a
+manual follow-up, as with SYN-007.
+
 ## [SYN-018] A disabled “Forgot password?” control advertises a nonexistent workflow
+
+**Status: ✅ Resolved — 2026-07-11, PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275). See the Resolution block at the end of this finding.**
 
 **Labels**
 
@@ -1046,6 +1202,10 @@ Confirm there is no support process that relies on the visible wording.
 **Suggested validation**
 
 Login screenshot and accessible-controls smoke test.
+
+**Resolution (2026-07-11 — PR [#275](https://github.com/TGALLOWAY1/Synapse/pull/275))**
+
+The disabled button (and its future-work comment) was removed with no replacement placeholder; `docs/auth.md` now records password reset as future work with “no UI affordance exists yet.” The LoginPage a11y test suite asserts no “Forgot password” control renders on either tab.
 
 ### P4 — Optional
 
@@ -1096,17 +1256,17 @@ Demo-only checks appear in `App`, project/image sync, design setup, project work
 ### Likely candidates requiring validation
 
 - **`src/lib/services/prdPipeline.ts` compatibility shim.** Current imports appear primarily type-oriented while progressive generation owns implementation and a duplicate schema-version constant. Consolidate types/constants into the active module only after checking external/private imports and fixtures.
-- **Expired Gemini model migration in `src/App.tsx:126-147`.** Existing backlog/audit text explicitly targeted removal after 2026-07-01; the audit date is later. Confirm migration adoption/telemetry, then remove the sentinel block and separately decide whether the retired banner-key sweep is still needed.
-- **Legacy Design System fallback paths.** After inventorying saved snapshots, consider migrating old Markdown to structured tokens and shrinking the 782-line dual renderer. Do not delete the fallback before data evidence.
+- **Expired Gemini model migration in `src/App.tsx:126-147`.** Confirm no current reachable path depends on it, then delete the sentinel block and retired banner-key sweep; telemetry/adoption is unnecessary for development-only state.
+- **Legacy Design System fallback paths.** Check the canonical demo and current generation path. If neither needs it, delete the Markdown side, raw-HTML fixtures, and dual-renderer complexity; regenerate canonical structured data.
 - **Repeated status badges/copy.** Once SYN-005 establishes canonical health, delete component-specific mapping tables and duplicate “current/outdated” derivation rather than wrapping them in another abstraction.
 
-### Do not simplify yet
+### Retain only with a concrete current consumer
 
-- **Prompt Pack legacy adapters and `implementationPlanAdapter`.** Prompt Pack is retired but persisted projects still render/export it, and the consolidated plan reads legacy content.
+- **Prompt Pack adapters and `implementationPlanAdapter`.** Retain: the current consolidated Implementation Plan consumes and presents Prompt Packs for implementation work (including its Prompts tab and supported export path). The deletion candidate is only obsolete standalone `prompt_pack` persistence compatibility after a direct check confirms it is not needed by canonical fixtures or exports.
 - **Hidden `component_inventory`.** It is not visible, but mockup generation consumes it. `expandWithHiddenDependencyClosure()` prevents mockups from rebuilding against stale hidden data.
-- **Image namespace/IndexedDB/Blob restore logic.** It is complex because persisted binary data and public snapshots genuinely cross namespaces. Fix incomplete-demo policy without collapsing these layers prematurely.
+- **Image namespace/IndexedDB/Blob restore logic.** Retain its namespace isolation and current public-snapshot restore consumer; simplify representations freely after its current route/generation consumers are verified.
 - **Project conflict/revision handling and pagehide/visibility persistence.** These protect local work and cross-device consistency; simplify only with equivalent failure tests.
-- **Legacy stage migration in `onRehydrateStorage`.** Old saved projects can still contain retired stages. Remove only after telemetry or an explicit compatibility window.
+- **Legacy stage migration in `onRehydrateStorage`.** Delete unless a current canonical fixture or reachable active path still emits a retired stage; reset development projects instead of a compatibility window.
 - **Defensive partial-generation/safety gates.** These are user-visible reliability controls, not ornamental complexity.
 
 ## 7. Cross-cutting themes
@@ -1120,18 +1280,18 @@ Demo-only checks appear in `App`, project/image sync, design setup, project work
 | Page components became controllers | Large workspaces own state selection, business rules, derivation, network/generation coordination, modals, and rendering | SYN-001, 005, 012 |
 | Acquisition paths need first-class constraints | Large eager bundle, ambiguous tour/demo story, inaccessible auth labels, and dead recovery control all affect the first visit | SYN-007, 008, 011, 018 |
 | Documentation and shipped architecture diverged | Backend/auth/sync now gate the workspace, while canonical docs describe a three-route client-only app | SYN-013 |
-| Compatibility code is often load-bearing | Hidden component inventory, prompt-pack adapters, image namespaces, and rehydrate migrations have concrete persisted-data consumers | Simplification section |
+| Compatibility must prove a current consumer | Hidden component inventory and image namespace isolation have identified current consumers; prompt-pack adapters and rehydrate migrations require direct verification, not hypothetical old projects | Simplification section |
 
-The dominant systemic issue is not excessive feature count; it is that newer, richer product concepts were layered beside older helpers and boundaries. Consolidation should follow demonstrated semantic seams, with old paths deleted after migration—not hidden behind more adapters.
+The dominant systemic issue is not excessive feature count; it is that newer, richer product concepts were layered beside older helpers and boundaries. Consolidation should follow demonstrated semantic seams, with obsolete paths deleted after confirming no current consumer—not hidden behind more adapters.
 
 ## 8. Recommended execution sequence
 
 ### Phase 1 — Stabilize
 
-**Findings:** SYN-001, SYN-002, SYN-003, SYN-004  
-**Expected outcome:** The public demo always opens, cannot be persistently damaged, never claims a missing image is generated, and generated Markdown cannot create raw active HTML.  
+**Findings:** SYN-001, SYN-002, SYN-003, SYN-004, SYN-006
+**Expected outcome:** The public demo always opens, cannot be persistently damaged, never claims a missing image is generated, generated Markdown cannot create raw active HTML, and a CI-visible browser contract protects the canonical fixture.
 **Estimated effort:** 6–9 engineering days total; parallelizable after policy decisions.  
-**Dependencies:** Define demo persistent-vs-ephemeral capabilities; inventory legacy raw HTML; identify required demo image manifest.  
+**Dependencies:** Define demo persistent-vs-ephemeral capabilities; identify the canonical demo image manifest. Convert the canonical Design System directly; do not inventory obsolete local snapshots.
 **Recommended commit boundaries:**
 
 1. Raw Markdown security fix + renderer tests.
@@ -1139,19 +1299,20 @@ The dominant systemic issue is not excessive feature count; it is that newer, ri
 3. Central demo capability policy + mutation guards.
 4. Demo reset/cache policy.
 5. Image-aware variant status + snapshot pin validation.
+6. Semantic demo E2E suite against the new canonical snapshot.
 
 ### Phase 2 — Simplify
 
 **Findings:** SYN-005, SYN-010, SYN-012, SYN-014, SYN-018; deletion candidates  
 **Expected outcome:** One artifact-health truth, explicit version/workflow boundaries, fewer fake/dead paths, and smaller controller responsibilities.  
-**Estimated effort:** 2–4 weeks staged; do not bundle into one branch.  
-**Dependencies:** Characterization/E2E tests from Phase 1; content-versus-workflow versioning decision; saved-data migration fixtures.  
+**Estimated effort:** 1.5–3 weeks staged; do not bundle unrelated refactors into one branch.
+**Dependencies:** Characterization/E2E tests from Phase 1; content-versus-workflow versioning decision; canonical fixtures only.
 **Recommended commit boundaries:**
 
 1. Characterize both freshness engines.
-2. Add canonical evaluator selector and migrate one consumer at a time.
-3. Delete `stalenessSlice` after final call-site migration.
-4. Define/migrate immutable content overlays separately from workflow overlays.
+2. Replace both freshness engines and update all consumers in one focused branch.
+3. Delete `stalenessSlice`, duplicate mappings, and obsolete selectors.
+4. Define immutable content revisions separately from workflow overlays; reset and rebuild development fixtures.
 5. Extract finalize/update-plan and artifact-health controllers with narrow selectors.
 6. Delete mocked Linear, dead auth affordance, and confirmed unused CSS.
 
@@ -1182,17 +1343,16 @@ The dominant systemic issue is not excessive feature count; it is that newer, ri
 
 ### Phase 5 — Harden
 
-**Findings:** SYN-006, SYN-011, SYN-013, SYN-015, SYN-016  
+**Findings:** SYN-011, SYN-013, SYN-015, SYN-016
 **Expected outcome:** Cross-layer regressions fail CI, entry payload is materially smaller, local setup is reproducible, and maintenance warnings/advisories are controlled.  
 **Estimated effort:** 5–8 days.  
 **Dependencies:** Stable demo fixture; supported local backend command; baseline bundle/network measurements.  
 **Recommended commit boundaries:**
 
-1. Minimal semantic demo E2E suite.
-2. Route-level lazy loading + accessible fallbacks.
-3. Build-warning cleanup.
-4. Dependency maintenance upgrade.
-5. Canonical architecture/setup documentation and badge updates.
+1. Route-level lazy loading + accessible fallbacks.
+2. Build-warning cleanup.
+3. Dependency maintenance upgrade.
+4. Canonical architecture/setup documentation and badge updates.
 
 ## 9. Priority matrix
 
@@ -1200,14 +1360,14 @@ The dominant systemic issue is not excessive feature count; it is that newer, ri
 | -- | -------------- | ---------: | -------: | -----: | ---------: | -------- | ----- | ---------- |
 | SYN-001 | ✅ Resolved — enforce read-only demo policy and reset | P1 | S2 | M | High | Demo | Cross-component | Complete; precedes demo polish |
 | SYN-002 | Hydrate demo at route boundary | P1 | S2 | S | High | Reliability | Cross-component | Coordinate with 001 |
-| SYN-003 | Require real image for generated status; validate pinned snapshot | P1 | S2 | M | High | Demo | Cross-artifact | Image-store inventory |
-| SYN-004 | Remove unsanitized raw HTML rendering | P1 | S2 | S | High | Security | Cross-component | Legacy-content check |
-| SYN-005 | Consolidate freshness on dependency evaluator | P1 | S2 | M | High | State model | Cross-artifact | Characterization tests |
-| SYN-006 | Add semantic demo E2E contract | P1 | N/A | M | High | Testing | Application-wide | Stabilize 001–003 |
+| SYN-003 | Replace image-status models; require complete canonical snapshot | P1 | S2 | S–M | High | Demo | Cross-artifact | Canonical manifest/current consumers |
+| SYN-004 | Delete unsafe raw-HTML path; use structured canonical data | P1 | S2 | S | High | Security | Cross-component | Current renderer check |
+| SYN-005 | Replace freshness engines with one evaluator | P1 | S2 | M | High | State model | Cross-artifact | Desired-behavior characterization |
+| SYN-006 | Add semantic canonical-demo E2E contract | P1 | N/A | M | High | Testing | Application-wide | Canonical fixture after 003/004 |
 | SYN-007 | Label auth fields and associate errors | P1 | N/A | S | High | Accessibility | Local | None |
 | SYN-008 | Align tour/demo story and versions | P2 | S3 | M | High | Content consistency | Cross-component | Stable complete demo |
 | SYN-009 | Constrain Screens filters on narrow widths | P2 | S3 | XS | High | Mobile | Local | None |
-| SYN-010 | Version content edits immutably; split workflow overlays | P2 | S2 | L | High | Versioning | Cross-artifact | Product/migration decision |
+| SYN-010 | Redesign immutable content versions and workflow overlays | P2 | S2 | M–L | High | Versioning | Cross-artifact | Product decision/canonical fixtures |
 | SYN-011 | Route-split eager application bundle | P2 | N/A | M | High | Performance | Application-wide | Baseline measurement |
 | SYN-012 | Extract controllers and narrow Zustand selectors | P2 | N/A | XL | High | Architecture | E2E/characterization first |
 | SYN-013 | Rewrite local setup and architecture docs | P2 | N/A | S | High | Developer experience | Verify supported command |
@@ -1229,6 +1389,8 @@ The dominant systemic issue is not excessive feature count; it is that newer, ri
 8. **Fix authentication semantics (SYN-007).** The core sign-in path needs programmatic labels and announced errors. Primarily a fix; visible design can remain unchanged while assistive technology becomes usable. Effort S. Ship independently.
 9. **Route-split the application (SYN-011).** The measured 575.88 kB gzip entry bundle is avoidably eager. Primarily a performance refactor; visible outcome is faster initial entry on constrained networks with stable loading shells. Effort M. Measure before/after.
 10. **Align the tour and pinned demo into one complete story (SYN-008).** Once reliability is fixed, this produces the largest polish gain: meaningful multi-version history, complete artifacts, and clear CTA choice. Primarily polish/content; visible outcome is a coherent first impression. Effort M. Do last among the top ten so content is built on stable behavior.
+
+The immediate order remains **SYN-003 → SYN-004 → SYN-006 → SYN-005** because it first makes the visible canonical demo truthful, then closes the concrete content-security boundary, locks those supported formats in a browser contract, and finally undertakes the broader freshness cutover with reliable regression coverage. The absence of users removes the need to delay any of these for migrations, telemetry, or compatibility windows.
 
 ---
 

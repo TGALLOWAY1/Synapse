@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type { FeedbackItem, FeedbackType, FeedbackStatus, ArtifactType, HistoryEvent } from '../../types';
 import type { ProjectState } from '../types';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 
 export type FeedbackSlice = {
     feedbackItems: Record<string, FeedbackItem[]>;
@@ -21,6 +22,7 @@ export const createFeedbackSlice: StateCreator<ProjectState, [], [], FeedbackSli
         description: string,
         targetArtifactType: ArtifactType
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canReviewArtifacts');
         const feedbackId = uuidv4();
         const now = Date.now();
         const newFeedback: FeedbackItem = {
@@ -60,6 +62,7 @@ export const createFeedbackSlice: StateCreator<ProjectState, [], [], FeedbackSli
     },
 
     updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => {
+        assertProjectCapability(get().projects[projectId], 'canReviewArtifacts');
         set((state) => {
             const items = state.feedbackItems[projectId] || [];
             const updatedItems = items.map(f =>

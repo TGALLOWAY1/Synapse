@@ -193,8 +193,7 @@ OAuth redirects surface errors through the `?auth_error=…` query param on
 
 - Email verification (new email users are created with `emailVerified: false`;
   nothing currently enforces verification).
-- Password reset / "Forgot password?" flow (the UI affordance exists but is
-  disabled).
+- Password reset / "Forgot password?" flow (no UI affordance exists yet).
 - Account linking (see policy above).
 - Two-factor authentication.
 - Rate limiting on signup/login (Vercel has no built-in limiter; consider

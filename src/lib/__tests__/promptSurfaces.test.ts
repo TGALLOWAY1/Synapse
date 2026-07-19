@@ -17,7 +17,7 @@ import { CORE_ARTIFACT_PROMPTS } from '../services/coreArtifactService';
 import { buildScreenImagePrompt } from '../services/mockupImageService';
 import { buildExternalMockupPrompt } from '../services/screenInventoryImageService';
 import { normalizeDesignTokens } from '../designTokens';
-import { DEFAULT_PRD_SECTIONS, RETIRED_PRD_SECTIONS } from '../services/progressivePrdGeneration';
+import { DEFAULT_PRD_SECTIONS } from '../services/progressivePrdGeneration';
 import { buildSpecialistPrompt } from '../review/prompt';
 import { SPECIALIST_REGISTRY } from '../review/specialists';
 import type { ReviewSpecialistId } from '../review/types';
@@ -82,18 +82,6 @@ describe('prompt surfaces — snapshot net', () => {
                 platform: 'web',
                 upstream: FIXTURE_UPSTREAM,
                 projectName: 'TrailPlan',
-            });
-            expect(system).toMatchSnapshot(`${section.id} system`);
-            expect(user).toMatchSnapshot(`${section.id} user`);
-        }
-    });
-
-    it('every retired PRD section prompt (legacy retry contract)', () => {
-        for (const section of RETIRED_PRD_SECTIONS) {
-            const { system, user } = buildSectionPrompt(section.id, {
-                idea: FIXTURE_IDEA,
-                platform: 'web',
-                upstream: FIXTURE_UPSTREAM,
             });
             expect(system).toMatchSnapshot(`${section.id} system`);
             expect(user).toMatchSnapshot(`${section.id} user`);

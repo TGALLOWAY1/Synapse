@@ -5,6 +5,7 @@ import type { FeedbackItem, FeedbackType } from '../types';
 interface FeedbackItemsListProps {
     projectId: string;
     onApplyToPRD?: (feedback: FeedbackItem) => void;
+    readOnly?: boolean;
 }
 
 const TYPE_LABELS: Record<FeedbackType, string> = {
@@ -20,7 +21,7 @@ const TYPE_LABELS: Record<FeedbackType, string> = {
 
 
 
-export function FeedbackItemsList({ projectId, onApplyToPRD }: FeedbackItemsListProps) {
+export function FeedbackItemsList({ projectId, onApplyToPRD, readOnly = false }: FeedbackItemsListProps) {
     const { getFeedbackItems, updateFeedbackStatus } = useProjectStore();
     const allItems = getFeedbackItems(projectId);
     const openItems = allItems.filter(f => f.status === 'open' || f.status === 'accepted');
@@ -49,7 +50,7 @@ export function FeedbackItemsList({ projectId, onApplyToPRD }: FeedbackItemsList
                                 <p className="text-xs text-neutral-500 line-clamp-2">{item.description}</p>
                             )}
                         </div>
-                        <div className="flex items-center gap-1 shrink-0">
+                        {!readOnly && <div className="flex items-center gap-1 shrink-0">
                             {onApplyToPRD && (
                                 <button
                                     onClick={() => onApplyToPRD(item)}
@@ -74,7 +75,7 @@ export function FeedbackItemsList({ projectId, onApplyToPRD }: FeedbackItemsList
                             >
                                 <X size={14} />
                             </button>
-                        </div>
+                        </div>}
                     </div>
                 ))}
             </div>

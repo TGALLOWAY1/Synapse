@@ -19,6 +19,7 @@ import { callOpenAIImage } from '../lib/openaiClient';
 import { buildScreenImagePrompt, pickImageSize } from '../lib/services/mockupImageService';
 import { selectPreferredDesignTokens } from '../lib/designTokens';
 import { useProjectStore } from './projectStore';
+import { assertProjectCapability } from '../lib/projectCapabilities';
 import {
     buildImageKey,
     buildScreenScopeKey,
@@ -30,7 +31,6 @@ import { getRefsForVersion } from '../lib/imageRefRegistry';
 import { fetchBlobAsDataUrl } from '../lib/imageRefsClient';
 import { mockupRecordFromRef, type ImageRef } from '../lib/imageRef';
 import { notifyMockupImageGenerated } from './projectImageSync';
-import { canPerformProjectAction } from '../lib/projectCapabilities';
 
 // Pull blob bytes for refs the local IndexedDB doesn't have yet (cross-device
 // case). Concurrency-limited so a version with many screens doesn't open a fetch
@@ -73,6 +73,11 @@ interface ImageStoreState {
     inFlight: Record<string, InFlight>;
     /** Map of `${versionId}:${screenId}` -> error message. */
     errors: Record<string, string>;
+    /** SYN-003: versions whose `loadForVersion` has fully settled (records found
+     * OR the version genuinely has none). Lets a consumer distinguish "no image
+     * yet, still hydrating" from "no image, provably absent" so the Screens
+     * variant grid never claims "Generated" for an image it can't find. */
+    loadedVersions: Record<string, true>;
 
     /** Hydrate this version's images from IndexedDB into the reactive cache. */
     loadForVersion: (versionId: string) => Promise<void>;
@@ -107,16 +112,27 @@ interface ImageStoreState {
 
     /** Clear the error state for one screen (e.g. on retry click). */
     clearError: (versionId: string, screenId: string) => void;
+
+    /** Evict cached records + settled-flags for these versions. IndexedDB
+     * stays the source of truth (nothing here touches it) — this only
+     * invalidates the in-memory reactive cache so a subsequent
+     * `loadForVersion` can't briefly serve pre-wipe data after something
+     * else (e.g. a demo reset) deletes the underlying IDB records out from
+     * under this cache. */
+    clearVersions: (versionIds: string[]) => void;
 }
 
 export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
     images: {},
     inFlight: {},
     errors: {},
+    loadedVersions: {},
 
     loadForVersion: async (versionId) => {
         const records = await idbListImages(versionId);
         const haveKeys = new Set(records.map((r) => r.key));
+        // Surface locally-cached records immediately — they must not wait on
+        // the network hydration of refs this device is missing.
         if (records.length > 0) {
             set((state) => {
                 const next = { ...state.images };
@@ -130,14 +146,19 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         // and surface it in the reactive cache. Lazy — only on view, never a
         // bulk download on sign-in.
         const missing = getRefsForVersion(versionId).filter((r) => !haveKeys.has(r.key));
-        if (missing.length === 0) return;
-        const hydrated = await hydrateMissingRefs(missing);
-        if (hydrated.length === 0) return;
+        const hydrated = missing.length > 0 ? await hydrateMissingRefs(missing) : [];
         for (const record of hydrated) await idbPutImage(record);
+
+        // SYN-003: mark the version settled on EVERY path (the empty path
+        // previously returned without a set(), so a consumer could never tell
+        // "no image yet" from "still loading").
         set((state) => {
             const next = { ...state.images };
             for (const r of hydrated) next[r.key] = r;
-            return { images: next };
+            return {
+                images: next,
+                loadedVersions: { ...state.loadedVersions, [versionId]: true },
+            };
         });
     },
 
@@ -163,9 +184,7 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
     },
 
     generate: async ({ projectId, artifactId, versionId, screen, payload, settings, quality, onGenerated }) => {
-        // This is the write/provider boundary; callers cannot accidentally
-        // turn the public example into a billable image-generation surface.
-        if (!canPerformProjectAction(projectId, 'image')) return;
+        assertProjectCapability(useProjectStore.getState().projects[projectId], 'canGenerateArtifacts');
         const scope = screenScope(versionId, screen.id);
         if (get().inFlight[scope]) return; // already generating something for this screen
 
@@ -238,6 +257,20 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
             const next = { ...state.errors };
             delete next[scope];
             return { errors: next };
+        });
+    },
+
+    clearVersions: (versionIds) => {
+        if (versionIds.length === 0) return;
+        const idSet = new Set(versionIds);
+        set((state) => {
+            const images = { ...state.images };
+            for (const key of Object.keys(images)) {
+                if (idSet.has(images[key].versionId)) delete images[key];
+            }
+            const loadedVersions = { ...state.loadedVersions };
+            for (const id of versionIds) delete loadedVersions[id];
+            return { images, loadedVersions };
         });
     },
 }));

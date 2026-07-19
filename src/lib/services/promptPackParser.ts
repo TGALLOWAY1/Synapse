@@ -1,9 +1,9 @@
 /**
  * Pure parser for legacy `prompt_pack` artifact markdown.
  *
- * Extracted from `PromptPackRenderer` (which still renders legacy artifacts
- * with it) so the implementation-plan adapter can turn old Developer Prompts
- * into consolidated prompt packs without duplicating the parsing rules.
+ * Consumed by the implementation-plan adapter to turn legacy Developer
+ * Prompts artifacts into consolidated prompt packs. (Originally extracted
+ * from the since-deleted `PromptPackRenderer`.)
  *
  * The conventional shape (from `coreArtifactService.ts`):
  *

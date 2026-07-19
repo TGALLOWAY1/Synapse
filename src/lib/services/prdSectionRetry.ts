@@ -14,7 +14,6 @@ import { buildRestrictionDirective } from '../safety/safetyReviewArtifact';
 import type { SafetyClassificationResult, SpineSafetyReview } from '../safety/safetyTypes';
 import {
     DEFAULT_PRD_SECTIONS,
-    RETIRED_PRD_SECTIONS,
     selectModelTier,
     parseSectionJson,
 } from './progressivePrdGeneration';
@@ -78,9 +77,10 @@ export const regeneratePrdSection = async (
 ): Promise<RetrySectionResult> => {
     const { platform, signal, onSectionStatus, safetyReview } = options;
 
-    // RETIRED_PRD_SECTIONS keeps retry working for legacy spines whose
-    // failedSections reference a section no longer in the default graph.
-    const template = [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS].find((s) => s.id === sectionId);
+    // The retired data_model / implementation_plan sections were removed from
+    // the graph and the schema, so a legacy failedSections entry referencing one
+    // surfaces the standard unknown-section error (graceful degradation).
+    const template = DEFAULT_PRD_SECTIONS.find((s) => s.id === sectionId);
     if (!template) {
         throw new Error(`Unknown PRD section: ${sectionId}`);
     }

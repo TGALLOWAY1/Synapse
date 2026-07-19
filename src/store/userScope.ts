@@ -5,10 +5,12 @@
 // key with the active user's id. This module is the single source of truth for
 // "which localStorage key is the project store reading/writing right now".
 //
-// It is intentionally a LEAF module (only touches localStorage) so it can be
-// imported by `storage.ts` without creating an import cycle with the store
-// itself. The orchestration that resets + rehydrates the store on a user switch
-// lives in `projectUserSync.ts`.
+// It is intentionally a LEAF module (only touches localStorage, plus the pure
+// collection-key constant below) so it can be imported by `storage.ts` without
+// creating an import cycle with the store itself. The orchestration that
+// resets + rehydrates the store on a user switch lives in `projectUserSync.ts`.
+
+import { ALL_PROJECT_COLLECTIONS } from '../lib/projectBundle';
 
 const BASE_NAME = 'synapse-projects-storage';
 
@@ -28,26 +30,11 @@ const DECLINED_KEY = 'synapse-projects-legacy-declined-by';
 // Persisted Zustand collections that are keyed by project id (or, for
 // `projects`, by project id). A legacy-import merges these additively so a
 // user can recover pre-namespacing projects without overwriting any project
-// they already own (existing ids always win). Keep in sync with
-// `emptyPersistedState()` in projectUserSync.ts.
-const MERGEABLE_COLLECTIONS = [
-  'projects',
-  'spineVersions',
-  'historyEvents',
-  'branches',
-  'artifacts',
-  'artifactVersions',
-  'feedbackItems',
-  'reviewRuns',
-  'specialistRuns',
-  'reviewFindings',
-  'reviewIssues',
-  'planningRecords',
-  'readinessReviews',
-  'readinessCommitmentEvents',
-  'tasks',
-  'workflowRuns',
-] as const;
+// they already own (existing ids always win). Sourced from
+// `ALL_PROJECT_COLLECTIONS` in `lib/projectBundle.ts` — the single source of
+// truth for this key list, also used by `emptyPersistedState()` in
+// projectUserSync.ts.
+const MERGEABLE_COLLECTIONS = ALL_PROJECT_COLLECTIONS;
 
 let activeUserId: string | null = null;
 

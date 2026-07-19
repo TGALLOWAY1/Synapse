@@ -1,6 +1,6 @@
 # Version History, Revert & Export
 
-> Extracted from CLAUDE.md. Export modal + manifest, version history/compare/revert components, provenance, and staleness UX.
+> Extracted from CLAUDE.md. Export modal + manifest, version history/compare/revert components, change-aware staleness, provenance, and the re-finalize Update Assets plan.
 
 ### Export (`ExportModal.tsx`)
 
@@ -10,6 +10,24 @@ or structured JSON. It also offers a **"Copy for coding agent"** preset
 PRD + build-relevant core artifacts (mockups excluded), with copy and download.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
+
+**The default PRD export is ONE coherent three-part document** mirroring the
+in-app Overview/Features/Decisions views: `renderPremiumMarkdown`
+(`src/lib/services/prdMarkdownRenderer.ts`) emits `# Part I — Product Overview`
+→ `# Part II — Feature Specification` → `# Part III — Decisions and Validation`
+→ `# Appendices` (Architecture & Additional Context holding legacy technical
+sections, a Traceability Index, domain grounding, and the "Where the Detail
+Lives" handoff appendix). It is composed from pure per-part builders
+(`overviewLines`/`featuresLines`/`decisionsLines`/`appendixLines`), and
+`renderPrdSectionMarkdown(prd, 'overview'|'features'|'decisions')` renders a
+single part for the **section-specific export** option (not the default).
+`ExportModal` renders the PRD from the canonical `structuredPRD` object via
+`renderPremiumMarkdown` (falling back to stored `responseText` for legacy
+PRDs with no structured payload), so the three-part structure is guaranteed
+regardless of the saved markdown. The renderer is still the source of
+`SpineVersion.responseText`, so reordering it is presentation-only —
+downstream artifacts consume the `StructuredPRD` object by field, never the
+markdown; no consumer parses it by heading.
 
 **Exports are version-aware.** `src/lib/exportManifest.ts` (pure) builds an
 **export manifest** — per asset: version number, generated-from PRD version
@@ -33,7 +51,8 @@ versions of **both** PRDs (spines) and artifacts:
   artifact text. Read-only except for opening the restore confirmation.
 - `RevertConfirmModal` — non-destructive restore confirmation; the PRD variant
   warns which downstream artifacts will be marked possibly outdated (computed by
-  the caller via `getArtifactStaleness`).
+  the caller via `evaluateProjectFreshness` — the artifacts currently
+  `up_to_date` with the latest spine).
 
 Diffs are computed on the fly from stored snapshots by **`src/lib/versionDiff.ts`**
 (pure, jsdiff-backed: `diffText`, `diffStructuredPRD`, `getDiffSummary`) —
@@ -41,7 +60,8 @@ nothing extra is persisted. Wiring: `ProjectWorkspace` exposes PRD history (a
 **Version History** overflow-menu item) and adds **Compare with current** /
 **Restore this version** to the read-only historical-version banner;
 `ArtifactWorkspace` shows a **Version history** button + a "Generated from PRD
-Version X" chip + `StalenessBadge` above each generated artifact. Restores route
+Version X" chip + `FreshnessBadge` (driven by `useProjectFreshness`) above each
+generated artifact. Restores route
 to `revertSpineToVersion` / `revertArtifactToVersion`. **Revert always appends a
 new version and never deletes history.** See `docs/VERSIONING_AUDIT.md` for the
 Phase 1 design and `docs/VERSIONING_V2_PLAN.md` for the change-awareness layer
@@ -61,7 +81,7 @@ must NEVER suppress a hard `needs_update`), `findFeatureReferences`
 attaches a `changeSummary` to `prd_changed` reasons + a node-level
 `likelyUnaffected` flag (only when the PRD change is the sole reason). Surfaced
 in the graph detail panel ("What changed: …", removed-feature still-referenced
-warnings), the `StalenessBadge` tooltip, and the artifact-header strip.
+warnings), the `FreshnessBadge` tooltip, and the artifact-header strip.
 Everything is computed at read time from stored snapshots — nothing persisted.
 
 **Provenance is complete.** Every version-creating path stamps
@@ -84,7 +104,7 @@ ref would leave the graph still reporting `dependency_changed`; never do a
 partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph
 detail panel and the artifact-header strip when stale.
 
-**Re-commit goes through the Update Assets plan.** When Commit Plan runs
+**Re-finalize goes through the Update Assets plan.** When Mark-as-Final runs
 and downstream assets already exist (and no generation job is active),
 `ProjectWorkspace.finalizeAndGenerate` does NOT call `startAll` — it evaluates
 the dependency graph against the spine being finalized and opens
@@ -96,7 +116,6 @@ Regenerate / Mark up to date / Decide later — defaulted from
 `expandSelectionWithTroubledUpstreams` (a selected dependent must never rebuild
 from a stale unselected visible input; marked-current upstreams count as
 healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
-(spine stays uncommitted). A first commitment never calls `startAll` directly:
-the success transition offers a separate **Generate build foundation** action.
-Do not reintroduce automatic output generation as a side effect of commitment.
+(spine stays non-final). First finalize and job-active re-finalizes keep the direct
+`startAll` path. Do not reintroduce a blind full regeneration on re-finalize.
 

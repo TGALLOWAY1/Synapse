@@ -55,6 +55,7 @@ import type {
     DownstreamArtifactUpdateReviewEvent, DownstreamArtifactUpdateVerification,
     DownstreamArtifactUpdateVerificationEvent,
 } from './planning/downstreamArtifactUpdateProposal';
+import { auditMockupImageCoverage, countMockupSpecScreens } from './snapshotImageAudit';
 
 export const OWNER_TOKEN_KEY = 'synapse-owner-token';
 
@@ -105,6 +106,13 @@ export type SnapshotManifest = {
     // Count of user-uploaded Screen Inventory images bundled alongside the
     // mockup images. Optional for back-compat with pre-existing manifests.
     screenImageCount?: number;
+    // SYN-003: how many screens the mockup spec describes, and how many
+    // per-variant mockup images travel. Optional for back-compat — legacy
+    // manifests lack them, and the client-side pin gate covers that case.
+    // Together with imageCount/screenImageCount they let the pin-time gate
+    // reject a demo whose mockup spec claims screens it carries no image for.
+    mockupScreenCount?: number;
+    variantImageCount?: number;
     sizeBytes?: number;
 };
 
@@ -296,11 +304,35 @@ export const saveSnapshot = async (
     const { snapshot: variantWire, images: variantImages } =
         splitVariantSnapshotImages(fullVariantSnapshot);
     bundle.mockupVariantImages = variantWire;
-    if (onWarnings && fullVariantSnapshot.summary.warnings?.length) {
-        onWarnings(fullVariantSnapshot.summary.warnings);
+
+    // Surface any pre-save integrity warnings (variant size-guard drops PLUS a
+    // "mockup spec has screens but no images were found" gap — the failure mode
+    // that let an image-less snapshot be pinned as the public demo). Reported
+    // together so the owner sees every reason a saved snapshot may be missing
+    // preview images before they pin it.
+    if (onWarnings) {
+        const warnings = [
+            ...auditMockupImageCoverage({
+                artifacts: bundle.artifacts,
+                artifactVersions: bundle.artifactVersions,
+                images,
+                screenImages,
+                variantImages: fullVariantSnapshot,
+            }),
+            ...(fullVariantSnapshot.summary.warnings ?? []),
+        ];
+        if (warnings.length > 0) onWarnings(warnings);
     }
 
     onProgress?.({ phase: 'bundle', completed: 0, total: 0 });
+
+    // SYN-003: how many screens the mockup spec claims + how many per-variant
+    // images travel. Persisted into the manifest so the pin-time gate can reject
+    // a demo that describes mockup screens but carries zero rendered images.
+    const mockupScreenCount = countMockupSpecScreens(
+        bundle.artifacts, bundle.artifactVersions,
+    )?.screenCount ?? 0;
+    const variantImageCount = variantImages.length;
 
     // Step 1 — POST the project bundle plus image metadata only. This is
     // bounded (typically a few hundred KB) regardless of how many or how
@@ -313,6 +345,8 @@ export const saveSnapshot = async (
             project: bundle,
             images: images.map(imageMetadata),
             screenImages: screenImages.map(imageMetadata),
+            mockupScreenCount,
+            variantImageCount,
         }),
     });
     if (!bundleResp.ok) throw await errorFromResponse(bundleResp, 'save_failed');

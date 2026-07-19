@@ -17,7 +17,9 @@ import {
     Layers, RefreshCcw, ShieldCheck, Workflow,
 } from 'lucide-react';
 import { useMemo, useState } from 'react';
-import type { DataModelContent, Feature, MockupPlatform, StalenessState, StructuredImplementationPlan } from '../../types';
+import type { DataModelContent, Feature, MockupPlatform, StructuredImplementationPlan } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
+import { isStaleStatus } from '../../lib/artifactFreshness';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from '../../lib/screenExperience';
 import {
     screenMatchesFilter,
@@ -37,7 +39,7 @@ import {
 } from '../../lib/screenImplementationHandoff';
 import {
     buildScreenMockupVariants, summarizeScreenVariants,
-    type GeneratedVariantMap, type MockupVariantCoverageSummary,
+    type GeneratedVariantMap, type MockupImagePresence, type MockupVariantCoverageSummary,
 } from '../../lib/mockupVariants';
 import {
     buildScreenGroups, deriveScreenConnections, flowFilterOptions, hasFlowGrouping,
@@ -50,7 +52,7 @@ import { ScreenCoveragePanel } from './ScreenCoveragePanel';
 import { ScreenPreflightPanel } from './ScreenPreflightPanel';
 import { ScreensHandoffExportPanel } from './ScreensHandoffExportPanel';
 import { ReadinessBadge } from './ReadinessBadge';
-import { StalenessBadge } from '../StalenessBadge';
+import { FreshnessBadge } from '../FreshnessBadge';
 
 const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
 
@@ -65,9 +67,9 @@ const EMPTY_REVIEW_MODELS: ReadonlyMap<string, ScreenReviewModel> = new Map();
 export interface ScreenArtifactControls {
     /** "Version N" label of the PRD the screen inventory was generated from. */
     prdVersionLabel?: string;
-    /** Screen-inventory staleness against the current PRD. */
-    staleness?: StalenessState;
-    /** "What changed" tooltip detail for the staleness badge. */
+    /** Screen-inventory freshness against the current PRD (canonical status). */
+    staleness?: DependencyNodeStatus;
+    /** "What changed" tooltip detail for the freshness badge. */
     stalenessDetail?: string;
     /** Timestamp (ms) the current mockup version was generated, if any. */
     lastMockupGeneratedAt?: number;
@@ -104,6 +106,10 @@ interface Props {
     /** Phase 3B: resolves a screen's manifest-backed generated variants so the
      * card reflects real generation (e.g. "Mobile: generated"). */
     generatedVariantsByScreen?: (screenId: string) => GeneratedVariantMap | undefined;
+    /** SYN-003: resolves a screen's authoritative default-mockup image presence
+     * so the primary Default variant only reads "Generated" when a rendered
+     * image actually exists. Absent → legacy spec-join behavior. */
+    defaultImagePresenceByScreen?: (screenId: string) => MockupImagePresence | undefined;
     /** Phase 3C: current trust context for per-screen variant freshness. */
     trustContext?: VariantTrustContext;
     /** Canonical PRD features — enables handoff/traceability derivation (Phase 5A). */
@@ -134,7 +140,7 @@ type StatusFilter = 'all' | 'draft' | 'needs_review' | 'accepted' | 'ready';
 export function ScreenListView({
     index, readiness, reviewModels = EMPTY_REVIEW_MODELS, artifactReview, coverage,
     variantCoverage, mockupPlatform, mobileRelevant,
-    generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan,
+    generatedVariantsByScreen, defaultImagePresenceByScreen, trustContext, features, traceDataModel, tracePlan,
     projectName, exportManifest, artifactControls,
     onSelectScreen, onGenerateMissingMockups,
 }: Props) {
@@ -162,7 +168,8 @@ export function ScreenListView({
             if (!model) continue;
             const variants = buildScreenMockupVariants(item, {
                 platform: mockupPlatform, mobileRelevant,
-                generatedVariants: generatedVariantsByScreen?.(item.id), trustContext,
+                generatedVariants: generatedVariantsByScreen?.(item.id),
+                defaultImagePresence: defaultImagePresenceByScreen?.(item.id), trustContext,
             });
             map.set(item.id, buildScreenImplementationHandoff({
                 item, reviewModel: model, variants,
@@ -171,7 +178,7 @@ export function ScreenListView({
             }));
         }
         return map;
-    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, trustContext, features, traceDataModel, tracePlan]);
+    }, [index, reviewModels, downstreamByScreen, mockupPlatform, mobileRelevant, generatedVariantsByScreen, defaultImagePresenceByScreen, trustContext, features, traceDataModel, tracePlan]);
 
     const p0Ids = useMemo(
         () => new Set(index.items.filter(i => i.screen.priority === 'P0' || i.screen.priority === 'core').map(i => i.id)),
@@ -246,7 +253,7 @@ export function ScreenListView({
         <div className="max-w-3xl xl:max-w-5xl mx-auto space-y-5">
             {/* Minimal control row — Flow + Status only. Everything else moved
                 into each screen's "Show details". */}
-            <div className="flex flex-wrap items-center gap-2">
+            <div className="flex flex-wrap items-center gap-2 min-w-0">
                 <SelectControl label="Flow" value={flow} onChange={setFlow}
                     options={[
                         { value: 'all', label: 'All flows' },
@@ -317,6 +324,7 @@ export function ScreenListView({
                                     mockupPlatform={mockupPlatform}
                                     mobileRelevant={mobileRelevant}
                                     generatedVariants={generatedVariantsByScreen?.(item.id)}
+                                    defaultImagePresence={defaultImagePresenceByScreen?.(item.id)}
                                     trustContext={trustContext}
                                     features={features}
                                     prdVersionLabel={artifactControls?.prdVersionLabel}
@@ -388,16 +396,16 @@ function SelectControl({
     options: Array<{ value: string; label: string }>;
 }) {
     return (
-        <label className="inline-flex items-center gap-1 text-xs text-neutral-500">
+        <label className="inline-flex items-center gap-1 text-xs text-neutral-500 min-w-0 max-w-full">
             <span className="sr-only">{label}</span>
             <select
                 value={value}
                 onChange={e => onChange(e.target.value)}
                 aria-label={label}
-                className="py-1.5 pl-2 pr-6 rounded-lg border border-neutral-200 text-neutral-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
+                className="min-w-0 max-w-full py-1.5 pl-2 pr-6 rounded-lg border border-neutral-200 text-neutral-700 bg-white text-xs focus:outline-none focus:ring-2 focus:ring-indigo-200 focus:border-indigo-300"
             >
                 {options.map(o => (
-                    <option key={o.value} value={o.value}>{label}: {o.label}</option>
+                    <option key={o.value} value={o.value}>{o.label}</option>
                 ))}
             </select>
         </label>
@@ -449,7 +457,7 @@ const SYSTEM_READINESS_TONE: Record<ScreenReviewModel['systemReadiness'], string
 };
 
 function ScreenCard({
-    ordinal, item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, trustContext, features, prdVersionLabel, onSelect,
+    ordinal, item, readiness, reviewModel, downstreamImpact, mockupPlatform, mobileRelevant, generatedVariants, defaultImagePresence, trustContext, features, prdVersionLabel, onSelect,
 }: {
     ordinal?: number;
     item: ScreenExperienceItem;
@@ -459,6 +467,7 @@ function ScreenCard({
     mockupPlatform?: MockupPlatform;
     mobileRelevant?: boolean;
     generatedVariants?: GeneratedVariantMap;
+    defaultImagePresence?: MockupImagePresence;
     trustContext?: VariantTrustContext;
     features?: readonly Feature[];
     prdVersionLabel?: string;
@@ -469,7 +478,7 @@ function ScreenCard({
     const priority = stylablePriority(screen.priority);
     const connections = deriveScreenConnections(item);
     const variants = buildScreenMockupVariants(item, {
-        platform: mockupPlatform, mobileRelevant, generatedVariants, trustContext,
+        platform: mockupPlatform, mobileRelevant, generatedVariants, defaultImagePresence, trustContext,
     });
     const variantSummary = summarizeScreenVariants(variants);
 
@@ -749,7 +758,7 @@ function ArtifactControlsBlock({ controls }: { controls: ScreenArtifactControls 
         prdVersionLabel, staleness, stalenessDetail, lastMockupGeneratedAt, mockupDesignDrift,
         onMarkUpToDate, onOpenVersionHistory, onOpenMockupHistory, onRegenerateMockup,
     } = controls;
-    const isStale = !!staleness && staleness !== 'current';
+    const isStale = isStaleStatus(staleness);
     const hasMetadata = !!prdVersionLabel || isStale || lastMockupGeneratedAt !== undefined;
     const hasHistory = !!onOpenVersionHistory || !!onOpenMockupHistory;
     const hasActions = (isStale && !!onMarkUpToDate) || !!onRegenerateMockup;
@@ -762,7 +771,7 @@ function ArtifactControlsBlock({ controls }: { controls: ScreenArtifactControls 
                     {prdVersionLabel && (
                         <span className="inline-flex items-center gap-1.5">
                             Generated from PRD {prdVersionLabel}
-                            {isStale && <StalenessBadge staleness={staleness} detail={stalenessDetail} />}
+                            {isStale && <FreshnessBadge status={staleness} detail={stalenessDetail} />}
                         </span>
                     )}
                     {lastMockupGeneratedAt !== undefined && (

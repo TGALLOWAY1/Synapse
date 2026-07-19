@@ -3,7 +3,8 @@ import { AlertTriangle, RotateCcw, X } from 'lucide-react';
 // Confirmation for restoring a historical version. Restore is non-destructive:
 // it always appends a NEW version and never deletes history. The PRD variant
 // additionally warns which downstream artifacts will be marked possibly
-// outdated (computed by the caller via getArtifactStaleness).
+// outdated (computed by the caller via the canonical freshness evaluator —
+// the artifacts currently up_to_date with the latest spine).
 interface RevertConfirmModalProps {
     kind: 'prd' | 'artifact';
     sourceLabel: string;              // e.g. "Version 3" / "version 2"

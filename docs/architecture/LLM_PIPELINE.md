@@ -56,18 +56,22 @@
     data dependencies only** — a section lists another solely when it consumes
     that section's output as prompt context. **The PRD is the product decision
     document, not a container for downstream artifacts:** the former
-    `data_model` and `implementation_plan` PRD sections are **retired** from the
-    default graph (`RETIRED_PRD_SECTIONS` / `RETIRED_SECTION_IDS`) — the
-    dedicated data_model / implementation_plan *artifacts* own that detail, and
-    the PRD-embedded copies duplicated them (two entity lists was a standing
-    inconsistency source; `implementationPlan` was never rendered). Their
-    `SectionId`, prompt builder, slice schema, and title all survive solely so
-    single-section retry of legacy `generationMeta.failedSections` keeps
-    working (`prdSectionRetry.ts` looks sections up across
-    `DEFAULT_PRD_SECTIONS ∪ RETIRED_PRD_SECTIONS`). Never re-add retired
-    sections to `DEFAULT_PRD_SECTIONS`, and never feed them to `runDag`.
-    Legacy PRDs with `richDataModel`/`stateMachines`/`implementationPlan` keep
-    rendering — the renderer blocks and optional `StructuredPRD` fields stay.
+    `data_model` and `implementation_plan` PRD sections were **removed
+    entirely** — their `SectionId`, prompt builder, slice schema, and title are
+    all gone. The dedicated data_model / implementation_plan *artifacts* own
+    that detail, and the PRD-embedded copies duplicated them (two entity lists
+    was a standing inconsistency source; `implementationPlan` was never
+    rendered). Single-section retry of a legacy
+    `generationMeta.failedSections` entry naming one of those ids now surfaces
+    the standard `Unknown PRD section` error (graceful degradation) —
+    `prdSectionRetry.ts` looks sections up over `DEFAULT_PRD_SECTIONS` only.
+    Never re-add either section to `DEFAULT_PRD_SECTIONS`, the `SectionId`
+    union, or the prompt/schema maps. NOTE: these retired PRD *sections* are
+    unrelated to the data_model/implementation_plan *artifacts* (whose
+    prompts/schemas live in `coreArtifactService`/`artifactSchemas.ts`), which
+    are untouched. Legacy PRDs with
+    `richDataModel`/`stateMachines`/`implementationPlan` keep rendering — the
+    renderer blocks and optional `StructuredPRD` fields stay.
     The remaining sections are prompted (and, where it matters,
     **schema-enforced** via lean slice schemas in `prdSchemas.ts` —
     `leanUxPageItemSchema`/`leanFeatureItemSchema`/`leanSuccessMetricSchema`,
@@ -92,21 +96,55 @@
     **PRD reading order ≠ generation (DAG) order.** The human/agent-facing
     section order is a fixed logical flow (Product Overview → Target Users →
     MVP Scope → Core Features → UX → Success Metrics → Risks → Technical
-    Architecture → Data Model → State Machines → NFRs → reference appendix →
-    **"Where the Detail Lives"**, a static deterministic handoff appendix
-    pointing to the downstream artifacts, rendered unconditionally by both
-    renderers — legacy spines' persisted `responseText` picks it up on the
-    next re-render (edit / section retry / regenerate), while the in-app
-    Structured view shows it immediately for every PRD)
+    Architecture → Data Model → State Machines → NFRs → reference appendix —
+    now the final section)
     defined in **two mirrored renderers that must stay in sync**:
     `prdMarkdownRenderer.renderPremiumMarkdown` (export/`responseText`) and
     `StructuredPRDView`/`PremiumSections` (in-app). Reordering is
     presentation-only and safe — downstream artifacts/mockups consume the
     `StructuredPRD` **object by field**, never this render order — but if you
     change one renderer's section order, change the other to match.
-    The legacy multi-pass scoring + revision passes were removed — old projects
-    in localStorage retain their saved `qualityScores`, but no new generation
-    writes them.
+    The legacy multi-pass scoring + revision passes were removed, and the
+    `qualityScores` field/plumbing they wrote (the `QualityScores` type,
+    `SpineVersion.qualityScores`, and the `updateSpineQualityScores` action)
+    have since been deleted outright — old persisted localStorage projects may
+    still carry the key in their stored JSON, but it is ignored on read and no
+    migration is needed.
+    - **Three-view PRD IA — Overview · Features · Decisions
+      (`StructuredPRDView` + `src/lib/derive/prdViews.ts`).** The in-app PRD is
+      **one canonical artifact presented through three coordinated tab views**,
+      NOT three artifacts — they share the same spine version, finalization
+      state, revision history, freshness/provenance, and downstream
+      relationships. `StructuredPRDView` is the single tabbed shell (rendered by
+      BOTH hosts — the editable `ProjectWorkspace` PRD stage and the read-only
+      `ArtifactWorkspace` Assets view); `PrdViewTabs` is the ARIA-tablist nav.
+      **Overview** = product brief (executive summary, problem/thesis, vision,
+      principles, JTBD/users, success metrics, a **compact Scope** block — the
+      scope *decision* rationale + MVP/next feature reference **chips** that link
+      into the Features view + a deferred count linking to Decisions, deliberately
+      NOT the full feature cards (those live only in the Features view, so the
+      Overview never duplicates the feature spec), constraints/NFRs, grounding
+      appendix, and a progressively-disclosed "Architecture & additional context" block holding
+      the legacy technical sections — architecture/roles/UX/loops/data-model/
+      state-machines — so nothing is discarded). **Features** = feature systems
+      → individual `FeatureCard`s, grouped by `groupFeaturesBySystem` (system
+      header shown once; a trailing "Other features" bucket for system-less
+      features), a compact filter select (All/MVP/Later/Needs review/Confirmed
+      via `filterFeatures`/`featureFilterCounts`), and an explicit-only
+      traceability strip (`deriveFeatureTrace` — system membership + resolved
+      dependency features; never keyword-inferred links). **Decisions** = Needs
+      Input (low-confidence unresolved assumptions) + Assumptions to Validate
+      (med/high, via `splitDecisionInputs`) → the parameterized
+      `ReviewConfirmSection`; Decision Log (decided items only) via
+      `DecisionLogSection`; and `DeferredRisksSection` (deferred scope + risks
+      via `deriveRisks`). The active view is **navigational-only URL state**
+      (`?prdView=overview|features|decisions`, wired by both hosts via
+      `useSearchParams`; `coercePrdView` normalizes; `overview` omits the param)
+      — NEVER a PRD content revision. Cross-view links (a scope card jumps to its
+      feature; a feature's "Summary" jumps back) switch the tab and scroll after
+      the target view renders. All derivations in `prdViews.ts` are pure and
+      unit-tested; the workflow (confirm/edit → `editSpineStructuredPRD`) is
+      unchanged, so versioning/finalization/downstream all still work.
     - **PRD Review & Confirm + Decision Log (2026-07 mobile cleanup pass).**
       Assumptions no longer render as a passive trailing "Assumptions" section
       (or as the Implementation Summary's "Open Decisions" list — both are
@@ -121,8 +159,29 @@
       `StructuredPRD` itself via all-optional fields (`Assumption.decision` /
       `decisionNote` / `decidedAt`; `Feature.confirmed` / `confirmedAt` —
       legacy PRDs simply read as "all unresolved"); every confirm/reject/undo
-      is a normal PRD edit through `editSpineStructuredPRD` (appends a
-      version, descriptive editSummary, undoable via version history). All
+      (and the feature confirm toggle) is a PRD edit through
+      `editSpineStructuredPRD` with `changeSource: 'decision_edit'` plus a
+      `decisionDelta` count (confirmed/corrected/reopened). **Consecutive
+      decision edits amend the latest spine version in place** instead of
+      appending one per click — same id/`createdAt`; `provenance.decisionCounts`
+      merges; `editSummary` is recomputed via the pure `buildDecisionEditSummary`
+      (`src/lib/derive/prdDecisions.ts` — the first edit's specific summary
+      survives alone, ≥2 coalesced edits switch to a deterministic aggregate
+      like "Confirmed 2 decisions · corrected 1"); the single matching `Edited`
+      history event is rewritten in place, never duplicated. N consecutive
+      confirms = 1 version — this is also the localStorage-quota fix (every
+      appended version used to carry a full `responseText` + `structuredPRD`
+      clone). **The coalesce chain breaks** (the next decision edit appends
+      normally) when the latest version's provenance isn't `decision_edit`, the
+      latest is `isFinal`, the edited version isn't the latest, or **any
+      `ArtifactVersion` carries a spine `sourceRef` to the latest version id**
+      (an artifact was generated against it — amending under a referenced id
+      would let the freshness engine read changed content as "current"; e.g.
+      finalize → generate → unfinalize → confirm, or an early design-system run
+      against a decision-edit version). A **"Confirm all (N)"** control in the
+      Decisions tab (inline two-step confirm) confirms every remaining
+      unresolved assumption in ONE call → one version. Undo remains available
+      via version history. All
       derivations (`sortAssumptionsByConfidence`, `splitAssumptions`,
       `deriveDecisionLog`, and `isDisplayableFeatureId`) are pure/read-side in
       `src/lib/derive/prdDecisions.ts`, which re-exports `resolveScopeFeature`
@@ -141,8 +200,10 @@
       section duplicated the summary's Build First / Build Next buckets and
       was removed from BOTH renderers (`StructuredPRDView` +
       `renderPremiumMarkdown`); the scope *rationale* (`mvpScope.rationale`)
-      now renders as the Decision callout at the top of
-      `ImplementationSummarySection`, and the summary buckets are **uncapped**
+      now renders as the Decision callout at the top of the Implementation
+      Summary block (rendered inline in `StructuredPRDView` — the standalone
+      `ImplementationSummarySection` component was removed as dead code; the
+      derivation lib below is unaffected), and the summary buckets are **uncapped**
       (every tagged MVP/V1 feature appears). `deriveImplementationSummary`
       (`src/lib/derive/implementationSummary.ts`) buckets by feature
       `tier`/`priority` when present; when a PRD has **no** tier/priority tags
@@ -301,17 +362,34 @@
     and the external copy-prompt, keeping the project visually consistent. The
     `DesignSystemRenderer` shows a banner explaining this coupling and that
     regenerating may shift downstream mockups/screen prompts.
-    - **Visual direction is requested at output generation, not during product
-      reasoning.** New projects may still carry the backward-compatible
-      `needsDesignSetup` flag, but the Plan stage never swaps the PRD/progress
-      view for design setup. When the user explicitly chooses **Generate build
-      foundation**, `DesignSystemPresetChoice` appears if no preset exists.
-      Choosing calls `setProjectDesignSystemPreset` (which also clears
-      `needsDesignSetup`) and then begins output generation. This prevents an
-      aesthetic decision from interrupting problem/scope reasoning while still
-      ensuring visual outputs have a deliberate direction. The reusable
-      `DesignSetupStep`, recommendation, and preference helpers remain for
-      other surfaces but are not a live-workspace gate.
+    - **Setup-stage selection (`src/components/setup/DesignSetupStep.tsx`) is
+      the primary picker.** New projects stamp `Project.needsDesignSetup: true`
+      in `createProject`; while that flag is set and no preset is chosen, the
+      workspace PRD stage renders `DesignSetupStep` **instead of** the PRD/
+      progress view — after the preflight clarification flow (if any) completes
+      and therefore exactly while PRD generation runs in the background (the
+      PRD run is untouched; the step is purely a view swap, so generation never
+      waits on the choice). Gating is the pure, unit-tested
+      `shouldShowDesignSetup` (`src/lib/designSetup.ts`): never for legacy
+      projects (no flag), the demo, blocked spines, or failed runs — full
+      (`generationError`) *and* partial (`generationMeta.failedSections`;
+      plus the transient `hasFailedSection` guard in `ProjectWorkspace`) —
+      because the error card / incomplete-PRD banner and their retry
+      affordances must stay reachable. The step shows static
+      `previewTokens`-driven preview cards (no AI/image calls), a rule-based
+      **Recommended** badge (`src/lib/designPresetRecommendation.ts` — keyword
+      scoring over idea + clarification answers, `saas_minimal` fallback), and
+      preselects the user's saved **default preset**
+      (`src/lib/designPresetPreference.ts`, localStorage
+      `SYNAPSE_DEFAULT_DESIGN_PRESET`, written only via the explicit "Use this
+      as my default" checkbox). Choosing calls `setProjectDesignSystemPreset`
+      (which also clears `needsDesignSetup` — from any picker); "Decide later"
+      calls `markDesignSetupComplete` and defers to the finalize gate.
+    - **The Mark-as-Final gate (`DesignSystemPresetChoice` in
+      `ProjectWorkspace`) is now the fallback**, still shown when a real
+      project reaches finalize with no preset (setup skipped, or a legacy
+      project) — so visual artifact generation still never starts without an
+      explicit preset decision.
     - **Post-finalization re-selection.** The preset is **no longer one-time**.
       Because the Mark-as-Final gate only fires once (and never for projects
       finalized before presets existed), the **Design System artifact** carries a
@@ -343,14 +421,39 @@
       screens/mockups. Do **not** re-add per-asset lock icons to downstream
       rows.
     - **Mockup-drift prompt.** Regenerating the design system produces a new
-      `tokensHash`, which `stalenessSlice` already uses to flip dependent mockups
-      to `possibly_outdated` (the auto-flag). On top of that, the Mockups view in
+      `tokensHash`, which the canonical freshness evaluator surfaces as a
+      `design_tokens_changed` reason (flipping dependent mockups to
+      `needs_update`). On top of that, the Mockups view in
       `ArtifactWorkspace` renders an amber **"Design system changed … Regenerate
       the mockups"** banner when the mockup's recorded design_system
       `anchorInfo` (tokensHash) differs from the project's current preferred
       design system (`selectPreferredDesignSystem`), wired to the existing mockup
       regenerate-confirm. Mockup *images* are keyed by the new mockup version id,
       so the user must regenerate to pull the new visual direction through.
+    - **Early design-system generation.** `artifactJobController.ensureDesignSystemForSpine(args)`
+      generates the design_system artifact **in the background as soon as a
+      preset is chosen AND the PRD settles cleanly**, so a real run rarely
+      leaves the user watching design_system "generating" after finalize.
+      Triggered by one `ProjectWorkspace` effect covering both orderings
+      (preset picked mid-generation → fires when `generationPhase` flips to
+      `'complete'`; preset picked after generation → fires on the preset
+      change). Every gate is a **silent early-return, never a throw** (this
+      runs from an effect): missing `canGenerateArtifacts` capability (covers
+      the demo), `evaluateSpineGenerationGate` (safety-blocked / no PRD /
+      unacknowledged-incomplete PRD), a missing Gemini key (`hasGeminiKey` — an
+      early run would just burn a guaranteed failure), the slot already done
+      for this spine, and an already-active run (idempotent). Failures are
+      recorded silently on the slot; finalize self-heals by regenerating.
+      `startAll`'s own `isSlotDoneForSpine` check then skips the
+      already-generated slot on finalize. **Single-run chaining
+      (`RunState.single`):** `ensureDesignSystemForSpine` and `retrySlot`
+      register their run as `single`; if `startAll` (finalize) is called while
+      a `single` run is still in flight for the same spine, it **chains**
+      (`existing.promise.finally(() => startAll(args))`) instead of silently
+      no-op'ing — this also fixed a latent retrySlot-then-finalize race. A full
+      run (`startAll`/`regenerateSlots`) still no-ops a concurrent `startAll` as
+      before (idempotent). New generation entry points that can overlap a
+      single-slot run must follow this chaining pattern.
   - **Canonical PRD Spine (`src/lib/canonicalPrdSpine.ts`) — the primary,
     authoritative context for artifact generation.** `buildCanonicalPrdSpine(prd,
     options)` is a **pure, deterministic** builder (NEVER an LLM call) that
@@ -370,7 +473,13 @@
     on final settle (`updateSpineStructuredPRD`, only when `generationMeta` is
     present — a diagnostic/diffing copy; artifact generation always **rebuilds it
     lazily** from `structuredPRD` so old projects and post-edit PRDs stay
-    consistent). In `generateCoreArtifact` the prompt is assembled by the pure,
+    consistent). **`editSpineStructuredPRD` (every user edit, decision edit, and
+    section retry) explicitly drops the inherited `canonicalSpine`** on the new/
+    amended version — it goes stale the moment `structuredPRD` changes, nothing
+    reads `SpineVersion.canonicalSpine` besides the diagnostic copy, and
+    dropping it keeps edit versions smaller (relevant to the same
+    localStorage-quota concern the decision-edit coalescing above addresses).
+    In `generateCoreArtifact` the prompt is assembled by the pure,
     unit-tested **`src/lib/services/artifactPromptBuilder.ts`** (`buildArtifactPrompt`)
     with an explicit, machine-checkable **source hierarchy** — labeled sections in
     a fixed authority order: **`## TASK` → `## SOURCE HIERARCHY — READ FIRST`
@@ -438,18 +547,19 @@
     fallback) → the manual prompt+upload sheet (`MockupScreenUpload`, reusing the
     IDB-backed `screenInventoryImageStore` keyed by the mockup version id);
     otherwise the OpenAI gpt-image-2 generator (`MockupScreenImage`).
-    `MockupImageStatusChip` summarizes per-version status (AI-generated /
-    uploaded / awaiting). **Two-phase completion:** a mockup has a SPEC phase
+    **Two-phase completion:** a mockup has a SPEC phase
     (the ArtifactVersion, marked done by the job controller as soon as the spec
     lands) and an independent IMAGE phase (one render per screen, async, can
     partially fail). `computeMockupImageCompletion` (`src/lib/mockupImageCompletion.ts`,
     pure) derives the visual status (`none`/`generating`/`partial`/`complete` +
     `failedScreenIds`) from per-screen image results so the UI never presents a
-    mockup as fully complete when images failed: `MockupImageStatusChip` shows a
-    red "Images incomplete · N failed" state, and `MockupViewer`'s header swaps
-    the flat "AI Generated" badge for the live status and renders a
-    "Retry failed images" banner (per-screen retry already exists in
-    `MockupScreenImage`). Image failures are tracked in the session-scoped
+    mockup as fully complete when images failed: `MockupViewer`'s header reads
+    this directly and swaps the flat "AI Generated" badge for a red
+    "Images incomplete · N failed" state, rendering a "Retry failed images"
+    banner (per-screen retry already exists in `MockupScreenImage`). (The
+    standalone `MockupImageStatusChip` component that used to render this state
+    was unused/dead — `MockupViewer` never consumed it — and has been removed;
+    the derivation lib is unchanged.) Image failures are tracked in the session-scoped
     `mockupImageStore` `errors`/`inFlight` maps (transient — a reload re-attempts
     on view). The Settings section is `settings/ArtifactModelsSection.tsx`,
     now the single place PRD **and** artifact models are configured: the PRD row
@@ -485,8 +595,27 @@
     **ER-style diagram**
     (`EntityGraph`) that mirrors the artifact dependency graph / user-flow
     diagrams (rounded node cards, deterministic layered SVG layout, directional
-    cardinality-labelled edges, click-a-node-to-open-its-card), and
-    **collapsible entity cards** (`EntityCard`) whose expanded state shows
+    cardinality-labelled edges, click-a-node-to-open-its-card), and the
+    **Entities browser** — a scannable, low-noise entity list (redesigned
+    2026-07). It is deliberately minimal: a section header ("Entities" + a live
+    entity count) and then the entities themselves — **no search box, no
+    group-by-category toggle, and no expand-all control** (all removed by owner
+    request as unnecessary noise on this surface). A model spanning **more than
+    one derived category is always grouped** into **connected, soft-tinted
+    `CategoryHeader` bands** (icon tile + name + count pill — replacing the old
+    detached category pill + horizontal rule; band tint from
+    `CATEGORY_STYLES[category].band`/`.count`); a single-category model renders as
+    a flat list (no band) with each card showing its own category chip. Each
+    **collapsible entity card** (`EntityCard`) shows, collapsed: icon + name +
+    a small set of high-value **status chips** (`EntityAttributeBadges` — only
+    Contains PII / User-facing-or-System / mutability / No PII, in that priority;
+    "Indexed" is deliberately NOT a status chip since it duplicates the footer
+    index count) that sit on the name row on desktop and wrap below it on mobile,
+    a 2-line-clamped description, and a **quiet, pluralised metadata footer**
+    (`CountChip`: "1 field" / "2 fields", "1 relationship", "1 privacy rule",
+    "1 index" — neutral bordered chips, rose only for the privacy warning). The
+    expanded/selected card carries a subtle indigo accent border + tint (state is
+    never colour-only — border + ring + elevation + chevron rotation) and shows
     grouped field tables (colour-coded type chips, required/indexed markers) and
     compact **inspector rows** (`InspectorRow`) for relationships / constraints /
     privacy / indexes in a fixed colour language (relationship=blue,
@@ -500,7 +629,7 @@
     unresolved/self references separately, and derives conservative entity
     **categories** (`core`/`user_config`/`generated`/`system`/`external`, from
     userFacing/mutability/integration-shaped signals only) used for the optional
-    "Group by category" swimlanes and node accents. **Relationship-edge labels
+    "Group by category" entity-list grouping and node accents. **Relationship-edge labels
     never overlap entity cards:** `EntityGraph` places each verb+cardinality pill
     with the pure, unit-tested **`placeEdgeLabels`** collision solver (also in
     `dataModelGraph.ts`) — each label starts on its edge midpoint (between-row
@@ -518,17 +647,20 @@
     (the `prdVersionLabel` prop is passed only to `implementation_plan` now). Do
     **not** change `dataModelMarkdown.ts`'s parser output shape without
     re-checking `dataModelGraph.ts`, which consumes its `ParsedEntity.callouts`.
-    The `component_inventory` renderer is a mobile-first, searchable
-    component library (sticky search + category/complexity/used-in
-    filters, expandable cards with live previews) decomposed under
-    `src/components/renderers/componentInventory/`. Its schema/types carry
-    optional `accessibility`, `previewType`, and per-prop `required`
-    fields (all backward-compatible — older saved inventories lack them);
-    when absent, `inferPreview.ts` derives a `previewType` and a
-    heuristic, review-flagged accessibility contract at render time so
-    every card still shows a preview and a dedicated a11y block.
-    `componentInventoryParse.ts` round-trips all these fields through
-    markdown.
+    `component_inventory` (UI Components) is a **hidden artifact** (see
+    "Post-finalization transition" below) with no reachable render UI — the
+    old mobile-first searchable component-library renderer (sticky search +
+    category/complexity/used-in filters, expandable cards with live previews,
+    under `src/components/renderers/componentInventory/`) was removed as dead
+    code (`ArtifactWorkspace`'s `slotMetas` filters hidden subtypes out of the
+    sidebar, so `selected` can never hold `component_inventory` and the
+    dispatch branch was unreachable). Generation, storage, and parsing are
+    unaffected: the artifact still generates (mockups softly consume it for
+    per-screen `componentRefs`) and its schema/types (optional `accessibility`,
+    `previewType`, per-prop `required` fields, all backward-compatible) still
+    round-trip through markdown via `src/lib/componentInventoryParse.ts`, which
+    remains in place for that purpose even with no renderer left to consume it
+    directly.
     **Artifact in-page navigation** is a shared, collapsible **Artifact
     Outline** — `src/components/ArtifactOutlineNav.tsx` (presentational/
     controlled) + `src/lib/useArtifactOutline.ts` (scroll-spy via
@@ -537,30 +669,29 @@
     navigator: a numbered list/card, subtle purple active highlight + a
     "Current section/entity" badge, `collapseOnSelect` on mobile (passed
     `isMobile`) with a floating re-open button. Used by the **Design System**
-    (sections), **Data Model** (entities), and **Developer Prompts**
-    (`prompt_pack`, prompts) renderers, which anchor each section with a
-    `scroll-mt-*` id matching an outline item. This **replaced the old
-    wrapping "pill" nav** (`SectionTabs`) on the first two pages and the old
-    permanent left rail on Developer Prompts — do not reintroduce pills or a
-    side rail there; `SectionTabs` survives only in the Implementation Plan
-    renderer's legacy-markdown fallback path. When a document-style artifact
-    needs in-page nav, reuse
+    (sections) and **Data Model** (entities) renderers, which anchor each
+    section with a `scroll-mt-*` id matching an outline item. This **replaced
+    the old wrapping "pill" nav** (the deleted `SectionTabs`) on both pages — do
+    not reintroduce pills there. The Implementation Plan renderer's
+    legacy/adapter-null fallback is now plain markdown + a Convert-to-Tasks
+    action row (no milestone cards, no in-page nav). When a document-style
+    artifact needs in-page nav, reuse
     `ArtifactOutlineNav`/`useArtifactOutline` rather than introducing another
     navigation style.
-    The `prompt_pack` (**Developer Prompts**) renderer
-    (`PromptPackRenderer.tsx`) survives only for legacy persisted artifacts
-    (the subtype is retired — no sidebar row, no new generation): a vertical
-    document driven by the shared outline (one card per `### N. Title`), with
-    Edit + Copy Prompt actions and a per-prompt `promptEdits` metadata
-    overlay. Its markdown parser lives in
-    `src/lib/services/promptPackParser.ts`, shared with the implementation-
-    plan adapter (which is how legacy Developer Prompts surface inside the
-    consolidated view). **Generated prompts are agent-agnostic** — neither
-    the legacy prompt_pack prompt nor the implementation_plan prompt-pack
-    instructions (`coreArtifactService.ts`) may name or recommend a specific
-    coding agent (Cursor, Claude Code, ChatGPT, Copilot). `generatedAt`
-    (version `createdAt`) and `versionNumber` thread through
-    `ArtifactContentRenderer`.
+    The standalone `prompt_pack` (**Developer Prompts**) renderer
+    (`PromptPackRenderer.tsx`, formerly a vertical document of prompt cards
+    with Edit + Copy actions and a per-prompt `promptEdits` overlay, driven by
+    the shared outline) has been **deleted as unreachable** — the subtype is
+    retired (no sidebar row, no new generation), so `ArtifactContentRenderer`
+    had no dispatch path that could ever render it. Legacy `prompt_pack`
+    content is **not lost**: it still surfaces read-only inside the
+    consolidated **Implementation Plan** view via
+    `implementationPlanAdapter.ts`'s "Unassigned Prompt Packs" grouping. The
+    markdown parser (`src/lib/services/promptPackParser.ts`) is shared between
+    the two and remains in place. **Generated prompts are agent-agnostic** —
+    neither the legacy prompt_pack prompt nor the implementation_plan
+    prompt-pack instructions (`coreArtifactService.ts`) may name or recommend a
+    specific coding agent (Cursor, Claude Code, ChatGPT, Copilot).
   - `branchService.ts` — branch consolidation back into the spine.
   - `preflightService.ts` — optional pre-PRD clarification (see "Preflight
     clarification" below). `generatePreflightQuestions()` (safety-gated) and

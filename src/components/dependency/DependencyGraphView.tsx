@@ -1,32 +1,31 @@
 import { useMemo, useState } from 'react';
 import {
     AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle,
-    Code2, Database, ExternalLink, FileText, Image, Info, Loader2, Package, Palette,
-    ListChecks, PencilLine, RefreshCcw, ShieldCheck, Waypoints, X,
+    Code2, Database, ExternalLink, FileText, Image, Info, ListChecks, Loader2, Package, Palette,
+    PencilLine, RefreshCcw, ShieldCheck, Waypoints, X,
 } from 'lucide-react';
 import { useProjectStore } from '../../store/projectStore';
 import { artifactJobController } from '../../lib/services/artifactJobController';
-import { selectPreferredDesignSystem } from '../../lib/designTokens';
 import {
     buildArtifactDependencyGraph,
     computeDisplayEdges,
     computeDownstreamImpacts,
     computeGraphLayout,
     computeUpdateOrder,
-    evaluateDependencyGraph,
     getDependencyNode,
     getDirectDependencies,
-    type DependencyEvaluationInput,
     type DependencyNodeEvaluation,
     type DependencyNodeId,
     type DependencyNodeStatus,
 } from '../../lib/artifactDependencyGraph';
-import { findFeatureReferences, makeSpineChangeResolver } from '../../lib/spineChangeAnalysis';
+import { useProjectFreshness } from '../../hooks/useProjectFreshness';
+import { DEPENDENCY_STATUS_LABELS } from '../../lib/artifactFreshness';
+import { findFeatureReferences } from '../../lib/spineChangeAnalysis';
 import { OutputAlignmentBadge } from '../OutputAlignmentStatus';
 import type { OutputAlignment } from '../../lib/planning/outputAlignment';
-import type {
-    ArtifactSlotKey, GenerationStatus, ProjectPlatform, StructuredPRD,
-} from '../../types';
+import type { ArtifactSlotKey, ProjectPlatform, StructuredPRD } from '../../types';
+import { useProjectCapabilities } from '../../hooks/useProjectCapabilities';
+import { ConfirmDialog } from '../common/ConfirmDialog';
 
 interface DependencyGraphViewProps {
     projectId: string;
@@ -58,16 +57,6 @@ const CARD_H = 86;
 const GAP_X = 28;
 const ROW_GAP = 64;
 
-const STATUS_LABELS: Record<DependencyNodeStatus, string> = {
-    source: 'Source of truth',
-    up_to_date: 'Up to date',
-    needs_update: 'Review required',
-    update_recommended: 'Review recommended',
-    generating: 'Generating…',
-    error: 'Failed',
-    missing: 'Not generated',
-};
-
 const STATUS_PILL_CLASSES: Record<DependencyNodeStatus, string> = {
     source: 'bg-indigo-50 text-indigo-700 border-indigo-200',
     up_to_date: 'bg-green-50 text-green-700 border-green-200',
@@ -92,7 +81,7 @@ function StatusPill({ status }: { status: DependencyNodeStatus }) {
     return (
         <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-full border text-[11px] font-medium ${STATUS_PILL_CLASSES[status]}`}>
             <StatusIcon status={status} />
-            {STATUS_LABELS[status]}
+            {DEPENDENCY_STATUS_LABELS[status]}
         </span>
     );
 }
@@ -118,11 +107,17 @@ type ViewMode = 'graph' | 'impact';
 export function DependencyGraphView({
     projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, onOpenNode, onOpenUpdatePlan,
 }: DependencyGraphViewProps) {
-    const {
-        getArtifacts, getPreferredVersion, getSpineVersions, getArtifactVersions, getProjectOutputAlignment, getJob,
-    } = useProjectStore();
+    const capabilities = useProjectCapabilities(projectId);
+    const { getPreferredVersion, getSpineVersions, getArtifactVersions, getProjectOutputAlignment, getJob } = useProjectStore();
 
-    const graph = useMemo(() => buildArtifactDependencyGraph(), []);
+    // Freshness comes from the ONE canonical seam — the same input assembly and
+    // evaluator (evaluateDependencyGraph) every other surface consumes — so the
+    // graph can never disagree with the artifact headers, export manifest, or
+    // update plan. The hook memoizes the evaluation and attaches its own
+    // change-aware resolver (prd_changed reasons carry a changeSummary).
+    const { graph, evaluations, artifactIdBySlot } = useProjectFreshness(projectId);
+    const outputAlignment = getProjectOutputAlignment(projectId);
+    const alignmentByNode = new Map(outputAlignment.outputs.map(item => [item.nodeId, item]));
     const layout = useMemo(() => computeGraphLayout(graph), [graph]);
     const displayEdges = useMemo(() => computeDisplayEdges(graph), [graph]);
 
@@ -134,60 +129,16 @@ export function DependencyGraphView({
         { title: string; order: DependencyNodeId[] } | null
     >(null);
 
-    // --- evaluation input from live store data --------------------------------
+    // Spines + live job are still read directly: the PRD history list, the
+    // "mark up to date" target spine, and the jobActive gate.
     const spines = getSpineVersions(projectId);
     const latestSpine = spines.find(s => s.isLatest);
     const job = getJob(projectId);
-    const coreArtifacts = getArtifacts(projectId, 'core_artifact');
-    const mockupArtifact = getArtifacts(projectId, 'mockup')[0];
-    const currentDesign = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
-    const outputAlignment = getProjectOutputAlignment(projectId);
-    const alignmentByNode = new Map(outputAlignment.outputs.map(item => [item.nodeId, item]));
 
-    const snapshots: DependencyEvaluationInput['snapshots'] = {};
-    const slotStatus: Partial<Record<ArtifactSlotKey, GenerationStatus>> = {};
-    const artifactIdByNode = new Map<DependencyNodeId, string>();
-    for (const node of graph.nodes) {
-        if (node.id === 'prd') continue;
-        const slotKey = node.id as ArtifactSlotKey;
-        const artifact = slotKey === 'mockup'
-            ? mockupArtifact
-            : coreArtifacts.find(a => a.subtype === slotKey && a.status !== 'archived');
-        const preferred = artifact ? getPreferredVersion(projectId, artifact.id) : undefined;
-        if (artifact && preferred) {
-            artifactIdByNode.set(node.id, artifact.id);
-            snapshots[slotKey] = {
-                artifactId: artifact.id,
-                version: {
-                    id: preferred.id,
-                    versionNumber: preferred.versionNumber,
-                    createdAt: preferred.createdAt,
-                    sourceRefs: preferred.sourceRefs,
-                    provenance: preferred.provenance,
-                    metadata: preferred.metadata,
-                },
-            };
-        }
-        const live = job?.slots[slotKey]?.status;
-        if (live && live !== 'idle') slotStatus[slotKey] = live;
-    }
-
-    // Change-aware staleness: resolves "what changed since spine X" against
-    // the latest spine (memoized per spine pair inside the resolver).
-    const spineChangeFor = useMemo(
-        () => makeSpineChangeResolver(spines, latestSpine?.id),
-        [spines, latestSpine?.id],
-    );
-
-    const evaluations = evaluateDependencyGraph(graph, {
-        spineVersionIds: spines.map(s => s.id),
-        latestSpineId: latestSpine?.id,
-        latestSpineProvenance: latestSpine?.provenance,
-        currentDesignTokensHash: currentDesign?.tokensHash,
-        snapshots,
-        slotStatus,
-        spineChangeFor,
-    });
+    // node id → artifact id (content lookup / mark-current / history). The PRD
+    // node has no backing artifact.
+    const artifactIdOf = (id: DependencyNodeId): string | undefined =>
+        id === 'prd' ? undefined : artifactIdBySlot[id as ArtifactSlotKey];
 
     const jobActive = !!job && Object.values(job.slots).some(
         s => s && (s.status === 'generating' || s.status === 'queued'),
@@ -196,6 +147,7 @@ export function DependencyGraphView({
     const startArgs = { projectId, spineVersionId, prdContent, structuredPRD, projectPlatform };
 
     const runUpdates = (order: DependencyNodeId[]) => {
+        if (!capabilities.canGenerateArtifacts) return;
         const slots = order.filter((id): id is ArtifactSlotKey => id !== 'prd');
         if (slots.length === 0) return;
         if (slots.length === 1) {
@@ -219,6 +171,7 @@ export function DependencyGraphView({
         if (id === 'prd') return;
         setUpdateConfirm({ title: `Update ${titleOf(id)}`, order: [id] });
     };
+
     // --- canvas geometry --------------------------------------------------------
     const maxCols = Math.max(...layout.rows.map(r => r.length));
     const canvasW = maxCols * CARD_W + (maxCols - 1) * GAP_X;
@@ -262,11 +215,11 @@ export function DependencyGraphView({
     const canMarkCurrent = (id: DependencyNodeId): boolean => {
         const ev = evalOf(id);
         return !!latestSpine
-            && artifactIdByNode.has(id)
+            && !!artifactIdOf(id)
             && (ev?.status === 'needs_update' || ev?.status === 'update_recommended');
     };
     const markCurrentNode = (id: DependencyNodeId) => {
-        const artifactId = artifactIdByNode.get(id);
+        const artifactId = artifactIdOf(id);
         if (!artifactId || !latestSpine) return;
         useProjectStore.getState().markArtifactCurrentForSpine(projectId, artifactId, latestSpine.id);
     };
@@ -277,7 +230,7 @@ export function DependencyGraphView({
         if (!selectedId || selectedId === 'prd' || !selectedEval) return [];
         const summary = selectedEval.reasons.find(r => r.kind === 'prd_changed')?.changeSummary;
         if (!summary || summary.features.removed.length === 0) return [];
-        const artifactId = artifactIdByNode.get(selectedId);
+        const artifactId = artifactIdOf(selectedId);
         const content = artifactId ? getPreferredVersion(projectId, artifactId)?.content ?? '' : '';
         if (!content) return [];
         const candidate = [{ artifactId: artifactId!, title: titleOf(selectedId), content }];
@@ -431,7 +384,7 @@ export function DependencyGraphView({
                                             ? 'Source of truth'
                                             : ev?.versionNumber !== undefined
                                                 ? `v${ev.versionNumber}${ev.generatedAt ? ` · ${new Date(ev.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}`
-                                                : STATUS_LABELS[status]}
+                                                : DEPENDENCY_STATUS_LABELS[status]}
                                     </div>
                                     <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
                                         {node.id === 'prd'
@@ -439,8 +392,8 @@ export function DependencyGraphView({
                                             : alignment
                                                 ? <OutputAlignmentBadge alignment={alignment} />
                                                 : impacted
-                                                ? <ImpactedPill />
-                                                : <StatusPill status={status} />}
+                                                    ? <ImpactedPill />
+                                                    : <StatusPill status={status} />}
                                     </div>
                                 </button>
                             );
@@ -474,13 +427,13 @@ export function DependencyGraphView({
                     onOpenUpdatePlan={
                         onOpenUpdatePlan
                         && (selectedId === 'screen_inventory' || selectedId === 'user_flows' || selectedId === 'data_model')
-                        && artifactIdByNode.has(selectedId)
+                        && artifactIdOf(selectedId) !== undefined
                         && alignmentByNode.get(selectedId)?.state !== 'aligned'
-                            ? () => onOpenUpdatePlan(artifactIdByNode.get(selectedId)!)
+                            ? () => onOpenUpdatePlan(artifactIdOf(selectedId)!)
                             : undefined
                     }
-                    onUpdate={() => confirmSingleUpdate(selectedId)}
-                    onMarkCurrent={canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
+                    onUpdate={capabilities.canGenerateArtifacts ? () => confirmSingleUpdate(selectedId) : undefined}
+                    onMarkCurrent={capabilities.canReviewArtifacts && canMarkCurrent(selectedId) ? () => markCurrentNode(selectedId) : undefined}
                     removedFeatureRefs={selectedRemovedFeatureRefs}
                     jobActive={jobActive}
                     titleOf={titleOf}
@@ -492,8 +445,8 @@ export function DependencyGraphView({
                                 createdAt: s.createdAt,
                                 changeSource: s.provenance?.changeSource,
                             })).reverse()
-                            : (artifactIdByNode.has(selectedId)
-                                ? [...getArtifactVersions(projectId, artifactIdByNode.get(selectedId)!)]
+                            : (artifactIdOf(selectedId)
+                                ? [...getArtifactVersions(projectId, artifactIdOf(selectedId)!)]
                                     .sort((a, b) => b.versionNumber - a.versionNumber)
                                     .map(v => ({
                                         id: v.id,
@@ -508,60 +461,37 @@ export function DependencyGraphView({
 
             {/* Update confirm modal */}
             {updateConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setUpdateConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title={updateConfirm.title}
+                    cancelLabel="Cancel"
+                    confirmLabel={
+                        <>
+                            <RefreshCcw size={13} />
+                            {updateConfirm.order.length === 1 ? 'Update' : `Update ${updateConfirm.order.length} artifacts`}
+                        </>
+                    }
+                    onCancel={() => setUpdateConfirm(null)}
+                    onConfirm={() => runUpdates(updateConfirm.order)}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={e => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="dep-update-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="dep-update-title" className="text-base font-bold text-neutral-900">
-                                {updateConfirm.title}
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                {updateConfirm.order.length === 1
-                                    ? `Regenerates ${titleOf(updateConfirm.order[0])} as a new version.`
-                                    : 'Regenerates these artifacts in dependency order, so each uses the reviewed upstream version:'}
-                            </p>
-                            {updateConfirm.order.length > 1 && (
-                                <ol className="mt-2 space-y-1">
-                                    {updateConfirm.order.map((id, i) => (
-                                        <li key={id} className="flex items-center gap-2 text-sm text-neutral-800">
-                                            <span className="w-4 text-right text-[11px] text-neutral-400">{i + 1}.</span>
-                                            {titleOf(id)}
-                                        </li>
-                                    ))}
-                                </ol>
-                            )}
-                            <p className="text-xs text-neutral-500 mt-2">
-                                Current versions remain available in version history.
-                            </p>
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setUpdateConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => runUpdates(updateConfirm.order)}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <RefreshCcw size={13} />
-                                {updateConfirm.order.length === 1 ? 'Update' : `Update ${updateConfirm.order.length} artifacts`}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        {updateConfirm.order.length === 1
+                            ? `Regenerates ${titleOf(updateConfirm.order[0])} as a new version.`
+                            : 'Regenerates these artifacts in dependency order, so each uses the reviewed upstream version:'}
+                    </p>
+                    {updateConfirm.order.length > 1 && (
+                        <ol className="mt-2 space-y-1">
+                            {updateConfirm.order.map((id, i) => (
+                                <li key={id} className="flex items-center gap-2 text-sm text-neutral-800">
+                                    <span className="w-4 text-right text-[11px] text-neutral-400">{i + 1}.</span>
+                                    {titleOf(id)}
+                                </li>
+                            ))}
+                        </ol>
+                    )}
+                    <p className="text-xs text-neutral-500 mt-2">
+                        Current versions remain available in version history.
+                    </p>
+                </ConfirmDialog>
             )}
         </div>
     );
@@ -716,7 +646,7 @@ interface DetailPanelProps {
     onSelect: (id: DependencyNodeId) => void;
     onOpenNode: (id: DependencyNodeId) => void;
     onOpenUpdatePlan?: () => void;
-    onUpdate: () => void;
+    onUpdate?: () => void;
     /** Present only when the node is stale and can be confirmed current. */
     onMarkCurrent?: () => void;
     /** Removed-feature names this artifact's content still mentions. */
@@ -745,7 +675,7 @@ function DetailPanel({
     const Icon = NODE_ICONS[nodeId] ?? Package;
     const deps = getDirectDependencies(graph, nodeId);
     const { direct, indirect } = computeDownstreamImpacts(graph, nodeId);
-    const canUpdate = nodeId !== 'prd';
+    const canUpdate = nodeId !== 'prd' && Boolean(onUpdate);
     const impacted = evaluation.status === 'up_to_date' && evaluation.impactedBy.length > 0;
 
     const TABS: Array<{ key: DetailTab; label: string }> = [
@@ -873,7 +803,7 @@ function DetailPanel({
                             <dl className="space-y-1.5">
                                 <div className="flex items-center justify-between gap-3">
                                     <dt className="text-xs text-neutral-500">Status</dt>
-                                    <dd>{nodeId === 'prd' ? <StatusPill status="source" /> : alignment ? <OutputAlignmentBadge alignment={alignment} /> : <StatusPill status={evaluation.status} />}</dd>
+                                    <dd>{nodeId === 'prd' ? <StatusPill status="source" /> : <StatusPill status={evaluation.status} />}</dd>
                                 </div>
                                 {evaluation.generatedAt !== undefined && (
                                     <div className="flex items-center justify-between gap-3">

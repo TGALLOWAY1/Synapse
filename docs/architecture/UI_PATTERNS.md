@@ -7,9 +7,10 @@
 The core PRD-refinement gesture — highlight PRD text, get a contextual
 action dialog (Clarify / Expand / Specify / Alternative / Replace), spawn
 a history-tracked branch — is detection-source-agnostic and works on
-both desktop and touch. Both PRD renderers (`SelectableSpine.tsx` for
-markdown PRDs, `StructuredPRDView.tsx` for structured PRDs) share one
-pipeline; do not reintroduce per-component `onMouseUp` selection logic.
+both desktop and touch. The selection pipeline now has a single consumer,
+`StructuredPRDView.tsx` (the structured PRD renderer); legacy spines with no
+`structuredPRD` render as read-only markdown with no selection/branch UI. Do
+not reintroduce per-component `onMouseUp` selection logic.
 
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
@@ -133,10 +134,9 @@ spine with no `structuredPRD`, or an incomplete spine that is neither
 acknowledged (`acknowledgeIncomplete`) nor already `isFinal` (the durable record
 of acknowledgement, so resume/retry after reload still work). `startAll` /
 `regenerateSlots` early-return when the gate disallows. On the finalize edge,
-`ProjectWorkspace.handleToggleFinal` interposes readiness and explicit
-"Commit an incomplete working plan?" checkpoints before `markSpineFinal`.
-Output generation remains a later explicit action and passes
-`acknowledgeIncomplete`. Any artifact/mockup
+`ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
+an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
+"Generate anyway" proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
 version generated while `failedSections` is non-empty is stamped
 `metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 
@@ -223,9 +223,8 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
   interaction must remain usable without animation.
 - **Screens** (`screens/`): Idea, SpecGeneration, Refine (reuses the
   Clarify/Expand/Specify/Alternative/Replace action set mirrored from
-  `SELECTION_ACTIONS`), Versions, Assets (the hero — Commit Plan → explicit
-  Generate Build Foundation → sequential output generation → `ArtifactDrawer`
-  previews), Connections
+  `SELECTION_ACTIONS`), Versions, Assets (the hero — Mark as Final →
+  sequential asset generation → `ArtifactDrawer` previews), Connections
   (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared
   pieces in `components/`: `ScreenShell`, `GenerationStep`, `RefineMenu`,
   `ArtifactDrawer` (mobile bottom-sheet / desktop side-drawer, mirrors

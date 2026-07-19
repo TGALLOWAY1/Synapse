@@ -8,7 +8,6 @@ import { createSpineSlice } from './slices/spineSlice';
 import { createBranchSlice } from './slices/branchSlice';
 import { createArtifactSlice } from './slices/artifactSlice';
 import { createFeedbackSlice } from './slices/feedbackSlice';
-import { createStalenessSlice } from './slices/stalenessSlice';
 import { createGenerationJobsSlice } from './slices/generationJobsSlice';
 import { createPrdProgressSlice } from './slices/prdProgressSlice';
 import { createTasksSlice } from './slices/tasksSlice';
@@ -30,7 +29,6 @@ export const useProjectStore = create<ProjectState>()(
             ...createBranchSlice(...a),
             ...createArtifactSlice(...a),
             ...createFeedbackSlice(...a),
-            ...createStalenessSlice(...a),
             ...createGenerationJobsSlice(...a),
             ...createPrdProgressSlice(...a),
             ...createTasksSlice(...a),

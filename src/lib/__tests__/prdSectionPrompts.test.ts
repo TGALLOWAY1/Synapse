@@ -1,11 +1,11 @@
 import { describe, it, expect } from 'vitest';
 import { buildSectionPrompt, SECTION_TITLES } from '../prompts/prdSectionPrompts';
-import { DEFAULT_PRD_SECTIONS, RETIRED_PRD_SECTIONS } from '../services/progressivePrdGeneration';
+import { DEFAULT_PRD_SECTIONS } from '../services/progressivePrdGeneration';
 import type { SectionId } from '../schemas/prdSchemas';
 
 describe('buildSectionPrompt', () => {
     it('returns non-empty system and user strings for all pipeline sections', () => {
-        for (const section of [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS]) {
+        for (const section of DEFAULT_PRD_SECTIONS) {
             const { system, user } = buildSectionPrompt(section.id as SectionId, {
                 idea: 'A task management app for remote teams',
                 upstream: {},
@@ -109,32 +109,17 @@ describe('lean decision-level prompts (detail deferred to artifacts)', () => {
         expect(user).not.toContain('instrumentation?');
     });
 
-    it('retired-section retry prompts omit the lean rubric that would contradict their asks', () => {
-        // The rubric says schemas/state machines "do NOT belong in the PRD" —
-        // a legacy data_model/implementation_plan retry must not receive it.
-        for (const retired of RETIRED_PRD_SECTIONS) {
-            const { system } = buildSectionPrompt(retired.id as SectionId, { idea: 'Test app', upstream: {} });
-            expect(system).not.toContain('QUALITY BAR');
-            expect(system).not.toContain('do NOT belong in the PRD');
-        }
-        // Active sections keep the rubric.
+    it('active sections keep the lean rubric', () => {
         const { system } = buildSectionPrompt('ux_loops', { idea: 'Test app', upstream: {} });
         expect(system).toContain('QUALITY BAR');
     });
 });
 
 describe('SECTION_TITLES', () => {
-    it('covers every active and retired section id', () => {
-        for (const section of [...DEFAULT_PRD_SECTIONS, ...RETIRED_PRD_SECTIONS]) {
+    it('covers every active section id', () => {
+        for (const section of DEFAULT_PRD_SECTIONS) {
             const title = SECTION_TITLES[section.id as SectionId];
             expect(title).toBeTruthy();
-        }
-    });
-
-    it('retired sections are not in the default generation graph', () => {
-        const activeIds = new Set(DEFAULT_PRD_SECTIONS.map((s) => s.id));
-        for (const retired of RETIRED_PRD_SECTIONS) {
-            expect(activeIds.has(retired.id)).toBe(false);
         }
     });
 });

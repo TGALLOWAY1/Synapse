@@ -171,7 +171,9 @@ User prompt → HomePage.handleCreateProject() → PreflightModeChoice
               ↓
               SpineVersion stored, currentStage='prd'
               ↓
-  PRD stage:       SelectableSpine / StructuredPRDView — text selection →
+  PRD stage:       StructuredPRDView (the only interactive view; legacy spines
+                   with no structuredPRD render as read-only ReactMarkdown with
+                   no selection/branch UI) — text selection →
                    branch creation → AI conversation → consolidateBranch()
                    merges into spine (local or doc-wide scope, see
                    ConsolidationModal). Selection → action dialog runs
@@ -203,15 +205,15 @@ rules ("do not re-add X", "never bypass Y") that are easy to violate without it.
 
 | Topic doc | Covers | Read before touching |
 |---|---|---|
-| [docs/architecture/LLM_PIPELINE.md](docs/architecture/LLM_PIPELINE.md) | `geminiClient` transport + LLM Trace Viewer, the PRD DAG pipeline & sections, PRD views / Review & Confirm / Decision Log, consistency review + guards, design-system presets & brief, canonical PRD spine, core artifact services & per-artifact model routing, prompt fragments & the prompt snapshot net, preflight clarification | Anything in `src/lib/services/`, `src/lib/prompts/`, prompts/schemas, PRD generation or rendering, model routing |
+| [docs/architecture/LLM_PIPELINE.md](docs/architecture/LLM_PIPELINE.md) | `geminiClient` transport + LLM Trace Viewer, the PRD DAG pipeline & sections, three-view PRD IA (Overview | Features | Decisions), Review & Confirm / Decision Log, consistency review + guards, design-system presets & brief, canonical PRD spine, core artifact services & per-artifact model routing, prompt fragments & the prompt snapshot net, preflight clarification | Anything in `src/lib/services/`, `src/lib/prompts/`, prompts/schemas, PRD generation or rendering, model routing |
 | [docs/architecture/PLANNING_AND_DECISIONS.md](docs/architecture/PLANNING_AND_DECISIONS.md) | Uncertainty-first planning: Plan → Challenge → Build progression, planning readiness projection, `PlanningRecord` / `DecisionEvent` authority model, assumption import & validation, decision impact previews, the `compareAndAppendStructuredPRD` write barrier, adversarial review engine, downstream update plans | Anything in `src/lib/planning/`, `src/lib/review/`, `src/components/planning/`, `src/components/review/`, `src/components/downstream/`, the review/readiness/downstream store slices |
 | [docs/architecture/SAFETY_AND_VALIDATION.md](docs/architecture/SAFETY_AND_VALIDATION.md) | The safety gate/classifier (`src/lib/safety/`), blocking vs advisory artifact validation, automatic traceability repair, dependency sufficiency gate | Safety policy, artifact validation, generation gating |
 | [docs/architecture/STATE_AND_AUTH.md](docs/architecture/STATE_AND_AUTH.md) | The store slices, generation lifecycle, interrupted-run recovery, persistence/quota, per-user project namespacing, legacy import, account linking, encrypted provider-key vault, key-resolution rules | `src/store/`, auth flows, anything reading/writing credentials |
 | [docs/architecture/PROJECT_SYNC.md](docs/architecture/PROJECT_SYNC.md) | Server-side project storage (`/api/projects`), revision/conflict model, sync orchestrator + UI, recovery bundle, cross-device mockup image sync (Blob refs) | Project sync, `api/projects.js`, `api/_lib/projectsStore.js`, image refs |
-| [docs/architecture/SNAPSHOTS_AND_DEMO.md](docs/architecture/SNAPSHOTS_AND_DEMO.md) | Owner snapshots (all image kinds + wire format), pin-time gate, demo hydration/reset/cache freshness, the demo write boundary | `api/snapshots.js`, `snapshotClient.ts`, anything demo (`DEMO_PROJECT_ID`) |
-| [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, post-commitment transition (Commit Plan → Build), consolidated Implementation Plan (+adapter), Artifact Dependency Graph, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
+| [docs/architecture/SNAPSHOTS_AND_DEMO.md](docs/architecture/SNAPSHOTS_AND_DEMO.md) | Owner snapshots (all image kinds + wire format), mockup-image audit, pin-time gate, demo capability boundary, demo hydration/reset/cache freshness | `api/snapshots.js`, `snapshotClient.ts`, anything demo (`DEMO_PROJECT_ID`) |
+| [docs/architecture/WORKSPACE_AND_ARTIFACTS.md](docs/architecture/WORKSPACE_AND_ARTIFACTS.md) | Artifact sidebar groups, hidden/retired subtypes, post-commitment transition (Commit Plan → Build), consolidated Implementation Plan (+adapter), Artifact Dependency Graph / freshness actions, implementation tasks | `ArtifactWorkspace`, artifact pipeline/job controller, plan rendering, tasks |
 | [docs/architecture/SCREENS_EXPERIENCE.md](docs/architecture/SCREENS_EXPERIENCE.md) | The Screens view: stable screen ids, join layer, screen contracts, readiness/coverage, review workflow (4A), downstream impact (4B), handoff + trace bridge + export (5A–5C), mockup variants (3A–3D), overlays, URL-addressable selection | Anything under `src/components/experience/` or `src/lib/screen*` / `mockupVariant*` |
-| [docs/architecture/VERSIONING_AND_EXPORT.md](docs/architecture/VERSIONING_AND_EXPORT.md) | Export modal + manifest, version history/compare/revert, provenance stamping, staleness UX | Exports, version history, revert, staleness UX |
+| [docs/architecture/VERSIONING_AND_EXPORT.md](docs/architecture/VERSIONING_AND_EXPORT.md) | Export modal + manifest + agent handoff, version history/compare/revert, change-aware staleness, provenance stamping, "Confirm aligned" | Exports, version history, revert, staleness UX |
 | [docs/architecture/UI_PATTERNS.md](docs/architecture/UI_PATTERNS.md) | PRD highlight→branch selection pipeline (desktop+touch), PRD progress timeline, incomplete-PRD gate, `GenerationProgress` modes, interactive product tour, orchestration metrics | Selection/branching UI, progress UIs, `/tour`, `/metrics` |
 
 Standalone design docs (referenced from the topic docs):
@@ -240,18 +242,21 @@ rationale and detail.
    localStorage data may lack them; never require a new field on read.
 4. **Credentials only via `localCredentials.ts`** — never
    `localStorage.getItem('GEMINI_API_KEY')` directly; keys are namespaced per
-   user. New provider call sites route through the credential helpers and never
-   log a key. → STATE_AND_AUTH.md
-5. **The demo project is read-only:** durable project mutations must respect
-   `projectCapabilities.ts` — every persistent store action belongs in
-   `PERSISTENT_STORE_ACTIONS` so `guardProjectStoreActions` can no-op it for
-   `DEMO_PROJECT_ID`; never add raw demo-id checks at call sites.
-   → SNAPSHOTS_AND_DEMO.md, PLANNING_AND_DECISIONS.md
+   user. Pre-generation key gates call `hasGeminiKey()` (vault OR local), never
+   a localStorage-only check. New provider call sites route through the vault
+   and never log a key. → STATE_AND_AUTH.md
+5. **Demo is read-only via one capability policy** (`projectCapabilities.ts`):
+   UI surfaces read `getProjectCapabilities`/`useProjectCapabilities`, domain
+   boundaries call `assertProjectCapability`, and every persistent store action
+   belongs in `PERSISTENT_STORE_ACTIONS` so `guardProjectStoreActions` no-ops
+   it for `DEMO_PROJECT_ID`. Never add raw demo-id checks at call sites or a
+   second demo store. → SNAPSHOTS_AND_DEMO.md, PLANNING_AND_DECISIONS.md
 6. **New persisted state must travel:** adding a persisted collection means
-   wiring the project bundle, snapshot collectors/restorers,
-   `userScope.MERGEABLE_COLLECTIONS`, demo cleanup, and server sync — or it
-   silently won't survive snapshots/sync. → SNAPSHOTS_AND_DEMO.md,
-   PROJECT_SYNC.md
+   wiring `ALL_PROJECT_COLLECTIONS` (`src/lib/projectBundle.ts` — the single
+   list the bundle, sync, recovery, namespace switch, and legacy import all
+   derive from), the snapshot collectors/restorers +
+   `namespaceSnapshotForRestore`, and demo cleanup — or it silently won't
+   survive snapshots/sync. → SNAPSHOTS_AND_DEMO.md, PROJECT_SYNC.md
 7. **Prompts are snapshot-locked:** every major prompt surface is covered by
    `src/lib/__tests__/promptSurfaces.test.ts` — an intentional prompt edit
    updates the snapshot in the same change; an unreviewed snapshot diff is
@@ -261,11 +266,15 @@ rationale and detail.
    never inline capability lists at a surface. The safety gate and the
    incomplete-PRD gate are code-level guardrails; don't bypass their
    chokepoints. → SAFETY_AND_VALIDATION.md
-9. **Staleness stays consistent:** `stalenessSlice` is the staleness engine;
-   the Artifact Dependency Graph evaluator mirrors its rules (e.g. the
-   design-`tokensHash` comparison) — if either rule set changes, update both.
-   System staleness vocabulary stays separate from user review/readiness
-   statuses. → WORKSPACE_AND_ARTIFACTS.md
+9. **One freshness engine:** `evaluateDependencyGraph` via
+   `src/lib/artifactFreshness.ts` (`useProjectFreshness` /
+   `evaluateProjectFreshness`) is THE staleness source — never hand-roll the
+   store→input loop or re-add the deleted `stalenessSlice`. The derived
+   output-alignment projection (`getProjectOutputAlignment`, on the downstream
+   update plan slice) layers planning semantics on top; it never replaces the
+   engine. System freshness vocabulary stays separate from user
+   review/readiness statuses. → WORKSPACE_AND_ARTIFACTS.md,
+   PLANNING_AND_DECISIONS.md
 10. **Read-side layers are derived, never persisted** (Screens join/readiness/
     review-issues/downstream/handoff, dependency graph, planning readiness,
     diffs): pure `src/lib/` modules, unit-tested, honest "estimated/derived"

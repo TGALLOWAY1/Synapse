@@ -100,11 +100,11 @@ export type ProgressiveEvent =
 //
 // The PRD is the product DECISION document — detailed specification belongs to
 // the dedicated downstream artifacts. The former `data_model` and
-// `implementation_plan` sections are retired from the default graph (see
-// RETIRED_PRD_SECTIONS below): the data_model and implementation_plan
-// artifacts own that detail, the PRD-embedded copies duplicated them (two
-// entity lists — domainEntities vs richDataModel.entities — was a standing
-// internal-inconsistency source), and implementationPlan was never rendered.
+// `implementation_plan` sections were removed entirely: the data_model and
+// implementation_plan artifacts own that detail, the PRD-embedded copies
+// duplicated them (two entity lists — domainEntities vs richDataModel.entities
+// — was a standing internal-inconsistency source), and implementationPlan was
+// never rendered. Never re-add them to DEFAULT_PRD_SECTIONS.
 
 // Dependencies are TRUE data dependencies only — a section lists another only
 // when it actually consumes that section's output as prompt context. Sections
@@ -133,21 +133,6 @@ export const DEFAULT_PRD_SECTIONS: PrdSectionTemplate[] = [
     { id: 'quality_risks',        title: SECTION_TITLES.quality_risks,        order: 8,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
     { id: 'metrics_scope',        title: SECTION_TITLES.metrics_scope,        order: 9,  risk: 'low',  estimatedSeconds: 10, dependencies: ['features'] },
 ];
-
-// Sections retired from the DEFAULT generation graph. Kept ONLY so the
-// single-section retry path (prdSectionRetry.ts) can re-run them for legacy
-// PRDs whose generationMeta.failedSections still reference them — their
-// SectionId, prompt builder, slice schema, and title all survive. Never feed
-// these to runDag, and never re-add them to DEFAULT_PRD_SECTIONS: the
-// dedicated data_model / implementation_plan artifacts own that detail now.
-export const RETIRED_PRD_SECTIONS: PrdSectionTemplate[] = [
-    { id: 'data_model',          title: SECTION_TITLES.data_model,          order: 98, risk: 'high', estimatedSeconds: 25 },
-    { id: 'implementation_plan', title: SECTION_TITLES.implementation_plan, order: 99, risk: 'high', estimatedSeconds: 30 },
-];
-
-export const RETIRED_SECTION_IDS: ReadonlySet<string> = new Set(
-    RETIRED_PRD_SECTIONS.map(s => s.id),
-);
 
 /** Lookup of estimated wall-clock seconds per section, derived from DEFAULT_PRD_SECTIONS. */
 export const SECTION_ESTIMATES_S: Record<string, number> = Object.fromEntries(

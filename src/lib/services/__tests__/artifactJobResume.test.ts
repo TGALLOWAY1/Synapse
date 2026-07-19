@@ -4,7 +4,9 @@ import { hasAnyCompletedSlotForSpine } from '../artifactJobController';
 
 beforeEach(() => {
     useProjectStore.setState({
-        projects: {},
+        // The capability boundary treats a missing project as unavailable, so
+        // durable writes need a real project record.
+        projects: { p1: { id: 'p1', name: 'P', createdAt: 1 } as never },
         spineVersions: {},
         historyEvents: {},
         branches: {},

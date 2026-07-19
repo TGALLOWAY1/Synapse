@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
@@ -14,18 +14,20 @@ import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, 
 import { readValidationBlockers } from '../lib/artifactBlockingValidation';
 import { ArtifactContentRenderer } from './renderers';
 import { StructuredPRDView } from './StructuredPRDView';
+import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { MockupViewer } from './mockups/MockupViewer';
 import { MockupErrorBoundary } from './mockups/MockupErrorBoundary';
 import { GenerationProgress } from './GenerationProgress';
 import { MOCKUP_GENERATION_STAGES, getArtifactStages } from './generationStages';
 import { ConvertToTasksModal } from './ConvertToTasksModal';
 import { TaskChecklist } from './tasks/TaskChecklist';
-import { StalenessBadge } from './StalenessBadge';
 import { OutputAlignmentBadge, OutputAlignmentDot, OutputAlignmentNotice } from './OutputAlignmentStatus';
 import { DownstreamUpdatePlanReview } from './downstream/DownstreamUpdatePlanReview';
+import { FreshnessBadge } from './FreshnessBadge';
 import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
+import { ConfirmDialog } from './common/ConfirmDialog';
 import { v4 as uuidv4 } from 'uuid';
 import {
     tryParsePayload, extractMockupSettings, mergeExtraScreens,
@@ -41,7 +43,11 @@ import {
 import { buildReadinessIndex, buildScreenCoverageSummary } from '../lib/screenReadiness';
 import { resolveDataModelForTrace, resolvePlanForTrace } from '../lib/screenArtifactTraceBridge';
 import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../lib/screenReviewWorkflow';
-import { buildMockupVariantCoverageSummary, type GeneratedVariantMap } from '../lib/mockupVariants';
+import { buildMockupVariantCoverageSummary, type GeneratedVariantMap, type MockupImagePresence } from '../lib/mockupVariants';
+import { deriveDefaultImagePresence } from '../lib/mockupImagePresence';
+import { buildScreenScopeKey } from '../lib/mockupImageStore';
+import { useScreenInventoryImageStore } from '../store/screenInventoryImageStore';
+import { slugifyScreenName } from '../lib/screenInventoryImageStore';
 import type { MockupVariantSourceSignature, VariantTrustContext } from '../lib/mockupVariantTrust';
 import { useMockupVariantImageStore } from '../store/mockupVariantImageStore';
 import { ReferenceWarningsPanel } from './experience/ReferenceWarningsPanel';
@@ -53,7 +59,6 @@ import { ScreenDetailView } from './experience/ScreenDetailView';
 import type { ScreenDetailTab } from './experience/ScreenDetailTabs';
 import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
-import { makeSpineChangeResolver } from '../lib/spineChangeAnalysis';
 import type { OutputAlignment } from '../lib/planning/outputAlignment';
 import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../lib/planning/downstreamUpdatePlan';
 import {
@@ -64,10 +69,13 @@ import type {
     PlanningNavigationIntent,
     PlanningReturnTarget,
 } from '../lib/planning/planningNavigation';
+import { useProjectFreshness } from '../hooks/useProjectFreshness';
+import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     GenerationStatus, ProjectTask,
 } from '../types';
+import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
 
 // Stable empty reference for the tasks selector. Returning `[]` literal each
 // call would make Zustand's useSyncExternalStore see a fresh snapshot on every
@@ -275,13 +283,18 @@ export function ArtifactWorkspace({
     initialRegion, initialUpdatePlanId, initialUpdatePlanItemId, onInitialSelectionConsumed,
     onOpenPlanningRecord, onNavigatePlanning,
 }: ArtifactWorkspaceProps) {
+    const capabilities = useProjectCapabilities(projectId);
     const isMobile = useIsMobile();
     const {
-        getArtifacts, getArtifact, getPreferredVersion, getArtifactStaleness, getProjectOutputAlignment, getJob, getProject,
+        getArtifacts, getArtifact, getPreferredVersion, getProjectOutputAlignment, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
         generateDownstreamUpdatePlans,
     } = useProjectStore();
+    // Canonical freshness for every artifact-status surface in this workspace
+    // (version-controls strip, Screens artifact controls, mockup drift banner,
+    // renderer staleness props). One evaluator — no per-surface recomputation.
+    const freshness = useProjectFreshness(projectId);
     // Reactive read of the project's chosen visual direction, so the Design
     // System "Design direction" control re-renders when it changes.
     const designSystemPreset = useProjectStore(s => s.projects[projectId]?.designSystemPreset);
@@ -384,6 +397,15 @@ export function ArtifactWorkspace({
     // invalid/stale id simply misses `byId` and falls back to the list.
     const [searchParams, setSearchParams] = useSearchParams();
     const selectedScreenId = searchParams.get('screen');
+    const prdView = coercePrdView(searchParams.get('prdView'));
+    const setPrdView = (next: PrdViewId) => {
+        setSearchParams(prev => {
+            const p = new URLSearchParams(prev);
+            if (next === 'overview') p.delete('prdView');
+            else p.set('prdView', next);
+            return p;
+        }, { replace: true });
+    };
     const rawScreenTab = searchParams.get('screenTab');
     const screenTab: ScreenDetailTab =
         rawScreenTab === 'flow' || rawScreenTab === 'mockups'
@@ -573,6 +595,45 @@ export function ArtifactWorkspace({
         return map;
     }, [variantImagesMap, mockupVersionId]);
 
+    // SYN-003: authoritative default-mockup image presence, resolved per screen
+    // from the real image stores (AI mockup store + screen-inventory store,
+    // which also holds user-uploaded mockups). List / coverage views used to
+    // never load these (only a mounted MockupScreenImage did), so a screen's
+    // primary Default variant could read "Generated" while no image exists.
+    // Load both here so the derived variant grid gates the claim on a real image.
+    const loadMockupImagesForVersion = useMockupImageStore(s => s.loadForVersion);
+    const mockupImagesMap = useMockupImageStore(s => s.images);
+    const mockupLoadedVersions = useMockupImageStore(s => s.loadedVersions);
+    const loadScreenImagesForVersion = useScreenInventoryImageStore(s => s.loadForArtifactVersion);
+    const screenUploadImagesMap = useScreenInventoryImageStore(s => s.images);
+    const screenUploadHydrated = useScreenInventoryImageStore(s => s.hydrated);
+    useEffect(() => {
+        if (!mockupVersionId) return;
+        void loadMockupImagesForVersion(mockupVersionId);
+        // User-uploaded mockups live in the screen-inventory store keyed by the
+        // MOCKUP version id, so hydrate that too for the uploaded-record fallback.
+        void loadScreenImagesForVersion(mockupVersionId);
+    }, [mockupVersionId, loadMockupImagesForVersion, loadScreenImagesForVersion]);
+    const defaultImagePresenceByScreen = useCallback((screenId: string): MockupImagePresence | undefined => {
+        if (!mockupVersionId) return undefined;
+        const item = screenIndex.byId.get(screenId);
+        const mockupScreen = item?.mockupScreen;
+        if (!mockupScreen) return undefined; // no spec join → presence is moot
+        const scope = buildScreenScopeKey(mockupVersionId, mockupScreen.id);
+        const hasMockupRecord = Object.keys(mockupImagesMap).some(k => k.startsWith(scope));
+        const uploadSlug = slugifyScreenName(mockupScreen.name);
+        const hasUploadedRecord = Object.values(screenUploadImagesMap).some(
+            r => r.artifactVersionId === mockupVersionId && r.screenSlug === uploadSlug,
+        );
+        return deriveDefaultImagePresence({
+            mockupImagesLoaded: mockupLoadedVersions[mockupVersionId] === true,
+            hasMockupRecord,
+            inventoryHydrated: screenUploadHydrated[mockupVersionId] === true,
+            hasUploadedRecord,
+        });
+    }, [mockupVersionId, screenIndex, mockupImagesMap, mockupLoadedVersions,
+        screenUploadImagesMap, screenUploadHydrated]);
+
     // Phase 3C: current screen/design/PRD context for variant freshness. Primitive
     // selects (not the wrapper object) keep the selector output reference-stable.
     const designSystemVersionId = useProjectStore(s => selectPreferredDesignSystem(s, projectId)?.versionId);
@@ -590,8 +651,9 @@ export function ArtifactWorkspace({
             mobileRelevant,
             trustContext,
             generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
+            defaultImagePresenceByScreen,
         }),
-        [screenIndex, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
+        [screenIndex, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen, defaultImagePresenceByScreen],
     );
 
     // Phase 4A: per-screen review models (user status vs. system readiness,
@@ -604,8 +666,9 @@ export function ArtifactWorkspace({
             mobileRelevant,
             trustContext,
             generatedVariantsByScreen: (id) => generatedVariantsByScreen.get(id),
+            defaultImagePresenceByScreen,
         }),
-        [screenIndex, structuredPRD.features, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen],
+        [screenIndex, structuredPRD.features, mockupPlatform, mobileRelevant, trustContext, generatedVariantsByScreen, defaultImagePresenceByScreen],
     );
     const artifactReview = useMemo(
         () => summarizeArtifactReviewReadiness(screenIndex, screenReviewModels),
@@ -646,6 +709,7 @@ export function ArtifactWorkspace({
     // Repair: pin/relink a mockup screen to a canonical screen (persisted on
     // the mockup version — survives renames and name drift thereafter).
     const handleRelinkMockupScreen = (mockupScreenId: string, screenId: string) => {
+        if (!capabilities.canEditArtifacts) return;
         if (!mockupArtifact || !mockupPreferred) return;
         const links = { ...readScreenLinks(mockupPreferred.metadata), [mockupScreenId]: screenId };
         updateArtifactVersionMetadata(projectId, mockupArtifact.id, mockupPreferred.id, { screenLinks: links });
@@ -653,6 +717,7 @@ export function ArtifactWorkspace({
 
     // Repair: hide a warning (current behavior is kept — nothing else changes).
     const handleDismissScreenIssue = (issueKey: string) => {
+        if (!capabilities.canReviewArtifacts) return;
         if (!invArtifact || !invPreferred) return;
         const dismissed = new Set(readDismissedScreenIssues(invPreferred.metadata));
         dismissed.add(issueKey);
@@ -663,6 +728,7 @@ export function ArtifactWorkspace({
 
     // Persist (or clear, with null) one screen's metadata edit overlay.
     const handleSaveScreenEdit = (screenId: string, edit: ScreenMetadataEdit | null) => {
+        if (!capabilities.canEditArtifacts) return;
         if (!invArtifact || !invPreferred) return;
         const current = readScreenEdits(invPreferred.metadata);
         const next: Record<string, ScreenMetadataEdit> = { ...current };
@@ -681,6 +747,7 @@ export function ArtifactWorkspace({
     // per-screen action (or the confirmed batch below), so adding coverage is
     // free. Returns the appended MockupScreen specs.
     const addScreensToMockups = (screenIds: string[]): MockupScreen[] => {
+        if (!capabilities.canEditArtifacts) return [];
         if (!mockupArtifact || !mockupPreferred) return [];
         const existing = readExtraMockupScreens(mockupPreferred.metadata);
         const appended: MockupScreen[] = [];
@@ -710,6 +777,7 @@ export function ArtifactWorkspace({
     // panel; failures leave that screen on its generate/upload placeholder.
     const [missingMockupsConfirm, setMissingMockupsConfirm] = useState<{ count: number } | null>(null);
     const handleGenerateMissingMockups = () => {
+        if (!capabilities.canGenerateArtifacts) return;
         const missing = screenIndex.items.filter(i => !i.mockupScreen).map(i => i.id);
         if (missing.length === 0 || !mockupArtifact || !mockupPreferred || !mockupPayload) {
             setMissingMockupsConfirm(null);
@@ -781,10 +849,11 @@ export function ArtifactWorkspace({
     // store), so without this the user lands on a workspace where missing
     // artifacts silently sit at "Idle" with no resume affordance.
     useEffect(() => {
+        if (!capabilities.canGenerateArtifacts) return;
         artifactJobController.resumeIfNeeded({
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
-    }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform]);
+    }, [projectId, spineVersionId, prdContent, structuredPRD, projectPlatform, capabilities.canGenerateArtifacts]);
 
     // Scroll the content pane back to the top on every page switch (including
     // opening/closing a screen detail page).
@@ -855,6 +924,7 @@ export function ArtifactWorkspace({
     });
 
     const handleRetrySlot = (slot: ArtifactSlotKey) => {
+        if (!capabilities.canGenerateArtifacts) return;
         artifactJobController.retrySlot(slot, {
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
@@ -895,6 +965,7 @@ export function ArtifactWorkspace({
     // confirm — the preset only takes effect when the design system is
     // regenerated, so we lead the user straight into that step.
     const handleChooseDirection = (presetId: string) => {
+        if (!capabilities.canManageDesignSystem) return;
         setProjectDesignSystemPreset(projectId, presetId);
         setShowDirectionPicker(false);
         const ds = getArtifacts(projectId, 'core_artifact').find(a => a.subtype === 'design_system');
@@ -910,14 +981,10 @@ export function ArtifactWorkspace({
         return idx >= 0 ? `Version ${idx + 1}` : undefined;
     };
 
-    // Change-aware staleness: "what changed since spine X" against the latest
-    // spine, memoized per spine pair for the render pass.
+    // Latest spine id is the "mark up to date" target; still read from the store
+    // (the seam exposes it too, but the mark-current writer wants the store's).
     const allSpines = getSpineVersions(projectId);
     const latestSpineId = allSpines.find(s => s.isLatest)?.id;
-    const spineChangeFor = useMemo(
-        () => makeSpineChangeResolver(allSpines, latestSpineId),
-        [allSpines, latestSpineId],
-    );
 
     const supportedUpdatePlanArtifact = (artifactId: string) => {
         const artifact = getArtifact(projectId, artifactId);
@@ -1041,17 +1108,20 @@ export function ArtifactWorkspace({
     };
 
     // Header strip shown above a generated artifact: provenance chip ("Generated
-    // from PRD Version X"), staleness badge (+ what-changed detail), a
+    // from PRD Version X"), freshness badge (+ what-changed detail), a
     // "Mark up to date" escape hatch when stale, and a Version history entry.
+    // Freshness comes from the canonical evaluator; the "what changed" summary
+    // rides on the evaluation's prd_changed reason (no separate resolver).
     const renderVersionControls = (
         artifactId: string,
         preferred: { sourceRefs: { sourceType: string; sourceArtifactVersionId: string }[] },
     ) => {
-        const staleness = getArtifactStaleness(projectId, artifactId);
+        const ev = freshness.byArtifactId.get(artifactId);
+        const status = ev?.status;
         const alignment = projectOutputAlignment.outputs.find(output => output.artifactId === artifactId);
         const spineRef = preferred.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
         const prdLabel = resolveSpineLabel(spineRef);
-        const changeSummary = staleness !== 'current' && spineRef ? spineChangeFor(spineRef) : null;
+        const changeSummary = ev?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary ?? null;
         return (
             <div className="space-y-2">
                 <div className="flex items-center gap-2 flex-wrap">
@@ -1063,14 +1133,14 @@ export function ArtifactWorkspace({
                     {alignment ? (
                         <OutputAlignmentBadge alignment={alignment} />
                     ) : (
-                        <StalenessBadge
-                            staleness={staleness}
+                        <FreshnessBadge
+                            status={status}
                             detail={changeSummary
                                 ? `PRD changes since ${prdLabel ?? 'this was generated'}: ${changeSummary.headline}`
                                 : undefined}
                         />
                     )}
-                    {alignment && alignment.state !== 'aligned' && latestSpineId && (
+                    {alignment && alignment.state !== 'aligned' && capabilities.canReviewArtifacts && latestSpineId && (
                         <button
                             type="button"
                             onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
@@ -1087,6 +1157,16 @@ export function ArtifactWorkspace({
                             className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
                         >
                             <ListChecks size={13} /> {currentUpdatePlanFor(artifactId) ? 'Review update plan' : 'Create update plan'}
+                        </button>
+                    )}
+                    {!alignment && capabilities.canReviewArtifacts && isStaleStatus(status) && latestSpineId && (
+                        <button
+                            type="button"
+                            onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
+                            title="Confirm this artifact is still valid for the current PRD without regenerating it"
+                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
+                        >
+                            <ShieldCheck size={12} /> Confirm aligned
                         </button>
                     )}
                     <button
@@ -1111,6 +1191,8 @@ export function ArtifactWorkspace({
                         spineId={spineVersionId}
                         structuredPRD={structuredPRD}
                         readOnly
+                        view={prdView}
+                        onViewChange={setPrdView}
                     />
                 </div>
             );
@@ -1164,13 +1246,13 @@ export function ArtifactWorkspace({
                                 {screensError?.message && (
                                     <p className="text-sm text-neutral-600 mt-1 break-words">{screensError.message}</p>
                                 )}
-                                <button
+                                {capabilities.canGenerateArtifacts && <button
                                     type="button"
                                     onClick={() => handleRetrySlot('screen_inventory')}
                                     className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                                 >
                                     <RefreshCcw size={14} /> Retry
-                                </button>
+                                </button>}
                             </div>
                         </div>
                     </div>
@@ -1219,11 +1301,11 @@ export function ArtifactWorkspace({
                         mockupContext={mockupDetailContext}
                         mobileRelevant={mobileRelevant}
                         mockupStatus={slotStatusFor('mockup')}
-                        onRetryMockup={() => handleRetrySlot('mockup')}
+                        onRetryMockup={capabilities.canGenerateArtifacts ? () => handleRetrySlot('mockup') : undefined}
                         features={structuredPRD.features}
-                        onSaveScreenEdit={invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
+                        onSaveScreenEdit={capabilities.canEditArtifacts && invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
                         onAddToMockups={
-                            mockupDetailContext && !detailItem.mockupScreen
+                            capabilities.canEditArtifacts && mockupDetailContext && !detailItem.mockupScreen
                                 ? () => handleAddScreenToMockups(detailItem.id)
                                 : undefined
                         }
@@ -1235,7 +1317,7 @@ export function ArtifactWorkspace({
                                 : undefined
                         }
                         onLinkMockup={
-                            mockupArtifact && mockupPreferred && !detailItem.mockupScreen
+                            capabilities.canEditArtifacts && mockupArtifact && mockupPreferred && !detailItem.mockupScreen
                                 ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
                                 : undefined
                         }
@@ -1254,33 +1336,29 @@ export function ArtifactWorkspace({
             // and into each screen card's "Show details" (progressive
             // disclosure) — passed to ScreenListView as `artifactControls` so
             // the list surfaces the screens themselves immediately.
-            const mockupDesignRef = mockupPreferred?.sourceRefs.find(
-                r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
-            );
-            const currentDesignForScreens = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
-            const screensDesignDrift = !!mockupDesignRef
-                && !!currentDesignForScreens?.tokensHash
-                && currentDesignForScreens.tokensHash !== mockupDesignRef.anchorInfo;
+            // Design-system drift on the mockups is the canonical evaluator's
+            // design_tokens_changed reason (mirrors the mockup-view banner).
+            const screensDesignDrift = hasDesignTokenDrift(freshness.bySlot('mockup'));
 
-            const invStaleness = invArtifact ? getArtifactStaleness(projectId, invArtifact.id) : undefined;
+            const invEval = invArtifact ? freshness.byArtifactId.get(invArtifact.id) : undefined;
+            const invStatus = invEval?.status;
             const invSpineRef = invPreferred?.sourceRefs.find(r => r.sourceType === 'spine')?.sourceArtifactVersionId;
             const invPrdLabel = resolveSpineLabel(invSpineRef);
-            const invChangeSummary = invStaleness && invStaleness !== 'current' && invSpineRef
-                ? spineChangeFor(invSpineRef) : null;
+            const invChangeSummary = invEval?.reasons.find(r => r.kind === 'prd_changed')?.changeSummary ?? null;
             const screensArtifactControls = {
                 prdVersionLabel: invPrdLabel,
-                staleness: invStaleness,
+                staleness: invStatus,
                 stalenessDetail: invChangeSummary
                     ? `PRD changes since ${invPrdLabel ?? 'this was generated'}: ${invChangeSummary.headline}`
                     : undefined,
                 lastMockupGeneratedAt: mockupPreferred?.createdAt,
                 mockupDesignDrift: screensDesignDrift,
-                onMarkUpToDate: invArtifact && latestSpineId
+                onMarkUpToDate: capabilities.canReviewArtifacts && invArtifact && latestSpineId
                     ? () => markArtifactCurrentForSpine(projectId, invArtifact.id, latestSpineId)
                     : undefined,
                 onOpenVersionHistory: invArtifact ? () => setVersionHistoryArtifactId(invArtifact.id) : undefined,
                 onOpenMockupHistory: mockupArtifact ? () => setVersionHistoryArtifactId(mockupArtifact.id) : undefined,
-                onRegenerateMockup: mockupPreferred
+                onRegenerateMockup: capabilities.canGenerateArtifacts && mockupPreferred
                     ? () => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })
                     : undefined,
             };
@@ -1310,8 +1388,8 @@ export function ArtifactWorkspace({
                             <ReferenceWarningsPanel
                                 issues={visibleScreenIssues}
                                 screenOptions={screenIndex.items.map(i => ({ id: i.id, name: i.screen.name }))}
-                                onRelink={mockupArtifact && mockupPreferred ? handleRelinkMockupScreen : undefined}
-                                onDismiss={invArtifact && invPreferred ? handleDismissScreenIssue : undefined}
+                                onRelink={capabilities.canEditArtifacts && mockupArtifact && mockupPreferred ? handleRelinkMockupScreen : undefined}
+                                onDismiss={capabilities.canReviewArtifacts && invArtifact && invPreferred ? handleDismissScreenIssue : undefined}
                             />
                         </div>
                     )}
@@ -1332,9 +1410,10 @@ export function ArtifactWorkspace({
                         exportManifest={exportManifest}
                         artifactControls={screensArtifactControls}
                         generatedVariantsByScreen={(id) => generatedVariantsByScreen.get(id)}
+                        defaultImagePresenceByScreen={defaultImagePresenceByScreen}
                         onSelectScreen={handleOpenScreen}
                         onGenerateMissingMockups={
-                            mockupDetailContext
+                            capabilities.canGenerateArtifacts && mockupDetailContext
                                 ? () => setMissingMockupsConfirm({
                                     count: screenIndex.items.filter(i => !i.mockupScreen).length,
                                 })
@@ -1383,13 +1462,13 @@ export function ArtifactWorkspace({
                             {error?.message && (
                                 <p className="text-sm text-neutral-600 mt-1 break-words">{error.message}</p>
                             )}
-                            <button
+                            {capabilities.canGenerateArtifacts && <button
                                 type="button"
                                 onClick={() => handleRetrySlot(activeSelection)}
                                 className="mt-4 inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white rounded-lg hover:bg-indigo-700 transition"
                             >
                                 <RefreshCcw size={14} /> Retry
-                            </button>
+                            </button>}
                         </div>
                     </div>
                 </div>
@@ -1421,31 +1500,25 @@ export function ArtifactWorkspace({
                 );
             }
             const settings = extractMockupSettings(preferred);
-            const staleness = getArtifactStaleness(projectId, mockup.id);
+            const mockupEval = freshness.bySlot('mockup');
+            const staleness = mockupEval?.status;
             // Did the design system's tokens change since these mockups were
-            // generated? Mirrors stalenessSlice's mockup check: compare the
-            // tokensHash recorded on the mockup's design_system source ref
-            // against the project's current preferred design system. When they
-            // differ, prompt the user to regenerate so the new visual direction
-            // actually reaches the images.
-            const designRef = preferred.sourceRefs.find(
-                r => r.sourceType === 'core_artifact' && typeof r.anchorInfo === 'string',
-            );
-            const currentDesign = selectPreferredDesignSystem(useProjectStore.getState(), projectId);
-            const designSystemDrift = !!designRef
-                && !!currentDesign?.tokensHash
-                && currentDesign.tokensHash !== designRef.anchorInfo;
+            // generated? The canonical evaluator's design_tokens_changed reason
+            // is the single source (tokensHash drift on the mockup's
+            // design_system source ref). When set, prompt the user to regenerate
+            // so the new visual direction reaches the images.
+            const designSystemDrift = hasDesignTokenDrift(mockupEval);
             return (
                 <div className="space-y-4">
                     <div className="flex items-center justify-between gap-2 flex-wrap">
                         {renderVersionControls(mockup.id, preferred)}
-                        <button
+                        {capabilities.canGenerateArtifacts && <button
                             type="button"
                             onClick={() => setMockupRegenConfirm({ nextVersion: preferred.versionNumber + 1 })}
                             className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-neutral-100 hover:bg-neutral-200 text-neutral-700 rounded-md transition"
                         >
                             <RefreshCcw size={12} /> Regenerate Mockup
-                        </button>
+                        </button>}
                     </div>
                     {designSystemDrift && (
                         <div className="flex items-start justify-between gap-3 flex-wrap rounded-lg border border-amber-200 bg-amber-50 p-3">
@@ -1460,13 +1533,13 @@ export function ArtifactWorkspace({
                                     </p>
                                 </div>
                             </div>
-                            <button
+                            {capabilities.canGenerateArtifacts && <button
                                 type="button"
                                 onClick={() => setMockupRegenConfirm({ nextVersion: preferred.versionNumber + 1 })}
                                 className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-amber-600 hover:bg-amber-700 text-white rounded-md transition shrink-0"
                             >
                                 <RefreshCcw size={12} /> Regenerate Mockup
-                            </button>
+                            </button>}
                         </div>
                     )}
                     <MockupErrorBoundary resetKey={preferred.id}>
@@ -1510,9 +1583,6 @@ export function ArtifactWorkspace({
                         : 'responsive') as 'mobile' | 'desktop' | 'responsive',
             }
             : undefined;
-        const promptEdits = subtype === 'prompt_pack'
-            ? ((preferred.metadata?.promptEdits as Record<number, string> | undefined) ?? {})
-            : undefined;
         // Legacy projects may hold a standalone prompt_pack artifact (retired
         // subtype, no sidebar row). The Implementation Plan view consumes its
         // content through the adapter so those prompts appear as prompt packs.
@@ -1523,13 +1593,6 @@ export function ArtifactWorkspace({
                 return packPreferred?.content;
             })()
             : undefined;
-        const handleUpdatePromptEdits = subtype === 'prompt_pack'
-            ? (next: Record<number, string>) => {
-                updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { promptEdits: next }, {
-                    historyDescription: 'Developer prompt edited',
-                });
-            }
-            : undefined;
         // Implementation Plan extras: saved tasks (tracked-task matching +
         // "Manage tasks (N)"), the Convert-to-Tasks entry point (now inside
         // the plan header), the persisted copy/gate progress overlay, and
@@ -1537,12 +1600,12 @@ export function ArtifactWorkspace({
         const planSavedTasks = subtype === 'implementation_plan'
             ? projectTasks.filter(t => t.sourceArtifactId === artifact.id)
             : undefined;
-        const handleConvertToTasks = subtype === 'implementation_plan'
+        const handleConvertToTasks = subtype === 'implementation_plan' && capabilities.canPersistWorkflowState
             ? () => setTasksModalSource({ artifactId: artifact.id, content: preferred.content })
             : undefined;
         // Progress is per-version plumbing (like relink/dismiss), not a
         // content edit — no history event.
-        const handleUpdatePlanProgress = subtype === 'implementation_plan'
+        const handleUpdatePlanProgress = subtype === 'implementation_plan' && capabilities.canPersistWorkflowState
             ? (next: unknown) => {
                 updateArtifactVersionMetadata(projectId, artifact.id, preferred.id, { planProgress: next });
             }
@@ -1597,17 +1660,17 @@ export function ArtifactWorkspace({
                             <p className="text-xs text-amber-700 mt-2">
                                 The content below is preserved for review. Regenerate this artifact to try to resolve it.
                             </p>
-                            <button
+                            {capabilities.canGenerateArtifacts && <button
                                 type="button"
                                 onClick={() => handleRetrySlot(activeSelection)}
                                 className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 hover:bg-amber-700 text-white transition"
                             >
                                 <RefreshCcw size={12} /> Regenerate
-                            </button>
+                            </button>}
                         </div>
                     </div>
                 )}
-                {subtype === 'design_system' && (
+                {subtype === 'design_system' && capabilities.canManageDesignSystem && (
                     <DesignDirectionControl
                         presetId={designSystemPreset}
                         onChangeDirection={() => setShowDirectionPicker(true)}
@@ -1617,7 +1680,7 @@ export function ArtifactWorkspace({
                     />
                 )}
                 {subtype === 'implementation_plan' && (
-                    <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} />
+                    <TaskChecklist projectId={projectId} sourceArtifactId={artifact.id} readOnly={!capabilities.canPersistWorkflowState} />
                 )}
                 <div className={
                     subtype === 'implementation_plan'
@@ -1645,7 +1708,7 @@ export function ArtifactWorkspace({
                         metadata={preferred.metadata}
                         projectId={projectId}
                         features={
-                            subtype === 'prompt_pack' || subtype === 'user_flows'
+                            subtype === 'user_flows'
                                 ? structuredPRD.features
                                 : undefined
                         }
@@ -1666,10 +1729,6 @@ export function ArtifactWorkspace({
                         onConvertToTasks={handleConvertToTasks}
                         onUpdatePlanProgress={handleUpdatePlanProgress}
                         sourceVersions={planSourceVersions}
-                        promptEdits={promptEdits}
-                        onUpdatePromptEdits={handleUpdatePromptEdits}
-                        generatedAt={subtype === 'prompt_pack' ? preferred.createdAt : undefined}
-                        versionNumber={subtype === 'prompt_pack' ? preferred.versionNumber : undefined}
                         prdVersionLabel={
                             // Data Model shows provenance once at the page level
                             // (the version-controls strip above), so only the plan
@@ -1680,7 +1739,7 @@ export function ArtifactWorkspace({
                         }
                         staleness={
                             subtype === 'data_model' || subtype === 'implementation_plan'
-                                ? getArtifactStaleness(projectId, artifact.id)
+                                ? freshness.byArtifactId.get(artifact.id)?.status
                                 : undefined
                         }
                     />
@@ -1879,7 +1938,7 @@ export function ArtifactWorkspace({
                 />
             )}
 
-            {tasksModalSource && (
+            {tasksModalSource && capabilities.canPersistWorkflowState && (
                 <ConvertToTasksModal
                     projectId={projectId}
                     sourceArtifactId={tasksModalSource.artifactId}
@@ -1891,107 +1950,53 @@ export function ArtifactWorkspace({
             )}
 
             {mockupRegenConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setMockupRegenConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title="Regenerate Mockup"
+                    cancelLabel="Cancel"
+                    confirmLabel={<><RefreshCcw size={13} /> Regenerate</>}
+                    onCancel={() => setMockupRegenConfirm(null)}
+                    onConfirm={() => {
+                        setMockupRegenConfirm(null);
+                        handleRetrySlot('mockup');
+                    }}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="mockup-regen-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="mockup-regen-title" className="text-base font-bold text-neutral-900">
-                                Regenerate Mockup
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                Creates Version {mockupRegenConfirm.nextVersion}.
-                            </p>
-                            <p className="text-xs text-neutral-500 mt-1">
-                                Current version remains available in version history.
-                            </p>
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setMockupRegenConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setMockupRegenConfirm(null);
-                                    handleRetrySlot('mockup');
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <RefreshCcw size={13} /> Regenerate
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        Creates Version {mockupRegenConfirm.nextVersion}.
+                    </p>
+                    <p className="text-xs text-neutral-500 mt-1">
+                        Current version remains available in version history.
+                    </p>
+                </ConfirmDialog>
             )}
 
             {missingMockupsConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setMissingMockupsConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title="Generate missing mockups"
+                    cancelLabel="Cancel"
+                    confirmLabel={<><Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}</>}
+                    onCancel={() => setMissingMockupsConfirm(null)}
+                    onConfirm={handleGenerateMissingMockups}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="missing-mockups-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="missing-mockups-title" className="text-base font-bold text-neutral-900">
-                                Generate missing mockups
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                Adds {missingMockupsConfirm.count} uncovered{' '}
-                                {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
-                                mockup set.
-                            </p>
-                            {hasOpenAIKey() ? (
-                                <p className="text-xs text-amber-700 mt-2">
-                                    A low-quality draft image will be generated per screen via OpenAI
-                                    gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
-                                    {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
-                                    own key (typically a few cents each). You can cancel any screen
-                                    while it&rsquo;s generating.
-                                </p>
-                            ) : (
-                                <p className="text-xs text-neutral-500 mt-2">
-                                    No OpenAI key is configured, so nothing will be generated — each
-                                    added screen shows a copyable prompt and an upload sheet instead.
-                                </p>
-                            )}
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setMissingMockupsConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={handleGenerateMissingMockups}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <Image size={13} /> {hasOpenAIKey() ? 'Add & generate' : 'Add screens'}
-                            </button>
-                        </div>
-                    </div>
-                </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        Adds {missingMockupsConfirm.count} uncovered{' '}
+                        {missingMockupsConfirm.count === 1 ? 'screen' : 'screens'} to the current
+                        mockup set.
+                    </p>
+                    {hasOpenAIKey() ? (
+                        <p className="text-xs text-amber-700 mt-2">
+                            A low-quality draft image will be generated per screen via OpenAI
+                            gpt-image-2 — {missingMockupsConfirm.count} paid image{' '}
+                            {missingMockupsConfirm.count === 1 ? 'call' : 'calls'} billed to your
+                            own key (typically a few cents each). You can cancel any screen
+                            while it&rsquo;s generating.
+                        </p>
+                    ) : (
+                        <p className="text-xs text-neutral-500 mt-2">
+                            No OpenAI key is configured, so nothing will be generated — each
+                            added screen shows a copyable prompt and an upload sheet instead.
+                        </p>
+                    )}
+                </ConfirmDialog>
             )}
 
             {showDirectionPicker && (
@@ -2003,56 +2008,29 @@ export function ArtifactWorkspace({
             )}
 
             {designRegenConfirm && (
-                <div
-                    className="fixed inset-0 z-50 bg-black/40 flex items-end md:items-center justify-center p-4"
-                    onClick={() => setDesignRegenConfirm(null)}
-                    role="presentation"
+                <ConfirmDialog
+                    title="Regenerate design system"
+                    cancelLabel="Cancel"
+                    confirmLabel={<><RefreshCcw size={13} /> Regenerate</>}
+                    onCancel={() => setDesignRegenConfirm(null)}
+                    onConfirm={() => {
+                        setDesignRegenConfirm(null);
+                        handleRetrySlot('design_system');
+                    }}
                 >
-                    <div
-                        className="bg-white rounded-xl shadow-xl border border-neutral-200 w-full max-w-sm overflow-hidden"
-                        onClick={(e) => e.stopPropagation()}
-                        role="dialog"
-                        aria-modal="true"
-                        aria-labelledby="design-regen-title"
-                    >
-                        <div className="px-5 pt-5 pb-3">
-                            <h3 id="design-regen-title" className="text-base font-bold text-neutral-900">
-                                Regenerate design system
-                            </h3>
-                            <p className="text-sm text-neutral-700 mt-1">
-                                Creates Version {designRegenConfirm.nextVersion} using your chosen direction.
-                            </p>
-                            <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
-                                <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-500" />
-                                <p className="text-xs text-amber-800">
-                                    This changes the visual foundation, so your downstream assets —
-                                    mockups and the screen-level prompts you copy for external image
-                                    tools — may become out of date. You can regenerate them afterward.
-                                    The current version stays in version history.
-                                </p>
-                            </div>
-                        </div>
-                        <div className="px-5 pb-4 flex items-center justify-end gap-2">
-                            <button
-                                type="button"
-                                onClick={() => setDesignRegenConfirm(null)}
-                                className="px-3 py-1.5 text-sm text-neutral-700 hover:bg-neutral-100 rounded-md transition"
-                            >
-                                Cancel
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => {
-                                    setDesignRegenConfirm(null);
-                                    handleRetrySlot('design_system');
-                                }}
-                                className="inline-flex items-center gap-1.5 px-3 py-1.5 text-sm bg-indigo-600 text-white hover:bg-indigo-700 rounded-md transition"
-                            >
-                                <RefreshCcw size={13} /> Regenerate
-                            </button>
-                        </div>
+                    <p className="text-sm text-neutral-700 mt-1">
+                        Creates Version {designRegenConfirm.nextVersion} using your chosen direction.
+                    </p>
+                    <div className="mt-2 flex items-start gap-2 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2">
+                        <AlertTriangle size={14} className="shrink-0 mt-0.5 text-amber-500" />
+                        <p className="text-xs text-amber-800">
+                            This changes the visual foundation, so your downstream assets —
+                            mockups and the screen-level prompts you copy for external image
+                            tools — may become out of date. You can regenerate them afterward.
+                            The current version stays in version history.
+                        </p>
                     </div>
-                </div>
+                </ConfirmDialog>
             )}
 
             {versionHistoryArtifactId && (() => {
@@ -2079,7 +2057,9 @@ export function ArtifactWorkspace({
                             before: versions.find(v => v.id === id)?.content ?? '',
                             after: preferred?.content ?? '',
                         })}
-                        onRestore={(id) => revertArtifactToVersion(projectId, artifactId, id)}
+                        onRestore={capabilities.canEditArtifacts
+                            ? (id) => revertArtifactToVersion(projectId, artifactId, id)
+                            : undefined}
                         onClose={() => setVersionHistoryArtifactId(null)}
                     />
                 );

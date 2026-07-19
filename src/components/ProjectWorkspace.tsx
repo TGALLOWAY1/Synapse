@@ -1,8 +1,11 @@
 import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
+import { useToastStore } from '../store/toastStore';
 import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity } from 'lucide-react';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
+import ReactMarkdown from 'react-markdown';
+import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
 import { generateStructuredPRD } from '../lib/llmProvider';
@@ -17,12 +20,12 @@ import { ProgressTimeline } from './progress/ProgressTimeline';
 import { buildGenerationSteps } from './progress/buildGenerationSteps';
 import { regeneratePrdSection } from '../lib/services/prdSectionRetry';
 import { summarizeConsistencyReview } from '../lib/services/prdConsistencyReview';
-import { SelectableSpine } from './SelectableSpine';
 import { BranchList } from './BranchList';
 import { ConsolidationModal } from './ConsolidationModal';
 import { SettingsModal } from './SettingsModal';
 import { PipelineStageBar } from './PipelineStageBar';
 import { StructuredPRDView } from './StructuredPRDView';
+import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { SafetyReviewView } from './SafetyReviewView';
 import { SafetyBoundariesCard } from './SafetyBoundariesCard';
 import { PreflightView } from './preflight/PreflightView';
@@ -40,10 +43,12 @@ import { artifactJobController } from '../lib/services/artifactJobController';
 import { SECTION_TITLES } from '../lib/prompts/prdSectionPrompts';
 import type { SectionId } from '../lib/schemas/prdSchemas';
 import type { ArtifactSlotKey, Branch, PipelineStage, FeedbackItem, ReadinessActionTarget } from '../types';
-import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { ProjectCloudStatus, ProjectConflictBanner } from './sync/ProjectSyncStatus';
 import { ReviewWorkspaceContainer } from './review/ReviewWorkspaceContainer';
-import { resetDemoProject } from '../lib/demoRouteHydration';
+import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
+import { DemoReadOnlyNotice } from './DemoReadOnlyNotice';
+import { evaluateProjectFreshness } from '../lib/artifactFreshness';
+import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
 import { canPerformProjectAction } from '../lib/projectCapabilities';
 import {
     commitmentRemainsCurrent,
@@ -79,9 +84,19 @@ export function ProjectWorkspace() {
     const { projectId } = useParams<{ projectId: string }>();
     const navigate = useNavigate();
     const [searchParams, setSearchParams] = useSearchParams();
+    const capabilities = useProjectCapabilities(projectId);
+    const prdView = coercePrdView(searchParams.get('prdView'));
+    const setPrdView = (next: PrdViewId) => {
+        setSearchParams(prev => {
+            const p = new URLSearchParams(prev);
+            if (next === 'overview') p.delete('prdView');
+            else p.set('prdView', next);
+            return p;
+        }, { replace: true });
+    };
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getArtifactStaleness, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -117,7 +132,6 @@ export function ProjectWorkspace() {
     const [isBranchesVisible, setIsBranchesVisible] = useState(false);
     const [activeRightTab, setActiveRightTab] = useState<'branches' | 'history'>('branches');
     const [activeCanvasBranchId, setActiveCanvasBranchId] = useState<string | null>(null);
-    const [showStructuredView, setShowStructuredView] = useState(true);
     const [showNavOverflow, setShowNavOverflow] = useState(false);
     const [isExportOpen, setIsExportOpen] = useState(false);
     const [isSnapshotsOpen, setIsSnapshotsOpen] = useState(false);
@@ -153,8 +167,9 @@ export function ProjectWorkspace() {
     const regenerateInFlight = useRef(false);
     const [overflowMenuPos, setOverflowMenuPos] = useState<{ top: number; right: number } | null>(null);
     const [animationParent] = useAutoAnimate();
-    const [isResettingDemo, setIsResettingDemo] = useState(false);
-    const [demoResetError, setDemoResetError] = useState<string | null>(null);
+    // Demo navigation is intentionally session-only. Ordinary projects retain
+    // their existing persisted currentStage behavior.
+    const [readOnlyStage, setReadOnlyStage] = useState<PipelineStage | null>(null);
 
     const planningIntent = useMemo(
         () => parsePlanningNavigationIntent(searchParams.get(PLANNING_NAVIGATION_QUERY_PARAM)),
@@ -247,20 +262,6 @@ export function ProjectWorkspace() {
         setProjectStage(projectId, 'workspace');
     }, [downstreamUpdatePlans, navigationArtifacts, planningIntent, planningRecords, projectId, readinessReviews, reviewFindings, reviewIssues, reviewRuns, setProjectStage]);
 
-    const handleResetDemo = async () => {
-        if (isResettingDemo) return;
-        setIsResettingDemo(true);
-        setDemoResetError(null);
-        try {
-            const result = await resetDemoProject();
-            if (!result.available) setDemoResetError('The example could not be restored. Please try again.');
-        } catch {
-            setDemoResetError('The example could not be restored. Please try again.');
-        } finally {
-            setIsResettingDemo(false);
-        }
-    };
-
     // Position the portaled overflow menu relative to its trigger button.
     useLayoutEffect(() => {
         if (!showNavOverflow) {
@@ -305,12 +306,10 @@ export function ProjectWorkspace() {
     const projectExists = !!projectId && !!getProject(projectId);
     useEffect(() => {
         if (projectId && !projectExists) {
-            import('../store/toastStore').then(({ useToastStore }) => {
-                useToastStore.getState().addToast({
-                    type: 'info',
-                    title: 'Project not found',
-                    message: 'It may have been deleted or saved in a different browser.',
-                });
+            useToastStore.getState().addToast({
+                type: 'info',
+                title: 'Project not found',
+                message: 'It may have been deleted or saved in a different browser.',
             });
             navigate('/', { replace: true });
         }
@@ -330,11 +329,12 @@ export function ProjectWorkspace() {
         const spine = store.getLatestSpine(projectId);
         if (!proj || proj.currentStage === 'workspace') return;
         if (spine?.structuredPRD && spine.safetyReview?.status !== 'blocked') {
-            store.setProjectStage(projectId, 'workspace');
+            if (capabilities.canPersistWorkflowState) store.setProjectStage(projectId, 'workspace');
+            else setReadOnlyStage('workspace');
         }
         // Mount-only by design (store read via getState, not deps): reacting
         // to later param changes would yank the stage from under the user.
-    }, [projectId]);
+    }, [projectId, capabilities.canPersistWorkflowState]);
 
     if (!projectId) return <div>Invalid Project</div>;
 
@@ -343,7 +343,9 @@ export function ProjectWorkspace() {
     const historyEvents = getHistoryEvents(projectId);
     const allSpines = getSpineVersions(projectId);
 
-    const pipelineStage = project?.currentStage || 'prd';
+    const pipelineStage = capabilities.canPersistWorkflowState
+        ? project?.currentStage || 'prd'
+        : readOnlyStage ?? project?.currentStage ?? 'prd';
     const setPipelineStage = (stage: PipelineStage) => {
         if (projectId) setProjectStage(projectId, stage);
     };
@@ -584,10 +586,20 @@ export function ProjectWorkspace() {
     // Downstream artifacts that would be marked possibly outdated if a different
     // PRD version becomes latest — i.e. those currently in sync with the latest
     // spine. Used to warn in the revert confirmation.
-    const getStaleArtifactTitles = (): string[] =>
-        getArtifacts(projectId)
-            .filter(a => a.type !== 'prd' && getArtifactStaleness(projectId, a.id) === 'current')
-            .map(a => a.title);
+    const getStaleArtifactTitles = (): string[] => {
+        if (!projectId) return [];
+        // Artifacts currently in sync with the latest spine (up_to_date) are
+        // exactly the ones a revert to a different PRD version will invalidate.
+        const { context, evaluations } = evaluateProjectFreshness(useProjectStore.getState(), projectId);
+        const titles: string[] = [];
+        for (const [slot, artifactId] of Object.entries(context.artifactIdBySlot)) {
+            if (!artifactId) continue;
+            if (evaluations.get(slot as DependencyNodeId)?.status !== 'up_to_date') continue;
+            const artifact = getArtifact(projectId, artifactId);
+            if (artifact) titles.push(artifact.title);
+        }
+        return titles;
+    };
 
     const handleRestoreSpine = (sourceSpineId: string) => {
         if (!canPerformProjectAction(projectId, 'persist')) return;
@@ -916,7 +928,7 @@ export function ProjectWorkspace() {
     };
 
     const startAssetGeneration = () => {
-        if (!projectId || !activeSpine?.structuredPRD || projectId === DEMO_PROJECT_ID) return;
+        if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return;
         artifactJobController.startAll({
             projectId,
             spineVersionId: activeSpine.id,
@@ -951,7 +963,7 @@ export function ProjectWorkspace() {
     };
 
     const handleGenerateAssets = () => {
-        if (!projectId || !activeSpine?.structuredPRD || projectId === DEMO_PROJECT_ID) return handleOpenAssets();
+        if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return handleOpenAssets();
         if (!project?.designSystemPreset) {
             generateAfterPreset.current = true;
             setShowPresetChoice(true);
@@ -1089,7 +1101,7 @@ export function ProjectWorkspace() {
                     <span className={`max-w-[44vw] truncate whitespace-nowrap rounded px-2 py-0.5 text-xs md:max-w-none md:shrink-0 ${activeSpine?.safetyReview?.status === 'blocked' ? 'bg-amber-900/30 text-amber-400 border border-amber-800' : isCommitmentUnverifiable ? 'bg-red-900/30 text-red-300 border border-red-800' : currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-900/30 text-amber-300 border border-amber-800' : isCurrentPlanCommitted ? 'bg-green-900/30 text-green-400 border border-green-800' : isLegacyPlanCommitted ? 'bg-neutral-800 text-neutral-300 border border-neutral-700' : activeSpine?.generationError ? 'bg-red-900/30 text-red-400 border border-red-800' : isPRDActivelyGenerating ? 'bg-indigo-900/30 text-indigo-400 border border-indigo-800' : 'bg-neutral-800 text-neutral-400'}`}>
                         {activeSpine ? `${getVersionLabel(activeSpine.id)} · ${headerPlanStatus}` : 'Initializing…'}
                     </span>
-                    {projectId !== DEMO_PROJECT_ID && (
+                    {!capabilities.isReadOnly && (
                         <span className="hidden md:inline-flex shrink-0">
                             <ProjectCloudStatus projectId={projectId} signedIn={!!authUser} />
                         </span>
@@ -1322,22 +1334,16 @@ export function ProjectWorkspace() {
                 />
             </div>
 
-            {/* One intentional explanation of the public demo policy. */}
-            {projectId === DEMO_PROJECT_ID && (
-                <div className="shrink-0 bg-indigo-500/10 border-b border-indigo-500/30 text-indigo-200 text-sm px-4 py-2 flex flex-wrap items-center justify-center gap-x-3 gap-y-1 z-10" role="status" aria-live="polite">
-                    <span>This is a read-only example project. Explore its connected artifacts and history; editing and generation are disabled.</span>
-                    <button type="button" onClick={handleResetDemo} disabled={isResettingDemo}
-                        className="font-medium underline underline-offset-2 disabled:opacity-60">
-                        {isResettingDemo ? 'Resetting demo…' : 'Reset demo'}
-                    </button>
-                    {demoResetError && <span role="alert">{demoResetError}</span>}
-                </div>
+            {/* One workspace-level explanation; individual artifacts stay free
+                of repetitive read-only warnings. */}
+            {capabilities.isReadOnly && (
+                <DemoReadOnlyNotice />
             )}
 
             {/* Cross-device conflict banner: the cloud copy changed on another
                 device while this device has unsynced edits. Blocks silent
                 overwrite — the user picks keep-local / use-cloud / download. */}
-            {projectId !== DEMO_PROJECT_ID && authUser && (
+            {!capabilities.isReadOnly && authUser && (
                 <div className="shrink-0 px-4 py-2 z-10 empty:hidden">
                     <ProjectConflictBanner projectId={projectId} />
                 </div>
@@ -1486,24 +1492,6 @@ export function ProjectWorkspace() {
                                             <SafetyBoundariesCard review={activeSpine.safetyReview} />
                                         )}
 
-                                        {/* View toggle when structured PRD exists (hidden for blocked spines) */}
-                                        {activeSpine.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' && (
-                                            <div className="flex items-center gap-2 mb-6">
-                                                <button
-                                                    onClick={() => setShowStructuredView(true)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Structured View
-                                                </button>
-                                                <button
-                                                    onClick={() => setShowStructuredView(false)}
-                                                    className={`px-3 py-1.5 text-sm rounded-md transition ${!showStructuredView ? 'bg-indigo-50 text-indigo-700 font-medium' : 'text-neutral-500 hover:bg-neutral-100'}`}
-                                                >
-                                                    Markdown View
-                                                </button>
-                                            </div>
-                                        )}
-
                                         {/* Partial result: some sections failed and were merged as
                                             empty stubs. Surfaced from the persisted generationMeta so
                                             the warning survives refresh; each button re-runs only
@@ -1591,7 +1579,7 @@ export function ProjectWorkspace() {
                                                     <div className="h-3.5 bg-neutral-100 rounded w-5/6" />
                                                 </div>
                                             </div>
-                                        ) : activeSpine.structuredPRD && showStructuredView ? (
+                                        ) : activeSpine.structuredPRD ? (
                                             <>
                                                 {!isOldVersion && (
                                                     <PlanningStateBar
@@ -1612,17 +1600,16 @@ export function ProjectWorkspace() {
                                                     spineId={activeSpine.id}
                                                     structuredPRD={activeSpine.structuredPRD}
                                                     readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
+                                                    view={prdView}
+                                                    onViewChange={setPrdView}
                                                     onOpenDecisions={openDecisionCenter}
                                                 />
                                             </>
                                         ) : (
                                             <div className="prose prose-neutral max-w-none">
-                                                <SelectableSpine
-                                                    projectId={projectId}
-                                                    spineVersionId={activeSpine.id}
-                                                    text={activeSpine.responseText}
-                                                    readOnly={isOldVersion || !canPerformProjectAction(projectId, 'persist')}
-                                                />
+                                                <ReactMarkdown remarkPlugins={[remarkGfm]}>
+                                                    {activeSpine.responseText}
+                                                </ReactMarkdown>
                                             </div>
                                         )}
                                     </div>

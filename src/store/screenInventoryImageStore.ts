@@ -18,6 +18,8 @@ import {
     setPreferredScreenImage as idbSetPreferred,
     slugifyScreenName,
 } from '../lib/screenInventoryImageStore';
+import { assertProjectCapability } from '../lib/projectCapabilities';
+import { useProjectStore } from './projectStore';
 
 interface UploadArgs {
     projectId: string;
@@ -51,6 +53,14 @@ interface ImageStoreState {
 
     /** Clear an upload error for one screen bucket (e.g. on retry). */
     clearError: (artifactVersionId: string, screenName: string) => void;
+
+    /** Evict cached records + the `hydrated` settled-flag for these artifact
+     * versions. IndexedDB stays the source of truth — this only invalidates
+     * the in-memory reactive cache. Clearing `hydrated` matters here:
+     * `loadForArtifactVersion` short-circuits when a version is already
+     * marked hydrated, so without this a caller re-loading after an external
+     * IDB wipe (e.g. a demo reset) would keep serving the stale cache. */
+    clearVersions: (artifactVersionIds: string[]) => void;
 }
 
 const bucketKey = (artifactVersionId: string, screenSlug: string): string =>
@@ -101,6 +111,7 @@ export const useScreenInventoryImageStore = create<ImageStoreState>((set, get) =
     },
 
     upload: async ({ projectId, artifactId, artifactVersionId, screenName, file, prompt }) => {
+        assertProjectCapability(useProjectStore.getState().projects[projectId], 'canEditArtifacts');
         const slug = slugifyScreenName(screenName);
         const bucket = bucketKey(artifactVersionId, slug);
         if (get().uploading[bucket]) return;
@@ -162,6 +173,13 @@ export const useScreenInventoryImageStore = create<ImageStoreState>((set, get) =
 
     setPreferred: async (artifactVersionId, screenName, versionNumber) => {
         const slug = slugifyScreenName(screenName);
+        const record = Object.values(get().images).find(
+            image => image.artifactVersionId === artifactVersionId && image.screenSlug === slug,
+        );
+        assertProjectCapability(
+            record ? useProjectStore.getState().projects[record.projectId] : undefined,
+            'canEditArtifacts',
+        );
         const updated = await idbSetPreferred(artifactVersionId, slug, versionNumber);
         if (updated.length === 0) return;
         set((state) => {
@@ -179,6 +197,20 @@ export const useScreenInventoryImageStore = create<ImageStoreState>((set, get) =
             const next = { ...state.errors };
             delete next[bucket];
             return { errors: next };
+        });
+    },
+
+    clearVersions: (artifactVersionIds) => {
+        if (artifactVersionIds.length === 0) return;
+        const idSet = new Set(artifactVersionIds);
+        set((state) => {
+            const images = { ...state.images };
+            for (const key of Object.keys(images)) {
+                if (idSet.has(images[key].artifactVersionId)) delete images[key];
+            }
+            const hydrated = { ...state.hydrated };
+            for (const id of artifactVersionIds) delete hydrated[id];
+            return { images, hydrated };
         });
     },
 }));

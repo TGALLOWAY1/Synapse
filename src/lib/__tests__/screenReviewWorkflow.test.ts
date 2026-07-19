@@ -7,8 +7,6 @@ import {
     compareReviewFreshness,
     buildScreenReviewSignature,
     computeScreenReviewHash,
-    reviewTransitionsFor,
-    canMarkImplementationReadyCleanly,
     type ScreenReviewSignals,
     type ScreenReviewModel,
 } from '../screenReviewWorkflow';
@@ -48,8 +46,6 @@ describe('deriveScreenReviewIssues', () => {
         expect(model.issues).toHaveLength(0);
         expect(model.systemReadiness).toBe('ready');
         expect(model.blockingCount).toBe(0);
-        expect(reviewTransitionsFor(model.userStatus).canAccept).toBe(true);
-        expect(canMarkImplementationReadyCleanly(model)).toBe(true);
     });
 
     it('a P0 screen with no derivable acceptance criteria has a blocking issue', () => {

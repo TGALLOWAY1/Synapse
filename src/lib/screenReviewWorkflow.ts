@@ -86,7 +86,9 @@ export const SEVERITY_LABELS: Record<ScreenReviewIssueSeverity, string> = {
 // --- System readiness --------------------------------------------------------
 
 /** Synapse's derived estimate of a screen's build-readiness — distinct from
- * the user's review status. */
+ * the user's review status. This is its OWN vocabulary tied to the persisted
+ * reviewStatus and stays here deliberately; do NOT merge it with the related
+ * handoff/export/trace vocabularies in `screenStatusShared.ts`. */
 export type SystemReadinessStatus = 'ready' | 'needs_review' | 'blocked';
 
 export const SYSTEM_READINESS_LABELS: Record<SystemReadinessStatus, string> = {
@@ -518,8 +520,13 @@ function countVariantFreshness(variants: readonly DerivedMockupVariant[]): { sta
 
 /** Options for the whole-index builder: the per-item options plus an optional
  * per-screen generated-variant lookup (mirrors the coverage summary). */
-export interface BuildReviewIndexOptions extends Omit<BuildReviewModelOptions, 'generatedVariants'> {
+export interface BuildReviewIndexOptions
+    extends Omit<BuildReviewModelOptions, 'generatedVariants' | 'defaultImagePresence'> {
     generatedVariantsByScreen?: (screenId: string) => BuildVariantOptions['generatedVariants'];
+    /** SYN-003: per-screen authoritative default-image presence (mirrors
+     * generatedVariantsByScreen). Threaded into each screen's variant grid so
+     * the review model's mockup signals reflect real image presence. */
+    defaultImagePresenceByScreen?: (screenId: string) => BuildVariantOptions['defaultImagePresence'];
 }
 
 /** Review model for every screen in the index, keyed by canonical id. */
@@ -527,44 +534,16 @@ export function buildScreenReviewIndex(
     index: ScreenExperienceIndex,
     options: BuildReviewIndexOptions = {},
 ): Map<string, ScreenReviewModel> {
-    const { generatedVariantsByScreen, ...itemOptions } = options;
+    const { generatedVariantsByScreen, defaultImagePresenceByScreen, ...itemOptions } = options;
     const out = new Map<string, ScreenReviewModel>();
     for (const item of index.items) {
         out.set(item.id, buildScreenReviewModelForItem(item, {
             ...itemOptions,
             generatedVariants: generatedVariantsByScreen?.(item.id),
+            defaultImagePresence: defaultImagePresenceByScreen?.(item.id),
         }));
     }
     return out;
-}
-
-// --- Status transitions ------------------------------------------------------
-
-/** The transitions the UI offers, given the current user status. A screen with
- * no user status yet behaves like 'draft'. */
-export interface ReviewTransitions {
-    canAccept: boolean;
-    canRequestChanges: boolean;
-    canMarkImplementationReady: boolean;
-}
-
-export function reviewTransitionsFor(status: ScreenReviewStatus | undefined): ReviewTransitions {
-    const s = status ?? 'draft';
-    return {
-        // Accept is offered from any state except already-accepted.
-        canAccept: s !== 'accepted',
-        // Request changes is always available (an escape hatch).
-        canRequestChanges: true,
-        // Implementation-ready is a promotion from accepted (or a direct
-        // promotion the UI confirms) — never offered when already there.
-        canMarkImplementationReady: s !== 'implementation_ready',
-    };
-}
-
-/** Whether marking implementation-ready is clean (no blocking issues) — the UI
- * still allows an override with a reason when blockers exist. */
-export function canMarkImplementationReadyCleanly(model: ScreenReviewModel): boolean {
-    return model.blockingCount === 0;
 }
 
 // --- Review freshness (re-review after acceptance) ---------------------------

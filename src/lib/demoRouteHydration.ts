@@ -23,11 +23,21 @@ export function hydrateDemoProject(options?: { force?: boolean }): Promise<DemoH
     return inFlight;
 }
 
-/** Explicit reset used by the one public-demo notice. It shares the route
- * loader's single-flight protection, so repeated clicks and Strict Mode are safe. */
-export async function resetDemoProject(): Promise<DemoHydrationResult> {
-    await useProjectStore.getState().clearDemoProject();
-    return hydrateDemoProject({ force: true });
+// SYN-001: "Reset Demo" shares the same single-flight slot as
+// `hydrateDemoProject` so a reset can never race a concurrent hydration pass
+// over the same IndexedDB/store keys. If a hydration is already in flight
+// (e.g. the route just mounted and `loadDemoProject()` is mid-restore), we
+// wait for it to settle — success or failure, we don't care which — before
+// wiping anything, then run the reset and register ITS promise as the new
+// `inFlight` slot so any hydration call that arrives while the reset is
+// running joins it instead of starting a redundant, racing pass.
+export function resetDemoProjectSingleFlight(): Promise<DemoHydrationResult> {
+    const afterPending = inFlight ? inFlight.catch(() => undefined) : Promise.resolve();
+    const run = afterPending.then(() => useProjectStore.getState().resetDemoProject());
+    inFlight = run.finally(() => {
+        inFlight = null;
+    });
+    return inFlight;
 }
 
 // Test-only escape hatch: drops a leaked in-flight promise between tests so

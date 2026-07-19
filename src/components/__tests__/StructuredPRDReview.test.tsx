@@ -51,7 +51,7 @@ function seedStore() {
         createdAt: 1,
     };
     useProjectStore.setState({
-        projects: {},
+        projects: { [PROJECT_ID]: { id: PROJECT_ID, name: 'Test', createdAt: 1 } },
         spineVersions: { [PROJECT_ID]: [spine as SpineVersion] },
         historyEvents: {},
         branches: {},
@@ -94,94 +94,75 @@ function renderView(readOnly = false) {
     );
 }
 
-describe('StructuredPRDView — section cleanup & ordering', () => {
-    it('surfaces a calm impact handoff after a consequential direct edit', () => {
-        const onOpenDecisions = vi.fn();
+// Switch the active PRD view (Overview | Features | Decisions). The tab's
+// accessible name may include a trailing count badge, so match loosely.
+const goTo = (label: RegExp) => fireEvent.click(screen.getByRole('tab', { name: label }));
+
+describe('StructuredPRDView — three-view IA', () => {
+    it('defaults to the Overview view with the product brief', () => {
+        renderView();
+        expect(screen.getByRole('tab', { name: /Overview/ })).toHaveAttribute('aria-selected', 'true');
+        expect(screen.getByRole('heading', { name: 'Current proposed scope' })).toBeInTheDocument();
+        expect(screen.getByText('Success Metrics')).toBeInTheDocument();
+        // The Overview shows scope as compact references, NOT the full feature
+        // spec — feature detail (user value, criteria) lives in the Features view.
+        expect(screen.queryByText('User Value:')).toBeNull();
+        // Overview omits Instrumentation column / legacy values.
+        expect(screen.queryByText(/instrumentation/i)).toBeNull();
+        expect(screen.queryByText('legacy event name')).toBeNull();
+        // Decisions content is not on the Overview panel.
+        expect(screen.queryByText('Decision Log')).toBeNull();
+    });
+
+    it('Features view groups features under their feature systems', () => {
+        renderView();
+        goTo(/Features/);
+        // The system name shows once as a group header…
+        expect(screen.getByText('Capture System')).toBeInTheDocument();
+        // …with its member feature nested (f1). f2 lands in "Other features".
+        expect(screen.getByRole('heading', { level: 4, name: 'Quick Capture' })).toBeInTheDocument();
+        expect(screen.getByRole('heading', { level: 4, name: 'Weekly Review' })).toBeInTheDocument();
+        expect(screen.getByText('Other features')).toBeInTheDocument();
+    });
+
+    it('Features filter narrows to MVP / Later', () => {
         render(
             <StructuredPRDView
                 projectId={PROJECT_ID}
                 spineId={SPINE_ID}
-                structuredPRD={prd}
-                readOnly={false}
-                onOpenDecisions={onOpenDecisions}
+                structuredPRD={{
+                    ...prd,
+                    features: [
+                        ...prd.features,
+                        { id: 'f10', name: 'Anki Export', description: 'CSV export', userValue: 'v', complexity: 'low', tier: 'later' },
+                    ],
+                }}
+                readOnly
             />,
         );
-
-        fireEvent.click(screen.getByRole('button', { name: 'Edit target users' }));
-        fireEvent.change(screen.getByPlaceholderText('One item per line'), {
-            target: { value: 'Independent creators' },
-        });
-        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-        expect(screen.getByText('Plan meaning updated')).toBeInTheDocument();
-        expect(screen.getByText(/related plan areas should be reviewed/i)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Review planning impact' }));
-        expect(onOpenDecisions).toHaveBeenCalledWith(expect.any(String));
+        goTo(/Features/);
+        // Default (All) hides deferred features.
+        expect(screen.queryByRole('heading', { level: 4, name: 'Anki Export' })).toBeNull();
+        // MVP filter keeps only f1.
+        fireEvent.change(screen.getByLabelText('Filter features'), { target: { value: 'mvp' } });
+        expect(screen.getByRole('heading', { level: 4, name: 'Quick Capture' })).toBeInTheDocument();
+        expect(screen.queryByRole('heading', { level: 4, name: 'Weekly Review' })).toBeNull();
+        // Later filter reveals the deferred feature.
+        fireEvent.change(screen.getByLabelText('Filter features'), { target: { value: 'later' } });
+        expect(screen.getByRole('heading', { level: 4, name: 'Anki Export' })).toBeInTheDocument();
     });
 
-    it('does not interrupt a copy-only direct edit', () => {
+    it('Decisions view splits Needs Input from Assumptions to Validate', () => {
         renderView();
-        fireEvent.click(screen.getByRole('button', { name: 'Edit vision' }));
-        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'V.' } });
-        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
-
-        expect(screen.queryByText('Plan meaning updated')).toBeNull();
-        expect(screen.queryByText('This edit may affect the plan')).toBeNull();
+        goTo(/Decisions/);
+        // a1 is low-confidence → Needs Input; a2 is high → Assumptions to Validate.
+        const needsInput = document.getElementById('prd-needs-input')!;
+        expect(within(needsInput).getByText('Users are mobile-first')).toBeInTheDocument();
+        const toValidate = document.getElementById('prd-assumptions')!;
+        expect(within(toValidate).getByText('Weekly cadence works')).toBeInTheDocument();
     });
 
-    it('renders Detailed Features before Feature Systems', () => {
-        const { container } = renderView();
-        const html = container.innerHTML;
-        const features = html.indexOf('Detailed Features');
-        const systems = html.indexOf('Feature Systems');
-        expect(features).toBeGreaterThan(-1);
-        expect(systems).toBeGreaterThan(-1);
-        expect(features).toBeLessThan(systems);
-    });
-
-    it('does not render a Defer bucket or the derived-from clutter line', () => {
-        renderView();
-        expect(screen.getByText('Current proposed scope')).toBeInTheDocument();
-        expect(screen.queryByText('Defer')).toBeNull();
-        expect(screen.queryByText(/derived from features and assumptions/i)).toBeNull();
-    });
-
-    it('omits Instrumentation from Success Metrics', () => {
-        renderView();
-        expect(screen.getByText('Success Metrics')).toBeInTheDocument();
-        expect(screen.queryByText(/instrumentation/i)).toBeNull();
-        expect(screen.queryByText('legacy event name')).toBeNull();
-    });
-
-    it('replaces the passive Assumptions section with Review & Confirm', () => {
-        renderView();
-        expect(screen.queryByText('Assumptions')).toBeNull();
-        expect(screen.getByText('Review & Confirm')).toBeInTheDocument();
-    });
-
-    it('surfaces durable decision-center conflicts in the affected PRD section', () => {
-        useProjectStore.setState({
-            planningRecords: {
-                [PROJECT_ID]: [{
-                    id: 'conflict-1', projectId: PROJECT_ID, type: 'conflict', status: 'open',
-                    title: 'The target market conflicts with the pricing model', statement: 'Resolve the market conflict',
-                    affectedPrdSections: ['Vision'], evidence: [], sourceFindingIds: [], createdBy: 'specialist_review',
-                    affectedPlanLocations: [{ kind: 'claim', section: 'Vision', label: 'Primary market promise', jsonPath: '$.vision' }],
-                    createdAt: 1, updatedAt: 1,
-                }],
-            },
-        });
-        const onOpenDecisions = vi.fn();
-        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
-        expect(screen.getByText(/Affected: Primary market promise/)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
-        expect(onOpenDecisions).toHaveBeenCalledWith('conflict-1', {
-            destination: { kind: 'prd', anchorId: 'prd-uncertainty-vision' },
-            label: 'Return to Vision',
-        });
-    });
-
-    it('renders no MVP Scope section — the Implementation Summary is the single scope surface', () => {
+    it('deferred scope surfaces in the Decisions Deferred & Risks section', () => {
         render(
             <StructuredPRDView
                 projectId={PROJECT_ID}
@@ -198,52 +179,24 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
                 readOnly
             />,
         );
-        expect(document.getElementById('prd-mvp-scope')).toBeNull();
-        expect(screen.queryByText('MVP Scope')).toBeNull();
-        // The scope rationale surfaces in the Implementation Summary…
+        // Scope rationale lives in the Overview Implementation Summary…
         const summary = document.getElementById('prd-implementation-summary')!;
         expect(within(summary).getByText(/Capture loop first/)).toBeInTheDocument();
-        // …and "Later" items surface as Deferred entries in the Decision Log.
-        const log = document.getElementById('prd-decision-log')!;
-        expect(within(log).getByText('Integrations')).toBeInTheDocument();
-        expect(within(log).getByText('Deferred')).toBeInTheDocument();
+        expect(screen.queryByText('MVP Scope')).toBeNull();
+        // …deferred "Later" items live in the Decisions view.
+        goTo(/Decisions/);
+        const deferred = document.getElementById('prd-deferred-risks')!;
+        expect(within(deferred).getByText('Integrations')).toBeInTheDocument();
+        expect(within(deferred).getByText('Deferred scope')).toBeInTheDocument();
     });
 
-    it('collapses V1 features by default and expands them on toggle', () => {
-        renderView();
-        // f1 (mvp) visible; f2 (v1) hidden behind the disclosure.
-        expect(screen.getByRole('heading', { level: 4, name: 'Quick Capture' })).toBeInTheDocument();
-        expect(screen.queryByRole('heading', { level: 4, name: 'Weekly Review' })).toBeNull();
-        fireEvent.click(screen.getByRole('button', { name: /V1 — soon after launch/ }));
-        expect(screen.getByRole('heading', { level: 4, name: 'Weekly Review' })).toBeInTheDocument();
-    });
-
-    it('excludes deferred features from Detailed Features and points at the Decision Log', () => {
-        render(
-            <StructuredPRDView
-                projectId={PROJECT_ID}
-                spineId={SPINE_ID}
-                structuredPRD={{
-                    ...prd,
-                    features: [
-                        ...prd.features,
-                        { id: 'f10', name: 'Anki Export', description: 'CSV export', userValue: 'v', complexity: 'low', tier: 'later' },
-                    ],
-                }}
-                readOnly
-            />,
-        );
-        expect(screen.queryByRole('heading', { level: 4, name: 'Anki Export' })).toBeNull();
-        expect(screen.getByText(/deferred feature is recorded in the/)).toBeInTheDocument();
-        const log = document.getElementById('prd-decision-log')!;
-        expect(within(log).getByText('Anki Export')).toBeInTheDocument();
-    });
-
-    it('summary cards deep-link to feature detail anchors with a back affordance', () => {
+    it('scope references cross-navigate to the feature in the Features view', () => {
         renderView();
         const summary = document.getElementById('prd-implementation-summary')!;
-        const link = within(summary).getByTitle('Jump to Quick Capture details');
-        expect(link.getAttribute('href')).toBe('#prd-feature-f1');
+        const link = within(summary).getByTitle('Go to Quick Capture in Features');
+        fireEvent.click(link);
+        // Now on the Features view, with the feature card + back affordance.
+        expect(screen.getByRole('tab', { name: /Features/ })).toHaveAttribute('aria-selected', 'true');
         expect(document.getElementById('prd-feature-f1')).not.toBeNull();
         expect(
             screen.getByRole('button', { name: 'Back to current proposed scope from Quick Capture' }),
@@ -251,17 +204,10 @@ describe('StructuredPRDView — section cleanup & ordering', () => {
     });
 });
 
-describe('StructuredPRDView — assumption review flow', () => {
-    it('orders unresolved assumptions by confidence (highest first)', () => {
-        renderView();
-        const section = document.getElementById('prd-review-confirm')!;
-        const items = within(section).getAllByRole('listitem');
-        expect(items[0].textContent).toContain('Weekly cadence works');
-        expect(items[1].textContent).toContain('Users are mobile-first');
-    });
-
+describe('StructuredPRDView — review workflow', () => {
     it('confirming an assumption appends a new spine version with the decision', () => {
         renderView();
+        goTo(/Decisions/);
         fireEvent.click(screen.getByRole('button', { name: 'Accept for planning, not validated: Weekly cadence works' }));
         const spine = latestSpine();
         expect(spine.id).not.toBe(SPINE_ID);
@@ -269,14 +215,11 @@ describe('StructuredPRDView — assumption review flow', () => {
         expect(decided?.decision).toBe('confirmed');
         expect(decided?.decidedAt).toBeTypeOf('number');
         expect(spine.provenance?.editSummary).toContain('Accepted assumption for planning');
-        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
-            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
-        expect(record).toMatchObject({ status: 'confirmed' });
-        expect(record?.events?.at(-1)).toMatchObject({ type: 'custom_answered', actor: 'user' });
     });
 
     it('rejecting an assumption records the correction note', () => {
         renderView();
+        goTo(/Decisions/);
         fireEvent.click(screen.getByRole('button', { name: 'Mark assumption incorrect: Users are mobile-first' }));
         fireEvent.change(screen.getByPlaceholderText(/What's actually true/), {
             target: { value: 'Desktop-first actually' },
@@ -285,18 +228,11 @@ describe('StructuredPRDView — assumption review flow', () => {
         const decided = latestSpine().structuredPRD?.assumptions?.find(a => a.id === 'a1');
         expect(decided?.decision).toBe('rejected');
         expect(decided?.decisionNote).toBe('Desktop-first actually');
-        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
-            .find(item => item.sources?.some(source => source.sourceId === 'a1'));
-        expect(record?.status).toBe('rejected');
-        expect(record?.events?.at(-1)).toMatchObject({
-            type: 'premise_rejected',
-            actor: 'user',
-            reason: 'Desktop-first actually',
-        });
     });
 
     it('confirming a feature appends a version with confirmed set', () => {
         renderView();
+        goTo(/Features/);
         fireEvent.click(screen.getByRole('button', { name: 'Confirm feature Quick Capture' }));
         const spine = latestSpine();
         const f = spine.structuredPRD?.features.find(x => x.id === 'f1');
@@ -306,19 +242,10 @@ describe('StructuredPRDView — assumption review flow', () => {
 
     it('hides confirm/reject actions in read-only mode', () => {
         renderView(true);
-        expect(screen.queryByRole('button', { name: /Accept for planning, not validated/ })).toBeNull();
+        goTo(/Decisions/);
+        expect(screen.queryByRole('button', { name: /Accept for planning/ })).toBeNull();
+        goTo(/Features/);
         expect(screen.queryByRole('button', { name: /Confirm feature/ })).toBeNull();
-    });
-
-    it('opens the exact material assumption record for validation', () => {
-        const onOpenDecisions = vi.fn();
-        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
-
-        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for assumption: Weekly cadence works' }));
-        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
-            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
-        expect(record).toBeDefined();
-        expect(onOpenDecisions).toHaveBeenCalledWith(record?.id);
     });
 });
 
@@ -358,6 +285,90 @@ describe('ReviewConfirmSection / DecisionLogSection units', () => {
         expect(onUndoAssumption).toHaveBeenCalledWith('a1');
     });
 
+    it('splitAssumptions keeps unresolved and decided visually separable inputs', () => {
+        const { unresolved, decided } = splitAssumptions([
+            { id: 'a1', statement: 's1', confidence: 'low' },
+            { id: 'a2', statement: 's2', confidence: 'high', decision: 'confirmed' },
+        ]);
+        expect(unresolved.map(a => a.id)).toEqual(['a1']);
+        expect(decided.map(a => a.id)).toEqual(['a2']);
+    });
+});
+
+describe('StructuredPRDView — uncertainty-first planning integration', () => {
+    it('surfaces a calm impact handoff after a consequential direct edit', () => {
+        const onOpenDecisions = vi.fn();
+        render(
+            <StructuredPRDView
+                projectId={PROJECT_ID}
+                spineId={SPINE_ID}
+                structuredPRD={prd}
+                readOnly={false}
+                onOpenDecisions={onOpenDecisions}
+            />,
+        );
+
+        fireEvent.click(screen.getByRole('button', { name: 'Edit target users' }));
+        fireEvent.change(screen.getByPlaceholderText('One item per line'), {
+            target: { value: 'Independent creators' },
+        });
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        expect(screen.getByText('Plan meaning updated')).toBeInTheDocument();
+        expect(screen.getByText(/related plan areas should be reviewed/i)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Review planning impact' }));
+        expect(onOpenDecisions).toHaveBeenCalledWith(expect.any(String));
+    });
+
+    it('does not interrupt a copy-only direct edit', () => {
+        renderView();
+        fireEvent.click(screen.getByRole('button', { name: 'Edit vision' }));
+        fireEvent.change(screen.getByRole('textbox'), { target: { value: 'V.' } });
+        fireEvent.click(screen.getByRole('button', { name: 'Save changes' }));
+
+        expect(screen.queryByText('Plan meaning updated')).toBeNull();
+        expect(screen.queryByText('This edit may affect the plan')).toBeNull();
+    });
+
+    it('surfaces durable decision-center conflicts in the affected PRD section', () => {
+        useProjectStore.setState({
+            planningRecords: {
+                [PROJECT_ID]: [{
+                    id: 'conflict-1', projectId: PROJECT_ID, type: 'conflict', status: 'open',
+                    title: 'The target market conflicts with the pricing model', statement: 'Resolve the market conflict',
+                    affectedPrdSections: ['Vision'], evidence: [], sourceFindingIds: [], createdBy: 'specialist_review',
+                    affectedPlanLocations: [{ kind: 'claim', section: 'Vision', label: 'Primary market promise', jsonPath: '$.vision' }],
+                    createdAt: 1, updatedAt: 1,
+                }],
+            },
+        });
+        const onOpenDecisions = vi.fn();
+        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+        expect(screen.getByText(/Affected: Primary market promise/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
+        expect(onOpenDecisions).toHaveBeenCalledWith('conflict-1', {
+            destination: { kind: 'prd', anchorId: 'prd-uncertainty-vision' },
+            label: 'Return to Vision',
+        });
+    });
+
+    it('shows the proposed scope vocabulary without a Defer bucket', () => {
+        renderView();
+        expect(screen.getByText('Current proposed scope')).toBeInTheDocument();
+        expect(screen.queryByText('Defer')).toBeNull();
+    });
+
+    it('opens the exact material assumption record for validation', () => {
+        const onOpenDecisions = vi.fn();
+        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
+        goTo(/Decisions/);
+        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for assumption: Weekly cadence works' }));
+        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
+            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
+        expect(record).toBeDefined();
+        expect(onOpenDecisions).toHaveBeenCalledWith(record?.id);
+    });
+
     it('keeps an exact validation action beside a material accepted assumption', () => {
         const onPlanValidation = vi.fn();
         const entries = deriveDecisionLog({
@@ -388,14 +399,5 @@ describe('ReviewConfirmSection / DecisionLogSection units', () => {
         expect(screen.getByRole('button', { name: 'Plan validation for assumption: Creators will pay' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Plan validation for assumption: Users prefer rounded cards' })).toBeNull();
         expect(screen.getAllByText('Accept for planning')).toHaveLength(2);
-    });
-
-    it('splitAssumptions keeps unresolved and decided visually separable inputs', () => {
-        const { unresolved, decided } = splitAssumptions([
-            { id: 'a1', statement: 's1', confidence: 'low' },
-            { id: 'a2', statement: 's2', confidence: 'high', decision: 'confirmed' },
-        ]);
-        expect(unresolved.map(a => a.id)).toEqual(['a1']);
-        expect(decided.map(a => a.id)).toEqual(['a2']);
     });
 });

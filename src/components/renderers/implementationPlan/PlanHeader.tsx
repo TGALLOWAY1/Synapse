@@ -1,5 +1,7 @@
 import { AlertTriangle, ArrowRight, CheckCircle2, History, ListChecks, XCircle } from 'lucide-react';
-import type { ConsolidatedImplementationPlan, StalenessState } from '../../../types';
+import type { ConsolidatedImplementationPlan } from '../../../types';
+import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
+import { isStaleStatus } from '../../../lib/artifactFreshness';
 import { promptPackToClipboardText } from '../../../lib/services/implementationPlanAdapter';
 import type { OrderedPromptPack, PlanScope } from '../../../lib/services/implementationPlanInsights';
 import { CopyTextButton } from './CopyTextButton';
@@ -18,7 +20,7 @@ interface Props {
     onNextPackCopied?: (packId: string) => void;
     /** "Version 2" — the PRD version this plan was generated from. */
     prdVersionLabel?: string;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
     /** Full plan markdown for the export/copy action. */
     planMarkdown: string;
     savedTaskCount?: number;
@@ -46,7 +48,7 @@ export function PlanHeader({
 }: Props) {
     const readiness = READINESS_STYLE[plan.readiness.status];
     const ReadinessIcon = readiness.icon;
-    const isStale = staleness && staleness !== 'current';
+    const isStale = isStaleStatus(staleness);
 
     const meta: string[] = [
         `${scope.milestones} milestone${scope.milestones === 1 ? '' : 's'}`,
@@ -67,7 +69,7 @@ export function PlanHeader({
                         </span>
                         {isStale && (
                             <span className="inline-flex items-center gap-1 text-[11px] font-semibold px-2 py-0.5 rounded-full border bg-amber-50 border-amber-200 text-amber-800">
-                                <History size={11} /> Stale — PRD changed
+                                <History size={11} /> Needs update
                             </span>
                         )}
                     </div>

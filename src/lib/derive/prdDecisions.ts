@@ -154,3 +154,43 @@ export function isDisplayableFeatureId(id: string | undefined): boolean {
 }
 
 // (resolveScopeFeature lives in scopeFeatureMatch.ts — re-exported above.)
+
+export type DecisionEditCounts = { confirmed: number; corrected: number; reopened: number };
+
+/**
+ * Build the edit-summary line for a (possibly coalesced) run of Decisions-tab
+ * edits. When exactly one edit has happened and a specific `firstSummary` was
+ * captured (e.g. "Confirmed assumption: X…"), that text is preserved. Once two
+ * or more edits coalesce, a deterministic aggregate is produced instead — the
+ * non-zero buckets in fixed priority order (confirmed → corrected → reopened),
+ * joined with " · ", pluralizing "decision(s)" once, on the lead segment only
+ * (e.g. "Confirmed 2 decisions · corrected 1").
+ */
+export function buildDecisionEditSummary(
+    counts: DecisionEditCounts,
+    firstSummary?: string,
+): string {
+    const total = counts.confirmed + counts.corrected + counts.reopened;
+    if (total === 1 && firstSummary) return firstSummary;
+
+    // Buckets in fixed priority order.
+    const buckets: { verb: string; count: number }[] = [
+        { verb: 'Confirmed', count: counts.confirmed },
+        { verb: 'corrected', count: counts.corrected },
+        { verb: 'reopened', count: counts.reopened },
+    ];
+    const present = buckets.filter(b => b.count > 0);
+    if (present.length === 0) return 'Updated decisions';
+
+    return present
+        .map((b, i) => {
+            // Capitalize the lead verb; subordinate verbs stay lowercase.
+            const verb = i === 0
+                ? b.verb.charAt(0).toUpperCase() + b.verb.slice(1)
+                : b.verb.toLowerCase();
+            // Pluralize the noun once, on the lead segment only.
+            if (i === 0) return `${verb} ${b.count} ${b.count === 1 ? 'decision' : 'decisions'}`;
+            return `${verb} ${b.count}`;
+        })
+        .join(' · ');
+}

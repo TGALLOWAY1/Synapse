@@ -75,8 +75,13 @@ export interface BundleSource {
   downstreamArtifactUpdateVerificationEvents?: Record<string, DownstreamArtifactUpdateVerificationEvent[]>;
 }
 
-// Array-valued collections (everything except the `projects` map).
-const ARRAY_COLLECTIONS = [
+// The array-valued collections (everything except the `projects` map).
+// This is the single source of truth for "which project-keyed collections
+// exist" — every consumer that used to hand-list these keys (the sync
+// orchestrator, the recovery-bundle builder, the per-user namespace switch,
+// and the legacy-import merge) derives from this constant (or
+// ALL_PROJECT_COLLECTIONS below) instead.
+export const ARRAY_COLLECTIONS = [
   'spineVersions',
   'historyEvents',
   'branches',
@@ -100,6 +105,41 @@ const ARRAY_COLLECTIONS = [
   'downstreamArtifactUpdateVerifications',
   'downstreamArtifactUpdateVerificationEvents',
 ] as const;
+
+/** Every project-keyed collection, including the `projects` map itself. */
+export const ALL_PROJECT_COLLECTIONS = ['projects', ...ARRAY_COLLECTIONS] as const;
+
+/** A BundleSource with every collection set to an empty object — the shape to
+ *  reset store state to before rehydrating a different namespace. */
+export function emptyBundleSource(): BundleSource {
+  const empty = {} as BundleSource;
+  for (const key of ALL_PROJECT_COLLECTIONS) {
+    (empty as unknown as Record<string, unknown>)[key] = {};
+  }
+  return empty;
+}
+
+/** Shallow-copy every collection of `source` into a fresh BundleSource object,
+ *  so callers can mutate the copy without touching the original maps. */
+function cloneBundleSource(source: BundleSource): BundleSource {
+  const next = {} as BundleSource;
+  for (const key of ALL_PROJECT_COLLECTIONS) {
+    (next as unknown as Record<string, unknown>)[key] = {
+      ...(source as unknown as Record<string, Record<string, unknown>>)[key],
+    };
+  }
+  return next;
+}
+
+/** Pick the project-keyed collections off any object that structurally has
+ *  them (e.g. the Zustand store state) into a plain BundleSource. */
+export function pickBundleSource(state: BundleSource): BundleSource {
+  const out = {} as BundleSource;
+  for (const key of ALL_PROJECT_COLLECTIONS) {
+    (out as unknown as Record<string, unknown>)[key] = state[key];
+  }
+  return out;
+}
 
 /**
  * Pull every slice for one project into a single bundle, or null if the project
@@ -135,31 +175,7 @@ export function mergeBundlesIntoSource(
   source: BundleSource,
   bundles: ProjectBundle[],
 ): { next: BundleSource; addedIds: string[] } {
-  const next: BundleSource = {
-    projects: { ...source.projects },
-    spineVersions: { ...source.spineVersions },
-    historyEvents: { ...source.historyEvents },
-    branches: { ...source.branches },
-    artifacts: { ...source.artifacts },
-    artifactVersions: { ...source.artifactVersions },
-    feedbackItems: { ...source.feedbackItems },
-    tasks: { ...source.tasks },
-    workflowRuns: { ...source.workflowRuns },
-    reviewRuns: { ...source.reviewRuns },
-    specialistRuns: { ...source.specialistRuns },
-    reviewFindings: { ...source.reviewFindings },
-    reviewIssues: { ...source.reviewIssues },
-    planningRecords: { ...source.planningRecords },
-    readinessReviews: { ...source.readinessReviews },
-    readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
-    downstreamUpdatePlans: { ...source.downstreamUpdatePlans },
-    downstreamUpdatePlanEvents: { ...source.downstreamUpdatePlanEvents },
-    downstreamArtifactUpdateProposals: { ...source.downstreamArtifactUpdateProposals },
-    downstreamArtifactUpdateReviewEvents: { ...source.downstreamArtifactUpdateReviewEvents },
-    downstreamArtifactUpdateApplications: { ...source.downstreamArtifactUpdateApplications },
-    downstreamArtifactUpdateVerifications: { ...source.downstreamArtifactUpdateVerifications },
-    downstreamArtifactUpdateVerificationEvents: { ...source.downstreamArtifactUpdateVerificationEvents },
-  };
+  const next = cloneBundleSource(source);
   const addedIds: string[] = [];
   for (const bundle of bundles) {
     if (!isValidBundle(bundle)) continue;
@@ -187,31 +203,7 @@ export function overwriteBundlesIntoSource(
   source: BundleSource,
   bundles: ProjectBundle[],
 ): { next: BundleSource; replacedIds: string[] } {
-  const next: BundleSource = {
-    projects: { ...source.projects },
-    spineVersions: { ...source.spineVersions },
-    historyEvents: { ...source.historyEvents },
-    branches: { ...source.branches },
-    artifacts: { ...source.artifacts },
-    artifactVersions: { ...source.artifactVersions },
-    feedbackItems: { ...source.feedbackItems },
-    tasks: { ...source.tasks },
-    workflowRuns: { ...source.workflowRuns },
-    reviewRuns: { ...source.reviewRuns },
-    specialistRuns: { ...source.specialistRuns },
-    reviewFindings: { ...source.reviewFindings },
-    reviewIssues: { ...source.reviewIssues },
-    planningRecords: { ...source.planningRecords },
-    readinessReviews: { ...source.readinessReviews },
-    readinessCommitmentEvents: { ...source.readinessCommitmentEvents },
-    downstreamUpdatePlans: { ...source.downstreamUpdatePlans },
-    downstreamUpdatePlanEvents: { ...source.downstreamUpdatePlanEvents },
-    downstreamArtifactUpdateProposals: { ...source.downstreamArtifactUpdateProposals },
-    downstreamArtifactUpdateReviewEvents: { ...source.downstreamArtifactUpdateReviewEvents },
-    downstreamArtifactUpdateApplications: { ...source.downstreamArtifactUpdateApplications },
-    downstreamArtifactUpdateVerifications: { ...source.downstreamArtifactUpdateVerifications },
-    downstreamArtifactUpdateVerificationEvents: { ...source.downstreamArtifactUpdateVerificationEvents },
-  };
+  const next = cloneBundleSource(source);
   const replacedIds: string[] = [];
   for (const bundle of bundles) {
     if (!isValidBundle(bundle)) continue;

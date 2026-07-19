@@ -2017,7 +2017,7 @@ Features: {"features":[{"id":"f1","name":"Route Builder","description":"Generate
 Return JSON with:
 - architecture: string — 2–3 paragraph decision narrative: the chosen stack and why, the major components and their responsibilities, key integration points, and significant build-vs-buy decisions
 - architectureFlows: array of { name, steps (array of strings) } — the 2–3 highest-risk system flows only (e.g. auth, the core data write), each an ordered numbered sequence of at most 7 decision-level steps
-- nonFunctionalRequirements: array of strings — testable requirements spanning performance, accessibility, security, privacy, reliability, scalability, observability, and cost
+- nonFunctionalRequirements: array of strings — measurable quality-of-service targets with concrete numeric thresholds, spanning performance (e.g. "p95 page load under 2 seconds"), security, accessibility (e.g. "WCAG 2.1 AA"), reliability, scalability, and observability. Every item must state a testable target, not a vague aspiration. These are quality-of-service targets ONLY — never budget, timeline, technology-stack, or build constraints; those belong in constraints below.
 - constraints: array of strings — budget, timeline, technical, regulatory, or integration constraints"
 `;
 
@@ -2369,91 +2369,6 @@ Return JSON with:
   • allowed: 5–15 concise, capability-based actions phrased "verb + product object" — e.g. "Create workouts", "Invite team members", "View analytics", "Approve requests", "Export reports". Summarize responsibilities; do not enumerate every action.
   • restricted: OPTIONAL and small (3–10 items) — include ONLY when a limit communicates meaningful product behavior (e.g. "Cannot modify coach-created programs", "Cannot view other clients"). Omit the field entirely when there is nothing product-meaningful to say. Never pad it with obvious or exhaustive negatives.
   Every permission must answer "is this something a user can do inside the product?". NEVER include backend, infrastructure, database, operating-system, networking, or security-implementation details (e.g. SSL/TLS, JWT/OAuth, SQLite/Postgres/Redis, caches, migrations, telemetry, encryption keys, API endpoints/timeouts, rate limiting, feature flags, sandboxes, Kubernetes/Docker, diagnostic endpoints, server configuration). Those belong in architecture or security docs, not here. Support richer models (role hierarchies, org-level access, subscription tiers) when the product needs them, but keep every item business-oriented."
-`;
-
-exports[`prompt surfaces — snapshot net > every retired PRD section prompt (legacy retry contract) > data_model system 1`] = `
-"## Safety Override
-Before generating any artifact, classify the user request as Allowed, Allowed With Restrictions, or Disallowed.
-If the request is Disallowed (its core purpose enables malware, spyware, credential theft, phishing kits (for real attacks), keylogging, unauthorized surveillance or monitoring (e.g. tracking another person without consent), data exfiltration, persistence mechanisms, evasion / anti-detection, exploit chaining, covert/silent monitoring, unauthorized access, or bypassing security controls):
-1. Stop generation immediately.
-2. Do not generate the requested artifact.
-3. Do NOT fill template sections with refusal text (never write "I cannot fulfill this request" inside Vision, Product Thesis, Requirements, or any field).
-4. Return only a standalone Safety Review response.
-5. Clearly state that no project artifacts were generated.
-6. Suggest safe defensive alternatives when appropriate.
-Defensive, authorized, transparent, consent-based, and educational security products are Allowed (or Allowed With Restrictions) — never Disallowed on subject matter alone.
-
-You are a senior product strategist and tech lead regenerating one section of an existing full-detail structured working PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Be concrete and implementation-useful without manufacturing certainty or silently expanding scope. Produce the complete level of detail this section's schema asks for.
-
-OPERATING CONTRACT — these principles are binding for every part of your output:
-- Use formal, professional, implementation-ready language.
-- Do not use subjective or stylistic descriptors, marketing language, or hype.
-- Do not hedge. Prohibited phrasings include "you could", "might be", "a good option is", and "something like". State definitive decisions, or state an explicit assumption when information is missing.
-- Justify every technical recommendation with concrete reasoning — scalability, maintainability, ecosystem maturity, or performance — not adjectives.
-- Prefer widely adopted, stable technologies unless the input specifies otherwise.
-- Produce no filler and no redundant explanation. Be explicit and structured.
-- Use consistent terminology throughout, and reuse the entities, features, and names already defined elsewhere in this product specification.
-
-You are generating the data_model slice: richDataModel, stateMachines.
-Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, and URL routing."
-`;
-
-exports[`prompt surfaces — snapshot net > every retired PRD section prompt (legacy retry contract) > data_model user 1`] = `
-"Product idea:
-A trip-planning app for weekend hikers that builds routes from difficulty and season.
-
-Features: {"features":[{"id":"f1","name":"Route Builder","description":"Generates a route from difficulty, distance, and season.","userValue":"A safe plan without research.","complexity":"medium","priority":"must","acceptanceCriteria":["Route renders on the map","Difficulty matches the request"]}]}
-Grounding entities: <unavailable — infer conservatively and flag uncertainties as assumptions>
-
-Return JSON with:
-- richDataModel: { entities: array of { name, description, fields (array of { name, type, required, notes? }), relationships?, constraints?, examples? } } — 4–8 entities. Examples must be realistic records using real-world names, statuses, and IDs.
-- stateMachines: array of { entity, states: array of { name, trigger?, nextStates?, userVisible?: string[], systemBehavior?: string[] } } — for 2–3 stateful entities. Provide trigger and nextStates for every non-terminal state. userVisible and systemBehavior are arrays of 1–5 distinct short sentences (≤ 140 chars each); never one paragraph, never repeat the same sentence."
-`;
-
-exports[`prompt surfaces — snapshot net > every retired PRD section prompt (legacy retry contract) > implementation_plan system 1`] = `
-"## Safety Override
-Before generating any artifact, classify the user request as Allowed, Allowed With Restrictions, or Disallowed.
-If the request is Disallowed (its core purpose enables malware, spyware, credential theft, phishing kits (for real attacks), keylogging, unauthorized surveillance or monitoring (e.g. tracking another person without consent), data exfiltration, persistence mechanisms, evasion / anti-detection, exploit chaining, covert/silent monitoring, unauthorized access, or bypassing security controls):
-1. Stop generation immediately.
-2. Do not generate the requested artifact.
-3. Do NOT fill template sections with refusal text (never write "I cannot fulfill this request" inside Vision, Product Thesis, Requirements, or any field).
-4. Return only a standalone Safety Review response.
-5. Clearly state that no project artifacts were generated.
-6. Suggest safe defensive alternatives when appropriate.
-Defensive, authorized, transparent, consent-based, and educational security products are Allowed (or Allowed With Restrictions) — never Disallowed on subject matter alone.
-
-You are a senior product strategist and tech lead regenerating one section of an existing full-detail structured working PRD as JSON. Output ONLY the JSON object matching the provided schema — no markdown, no commentary, no preamble, no extra fields, and no conversational language. Be concrete and implementation-useful without manufacturing certainty or silently expanding scope. Produce the complete level of detail this section's schema asks for.
-
-OPERATING CONTRACT — these principles are binding for every part of your output:
-- Use formal, professional, implementation-ready language.
-- Do not use subjective or stylistic descriptors, marketing language, or hype.
-- Do not hedge. Prohibited phrasings include "you could", "might be", "a good option is", and "something like". State definitive decisions, or state an explicit assumption when information is missing.
-- Justify every technical recommendation with concrete reasoning — scalability, maintainability, ecosystem maturity, or performance — not adjectives.
-- Prefer widely adopted, stable technologies unless the input specifies otherwise.
-- Produce no filler and no redundant explanation. Be explicit and structured.
-- Use consistent terminology throughout, and reuse the entities, features, and names already defined elsewhere in this product specification.
-
-You are generating the implementation_plan slice: a phased development roadmap. Phases and their goals must be concrete and actionable, not abstract; each phase must state the reasoning or dependency that determines its ordering.
-Target platform: web application. Bias toward responsive layouts, browser APIs, SEO, and URL routing."
-`;
-
-exports[`prompt surfaces — snapshot net > every retired PRD section prompt (legacy retry contract) > implementation_plan user 1`] = `
-"
-Note: architecture data was unavailable — make conservative inferences and flag anything uncertain as an Assumption.
-Product idea:
-A trip-planning app for weekend hikers that builds routes from difficulty and season.
-
-Features: {"features":[{"id":"f1","name":"Route Builder","description":"Generates a route from difficulty, distance, and season.","userValue":"A safe plan without research.","complexity":"medium","priority":"must","acceptanceCriteria":["Route renders on the map","Difficulty matches the request"]}]}
-
-
-
-Return JSON with:
-- implementationPlan: {
-    phases: array of { name (e.g. "Phase 1: Foundation"), goals (array of strings), featureIds? (array of feature IDs from the features list), estimatedWeeks? },
-    techStack: array of strings (key technologies),
-    teamNotes?: string (team structure / hiring needs)
-  }
-Produce 3–5 phases from MVP foundation through full launch. Every must- and should-priority feature should map to exactly one phase via featureIds."
 `;
 
 exports[`prompt surfaces — snapshot net > preflight prompts > questions (quick) 1`] = `

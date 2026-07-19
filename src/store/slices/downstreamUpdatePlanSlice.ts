@@ -50,8 +50,10 @@ import {
     deriveVerifiedDownstreamUpdatePlanSummary,
     deriveDownstreamArtifactUpdateVerification,
     projectDownstreamArtifactUpdateVerifications,
+    reconcileProjectOutputAlignment,
     verificationIsCurrent,
 } from '../../lib/planning/downstreamArtifactUpdateVerification';
+import { deriveProjectOutputAlignment } from '../../lib/planning/outputAlignment';
 import { rebaseDownstreamUpdatePlanAfterApplication } from '../../lib/planning/downstreamUpdatePlanRebase';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
@@ -76,6 +78,8 @@ export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'verifyDownstreamArtifactUpdateItem'
     | 'appendDownstreamArtifactUpdateVerificationEvent'
     | 'getDownstreamArtifactUpdateProposalCurrentness'
+    | 'getProjectOutputAlignment'
+    | 'getArtifactAlignment'
 >;
 
 function currentContext(state: ProjectState, projectId: string): DownstreamUpdatePlanCurrentContext | undefined {
@@ -203,6 +207,35 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
             reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
         });
         return deriveVerifiedDownstreamUpdatePlanSummary({ base, plans, events, context, projections });
+    },
+
+    // Derived output-alignment projection (formerly on the deleted
+    // stalenessSlice). Read-side only — never persisted.
+    getProjectOutputAlignment: (projectId) => {
+        const state = get();
+        const raw = deriveProjectOutputAlignment({
+            artifacts: state.artifacts[projectId] || [],
+            artifactVersions: state.artifactVersions[projectId] || [],
+            spineVersions: state.spineVersions[projectId] || [],
+            job: state.jobs[projectId],
+        });
+        const context = currentContext(state, projectId);
+        return reconcileProjectOutputAlignment(raw, projectDownstreamArtifactUpdateVerifications({
+            plans: state.downstreamUpdatePlans[projectId] ?? [],
+            context,
+            artifacts: state.artifacts[projectId] ?? [],
+            artifactVersions: state.artifactVersions[projectId] ?? [],
+            verifications: state.downstreamArtifactUpdateVerifications[projectId] ?? [],
+            verificationEvents: state.downstreamArtifactUpdateVerificationEvents[projectId] ?? [],
+            proposals: state.downstreamArtifactUpdateProposals[projectId] ?? [],
+            applications: state.downstreamArtifactUpdateApplications[projectId] ?? [],
+            reviewEvents: state.downstreamArtifactUpdateReviewEvents[projectId] ?? [],
+        }));
+    },
+
+    getArtifactAlignment: (projectId, artifactId) => {
+        const state = get();
+        return state.getProjectOutputAlignment(projectId).outputs.find(output => output.artifactId === artifactId);
     },
 
     recordDownstreamArtifactUpdateProposal: (projectId, proposal) => {

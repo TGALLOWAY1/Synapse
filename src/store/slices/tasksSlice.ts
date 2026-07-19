@@ -2,6 +2,7 @@ import type { StateCreator } from 'zustand';
 import type { ProjectTask, TaskStatus, TaskExternalRef } from '../../types';
 import type { ImplementationTask } from '../../types/tasks';
 import type { ProjectState } from '../types';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 
 export type TasksSlice = {
     tasks: Record<string, ProjectTask[]>;
@@ -46,6 +47,7 @@ export const createTasksSlice: StateCreator<ProjectState, [], [], TasksSlice> = 
     tasks: {},
 
     saveTasks: (projectId, sourceArtifactId, tasks, sourceSpineVersionId) => {
+        assertProjectCapability(get().projects[projectId], 'canPersistWorkflowState');
         const now = Date.now();
         set((state) => {
             const existing = state.tasks[projectId] || [];
@@ -68,6 +70,7 @@ export const createTasksSlice: StateCreator<ProjectState, [], [], TasksSlice> = 
     },
 
     setTaskStatus: (projectId: string, taskId: string, status: TaskStatus) => {
+        assertProjectCapability(get().projects[projectId], 'canPersistWorkflowState');
         set((state) => {
             const list = state.tasks[projectId] || [];
             return {
@@ -82,6 +85,7 @@ export const createTasksSlice: StateCreator<ProjectState, [], [], TasksSlice> = 
     },
 
     removeProjectTask: (projectId: string, taskId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canPersistWorkflowState');
         set((state) => {
             const list = state.tasks[projectId] || [];
             return {
@@ -94,6 +98,7 @@ export const createTasksSlice: StateCreator<ProjectState, [], [], TasksSlice> = 
         projectId: string,
         refs: Array<{ taskId: string; ref: TaskExternalRef }>,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canExportExternally');
         if (refs.length === 0) return;
         const byTask = new Map<string, TaskExternalRef[]>();
         for (const { taskId, ref } of refs) {

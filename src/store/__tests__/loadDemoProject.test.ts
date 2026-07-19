@@ -180,4 +180,38 @@ describe('loadDemoProject — freshness check', () => {
         const project = useProjectStore.getState().projects[DEMO_PROJECT_ID];
         expect(project?.demoSourceSnapshotId).toBeUndefined();
     });
+
+    // SYN-003: a STAMPED cache is provably known-complete (the stamp is only
+    // written for a complete restore), so a fresh-but-partial fetch must NOT
+    // overwrite it — keep serving the complete cache, and let the stale stamp
+    // drive a re-fetch on the next open.
+    it('keeps a stamped (known-complete) cache instead of overwriting it with a partial fetch', async () => {
+        seedDemo('snap-A');
+        // The owner pinned a newer snapshot, but its fresh fetch is incomplete.
+        mockedPointer.mockResolvedValue({ snapshotId: 'snap-B', updatedAt: null });
+        mockedPublic.mockResolvedValue({ ...fakePayload('snap-B'), imagesComplete: false });
+
+        const result = await useProjectStore.getState().loadDemoProject();
+
+        expect(result).toEqual({ projectId: DEMO_PROJECT_ID, available: true });
+        // The complete cache is preserved — no restore over it.
+        expect(mockedRestore).not.toHaveBeenCalled();
+        // The stale stamp is left untouched (drives the next-open re-fetch).
+        const project = useProjectStore.getState().projects[DEMO_PROJECT_ID];
+        expect(project?.demoSourceSnapshotId).toBe('snap-A');
+    });
+
+    it('restores a partial fetch over an UN-stamped cache (partial beats no-known-complete)', async () => {
+        seedDemo(undefined); // cache exists but was never stamped complete
+        mockedPointer.mockResolvedValue({ snapshotId: 'snap-A', updatedAt: null });
+        mockedPublic.mockResolvedValue({ ...fakePayload('snap-A'), imagesComplete: false });
+
+        const result = await useProjectStore.getState().loadDemoProject();
+
+        expect(result).toEqual({ projectId: DEMO_PROJECT_ID, available: true });
+        expect(mockedRestore).toHaveBeenCalledTimes(1);
+        // Still no stamp (the fetch was partial), so it self-heals next open.
+        const project = useProjectStore.getState().projects[DEMO_PROJECT_ID];
+        expect(project?.demoSourceSnapshotId).toBeUndefined();
+    });
 });

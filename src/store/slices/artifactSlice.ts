@@ -3,6 +3,7 @@ import { v4 as uuidv4 } from 'uuid';
 import type { Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype, SourceRef, HistoryEvent, VersionProvenance } from '../../types';
 import type { ProjectState } from '../types';
 import { trackActivity } from '../../lib/recruiterApi';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 
 export type ArtifactSlice = {
     artifacts: Record<string, Artifact[]>;
@@ -27,6 +28,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     artifactVersions: {},
 
     createArtifact: (projectId: string, type: ArtifactType, title: string, subtype?: CoreArtifactSubtype) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         const artifactId = uuidv4();
         const now = Date.now();
         const newArtifact: Artifact = {
@@ -52,6 +54,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     },
 
     updateArtifact: (projectId: string, artifactId: string, updates: Partial<Pick<Artifact, 'title' | 'status'>>) => {
+        assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
         set((state) => {
             const projectArtifacts = state.artifacts[projectId] || [];
             const updatedArtifacts = projectArtifacts.map(a =>
@@ -64,6 +67,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     },
 
     deleteArtifact: (projectId: string, artifactId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
         set((state) => ({
             artifacts: {
                 ...state.artifacts,
@@ -97,6 +101,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         parentVersionId?: string | null,
         provenance?: VersionProvenance,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         const versionId = uuidv4();
         const now = Date.now();
         const historyEventId = uuidv4();
@@ -180,6 +185,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     // incrementing and the timeline shows the revert as its own honest event.
     // All reads happen inside set() against the fresh `state` (concurrency rule).
     revertArtifactToVersion: (projectId: string, artifactId: string, sourceVersionId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
         const allVersions = get().artifactVersions[projectId] || [];
         const source = allVersions.find(v => v.id === sourceVersionId && v.artifactId === artifactId);
         if (!source) throw new Error('No artifact version to restore');
@@ -255,6 +261,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     // leave the graph reporting dependency_changed. All reads inside set()
     // (concurrency rule).
     markArtifactCurrentForSpine: (projectId: string, artifactId: string, spineVersionId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canReviewArtifacts');
         const preferred = (get().artifactVersions[projectId] || [])
             .find(v => v.artifactId === artifactId && v.isPreferred);
         if (!preferred) throw new Error('No preferred artifact version to mark current');
@@ -356,6 +363,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
     },
 
     setPreferredVersion: (projectId: string, artifactId: string, versionId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
         set((state) => {
             const allVersions = state.artifactVersions[projectId] || [];
             const updatedVersions = allVersions.map(v => {
@@ -401,6 +409,7 @@ export const createArtifactSlice: StateCreator<ProjectState, [], [], ArtifactSli
         patch: Record<string, unknown>,
         opts?: { historyDescription?: string },
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canEditArtifacts');
         set((state) => {
             const allVersions = state.artifactVersions[projectId] || [];
             const updatedVersions = allVersions.map(v =>

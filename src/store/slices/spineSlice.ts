@@ -2,11 +2,13 @@ import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
 import type {
     SpineVersion, HistoryEvent, StructuredPRD,
-    QualityScores, GenerationMeta, SpineSafetyReview,
+    SpineSafetyReview,
     PreflightSession,
 } from '../../types';
 import type { ProjectState, SpineGenerationMetaInput, CompareAndAppendStructuredPRDResult } from '../types';
+import { assertProjectCapability } from '../../lib/projectCapabilities';
 import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
+import { buildDecisionEditSummary } from '../../lib/derive/prdDecisions';
 import { renderPremiumMarkdown } from '../../lib/services/prdMarkdownRenderer';
 import {
     appendDecisionEvent,
@@ -30,7 +32,6 @@ export type SpineSlice = {
     editSpineStructuredPRD: ProjectState['editSpineStructuredPRD'];
     compareAndAppendStructuredPRD: ProjectState['compareAndAppendStructuredPRD'];
     revertSpineToVersion: ProjectState['revertSpineToVersion'];
-    updateSpineQualityScores: ProjectState['updateSpineQualityScores'];
     updateProjectProductMetadata: ProjectState['updateProjectProductMetadata'];
     markSpineGenerationStarted: ProjectState['markSpineGenerationStarted'];
     setSpineError: ProjectState['setSpineError'];
@@ -61,6 +62,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     spineVersions: {},
 
     updateSpineText: (projectId: string, spineId: string, text: string) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -71,6 +73,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     regenerateSpine: (projectId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         // Validate against a snapshot, but perform the array derivations inside
         // the set() updater against the fresh `state` so a concurrent spine
         // mutation cannot be clobbered by a stale snapshot.
@@ -128,6 +131,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => {
+        assertProjectCapability(get().projects[projectId], 'canChangeFinality');
         // Phase 3 authority boundary: only commitReadinessReview may project a
         // reviewed user commitment onto `isFinal`. Keep this legacy action for
         // reopening old persisted commitments, but never let a caller create
@@ -157,6 +161,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
 
     // --- Preflight clarification --------------------------------------------
     initPreflightSession: (projectId, spineId, mode, originalIdea) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map((s) =>
@@ -179,6 +184,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightQuestions: (projectId, spineId, questions, usedFallback) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -194,6 +200,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightAnswer: (projectId, spineId, questionId, answer, skipped) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -208,6 +215,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightIndex: (projectId, spineId, index) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -230,6 +238,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightSummary: (projectId, spineId, { summary, assumptions, unknowns }) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -245,6 +254,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     completePreflightSession: (projectId, spineId) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -258,6 +268,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setPreflightError: (projectId, spineId, message) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => ({
             spineVersions: {
                 ...state.spineVersions,
@@ -270,6 +281,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -286,13 +298,13 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         responseText: string,
         meta?: SpineGenerationMetaInput,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s => {
                 if (s.id !== spineId) return s;
                 const next: SpineVersion = { ...s, structuredPRD, responseText };
                 if (meta?.sourcePrompt !== undefined) next.sourcePrompt = meta.sourcePrompt;
-                if (meta?.qualityScores !== undefined) next.qualityScores = meta.qualityScores;
                 if (meta?.generationMeta !== undefined) next.generationMeta = meta.generationMeta;
                 if (meta?.model !== undefined) next.model = meta.model;
                 if (meta?.prdVersion !== undefined) next.prdVersion = meta.prdVersion;
@@ -338,6 +350,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     // the fresh `state` (concurrency rule); the new id is a UUID and display
     // labels derive from array position, never the id.
     editSpineStructuredPRD: (projectId, spineId, nextStructuredPRD, opts) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         // Validate against a snapshot; do array derivations inside set().
         const source = (get().spineVersions[projectId] || []).find(s => s.id === spineId);
         if (!source) throw new Error('No spine version to edit');
@@ -348,13 +361,108 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         const changeSource = opts?.changeSource ?? 'user_edit';
         const editSummary = opts?.editSummary ?? 'Edited PRD';
         let recognition: ConsequentialPrdEditRecognition | undefined;
+        const decisionDelta = opts?.decisionDelta;
+        const zeroCounts = () => ({ confirmed: 0, corrected: 0, reopened: 0 });
+
+        // The updater is synchronous, so we can record which branch ran (amend
+        // vs append) to shape the return value. Decisions-tab edits (confirm/
+        // reject/undo) coalesce onto the latest version in place instead of
+        // spamming a full clone per click; every other edit appends as before.
+        let amendedSpineId: string | null = null;
 
         set((state) => {
             const currentVersions = state.spineVersions[projectId] || [];
             const src = currentVersions.find(s => s.id === spineId);
             if (!src) return state;
 
+            const latest = currentVersions.find(v => v.isLatest);
+
+            // Never amend a version that downstream artifacts were generated
+            // against: freshness compares each artifact's recorded spine ref to
+            // the latest spine id, so mutating content under a referenced id
+            // would leave those artifacts reading "current" against changed
+            // content (e.g. finalize → generate assets → unfinalize → confirm,
+            // or an early design-system run against a decision-edit version).
+            // Appending instead makes the freshness engine flag them normally.
+            const latestHasArtifactRefs =
+                !!latest
+                && Object.values(state.artifactVersions).some(versions =>
+                    versions.some(v => v.sourceRefs?.some(r =>
+                        r.sourceType === 'spine' && r.sourceArtifactVersionId === latest.id)));
+
+            // Amend iff this is a Decisions-tab edit whose target IS the current
+            // latest version, that version is not final, no generated artifact
+            // references it, and it was itself produced by a decision edit (so
+            // we only coalesce a contiguous run).
+            const canAmend =
+                changeSource === 'decision_edit'
+                && !!latest
+                && latest.id === spineId
+                && !latest.isFinal
+                && !latestHasArtifactRefs
+                && latest.provenance?.changeSource === 'decision_edit';
+
+            if (canAmend && latest) {
+                const prevCounts = latest.provenance?.decisionCounts ?? zeroCounts();
+                const mergedCounts = {
+                    confirmed: prevCounts.confirmed + (decisionDelta?.confirmed ?? 0),
+                    corrected: prevCounts.corrected + (decisionDelta?.corrected ?? 0),
+                    reopened: prevCounts.reopened + (decisionDelta?.reopened ?? 0),
+                };
+                const mergedTotal = mergedCounts.confirmed + mergedCounts.corrected + mergedCounts.reopened;
+                // Preserve the FIRST specific summary only while the run is a
+                // single edit; once ≥2 edits coalesce, switch to the aggregate.
+                const nextSummary = buildDecisionEditSummary(
+                    mergedCounts,
+                    mergedTotal === 1 ? latest.provenance?.editSummary : undefined,
+                );
+
+                const amendedSpine: SpineVersion = {
+                    ...latest,
+                    // Same id + createdAt — this is an in-place amend, not a new version.
+                    structuredPRD: nextStructuredPRD,
+                    responseText: opts?.responseText ?? latest.responseText,
+                    isLatest: true,
+                    provenance: {
+                        changeSource: 'decision_edit',
+                        editSummary: nextSummary,
+                        decisionCounts: mergedCounts,
+                    },
+                };
+
+                const updatedSpines = currentVersions.map(v => (v.id === latest.id ? amendedSpine : v));
+
+                // Update (never append) the matching Edited history event so the
+                // log shows the coalesced summary, not one row per click. If none
+                // exists, leave events untouched (never append a duplicate).
+                const events = state.historyEvents[projectId] || [];
+                const idx = events.findIndex(e => e.spineVersionId === latest.id && e.type === 'Edited');
+                const nextEvents = idx >= 0
+                    ? events.map((e, i) => (i === idx ? { ...e, description: nextSummary } : e))
+                    : events;
+
+                amendedSpineId = latest.id;
+                return {
+                    spineVersions: { ...state.spineVersions, [projectId]: updatedSpines },
+                    historyEvents: { ...state.historyEvents, [projectId]: nextEvents },
+                };
+            }
+
             const mappedOld = currentVersions.map(v => ({ ...v, isLatest: false }));
+
+            // Seed decision counts when starting a new coalescable decision-edit
+            // run; keep the caller's specific summary as the first-edit label.
+            const provenance: SpineVersion['provenance'] = changeSource === 'decision_edit'
+                ? {
+                    changeSource,
+                    editSummary,
+                    decisionCounts: {
+                        confirmed: decisionDelta?.confirmed ?? 0,
+                        corrected: decisionDelta?.corrected ?? 0,
+                        reopened: decisionDelta?.reopened ?? 0,
+                    },
+                }
+                : { changeSource, editSummary };
 
             // Clone the source spine fully so generation metadata carries
             // forward, then apply the edit + provenance.
@@ -370,14 +478,13 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 generationPhase: 'complete',
                 // A historical edit must not inherit a stale error/safety stub.
                 generationError: undefined,
-                provenance: { changeSource, editSummary },
+                provenance,
                 // Never carry the source version's canonical metadata onto a
                 // new id. Rebuilt below after all metadata overrides settle.
                 canonicalSpine: undefined,
             };
             // Optional generation-meta overrides (e.g. updated failedSections).
             if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
-            if (opts?.meta?.qualityScores !== undefined) newSpine.qualityScores = opts.meta.qualityScores;
             if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
             if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
             if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
@@ -437,7 +544,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             };
         });
 
-        return { newSpineId, recognition };
+        return { newSpineId: amendedSpineId ?? newSpineId, recognition };
     },
 
     // Compare-and-append is the write barrier for a structured PRD change
@@ -569,7 +676,6 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 canonicalSpine,
             };
             if (opts?.meta?.sourcePrompt !== undefined) newSpine.sourcePrompt = opts.meta.sourcePrompt;
-            if (opts?.meta?.qualityScores !== undefined) newSpine.qualityScores = opts.meta.qualityScores;
             if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
             if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
             if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
@@ -613,6 +719,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     // cloning its content. The source version is never mutated or deleted, so
     // all history before the revert is preserved.
     revertSpineToVersion: (projectId, sourceSpineId) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         const versions = get().spineVersions[projectId] || [];
         const sourceIdx = versions.findIndex(s => s.id === sourceSpineId);
         if (sourceIdx < 0) throw new Error('No spine version to restore');
@@ -680,30 +787,11 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         return { newSpineId };
     },
 
-    updateSpineQualityScores: (
-        projectId: string,
-        spineId: string,
-        scores: QualityScores,
-        generationMeta?: GenerationMeta,
-    ) => {
-        set((state) => {
-            const projectSpines = state.spineVersions[projectId] || [];
-            const updatedSpines = projectSpines.map(s => {
-                if (s.id !== spineId) return s;
-                return {
-                    ...s,
-                    qualityScores: scores,
-                    ...(generationMeta ? { generationMeta } : {}),
-                };
-            });
-            return { spineVersions: { ...state.spineVersions, [projectId]: updatedSpines } };
-        });
-    },
-
     updateProjectProductMetadata: (
         projectId: string,
         meta: { productName?: string; productCategory?: string },
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         set((state) => {
             const project = state.projects[projectId];
             if (!project) return state;
@@ -715,6 +803,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     markSpineGenerationStarted: (projectId: string, spineId: string) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const updatedSpines = projectSpines.map(s =>
@@ -730,6 +819,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
         review: SpineSafetyReview,
         responseText?: string,
     ) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const spine = projectSpines.find(s => s.id === spineId);
@@ -774,6 +864,7 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
     },
 
     setSpineError: (projectId: string, spineId: string, error: { message: string; category: string; timestamp: number; raw?: string } | null) => {
+        assertProjectCapability(get().projects[projectId], 'canGenerateArtifacts');
         set((state) => {
             const projectSpines = state.spineVersions[projectId] || [];
             const spine = projectSpines.find(s => s.id === spineId);

@@ -22,6 +22,7 @@ import type { ScreenReviewStatus } from './screenReadiness';
 import type {
     ScreenArtifactReviewReadiness, ScreenReviewFreshnessStatus, ScreenReviewModel,
 } from './screenReviewWorkflow';
+import type { ScreensExportStatus } from './screenStatusShared';
 
 // --- Types -------------------------------------------------------------------
 
@@ -91,11 +92,11 @@ export interface ScreensDownstreamImpactRollup {
     impactedP0Screens: number;
     byArtifact: Record<DownstreamArtifactKind, { blocking: number; review: number; info: number }>;
     recommendedNextActions: string[];
-    overallStatus: 'ready' | 'review_recommended' | 'not_ready';
+    overallStatus: ScreensExportStatus;
 }
 
 export interface ScreensPreflightModel {
-    status: 'ready' | 'review_recommended' | 'not_ready';
+    status: ScreensExportStatus;
     headline: string;
     /** Must-fix items before this artifact is a safe build source. */
     blocking: string[];

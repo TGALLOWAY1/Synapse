@@ -28,9 +28,14 @@ the feature keys off.)
   refs for their inputs (the design_system ref carries the tokensHash in
   `SourceRef.anchorInfo`). Core artifacts recorded **only** the spine ref
   before this feature.
-- **Existing staleness.** `stalenessSlice.getArtifactStaleness` → `current |
-  possibly_outdated | outdated` from spine-ref drift + the mockup tokensHash
-  rule. Live per-slot status lives in the transient `generationJobsSlice`.
+- **Freshness (SYN-005).** `evaluateDependencyGraph` is the ONE freshness
+  engine. The old `stalenessSlice.getArtifactStaleness` (3-value
+  `current | possibly_outdated | outdated`) was **deleted**; its spine-ref-drift
+  and mockup-tokensHash rules were absorbed here. `src/lib/artifactFreshness.ts`
+  assembles the evaluator input from store slices and
+  `useProjectFreshness(projectId)` is the selector-stable React entry every
+  surface consumes. Live per-slot status still lives in the transient
+  `generationJobsSlice`.
 - **Regeneration flows.** `artifactJobController.retrySlot` (single slot),
   `startAll`/`resumeIfNeeded` (pending slots), `executeJob` (runs slots in
   `buildDependencyLayers()` order, mockup after the core pipeline).
@@ -65,8 +70,7 @@ Evaluated per node by `evaluateDependencyGraph()`:
 3. **Design token drift** (mockup only) — recorded tokensHash
    (`SourceRef.anchorInfo`) ≠ current preferred design system's hash →
    `needs_update` (`design_tokens_changed`). Hash comparison beats
-   version-id comparison so a token-identical regen keeps mockups current
-   (parity with `stalenessSlice`).
+   version-id comparison so a token-identical regen keeps mockups current.
 4. **Legacy fallback** — no recorded dependency ref (pre-feature versions)
    but the dependency's preferred version is newer than this artifact →
    advisory `update_recommended` (`dependency_newer`).

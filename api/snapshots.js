@@ -1,6 +1,7 @@
 import crypto from 'crypto';
 import { put, list, del } from '@vercel/blob';
 import { json, methodNotAllowed } from './_lib/response.js';
+import { readJsonBody } from './_lib/body.js';
 import { enforceRateLimit } from './_lib/rateLimit.js';
 import { requireOwner } from './_lib/ownerAuth.js';
 
@@ -37,35 +38,6 @@ const DEMO_POINTER_PATH = 'snapshots/_demo.json';
 const ID_RE = /^[0-9a-f-]{8,64}$/i;
 const IMAGE_KEY_MAX = 512;
 const CURRENT_SCHEMA_VERSION = 2;
-
-async function readJsonBody(req) {
-  if (req.body && typeof req.body === 'object') return req.body;
-  if (typeof req.body === 'string' && req.body.length > 0) {
-    return JSON.parse(req.body);
-  }
-  return await new Promise((resolve, reject) => {
-    let total = 0;
-    const chunks = [];
-    req.on('data', (chunk) => {
-      total += chunk.length;
-      if (total > MAX_BODY_BYTES) {
-        reject(new Error('payload_too_large'));
-        req.destroy();
-        return;
-      }
-      chunks.push(chunk);
-    });
-    req.on('end', () => {
-      try {
-        const raw = Buffer.concat(chunks).toString('utf8');
-        resolve(raw ? JSON.parse(raw) : {});
-      } catch (err) {
-        reject(err);
-      }
-    });
-    req.on('error', reject);
-  });
-}
 
 const nowIso = () => new Date().toISOString();
 
@@ -146,7 +118,7 @@ async function clearDemoPointer() {
 async function handlePost(req, res) {
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
   } catch (err) {
     if (err?.message === 'payload_too_large') {
       return json(res, 413, { error: 'payload_too_large', limitBytes: MAX_BODY_BYTES });
@@ -174,6 +146,13 @@ async function handlePost(req, res) {
   // (keyed by a hash of the image key, which never collides with a mockup key).
   const screenImageRefs = toRefs(rawScreenImages);
 
+  // SYN-003: sanitize the client-reported completeness counters to non-negative
+  // integers so the pin-time gate (handlePutDemo) can trust them.
+  const nonNegInt = (value) => {
+    const n = Number(value);
+    return Number.isFinite(n) && n >= 0 ? Math.floor(n) : 0;
+  };
+
   const id = crypto.randomUUID();
   const manifest = {
     id,
@@ -183,6 +162,8 @@ async function handlePost(req, res) {
     schemaVersion: CURRENT_SCHEMA_VERSION,
     imageCount: imageRefs.length,
     screenImageCount: screenImageRefs.length,
+    mockupScreenCount: nonNegInt(body.mockupScreenCount),
+    variantImageCount: nonNegInt(body.variantImageCount),
   };
 
   const data = {
@@ -228,7 +209,7 @@ async function handleImagePost(id, req, res) {
 
   let body;
   try {
-    body = await readJsonBody(req);
+    body = await readJsonBody(req, { maxBytes: MAX_BODY_BYTES });
   } catch (err) {
     if (err?.message === 'payload_too_large') {
       return json(res, 413, { error: 'payload_too_large', limitBytes: MAX_BODY_BYTES });
@@ -363,6 +344,35 @@ async function handlePutDemo(id, res) {
   const blobs = await findBlobsForId(id);
   const exists = blobs.some((b) => b.pathname.endsWith('/data.json'));
   if (!exists) return json(res, 404, { error: 'not_found' });
+
+  // SYN-003: server backstop for the pin-time completeness gate (the client
+  // hard-blocks too). A demo whose mockup spec claims screens but carries zero
+  // rendered image blobs would render "Generated" cards with no images — refuse
+  // to pin it. Count the per-image blobs (under `.../images/`) and cross-check
+  // the manifest's mockupScreenCount. Legacy manifests (no mockupScreenCount)
+  // pass here — the client gate covers them.
+  const imageBlobCount = blobs.filter((b) => b.pathname.includes('/images/')).length;
+  if (imageBlobCount === 0) {
+    const manifestBlob = blobs.find((b) => b.pathname.endsWith('/manifest.json'));
+    if (manifestBlob) {
+      let manifest = null;
+      try {
+        manifest = await fetchBlobJson(manifestBlob.url);
+      } catch {
+        manifest = null; // unreadable manifest → don't block on a transient read error
+      }
+      if (manifest && Number(manifest.mockupScreenCount) > 0) {
+        return json(res, 422, {
+          error: 'demo_snapshot_incomplete',
+          message:
+            `This snapshot's mockup spec describes ${Number(manifest.mockupScreenCount)} screen(s) `
+            + 'but contains 0 rendered mockup images, so the demo would claim mockups it cannot show. '
+            + 'Generate the mockup images, save a new snapshot, and pin that one instead.',
+        });
+      }
+    }
+  }
+
   await writeDemoPointer(id);
   return json(res, 200, { demoSnapshotId: id });
 }

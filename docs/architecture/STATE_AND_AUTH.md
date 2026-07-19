@@ -4,7 +4,7 @@
 
 ### State (`src/store/`)
 
-`useProjectStore` is one Zustand store composed from 10 slices in
+`useProjectStore` is one Zustand store composed from the slices in
 `src/store/slices/`:
 
 - `projectSlice` — Project CRUD, current stage
@@ -42,7 +42,6 @@
   `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`
   via `setPreferredVersion` — keeps the audit log honest.
 - `feedbackSlice` — FeedbackItems with intent classification
-- `stalenessSlice` — Staleness checks
 - `generationJobsSlice` — Per-project job tracking (transient; stripped
   from persistence)
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
@@ -54,6 +53,16 @@
   (todo/in_progress/done) and `recordTaskExports` (attach created
   GitHub/Linear issue refs) drive progress tracking. **Persisted** — not
   stripped from localStorage.
+- `reviewSlice` — Persisted adversarial-review state (reviewRuns,
+  specialistRuns, reviewFindings, reviewIssues, planningRecords). Append-only
+  authority events; see docs/architecture/PLANNING_AND_DECISIONS.md.
+- `readinessSlice` — Persisted readiness reviews + commitment events
+  (version-pinned; commitment display goes through
+  `commitmentRemainsCurrent`).
+- `downstreamUpdatePlanSlice` — Persisted downstream update plans, artifact
+  update proposals/applications/verifications, plus the derived
+  output-alignment getters (`getProjectOutputAlignment` /
+  `getArtifactAlignment` — read-side only, never persisted).
 - `metricsSlice` — Persisted orchestration metrics (`WorkflowRun[]` keyed by
   projectId, newest-first, capped at 50/project). `recordWorkflowRun` appends a
   run; `getWorkflowRuns`/`getAllWorkflowRuns`/`clearWorkflowRuns` read/clear.
@@ -144,10 +153,14 @@ rules:
   namespaced data of their own), and the import **merges additively** (existing
   ids always win, so a re-import can only add projects, never overwrite/delete
   one the user already has). **Do not** read the project store before
-  `applyProjectUser` has run for the current user, and keep
-  `emptyPersistedState()` in `projectUserSync` in sync with **both** the
-  persisted slice fields **and** the slices re-persisted by
-  `repersistCurrentState()`.
+  `applyProjectUser` has run for the current user. The nine project-keyed
+  collections are listed in exactly one place —
+  `ALL_PROJECT_COLLECTIONS`/`ARRAY_COLLECTIONS` in `src/lib/projectBundle.ts`
+  — and `emptyPersistedState()`/`repersistCurrentState()` in `projectUserSync`
+  (plus `MERGEABLE_COLLECTIONS` in `userScope.ts`, `bundleSourceOf` in
+  `projectServerSync.ts`, and `projectRecovery.ts`) all derive from it via
+  `emptyBundleSource()`/`pickBundleSource()`, so adding a tenth collection is a
+  one-line change there rather than five hand-edits.
   - **Namespace-switch data-loss guard:** `applyProjectUser` wipes in-memory
     state (`setState(emptyPersistedState())`, which queues a *debounced* persist
     write of the empty state to the target namespace) and then calls

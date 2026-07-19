@@ -517,8 +517,9 @@ export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
 
 // (The old MvpScopeSection was removed: it duplicated the Implementation
 // Summary's Build First / Build Next buckets. The scope rationale now renders
-// as the Decision callout in ImplementationSummarySection and "Later" items
-// surface as Deferred entries in the Decision Log.)
+// as the Decision callout inside the Implementation Summary block — rendered
+// inline in StructuredPRDView, not as a standalone component — and "Later"
+// items surface as Deferred entries in the Decision Log.)
 
 // Instrumentation was dropped from this table: new generations no longer
 // produce it (analytics detail belongs to downstream artifacts) so the column
@@ -544,35 +545,6 @@ export function MetricsSection({ metrics }: { metrics: SuccessMetric[] }) {
                     </tbody>
                 </table>
             </div>
-        </Section>
-    );
-}
-
-// Static handoff appendix — always rendered, for legacy PRDs too. Wording must
-// stay bullet-for-bullet identical to the `## Where the Detail Lives` block in
-// prdMarkdownRenderer.ts (mirrored-renderer rule).
-const HANDOFF_ARTIFACTS: Array<{ name: string; detail: string }> = [
-    { name: 'Data Model', detail: 'entities, fields, relationships, and state machines' },
-    { name: 'Screens (Screen Inventory)', detail: 'per-screen components, states, and interactions' },
-    { name: 'User Flows', detail: 'step-by-step journeys and decision points' },
-    { name: 'Design System', detail: 'visual tokens and component conventions' },
-    { name: 'Implementation Plan', detail: 'phased milestones, tasks, and quality gates' },
-];
-
-export function HandoffAppendixSection() {
-    return (
-        <Section title="Where the Detail Lives" id="prd-handoff-appendix">
-            <p className="text-sm text-neutral-600 mb-3">
-                This PRD stays at the product-decision level. The deep specification is generated as dedicated downstream artifacts:
-            </p>
-            <ul className="space-y-1.5">
-                {HANDOFF_ARTIFACTS.map(a => (
-                    <li key={a.name} className="text-sm text-neutral-700">
-                        <span className="font-semibold text-neutral-900">{a.name}</span>
-                        {' — '}{a.detail}
-                    </li>
-                ))}
-            </ul>
         </Section>
     );
 }

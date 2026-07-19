@@ -1,7 +1,7 @@
 import { verifyPassword, hashPassword } from '../_lib/password.js';
 import { json, methodNotAllowed } from '../_lib/response.js';
+import { readJsonBody } from '../_lib/body.js';
 import {
-  parseJsonBody,
   validateEmail,
   validateName,
   validatePassword,
@@ -43,7 +43,7 @@ async function handleLogin(req, res) {
   }
 
   try {
-    const body = await parseJsonBody(req);
+    const body = await readJsonBody(req);
 
     const emailCheck = validateEmail(body?.email);
     if (!emailCheck.ok) {
@@ -101,7 +101,7 @@ async function handleSignup(req, res) {
   }
 
   try {
-    const body = await parseJsonBody(req);
+    const body = await readJsonBody(req);
 
     const emailCheck = validateEmail(body?.email);
     if (!emailCheck.ok) return json(res, 400, { error: 'invalid_email', field: 'email', message: emailCheck.error });

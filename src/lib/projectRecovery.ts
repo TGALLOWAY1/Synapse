@@ -10,7 +10,7 @@
 // self-describing.
 
 import { useProjectStore } from '../store/projectStore';
-import { extractProjectBundle, type BundleSource, type ProjectBundle } from './projectBundle';
+import { extractProjectBundle, pickBundleSource, type BundleSource, type ProjectBundle } from './projectBundle';
 
 const RECOVERY_FORMAT = 'synapse-project-recovery/v1';
 
@@ -25,32 +25,7 @@ export interface ProjectRecoveryBundle {
 }
 
 function bundleSourceOfStore(): BundleSource {
-  const state = useProjectStore.getState();
-  return {
-    projects: state.projects,
-    spineVersions: state.spineVersions,
-    historyEvents: state.historyEvents,
-    branches: state.branches,
-    artifacts: state.artifacts,
-    artifactVersions: state.artifactVersions,
-    feedbackItems: state.feedbackItems,
-    tasks: state.tasks,
-    workflowRuns: state.workflowRuns,
-    reviewRuns: state.reviewRuns,
-    specialistRuns: state.specialistRuns,
-    reviewFindings: state.reviewFindings,
-    reviewIssues: state.reviewIssues,
-    planningRecords: state.planningRecords,
-    readinessReviews: state.readinessReviews,
-    readinessCommitmentEvents: state.readinessCommitmentEvents,
-    downstreamUpdatePlans: state.downstreamUpdatePlans,
-    downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents,
-    downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals,
-    downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents,
-    downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications,
-    downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications,
-    downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents,
-  };
+  return pickBundleSource(useProjectStore.getState());
 }
 
 /** Assemble a recovery bundle for one project from the live local store, or null

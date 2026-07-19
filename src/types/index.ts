@@ -283,20 +283,6 @@ export type ImplementationPlan = {
     teamNotes?: string;
 };
 
-// --- Quality scoring (7-dimension rubric, 1–5 each) ---
-
-export type QualityScores = {
-    specificity: number;
-    uxUsefulness: number;
-    engineeringUsefulness: number;
-    strategicClarity: number;
-    formatting: number;
-    acceptanceCriteria: number;
-    downstreamReadiness: number;
-    overall: number;
-    notes?: string;
-};
-
 export type GenerationPassRecord = {
     stage: string;                         // 'strategy' | 'render_score' | 'revision'
     ms: number;
@@ -697,7 +683,6 @@ export type SpineVersion = {
     generationPhase?: 'running' | 'complete';
     // --- Premium PRD additions (all optional). ---
     sourcePrompt?: string;                 // original user prompt at generation time
-    qualityScores?: QualityScores;
     model?: string;                        // model used for generation
     generationMeta?: GenerationMeta;
     prdVersion?: number;                   // schema version (1 = legacy; 2 = premium)
@@ -1237,8 +1222,6 @@ export interface ProjectJobState {
     startedAt: number;
     slots: Record<ArtifactSlotKey, SlotState>;
 }
-
-export type StalenessState = 'current' | 'possibly_outdated' | 'outdated';
 
 export type SourceRef = {
     id: string;
@@ -2219,7 +2202,7 @@ export type ProjectTask = {
     status: TaskStatus;
     createdAt: number;
     updatedAt: number;
-    /** Populated when the task is exported to GitHub/Linear/markdown. */
+    /** Populated when the task is exported to GitHub/markdown. */
     externalRefs?: TaskExternalRef[];
 };
 
@@ -2452,7 +2435,8 @@ export type VersionChangeSource =
     | 'user_edit'           // inline edit in the workspace
     | 'revert'              // restore of an earlier version
     | 'consistency_review'  // optional final reconciliation pass
-    | 'marked_current';     // user confirmed an artifact is still current for a newer PRD
+    | 'marked_current'      // user confirmed an artifact is still current for a newer PRD
+    | 'decision_edit';      // Decisions-tab confirm/reject/undo — consecutive edits amend the latest version in place
 
 export type VersionProvenance = {
     changeSource?: VersionChangeSource;
@@ -2460,6 +2444,10 @@ export type VersionProvenance = {
     revertedFromVersionId?: string;  // set when changeSource === 'revert'
     model?: string;                  // AI-generated versions
     prompt?: string;                 // AI-generated versions
+    // Running tally of coalesced Decisions-tab edits on this version, so the
+    // aggregate summary ("Confirmed 3 decisions · corrected 1") stays accurate
+    // as consecutive decision edits amend in place.
+    decisionCounts?: { confirmed: number; corrected: number; reopened: number };
 };
 
 export type HistoryEvent = {

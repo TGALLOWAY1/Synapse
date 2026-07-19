@@ -1,5 +1,5 @@
 import { json, methodNotAllowed } from './_lib/response.js';
-import { parseJsonBody } from './_lib/validate.js';
+import { readJsonBody } from './_lib/body.js';
 import { requireUser } from './_lib/requireUser.js';
 import { isVaultConfigured } from './_lib/cryptoVault.js';
 import {
@@ -81,7 +81,7 @@ export default async function handler(req, res) {
     }
 
     if (req.method === 'PUT') {
-      const body = await parseJsonBody(req);
+      const body = await readJsonBody(req);
       const provider = body?.provider;
       if (!isSupportedProvider(provider)) {
         return json(res, 400, { error: 'unsupported_provider' });
@@ -108,7 +108,7 @@ export default async function handler(req, res) {
     if (req.query?.action !== 'test') {
       return json(res, 400, { error: 'unknown_action' });
     }
-    const body = await parseJsonBody(req);
+    const body = await readJsonBody(req);
     const provider = body?.provider;
     if (!isSupportedProvider(provider)) {
       return json(res, 400, { error: 'unsupported_provider' });

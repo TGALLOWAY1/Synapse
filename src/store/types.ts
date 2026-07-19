@@ -2,9 +2,9 @@ import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
     PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
-    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus, StalenessState,
+    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus,
     ArtifactSlotKey, ProjectJobState, SlotState,
-    QualityScores, GenerationMeta, SpineSafetyReview,
+    GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
     ProjectTask, TaskStatus, TaskExternalRef,
     WorkflowRun, VersionProvenance,
@@ -38,7 +38,6 @@ import type {
 
 export interface SpineGenerationMetaInput {
     sourcePrompt?: string;
-    qualityScores?: QualityScores;
     generationMeta?: GenerationMeta;
     model?: string;
     prdVersion?: number;
@@ -187,6 +186,16 @@ export interface ProjectState {
     loadDemoProject: (options?: { force?: boolean }) => Promise<{ projectId: string; available: boolean }>;
     clearDemoProject: () => Promise<void>;
 
+    // SYN-001: deterministic "Reset Demo" — wipes every local trace of the
+    // demo project (all nine project-keyed store maps, transient job/
+    // progress state, and the three IDB image stores + their reactive
+    // caches) and falls through to `loadDemoProject()` for a full re-fetch +
+    // restore from the pinned snapshot. Route/store-owned like
+    // `loadDemoProject`; deliberately bypasses the read-only capability
+    // guards rather than extending them. Operates only on DEMO_PROJECT_ID —
+    // no projectId param.
+    resetDemoProject: () => Promise<{ projectId: string; available: boolean }>;
+
     // Structured PRD
     updateStructuredPRD: (projectId: string, spineId: string, structuredPRD: StructuredPRD) => void;
     updateSpineStructuredPRD: (
@@ -195,12 +204,6 @@ export interface ProjectState {
         structuredPRD: StructuredPRD,
         responseText: string,
         meta?: SpineGenerationMetaInput,
-    ) => void;
-    updateSpineQualityScores: (
-        projectId: string,
-        spineId: string,
-        scores: import('../types').QualityScores,
-        generationMeta?: import('../types').GenerationMeta,
     ) => void;
     // Versioning: append a NEW spine version from an edited structuredPRD
     // (clones the source spine, applies the edit, becomes the new isLatest)
@@ -219,6 +222,10 @@ export interface ProjectState {
             /** Machine-generated merges can opt out even when they share the
              * user-edit append path. */
             recognizeConsequentialEdit?: boolean;
+            // Per-edit decision tally delta (Decisions-tab confirm/reject/undo).
+            // Merged into the version's provenance.decisionCounts; drives the
+            // in-place amend coalescing when changeSource === 'decision_edit'.
+            decisionDelta?: Partial<{ confirmed: number; corrected: number; reopened: number }>;
         },
     ) => EditSpineStructuredPRDResult;
     // Guarded append for changes prepared against a known PRD baseline (for
@@ -560,10 +567,11 @@ export interface ProjectState {
     getAllWorkflowRuns: () => WorkflowRun[];
     clearWorkflowRuns: (projectId: string) => void;
 
-    // Staleness
-    getArtifactStaleness: (projectId: string, artifactId: string) => StalenessState;
+    // Derived output-alignment projection (read-side only; lives on the
+    // downstream update plan slice).
     getArtifactAlignment: (projectId: string, artifactId: string) => OutputAlignment | undefined;
     getProjectOutputAlignment: (projectId: string) => ProjectOutputAlignmentSummary;
+
 
     // Background generation jobs (transient — excluded from persist)
     jobs: Record<string, ProjectJobState | undefined>;

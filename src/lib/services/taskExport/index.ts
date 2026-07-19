@@ -6,7 +6,6 @@ import type {
     TaskExportProvider,
 } from '../../../types/tasks';
 import { githubExporter } from './githubExporter';
-import { linearExporter } from './linearExporter';
 import { markdownExporter } from './markdownExporter';
 
 /**
@@ -16,7 +15,6 @@ import { markdownExporter } from './markdownExporter';
 export const EXPORT_PROVIDERS: Record<ExportTargetId, TaskExportProvider> = {
     markdown: markdownExporter,
     github: githubExporter,
-    linear: linearExporter,
 };
 
 export function listExportProviders(): TaskExportProvider[] {
@@ -40,5 +38,4 @@ export async function exportTasks(
 }
 
 export { buildGithubIssueBody, buildGithubIssuePayload, exportTasksToGithub } from './githubExporter';
-export { buildLinearIssueInput, buildLinearIssueDescription } from './linearExporter';
 export { renderTaskMarkdown, renderTasksMarkdown } from './markdownExporter';

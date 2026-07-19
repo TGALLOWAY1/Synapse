@@ -60,7 +60,8 @@ function variant(): DerivedMockupVariant {
         id: 'default', screenId: 'scr-landing', viewport: 'desktop',
         stateName: 'Default', stateType: 'default', status: 'generated',
         required: true, userSet: false, source: 'legacy',
-        coverageStatus: 'unknown', coverageEstimated: true, notes: [],
+        coverageStatus: 'unknown', coverageEstimated: true,
+        imagePresence: 'present', notes: [],
     };
 }
 

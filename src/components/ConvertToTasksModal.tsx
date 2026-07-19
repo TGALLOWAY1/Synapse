@@ -1,5 +1,5 @@
 import { useMemo, useState } from 'react';
-import { X, Trash2, Loader2, CheckCircle2, AlertTriangle, ExternalLink, FileDown, Github, KanbanSquare, Save } from 'lucide-react';
+import { X, Trash2, Loader2, CheckCircle2, AlertTriangle, ExternalLink, FileDown, Github, Save } from 'lucide-react';
 import type {
     ExportResult,
     ExportTargetId,
@@ -45,7 +45,6 @@ const COMPLEXITY_OPTIONS: TaskComplexity[] = ['small', 'medium', 'large'];
 const TARGET_ICON: Record<ExportTargetId, typeof FileDown> = {
     markdown: FileDown,
     github: Github,
-    linear: KanbanSquare,
 };
 
 function toEditable(task: ImplementationTask): EditableTask {
@@ -143,7 +142,7 @@ export function ConvertToTasksModal({
     const recordRefsFromResult = (exportResult: ExportResult) => {
         const refs: Array<{ taskId: string; ref: TaskExternalRef }> = [];
         const exportTarget = exportResult.target;
-        if (exportTarget !== 'github' && exportTarget !== 'linear') return;
+        if (exportTarget !== 'github') return;
         for (const item of exportResult.succeeded) {
             if (!item.externalUrl && !item.externalId) continue;
             refs.push({
@@ -190,7 +189,7 @@ export function ConvertToTasksModal({
             } else if (failed === 0) {
                 addToast({
                     type: 'success',
-                    title: exportResult.mock ? `Linear export prepared (mocked)` : `Exported ${succeeded} task${succeeded === 1 ? '' : 's'}`,
+                    title: `Exported ${succeeded} task${succeeded === 1 ? '' : 's'}`,
                 });
             } else {
                 addToast({
@@ -453,7 +452,6 @@ function ExportResultPanel({ result }: { result: ExportResult }) {
                 )}
                 <h3 className="text-sm font-semibold text-neutral-800">
                     Export result — {result.target}
-                    {result.mock && <span className="ml-1.5 text-[10px] uppercase tracking-wider text-amber-600 font-bold">(mock)</span>}
                 </h3>
                 <span className="text-xs text-neutral-500 ml-auto">
                     {result.succeeded.length} of {total} succeeded

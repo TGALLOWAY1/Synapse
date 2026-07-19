@@ -1,8 +1,9 @@
 import { useEffect, useMemo, useState } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
-import { ChevronsDownUp, ChevronsUpDown, Layers, Sparkles } from 'lucide-react';
-import type { DataModelContent, StalenessState } from '../../types';
+import { Layers, Sparkles } from 'lucide-react';
+import type { DataModelContent } from '../../types';
+import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import {
     parseDataModelMarkdown,
     dataModelToMarkdown,
@@ -16,15 +17,25 @@ import {
     slugifyEntity,
     ENTITY_CATEGORY_ORDER,
     type DataModelNode,
+    type EntityCategory,
 } from '../../lib/dataModelGraph';
-import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
 import { useArtifactOutline } from '../../lib/useArtifactOutline';
 import { useIsMobile } from '../../lib/useIsMobile';
 import { DataModelOverview } from './dataModel/DataModelOverview';
 import { EntityGraph } from './dataModel/EntityGraph';
 import { EntityCard } from './dataModel/EntityCard';
 import { resolveDataModelMemberAnchor, type DataModelMemberAspect } from './dataModel/dataModelNavigation';
-import { CategoryBadge } from './dataModel/badges';
+import { CategoryHeader } from './dataModel/badges';
+
+interface EntityPair {
+    entity: ParsedEntity;
+    node: DataModelNode;
+}
+
+interface EntityCategoryGroup {
+    category: EntityCategory | null;
+    items: EntityPair[];
+}
 
 interface Props {
     content: string;
@@ -33,7 +44,7 @@ interface Props {
      * PRD provenance is intentionally not passed here — it's shown once at the
      * artifact/page level, not repeated inside the summary card.
      */
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
@@ -117,7 +128,7 @@ export function DataModelRenderer({ content, staleness, initialEntityName, initi
 
 interface BodyProps {
     parsed: ParsedDataModel;
-    staleness?: StalenessState;
+    staleness?: DependencyNodeStatus;
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
@@ -131,12 +142,16 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
     const nodeIdSet = useMemo(() => new Set(graph.nodes.map(n => n.id)), [graph]);
 
     // Entity + derived node pairs, in document order.
-    const pairs = useMemo(
+    const pairs = useMemo<EntityPair[]>(
         () => parsed.entities
             .map(entity => ({ entity, node: nodeById.get(slugifyEntity(entity.name)) }))
-            .filter((p): p is { entity: ParsedEntity; node: DataModelNode } => Boolean(p.node)),
+            .filter((p): p is EntityPair => Boolean(p.node)),
         [parsed, nodeById],
     );
+
+    // Entities are always organised into their derived category sections when the
+    // model spans more than one category (the mockup's organizing principle); a
+    // single-category model renders as a flat list with no header band.
     const initialNodeId = initialEntityName ? slugifyEntity(initialEntityName) : undefined;
     const initialPair = initialNodeId ? pairs.find(pair => pair.node.id === initialNodeId) : undefined;
     const exactMemberAnchor = initialPair
@@ -147,8 +162,7 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
         () => new Set(pairs.map(p => p.node.category)).size,
         [pairs],
     );
-    const canGroup = distinctCategories >= 2 && pairs.length >= 4;
-    const [grouped, setGrouped] = useState(canGroup);
+    const grouped = distinctCategories >= 2;
 
     const orderedPairs = useMemo(() => {
         if (!grouped) return pairs;
@@ -165,16 +179,11 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
         return pairs.length === 1 ? new Set(pairs.map(p => p.node.id)) : new Set();
     });
 
-    const outlineItems: ArtifactOutlineItem[] = useMemo(
-        () => orderedPairs.map(({ entity, node }) => ({
-            id: entityAnchorId(entity.name),
-            label: entity.name,
-            countLabel: `${node.fieldCount} ${node.fieldCount === 1 ? 'field' : 'fields'}`,
-        })),
+    const outlineIds = useMemo(
+        () => orderedPairs.map(({ entity }) => entityAnchorId(entity.name)),
         [orderedPairs],
     );
-    const outlineIds = useMemo(() => outlineItems.map(i => i.id), [outlineItems]);
-    const { activeId, scrollTo } = useArtifactOutline(outlineIds);
+    const { scrollTo } = useArtifactOutline(outlineIds);
 
     useEffect(() => {
         if (!initialEntityName) return;
@@ -197,18 +206,19 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
         if (node) scrollTo(entityAnchorId(node.name));
     };
 
-    const allExpanded = expandedIds.size >= pairs.length;
-    const toggleAll = () =>
-        setExpandedIds(allExpanded ? new Set() : new Set(pairs.map(p => p.node.id)));
-
     const resolveTargetId = (name: string) => resolveEntityId(name, nodeIdSet);
 
-    // Category boundaries for grouped rendering — derived purely so no variable
-    // is reassigned during render.
-    const orderedWithHeader = orderedPairs.map((pair, i) => ({
-        ...pair,
-        showHeader: grouped && (i === 0 || orderedPairs[i - 1].node.category !== pair.node.category),
-    }));
+    // Group ordered pairs into category sections (grouped) or a single section.
+    const groups = useMemo<EntityCategoryGroup[]>(() => {
+        if (!grouped) return [{ category: null, items: orderedPairs }];
+        const out: EntityCategoryGroup[] = [];
+        for (const pair of orderedPairs) {
+            const last = out[out.length - 1];
+            if (last && last.category === pair.node.category) last.items.push(pair);
+            else out.push({ category: pair.node.category, items: [pair] });
+        }
+        return out;
+    }, [grouped, orderedPairs]);
 
     return (
         <div className="space-y-6">
@@ -247,76 +257,44 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
             )}
 
             {pairs.length > 0 && (
-                <section className="space-y-3">
-                    <div className="flex items-center justify-between gap-2 flex-wrap">
-                        <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500 inline-flex items-center gap-1.5">
+                <section aria-label="Entities" className="space-y-4">
+                    {/* Section header */}
+                    <div className="flex items-center gap-2">
+                        <h3 className="text-sm font-semibold text-neutral-900 inline-flex items-center gap-1.5">
                             <Layers className="w-4 h-4 text-neutral-400" /> Entities
+                            <span className="text-xs font-normal text-neutral-400">
+                                {pairs.length} {pairs.length === 1 ? 'entity' : 'entities'}
+                            </span>
                         </h3>
-                        <div className="flex items-center gap-1.5">
-                            {canGroup && (
-                                <button
-                                    type="button"
-                                    onClick={() => setGrouped(g => !g)}
-                                    className={`inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md border transition ${
-                                        grouped
-                                            ? 'bg-indigo-50 text-indigo-700 border-indigo-200'
-                                            : 'bg-white text-neutral-600 border-neutral-200 hover:bg-neutral-50'
-                                    }`}
-                                >
-                                    <Layers size={12} /> Group by category
-                                </button>
-                            )}
-                            {pairs.length > 1 && (
-                                <button
-                                    type="button"
-                                    onClick={toggleAll}
-                                    className="inline-flex items-center gap-1.5 px-2.5 py-1 text-[11px] font-medium rounded-md border border-neutral-200 bg-white text-neutral-600 hover:bg-neutral-50 transition"
-                                >
-                                    {allExpanded ? <ChevronsDownUp size={12} /> : <ChevronsUpDown size={12} />}
-                                    {allExpanded ? 'Collapse all' : 'Expand all'}
-                                </button>
-                            )}
-                        </div>
                     </div>
 
-                    {pairs.length > 1 && (
-                        <ArtifactOutlineNav
-                            title="Entities"
-                            items={outlineItems}
-                            activeId={activeId}
-                            activeLabel="Current entity"
-                            defaultExpanded={false}
-                            collapseOnSelect={isMobile}
-                            onSelect={scrollTo}
-                        />
-                    )}
-
-                    <div className="space-y-3">
-                        {orderedWithHeader.map(({ entity, node, showHeader }) => {
-                            return (
-                                <div key={node.id}>
-                                    {showHeader && (
-                                        <div className="flex items-center gap-2 pt-2 pb-1.5">
-                                            <CategoryBadge category={node.category} />
-                                            <span className="flex-1 h-px bg-neutral-100" />
-                                        </div>
-                                    )}
-                                    <EntityCard
-                                        entity={entity}
-                                        node={node}
-                                        expanded={expandedIds.has(node.id)}
-                                        onToggle={() => toggleEntity(node.id)}
-                                        resolveTargetId={resolveTargetId}
-                                        onNavigateToEntity={focusEntity}
-                                        showCategory={!grouped}
-                                        isMobile={isMobile}
-                                        focusedEntity={initialPair?.node.id === node.id && !exactMemberAnchor}
-                                        initialMemberName={initialPair?.node.id === node.id && exactMemberAnchor ? initialMemberName : undefined}
-                                        initialMemberAspect={initialPair?.node.id === node.id && exactMemberAnchor ? initialMemberAspect : undefined}
-                                    />
+                    {/* Entities organised into their derived category sections. */}
+                    <div className="space-y-6">
+                        {groups.map(group => (
+                            <div key={group.category ?? 'all'} className="space-y-2.5">
+                                {group.category && (
+                                    <CategoryHeader category={group.category} count={group.items.length} />
+                                )}
+                                <div className="space-y-2.5">
+                                    {group.items.map(({ entity, node }) => (
+                                        <EntityCard
+                                            key={node.id}
+                                            entity={entity}
+                                            node={node}
+                                            expanded={expandedIds.has(node.id)}
+                                            onToggle={() => toggleEntity(node.id)}
+                                            resolveTargetId={resolveTargetId}
+                                            onNavigateToEntity={focusEntity}
+                                            showCategory={!grouped}
+                                            isMobile={isMobile}
+                                            focusedEntity={initialPair?.node.id === node.id && !exactMemberAnchor}
+                                            initialMemberName={initialPair?.node.id === node.id && exactMemberAnchor ? initialMemberName : undefined}
+                                            initialMemberAspect={initialPair?.node.id === node.id && exactMemberAnchor ? initialMemberAspect : undefined}
+                                        />
+                                    ))}
                                 </div>
-                            );
-                        })}
+                            </div>
+                        ))}
                     </div>
                 </section>
             )}

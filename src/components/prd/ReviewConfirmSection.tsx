@@ -43,12 +43,30 @@ interface Props {
     /** Mark the assumption incorrect, with an optional correction/clarification. */
     onReject: (assumptionId: string, note: string) => void;
     readOnly: boolean;
+    /** Section heading. Defaults to "Review & Confirm" (legacy usage). */
+    title?: string;
+    /** Explanatory copy under the heading. */
+    description?: string;
+    /** DOM id / scroll anchor. */
+    id?: string;
+    /** Label for the confirm action ("Confirm" | "Confirm answer" …). */
+    confirmLabel?: string;
 }
 
 const requiresValidation = (assumption: Assumption): boolean =>
     assumption.materiality === undefined || assumption.materiality === 'blocking' || assumption.materiality === 'high';
 
-export function ReviewConfirmSection({ assumptions, onConfirm, onPlanValidation, onReject, readOnly }: Props) {
+export function ReviewConfirmSection({
+    assumptions,
+    onConfirm,
+    onPlanValidation,
+    onReject,
+    readOnly,
+    title = 'Review & Confirm',
+    description = 'Synapse made these assumptions while drafting the PRD. Accept one as working planning context or correct it. Acceptance does not validate the underlying belief.',
+    id = 'prd-review-confirm',
+    confirmLabel = 'Accept for planning',
+}: Props) {
     const [rejectingId, setRejectingId] = useState<string | null>(null);
     const [note, setNote] = useState('');
 
@@ -66,17 +84,14 @@ export function ReviewConfirmSection({ assumptions, onConfirm, onPlanValidation,
     };
 
     return (
-        <div id="prd-review-confirm" className="mb-8 scroll-mt-24">
+        <div id={id} className="mb-8 scroll-mt-24">
             <div className="flex items-center gap-2 mb-3 border-b border-neutral-200 pb-2">
                 <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight whitespace-nowrap">
-                    Review &amp; Confirm
+                    {title}
                 </h3>
                 <span className="text-[11px] text-neutral-400">{assumptions.length}</span>
             </div>
-            <p className="text-sm text-neutral-600 mb-3">
-                Synapse made these assumptions while drafting the PRD. Accept one as working
-                planning context or correct it. Acceptance does not validate the underlying belief.
-            </p>
+            <p className="text-sm text-neutral-600 mb-3">{description}</p>
             <ul className="space-y-2">
                 {assumptions.map(a => (
                     <li key={a.id} className="rounded-lg border border-neutral-200 bg-white px-4 py-3">
@@ -95,7 +110,7 @@ export function ReviewConfirmSection({ assumptions, onConfirm, onPlanValidation,
                                         className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-800 transition hover:bg-neutral-50 sm:w-auto"
                                         aria-label={`Accept for planning, not validated: ${a.statement}`}
                                     >
-                                        <Check size={13} /> Accept for planning
+                                        <Check size={13} /> {confirmLabel}
                                     </button>
                                     {requiresValidation(a) && onPlanValidation && (
                                         <button

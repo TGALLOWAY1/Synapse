@@ -28,6 +28,7 @@ import type {
 import type { ParsedFlow } from '../components/renderers/userFlows/types';
 import { slugifyScreenName } from './screenInventoryImageStore';
 import type { ScreenExperienceIndex, ScreenExperienceItem } from './screenExperience';
+import type { ScreenHandoffStatus, TraceConfidence } from './screenStatusShared';
 
 // --- Review status -----------------------------------------------------------
 
@@ -371,7 +372,7 @@ export interface ScreenFeatureLink {
  *                 coverage is estimated from what does link;
  *   'missing'   — no refs at all.
  */
-export type TraceabilityConfidence = 'explicit' | 'estimated' | 'missing';
+export type TraceabilityConfidence = Extract<TraceConfidence, 'explicit' | 'estimated' | 'missing'>;
 
 export interface ScreenTraceability {
     features: ScreenFeatureLink[];
@@ -431,7 +432,7 @@ const MAX_CRITERIA = 8;
  * restates a fact the spec already carries in checkable form. Consumers must
  * label the list as derived.
  */
-export function deriveAcceptanceCriteria(screen: ScreenItem): string[] {
+function deriveAcceptanceCriteria(screen: ScreenItem): string[] {
     const out: string[] = [];
     if (screen.userIntent?.trim()) {
         out.push(`The user can accomplish their goal on this screen: ${trimSentence(screen.userIntent)}.`);
@@ -512,7 +513,7 @@ export interface ScreenHandoff {
  * existing fields — no route, prop, or accessibility data exists in the
  * legacy generated spec, so none is fabricated here; the UI shows
  * "Not specified". (Phase 2 contract artifacts use resolveScreenHandoff.) */
-export function buildScreenHandoff(screen: ScreenItem): ScreenHandoff {
+function buildScreenHandoff(screen: ScreenItem): ScreenHandoff {
     const components = (screen.coreUIElements && screen.coreUIElements.length > 0
         ? screen.coreUIElements
         : screen.components ?? []).filter(c => c.trim());
@@ -610,6 +611,16 @@ export const DEFAULT_VARIANT_ID = 'default';
  * State rows exist for every documented state; per-state mockup generation
  * isn't wired yet, so a state row is 'missing' unless the user marked it
  * accepted (e.g. covered by an upload) or not needed.
+ *
+ * SYN-003 — DELIBERATE non-change: this stays SPEC-derived (item.mockupScreen),
+ * NOT device-image-aware. Readiness gaps (incl. `missing_mockup_p0`) are
+ * WORK-PLANNING signals evaluated in pure batch derivations with no reactive
+ * store access; making them depend on IndexedDB/blob image presence would flip
+ * review statuses transiently during lazy hydration and conflate "asset missing
+ * on THIS device" with "work not done". The variant layer
+ * (src/lib/mockupVariants.ts, gated by `defaultImagePresence`) is the
+ * visual-truth surface; readiness answers "is the mockup planned?", not "does a
+ * rendered PNG exist here right now?".
  */
 export function buildMockupVariantRows(
     item: Pick<ScreenExperienceItem, 'screen' | 'mockupScreen' | 'edit'>,
@@ -996,7 +1007,7 @@ export interface ScreenFilterReview {
     /** Phase 4B: true when this screen has a blocking/review downstream impact. */
     downstreamReviewNeeded?: boolean;
     /** Phase 5A: implementation-handoff readiness for this screen. */
-    handoffReadiness?: 'ready' | 'review_recommended' | 'blocked';
+    handoffReadiness?: ScreenHandoffStatus;
 }
 
 export function screenMatchesFilter(

@@ -1,6 +1,6 @@
 # Build Workspace, Artifact Groups & Implementation Plan
 
-> Extracted from CLAUDE.md. Post-commitment flow, hidden/retired artifact subtypes, the consolidated Implementation Plan, the Artifact Dependency Graph (Project Map), and implementation tasks.
+> Extracted from CLAUDE.md. Post-finalization flow, hidden/retired artifact subtypes, the consolidated Implementation Plan, the Artifact Dependency Graph (Project Map), and implementation tasks.
 
 ### Post-commitment transition (Commit Plan → Build)
 
@@ -169,14 +169,28 @@ stale and why, and the safe update order. See
   `update_recommended`, never hard `needs_update`). `sourceRefs` already
   travel in `ArtifactVersion` through persistence/sync/snapshots, so no
   schema change was involved.
-- **Staleness is deterministic** (`evaluateDependencyGraph`): spine-ref drift
-  and recorded dependency-ref drift → `needs_update`; the mockup
-  design-tokensHash rule mirrors `stalenessSlice` (hash comparison beats
-  version-id comparison — a token-identical regen keeps mockups current);
-  missing/error/generating come from artifact presence + live job slots.
-  Upstream trouble propagates downstream as `impactedBy` (blue "Impacted"
-  pill). Keep this evaluator and `stalenessSlice` consistent if either rule
-  set changes.
+- **`evaluateDependencyGraph` is THE single freshness engine (SYN-005).** The
+  legacy `stalenessSlice` / `getArtifactStaleness` (3-value `StalenessState`:
+  current/possibly_outdated/outdated) was deleted; every surface now reads this
+  one evaluator through the shared seam. **`src/lib/artifactFreshness.ts`**
+  assembles its `DependencyEvaluationInput` from raw store slices
+  (`buildDependencyEvaluationInput` / `evaluateProjectFreshness` /
+  `invertToArtifactIds`) — **never hand-roll the store→input loop again** (that
+  duplication across DependencyGraphView and the update-plan builder was the
+  SYN-005 defect). **`useProjectFreshness(projectId)`** is the selector-stable
+  React entry (used by DependencyGraphView, ArtifactWorkspace, ExportModal).
+  **`DEPENDENCY_STATUS_LABELS`** is the ONLY status-label map; `isStaleStatus`
+  (needs_update | update_recommended) and `hasDesignTokenDrift` are the shared
+  predicates; `FreshnessBadge` is the inline badge (renders only for stale
+  statuses). Staleness itself is deterministic: spine-ref drift and recorded
+  dependency-ref drift → `needs_update`; the mockup design-tokensHash rule (a
+  `design_tokens_changed` reason) uses hash comparison over version-id
+  comparison — a token-identical regen keeps mockups current; missing/error/
+  generating come from artifact presence + live job slots. Upstream trouble
+  propagates downstream as `impactedBy` (blue "Impacted" pill).
+  **System freshness (`DependencyNodeStatus`) is a SEPARATE vocabulary from the
+  user review/readiness statuses** (`screenReadiness` / `screenReviewWorkflow`)
+  — never merge them.
 - **Actions reuse existing flows.** Single update → `retrySlot`; batch →
   `artifactJobController.regenerateSlots(slots, args)`, a thin wrapper over
   the existing `executeJob` (dependency-layer order, mockup last — no second

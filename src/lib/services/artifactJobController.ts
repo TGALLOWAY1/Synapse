@@ -43,6 +43,15 @@ import { hasOpenAIKey } from '../openaiClient';
 import { selectPreferredDesignSystem } from '../designTokens';
 import { parseScreenInventory } from '../screenInventoryNormalize';
 import { parseComponentInventoryMarkdown } from '../componentInventoryParse';
+import { assertProjectCapability, getProjectCapabilities } from '../projectCapabilities';
+import { hasGeminiKey } from '../geminiKeyVault';
+
+function assertArtifactGenerationAllowed(projectId: string): void {
+    assertProjectCapability(
+        useProjectStore.getState().projects[projectId],
+        'canGenerateArtifacts',
+    );
+}
 
 export interface StartArgs {
     projectId: string;
@@ -122,6 +131,16 @@ interface RunState {
     controller: AbortController;
     spineVersionId: string;
     promise: Promise<void>;
+    /**
+     * True for a single-slot run (a manual `retrySlot`, or the background
+     * `ensureDesignSystemForSpine` early-generation run). A single run does NOT
+     * block a subsequent full `startAll` for the same spine: startAll chains
+     * itself onto the single run's completion instead of no-op'ing, so
+     * finalizing while an early/manual single slot is in flight can't silently
+     * generate nothing. A full run (startAll / regenerateSlots) leaves this
+     * undefined and DOES cause a concurrent startAll to no-op (idempotent).
+     */
+    single?: boolean;
 }
 
 const runs = new Map<string, RunState>();
@@ -735,11 +754,79 @@ export const artifactJobController = {
     },
 
     /**
+     * Background early-generation of the design_system artifact. Fired from a
+     * React effect as soon as a design-system preset is chosen AND the PRD has
+     * settled successfully, so the later finalize `startAll` finds it already
+     * done (via `isSlotDoneForSpine`) and skips it — the user never watches
+     * design_system "generating" after finalize.
+     *
+     * All gates return early and NEVER throw (this is fired from an effect):
+     * demo / no-generate capability, the spine generation gate (safety-blocked,
+     * missing PRD, unacknowledged-incomplete PRD), a missing Gemini key (an
+     * early run would just burn a guaranteed failure), the slot already being
+     * done for this spine, and an already-active run (idempotent — never
+     * interleave). Registered as a `single` run so a subsequent full startAll
+     * chains onto it rather than no-op'ing (see startAll). On failure it records
+     * the slot error silently; finalize self-heals by regenerating.
+     */
+    ensureDesignSystemForSpine(args: StartArgs): void {
+        const slot: CoreArtifactSubtype = 'design_system';
+        const store = useProjectStore.getState();
+
+        // Silent gate: demo / read-only projects can't generate. Use the
+        // non-throwing capability read (assertProjectCapability would throw).
+        if (!getProjectCapabilities(store.projects[args.projectId]).canGenerateArtifacts) return;
+
+        // Silent gate: safety-blocked, no structured PRD, or unacknowledged
+        // incomplete PRD (a non-final spine with failed sections).
+        const spine = (store.spineVersions[args.projectId] || [])
+            .find(s => s.id === args.spineVersionId);
+        if (!evaluateSpineGenerationGate(spine, {}).allowed) return;
+
+        // Silent gate: no resolvable Gemini key → skip (the run would fail).
+        if (!hasGeminiKey()) return;
+
+        // Silent gate: already generated for this spine.
+        if (isSlotDoneForSpine(args.projectId, slot, args.spineVersionId)) return;
+
+        // Silent gate: never interleave with an active run (idempotent).
+        const existing = runs.get(args.projectId);
+        if (existing && !existing.controller.signal.aborted) return;
+        if (existing) runs.delete(args.projectId);
+
+        // design_system has no dependencies (dependsOn: []) — no closure to plan.
+        if (!store.getJob(args.projectId)) {
+            store.initJob(args.projectId, args.spineVersionId, [slot]);
+        }
+        store.setSlotStatus(args.projectId, slot, { status: 'queued', error: undefined });
+
+        const controller = new AbortController();
+        const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
+        const promise = (async () => {
+            try {
+                await runCoreArtifactSlot(args, slot, controller.signal, generatedArtifacts);
+            } catch (e) {
+                if (isAbortError(e) || controller.signal.aborted) return;
+                // Silent: jobs are transient and finalize self-heals. Do NOT
+                // consume the manual retryFailures budget.
+                recordError(args.projectId, slot, e);
+            }
+        })().finally(() => {
+            const current = runs.get(args.projectId);
+            if (current && current.controller === controller) {
+                runs.delete(args.projectId);
+            }
+        });
+        runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, single: true });
+    },
+
+    /**
      * Kick off generation of every downstream slot not yet done for this
      * spine. Idempotent: a re-call while active is a no-op; a re-call after
      * completion only queues slots still missing.
      */
     startAll(args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         // Downstream protection: a spine blocked by safety review — or an
         // incomplete (partial) PRD the user hasn't acknowledged — can never
         // drive artifact generation, even if startAll is reached directly.
@@ -749,6 +836,18 @@ export const artifactJobController = {
 
         const existing = runs.get(args.projectId);
         if (existing && !existing.controller.signal.aborted && existing.spineVersionId === args.spineVersionId) {
+            // A full run already covers this spine — idempotent no-op. But a
+            // *single* run (an early design_system generation, or a manual
+            // retrySlot) covers only one slot; no-op'ing here would let a
+            // finalize silently generate NOTHING. Instead chain: run the full
+            // startAll once the single run settles. Re-entry recomputes
+            // pendingSlotsForSpine, so a successful early slot is skipped (its
+            // sourceRefs carry the spine id) and a failed one regenerates. A
+            // double-finalize chains twice; the second re-entry sees the full
+            // run active and no-ops.
+            if (existing.single) {
+                void existing.promise.finally(() => this.startAll(args));
+            }
             return;
         }
         // Different spine or stale entry — cancel any prior run.
@@ -789,6 +888,7 @@ export const artifactJobController = {
      * their update buttons off the live job state.
      */
     regenerateSlots(slots: ArtifactSlotKey[], args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         const spine = (useProjectStore.getState().spineVersions[args.projectId] || [])
             .find(s => s.id === args.spineVersionId);
         if (!evaluateSpineGenerationGate(spine, { acknowledgeIncomplete: args.acknowledgeIncomplete }).allowed) return;
@@ -836,6 +936,7 @@ export const artifactJobController = {
      * race against it.
      */
     retrySlot(slot: ArtifactSlotKey, args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         const failureKey = retryFailureKey(args.projectId, slot);
         if ((retryFailures.get(failureKey) ?? 0) >= MAX_RETRY_FAILURES) {
             useProjectStore.getState().setSlotStatus(args.projectId, slot, {
@@ -916,7 +1017,9 @@ export const artifactJobController = {
         });
 
         if (!reuseExisting) {
-            runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise });
+            // Registered as a single-slot run so a concurrent full startAll
+            // chains onto it instead of no-op'ing (see startAll).
+            runs.set(args.projectId, { controller, spineVersionId: args.spineVersionId, promise, single: true });
         }
     },
 
@@ -925,6 +1028,7 @@ export const artifactJobController = {
      * final spine. Skips when generation is already active.
      */
     resumeIfNeeded(args: StartArgs): void {
+        assertArtifactGenerationAllowed(args.projectId);
         if (this.isActive(args.projectId)) return;
         if (!hasAnyCompletedSlotForSpine(args.projectId, args.spineVersionId)) return;
         // Only auto-wake for *visible* pending slots. A hidden slot that errored

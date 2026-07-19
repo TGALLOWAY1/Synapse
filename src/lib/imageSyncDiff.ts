@@ -3,22 +3,21 @@
 
 /**
  * Which local image keys need uploading: those present locally but NOT already
- * on the server AND NOT already recorded in the per-user "uploaded" markers.
- * Mirrors projectMigration's marker pattern — the server upsert is idempotent
- * on (userId, projectId, key), so a missed marker only costs a redundant
- * (harmless) re-upload, never a duplicate.
+ * on the server. The server refs are the single source of truth — the caller
+ * defers the round entirely if it can't fetch them, so this never uploads blind.
+ * The server upsert is idempotent on (userId, projectId, key), so a redundant
+ * re-upload is harmless and never produces a duplicate.
  */
 export function computeImagesToUpload(
   localKeys: Iterable<string>,
   serverKeys: ReadonlySet<string>,
-  uploadedMarkers: ReadonlySet<string>,
 ): string[] {
   const out: string[] = [];
   const seen = new Set<string>();
   for (const key of localKeys) {
     if (seen.has(key)) continue;
     seen.add(key);
-    if (!serverKeys.has(key) && !uploadedMarkers.has(key)) out.push(key);
+    if (!serverKeys.has(key)) out.push(key);
   }
   return out;
 }
