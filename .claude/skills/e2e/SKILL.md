@@ -28,10 +28,12 @@ npm run e2e:smoke            # no key: boot + form + start-dialog only
   larger token spend and takes several minutes; use `--skip-assets` for a
   PRD-only pass. Pass `--timeout-min=15` if it times out; `--prompt=…`/`--name=…`
   to vary the idea.
-- **Mockup images** need an `OPENAI_API_KEY` too (they come from `gpt-image`).
-  With only a Gemini key the Screens view shows wireframe/placeholder screens,
-  not rendered visuals — `report.assets.note` records this; don't report it as a
-  defect.
+- **Mockup images never render locally.** They come from the server-side
+  `/api/image/generate` proxy (and `hasOpenAIKey()` reads a server status
+  endpoint) — `api/` functions that `vite dev` doesn't run, so the Screens view
+  always shows wireframe/placeholder screens here, regardless of any
+  `OPENAI_API_KEY`. `report.assets.note` records this; don't report it as a
+  defect. Rendered imagery needs a real deployment (Vercel preview).
 - Output: `e2e-results/run-<timestamp>/` — numbered PNGs + `report.json`.
 
 ## 2. Assess — actually look at the screenshots

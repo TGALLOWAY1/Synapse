@@ -556,7 +556,7 @@ try {
                         // Fallback: some slot errored (no artifact written) but the run
                         // is quiescent and most assets are present — don't hang.
                         if (domIdle && info.ready >= 3 && Date.now() - lastChangeAt > 60_000) { settleReason = 'quiescent'; break; }
-                        if (Date.now() - t0 > GENERATION_TIMEOUT_MS) { await shot(page, 'assets-TIMEOUT', { fullPage: false }); break; }
+                        if (Date.now() - t0 > GENERATION_TIMEOUT_MS) { settleReason = 'timeout'; await shot(page, 'assets-TIMEOUT', { fullPage: false }); break; }
                         if (Date.now() - lastShotAt >= PROGRESS_SHOT_EVERY_MS) {
                             lastShotAt = Date.now();
                             await shot(page, `assets-generating-${Math.round((Date.now() - t0) / 1000)}s`, { fullPage: false });
@@ -567,15 +567,23 @@ try {
                         ms: Date.now() - t0,
                         settleReason,
                         readySubtypes: [...new Set(subtypes)].sort(),
-                        // Mockup *images* need an OpenAI key (hasOpenAIKey); with only a
-                        // Gemini key the mockup spec/screens generate but render as
-                        // wireframe/placeholder screens, not rendered visuals.
-                        note: process.env.OPENAI_API_KEY ? undefined
-                            : 'No OpenAI key: mockup screen images are not rendered (spec/wireframe only).',
+                        // Mockup *images* come from the /api/image/generate backend proxy
+                        // (server-side, gated by the provider-key status endpoint), and
+                        // hasOpenAIKey() reflects that server status — NOT any shell env
+                        // var. Plain `vite dev` runs no `api/` functions, so images never
+                        // render here regardless of key; the mockup *spec* still generates
+                        // via Gemini and screens show as wireframe/placeholder.
+                        note: 'Local harness: mockup screen images are always wireframe/placeholder — the /api image backend does not run under vite dev. The mockup spec generates via Gemini.',
                     };
                     console.log(`  assets settled in ${Math.round((Date.now() - t0) / 1000)}s (${settleReason})`,
                         report.assets.readySubtypes);
-                }, { optional: true });
+                    // A timeout means the newly-added asset path did not complete — fail
+                    // the run (report.assets is already recorded above) rather than exit
+                    // 0 and mask the regression this harness exists to catch.
+                    if (settleReason === 'timeout') {
+                        throw new Error(`asset generation did not settle within ${GENERATION_TIMEOUT_MS / 60000} min`);
+                    }
+                }); // non-optional: a stalled/failed asset bundle must fail `npm run e2e`
 
                 // Screenshot each generated artifact by clicking its sidebar row.
                 for (const title of ARTIFACT_ROW_TITLES) {
