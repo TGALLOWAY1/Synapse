@@ -368,18 +368,20 @@ export function AssumptionValidationPanel({
                     <h3 id={`assumption-validation-${recordId}`} className="mt-1 text-base font-semibold text-neutral-950">{requiresValidation ? 'Replace belief with evidence' : 'Validate if it would improve the plan'}</h3>
                     <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">{requiresValidation ? 'Acceptance lets planning continue but does not establish that the belief is true. Validation requires evidence that answers a specific question.' : 'This assumption is not consequential enough to require a formal test. You can still validate it if new evidence would change the plan.'}</p>
                 </div>
-                <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${validation.workflowState === 'completed' ? 'bg-emerald-50 text-emerald-700' : validation.workflowState === 'due_for_review' ? 'bg-amber-50 text-amber-800' : 'bg-neutral-100 text-neutral-700'}`}>
-                    {workflowLabels[validation.workflowState]}
-                </span>
+                {validation.workflowState !== 'not_planned' && (
+                    <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${validation.workflowState === 'completed' ? 'bg-emerald-50 text-emerald-700' : validation.workflowState === 'due_for_review' ? 'bg-amber-50 text-amber-800' : 'bg-neutral-100 text-neutral-700'}`}>
+                        {workflowLabels[validation.workflowState]}
+                    </span>
+                )}
             </div>
 
-            <div className="mt-4 rounded-lg bg-neutral-50 px-3 py-2.5">
-                <div className="rounded-lg bg-neutral-50 px-3 py-2.5">
+            {(validation.acceptedConclusion || (!validation.conclusionIsCurrent && validation.hasHistoricalValidation)) && (
+                <div className="mt-4 rounded-lg bg-neutral-50 px-3 py-2.5">
                     <p className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">Evidence conclusion</p>
                     <p className="mt-1 text-sm font-semibold text-neutral-900">{validation.acceptedConclusion ? conclusionLabels[validation.acceptedConclusion] : 'No current conclusion'}</p>
                     {!validation.conclusionIsCurrent && validation.hasHistoricalValidation && <p className="mt-1 text-xs text-amber-700">Earlier validation is historical and cannot support the current assumption.</p>}
                 </div>
-            </div>
+            )}
             {validation.userTreatment && (
                 <details className="mt-2 rounded-lg border border-neutral-200 px-3">
                     <summary className="min-h-10 cursor-pointer py-2 text-xs font-semibold text-neutral-600">How unresolved uncertainty is being treated</summary>
