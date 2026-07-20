@@ -170,7 +170,15 @@ export interface ValidatedSpecialistFinding extends Omit<ParsedSpecialistFinding
 export interface SpecialistDefinition {
     id: ReviewSpecialistId;
     label: string;
+    /** One-line responsibility summary; also shown in the review UI. */
     responsibility: string;
+    /**
+     * Expert persona: the reviewer's background, mindset, what they are
+     * instinctively suspicious of, and how they weigh severity. Rendered into
+     * the specialist prompt to set lens and rigor — never a license to assume
+     * facts that lack evidence.
+     */
+    perspective: string;
     goals: string[];
     boundaries: string[];
     relevantArtifacts: CoreArtifactSubtype[];
