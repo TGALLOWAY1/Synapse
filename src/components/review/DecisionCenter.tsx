@@ -289,8 +289,8 @@ export function DecisionCenter({
                 </div>
             )}
 
-            <div className="min-h-0 flex-1 md:grid md:grid-cols-[300px_minmax(0,1fr)]">
-                <aside className={`${mobileDetailOpen ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-neutral-200 bg-white`} aria-label="Decision queue">
+            <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[300px_minmax(0,1fr)]">
+                <aside className={`${mobileDetailOpen ? 'hidden md:flex' : 'flex'} min-h-0 flex-1 flex-col border-r border-neutral-200 bg-white`} aria-label="Decision queue">
                     <div className="flex shrink-0 border-b border-neutral-100 p-2">
                         <button type="button" onClick={() => setView('needs_review')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'needs_review' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Needs attention</button>
                         <button type="button" onClick={() => setView('log')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'log' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Resolved &amp; history</button>
@@ -318,7 +318,7 @@ export function DecisionCenter({
                     </div>
                 </aside>
 
-                <main className={`${mobileDetailOpen ? 'block' : 'hidden md:block'} min-h-0 overflow-y-auto`} aria-label="Decision detail">
+                <main className={`${mobileDetailOpen ? 'block' : 'hidden md:block'} min-h-0 flex-1 overflow-y-auto`} aria-label="Decision detail">
                     {!selected ? (
                         <div className="mx-auto max-w-xl px-5 py-16 text-center text-sm text-neutral-500">Select a decision to inspect its reasoning and history.</div>
                     ) : (
