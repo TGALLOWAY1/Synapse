@@ -531,7 +531,13 @@ function ScreenCard({
                         <ImageIcon size={12} className="text-neutral-300" aria-hidden />
                         {variantSummary.hasMockup ? 'Mockup ready' : 'No mockup yet'}
                     </span>
-                    <ChevronRight size={13} className="ml-auto text-neutral-300 group-hover:text-indigo-400 transition-colors" aria-hidden />
+                    <span
+                        className="ml-auto inline-flex items-center gap-0.5 text-neutral-400 group-hover:text-indigo-500 transition-colors"
+                        title={!variantSummary.hasMockup ? 'Open this screen to generate a mockup' : undefined}
+                    >
+                        Open
+                        <ChevronRight size={13} aria-hidden />
+                    </span>
                 </div>
             </button>
 

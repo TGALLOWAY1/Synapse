@@ -1,6 +1,6 @@
 // Compact review/readiness status chip shared by the Screens list cards and
 // the Screen Detail header. Derived statuses are visually distinct from
-// user-set ones (a small "est." suffix) so an estimate never reads as a
+// user-set ones (a small "estimated" suffix) so an estimate never reads as a
 // confirmed sign-off.
 
 import type { ScreenReadiness } from '../../lib/screenReadiness';
@@ -26,7 +26,7 @@ export function ReadinessBadge({ readiness }: { readiness: ScreenReadiness }) {
         >
             {REVIEW_STATUS_LABELS[readiness.status]}
             {readiness.source === 'derived' && (
-                <span className="opacity-70 font-normal">est.</span>
+                <span className="opacity-70 font-normal">estimated</span>
             )}
         </span>
     );

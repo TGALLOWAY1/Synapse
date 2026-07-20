@@ -53,7 +53,6 @@ const twoEntityModel: DataModelContent = {
 };
 
 function renderModel(content: DataModelContent, props: Partial<{
-    staleness: 'up_to_date' | 'needs_update' | 'update_recommended';
     initialEntityName: string;
     initialMemberName: string;
     initialMemberAspect: 'field' | 'relationship' | 'constraint' | 'data_expectation';
@@ -83,7 +82,7 @@ describe('DataModelRenderer — overview header', () => {
 
     it('does not repeat PRD provenance or a count subtitle inside the card', () => {
         // Provenance ("From PRD Version N") lives at the page level, not the card.
-        const { getByLabelText } = renderModel(modelWithApi, { staleness: 'up_to_date' });
+        const { getByLabelText } = renderModel(modelWithApi);
         const overview = getByLabelText('Data model overview');
         expect(overview).not.toHaveTextContent('From PRD');
         // The old "6 entities · 5 API endpoints" subtitle is gone — the entity
@@ -92,10 +91,15 @@ describe('DataModelRenderer — overview header', () => {
         expect(within(overview).queryByText(/API endpoints/)).toBeNull(); // lowercase subtitle form
     });
 
-    it('keeps the freshness ("Up to date") pill when status is provided', () => {
-        const { getByLabelText } = renderModel(twoEntityModel, { staleness: 'up_to_date' });
+    it('does not render an in-card freshness pill (freshness lives at the page level only)', () => {
+        // The overview no longer accepts/renders a staleness prop — the old
+        // "Up to date" / "Needs update" pill duplicated the page-level
+        // provenance/freshness strip.
+        const { getByLabelText } = renderModel(twoEntityModel);
         const overview = getByLabelText('Data model overview');
-        expect(overview).toHaveTextContent('Up to date');
+        expect(overview).not.toHaveTextContent('Up to date');
+        expect(overview).not.toHaveTextContent('Needs update');
+        expect(overview).not.toHaveTextContent('Update recommended');
     });
 
     it('renders six metric cards, including a real API-endpoint count', () => {
@@ -112,6 +116,26 @@ describe('DataModelRenderer — overview header', () => {
         expect(within(metrics).getByText('Constraints')).toBeInTheDocument();
         expect(within(metrics).getByText('Indexes')).toBeInTheDocument();
         expect(within(metrics).getByText('Entities with PII')).toBeInTheDocument();
+    });
+});
+
+describe('DataModelRenderer — PII tile interactivity', () => {
+    it('clicking "Entities with PII" expands and reveals a PII-bearing entity card', () => {
+        const { getByLabelText, getByText, queryByText } = renderModel(groupedModel);
+        // InfographicSource carries a privacy rule → collapsed by default in a
+        // 4-entity grouped model, so its field isn't visible yet.
+        expect(queryByText('uploaded_image must be access-controlled')).toBeNull();
+
+        const piiTile = getByLabelText('Show entities containing PII');
+        expect(piiTile.tagName).toBe('BUTTON');
+        fireEvent.click(piiTile);
+
+        expect(getByText('uploaded_image must be access-controlled')).toBeInTheDocument();
+    });
+
+    it('renders a static (non-interactive) tile when there is no PII', () => {
+        const { queryByLabelText } = renderModel(twoEntityModel);
+        expect(queryByLabelText('Show entities containing PII')).toBeNull();
     });
 });
 

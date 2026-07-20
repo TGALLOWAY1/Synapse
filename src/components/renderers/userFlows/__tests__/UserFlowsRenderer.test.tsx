@@ -150,4 +150,34 @@ describe('UserFlowsRenderer', () => {
         // No section heading should call them just "errors" anymore.
         expect(container.textContent).not.toMatch(/General error paths/i);
     });
+
+    it('numbers flows by grouped display order, not authored order, when categories are out of CATEGORY_ORDER order', () => {
+        // Authored order: Sharing & Collaboration, Onboarding, Auth & Identity —
+        // deliberately NOT in CATEGORY_ORDER order (Onboarding, Auth & Identity,
+        // Core Experience, Sharing & Collaboration, Other). A naive
+        // `originalIndex + 1` would show the Auth flow (authored 3rd) as
+        // "Flow 3", but the sidebar groups it under Auth & Identity, which
+        // renders second — so it must display as "Flow 2".
+        const content = `### Flow: Invite a teammate
+**Goal:** Share a workspace with a collaborator.
+**Steps:**
+1. [Share dialog] — User invites teammate → System sends invite
+
+### Flow: Welcome tour
+**Goal:** Get started for the first time.
+**Steps:**
+1. [Welcome] — User views tour → System advances slide
+
+### Flow: Log in
+**Goal:** Sign in with a password.
+**Steps:**
+1. [Login] — User signs in → System authenticates`;
+
+        const { container } = render(<UserFlowsRenderer content={content} initialFlowId="log-in" />);
+
+        // Grouped order: Onboarding (Welcome tour) → 1, Auth & Identity (Log in)
+        // → 2, Sharing & Collaboration (Invite a teammate) → 3.
+        expect(container.textContent).toMatch(/Flow 2/);
+        expect(container.textContent).not.toMatch(/Flow 3\D/);
+    });
 });

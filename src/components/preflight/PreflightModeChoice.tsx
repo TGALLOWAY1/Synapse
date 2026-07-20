@@ -1,4 +1,4 @@
-import { Zap, MessagesSquare, Compass, X } from 'lucide-react';
+import { Zap, MessagesSquare, Compass, X, ChevronRight } from 'lucide-react';
 import type { PreflightMode } from '../../types';
 
 interface PreflightModeChoiceProps {
@@ -48,21 +48,21 @@ export function PreflightModeChoice({ onChoose, onClose }: PreflightModeChoicePr
             onClick={onClose}
         >
             <div
-                className="bg-neutral-900 border border-white/10 rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg max-h-[90vh] overflow-y-auto"
+                className="bg-white text-neutral-900 border border-neutral-200 shadow-2xl rounded-t-3xl sm:rounded-3xl w-full sm:max-w-lg max-h-[90vh] overflow-y-auto"
                 style={{ paddingBottom: 'env(safe-area-inset-bottom)' }}
                 onClick={(e) => e.stopPropagation()}
             >
                 <div className="flex items-center justify-between px-6 pt-6 pb-2">
-                    <h2 className="text-lg font-semibold text-white">How would you like to start?</h2>
+                    <h2 className="text-lg font-semibold text-neutral-900">How would you like to start?</h2>
                     <button
                         onClick={onClose}
-                        className="p-2 -mr-2 text-neutral-400 hover:text-white rounded-lg transition"
+                        className="p-2 -mr-2 text-neutral-400 hover:text-neutral-900 rounded-lg transition"
                         aria-label="Cancel"
                     >
                         <X size={18} />
                     </button>
                 </div>
-                <p className="px-6 text-sm text-neutral-400 mb-4">
+                <p className="px-6 text-sm text-neutral-600 mb-4">
                     Start with the level of discovery that is useful now. You can keep exploring after the plan is drafted.
                 </p>
                 <div className="px-4 pb-5 space-y-2">
@@ -70,20 +70,24 @@ export function PreflightModeChoice({ onChoose, onClose }: PreflightModeChoicePr
                         <button
                             key={mode}
                             onClick={() => onChoose(mode)}
-                            className="w-full text-left flex items-start gap-4 p-4 min-h-[64px] rounded-2xl border border-white/10 bg-white/[0.03] hover:bg-white/[0.07] hover:border-indigo-500/50 transition group"
+                            className="w-full text-left flex items-start gap-4 p-4 min-h-[64px] rounded-2xl border border-neutral-200 bg-white hover:bg-indigo-50/40 hover:border-indigo-300 transition group"
                         >
-                            <div className="shrink-0 w-10 h-10 rounded-xl bg-indigo-500/15 text-indigo-300 flex items-center justify-center group-hover:bg-indigo-500/25 transition">
+                            <div className="shrink-0 w-10 h-10 rounded-xl bg-indigo-50 text-indigo-600 flex items-center justify-center group-hover:bg-indigo-100 transition">
                                 <Icon size={18} />
                             </div>
                             <div className="flex-1 min-w-0">
                                 <div className="flex items-center gap-2">
-                                    <span className="font-medium text-white">{title}</span>
-                                    <span className="text-xs text-indigo-300/80 bg-indigo-500/10 px-2 py-0.5 rounded-full">
+                                    <span className="font-medium text-neutral-900">{title}</span>
+                                    <span className="text-xs text-indigo-700 bg-indigo-50 px-2 py-0.5 rounded-full">
                                         {subtitle}
                                     </span>
                                 </div>
-                                <p className="text-sm text-neutral-400 mt-0.5">{detail}</p>
+                                <p className="text-sm text-neutral-600 mt-0.5">{detail}</p>
                             </div>
+                            <ChevronRight
+                                size={18}
+                                className="shrink-0 self-center text-neutral-300 transition group-hover:translate-x-0.5 group-hover:text-indigo-500"
+                            />
                         </button>
                     ))}
                 </div>

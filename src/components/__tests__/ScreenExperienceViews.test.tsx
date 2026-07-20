@@ -1,5 +1,5 @@
 import { describe, it, expect, beforeEach, vi } from 'vitest';
-import { render, fireEvent } from '@testing-library/react';
+import { render, fireEvent, within } from '@testing-library/react';
 import type { Feature, MockupPayload, ScreenInventoryContent, ScreenItem } from '../../types';
 import { buildScreenIndex, type ScreenMetadataEdit } from '../../lib/screenExperience';
 import { buildReadinessIndex, buildScreenCoverageSummary, type ScreenCoverageSummary } from '../../lib/screenReadiness';
@@ -213,6 +213,38 @@ describe('ScreenListView (coverage panel + filters + cards)', () => {
         // ...yet the freshness + legacy signals for existing mockups still show.
         expect(getByText(/may be worth refreshing/)).toBeTruthy();
         expect(getByText(/predate coverage metadata/)).toBeTruthy();
+    });
+
+    it('renders the card\'s "Open" affordance as a span (never a nested button), titled only when there is no mockup yet', () => {
+        // This fixture has one screen with a mockup ("Home Dashboard", via
+        // `payload`) and one without ("Bare Legacy Screen") — exercising both
+        // the titled and untitled affordance states in one render.
+        const { index, readiness, coverage } = buildFixtures();
+        const { getByText, getAllByText } = render(
+            <ScreenListView
+                index={index}
+                readiness={readiness}
+                coverage={coverage}
+                onSelectScreen={() => {}}
+            />,
+        );
+        const openAffordances = getAllByText('Open');
+        expect(openAffordances.length).toBeGreaterThan(0);
+        for (const affordance of openAffordances) {
+            // Must be a <span> — the whole card is already a <button>, and a
+            // nested <button> would be invalid HTML.
+            expect(affordance.tagName).toBe('SPAN');
+        }
+
+        // The card with no mockup carries the explanatory title...
+        const noMockupCard = getByText('No mockup yet').closest('button')!;
+        const noMockupAffordance = within(noMockupCard).getByText('Open');
+        expect(noMockupAffordance.getAttribute('title')).toBe('Open this screen to generate a mockup');
+
+        // ...while a card with a mockup ready does not.
+        const mockupReadyCard = getByText('Mockup ready').closest('button')!;
+        const readyAffordance = within(mockupReadyCard).getByText('Open');
+        expect(readyAffordance.getAttribute('title')).toBeNull();
     });
 
     it('exposes only the Flow and Status filters — no search / priority / sort / group / advanced', () => {

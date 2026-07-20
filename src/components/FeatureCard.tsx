@@ -120,13 +120,14 @@ export function FeatureCard({ feature, onUpdate, onToggleConfirm, onBackToSummar
                             onClick={() => !readOnly && onToggleConfirm(feature)}
                             disabled={readOnly}
                             className={confirmed
-                                ? 'inline-flex items-center justify-center h-6 w-6 rounded-full bg-emerald-100 text-emerald-700 transition'
-                                : 'inline-flex items-center justify-center h-6 w-6 rounded-full text-neutral-300 hover:text-emerald-600 hover:bg-emerald-50 transition'}
+                                ? 'inline-flex items-center gap-1 min-h-8 px-2.5 rounded-md bg-emerald-100 text-emerald-700 text-xs font-medium transition'
+                                : 'inline-flex items-center gap-1 min-h-8 px-2.5 rounded-md border border-neutral-200 text-neutral-500 text-xs font-medium hover:border-emerald-300 hover:text-emerald-600 hover:bg-emerald-50 transition'}
                             title={confirmed ? 'Confirmed — tap to reopen' : 'Confirm feature'}
                             aria-label={confirmed ? `Reopen feature ${feature.name}` : `Confirm feature ${feature.name}`}
                             aria-pressed={confirmed}
                         >
                             {confirmed ? <Check size={14} /> : <Circle size={14} />}
+                            {confirmed ? 'Confirmed' : 'Confirm'}
                         </button>
                     )}
                 </div>

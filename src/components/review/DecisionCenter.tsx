@@ -168,6 +168,18 @@ export function DecisionCenter({
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsAttention(initialRecord) ? 'needs_review' : 'log') : records.some(needsAttention) ? 'needs_review' : 'log');
     const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsAttention(record) : !needsAttention(record)), [records, view]);
+    // Stable-partition the queue by dominant condition in first-seen order so
+    // rows group under one small header instead of repeating a tag per row.
+    const groupedVisible = useMemo(() => {
+        const groups: Array<{ label: string; records: DecisionCenterRecordView[] }> = [];
+        for (const record of visible) {
+            const label = dominantConditionLabel(record);
+            const existing = groups.find(group => group.label === label);
+            if (existing) existing.records.push(record);
+            else groups.push({ label, records: [record] });
+        }
+        return groups;
+    }, [visible]);
     const [selectedId, setSelectedId] = useState<string | undefined>(initialRecord?.id);
     const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialRecord));
     const [customAnswer, setCustomAnswer] = useState('');
@@ -302,18 +314,22 @@ export function DecisionCenter({
                                 <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'Nothing needs attention' : 'No resolved planning history yet'}</p>
                                 <p className="mt-1 text-xs leading-5 text-neutral-500">{view === 'needs_review' ? 'New assumptions and review findings will appear here.' : 'Resolved and deferred choices remain available here.'}</p>
                             </div>
-                        ) : visible.map(record => (
-                            <button
-                                type="button"
-                                key={record.id}
-                                onClick={() => choose(record.id)}
-                                aria-current={selected?.id === record.id ? 'true' : undefined}
-                                className={`mb-1 w-full rounded-xl border px-3 py-3 text-left transition ${selected?.id === record.id ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-neutral-50'}`}
-                            >
-                                <div className="text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{dominantConditionLabel(record)}</div>
-                                <p className="mt-1 text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
-                                {record.sourceLabels?.[0] && <p className="mt-1 truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</p>}
-                            </button>
+                        ) : groupedVisible.map(group => (
+                            <div key={group.label}>
+                                <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{group.label}</div>
+                                {group.records.map(record => (
+                                    <button
+                                        type="button"
+                                        key={record.id}
+                                        onClick={() => choose(record.id)}
+                                        aria-current={selected?.id === record.id ? 'true' : undefined}
+                                        className={`mb-1 w-full rounded-xl border px-3 py-3 text-left transition ${selected?.id === record.id ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-neutral-50'}`}
+                                    >
+                                        <p className="text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
+                                        {record.sourceLabels?.[0] && <p className="mt-1 truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</p>}
+                                    </button>
+                                ))}
+                            </div>
                         ))}
                     </div>
                 </aside>
@@ -330,10 +346,16 @@ export function DecisionCenter({
                             {selected.sourceNotice && <div className="mt-4 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-sm text-amber-800" role="status">{selected.sourceNotice}</div>}
                             {selected.whyItMatters && <section className="mt-6"><h3 className="text-sm font-semibold text-neutral-900">Why it matters</h3><p className="mt-1 text-sm leading-6 text-neutral-600">{selected.whyItMatters}</p></section>}
 
-                            <section className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3" aria-label="Next action">
-                                <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Next action</p>
-                                <p className="mt-1 text-sm font-semibold leading-6 text-indigo-950">{dominantNextAction}</p>
-                            </section>
+                            {/* The AssumptionValidationPanel (mounted below under the same
+                                condition) already carries the guidance for assumptions with a
+                                validation flow, so suppress the generic callout to avoid a
+                                duplicate "next action" for them. */}
+                            {!(selected.type === 'assumption' && selected.validation) && (
+                                <section className="mt-5 rounded-xl border border-indigo-200 bg-indigo-50 px-4 py-3" aria-label="Next action">
+                                    <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Next action</p>
+                                    <p className="mt-1 text-sm font-semibold leading-6 text-indigo-950">{dominantNextAction}</p>
+                                </section>
+                            )}
 
                             {selected.type === 'assumption' && selected.validation && (
                                 <div>

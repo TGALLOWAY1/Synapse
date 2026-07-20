@@ -83,8 +83,11 @@ export function getSelectionInfo(sel: Selection | null): SelectionInfo | null {
  *
  * - Horizontally centers on the selection, then clamps so the (centered)
  *   popover stays fully on screen with an 8px margin.
- * - Vertically sits 8px below the selection, but flips above it when it would
- *   overflow the bottom edge.
+ * - Vertically PREFERS sitting 8px above the selection when it fits, and only
+ *   falls back to 8px below when there is no room above. Rationale: a
+ *   below-placement covers the text the user has not read yet, while an
+ *   above-placement covers text they have already read. In the below case it
+ *   still flips back above if the below position would overflow the bottom.
  * - Enforces an 8px top floor.
  *
  * The returned `left` is the popover's horizontal center (the popover element
@@ -96,19 +99,26 @@ export function computePopoverPosition(
     size: PopoverSize,
 ): PopoverPosition {
     const rawLeft = rect.left + rect.width / 2;
-    const rawTop = rect.bottom + 8;
+    const aboveTop = rect.top - size.height - 8;
+    const belowTop = rect.bottom + 8;
 
     const clampedLeft = Math.max(
         size.width / 2 + 8,
         Math.min(rawLeft, viewport.width - size.width / 2 - 8),
     );
-    const clampedTop =
-        rawTop + size.height > viewport.height
-            ? rect.top - size.height - 8 // flip above if overflowing bottom
-            : rawTop;
+
+    let placedTop: number;
+    if (aboveTop >= 8) {
+        // Preferred: sits above the (already-read) selection when it fits.
+        placedTop = aboveTop;
+    } else {
+        // No room above → sit below, but flip back above if that overflows the
+        // bottom edge (keeps the original below-case clamp/flip behavior).
+        placedTop = belowTop + size.height > viewport.height ? aboveTop : belowTop;
+    }
 
     return {
-        top: Math.max(8, clampedTop),
+        top: Math.max(8, placedTop),
         left: clampedLeft,
     };
 }

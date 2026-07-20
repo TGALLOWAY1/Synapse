@@ -5,6 +5,7 @@ import type {
     DomainEntity, Feature, FeatureSystem, ImplementationPlan, UXPage,
 } from '../../../types';
 import { parseFlows } from './parseFlow';
+import { displayNumbers } from './categorize';
 import type { FeatureRef, FlowIssue } from './types';
 import { FlowSidebar } from './FlowSidebar';
 import { FlowSummaryCard } from './FlowSummaryCard';
@@ -71,6 +72,11 @@ export function UserFlowsRenderer({
         ])),
         [flows],
     );
+
+    // Maps original index → 1-based display number in grouped visual order,
+    // so every surface (rail, mobile trigger, summary card) shows consistent
+    // 1..N numbering even though flows are grouped by category.
+    const flowNumbers = useMemo(() => displayNumbers(flows), [flows]);
 
     const [selectedIndex, setSelectedIndex] = useState(() => {
         if (!initialFlowId) return 0;
@@ -149,7 +155,7 @@ export function UserFlowsRenderer({
             <div className="flex-1 min-w-0">
                 <FlowSummaryCard
                     flow={flow}
-                    index={safeIndex}
+                    displayNumber={flowNumbers[safeIndex]}
                     featuresById={featuresById}
                     onSelectFeature={onSelectFeature}
                 />

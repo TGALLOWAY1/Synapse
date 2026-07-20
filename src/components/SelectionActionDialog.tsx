@@ -9,7 +9,7 @@ import {
 /** Action chips shown in the dialog. Desktop prefills; mobile one-taps. */
 export const SELECTION_ACTIONS = ['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace'] as const;
 
-const POPOVER_SIZE = { width: 320, height: 220 };
+const POPOVER_SIZE = { width: 340, height: 220 };
 
 interface SelectionActionDialogProps {
     selection: SelectionInfo;
@@ -76,6 +76,10 @@ export function SelectionActionDialog({
     const anchorPreview =
         selection.text.length > 50 ? `${selection.text.substring(0, 50)}...` : selection.text;
 
+    // Which action chip prefilled the current intent (if any). Derived from the
+    // intent string so no extra state is needed — the chips set `"<tag>: "`.
+    const activeTag = SELECTION_ACTIONS.find(t => intent.startsWith(t + ': '));
+
     if (isMobile) {
         return (
             <>
@@ -90,11 +94,11 @@ export function SelectionActionDialog({
                 <div
                     role="dialog"
                     aria-label="PRD edit actions"
-                    className="fixed inset-x-0 bottom-0 z-50 flex max-h-[70vh] flex-col gap-3 rounded-t-2xl border-t border-neutral-700 bg-neutral-900 p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl"
+                    className="fixed inset-x-0 bottom-0 z-50 flex max-h-[70vh] flex-col gap-3 rounded-t-2xl border-t border-neutral-200 bg-white p-4 pb-[calc(env(safe-area-inset-bottom)+1rem)] shadow-2xl"
                 >
-                    <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-neutral-700" aria-hidden="true" />
-                    <div className="text-xs text-neutral-400">
-                        <span className="font-semibold text-neutral-300">Anchor:</span> "{anchorPreview}"
+                    <div className="mx-auto mb-1 h-1 w-10 rounded-full bg-neutral-300" aria-hidden="true" />
+                    <div className="text-xs text-neutral-500">
+                        <span className="font-semibold text-neutral-700">Anchor:</span> "{anchorPreview}"
                     </div>
 
                     <div className="flex flex-wrap gap-2">
@@ -104,7 +108,7 @@ export function SelectionActionDialog({
                                 type="button"
                                 disabled={isSubmitting}
                                 onClick={() => onQuickAction(tag)}
-                                className="min-h-[44px] flex-1 basis-[28%] rounded-lg border border-neutral-700 bg-neutral-800 px-3 text-sm font-medium text-neutral-100 transition hover:bg-neutral-700 active:bg-neutral-600 disabled:opacity-50"
+                                className="min-h-[44px] flex-1 basis-[28%] rounded-lg border border-neutral-200 bg-neutral-50 px-3 text-sm font-medium text-neutral-700 transition hover:bg-neutral-100 active:bg-neutral-200 disabled:opacity-50"
                             >
                                 {tag}
                             </button>
@@ -119,7 +123,7 @@ export function SelectionActionDialog({
                             value={intent}
                             onChange={e => setIntent(e.target.value)}
                             placeholder="Or type a custom change…"
-                            className="min-h-[44px] flex-1 rounded-lg border border-neutral-700 bg-neutral-800 px-3 text-sm text-neutral-100 outline-none transition focus:border-indigo-500"
+                            className="min-h-[44px] flex-1 rounded-lg border border-neutral-200 bg-white px-3 text-sm text-neutral-900 outline-none transition focus:border-indigo-500"
                             disabled={isSubmitting}
                         />
                         <button
@@ -149,24 +153,32 @@ export function SelectionActionDialog({
             aria-label="PRD edit actions"
             onMouseDown={e => e.preventDefault()}
             onMouseUp={e => e.stopPropagation()}
-            className="fixed z-50 flex w-[340px] -translate-x-1/2 flex-col gap-3 rounded-xl border border-neutral-700 bg-neutral-900 p-4 shadow-2xl"
+            className="fixed z-50 flex w-[340px] -translate-x-1/2 flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-2xl"
             style={{ top: pos.top, left: pos.left }}
         >
-            <div className="text-xs text-neutral-400">
-                <span className="font-semibold text-neutral-300">Anchor:</span> "{anchorPreview}"
+            <div className="text-xs text-neutral-500">
+                <span className="font-semibold text-neutral-700">Anchor:</span> "{anchorPreview}"
             </div>
 
             <div className="mb-2 mt-1 flex flex-wrap gap-1.5">
-                {SELECTION_ACTIONS.map(tag => (
-                    <button
-                        key={tag}
-                        type="button"
-                        onClick={() => setIntent(tag + ': ')}
-                        className="rounded-full border border-neutral-700 bg-neutral-800 px-2.5 py-1.5 text-xs text-neutral-200 shadow-sm transition hover:border-neutral-500 hover:bg-neutral-700"
-                    >
-                        {tag}
-                    </button>
-                ))}
+                {SELECTION_ACTIONS.map(tag => {
+                    const isActive = tag === activeTag;
+                    return (
+                        <button
+                            key={tag}
+                            type="button"
+                            aria-pressed={isActive}
+                            onClick={() => setIntent(tag + ': ')}
+                            className={
+                                isActive
+                                    ? 'rounded-full border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition'
+                                    : 'rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 text-xs text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-100'
+                            }
+                        >
+                            {tag}
+                        </button>
+                    );
+                })}
             </div>
 
             <IntentHelperInline text={intent} />
@@ -178,7 +190,7 @@ export function SelectionActionDialog({
                     value={intent}
                     onChange={e => setIntent(e.target.value)}
                     placeholder="How should this change?"
-                    className="flex-1 rounded border border-neutral-700 bg-neutral-800 px-2 py-1.5 text-sm text-neutral-100 outline-none transition focus:border-indigo-500"
+                    className="flex-1 rounded border border-neutral-200 bg-white px-2 py-1.5 text-sm text-neutral-900 outline-none transition focus:border-indigo-500"
                     disabled={isSubmitting}
                 />
                 <button

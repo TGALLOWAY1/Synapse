@@ -10,7 +10,9 @@ import { inlineWithFeatures } from './inlineWithFeatures';
 
 interface Props {
     flow: ParsedFlow;
-    index: number;
+    /** 1-based display number in grouped visual order (see `displayNumbers` in
+     * `categorize.ts`) — NOT the flow's original/selection index. */
+    displayNumber: number;
     featuresById?: Map<string, Feature>;
     onSelectFeature: (refToken: FeatureRef) => void;
 }
@@ -33,7 +35,7 @@ function GoalBlock({
 }
 
 export function FlowSummaryCard({
-    flow, index, featuresById, onSelectFeature,
+    flow, displayNumber, featuresById, onSelectFeature,
 }: Props) {
     const renderText = (text: string) =>
         inlineWithFeatures(text, { featuresById, onSelectFeature });
@@ -55,7 +57,7 @@ export function FlowSummaryCard({
                 <div className="min-w-0 flex-1">
                     <div className="flex items-center gap-2 flex-wrap">
                         <p className="text-[11px] font-semibold uppercase tracking-wider text-indigo-600">
-                            Flow {index + 1}
+                            Flow {displayNumber}
                         </p>
                         <span className="text-[10px] px-2 py-0.5 rounded-full bg-indigo-50 text-indigo-700 font-medium border border-indigo-100">
                             {flow.category}

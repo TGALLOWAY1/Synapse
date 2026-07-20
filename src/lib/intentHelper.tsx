@@ -26,7 +26,8 @@ export function IntentHelperInline({ text }: { text: string }): React.ReactEleme
     const info = getIntentInfo(text);
     if (!info) return null;
     return (
-        <div className="text-xs text-neutral-400 italic leading-snug bg-neutral-800/50 p-2 rounded border border-neutral-700/50 mb-2">
+        // Light-themed to match SelectionActionDialog (its only consumer).
+        <div className="text-xs text-neutral-500 italic leading-snug bg-neutral-50 p-2 rounded border border-neutral-200 mb-2">
             {info.helper}
         </div>
     );

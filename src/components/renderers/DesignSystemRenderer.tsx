@@ -115,21 +115,18 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
 
 // Explains the design system's role as the project's single visual source of
 // truth: internal mockups and the prompts users copy for external image tools
-// both follow it, and regenerating it can shift those downstream assets. Shows
-// the chosen preset direction when one was set.
+// both follow it. Shows the chosen preset direction when one was set. The
+// regeneration-impact message is deliberately NOT repeated here — it's already
+// carried by `DesignDirectionControl`.
 function DesignDirectionNote({ projectId }: { projectId?: string }) {
     const presetId = useProjectStore(s => (projectId ? s.projects[projectId]?.designSystemPreset : undefined));
     const presetLabel = getDesignSystemPresetLabel(presetId);
     return (
         <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-xs text-indigo-900">
             <p>
-                <span className="font-semibold">This design system is your project's visual source of truth.</span>{' '}
-                Internal mockups and the prompts you copy for external image tools both follow it, so they
-                stay consistent.
+                <span className="font-semibold">This design system is your project's visual source of truth</span>
+                {' '}— mockups and external image prompts follow it.
                 {presetLabel ? <> Direction: <span className="font-medium">{presetLabel}</span>.</> : null}
-            </p>
-            <p className="mt-1 text-indigo-700/90">
-                Regenerating the design system may change your mockups and screen-level prompts.
             </p>
         </div>
     );

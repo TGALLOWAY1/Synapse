@@ -7,7 +7,7 @@ import type { OrderedPromptPack, PlanScope } from '../../../lib/services/impleme
 import { CopyTextButton } from './CopyTextButton';
 
 const READINESS_STYLE = {
-    ready: { icon: CheckCircle2, cls: 'bg-emerald-50 border-emerald-200 text-emerald-800', label: 'Ready to build' },
+    ready: { icon: CheckCircle2, cls: 'bg-emerald-50 border-emerald-200 text-emerald-800', label: 'Plan complete' },
     needs_review: { icon: AlertTriangle, cls: 'bg-amber-50 border-amber-200 text-amber-800', label: 'Needs review' },
     blocked: { icon: XCircle, cls: 'bg-red-50 border-red-200 text-red-800', label: 'Blocked' },
 } as const;
