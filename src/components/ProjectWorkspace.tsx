@@ -32,6 +32,8 @@ import { PreflightView } from './preflight/PreflightView';
 import { ArtifactWorkspace } from './ArtifactWorkspace';
 import { FinalizationSuccessModal } from './FinalizationSuccessModal';
 import { DesignSystemPresetChoice } from './DesignSystemPresetChoice';
+import { DesignSetupStep } from './setup/DesignSetupStep';
+import { shouldShowDesignSetup } from '../lib/designSetup';
 import { CORE_ARTIFACT_DISPLAY_ORDER, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
 import { HistoryView } from './HistoryView';
 import { VersionHistoryPanel, VersionCompareView, RevertConfirmModal, type VersionEntry } from './versions';
@@ -365,6 +367,34 @@ export function ProjectWorkspace() {
         // to later param changes would yank the stage from under the user.
     }, [projectId, capabilities.canPersistWorkflowState]);
 
+    // Early design-system generation: as soon as a preset is chosen and the PRD
+    // settles cleanly, kick off design_system in the background so it isn't
+    // still "generating" after the user finalizes. All gating beyond these
+    // guards (capabilities/demo, generation gate, missing key, already-done for
+    // the spine, active run) lives inside ensureDesignSystemForSpine.
+    const earlyDesignSpine = projectId ? getLatestSpine(projectId) : undefined;
+    const earlyDesignProject = projectId ? getProject(projectId) : undefined;
+    useEffect(() => {
+        if (!projectId || !earlyDesignSpine) return;
+        // Only act on the current latest spine — not while viewing an old one.
+        if (viewedSpineId && viewedSpineId !== earlyDesignSpine.id) return;
+        if (!earlyDesignProject?.designSystemPreset) return;
+        // Finalize owns generation from here; also prevents a double-fire with
+        // handleChooseDesignSystemPreset / the post-final ChangeDirectionModal.
+        if (earlyDesignSpine.isFinal) return;
+        if (earlyDesignSpine.generationPhase !== 'complete') return;
+        if (!earlyDesignSpine.structuredPRD) return;
+        if (earlyDesignSpine.generationError) return;
+        if (earlyDesignSpine.safetyReview?.status === 'blocked') return;
+        artifactJobController.ensureDesignSystemForSpine({
+            projectId,
+            spineVersionId: earlyDesignSpine.id,
+            prdContent: earlyDesignSpine.responseText,
+            structuredPRD: earlyDesignSpine.structuredPRD,
+            projectPlatform: earlyDesignProject.platform,
+        });
+    }, [projectId, viewedSpineId, earlyDesignSpine, earlyDesignProject]);
+
     if (!projectId) return <div>Invalid Project</div>;
 
     const project = getProject(projectId);
@@ -591,6 +621,27 @@ export function ProjectWorkspace() {
         && !activeSpine.preflightSession.completed
         && !activeSpine.structuredPRD
         && activeSpine.safetyReview?.status !== 'blocked';
+
+    // Setup-stage design selection: right after clarification (or immediately,
+    // on the Generate Immediately path), while PRD generation runs in the
+    // background, a fresh project picks its visual direction with live preview
+    // cards. Replaces the PRD/progress view until the user chooses or skips;
+    // never shown for legacy projects, the demo, blocked spines, or failed runs
+    // (see shouldShowDesignSetup). `hasFailedSection` additionally yields on a
+    // *transient* section failure (the live grid errors before the persisted
+    // failedSections meta lands on the spine) so the progress timeline's
+    // "Run again" affordance is never hidden behind the setup step.
+    const showDesignSetup = !showPreflight && !isOldVersion && !hasFailedSection
+        && shouldShowDesignSetup(project, activeSpine);
+
+    // Idea + clarification text feeding the rule-based preset recommendation.
+    const designRecommendationText = showDesignSetup
+        ? [
+            activeSpine?.promptText,
+            activeSpine?.preflightSession?.summary,
+            ...(activeSpine?.preflightSession?.questions.map((q) => q.answer ?? '') ?? []),
+        ].filter(Boolean).join('\n')
+        : '';
 
 
     // Human-friendly version label
@@ -1489,7 +1540,14 @@ export function ProjectWorkspace() {
                                 platform={project?.platform}
                             />
                         )}
-                        {pipelineStage === 'prd' && !showPreflight && (
+                        {pipelineStage === 'prd' && showDesignSetup && activeSpine && (
+                            <DesignSetupStep
+                                projectId={projectId}
+                                recommendationText={designRecommendationText}
+                                prdGenerating={isPRDActivelyGenerating}
+                            />
+                        )}
+                        {pipelineStage === 'prd' && !showPreflight && !showDesignSetup && (
                             <>
                                 {/* Feedback items from mockups/artifacts */}
                                 <FeedbackItemsList

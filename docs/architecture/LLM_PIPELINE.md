@@ -400,7 +400,11 @@
       `ProjectWorkspace`) is now the fallback**, still shown when a real
       project reaches finalize with no preset (setup skipped, or a legacy
       project) — so visual artifact generation still never starts without an
-      explicit preset decision.
+      explicit preset decision. It renders the **same shared `DesignPresetGrid`
+      live preview cards** as the setup step and `ChangeDirectionModal` (a
+      select-then-Continue flow with the "Use this as my default" checkbox), so
+      every visual-direction surface is one consistent preview picker — there is
+      no separate text-only preset list.
     - **Post-finalization re-selection.** The preset is **no longer one-time**.
       Because the Mark-as-Final gate only fires once (and never for projects
       finalized before presets existed), the **Design System artifact** carries a
@@ -419,8 +423,9 @@
       regenerate-confirm (itself carrying the downstream-impact warning) that
       calls `artifactJobController.retrySlot('design_system')` — which re-reads
       the preset off the project, so the new direction actually reaches
-      generation. (The old compact `DesignSystemPresetChoice` sheet now serves
-      only the Mark-as-Final fallback gate in `ProjectWorkspace`.)
+      generation. (`DesignSystemPresetChoice` now serves only the Mark-as-Final
+      fallback gate in `ProjectWorkspace`, and shares the `DesignPresetGrid`
+      preview cards with these other surfaces.)
     - **Design-system lock affordance.** The **Design System row only**
       (`isLockedAsset` in `ArtifactWorkspace`) shows a small `Lock` icon in the
       sidebar/mobile-header once its slot status is `done`, signalling the
