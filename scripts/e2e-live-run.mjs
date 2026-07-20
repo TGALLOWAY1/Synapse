@@ -440,6 +440,14 @@ try {
         });
 
         await step('PRD Overview view', async () => {
+            // On the immediate-generation path an inline "Choose your visual
+            // direction" setup card replaces the PRD content until dismissed
+            // (the preset picker reappears on the Explore-outputs path, which
+            // handles it via the scoped dialog). Dismiss it so the PRD tabs and
+            // panels render — the features/refine steps depend on them.
+            await page.getByRole('button', { name: 'Decide later' }).click({ timeout: 8000 }).catch(() => {
+                console.log('  no inline design setup to dismiss');
+            });
             await settle(2500);
             await shot(page, 'prd-overview');
         });
@@ -559,8 +567,15 @@ try {
                 // stacked on top (legacy behavior) — dismiss it so the picker is
                 // reachable. The app now closes it automatically when the picker
                 // opens, so this is a guarded no-op on current builds.
-                const preset = page.getByText('Choose your visual direction');
-                if (await preset.isVisible({ timeout: 6000 }).catch(() => false)) {
+                // Scope to the preset dialog itself: the inline design-setup
+                // card in the plan area repeats the "Choose your visual
+                // direction" heading, and an unscoped getByText is a
+                // strict-mode violation that reads as "not visible" — which
+                // silently skips the preset flow and strands the modal.
+                const presetDialog = page.locator('[aria-labelledby="preset-choice-title"]');
+                const presetShown = await presetDialog
+                    .waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+                if (presetShown) {
                     await shot(page, 'design-preset-choice');
                     const stackedFinalize = page.locator('[aria-labelledby="finalize-success-title"]')
                         .getByRole('button', { name: 'Keep reviewing the plan' });
@@ -572,9 +587,9 @@ try {
                     // to select it (accessible name starts with the label — the
                     // "Continue with…" button starts with "Continue", so the
                     // anchored patterns don't collide), then confirm.
-                    await page.getByRole('button', { name: /^Modern SaaS/ }).click({ timeout: 6000 });
+                    await presetDialog.getByRole('button', { name: /^Modern SaaS/ }).click({ timeout: 6000 });
                     await settle(300);
-                    await page.getByRole('button', { name: /^Continue with/ }).click({ timeout: 6000 });
+                    await presetDialog.getByRole('button', { name: /^Continue with/ }).click({ timeout: 6000 });
                 }
                 await page.waitForTimeout(3000);
                 assetsTriggered = true;
