@@ -303,11 +303,12 @@ try {
     page.on('requestfailed', (req) => {
         const failure = req.failure()?.errorText || 'unknown';
         const url = redact(req.url());
-        // Known environmental noise: the Vercel Analytics debug script is
-        // blocked in sandboxes/offline runs and is irrelevant to the app.
-        const bucket = /vercel-scripts\.com|vitals\.vercel/.test(url)
-            ? report.ignoredRequests : report.failedRequests;
-        bucket.push({ url, method: req.method(), failure });
+        // Known environmental noise: blocked Vercel Analytics, and aborted
+        // localhost /api/* calls (vite dev runs no serverless functions).
+        const isNoise = /vercel-scripts\.com|vitals\.vercel/.test(url)
+            || (url.startsWith(BASE_URL) && new URL(req.url()).pathname.startsWith('/api/'));
+        (isNoise ? report.ignoredRequests : report.failedRequests)
+            .push({ url, method: req.method(), failure });
     });
 
     // Seed browser state before any app code runs: the Gemini key in the same
