@@ -425,5 +425,38 @@ describe('ReviewWorkspace', () => {
             expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
             expect(screen.queryByRole('heading', { name: 'Answer your open decisions first' })).not.toBeInTheDocument();
         });
+
+        it('gates resume of an interrupted run behind decisions', () => {
+            const run = completeRun({ status: 'interrupted' });
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: /Resume review/ })).not.toBeInTheDocument();
+        });
+
+        it('gates retry of a failed run behind decisions', () => {
+            const run = completeRun({ status: 'failed' });
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
+        });
+
+        it('keeps an interrupted run resumable when decisions are addressed', () => {
+            const run = completeRun({ status: 'interrupted' });
+            render(<ReviewWorkspace {...baseProps({ initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('button', { name: /Resume review/ })).toBeInTheDocument();
+        });
+
+        it('hides re-run affordances on a partial run while gated but keeps findings visible', () => {
+            const run = completeRun({
+                status: 'partial',
+                specialists: [
+                    { ...panel[0], status: 'complete', findingCount: 1 },
+                    { ...panel[1], status: 'failed', error: 'Timed out' },
+                ],
+            });
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Retry failed coverage' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Review current plan' })).not.toBeInTheDocument();
+        });
     });
 });

@@ -15,8 +15,11 @@ prompt (`CritiqueGate`) until every surfaced decision is addressed — answered
 (open/proposed records of type decision/open_question/conflict/assumption; risks
 are advisory and excluded); deferring or answering clears it, and the gate's
 "defer the remaining decisions and continue" action is the escape hatch for an
-unsure user. Only the critique *run* is gated — the Decision Center, history, and
-any already-completed run stay visible even if a later decision reopens the gate.
+unsure user. Only *running/continuing* the critique is gated: starting a new run,
+resuming an interrupted/failed run, and retrying coverage are all suppressed
+while decisions are open (a live in-flight run keeps showing progress). The
+Decision Center, history, and any already-completed run stay visible even if a
+later decision reopens the gate — findings remain viewable and triageable.
 A completed critique's findings still promote into new planning records. When
 open decisions remain, entering Challenge lands on the Decision Center tab.
 `src/components/review/ReviewWorkspaceContainer.tsx`

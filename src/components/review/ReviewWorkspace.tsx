@@ -722,7 +722,7 @@ function FindingCard({ issue, onResolve, onReopen, onReviewCurrent, contextChang
     );
 }
 
-function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, readOnly, initialIssueId, initialFindingId }: {
+function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenIssue, onNewReview, onRetryCoverage, readOnly, critiqueLocked, initialIssueId, initialFindingId }: {
     run: ReviewRunView;
     planningRecords: PlanningRecordView[];
     onAct: ReviewWorkspaceProps['onActOnIssue'];
@@ -731,6 +731,10 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
     onNewReview: () => void;
     onRetryCoverage: () => void;
     readOnly?: boolean;
+    /** When true, re-running critique work is gated behind open decisions; the
+     * findings stay fully visible and triageable, but the "review again" /
+     * "retry coverage" affordances are hidden. */
+    critiqueLocked?: boolean;
     initialIssueId?: string;
     initialFindingId?: string;
 }) {
@@ -819,7 +823,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                     <AlertTriangle size={16} className="mt-0.5 shrink-0" />
                     <div className="flex-1">
                         <span>Review complete with a coverage gap: {failed} specialist{failed === 1 ? '' : 's'} did not finish. Successful findings were still validated and synthesized.</span>
-                        {!readOnly && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
+                        {!readOnly && !critiqueLocked && <button type="button" onClick={onRetryCoverage} className="mt-2 block font-semibold underline underline-offset-2">Retry failed coverage</button>}
                     </div>
                 </div>
             )}
@@ -830,7 +834,7 @@ function ReviewResults({ run, planningRecords, onAct, onTriageFinding, onReopenI
                     <p className="mt-1 text-sm text-neutral-500">Prioritized findings from {run.specialists.filter(s => s.status === 'complete').length} completed specialist reviews.</p>
                 </div>
                 <div className="space-y-2">
-                    {!readOnly && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
+                    {!readOnly && !critiqueLocked && <button type="button" onClick={onNewReview} className="inline-flex min-h-10 w-full items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-3 py-2 text-sm font-semibold text-neutral-700 hover:bg-neutral-50"><RefreshCcw size={14} /> Review current plan</button>}
                 <div className="grid grid-cols-3 gap-2 text-center sm:flex">
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-neutral-900">{open.length + untriagedFindings.length}</div><div className="text-[11px] text-neutral-500">Needs attention</div></div>
                     <div className="rounded-xl border border-neutral-200 bg-white px-3 py-2"><div className="text-lg font-bold text-amber-700">{blocking}</div><div className="text-[11px] text-neutral-500">Build blockers</div></div>
@@ -953,7 +957,14 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
                     )
                 ) : isInProgress ? (
-                    <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
+                    // A stalled (interrupted/failed) run's only actions are resume/retry —
+                    // restarting critique work — so gate it behind decisions too. A live
+                    // in-flight run keeps showing progress (it was started when unlocked).
+                    props.critiqueUnlocked === false && (activeRun.status === 'interrupted' || activeRun.status === 'failed') ? (
+                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} />
+                    ) : (
+                        <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
+                    )
                 ) : activeRun.status === 'complete' || activeRun.status === 'partial' ? (
                     <ReviewResults
                         run={activeRun}
@@ -962,6 +973,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onTriageFinding={props.onTriageFinding}
                         onReopenIssue={props.onReopenIssue}
                         readOnly={props.readOnly}
+                        critiqueLocked={props.critiqueUnlocked === false}
                         initialIssueId={props.initialIssueId}
                         initialFindingId={props.initialFindingId}
                         onNewReview={() => setStartingNewReview(true)}
