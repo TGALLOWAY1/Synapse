@@ -400,9 +400,13 @@ try {
     await finalizeButton().waitFor({ timeout: 12_000 }).catch(() => {});
     await settle(400);
     await finalizeButton().click({ timeout: 8000 }).catch(() => {});
-    // Visual-direction preset picker gates the first bundle.
+    // Visual-direction preset picker gates the first bundle. Use waitFor (not
+    // isVisible, whose `timeout` option is ignored and returns synchronously) so
+    // we don't skip the only preset-selection path if React hasn't rendered the
+    // picker in the same tick as the finalize click.
     const preset = page.getByText('Choose your visual direction');
-    if (await preset.isVisible({ timeout: 6000 }).catch(() => false)) {
+    const presetShown = await preset.waitFor({ state: 'visible', timeout: 8000 }).then(() => true).catch(() => false);
+    if (presetShown) {
         await shot(page, 'design-preset');
         await page.getByRole('button', { name: /^Modern SaaS/ }).click({ timeout: 6000 }).catch(() => {});
         await settle(300);
@@ -415,6 +419,7 @@ try {
     const VISIBLE_CORE = ['design_system', 'user_flows', 'screen_inventory', 'data_model', 'implementation_plan'];
     const aT0 = Date.now();
     let lastReady = -1, lastChangeAt = aT0;
+    let assetsTimedOut = false;
     for (;;) {
         const info = await page.evaluate((id) => {
             for (let i = 0; i < localStorage.length; i++) {
@@ -437,8 +442,16 @@ try {
         if (info.ready !== lastReady) { lastReady = info.ready; lastChangeAt = Date.now(); }
         if (haveCore && domIdle) break;
         if (domIdle && info.ready >= 3 && Date.now() - lastChangeAt > 60_000) break;
-        if (Date.now() - aT0 > GENERATION_TIMEOUT_MS) { console.warn('  asset settle timed out'); break; }
+        if (Date.now() - aT0 > GENERATION_TIMEOUT_MS) { assetsTimedOut = true; break; }
         await settle(5000);
+    }
+    // A stalled/errored bundle (e.g. quota/rate-limit or a real regression) must
+    // fail the run — otherwise the artifact screenshots silently capture an
+    // incomplete/non-generated state while the process exits 0. Fail loudly, the
+    // same way the PRD-generation timeout does.
+    if (assetsTimedOut) {
+        await shot(page, 'assets-TIMEOUT');
+        throw new Error(`asset generation did not settle within ${GENERATION_TIMEOUT_MS / 60000} min`);
     }
     console.log(`  assets settled in ${Math.round((Date.now() - aT0) / 1000)}s`);
     await settle(2000);
