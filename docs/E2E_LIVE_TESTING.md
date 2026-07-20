@@ -156,7 +156,9 @@ update the script in the same change (treat drift here like docs drift):
   `#readiness-containment` textareas (`ReadinessCheckpoint.tsx`), the
   `Generate build foundation` / `Explore outputs` button
   (`FinalizationSuccessModal.tsx`), and the `Choose your visual direction`
-  preset picker with a `Modern SaaS` option (`DesignSystemPresetChoice.tsx`).
+  preset picker (`DesignSystemPresetChoice.tsx`) — a `DesignPresetGrid` preview
+  grid where the run selects the `Modern SaaS` card and confirms via
+  `Continue with…`.
 - Asset settle signal: persisted `artifacts[projectId]` entries with a
   `currentVersionId` for the visible core subtypes (`design_system`,
   `user_flows`, `screen_inventory`, `data_model`, `implementation_plan`) plus a

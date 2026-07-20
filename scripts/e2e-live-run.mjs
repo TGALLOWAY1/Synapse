@@ -517,7 +517,13 @@ try {
                         await stackedFinalize.click().catch(() => {});
                         await settle(400);
                     }
-                    await page.getByRole('button', { name: /Modern SaaS/ }).click({ timeout: 6000 });
+                    // The picker is now a preview grid: click the Modern SaaS card
+                    // to select it (accessible name starts with the label — the
+                    // "Continue with…" button starts with "Continue", so the
+                    // anchored patterns don't collide), then confirm.
+                    await page.getByRole('button', { name: /^Modern SaaS/ }).click({ timeout: 6000 });
+                    await settle(300);
+                    await page.getByRole('button', { name: /^Continue with/ }).click({ timeout: 6000 });
                 }
                 await page.waitForTimeout(3000);
                 assetsTriggered = true;
