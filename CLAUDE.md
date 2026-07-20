@@ -72,6 +72,9 @@ npm run lint         # ESLint flat config, TS/TSX only
 npm run preview      # Preview production build
 npm test             # vitest run (one-shot)
 npx vitest <file>    # Run a single test file in watch mode
+npm run e2e          # Live e2e: real project generation + page screenshots
+                     # (needs SYNAPSE_E2E_GEMINI_KEY; see docs/E2E_LIVE_TESTING.md)
+npm run e2e:smoke    # E2e harness check without any LLM calls / key
 ```
 
 ### Required pre-push gate (do not skip — this is what Vercel runs)
@@ -112,7 +115,11 @@ not exceed 12.
 
 Tests live in `src/lib/__tests__/`, `src/store/__tests__/`,
 `src/components/__tests__/`, and `api/_lib/__tests__/` (+ `api/__tests__/`).
-There is no Playwright suite despite the dev dependency.
+There is no Playwright *assertion* suite; Playwright powers the screenshot
+capture scripts and the live e2e driver `scripts/e2e-live-run.mjs`
+(`npm run e2e` — real generation + visual screenshots + report; see
+[docs/E2E_LIVE_TESTING.md](docs/E2E_LIVE_TESTING.md) and the `/e2e` skill in
+`.claude/skills/e2e/`).
 
 ## Tech Stack
 
