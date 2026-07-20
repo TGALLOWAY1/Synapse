@@ -391,6 +391,11 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         () => featureFilterCounts(structuredPRD.features, deferredFeatureIds),
         [structuredPRD.features, deferredFeatureIds],
     );
+    // Display-only tally of confirmed features (legacy data may lack `features`).
+    const confirmedCount = useMemo(
+        () => (structuredPRD.features ?? []).filter(f => f.confirmed).length,
+        [structuredPRD.features],
+    );
     const filteredFeatures = useMemo(
         () => filterFeatures(structuredPRD.features, featureFilter, deferredFeatureIds),
         [structuredPRD.features, featureFilter, deferredFeatureIds],
@@ -1133,7 +1138,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 <div className="flex items-center justify-between gap-3 mb-4 flex-wrap">
                     <div className="flex items-center gap-2 min-w-0">
                         <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Features</h3>
-                        <span className="text-[11px] text-neutral-400">{filterCounts.all} in scope</span>
+                        <span className="text-[11px] text-neutral-400">
+                            {filterCounts.all} in scope
+                            {confirmedCount > 0 && <span className="text-emerald-600"> · {confirmedCount} confirmed</span>}
+                        </span>
                     </div>
                     <div className="flex items-center gap-2 shrink-0">
                         <label htmlFor="prd-feature-filter" className="sr-only">Filter features</label>

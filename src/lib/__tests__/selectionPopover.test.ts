@@ -101,30 +101,27 @@ describe('computePopoverPosition', () => {
         ...over,
     });
 
-    it('centers horizontally on the selection and sits below it', () => {
-        const pos = computePopoverPosition(rect(), viewport, size);
+    it('prefers sitting above the selection when there is room', () => {
+        // A selection well down the page has room above it.
+        const pos = computePopoverPosition(rect({ top: 400, bottom: 420 }), viewport, size);
         expect(pos.left).toBe(450); // 400 + 100/2
-        expect(pos.top).toBe(128); // 120 + 8
+        expect(pos.top).toBe(172); // above: 400 - 220 - 8
     });
 
     it('clamps to the left edge so the centered popover stays on screen', () => {
-        const pos = computePopoverPosition(rect({ left: 0, width: 10 }), viewport, size);
+        const pos = computePopoverPosition(rect({ top: 400, bottom: 420, left: 0, width: 10 }), viewport, size);
         expect(pos.left).toBe(size.width / 2 + 8); // 168
     });
 
     it('clamps to the right edge', () => {
-        const pos = computePopoverPosition(rect({ left: 990, width: 10 }), viewport, size);
+        const pos = computePopoverPosition(rect({ top: 400, bottom: 420, left: 990, width: 10 }), viewport, size);
         expect(pos.left).toBe(viewport.width - size.width / 2 - 8); // 832
     });
 
-    it('flips above the selection when it would overflow the bottom', () => {
-        const pos = computePopoverPosition(
-            rect({ top: 700, bottom: 720 }),
-            viewport,
-            size,
-        );
-        // 720 + 8 + 220 > 800 -> flip above: 700 - 220 - 8 = 472
-        expect(pos.top).toBe(472);
+    it('falls back below the selection when there is no room above (near viewport top)', () => {
+        // top 100 → above would be 100 - 220 - 8 = -128 (< 8), so sit below.
+        const pos = computePopoverPosition(rect({ top: 100, bottom: 120 }), viewport, size);
+        expect(pos.top).toBe(128); // below: 120 + 8
     });
 
     it('enforces an 8px top floor', () => {

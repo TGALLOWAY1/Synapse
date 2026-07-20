@@ -15,8 +15,10 @@ not reintroduce per-component `onMouseUp` selection logic.
 - **`src/lib/selectionPopover.ts`** — pure, framework-free helpers:
   `isValidSelection` (rejects null / collapsed / empty / out-of-container
   selections), `getSelectionInfo` (text + bounding rect), and
-  `computePopoverPosition` (viewport clamp + flip-above math for the
-  desktop popover). These are unit-tested in isolation.
+  `computePopoverPosition` (viewport clamp; prefers placing the popover
+  *above* the selection when it fits — covering already-read rather than
+  not-yet-read text — and falls back below, with a bottom-overflow flip, when
+  there is no room above). These are unit-tested in isolation.
 - **`src/lib/useSelectionPopover.ts`** — the React hook owning detection.
   Listens on `document` for **`pointerup`** (mouse/pen/touch, short read
   delay) *and* **`selectionchange`** (debounced — the mobile long-press +

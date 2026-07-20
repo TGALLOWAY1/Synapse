@@ -1,9 +1,9 @@
-import { useEffect, useState } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import {
     Clock, GitBranch, Menu, PanelLeftClose, PanelLeftOpen, Sparkles, X,
 } from 'lucide-react';
 import type { FlowCategory, FlowIssueKind, FlowRiskLevel, ParsedFlow } from './types';
-import { CATEGORY_ORDER } from './categorize';
+import { CATEGORY_ORDER, displayNumbers } from './categorize';
 
 const RISK_DOT: Record<FlowRiskLevel, { color: string; label: string }> = {
     low: { color: 'bg-emerald-400', label: 'Low risk' },
@@ -35,6 +35,21 @@ function groupFlows(flows: ParsedFlow[]): Grouped[] {
         .map(category => ({ category, items: map.get(category)! }));
 }
 
+/** Compact, one-line dot + label legend for the risk indicator — only worth
+ * showing when at least one visible flow actually renders a risk dot. */
+function RiskLegend() {
+    return (
+        <p className="flex items-center gap-2.5 text-[10px] text-neutral-400">
+            {(Object.entries(RISK_DOT) as Array<[FlowRiskLevel, { color: string; label: string }]>).map(([level, risk]) => (
+                <span key={level} className="inline-flex items-center gap-1">
+                    <span className={`inline-block w-1.5 h-1.5 rounded-full ${risk.color}`} aria-hidden="true" />
+                    {risk.label}
+                </span>
+            ))}
+        </p>
+    );
+}
+
 const ALT_PATH_KINDS: FlowIssueKind[] = ['alternate_path', 'failure_mode'];
 
 function summarizeIssues(flow: ParsedFlow): {
@@ -58,7 +73,11 @@ export function FlowSidebar({
     flows, selectedIndex, onSelect, isMobileOpen, onToggleMobile, ttvByFlow,
 }: Props) {
     const grouped = groupFlows(flows);
+    const numbers = useMemo(() => displayNumbers(flows), [flows]);
     const selected = flows[selectedIndex];
+    // Legend only earns its place when at least one visible flow actually
+    // renders a risk dot — otherwise it's an explanation for nothing on screen.
+    const anyRiskDotVisible = flows.some(flow => flow.risk !== 'low' || flow.issues.length > 0);
     // Desktop rail defaults to the NAMED flow list — the collapsed numbered
     // strip read as decoration and hid flows 2..N (audit L4). Users can still
     // collapse it to reclaim width. A single-flow artifact never needs a
@@ -114,7 +133,7 @@ export function FlowSidebar({
                                                         : 'bg-neutral-200 text-neutral-700'
                                                 }`}
                                             >
-                                                {originalIndex + 1}
+                                                {numbers[originalIndex]}
                                             </span>
                                             <div className="min-w-0 flex-1">
                                                 <div className="flex items-start gap-1.5">
@@ -189,15 +208,15 @@ export function FlowSidebar({
                             type="button"
                             onClick={() => onSelect(i)}
                             aria-current={active ? 'true' : undefined}
-                            aria-label={`Flow ${i + 1}: ${flow.title}`}
-                            title={`Flow ${i + 1}: ${flow.title}`}
+                            aria-label={`Flow ${numbers[i]}: ${flow.title}`}
+                            title={`Flow ${numbers[i]}: ${flow.title}`}
                             className={`inline-flex items-center justify-center w-8 h-8 rounded-full text-xs font-bold transition ${
                                 active
                                     ? 'bg-indigo-600 text-white shadow-sm'
                                     : 'bg-neutral-100 text-neutral-600 hover:bg-neutral-200'
                             }`}
                         >
-                            {i + 1}
+                            {numbers[i]}
                         </button>
                         {showRisk && (
                             <span
@@ -222,7 +241,7 @@ export function FlowSidebar({
                     }`}
                     aria-label="Flow navigation"
                 >
-                    <div className={`mb-3 flex items-center ${railExpanded ? 'px-2 justify-between' : 'justify-center'}`}>
+                    <div className={`mb-1.5 flex items-center ${railExpanded ? 'px-2 justify-between' : 'justify-center'}`}>
                         {railExpanded && (
                             <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-700">
                                 User Flows
@@ -239,6 +258,11 @@ export function FlowSidebar({
                             {railExpanded ? <PanelLeftClose size={15} /> : <PanelLeftOpen size={15} />}
                         </button>
                     </div>
+                    {railExpanded && anyRiskDotVisible && (
+                        <div className="mb-3 px-2">
+                            <RiskLegend />
+                        </div>
+                    )}
                     {railExpanded ? renderList(onSelect) : renderCollapsedRail()}
                 </aside>
             )}
@@ -252,18 +276,18 @@ export function FlowSidebar({
                     onClick={() => onToggleMobile(true)}
                     aria-label={
                         selected
-                            ? `Browse flows — current: flow ${selectedIndex + 1} of ${flows.length}, ${selected.title}`
+                            ? `Browse flows — current: flow ${numbers[selectedIndex]} of ${flows.length}, ${selected.title}`
                             : 'Browse flows'
                     }
                     className="w-full flex items-center gap-3 px-3 py-2.5 bg-white border border-neutral-300 rounded-lg text-left hover:bg-neutral-50 active:bg-neutral-100 transition"
                 >
                     <span className="shrink-0 inline-flex items-center justify-center w-7 h-7 rounded-full bg-indigo-600 text-white text-xs font-bold">
-                        {selectedIndex + 1}
+                        {numbers[selectedIndex]}
                     </span>
                     <span className="min-w-0 flex-1">
                         <span className="block text-[10px] font-semibold uppercase tracking-wider text-neutral-400 truncate">
                             {selected
-                                ? `${selected.category} · ${selectedIndex + 1} of ${flows.length}`
+                                ? `${selected.category} · ${numbers[selectedIndex]} of ${flows.length}`
                                 : `${flows.length} ${flows.length === 1 ? 'flow' : 'flows'}`}
                         </span>
                         <span className="block text-sm font-medium text-neutral-800 truncate">
@@ -290,16 +314,23 @@ export function FlowSidebar({
                 }`}
                 aria-hidden={!isMobileOpen}
             >
-                <div className="flex items-center justify-between px-3 py-2 border-b border-neutral-200">
-                    <span className="text-sm font-semibold text-neutral-900">Flows</span>
-                    <button
-                        type="button"
-                        onClick={() => onToggleMobile(false)}
-                        className="p-1 rounded hover:bg-neutral-100 text-neutral-500"
-                        aria-label="Close"
-                    >
-                        <X size={16} />
-                    </button>
+                <div className="border-b border-neutral-200">
+                    <div className="flex items-center justify-between px-3 py-2">
+                        <span className="text-sm font-semibold text-neutral-900">Flows</span>
+                        <button
+                            type="button"
+                            onClick={() => onToggleMobile(false)}
+                            className="p-1 rounded hover:bg-neutral-100 text-neutral-500"
+                            aria-label="Close"
+                        >
+                            <X size={16} />
+                        </button>
+                    </div>
+                    {anyRiskDotVisible && (
+                        <div className="px-3 pb-2">
+                            <RiskLegend />
+                        </div>
+                    )}
                 </div>
                 <div className="overflow-y-auto h-[calc(100%-2.75rem)] p-2">
                     {renderList(i => {

@@ -116,7 +116,7 @@ export function PlanningStateBar({ readiness, planSummary, committed, legacyComm
                     <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold opacity-75">
                         <ChevronDown size={15} className="transition group-open:rotate-180" />
                         Other items needing attention
-                        {attention.hiddenCount > 0 && <span className="text-xs font-medium opacity-60">+{attention.hiddenCount} more</span>}
+                        <span className="text-xs font-medium opacity-60">({attention.secondary.length + attention.hiddenCount})</span>
                     </summary>
                     <div className="border-t border-current/10 py-2">
                         {attention.secondary.map(item => (
@@ -139,6 +139,7 @@ export function PlanningStateBar({ readiness, planSummary, committed, legacyComm
             <details className="mt-3 group">
                 <summary className="flex min-h-10 cursor-pointer list-none items-center gap-2 text-sm font-semibold opacity-75">
                     <ChevronDown size={15} className="transition group-open:rotate-180" /> Review details and planning tools
+                    <span className="text-xs font-medium opacity-60">({readiness.criteria.length} checks)</span>
                 </summary>
                 <div className={`mt-2 rounded-xl p-2 ${surfaceFaint}`}>
                     <div className="grid gap-2 sm:grid-cols-2">

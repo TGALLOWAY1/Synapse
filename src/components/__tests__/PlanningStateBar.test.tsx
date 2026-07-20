@@ -79,13 +79,13 @@ describe('PlanningStateBar', () => {
         expect(screen.getByText(/A focused guest onboarding experience/)).toBeInTheDocument();
         expect(screen.getByText('Should guests require an account?')).toBeInTheDocument();
 
-        const planningTools = screen.getByText('Review details and planning tools').closest('details');
+        const planningTools = screen.getByText(/Review details and planning tools/).closest('details');
         expect(planningTools).not.toHaveAttribute('open');
-        fireEvent.click(screen.getByText('Review details and planning tools'));
+        fireEvent.click(screen.getByText(/Review details and planning tools/));
         expect(planningTools).toHaveAttribute('open');
         expect(screen.getByRole('button', { name: 'Open Decision Center' })).toBeInTheDocument();
 
-        fireEvent.click(screen.getByText('Other items needing attention'));
+        fireEvent.click(screen.getByText(/Other items needing attention/));
         fireEvent.click(screen.getByRole('button', { name: /Recovery conflicts with guest access/ }));
         expect(onOpenAttention).toHaveBeenCalledWith({
             kind: 'challenge', reviewId: 'review-1', issueId: 'issue-1',

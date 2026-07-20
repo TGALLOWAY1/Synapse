@@ -409,12 +409,12 @@ export function HomePage() {
                     </h2>
 
                     {/* Example prompt pills */}
-                    <div className="flex gap-2 overflow-x-auto pb-3 mb-6 scrollbar-hide">
+                    <div className="flex flex-wrap justify-center gap-2 mb-6">
                         {EXAMPLE_PROMPTS.map((example) => (
                             <button
                                 key={example.label}
                                 onClick={() => handleExampleClick(example)}
-                                className="shrink-0 px-4 py-2 rounded-full border border-neutral-300 bg-white text-sm text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 transition whitespace-nowrap"
+                                className="px-4 py-2 rounded-full border border-neutral-300 bg-white text-sm text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 transition whitespace-nowrap"
                             >
                                 {example.label}
                             </button>

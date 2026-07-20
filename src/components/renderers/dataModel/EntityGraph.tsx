@@ -219,7 +219,7 @@ export function EntityGraph(props: Props) {
                     <GitBranch size={12} /> Entity relationships
                 </p>
                 <span className="text-[10px] text-neutral-400 inline-flex items-center gap-1">
-                    <MousePointerClick size={11} /> Tap an entity to open its details
+                    <MousePointerClick size={11} /> Select an entity to open its details
                 </span>
             </div>
 

@@ -39,6 +39,25 @@ describe('DecisionCenter', () => {
         expect(screen.getByRole('button', { name: 'Back to decisions' })).toHaveClass('min-h-11');
     });
 
+    it('suppresses the generic next-action callout for an assumption with a validation flow', () => {
+        const { unmount } = render(<DecisionCenter records={[openRecord]} {...callbacks()} />);
+        // No validation flow → the generic "Next action" guidance is shown.
+        expect(screen.getByRole('region', { name: 'Next action' })).toBeInTheDocument();
+        unmount();
+
+        // With a validation flow, AssumptionValidationPanel carries the guidance,
+        // so the duplicate generic callout is suppressed.
+        render(<DecisionCenter records={[{
+            ...openRecord,
+            validation: {
+                workflowState: 'not_planned', activeEvidence: [], duplicateEvidenceIds: [],
+                evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false,
+                hasHistoricalValidation: false, dependentLabels: [], history: [],
+            },
+        }]} {...callbacks()} />);
+        expect(screen.queryByRole('region', { name: 'Next action' })).toBeNull();
+    });
+
     it('switches to a newly linked exact record while the center remains mounted', () => {
         const resolved = { ...openRecord, id: 'resolved', title: 'Resolved audience', status: 'confirmed' as const, resolution: 'Independent creators' };
         const props = callbacks();

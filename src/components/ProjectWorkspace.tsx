@@ -1231,8 +1231,8 @@ export function ProjectWorkspace() {
                     {!isOldVersion && activeSpine?.safetyReview?.status !== 'blocked' && (
                         <button
                             onClick={handleToggleFinal}
-                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-700 hover:bg-amber-600 text-white' : displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
-                            title={displaysCurrentCommitment ? "Reopen this plan for changes" : "Review readiness and commit this plan"}
+                            className={`flex items-center gap-1.5 px-3 py-1.5 text-sm rounded transition ${currentCommittedReadiness?.review.conclusion === 'not_ready' ? 'bg-amber-600 hover:bg-amber-500 text-white' : displaysCurrentCommitment ? 'bg-green-600 hover:bg-green-700 text-white' : 'bg-neutral-800 hover:bg-neutral-700 text-neutral-300'}`}
+                            title={currentCommittedReadiness?.review.conclusion === 'not_ready' ? "Committed with accepted risk — reopen to revisit readiness" : displaysCurrentCommitment ? "Reopen this plan for changes" : "Review readiness and commit this plan"}
                         >
                             <CheckCircle size={14} />
                             <span className="hidden md:inline">{displaysCurrentCommitment ? 'Reopen plan' : 'Review readiness'}</span>
@@ -1507,9 +1507,9 @@ export function ProjectWorkspace() {
                 ) : (
                 <>
                 {/* Left: Main Content Column */}
-                <div className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 lg:p-12 shadow-inner z-0 relative">
+                <div className="flex-1 min-w-0 bg-neutral-50 text-black overflow-y-auto p-4 md:p-8 shadow-inner z-0 relative">
                     {isOldVersion && pipelineStage === 'prd' && (
-                        <div className="sticky top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex flex-wrap gap-2 justify-between items-center z-10 -mx-4 md:-mx-8 lg:-mx-12 -mt-4 md:-mt-8 lg:-mt-12 mb-4">
+                        <div className="sticky top-0 left-0 right-0 bg-yellow-100 border-b border-yellow-300 text-yellow-800 text-sm py-2 px-4 shadow-sm flex flex-wrap gap-2 justify-between items-center z-10 -mx-4 md:-mx-8 -mt-4 md:-mt-8 mb-4">
                             <span>You are viewing a historical version (Read-Only).</span>
                             <div className="flex items-center gap-3 shrink-0">
                                 {activeSpine?.structuredPRD && latestSpine?.structuredPRD && (
@@ -1536,7 +1536,7 @@ export function ProjectWorkspace() {
                         </div>
                     )}
 
-                    <div className="max-w-4xl mx-auto mt-4">
+                    <div className="max-w-4xl mx-auto">
                         {/* PRD Stage */}
                         {pipelineStage === 'prd' && showPreflight && activeSpine && (
                             <PreflightView
@@ -1704,7 +1704,10 @@ export function ProjectWorkspace() {
                                                 ) : (
                                                     <PlanningStateBar
                                                         readiness={planningReadiness}
-                                                        planSummary={activeSpine.structuredPRD.executiveSummary ?? activeSpine.structuredPRD.vision}
+                                                        // Avoid duplicating the executive summary: StructuredPRDView's
+                                                        // Overview already renders `executiveSummary` just below, so only
+                                                        // surface the vision here as a fallback when there's no summary.
+                                                        planSummary={activeSpine.structuredPRD.executiveSummary ? undefined : activeSpine.structuredPRD.vision}
                                                         committed={isCurrentPlanCommitted}
                                                         legacyCommitted={isLegacyPlanCommitted}
                                                         onNextAction={handlePlanningNextAction}

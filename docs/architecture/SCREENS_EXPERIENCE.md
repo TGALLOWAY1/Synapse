@@ -226,7 +226,7 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   overlay — always wins (`source: 'user'`) but never hides derived warnings
   (an `accepted_with_warnings` gap is appended); a derived status is always
   presented as estimated (`source: 'derived'`, `ReadinessBadge` renders an
-  "est." suffix). `buildReadinessIndex(index, features?)` computes the
+  "estimated" suffix). `buildReadinessIndex(index, features?)` computes the
   variant/decision inputs itself. `buildScreenCoverageSummary` feeds the list
   panel — PRD-feature coverage estimated from `featureRefs` id tokens (plus
   `mustWithoutPrimaryScreen`: must-priority features only covered by P2/P3

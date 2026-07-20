@@ -35,10 +35,11 @@ import { chromium } from 'playwright';
 // Args & config
 // ---------------------------------------------------------------------------
 function parseArgs(argv) {
-    const out = { prompt: undefined, name: undefined, out: undefined, timeoutMin: undefined, relay: undefined, port: undefined };
+    const out = { prompt: undefined, name: undefined, out: undefined, timeoutMin: undefined, relay: undefined, port: undefined, assets: true };
     for (const a of argv) {
         if (a === '--fetch-relay') out.relay = true;
         else if (a === '--no-relay') out.relay = false;
+        else if (a === '--skip-assets') out.assets = false; // stop after the PRD surfaces (cheaper — no bundle spend)
         else if (a.startsWith('--prompt=')) out.prompt = a.slice('--prompt='.length);
         else if (a.startsWith('--name=')) out.name = a.slice('--name='.length);
         else if (a.startsWith('--out=')) out.out = a.slice('--out='.length);
@@ -77,6 +78,10 @@ mkdirSync(outDir, { recursive: true });
 
 const PROXY_URL = process.env.HTTPS_PROXY || process.env.https_proxy;
 const USE_RELAY = args.relay ?? Boolean(PROXY_URL);
+
+// Sentinel thrown to exit the main flow early under --skip-assets (caught and
+// treated as success, not a failure).
+const SKIP_ASSETS_DONE = Symbol('skip-assets-done');
 
 // ---------------------------------------------------------------------------
 // Chromium / dev-server helpers (mirror e2e-live-run.mjs)
@@ -167,6 +172,15 @@ async function hideDevChrome(page) {
             const t = (el.textContent || '').trim();
             if (labels.some((l) => t === l) || /^Synced /.test(t) || /^Last cloud save/.test(t)) {
                 (el.parentElement || el).style.visibility = 'hidden';
+            }
+        });
+        // The "Signed in as …" pill (HomePage) is a text-only <div>, not a
+        // <span>, so the scan above misses it. Match the deepest text-only div
+        // whose text starts with "Signed in as" and blank it — a personal
+        // account name has no place in a marketing screenshot.
+        document.querySelectorAll('div').forEach((el) => {
+            if (el.childElementCount === 0 && /^Signed in as /.test((el.textContent || '').trim())) {
+                el.style.visibility = 'hidden';
             }
         });
     }).catch(() => {});
@@ -377,7 +391,13 @@ try {
     // --- 7. Artifacts in Explore ---------------------------------------------
     // Commit through the readiness gate with accepted risk (a fresh working plan
     // is in the exploring phase), then take the "Explore outputs" path → visual
-    // direction preset → real artifact bundle.
+    // direction preset → real artifact bundle. Skipped under --skip-assets
+    // (PRD-surface-only run; much cheaper).
+    if (!args.assets) {
+        console.log('  --skip-assets: stopping after PRD surfaces');
+        await context.close();
+        throw SKIP_ASSETS_DONE;
+    }
     await page.getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 }).catch(() => {});
     await settle(1200);
     const commitReady = page.getByRole('button', { name: 'Commit plan' });
@@ -473,8 +493,12 @@ try {
 
     await context.close();
 } catch (err) {
-    console.error(`\nFatal: ${String(err?.stack || err).replaceAll(GEMINI_KEY, '<gemini-key>')}`);
-    exitCode = 1;
+    if (err === SKIP_ASSETS_DONE) {
+        // Not an error — the --skip-assets early exit from the main flow.
+    } else {
+        console.error(`\nFatal: ${String(err?.stack || err).replaceAll(GEMINI_KEY, '<gemini-key>')}`);
+        exitCode = 1;
+    }
 } finally {
     if (browser) await browser.close().catch(() => {});
     devServer.kill();

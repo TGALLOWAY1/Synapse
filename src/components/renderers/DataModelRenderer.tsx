@@ -3,7 +3,6 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { Layers, Sparkles } from 'lucide-react';
 import type { DataModelContent } from '../../types';
-import type { DependencyNodeStatus } from '../../lib/artifactDependencyGraph';
 import {
     parseDataModelMarkdown,
     dataModelToMarkdown,
@@ -39,12 +38,6 @@ interface EntityCategoryGroup {
 
 interface Props {
     content: string;
-    /**
-     * Optional freshness state for the overview header (the "Current" pill).
-     * PRD provenance is intentionally not passed here — it's shown once at the
-     * artifact/page level, not repeated inside the summary card.
-     */
-    staleness?: DependencyNodeStatus;
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
@@ -91,7 +84,7 @@ function MethodPill({ method }: { method: string }) {
     );
 }
 
-export function DataModelRenderer({ content, staleness, initialEntityName, initialMemberName, initialMemberAspect }: Props) {
+export function DataModelRenderer({ content, initialEntityName, initialMemberName, initialMemberAspect }: Props) {
     const { parsed, sourceMarkdown } = useMemo(() => {
         const json = tryParseAsJson(content);
         if (json) {
@@ -118,7 +111,6 @@ export function DataModelRenderer({ content, staleness, initialEntityName, initi
         <DataModelBody
             key={`${signature}:${initialEntityName ?? ''}:${initialMemberAspect ?? ''}:${initialMemberName ?? ''}`}
             parsed={parsed}
-            staleness={staleness}
             initialEntityName={initialEntityName}
             initialMemberName={initialMemberName}
             initialMemberAspect={initialMemberAspect}
@@ -128,13 +120,12 @@ export function DataModelRenderer({ content, staleness, initialEntityName, initi
 
 interface BodyProps {
     parsed: ParsedDataModel;
-    staleness?: DependencyNodeStatus;
     initialEntityName?: string;
     initialMemberName?: string;
     initialMemberAspect?: DataModelMemberAspect;
 }
 
-function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName, initialMemberAspect }: BodyProps) {
+function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMemberAspect }: BodyProps) {
     const isMobile = useIsMobile();
     const { graph, summary } = useMemo(() => analyzeDataModel(parsed), [parsed]);
 
@@ -206,6 +197,25 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
         if (node) scrollTo(entityAnchorId(node.name));
     };
 
+    // Entities with PII, in document order — used by the overview's "Entities
+    // with PII" tile to expand + reveal them all in one action.
+    const piiNodeIds = useMemo(
+        () => graph.nodes.filter(n => n.hasPII).map(n => n.id),
+        [graph.nodes],
+    );
+
+    const showPiiEntities = piiNodeIds.length > 0
+        ? () => {
+            setExpandedIds(prev => {
+                const next = new Set(prev);
+                piiNodeIds.forEach(id => next.add(id));
+                return next;
+            });
+            const firstNode = nodeById.get(piiNodeIds[0]);
+            if (firstNode) scrollTo(entityAnchorId(firstNode.name));
+        }
+        : undefined;
+
     const resolveTargetId = (name: string) => resolveEntityId(name, nodeIdSet);
 
     // Group ordered pairs into category sections (grouped) or a single section.
@@ -222,7 +232,7 @@ function DataModelBody({ parsed, staleness, initialEntityName, initialMemberName
 
     return (
         <div className="space-y-6">
-            <DataModelOverview summary={summary} staleness={staleness} />
+            <DataModelOverview summary={summary} onShowPii={showPiiEntities} />
 
             {parsed.overview && (
                 <section className="rounded-xl border border-indigo-100 bg-indigo-50/40 p-5">

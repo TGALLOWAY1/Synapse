@@ -95,7 +95,7 @@ describe('ImplementationPlanRenderer (consolidated view)', () => {
         expect(screen.getByRole('button', { name: /Validation/ })).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Coverage/ })).toBeInTheDocument();
         // Header: readiness, scope counts, primary CTA.
-        expect(screen.getByText('Ready to build')).toBeInTheDocument();
+        expect(screen.getByText('Plan complete')).toBeInTheDocument();
         expect(screen.getByText(/2 milestones · 1 task · 1 prompt pack · 2 quality gates/)).toBeInTheDocument();
         expect(screen.getByRole('button', { name: /Copy next prompt/ })).toBeInTheDocument();
         // Overview content: strategy, stack, risks with handling.

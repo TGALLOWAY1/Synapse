@@ -2,21 +2,17 @@ import {
     Database, GitBranch, ShieldCheck, ShieldAlert, SlidersHorizontal, KeyRound, Network,
 } from 'lucide-react';
 import type { DataModelSummary } from '../../../lib/dataModelGraph';
-import type { DependencyNodeStatus } from '../../../lib/artifactDependencyGraph';
 
 interface Props {
     summary: DataModelSummary;
-    staleness?: DependencyNodeStatus;
+    /**
+     * Optional handler that makes the "Entities with PII" tile interactive —
+     * clicking it expands and scrolls to the PII-bearing entities below. Only
+     * rendered as a button when both this is provided AND the PII count > 0;
+     * otherwise the tile stays a static stat display.
+     */
+    onShowPii?: () => void;
 }
-
-// The freshness pill STAYS shown when fresh (up_to_date → green "Up to date")
-// as well as when stale. Statuses without an entry render nothing (the pill is
-// hidden) — matching the old "undefined → hidden" behavior.
-const STALENESS_CONFIG: Partial<Record<DependencyNodeStatus, { label: string; className: string }>> = {
-    up_to_date: { label: 'Up to date', className: 'bg-green-50 text-green-700 ring-1 ring-green-200' },
-    update_recommended: { label: 'Update recommended', className: 'bg-amber-50 text-amber-700 ring-1 ring-amber-200' },
-    needs_update: { label: 'Needs update', className: 'bg-amber-100 text-amber-800 ring-1 ring-amber-300' },
-};
 
 function StatTile({
     icon: Icon, value, label, tone = 'neutral',
@@ -51,30 +47,20 @@ function StatTile({
  * here — it lives once at the artifact/page level (ArtifactWorkspace's version
  * controls strip) so the same fact isn't shown twice in close proximity.
  */
-export function DataModelOverview({ summary, staleness }: Props) {
-    const stale = staleness ? STALENESS_CONFIG[staleness] : undefined;
+export function DataModelOverview({ summary, onShowPii }: Props) {
     const piiLabel = summary.piiEntityCount === 1 ? 'Entity with PII' : 'Entities with PII';
+    const piiInteractive = summary.piiEntityCount > 0 && Boolean(onShowPii);
 
     return (
         <section
             aria-label="Data model overview"
             className="rounded-xl border border-neutral-200 bg-white shadow-sm p-4 md:p-5"
         >
-            <div className="flex items-center justify-between gap-3 flex-wrap">
-                <div className="flex items-center gap-2.5 min-w-0">
-                    <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 shrink-0">
-                        <Database size={18} />
-                    </div>
-                    <h2 className="text-base font-bold text-neutral-900 truncate">Data Model</h2>
+            <div className="flex items-center gap-2.5 min-w-0">
+                <div className="p-2 rounded-lg bg-indigo-50 text-indigo-600 shrink-0">
+                    <Database size={18} />
                 </div>
-                {stale && (
-                    <span className={`inline-flex items-center gap-1 text-[11px] px-2 py-1 rounded-full font-medium ${stale.className}`}>
-                        {staleness === 'up_to_date'
-                            ? <ShieldCheck size={11} />
-                            : <ShieldAlert size={11} />}
-                        {stale.label}
-                    </span>
-                )}
+                <h2 className="text-base font-bold text-neutral-900 truncate">Data Model</h2>
             </div>
 
             <div
@@ -86,12 +72,28 @@ export function DataModelOverview({ summary, staleness }: Props) {
                 <StatTile icon={GitBranch} value={summary.relationshipCount} label={summary.relationshipCount === 1 ? 'Relationship' : 'Relationships'} />
                 <StatTile icon={SlidersHorizontal} value={summary.constraintCount} label={summary.constraintCount === 1 ? 'Constraint' : 'Constraints'} />
                 <StatTile icon={KeyRound} value={summary.indexCount} label={summary.indexCount === 1 ? 'Index' : 'Indexes'} />
-                <StatTile
-                    icon={summary.piiEntityCount > 0 ? ShieldAlert : ShieldCheck}
-                    value={summary.piiEntityCount > 0 ? summary.piiEntityCount : '—'}
-                    label={piiLabel}
-                    tone={summary.piiEntityCount > 0 ? 'rose' : 'neutral'}
-                />
+                {piiInteractive ? (
+                    <button
+                        type="button"
+                        role="listitem"
+                        onClick={onShowPii}
+                        aria-label="Show entities containing PII"
+                        className="flex items-center gap-2.5 rounded-lg border border-neutral-200 bg-neutral-50/60 px-3 py-2 text-left transition hover:border-rose-300 hover:bg-rose-50/60 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-rose-400"
+                    >
+                        <ShieldAlert size={16} className="shrink-0 text-rose-600" aria-hidden="true" />
+                        <div className="min-w-0">
+                            <div className="text-base font-bold leading-none text-neutral-900 tabular-nums">{summary.piiEntityCount}</div>
+                            <div className="mt-0.5 text-[11px] text-neutral-500 truncate">{piiLabel}</div>
+                        </div>
+                    </button>
+                ) : (
+                    <StatTile
+                        icon={summary.piiEntityCount > 0 ? ShieldAlert : ShieldCheck}
+                        value={summary.piiEntityCount > 0 ? summary.piiEntityCount : '—'}
+                        label={piiLabel}
+                        tone={summary.piiEntityCount > 0 ? 'rose' : 'neutral'}
+                    />
+                )}
                 <StatTile icon={Network} value={summary.apiEndpointCount} label={summary.apiEndpointCount === 1 ? 'API Endpoint' : 'API Endpoints'} />
             </div>
         </section>

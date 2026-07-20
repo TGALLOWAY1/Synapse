@@ -67,7 +67,11 @@ interface DispatchProps {
     /** Consumed by `implementation_plan`: source PRD version label. (Data Model
      * shows provenance at the page level, so it doesn't take this.) */
     prdVersionLabel?: string;
-    /** Consumed by `data_model` and `implementation_plan`: canonical freshness. */
+    /**
+     * Consumed by `implementation_plan`: canonical freshness. `data_model` no
+     * longer takes this — its in-card freshness pill was removed as a
+     * duplicate of the page-level provenance/freshness strip.
+     */
     staleness?: DependencyNodeStatus;
 }
 
@@ -140,7 +144,6 @@ export function ArtifactContentRenderer({
             <DataModelRenderer
                 key={`${initialDataEntityName ?? 'data-model'}:${initialDataMemberAspect ?? ''}:${initialDataMemberName ?? ''}`}
                 content={content}
-                staleness={staleness}
                 initialEntityName={initialDataEntityName}
                 initialMemberName={initialDataMemberName}
                 initialMemberAspect={initialDataMemberAspect}
