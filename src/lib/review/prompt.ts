@@ -51,6 +51,7 @@ export function buildSpecialistPrompt(
     return [
         `You are the ${specialist.label} specialist in an independent planning review.`,
         '',
+        `Perspective: ${specialist.perspective}`,
         `Responsibility: ${specialist.responsibility}`,
         `Review goals:\n${specialist.goals.map(goal => `- ${goal}`).join('\n')}`,
         `Boundaries:\n${specialist.boundaries.map(boundary => `- ${boundary}`).join('\n')}`,

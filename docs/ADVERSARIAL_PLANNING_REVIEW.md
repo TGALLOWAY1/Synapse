@@ -55,7 +55,7 @@ The canonical spine is the authority for identity, features, constraints, and sa
 
 ## Specialist panel
 
-The registry defines each specialist's responsibility, review goals, boundaries, relevant source types, and selection signals. The default panel is selected deterministically from product category, platform, artifact inventory, AI/data/auth/operational signals, maturity, and the user's focus. The selection and its reasons are persisted and visible.
+The registry defines each specialist's expert **perspective** (an authentic reviewer persona — background, mindset, and how they weigh severity/reversibility), a concise responsibility, a specific review-goals inspection checklist, role-specific boundaries, relevant source types, and selection signals. The perspective, goals, and boundaries render directly into the specialist prompt to set lens and rigor while staying evidence-anchored (every finding still cites a verbatim locator); they never license assuming facts. The default panel is selected deterministically from product category, platform, artifact inventory, AI/data/auth/operational signals, maturity, and the user's focus. The selection and its reasons are persisted and visible.
 
 Initial specialties cover product/scope, UX/behavior, architecture, data/backend, security/privacy, accessibility, reliability/QA, AI/model risk, and delivery/operations. The selector chooses 3-5; it does not run the full registry mechanically.
 
