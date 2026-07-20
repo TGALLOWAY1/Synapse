@@ -67,9 +67,16 @@ fallback during this first migration.
 - **Validation:** `validateCanonicalPrdSpine` — deterministic, non-invasive;
   warnings are recorded in the spine `meta`, never silently dropped.
 - **Persistence:** `SpineVersion.canonicalSpine` is attached on final settle
-  (in `updateSpineStructuredPRD` when `generationMeta` is present). Old
-  projects have none; artifact generation rebuilds the spine lazily from the
-  stored `structuredPRD`, so backwards compatibility is automatic.
+  (in `updateSpineStructuredPRD` when `generationMeta` is present). It is
+  deliberately **not** persisted on user/decision edits (`editSpineStructuredPRD`)
+  or reverts (`revertSpineToVersion`): re-cloning the full spine onto every edit
+  version bloated mobile localStorage into the "Storage full" toast (fix
+  c9df7c5). It is a rebuildable cache, so consumers reconstruct it lazily from
+  the stored `structuredPRD` when it is absent — artifact generation via
+  `coreArtifactService`, and the review context via `useReviewContextManifest`
+  (which mirrors the generation build params so a lazily-built spine hashes
+  identically at review capture and replay). Old projects have none, so
+  backwards compatibility is automatic.
 - **Prompt order:** persona/system → guardrails → **Canonical PRD Spine
   (authoritative)** → dependency artifacts → **Full PRD (secondary fallback)**.
   The separate feature glossary and inline PRD summary are removed when a spine

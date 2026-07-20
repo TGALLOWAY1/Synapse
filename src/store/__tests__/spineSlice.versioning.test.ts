@@ -93,7 +93,7 @@ describe('editSpineStructuredPRD', () => {
         expect(latest.model).toBe('gemini-x');
     });
 
-    it('rebuilds canonical metadata for the appended version id', () => {
+    it('does not persist a canonicalSpine on the appended edit version (rebuilt lazily)', () => {
         const store = useProjectStore.getState();
         const { projectId } = store.createProject('P', 'idea');
         const v1 = useProjectStore.getState().spineVersions[projectId][0];
@@ -106,9 +106,10 @@ describe('editSpineStructuredPRD', () => {
         const latest = useProjectStore.getState().spineVersions[projectId].find(s => s.isLatest)!;
 
         expect(latest.id).toBe(newSpineId);
-        expect(latest.canonicalSpine?.meta.sourceSpineVersionId).toBe(newSpineId);
-        expect(latest.canonicalSpine?.meta.sourcePrdVersion).toBe(2);
-        expect(latest.canonicalSpine?.identity.primaryGoal).toBe('edited');
+        // Edit versions carry no canonicalSpine clone (mobile localStorage quota
+        // — fix c9df7c5); it is reconstructed lazily by consumers from the
+        // stored structuredPRD.
+        expect(latest.canonicalSpine).toBeUndefined();
     });
 });
 
@@ -520,7 +521,7 @@ describe('revertSpineToVersion', () => {
         expect(events.some(e => e.type === 'Reverted')).toBe(true);
     });
 
-    it('rebuilds canonical metadata for the restored version id', () => {
+    it('does not persist a canonicalSpine on the restored version (rebuilt lazily)', () => {
         const store = useProjectStore.getState();
         const { projectId } = store.createProject('P', 'idea');
         const v1 = useProjectStore.getState().spineVersions[projectId][0];
@@ -534,8 +535,10 @@ describe('revertSpineToVersion', () => {
         const latest = useProjectStore.getState().spineVersions[projectId].find(s => s.isLatest)!;
 
         expect(latest.id).toBe(newSpineId);
-        expect(latest.canonicalSpine?.meta.sourceSpineVersionId).toBe(newSpineId);
-        expect(latest.canonicalSpine?.identity.primaryGoal).toBe('v1');
+        // A restored version is a fresh identity with no persisted canonicalSpine
+        // clone; consumers rebuild it lazily (mobile localStorage quota — fix
+        // c9df7c5).
+        expect(latest.canonicalSpine).toBeUndefined();
     });
 });
 

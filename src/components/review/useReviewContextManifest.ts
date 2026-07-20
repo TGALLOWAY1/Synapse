@@ -1,4 +1,4 @@
-import { useMemo, useRef } from 'react';
+import { useCallback, useMemo, useRef } from 'react';
 import type { Artifact, ArtifactVersion, Project, ReviewRun, SpineVersion } from '../../types';
 import {
     buildReviewContextManifest,
@@ -6,6 +6,7 @@ import {
     SPECIALIST_REGISTRY,
     type ReviewContextManifest,
 } from '../../lib/review';
+import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 import type { ReviewSpecialistOption } from './ReviewWorkspace';
 
 /**
@@ -26,6 +27,30 @@ export function useReviewContextManifest(params: {
     const manifests = useRef(new Map<string, ReviewContextManifest>());
 
     const latestSpine = spines.find(spine => spine.isLatest) ?? spines.at(-1);
+
+    // canonicalSpine is a rebuildable cache that is no longer persisted onto
+    // edit/revert spine versions (mobile localStorage quota — fix c9df7c5).
+    // Reconstruct it on demand here so the review context keeps its
+    // authoritative spine block and a deterministic context signature,
+    // whichever way the spine was produced. buildCanonicalPrdSpine is a pure,
+    // synchronous transform. Build params mirror the spine-slice generation
+    // path so a lazily-built spine hashes identically at capture and replay.
+    const resolveCanonicalSpine = useCallback((spine: SpineVersion) => {
+        if (spine.canonicalSpine) return spine.canonicalSpine;
+        if (!project || !spine.structuredPRD) return undefined;
+        try {
+            return buildCanonicalPrdSpine(spine.structuredPRD, {
+                projectName: project.productName || project.name,
+                platform: project.platform,
+                designSystemPreset: project.designSystemPreset,
+                safetyReview: spine.safetyReview,
+                sourceSpineVersionId: spine.id,
+                sourcePrdVersion: spine.prdVersion,
+            });
+        } catch {
+            return undefined;
+        }
+    }, [project]);
 
     const preferredArtifacts = useMemo(() => artifacts.flatMap(artifact => {
         if (artifact.type !== 'core_artifact' || !artifact.subtype || !artifact.currentVersionId) return [];
@@ -51,12 +76,12 @@ export function useReviewContextManifest(params: {
                 schemaVersion: latestSpine.prdVersion,
                 content: latestSpine.responseText,
                 structuredPRD: latestSpine.structuredPRD,
-                canonicalSpine: latestSpine.canonicalSpine,
+                canonicalSpine: resolveCanonicalSpine(latestSpine),
             },
             artifacts: preferredArtifacts,
             safetyBoundaries: latestSpine.safetyReview?.detectedConcerns ?? [],
         });
-    }, [latestSpine, preferredArtifacts, project, projectId]);
+    }, [latestSpine, preferredArtifacts, project, projectId, resolveCanonicalSpine]);
 
     const manifestForReview = (reviewId: string): ReviewContextManifest | undefined => {
         const cached = manifests.current.get(reviewId);
@@ -82,7 +107,7 @@ export function useReviewContextManifest(params: {
                 schemaVersion: sourceSpine.prdVersion,
                 content: sourceSpine.responseText,
                 structuredPRD: sourceSpine.structuredPRD,
-                canonicalSpine: sourceSpine.canonicalSpine,
+                canonicalSpine: resolveCanonicalSpine(sourceSpine),
             },
             artifacts: sourceArtifacts,
             expectedArtifactSubtypes: [
