@@ -381,4 +381,82 @@ describe('ReviewWorkspace', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Add to review queue' }));
         expect(onTriageFinding).toHaveBeenCalledWith('review-1', 'finding-exact');
     });
+
+    describe('critique gate (Findings after decisions)', () => {
+        it('renders the Decision Center first, then Findings, then History', () => {
+            render(<ReviewWorkspace {...baseProps()} />);
+            const tabs = screen.getAllByRole('button', { name: /Decision Center|Review findings|Review history/ });
+            expect(tabs.map(tab => tab.getAttribute('aria-label'))).toEqual([
+                'Decision Center', 'Review findings', 'Review history',
+            ]);
+        });
+
+        it('keeps the critique runnable when critiqueUnlocked is omitted (default)', () => {
+            render(<ReviewWorkspace {...baseProps()} />);
+            expect(screen.getByRole('button', { name: 'Start specialist review' })).toBeInTheDocument();
+        });
+
+        it('lands on the Decision Center and gates the critique when decisions are open', () => {
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 3 })} />);
+            expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
+
+            fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
+            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Start specialist review' })).not.toBeInTheDocument();
+        });
+
+        it('returns to the Decision Center from the gate', () => {
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 2 })} />);
+            fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
+            fireEvent.click(screen.getByRole('button', { name: /Go to the Decision Center/ }));
+            expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
+        });
+
+        it('defers the remaining open decisions from the gate', () => {
+            const onDeferOpenDecisions = vi.fn();
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 2, onDeferOpenDecisions })} />);
+            fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
+            fireEvent.click(screen.getByRole('button', { name: /Defer the remaining 2 and continue/ }));
+            expect(onDeferOpenDecisions).toHaveBeenCalledTimes(1);
+        });
+
+        it('still shows an already-completed run while the gate is active', () => {
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [completeRun()], activeRunId: 'review-1' })} />);
+            expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
+            expect(screen.queryByRole('heading', { name: 'Answer your open decisions first' })).not.toBeInTheDocument();
+        });
+
+        it('gates resume of an interrupted run behind decisions', () => {
+            const run = completeRun({ status: 'interrupted' });
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: /Resume review/ })).not.toBeInTheDocument();
+        });
+
+        it('gates retry of a failed run behind decisions', () => {
+            const run = completeRun({ status: 'failed' });
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('heading', { name: 'Answer your open decisions first' })).toBeInTheDocument();
+        });
+
+        it('keeps an interrupted run resumable when decisions are addressed', () => {
+            const run = completeRun({ status: 'interrupted' });
+            render(<ReviewWorkspace {...baseProps({ initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('button', { name: /Resume review/ })).toBeInTheDocument();
+        });
+
+        it('hides re-run affordances on a partial run while gated but keeps findings visible', () => {
+            const run = completeRun({
+                status: 'partial',
+                specialists: [
+                    { ...panel[0], status: 'complete', findingCount: 1 },
+                    { ...panel[1], status: 'failed', error: 'Timed out' },
+                ],
+            });
+            render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, initialTab: 'review', runs: [run], activeRunId: run.id })} />);
+            expect(screen.getByRole('heading', { name: 'Planning review' })).toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Retry failed coverage' })).not.toBeInTheDocument();
+            expect(screen.queryByRole('button', { name: 'Review current plan' })).not.toBeInTheDocument();
+        });
+    });
 });

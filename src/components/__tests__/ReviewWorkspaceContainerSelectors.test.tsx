@@ -71,7 +71,7 @@ describe('ReviewWorkspaceContainer project collection selectors', () => {
             spineVersions: { [PROJECT_ID]: [spine] },
         });
 
-        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} />)).not.toThrow();
+        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} critiqueUnlocked />)).not.toThrow();
         expect(screen.getByTestId('review-workspace')).toHaveTextContent('Signal Notes');
         expect(screen.getByTestId('review-workspace')).toHaveAttribute('data-reopen-handler', 'function');
     });
@@ -89,7 +89,7 @@ describe('ReviewWorkspaceContainer project collection selectors', () => {
             planningRecords: { [PROJECT_ID]: [] },
         });
 
-        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} />)).not.toThrow();
+        expect(() => render(<ReviewWorkspaceContainer projectId={PROJECT_ID} critiqueUnlocked />)).not.toThrow();
         expect(screen.getByTestId('review-workspace')).toHaveTextContent('Signal Notes');
     });
 });
