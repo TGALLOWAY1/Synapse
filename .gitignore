@@ -20,6 +20,9 @@ logs
 # Screenshot capture output (demo artifact shots — not committed)
 screenshots-demo/
 
+# Live e2e run output (screenshots + report.json — not committed)
+e2e-results/
+
 # Editor & OS
 .vscode/*
 !.vscode/extensions.json
