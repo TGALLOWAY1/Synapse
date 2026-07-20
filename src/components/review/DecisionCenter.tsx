@@ -438,7 +438,7 @@ export function DecisionCenter({
                                     <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                         {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
-                                        {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50">Accept for planning · not validated</button>}
+                                        {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"><Check size={14} className="mr-1 inline" /> Yes, that's right</button>}
                                         {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
                                         <button
                                             type="button"
@@ -448,8 +448,11 @@ export function DecisionCenter({
                                                 else setAnswerChoice('other');
                                             }}
                                             className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
-                                        ><X size={14} className="mr-1 inline" /> Reject premise</button>
+                                        ><X size={14} className="mr-1 inline" /> Not quite — correct it</button>
                                     </div>
+                                    {selected.type === 'assumption' && !selected.options?.length && (
+                                        <p className="mt-2 text-xs leading-5 text-neutral-500">Recorded as your call — not independently checked.</p>
+                                    )}
                                 </section>
                                 );
                             })()}

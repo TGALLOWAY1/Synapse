@@ -56,7 +56,7 @@ describe('ScreenDecisions', () => {
     it('lets an assumption be accepted for planning without pretending it was validated', () => {
         renderScreen();
         fireEvent.click(screen.getByRole('button', { name: /Musicians will pay before finishing/i }));
-        fireEvent.click(screen.getByRole('button', { name: 'Accept for planning · not validated' }));
+        fireEvent.click(screen.getByRole('button', { name: "Yes, that's right" }));
         expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
     });
 });

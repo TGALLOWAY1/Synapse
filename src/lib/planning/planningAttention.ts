@@ -152,7 +152,7 @@ const recordItem = (
         rank = 30;
     } else if (record.type === 'assumption') {
         condition = 'worth_validating';
-        actionLabel = 'Validate this assumption';
+        actionLabel = 'Answer this question';
         rank = 30;
     } else {
         condition = 'needs_decision';
@@ -277,6 +277,26 @@ function primaryKeyFor(readiness: PlanningReadiness, items: RankedAttentionItem[
         item.condition === 'update_required' || item.condition === 'review_recommended' || item.condition === 'legacy_review'
     ))?.key;
     return undefined;
+}
+
+/**
+ * The subset of current attention a user can settle by directly answering —
+ * open material assumptions Synapse made while drafting, ordered by the same
+ * ranking the attention summary uses. Powers the Plan stage's guided sharpen
+ * flow and its question count. Assumptions with changed/missing sources are
+ * excluded: those need a context review, not a quick answer.
+ */
+export function deriveAnswerableAssumptionRecords(input: PlanningAttentionInput): PlanningRecord[] {
+    const entries = new Map<string, { record: PlanningRecord; item: RankedAttentionItem }>();
+    for (const record of input.planningRecords) {
+        const item = recordItem(record, input.planningRecords, input);
+        if (item?.condition === 'worth_validating') entries.set(item.key, { record, item });
+    }
+    return sorted([...entries.values()].map(entry => entry.item))
+        .flatMap(item => {
+            const entry = entries.get(item.key);
+            return entry ? [entry.record] : [];
+        });
 }
 
 /**

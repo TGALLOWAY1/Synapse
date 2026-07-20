@@ -2,7 +2,7 @@ import { describe, expect, it } from 'vitest';
 import type { PlanningRecord, ReviewIssue, StructuredPRD } from '../../../types';
 import type { DownstreamUpdatePlanSummary, DownstreamUpdatePlanSummaryItem } from '../downstreamUpdatePlan';
 import type { OutputAlignment } from '../outputAlignment';
-import { derivePlanningAttention, type PlanningAttentionInput } from '../planningAttention';
+import { deriveAnswerableAssumptionRecords, derivePlanningAttention, type PlanningAttentionInput } from '../planningAttention';
 import {
     assumptionEvidenceSetHash,
     assumptionStatementHash,
@@ -257,5 +257,44 @@ describe('planning attention projection', () => {
             actionableNow: true,
         });
         expect(result.secondary[0]?.why).toMatch(/without assuming it is wrong/i);
+    });
+});
+
+describe('deriveAnswerableAssumptionRecords', () => {
+    it('labels an open assumption as a question to answer, not a validation task', () => {
+        const result = derivePlanningAttention(base({
+            planningRecords: [record({ type: 'assumption', title: 'LLM pricing stays affordable' })],
+        }));
+        expect(result.primary).toMatchObject({
+            condition: 'worth_validating',
+            actionLabel: 'Answer this question',
+        });
+    });
+
+    it('returns open material assumptions in attention order, excluding immaterial ones', () => {
+        const records = [
+            record({ id: 'a-high', type: 'assumption', materiality: 'high', title: 'High assumption' }),
+            record({ id: 'a-low', type: 'assumption', materiality: 'low', title: 'Low assumption' }),
+            record({ id: 'a-blocking', type: 'assumption', materiality: 'blocking', title: 'Blocking assumption' }),
+        ];
+        const result = deriveAnswerableAssumptionRecords(base({ planningRecords: records }));
+        expect(result.map(item => item.id)).toEqual(['a-blocking', 'a-high']);
+    });
+
+    it('excludes settled assumptions, non-assumption records, and changed-source assumptions', () => {
+        const confirmed = record({
+            id: 'a-confirmed', type: 'assumption', status: 'confirmed',
+            events: [{
+                id: 'event-1', planningRecordId: 'a-confirmed', type: 'custom_answered',
+                actor: 'user', at: 50, answer: 'Confirmed statement',
+            }],
+        });
+        const decision = record({ id: 'd-open', type: 'decision' });
+        const changedSource = record({ id: 'a-changed', type: 'assumption', sourceState: 'changed' });
+        const open = record({ id: 'a-open', type: 'assumption' });
+        const result = deriveAnswerableAssumptionRecords(base({
+            planningRecords: [confirmed, decision, changedSource, open],
+        }));
+        expect(result.map(item => item.id)).toEqual(['a-open']);
     });
 });

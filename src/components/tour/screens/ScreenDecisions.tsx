@@ -374,7 +374,7 @@ export default function ScreenDecisions({ reducedMotion }: ScreenProps) {
                                                 onClick={() => setAssumptionAccepted(true)}
                                                 className="rounded-xl border border-neutral-600 bg-neutral-800 px-4 py-2.5 text-sm font-semibold text-neutral-100 transition hover:border-indigo-500/50"
                                             >
-                                                Accept for planning · not validated
+                                                Yes, that's right
                                             </button>
                                             <span className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-400">
                                                 <Clock3 size={14} /> Defer

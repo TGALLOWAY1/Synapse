@@ -208,7 +208,7 @@ describe('StructuredPRDView — review workflow', () => {
     it('confirming an assumption appends a new spine version with the decision', () => {
         renderView();
         goTo(/Decisions/);
-        fireEvent.click(screen.getByRole('button', { name: 'Accept for planning, not validated: Weekly cadence works' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Accept as planning context, not validated: Weekly cadence works' }));
         const spine = latestSpine();
         expect(spine.id).not.toBe(SPINE_ID);
         const decided = spine.structuredPRD?.assumptions?.find(a => a.id === 'a2');
@@ -243,7 +243,7 @@ describe('StructuredPRDView — review workflow', () => {
     it('hides confirm/reject actions in read-only mode', () => {
         renderView(true);
         goTo(/Decisions/);
-        expect(screen.queryByRole('button', { name: /Accept for planning/ })).toBeNull();
+        expect(screen.queryByRole('button', { name: /Accept as planning context/ })).toBeNull();
         goTo(/Features/);
         expect(screen.queryByRole('button', { name: /Confirm feature/ })).toBeNull();
     });
@@ -398,6 +398,6 @@ describe('StructuredPRDView — uncertainty-first planning integration', () => {
 
         expect(screen.getByRole('button', { name: 'Plan validation for assumption: Creators will pay' })).toBeInTheDocument();
         expect(screen.queryByRole('button', { name: 'Plan validation for assumption: Users prefer rounded cards' })).toBeNull();
-        expect(screen.getAllByText('Accept for planning')).toHaveLength(2);
+        expect(screen.getAllByText("That's right")).toHaveLength(2);
     });
 });
