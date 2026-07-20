@@ -114,7 +114,9 @@ update the script in the same change (treat drift here like docs drift):
   plan" option, the `Cancel` aria-label.
 - PRD tabs: `#prd-tab-overview|features|decisions` ids in
   `src/components/prd/PrdViewTabs.tsx`.
-- Pipeline-stage nav: the `Plan | Challenge | Explore | History` tab buttons
-  in `ProjectWorkspace.tsx` (matched by exact accessible name).
+- Pipeline-stage nav: `PipelineStageBar.tsx` — the
+  `nav[aria-label="Planning progression"]` buttons, whose accessible names are
+  `"<Label>: <description>"` (matched by label prefix; the outputs stage is
+  labeled `Explore` before readiness and `Build` after).
 - Settle signal: `SpineVersion.generationPhase` and the
   `synapse-projects-storage*` persist key prefix.

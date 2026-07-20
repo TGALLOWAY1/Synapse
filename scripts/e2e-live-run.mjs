@@ -303,11 +303,12 @@ try {
     page.on('requestfailed', (req) => {
         const failure = req.failure()?.errorText || 'unknown';
         const url = redact(req.url());
-        // Known environmental noise: the Vercel Analytics debug script is
-        // blocked in sandboxes/offline runs and is irrelevant to the app.
-        const bucket = /vercel-scripts\.com|vitals\.vercel/.test(url)
-            ? report.ignoredRequests : report.failedRequests;
-        bucket.push({ url, method: req.method(), failure });
+        // Known environmental noise: blocked Vercel Analytics, and aborted
+        // localhost /api/* calls (vite dev runs no serverless functions).
+        const isNoise = /vercel-scripts\.com|vitals\.vercel/.test(url)
+            || (url.startsWith(BASE_URL) && new URL(req.url()).pathname.startsWith('/api/'));
+        (isNoise ? report.ignoredRequests : report.failedRequests)
+            .push({ url, method: req.method(), failure });
     });
 
     // Seed browser state before any app code runs: the Gemini key in the same
@@ -437,14 +438,21 @@ try {
             }, { optional: true });
         }
 
-        // The workspace pipeline-stage nav tabs (Plan | Challenge | Explore |
-        // History). Artifacts aren't generated (large token spend), so Explore
-        // shows the pre-generation outputs view.
-        for (const [stage, wait] of [['Explore', 2500], ['History', 2000]]) {
-            await step(`${stage} stage`, async () => {
-                await page.getByRole('button', { name: stage, exact: true }).first().click({ timeout: 5000 });
+        // The pipeline-stage nav (PipelineStageBar: Plan | Challenge |
+        // Explore/Build | History). Each button's accessible name is
+        // "<Label>: <description>", so match on the label prefix. Artifacts
+        // aren't generated (large token spend), so the outputs stage shows the
+        // pre-generation view; its label is Explore before readiness, Build
+        // after.
+        const stageBar = page.getByRole('navigation', { name: 'Planning progression' });
+        for (const [slug, namePattern, wait] of [
+            ['outputs', /^(Explore|Build):/, 2500],
+            ['history', /^History:/, 2000],
+        ]) {
+            await step(`${slug} stage`, async () => {
+                await stageBar.getByRole('button', { name: namePattern }).click({ timeout: 5000 });
                 await settle(wait);
-                await shot(page, `${stage.toLowerCase()}-stage`);
+                await shot(page, `${slug}-stage`);
             }, { optional: true });
         }
 
@@ -452,7 +460,8 @@ try {
             // Resize in place rather than reloading the deep link: a reload
             // races the per-user store rehydration and can bounce to
             // "Project not found" (see docs/E2E_LIVE_TESTING.md).
-            await page.getByRole('button', { name: 'Plan', exact: true }).first()
+            await page.getByRole('navigation', { name: 'Planning progression' })
+                .getByRole('button', { name: /^Plan:/ })
                 .click({ timeout: 5000 }).catch(() => {});
             await page.setViewportSize({ width: 390, height: 844 });
             await settle(2500);
