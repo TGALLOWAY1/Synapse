@@ -73,9 +73,10 @@ describe('updateSpineStructuredPRD — canonical spine attachment', () => {
         // An edit clones v1 but must NOT carry its now-stale canonicalSpine, and
         // must not eagerly rebuild one either: persisting a full spine clone onto
         // every edit version bloated mobile localStorage into "Storage full"
-        // (fix c9df7c5). It is left undefined and rebuilt lazily by consumers
-        // (artifact generation, review manifest), always bound to the version
-        // that consumes it — so a stale spine can never surface under a new id.
+        // (fix c9df7c5). It is left undefined; artifact generation rebuilds it
+        // lazily from structuredPRD (the review context reads the persisted
+        // field and simply omits the block when absent) — so a stale spine can
+        // never surface under a new id.
         store.editSpineStructuredPRD(projectId, v1.id, { ...prd, vision: 'Edited.' }, {
             responseText: 'edited md',
             editSummary: 'Updated section: Vision',

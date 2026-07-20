@@ -1,4 +1,4 @@
-import { useCallback, useMemo, useRef } from 'react';
+import { useMemo, useRef } from 'react';
 import type { Artifact, ArtifactVersion, Project, ReviewRun, SpineVersion } from '../../types';
 import {
     buildReviewContextManifest,
@@ -6,7 +6,6 @@ import {
     SPECIALIST_REGISTRY,
     type ReviewContextManifest,
 } from '../../lib/review';
-import { buildCanonicalPrdSpine } from '../../lib/canonicalPrdSpine';
 import type { ReviewSpecialistOption } from './ReviewWorkspace';
 
 /**
@@ -28,30 +27,16 @@ export function useReviewContextManifest(params: {
 
     const latestSpine = spines.find(spine => spine.isLatest) ?? spines.at(-1);
 
-    // canonicalSpine is a rebuildable cache that is no longer persisted onto
-    // edit/revert spine versions (mobile localStorage quota — fix c9df7c5).
-    // Reconstruct it on demand here so the review context keeps its
-    // authoritative spine block and a deterministic context signature,
-    // whichever way the spine was produced. buildCanonicalPrdSpine is a pure,
-    // synchronous transform. Build params mirror the spine-slice generation
-    // path so a lazily-built spine hashes identically at capture and replay.
-    const resolveCanonicalSpine = useCallback((spine: SpineVersion) => {
-        if (spine.canonicalSpine) return spine.canonicalSpine;
-        if (!project || !spine.structuredPRD) return undefined;
-        try {
-            return buildCanonicalPrdSpine(spine.structuredPRD, {
-                projectName: project.productName || project.name,
-                platform: project.platform,
-                designSystemPreset: project.designSystemPreset,
-                safetyReview: spine.safetyReview,
-                sourceSpineVersionId: spine.id,
-                sourcePrdVersion: spine.prdVersion,
-            });
-        } catch {
-            return undefined;
-        }
-    }, [project]);
-
+    // canonicalSpine is a rebuildable cache no longer persisted onto edit/revert
+    // spine versions (mobile localStorage quota — fix c9df7c5). The review
+    // context reads the persisted field directly and omits the canonical block
+    // when it is absent (exactly as it already did for legacy spines that never
+    // had one). This is deliberate: the readiness/challenge context-signature
+    // builders (readinessSlice, ProjectWorkspace, HistoryView) also read the
+    // persisted field, so rebuilding one here — but not there — would desync the
+    // signatures and stop a just-completed review from counting toward
+    // readiness. Uniformly reading the persisted field keeps every signature
+    // consistent with zero migration of existing review runs.
     const preferredArtifacts = useMemo(() => artifacts.flatMap(artifact => {
         if (artifact.type !== 'core_artifact' || !artifact.subtype || !artifact.currentVersionId) return [];
         const version = artifactVersions.find(candidate => candidate.id === artifact.currentVersionId);
@@ -76,12 +61,12 @@ export function useReviewContextManifest(params: {
                 schemaVersion: latestSpine.prdVersion,
                 content: latestSpine.responseText,
                 structuredPRD: latestSpine.structuredPRD,
-                canonicalSpine: resolveCanonicalSpine(latestSpine),
+                canonicalSpine: latestSpine.canonicalSpine,
             },
             artifacts: preferredArtifacts,
             safetyBoundaries: latestSpine.safetyReview?.detectedConcerns ?? [],
         });
-    }, [latestSpine, preferredArtifacts, project, projectId, resolveCanonicalSpine]);
+    }, [latestSpine, preferredArtifacts, project, projectId]);
 
     const manifestForReview = (reviewId: string): ReviewContextManifest | undefined => {
         const cached = manifests.current.get(reviewId);
@@ -107,7 +92,7 @@ export function useReviewContextManifest(params: {
                 schemaVersion: sourceSpine.prdVersion,
                 content: sourceSpine.responseText,
                 structuredPRD: sourceSpine.structuredPRD,
-                canonicalSpine: resolveCanonicalSpine(sourceSpine),
+                canonicalSpine: sourceSpine.canonicalSpine,
             },
             artifacts: sourceArtifacts,
             expectedArtifactSubtypes: [
