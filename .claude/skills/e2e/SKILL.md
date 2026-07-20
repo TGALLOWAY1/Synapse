@@ -11,8 +11,9 @@ run → look at the screenshots → report/fix → re-run.
 ## 1. Run
 
 ```bash
-npm run e2e            # live: real Gemini PRD generation (needs a key)
-npm run e2e:smoke      # no key: boot + form + start-dialog only
+npm run e2e                  # live: real Gemini PRD + asset bundle (needs a key)
+npm run e2e -- --skip-assets # live: stop after the PRD (cheaper, no bundle)
+npm run e2e:smoke            # no key: boot + form + start-dialog only
 ```
 
 - Live mode needs `SYNAPSE_E2E_GEMINI_KEY` (or `GEMINI_API_KEY`) in the
@@ -21,8 +22,18 @@ npm run e2e:smoke      # no key: boot + form + start-dialog only
   quota-capped test key — never ask them to paste it into chat or commit it).
 - Auth is the dev-only local bypass (`VITE_DEV_SKIP_AUTH=true`) — no real
   account is involved and nothing syncs to the server.
-- A live run takes several minutes (real generation). Pass
-  `--timeout-min=15` if it times out; `--prompt=…`/`--name=…` to vary the idea.
+- The default live run walks the **whole arc**: idea → PRD → commit through the
+  readiness gate → generate the downstream asset bundle (design system, user
+  flows, screens, data model, implementation plan) → screenshot each. That's a
+  larger token spend and takes several minutes; use `--skip-assets` for a
+  PRD-only pass. Pass `--timeout-min=15` if it times out; `--prompt=…`/`--name=…`
+  to vary the idea.
+- **Mockup images never render locally.** They come from the server-side
+  `/api/image/generate` proxy (and `hasOpenAIKey()` reads a server status
+  endpoint) — `api/` functions that `vite dev` doesn't run, so the Screens view
+  always shows wireframe/placeholder screens here, regardless of any
+  `OPENAI_API_KEY`. `report.assets.note` records this; don't report it as a
+  defect. Rendered imagery needs a real deployment (Vercel preview).
 - Output: `e2e-results/run-<timestamp>/` — numbered PNGs + `report.json`.
 
 ## 2. Assess — actually look at the screenshots

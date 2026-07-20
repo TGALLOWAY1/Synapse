@@ -66,12 +66,15 @@ function parseArgs(argv) {
     const out = {
         mode: undefined, prompt: undefined, name: undefined,
         out: undefined, timeoutMin: undefined, relay: undefined, port: undefined,
+        assets: undefined,
     };
     for (const a of argv) {
         if (a === '--live') out.mode = 'live';
         else if (a === '--smoke') out.mode = 'smoke';
         else if (a === '--fetch-relay') out.relay = true;
         else if (a === '--no-relay') out.relay = false;
+        else if (a === '--skip-assets') out.assets = false;
+        else if (a === '--assets') out.assets = true;
         else if (a.startsWith('--prompt=')) out.prompt = a.slice('--prompt='.length);
         else if (a.startsWith('--name=')) out.name = a.slice('--name='.length);
         else if (a.startsWith('--out=')) out.out = a.slice('--out='.length);
@@ -99,6 +102,16 @@ const PORT = args.port || 5181; // dedicated port; 5173 dev / 5179 tour / 5180 d
 const BASE_URL = `http://localhost:${PORT}`;
 const GENERATION_TIMEOUT_MS = (args.timeoutMin || 12) * 60_000;
 const PROGRESS_SHOT_EVERY_MS = 45_000;
+// Downstream asset generation (the 7-core artifact bundle + mockup spec) is a
+// much larger token spend than the PRD alone, so it's opt-outable. Default: on
+// in live mode. It requires committing the plan through the readiness gate.
+const GENERATE_ASSETS = args.assets ?? true;
+// The 5 *visible* core subtypes a fresh bundle produces (component_inventory is
+// hidden but generates; prompt_pack is retired and does not). Used for settle.
+const VISIBLE_CORE_SUBTYPES = ['design_system', 'user_flows', 'screen_inventory', 'data_model', 'implementation_plan'];
+// Titles of the sidebar rows to screenshot once assets settle (Screens
+// consolidates screen_inventory + mockup; Dependency Graph is a derived view).
+const ARTIFACT_ROW_TITLES = ['Design System', 'User Flows', 'Screens', 'Data Model', 'Implementation Plan', 'Dependency Graph'];
 
 const IDEA_PROMPT = args.prompt ||
     'A simple habit tracker for busy parents: log daily habits in one tap, ' +
@@ -217,6 +230,7 @@ const report = {
     projectName: PROJECT_NAME,
     projectId: null,
     generation: null, // { ms, phase, error }
+    assets: null,     // { ms, readySubtypes: [], settleReason, note } — asset bundle
     steps: [],        // { name, status: ok|failed|skipped, ms, error?, screenshots: [] }
     consoleErrors: [],
     consoleWarnings: [],
@@ -438,23 +452,162 @@ try {
             }, { optional: true });
         }
 
-        // The pipeline-stage nav (PipelineStageBar: Plan | Challenge |
-        // Explore/Build | History). Each button's accessible name is
-        // "<Label>: <description>", so match on the label prefix. Artifacts
-        // aren't generated (large token spend), so the outputs stage shows the
-        // pre-generation view; its label is Explore before readiness, Build
-        // after.
-        const stageBar = page.getByRole('navigation', { name: 'Planning progression' });
-        for (const [slug, namePattern, wait] of [
-            ['outputs', /^(Explore|Build):/, 2500],
-            ['history', /^History:/, 2000],
-        ]) {
-            await step(`${slug} stage`, async () => {
-                await stageBar.getByRole('button', { name: namePattern }).click({ timeout: 5000 });
-                await settle(wait);
-                await shot(page, `${slug}-stage`);
+        // --- Downstream asset generation -------------------------------------
+        // Committing a plan and generating its build assets (the core-artifact
+        // bundle + mockup spec). This is the expensive tail; --skip-assets stops
+        // after the PRD. The path: top-bar "Review readiness" → ReadinessCheckpoint
+        // (Commit plan, or Proceed-with-accepted-risk for an exploring-phase
+        // working plan) → FinalizationSuccessModal → DesignSystemPresetChoice →
+        // artifactJobController.startAll runs the bundle.
+        const finalizeModalButton = () => page
+            .locator('[aria-labelledby="finalize-success-title"]')
+            .getByRole('button', { name: /Generate build foundation|Explore outputs/ });
+        let assetsTriggered = false;
+        if (GENERATE_ASSETS) {
+            await step('commit plan (readiness checkpoint)', async () => {
+                await page.getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 });
+                await settle(1200);
+                await shot(page, 'readiness-checkpoint');
+                // "Commit plan" appears only when the plan is ready-to-build; an
+                // immediately-generated working plan is in the exploring phase, so
+                // it takes the "Proceed with accepted risk" override (rationale +
+                // optional containment for a build blocker).
+                const commitReady = page.getByRole('button', { name: 'Commit plan' });
+                if (await commitReady.isVisible().catch(() => false)) {
+                    await commitReady.click();
+                } else {
+                    await page.getByRole('button', { name: 'Proceed with accepted risk' }).click({ timeout: 6000 });
+                    await settle(500);
+                    await page.locator('#readiness-rationale').fill(
+                        'Automated E2E run: committing to exercise the full downstream asset-generation ' +
+                        'flow for visual assessment. Remaining open items are acceptable for this test build.',
+                    );
+                    const containment = page.locator('#readiness-containment');
+                    if (await containment.isVisible().catch(() => false)) {
+                        await containment.fill(
+                            'Throwaway local E2E build — generated artifacts are inspected for layout and ' +
+                            'quality only and never shipped, so residual risk is contained to the test environment.',
+                        );
+                    }
+                    await page.getByRole('button', { name: /^Proceed with \d+ open item/ }).click({ timeout: 6000 });
+                }
+                // Scope to the finalize dialog: once the plan is committed, the
+                // top-bar green pill ALSO reads "Explore outputs", so an unscoped
+                // match is a strict-mode violation.
+                await finalizeModalButton().waitFor({ timeout: 12_000 });
+                await settle(500);
+                await shot(page, 'finalize-success');
             }, { optional: true });
+
+            await step('trigger asset generation ("Generate build foundation")', async () => {
+                await finalizeModalButton().click({ timeout: 8000 });
+                // The one-time visual-direction picker gates the first bundle. Note
+                // the app opens it WITHOUT closing the finalize modal, so the
+                // finalize card sits on top of the picker and intercepts clicks —
+                // capture that state, then — only if the finalize modal is still
+                // stacked on top (legacy behavior) — dismiss it so the picker is
+                // reachable. The app now closes it automatically when the picker
+                // opens, so this is a guarded no-op on current builds.
+                const preset = page.getByText('Choose your visual direction');
+                if (await preset.isVisible({ timeout: 6000 }).catch(() => false)) {
+                    await shot(page, 'design-preset-choice');
+                    const stackedFinalize = page.locator('[aria-labelledby="finalize-success-title"]')
+                        .getByRole('button', { name: 'Keep reviewing the plan' });
+                    if (await stackedFinalize.isVisible().catch(() => false)) {
+                        await stackedFinalize.click().catch(() => {});
+                        await settle(400);
+                    }
+                    await page.getByRole('button', { name: /Modern SaaS/ }).click({ timeout: 6000 });
+                }
+                await page.waitForTimeout(3000);
+                assetsTriggered = true;
+                await shot(page, 'assets-generating-start', { fullPage: false });
+            }, { optional: true });
+
+            if (assetsTriggered) {
+                await step('asset bundle settles (live Gemini artifacts)', async () => {
+                    const t0 = Date.now();
+                    let lastShotAt = t0;
+                    let lastReady = -1;
+                    let lastChangeAt = t0;
+                    let settleReason = 'timeout';
+                    let subtypes = [];
+                    for (;;) {
+                        const info = await page.evaluate((projectId) => {
+                            for (let i = 0; i < localStorage.length; i++) {
+                                const k = localStorage.key(i);
+                                if (!k || !k.startsWith('synapse-projects-storage')) continue;
+                                try {
+                                    const state = JSON.parse(localStorage.getItem(k) || '{}').state;
+                                    const arr = state?.artifacts?.[projectId];
+                                    if (!arr?.length) continue;
+                                    const ready = arr.filter((a) => a.currentVersionId);
+                                    return { ready: ready.length, subtypes: ready.map((a) => a.subtype || a.type) };
+                                } catch { /* ignore malformed blobs */ }
+                            }
+                            return { ready: 0, subtypes: [] };
+                        }, report.projectId);
+                        subtypes = info.subtypes;
+                        // In-flight signals in the workspace: spinning StatusDots in
+                        // the artifact rail + the "Creating your build assets…" pane.
+                        const spinners = await page.locator('nav[aria-label="Artifacts"] .animate-spin').count().catch(() => 0);
+                        const building = await page.getByText('Creating your build assets…').isVisible().catch(() => false);
+                        const domIdle = spinners === 0 && !building;
+                        const haveAllVisibleCore = VISIBLE_CORE_SUBTYPES.every((s) => info.subtypes.includes(s));
+
+                        if (info.ready !== lastReady) { lastReady = info.ready; lastChangeAt = Date.now(); }
+                        if (haveAllVisibleCore && domIdle) { settleReason = 'all-core-done'; break; }
+                        // Fallback: some slot errored (no artifact written) but the run
+                        // is quiescent and most assets are present — don't hang.
+                        if (domIdle && info.ready >= 3 && Date.now() - lastChangeAt > 60_000) { settleReason = 'quiescent'; break; }
+                        if (Date.now() - t0 > GENERATION_TIMEOUT_MS) { settleReason = 'timeout'; await shot(page, 'assets-TIMEOUT', { fullPage: false }); break; }
+                        if (Date.now() - lastShotAt >= PROGRESS_SHOT_EVERY_MS) {
+                            lastShotAt = Date.now();
+                            await shot(page, `assets-generating-${Math.round((Date.now() - t0) / 1000)}s`, { fullPage: false });
+                        }
+                        await settle(5000);
+                    }
+                    report.assets = {
+                        ms: Date.now() - t0,
+                        settleReason,
+                        readySubtypes: [...new Set(subtypes)].sort(),
+                        // Mockup *images* come from the /api/image/generate backend proxy
+                        // (server-side, gated by the provider-key status endpoint), and
+                        // hasOpenAIKey() reflects that server status — NOT any shell env
+                        // var. Plain `vite dev` runs no `api/` functions, so images never
+                        // render here regardless of key; the mockup *spec* still generates
+                        // via Gemini and screens show as wireframe/placeholder.
+                        note: 'Local harness: mockup screen images are always wireframe/placeholder — the /api image backend does not run under vite dev. The mockup spec generates via Gemini.',
+                    };
+                    console.log(`  assets settled in ${Math.round((Date.now() - t0) / 1000)}s (${settleReason})`,
+                        report.assets.readySubtypes);
+                    // A timeout means the newly-added asset path did not complete — fail
+                    // the run (report.assets is already recorded above) rather than exit
+                    // 0 and mask the regression this harness exists to catch.
+                    if (settleReason === 'timeout') {
+                        throw new Error(`asset generation did not settle within ${GENERATION_TIMEOUT_MS / 60000} min`);
+                    }
+                }); // non-optional: a stalled/failed asset bundle must fail `npm run e2e`
+
+                // Screenshot each generated artifact by clicking its sidebar row.
+                for (const title of ARTIFACT_ROW_TITLES) {
+                    await step(`artifact: ${title}`, async () => {
+                        await page.locator('nav[aria-label="Artifacts"] button').filter({ hasText: title })
+                            .first().click({ timeout: 6000 });
+                        await settle(1800);
+                        await shot(page, `artifact-${title.toLowerCase().replace(/[^a-z0-9]+/g, '-')}`);
+                    }, { optional: true });
+                }
+            }
         }
+
+        await step('history stage', async () => {
+            await page.getByRole('navigation', { name: 'Planning progression' })
+                .getByRole('button', { name: /^History:/ })
+                .click({ timeout: 5000 });
+            await settle(2000);
+            await shot(page, 'history-stage');
+        }, { optional: true });
 
         await step('mobile viewport pass (PRD)', async () => {
             // Resize in place rather than reloading the deep link: a reload
