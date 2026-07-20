@@ -444,13 +444,64 @@ try {
             await shot(page, 'prd-overview');
         });
 
-        for (const view of ['features', 'decisions']) {
+        // Decisions no longer live on a PRD tab (they moved to the Decision
+        // Center on the Challenge stage — see the "refine popover" step below
+        // and docs/E2E_LIVE_TESTING.md); PRD_VIEWS (src/lib/derive/prdViews.ts)
+        // only has 'overview' | 'features'.
+        for (const view of ['features']) {
             await step(`PRD ${view} view`, async () => {
                 await page.locator(`#prd-tab-${view}`).click({ timeout: 5000 });
                 await settle(1500);
                 await shot(page, `prd-${view}`);
             }, { optional: true });
         }
+
+        // Highlight-to-refine popover: programmatically select a run of PRD
+        // text and dispatch pointerup so useSelectionPopover surfaces the
+        // action dialog. Recipe adapted from the working recipe in
+        // capture-readme-screenshots.mjs (~lines 319-358) — do not modify that
+        // file, this is a standalone copy tuned for this script's panel ids.
+        await step('refine popover (highlight-to-refine dialog)', async () => {
+            // Selection reads real text, so land back on Overview (the loop
+            // above may have moved to Features, or skipped and left Overview
+            // active either way).
+            await page.locator('#prd-tab-overview').click({ timeout: 5000 }).catch(() => {});
+            await settle(800);
+            const selected = await page.evaluate(() => {
+                const panel = document.querySelector('#prd-panel-overview');
+                if (!panel) return false;
+                const walker = document.createTreeWalker(panel, NodeFilter.SHOW_TEXT);
+                let node = null;
+                while (walker.nextNode()) {
+                    const t = walker.currentNode.textContent || '';
+                    if (t.trim().length > 80) { node = walker.currentNode; break; }
+                }
+                if (!node) return false;
+                const text = node.textContent || '';
+                const start = text.indexOf(' ', 10) + 1;
+                const end = Math.min(text.length, start + 60);
+                const range = document.createRange();
+                range.setStart(node, start);
+                range.setEnd(node, end);
+                const sel = window.getSelection();
+                sel.removeAllRanges();
+                sel.addRange(range);
+                node.parentElement?.scrollIntoView({ block: 'center' });
+                document.dispatchEvent(new PointerEvent('pointerup', { bubbles: true }));
+                return true;
+            });
+            if (!selected) throw new Error('no selectable PRD text node found in #prd-panel-overview');
+            await settle(700);
+            // Dialog identity: role="dialog" aria-label="PRD edit actions"
+            // (src/components/SelectionActionDialog.tsx). A parallel
+            // workstream is widening it to 480px with a textarea, so only
+            // presence is asserted here, never exact size.
+            await page.getByRole('dialog', { name: 'PRD edit actions' }).waitFor({ timeout: 5000 });
+            await shot(page, 'refine-popover');
+            // Dismiss so the flow continues cleanly into the readiness gate.
+            await page.keyboard.press('Escape').catch(() => {});
+            await settle(400);
+        }, { optional: true });
 
         // --- Downstream asset generation -------------------------------------
         // Committing a plan and generating its build assets (the core-artifact
@@ -626,6 +677,68 @@ try {
             await settle(2500);
             await shot(page, 'prd-mobile');
         }, { optional: true });
+
+        // --- Extended mobile pass: Decision Center + Design System artifact ---
+        // Still resize-in-place at 390x844 (no reload, same reason as the PRD
+        // mobile step above), same optional-step convention: a missed selector
+        // records `skipped` with the error and the run continues. Ordered so
+        // each step resets the app to a clean state before the next one runs
+        // (list view, not a stranded detail/drawer) and the script still ends
+        // after the mobile pass, as before.
+        await step('mobile: Decision Center list (decisions-mobile)', async () => {
+            // canReview/canExploreOutputs only require a structured PRD (see
+            // ProjectWorkspace.tsx), so Challenge is reachable here regardless
+            // of whether the plan was committed / assets were generated.
+            await page.getByRole('navigation', { name: 'Planning progression' })
+                .getByRole('button', { name: /^Challenge:/ })
+                .click({ timeout: 5000 });
+            await settle(1200);
+            // Land on the Decisions tab explicitly: Challenge opens on
+            // "Review findings" once the critique gate is unlocked, and the
+            // Decision Center tab's aria-label carries a dynamic record count
+            // ("Decision Center" or "Decision Center, N records").
+            await page.getByRole('button', { name: /^Decision Center/ }).click({ timeout: 5000 }).catch(() => {});
+            await settle(800);
+            await shot(page, 'decisions-mobile');
+        }, { optional: true });
+
+        await step('mobile: Decision Center detail (decision-detail-mobile)', async () => {
+            // Record rows live in the same `aside[aria-label="Decision queue"]`
+            // as the "Needs attention" / "Resolved & history" UnderlineTabs
+            // above them; those are role="tab", so exclude them to reach the
+            // first actual decision/assumption/risk row.
+            const firstRecord = page.locator('aside[aria-label="Decision queue"] button:not([role="tab"])').first();
+            await firstRecord.waitFor({ timeout: 5000 });
+            await firstRecord.click();
+            await settle(1000);
+            await shot(page, 'decision-detail-mobile');
+            // Reset to the list (DecisionCenter's mobileDetailOpen back to
+            // false) so a later step never inherits a stranded detail view.
+            await page.getByRole('button', { name: 'Back to decisions' }).click({ timeout: 3000 }).catch(() => {});
+            await settle(500);
+        }, { optional: true });
+
+        if (assetsTriggered) {
+            await step('mobile: Design System artifact (artifact-design-system-mobile)', async () => {
+                await page.getByRole('navigation', { name: 'Planning progression' })
+                    .getByRole('button', { name: /^Build:|^Explore:/ })
+                    .click({ timeout: 5000 });
+                await settle(1200);
+                // Mobile's artifact sidebar is an off-canvas drawer — same
+                // hamburger -> pick -> auto-close pattern as
+                // capture-demo-screenshots.mjs's selectArtifact() (~lines
+                // 328-337).
+                const hamburger = page.getByRole('button', { name: 'Open artifact list' });
+                if (await hamburger.isVisible().catch(() => false)) {
+                    await hamburger.click();
+                    await settle(400);
+                }
+                await page.locator('nav[aria-label="Artifacts"] button').filter({ hasText: 'Design System' })
+                    .first().click({ timeout: 6000 });
+                await settle(1800);
+                await shot(page, 'artifact-design-system-mobile');
+            }, { optional: true });
+        }
     }
 
     await context.close();
