@@ -1,6 +1,6 @@
 import { describe, it, expect, vi, afterEach } from 'vitest';
 import { render, screen, fireEvent } from '@testing-library/react';
-import { SelectionActionDialog } from '../SelectionActionDialog';
+import { SelectionActionDialog, SELECTION_ACTIONS } from '../SelectionActionDialog';
 import type { SelectionInfo } from '../../lib/selectionPopover';
 
 const selection: SelectionInfo = {
@@ -39,6 +39,7 @@ afterEach(() => {
     // @ts-expect-error allow removing the stub between tests
     delete window.matchMedia;
     vi.restoreAllMocks();
+    vi.unstubAllGlobals();
 });
 
 describe('SelectionActionDialog — desktop', () => {
@@ -65,6 +66,96 @@ describe('SelectionActionDialog — desktop', () => {
         const { props } = renderDialog({ intent: 'Clarify: make it precise' });
         fireEvent.click(screen.getByRole('button', { name: 'Branch' }));
         expect(props.onSubmit).toHaveBeenCalled();
+    });
+
+    it('renders a multiline textarea for the intent', () => {
+        mockMatchMedia(false);
+        renderDialog({ intent: 'hi' });
+        const box = screen.getByRole('textbox');
+        expect(box.tagName).toBe('TEXTAREA');
+        expect(box).toHaveValue('hi');
+    });
+
+    it('renders the five action chips in order', () => {
+        mockMatchMedia(false);
+        renderDialog();
+        const chips = SELECTION_ACTIONS.map(tag => screen.getByRole('button', { name: tag }));
+        expect(chips).toHaveLength(5);
+        expect(SELECTION_ACTIONS).toEqual(['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace']);
+    });
+
+    it('toggles aria-pressed on the chip matching the current intent', () => {
+        mockMatchMedia(false);
+        renderDialog({ intent: 'Expand: ' });
+        expect(screen.getByRole('button', { name: 'Expand' })).toHaveAttribute('aria-pressed', 'true');
+        expect(screen.getByRole('button', { name: 'Clarify' })).toHaveAttribute('aria-pressed', 'false');
+    });
+
+    it('submits on Enter and inserts a newline on Shift+Enter', () => {
+        mockMatchMedia(false);
+        const { props } = renderDialog({ intent: 'Clarify: x' });
+        const box = screen.getByRole('textbox');
+
+        fireEvent.keyDown(box, { key: 'Enter', shiftKey: true });
+        expect(props.onSubmit).not.toHaveBeenCalled();
+
+        fireEvent.keyDown(box, { key: 'Enter' });
+        expect(props.onSubmit).toHaveBeenCalledTimes(1);
+    });
+});
+
+describe('SelectionActionDialog — anchor highlight (CSS Custom Highlight API)', () => {
+    class FakeHighlight {
+        ranges: unknown[];
+        constructor(...ranges: unknown[]) {
+            this.ranges = ranges;
+        }
+    }
+
+    it('registers the anchor highlight on mount and clears it on unmount', () => {
+        mockMatchMedia(false);
+        const highlights = new Map<string, unknown>();
+        vi.stubGlobal('Highlight', FakeHighlight);
+        vi.stubGlobal('CSS', { highlights });
+
+        const range = {} as Range;
+        const { unmount } = render(
+            <SelectionActionDialog
+                selection={{ ...selection, range }}
+                intent=""
+                setIntent={vi.fn()}
+                isSubmitting={false}
+                onSubmit={vi.fn((e: React.FormEvent) => e.preventDefault())}
+                onQuickAction={vi.fn()}
+                onDismiss={vi.fn()}
+            />,
+        );
+
+        expect(highlights.has('prd-refine-anchor')).toBe(true);
+        expect(highlights.get('prd-refine-anchor')).toBeInstanceOf(FakeHighlight);
+
+        unmount();
+        expect(highlights.has('prd-refine-anchor')).toBe(false);
+    });
+
+    it('falls back silently when the CSS Custom Highlight API is unavailable', () => {
+        mockMatchMedia(false);
+        // CSS present but without a highlights registry → feature detect fails.
+        vi.stubGlobal('CSS', { supports: () => false });
+
+        expect(() =>
+            render(
+                <SelectionActionDialog
+                    selection={{ ...selection, range: {} as Range }}
+                    intent=""
+                    setIntent={vi.fn()}
+                    isSubmitting={false}
+                    onSubmit={vi.fn((e: React.FormEvent) => e.preventDefault())}
+                    onQuickAction={vi.fn()}
+                    onDismiss={vi.fn()}
+                />,
+            ),
+        ).not.toThrow();
     });
 });
 
