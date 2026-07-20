@@ -1,4 +1,4 @@
-import { useMemo, Children, Fragment, type ReactNode } from 'react';
+import { useMemo, Children, type ReactNode } from 'react';
 import ReactMarkdown, { type Components } from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
@@ -191,17 +191,21 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
         ...Object.keys(grouped).filter(n => !namespaceOrder.includes(n)).sort(),
     ];
 
+    // Namespace clusters flow inline so several groups share a row on desktop
+    // instead of each namespace forcing a mostly-empty full-width grid row.
     return (
-        <div className="grid grid-cols-[repeat(auto-fill,minmax(150px,1fr))] gap-2">
+        <div className="flex flex-wrap gap-x-8 gap-y-4">
             {namespaces.map(ns => (
-                <Fragment key={ns}>
-                    <p className="col-span-full text-[11px] font-bold uppercase tracking-wide text-neutral-500 mt-2 first:mt-0">
+                <div key={ns}>
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500 mb-1.5">
                         {NAMESPACE_LABEL[ns] ?? ns}
                     </p>
-                    {grouped[ns].map(([name, hex]) => (
-                        <ColorSwatchCard key={name} name={name} hex={hex} />
-                    ))}
-                </Fragment>
+                    <div className="flex flex-wrap gap-2">
+                        {grouped[ns].map(([name, hex]) => (
+                            <ColorSwatchCard key={name} name={name} hex={hex} />
+                        ))}
+                    </div>
+                </div>
             ))}
         </div>
     );
@@ -212,7 +216,7 @@ function ColorSwatchCard({ name, hex }: { name: string; hex: string }) {
     const rgb = hexToRgbString(hex);
     return (
         <div
-            className="rounded-lg border border-neutral-200 overflow-hidden"
+            className="w-40 rounded-lg border border-neutral-200 overflow-hidden"
             title={`${name} · ${hex} · rgb(${rgb})`}
             aria-label={`${name} ${hex}`}
         >
@@ -238,7 +242,7 @@ function TypographyTokens({ tokens }: { tokens: DesignTokens }) {
     }, [tokens.typography]);
 
     return (
-        <div className="grid gap-2 md:grid-cols-2">
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
             {sorted.map(([name, t]: [string, DesignTypographyToken]) => (
                 <TypographyRow key={name} name={name} token={t} />
             ))}
@@ -279,7 +283,7 @@ function SpacingAndRadius({ tokens }: { tokens: DesignTokens }) {
     const maxRadius = Math.max(1, ...radiusEntries.map(([, v]) => v));
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Spacing scale</p>
                 <div className="space-y-1.5">
@@ -319,7 +323,7 @@ function SpacingAndRadius({ tokens }: { tokens: DesignTokens }) {
 function ComponentTokens({ tokens }: { tokens: DesignTokens }) {
     const entries = Object.entries(tokens.components).sort((a, b) => a[0].localeCompare(b[0]));
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {entries.map(([name, c]: [string, DesignComponentToken]) => (
                 <div key={name} className="bg-white rounded-lg border border-neutral-200 p-3 space-y-2">
                     <p className="text-xs font-semibold text-neutral-900">{name}</p>

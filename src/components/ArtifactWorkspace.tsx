@@ -1634,7 +1634,7 @@ export function ArtifactWorkspace({
             preferred.metadata?.repairType === 'traceability_enrichment' &&
             preferred.metadata?.repairSucceeded === true;
         return (
-            <div className="max-w-3xl xl:max-w-5xl 2xl:max-w-6xl mx-auto space-y-4">
+            <div className={`${subtype === 'design_system' ? 'max-w-none' : 'max-w-3xl xl:max-w-5xl 2xl:max-w-6xl'} mx-auto space-y-4`}>
                 <div className="flex items-center justify-start">
                     {renderVersionControls(artifact.id, preferred)}
                 </div>
@@ -1674,9 +1674,6 @@ export function ArtifactWorkspace({
                     <DesignDirectionControl
                         presetId={designSystemPreset}
                         onChangeDirection={() => setShowDirectionPicker(true)}
-                        onRegenerate={() =>
-                            setDesignRegenConfirm({ nextVersion: preferred.versionNumber + 1 })
-                        }
                     />
                 )}
                 {subtype === 'implementation_plan' && (

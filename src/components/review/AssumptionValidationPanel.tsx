@@ -366,7 +366,7 @@ export function AssumptionValidationPanel({
                 <div>
                     <div className="flex items-center gap-2 text-xs font-semibold uppercase tracking-wide text-indigo-700"><FlaskConical size={14} /> {requiresValidation ? 'Assumption validation' : 'Optional assumption validation'}</div>
                     <h3 id={`assumption-validation-${recordId}`} className="mt-1 text-base font-semibold text-neutral-950">{requiresValidation ? 'Replace belief with evidence' : 'Validate if it would improve the plan'}</h3>
-                    <p className="mt-1 max-w-2xl text-sm leading-6 text-neutral-600">{requiresValidation ? 'Acceptance lets planning continue but does not establish that the belief is true. Validation requires evidence that answers a specific question.' : 'This assumption is not consequential enough to require a formal test. You can still validate it if new evidence would change the plan.'}</p>
+                    <p className="mt-1 text-sm leading-6 text-neutral-600">{requiresValidation ? 'Acceptance lets planning continue but does not establish that the belief is true. Validation requires evidence that answers a specific question.' : 'This assumption is not consequential enough to require a formal test. You can still validate it if new evidence would change the plan.'}</p>
                 </div>
                 {validation.workflowState !== 'not_planned' && (
                     <span className={`rounded-full px-2.5 py-1 text-xs font-semibold ${validation.workflowState === 'completed' ? 'bg-emerald-50 text-emerald-700' : validation.workflowState === 'due_for_review' ? 'bg-amber-50 text-amber-800' : 'bg-neutral-100 text-neutral-700'}`}>
