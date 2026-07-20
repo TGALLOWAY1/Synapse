@@ -23,7 +23,10 @@ describe('MobileSelectionToolbar', () => {
 
         const button = screen.getByRole('button', { name: 'Select text to edit' });
         expect(screen.queryByRole('toolbar')).toBeNull();
-        expect(button.parentElement).not.toHaveClass('fixed');
+        // Idle pill is pinned (fixed) bottom-right so it stays visible while
+        // scrolling; the band is non-interactive except the pill itself.
+        expect(button.parentElement).toHaveClass('fixed');
+        expect(button.parentElement).toHaveClass('justify-end');
 
         fireEvent.click(button);
         expect(props.onActivate).toHaveBeenCalledTimes(1);

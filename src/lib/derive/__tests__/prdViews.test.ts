@@ -35,9 +35,10 @@ describe('coercePrdView', () => {
         expect(coercePrdView('nope')).toBe('overview');
         expect(coercePrdView('overview')).toBe('overview');
     });
-    it('accepts features and decisions', () => {
+    it('accepts features; legacy decisions coerces to overview', () => {
         expect(coercePrdView('features')).toBe('features');
-        expect(coercePrdView('decisions')).toBe('decisions');
+        // The Decisions sub-tab was removed — old deep links fall back to Overview.
+        expect(coercePrdView('decisions')).toBe('overview');
     });
 });
 

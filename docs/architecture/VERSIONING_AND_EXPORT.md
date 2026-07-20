@@ -11,8 +11,10 @@ PRD + build-relevant core artifacts (mockups excluded), with copy and download.
 Copy-to-clipboard (via `src/lib/utils/copyToClipboard.ts`, Clipboard API with
 an `execCommand` fallback) is available on the PRD and full bundle too.
 
-**The default PRD export is ONE coherent three-part document** mirroring the
-in-app Overview/Features/Decisions views: `renderPremiumMarkdown`
+**The default PRD export is ONE coherent three-part document.** (The in-app
+PRD view now has just Overview/Features tabs — decisions live in the Decision
+Center — but the *export* still includes a dedicated Decisions part for a
+complete hand-off document.) `renderPremiumMarkdown`
 (`src/lib/services/prdMarkdownRenderer.ts`) emits `# Part I — Product Overview`
 → `# Part II — Feature Specification` → `# Part III — Decisions and Validation`
 → `# Appendices` (Architecture & Additional Context holding legacy technical

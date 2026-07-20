@@ -12,7 +12,7 @@
 //
 // MODES
 //   --live   Full flow: home → idea → "Draft a working plan" → real PRD
-//            generation → PRD Overview/Features/Decisions tabs → workspace
+//            generation → PRD Overview/Features tabs → workspace
 //            stage → mobile viewport pass. Requires a Gemini API key in the
 //            SYNAPSE_E2E_GEMINI_KEY or GEMINI_API_KEY env var. The key is
 //            seeded into the browser's localStorage only (same place the app

@@ -94,11 +94,11 @@ function renderView(readOnly = false) {
     );
 }
 
-// Switch the active PRD view (Overview | Features | Decisions). The tab's
-// accessible name may include a trailing count badge, so match loosely.
+// Switch the active PRD view (Overview | Features). The tab's accessible name
+// may include a trailing count badge, so match loosely.
 const goTo = (label: RegExp) => fireEvent.click(screen.getByRole('tab', { name: label }));
 
-describe('StructuredPRDView — three-view IA', () => {
+describe('StructuredPRDView — two-view IA', () => {
     it('defaults to the Overview view with the product brief', () => {
         renderView();
         expect(screen.getByRole('tab', { name: /Overview/ })).toHaveAttribute('aria-selected', 'true');
@@ -152,17 +152,7 @@ describe('StructuredPRDView — three-view IA', () => {
         expect(screen.getByRole('heading', { level: 4, name: 'Anki Export' })).toBeInTheDocument();
     });
 
-    it('Decisions view splits Needs Input from Assumptions to Validate', () => {
-        renderView();
-        goTo(/Decisions/);
-        // a1 is low-confidence → Needs Input; a2 is high → Assumptions to Validate.
-        const needsInput = document.getElementById('prd-needs-input')!;
-        expect(within(needsInput).getByText('Users are mobile-first')).toBeInTheDocument();
-        const toValidate = document.getElementById('prd-assumptions')!;
-        expect(within(toValidate).getByText('Weekly cadence works')).toBeInTheDocument();
-    });
-
-    it('deferred scope surfaces in the Decisions Deferred & Risks section', () => {
+    it('deferred scope surfaces the rationale in the Overview implementation summary', () => {
         render(
             <StructuredPRDView
                 projectId={PROJECT_ID}
@@ -179,15 +169,12 @@ describe('StructuredPRDView — three-view IA', () => {
                 readOnly
             />,
         );
-        // Scope rationale lives in the Overview Implementation Summary…
+        // Scope rationale lives in the Overview Implementation Summary. Deferred
+        // "Later" items and their rationale now live in the Decision Center
+        // (Challenge stage), not in a PRD sub-tab.
         const summary = document.getElementById('prd-implementation-summary')!;
         expect(within(summary).getByText(/Capture loop first/)).toBeInTheDocument();
         expect(screen.queryByText('MVP Scope')).toBeNull();
-        // …deferred "Later" items live in the Decisions view.
-        goTo(/Decisions/);
-        const deferred = document.getElementById('prd-deferred-risks')!;
-        expect(within(deferred).getByText('Integrations')).toBeInTheDocument();
-        expect(within(deferred).getByText('Deferred scope')).toBeInTheDocument();
     });
 
     it('scope references cross-navigate to the feature in the Features view', () => {
@@ -205,31 +192,6 @@ describe('StructuredPRDView — three-view IA', () => {
 });
 
 describe('StructuredPRDView — review workflow', () => {
-    it('confirming an assumption appends a new spine version with the decision', () => {
-        renderView();
-        goTo(/Decisions/);
-        fireEvent.click(screen.getByRole('button', { name: 'Accept as planning context, not validated: Weekly cadence works' }));
-        const spine = latestSpine();
-        expect(spine.id).not.toBe(SPINE_ID);
-        const decided = spine.structuredPRD?.assumptions?.find(a => a.id === 'a2');
-        expect(decided?.decision).toBe('confirmed');
-        expect(decided?.decidedAt).toBeTypeOf('number');
-        expect(spine.provenance?.editSummary).toContain('Accepted assumption for planning');
-    });
-
-    it('rejecting an assumption records the correction note', () => {
-        renderView();
-        goTo(/Decisions/);
-        fireEvent.click(screen.getByRole('button', { name: 'Mark assumption incorrect: Users are mobile-first' }));
-        fireEvent.change(screen.getByPlaceholderText(/What's actually true/), {
-            target: { value: 'Desktop-first actually' },
-        });
-        fireEvent.click(screen.getByRole('button', { name: 'Mark incorrect' }));
-        const decided = latestSpine().structuredPRD?.assumptions?.find(a => a.id === 'a1');
-        expect(decided?.decision).toBe('rejected');
-        expect(decided?.decisionNote).toBe('Desktop-first actually');
-    });
-
     it('confirming a feature appends a version with confirmed set', () => {
         renderView();
         goTo(/Features/);
@@ -240,10 +202,8 @@ describe('StructuredPRDView — review workflow', () => {
         expect(spine.provenance?.editSummary).toBe('Confirmed feature: Quick Capture');
     });
 
-    it('hides confirm/reject actions in read-only mode', () => {
+    it('hides confirm actions in read-only mode', () => {
         renderView(true);
-        goTo(/Decisions/);
-        expect(screen.queryByRole('button', { name: /Accept as planning context/ })).toBeNull();
         goTo(/Features/);
         expect(screen.queryByRole('button', { name: /Confirm feature/ })).toBeNull();
     });
@@ -356,17 +316,6 @@ describe('StructuredPRDView — uncertainty-first planning integration', () => {
         renderView();
         expect(screen.getByText('Current proposed scope')).toBeInTheDocument();
         expect(screen.queryByText('Defer')).toBeNull();
-    });
-
-    it('opens the exact material assumption record for validation', () => {
-        const onOpenDecisions = vi.fn();
-        render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
-        goTo(/Decisions/);
-        fireEvent.click(screen.getByRole('button', { name: 'Plan validation for assumption: Weekly cadence works' }));
-        const record = useProjectStore.getState().planningRecords[PROJECT_ID]
-            .find(item => item.sources?.some(source => source.sourceId === 'a2'));
-        expect(record).toBeDefined();
-        expect(onOpenDecisions).toHaveBeenCalledWith(record?.id);
     });
 
     it('keeps an exact validation action beside a material accepted assumption', () => {

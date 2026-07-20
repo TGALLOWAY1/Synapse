@@ -1,8 +1,8 @@
 import { useRef } from 'react';
-import { FileText, Layers, GitBranch } from 'lucide-react';
+import { FileText, Layers } from 'lucide-react';
 import { PRD_VIEWS, type PrdViewId } from '../../lib/derive/prdViews';
 
-// Segmented tab navigation for the three coordinated PRD views. Uses proper
+// Segmented tab navigation for the two coordinated PRD views. Uses proper
 // ARIA tablist semantics with roving arrow-key navigation. The row scrolls
 // horizontally on very narrow screens rather than shrinking labels, and never
 // overflows the page (min-w-0 + overflow-x-auto on the container).
@@ -10,7 +10,6 @@ import { PRD_VIEWS, type PrdViewId } from '../../lib/derive/prdViews';
 const ICONS: Record<PrdViewId, typeof FileText> = {
     overview: FileText,
     features: Layers,
-    decisions: GitBranch,
 };
 
 interface Props {
