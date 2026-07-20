@@ -54,6 +54,7 @@ import {
     commitmentRemainsCurrent,
     compareReadinessReviewCurrentness,
     compareReadinessReviewProjections,
+    deriveAnswerableAssumptionRecords,
     derivePlanningAttention,
     derivePlanningReadiness,
     deriveReadinessChallengeState,
@@ -63,6 +64,8 @@ import {
     planningContentHash,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
+import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
+import { useDecisionImpactActions } from './review/useDecisionImpactActions';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
 import { buildReadinessCheckpointView, readinessNavigationDestination } from './planning/readinessCheckpointView';
 import { hashReviewValue } from '../lib/review/hash';
@@ -102,6 +105,14 @@ export function ProjectWorkspace() {
     // Live asset-generation job for the post-finalize status pill.
     const assetJob = useProjectStore((s) => (projectId ? s.jobs[projectId] : undefined));
     const planningRecords = useProjectStore((s) => (projectId ? s.planningRecords[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
+    const canEditPlan = !!projectId && canPerformProjectAction(projectId, 'persist');
+    // The sharpen flow records verdicts through the same append-only
+    // decision-event path the Decision Center uses (user-only authority).
+    const { handleDecisionAction: handleSharpenDecision } = useDecisionImpactActions({
+        projectId: projectId ?? '',
+        canWrite: canEditPlan,
+        planningRecords,
+    });
     const reviewRuns = useProjectStore((s) => (projectId ? s.reviewRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const specialistRuns = useProjectStore((s) => (projectId ? s.specialistRuns[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
     const reviewIssues = useProjectStore((s) => (projectId ? s.reviewIssues[projectId] ?? EMPTY_PROJECT_LIST : EMPTY_PROJECT_LIST));
@@ -149,6 +160,9 @@ export function ProjectWorkspace() {
     const [isReadinessSubmitting, setIsReadinessSubmitting] = useState(false);
     const [reviewInitialTab, setReviewInitialTab] = useState<'review' | 'decisions'>('review');
     const [reviewInitialRecordId, setReviewInitialRecordId] = useState<string>();
+    // Guided sharpen flow: the answerable-assumption queue is frozen at open
+    // so answering one question never reshuffles the remaining ones.
+    const [sharpenQueueIds, setSharpenQueueIds] = useState<string[] | null>(null);
     const [reviewInitialRunId, setReviewInitialRunId] = useState<string>();
     const [reviewInitialIssueId, setReviewInitialIssueId] = useState<string>();
     const [reviewInitialFindingId, setReviewInitialFindingId] = useState<string>();
@@ -531,6 +545,7 @@ export function ProjectWorkspace() {
         reviewIssues,
         outputAlignments: outputAlignment.outputs,
     });
+    const answerableAssumptions = deriveAnswerableAssumptionRecords(planningReadinessInput);
     const selectedReadinessReview = readinessReviews.find(review => review.id === selectedReadinessReviewId);
     const selectedReadinessCurrentness = selectedReadinessReview && readinessReviewInput
         ? compareReadinessReviewCurrentness(selectedReadinessReview, readinessReviewInput)
@@ -1605,7 +1620,20 @@ export function ProjectWorkspace() {
                                             </div>
                                         ) : activeSpine.structuredPRD ? (
                                             <>
-                                                {!isOldVersion && (
+                                                {!isOldVersion && (sharpenQueueIds ? (
+                                                    <SharpenPlanFlow
+                                                        records={sharpenQueueIds.flatMap(id => {
+                                                            const match = planningRecords.find(record => record.id === id);
+                                                            return match ? [match] : [];
+                                                        })}
+                                                        onDecide={handleSharpenDecision}
+                                                        onClose={() => setSharpenQueueIds(null)}
+                                                        onOpenRecord={recordId => {
+                                                            setSharpenQueueIds(null);
+                                                            openDecisionCenter(recordId, planReturnTarget);
+                                                        }}
+                                                    />
+                                                ) : (
                                                     <PlanningStateBar
                                                         readiness={planningReadiness}
                                                         planSummary={activeSpine.structuredPRD.executiveSummary ?? activeSpine.structuredPRD.vision}
@@ -1617,8 +1645,12 @@ export function ProjectWorkspace() {
                                                         onOpenChallenge={() => openChallenge(undefined, undefined, undefined, planReturnTarget)}
                                                         attention={planningAttention}
                                                         onOpenAttention={openPlanningAttention}
+                                                        answerableCount={answerableAssumptions.length}
+                                                        onStartSharpen={canEditPlan && answerableAssumptions.length > 0
+                                                            ? () => setSharpenQueueIds(answerableAssumptions.map(record => record.id))
+                                                            : undefined}
                                                     />
-                                                )}
+                                                ))}
                                                 <StructuredPRDView
                                                     projectId={projectId}
                                                     spineId={activeSpine.id}

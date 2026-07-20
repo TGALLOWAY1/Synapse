@@ -28,6 +28,30 @@ impact previews / the write-barrier apply path in
 - `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
   current readiness category, supporting criteria, and one highest-value next
   action with direct entry to decisions or Challenge.
+  - **Presentation is invitation-first, never default-alarm**
+    (`planningOverviewPresentation.ts`, pure). Every fresh PRD lands in
+    `needs_decisions` (imported assumptions open + scope unconfirmed), so that
+    phase alone renders as a **calm** "Your draft is ready" card; the amber
+    caution treatment is reserved for genuine regressions (`conflictCount > 0`
+    or changed sources). This is presentation only — readiness authority,
+    phases, and persisted enums are untouched. Do not re-add amber as the
+    default first-run state, problem-counter stat tiles, or a
+    "no news" downstream tile (the Downstream alignment tile renders only when
+    the alignment criterion has a real signal).
+  - **The guided sharpen flow** (`SharpenPlanFlow.tsx` +
+    `deriveAnswerableAssumptionRecords` in `planningAttention.ts`) is the calm
+    card's dominant action when open material assumptions exist: one
+    plain-language question per assumption ("Synapse assumed … Does this match
+    your reality?") with Sounds right / Not quite — correct it / Not sure yet
+    chips. Verdicts flow through `useDecisionImpactActions.handleDecisionAction`
+    — the exact append-only, user-only DecisionEvent path the Decision Center
+    uses (confirm = statement as recorded answer, correction = premise_rejected,
+    Not sure = deferred). No new persisted state; the queue is frozen at open so
+    answering never reshuffles remaining questions. Elicitation vocabulary rule:
+    on the Plan overview, never use "validate", "unresolved", "assumption", or
+    "downstream alignment" in primary text — that vocabulary stays inside the
+    Decision Center, where the attention item's action label is now "Answer
+    this question".
 - PRD assumptions are imported idempotently as soon as the latest structured
   PRD exists; visiting Challenge is not a prerequisite for planning state.
 - Generated assumptions distinguish **confidence** (plausibility) from

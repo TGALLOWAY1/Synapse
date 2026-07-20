@@ -63,9 +63,9 @@ export function ReviewConfirmSection({
     onReject,
     readOnly,
     title = 'Review & Confirm',
-    description = 'Synapse made these assumptions while drafting the PRD. Accept one as working planning context or correct it. Acceptance does not validate the underlying belief.',
+    description = 'Synapse made these judgment calls while drafting the PRD. Confirm the ones that match your reality or correct them. Confirming records your call — it does not validate the underlying belief.',
     id = 'prd-review-confirm',
-    confirmLabel = 'Accept for planning',
+    confirmLabel = "That's right",
 }: Props) {
     const [rejectingId, setRejectingId] = useState<string | null>(null);
     const [note, setNote] = useState('');
@@ -108,7 +108,7 @@ export function ReviewConfirmSection({
                                         type="button"
                                         onClick={() => onConfirm(a.id)}
                                         className="inline-flex min-h-11 w-full items-center justify-center gap-1.5 rounded-md border border-neutral-300 bg-white px-3 py-1.5 text-xs font-semibold text-neutral-800 transition hover:bg-neutral-50 sm:w-auto"
-                                        aria-label={`Accept for planning, not validated: ${a.statement}`}
+                                        aria-label={`Accept as planning context, not validated: ${a.statement}`}
                                     >
                                         <Check size={13} /> {confirmLabel}
                                     </button>

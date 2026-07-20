@@ -289,8 +289,8 @@ export function DecisionCenter({
                 </div>
             )}
 
-            <div className="min-h-0 flex-1 md:grid md:grid-cols-[300px_minmax(0,1fr)]">
-                <aside className={`${mobileDetailOpen ? 'hidden md:flex' : 'flex'} min-h-0 flex-col border-r border-neutral-200 bg-white`} aria-label="Decision queue">
+            <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[300px_minmax(0,1fr)]">
+                <aside className={`${mobileDetailOpen ? 'hidden md:flex' : 'flex'} min-h-0 flex-1 flex-col border-r border-neutral-200 bg-white`} aria-label="Decision queue">
                     <div className="flex shrink-0 border-b border-neutral-100 p-2">
                         <button type="button" onClick={() => setView('needs_review')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'needs_review' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Needs attention</button>
                         <button type="button" onClick={() => setView('log')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'log' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Resolved &amp; history</button>
@@ -318,7 +318,7 @@ export function DecisionCenter({
                     </div>
                 </aside>
 
-                <main className={`${mobileDetailOpen ? 'block' : 'hidden md:block'} min-h-0 overflow-y-auto`} aria-label="Decision detail">
+                <main className={`${mobileDetailOpen ? 'block' : 'hidden md:block'} min-h-0 flex-1 overflow-y-auto`} aria-label="Decision detail">
                     {!selected ? (
                         <div className="mx-auto max-w-xl px-5 py-16 text-center text-sm text-neutral-500">Select a decision to inspect its reasoning and history.</div>
                     ) : (
@@ -438,7 +438,7 @@ export function DecisionCenter({
                                     <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                         {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
-                                        {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50">Accept for planning · not validated</button>}
+                                        {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"><Check size={14} className="mr-1 inline" /> Yes, that's right</button>}
                                         {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
                                         <button
                                             type="button"
@@ -448,8 +448,11 @@ export function DecisionCenter({
                                                 else setAnswerChoice('other');
                                             }}
                                             className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
-                                        ><X size={14} className="mr-1 inline" /> Reject premise</button>
+                                        ><X size={14} className="mr-1 inline" /> Not quite — correct it</button>
                                     </div>
+                                    {selected.type === 'assumption' && !selected.options?.length && (
+                                        <p className="mt-2 text-xs leading-5 text-neutral-500">Recorded as your call — not independently checked.</p>
+                                    )}
                                 </section>
                                 );
                             })()}

@@ -67,7 +67,7 @@ describe('DecisionCenter', () => {
         const props = callbacks();
         render(<DecisionCenter records={[openRecord]} {...props} />);
         expect(screen.queryByRole('button', { name: 'Confirm as true' })).toBeNull();
-        const reject = screen.getByRole('button', { name: /Reject premise/ });
+        const reject = screen.getByRole('button', { name: /Not quite/ });
         expect(reject).toBeDisabled();
         fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: 'Guests may browse but must sign in before saving' } });
         expect(reject).toBeEnabled();
@@ -337,7 +337,7 @@ describe('DecisionCenter', () => {
         }]} {...callbacks()} />);
 
         expect(screen.getByText('Optional assumption validation')).toBeInTheDocument();
-        expect(screen.getByRole('button', { name: 'Accept for planning · not validated' })).toBeInTheDocument();
+        expect(screen.getByRole('button', { name: "Yes, that's right" })).toBeInTheDocument();
     });
 
     it('opens a linked resolved decision directly even when unresolved work also exists', () => {
@@ -456,7 +456,7 @@ describe('DecisionCenter', () => {
         it('reveals the explanation field before a premise can be rejected', () => {
             const props = callbacks();
             render(<DecisionCenter records={[decisionRecord]} {...props} />);
-            const reject = screen.getByRole('button', { name: /Reject premise/ });
+            const reject = screen.getByRole('button', { name: /Not quite/ });
             expect(reject).toBeEnabled();
             fireEvent.click(reject);
             expect(props.onDecide).not.toHaveBeenCalled();
