@@ -39,12 +39,17 @@ export function MobileSelectionToolbar({
     onCancel,
 }: MobileSelectionToolbarProps) {
     if (!active) {
+        // Pinned bottom-right so it stays visible while the PRD scrolls. The
+        // full-width band is `pointer-events-none` so it never blocks scroll or
+        // native selection on the content behind it; only the pill itself is
+        // tappable (`pointer-events-auto`). Bottom-right (not centered) keeps
+        // the primary planning CTA clear.
         return (
-            <div className="flex justify-end pb-3">
+            <div className="pointer-events-none fixed inset-x-0 bottom-0 z-40 flex justify-end px-4 pb-[calc(env(safe-area-inset-bottom)+0.75rem)]">
                 <button
                     type="button"
                     onClick={onActivate}
-                    className="min-h-[44px] rounded-full bg-indigo-600 px-5 text-sm font-medium text-white shadow-lg transition hover:bg-indigo-700 active:bg-indigo-800"
+                    className="pointer-events-auto min-h-[44px] rounded-full bg-indigo-600 px-5 text-sm font-medium text-white shadow-lg transition hover:bg-indigo-700 active:bg-indigo-800"
                 >
                     Select text to edit
                 </button>

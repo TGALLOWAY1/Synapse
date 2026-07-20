@@ -1,11 +1,16 @@
-// Pure, read-side derivations behind the three coordinated PRD views
-// (Overview · Features · Decisions). No LLM call, no store access, no React —
-// everything is computed at read time from the StructuredPRD so legacy PRDs
-// (missing feature systems, tiers, assumptions decisions, …) render safely.
+// Pure, read-side derivations behind the two coordinated PRD views
+// (Overview · Features). No LLM call, no store access, no React — everything is
+// computed at read time from the StructuredPRD so legacy PRDs (missing feature
+// systems, tiers, assumptions decisions, …) render safely.
 //
 // These views are a presentation layer over the SAME canonical StructuredPRD:
 // they share one version, one finalization state, one revision history, one
 // freshness/provenance model. Nothing here is persisted as its own structure.
+//
+// Decision feedback (assumptions, decision log, deferred scope, risks) lives in
+// the Decision Center (Challenge stage), NOT in a PRD sub-tab. The decision
+// derivations below (splitDecisionInputs, deriveRisks, hasDecisionContent) are
+// still used by the markdown export and the PRD section-uncertainty badges.
 
 import type { Assumption, Feature, RiskDetailed, StructuredPRD } from '../../types';
 import {
@@ -16,17 +21,18 @@ import { splitAssumptions } from './prdDecisions';
 
 // ── View identity ──────────────────────────────────────────────────────────
 
-export type PrdViewId = 'overview' | 'features' | 'decisions';
+export type PrdViewId = 'overview' | 'features';
 
 export const PRD_VIEWS: ReadonlyArray<{ id: PrdViewId; label: string }> = [
     { id: 'overview', label: 'Overview' },
     { id: 'features', label: 'Features' },
-    { id: 'decisions', label: 'Decisions' },
 ];
 
-/** Coerce an arbitrary query-param / stored value to a valid view id. */
+/** Coerce an arbitrary query-param / stored value to a valid view id.
+ *  Legacy `?prdView=decisions` links coerce to `overview` (the Decisions
+ *  sub-tab was removed; decisions now live in the Decision Center). */
 export function coercePrdView(value: string | null | undefined): PrdViewId {
-    return value === 'features' || value === 'decisions' ? value : 'overview';
+    return value === 'features' ? value : 'overview';
 }
 
 // ── Features view: system grouping ───────────────────────────────────────────

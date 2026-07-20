@@ -29,7 +29,8 @@ network requests, and the generation outcome.
 4. Generation settle detected from the app's own persisted store: the latest
    `SpineVersion.generationPhase` flipping to `'complete'` (progress
    screenshots are captured every ~45s while it runs).
-5. PRD Overview / Features / Decisions tabs (stable `#prd-tab-*` ids).
+5. PRD Overview / Features tabs (stable `#prd-tab-*` ids). Decisions live in
+   the Decision Center (Challenge stage), not a PRD tab.
 6. **Downstream asset generation** (unless `--skip-assets`). The plan is
    committed through the readiness gate — top-bar **Review readiness** →
    ReadinessCheckpoint (**Commit plan** when ready-to-build, otherwise the

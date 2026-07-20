@@ -18,12 +18,9 @@ import {
     serializeEntities,
     serializeActions,
 } from '../lib/groundingFields';
-import { ReviewConfirmSection } from './prd/ReviewConfirmSection';
-import { DecisionLogSection } from './prd/DecisionLogSection';
-import { DeferredRisksSection } from './prd/DeferredRisksSection';
 import { PrdViewTabs } from './prd/PrdViewTabs';
 import { FeatureIdBadge } from './prd/FeatureIdBadge';
-import { deriveDecisionLog, isDisplayableFeatureId } from '../lib/derive/prdDecisions';
+import { isDisplayableFeatureId } from '../lib/derive/prdDecisions';
 import { assumptionSourceKey } from '../lib/planning/assumptionImport';
 import { projectDecision } from '../lib/planning/decisionProjection';
 import type { ConsequentialPrdEditRecognition } from '../lib/planning';
@@ -37,7 +34,6 @@ import {
 import {
     coercePrdView,
     deriveFeatureTrace,
-    deriveRisks,
     featureFilterCounts,
     filterFeatures,
     groupFeaturesBySystem,
@@ -66,11 +62,11 @@ interface StructuredPRDViewProps {
     structuredPRD: StructuredPRD;
     readOnly: boolean;
     /**
-     * Active view (Overview | Features | Decisions). Optional controlled prop:
-     * hosts wire it to URL query state (`?prdView=…`) for deep-linkable,
-     * refresh-stable navigation. When omitted the component keeps view state
-     * internally, so it renders standalone (e.g. in tests) without a router.
-     * This is purely NAVIGATIONAL UI state — never persisted as PRD content.
+     * Active view (Overview | Features). Optional controlled prop: hosts wire it
+     * to URL query state (`?prdView=…`) for deep-linkable, refresh-stable
+     * navigation. When omitted the component keeps view state internally, so it
+     * renders standalone (e.g. in tests) without a router. This is purely
+     * NAVIGATIONAL UI state — never persisted as PRD content.
      */
     view?: PrdViewId;
     onViewChange?: (view: PrdViewId) => void;
@@ -357,177 +353,11 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         savePRD(updated, `Edited feature: ${updatedFeature.name || 'Untitled'}`);
     };
 
-    // ── Review & Confirm / Decision Log ────────────────────────────────
+    // ── Feature confirmation (Features view) ───────────────────────────
     // Confirmations are PRD edits like any other: they append a new spine
     // version (never overwrite) with a descriptive edit summary, so every
-    // decision is undoable through version history too.
-    const truncate = (s: string, max = 60) =>
-        s.length > max ? `${s.slice(0, max - 1).trim()}…` : s;
-
-    const patchAssumption = (
-        assumptionId: string,
-        patch: Partial<NonNullable<StructuredPRD['assumptions']>[number]>,
-        editSummary: string,
-        kind: 'confirmed' | 'corrected' | 'reopened',
-    ) => {
-        const updated = {
-            ...structuredPRD,
-            assumptions: (structuredPRD.assumptions ?? []).map(a =>
-                a.id === assumptionId ? { ...a, ...patch } : a,
-            ),
-        };
-        saveDecision(updated, editSummary, kind);
-    };
-
-    const findOrImportAssumptionRecord = (assumptionId: string): PlanningRecord | undefined => {
-        const state = useProjectStore.getState();
-        const sourceKey = assumptionSourceKey(assumptionId);
-        let record = (state.planningRecords[projectId] ?? []).find(item =>
-            (item.sources ?? []).some(source => source.key === sourceKey),
-        );
-        // Keep legacy projects and direct PRD deep links self-contained.
-        if (!record) {
-            state.importPlanningAssumptions(projectId, spineId, structuredPRD);
-            record = (useProjectStore.getState().planningRecords[projectId] ?? []).find(item =>
-                (item.sources ?? []).some(source => source.key === sourceKey),
-            );
-        }
-        return record;
-    };
-
-    const appendAssumptionVerdict = (
-        assumptionId: string,
-        event: Parameters<ReturnType<typeof useProjectStore.getState>['appendPlanningDecisionEvent']>[2],
-    ): number | undefined => {
-        const record = findOrImportAssumptionRecord(assumptionId);
-        if (record) {
-            // Persisted projects can contain future-skewed timestamps (and
-            // tests deliberately pin clocks). Preserve append-only ordering
-            // without changing the meaning of this user action.
-            const at = Math.max(event.at, record.events?.at(-1)?.at ?? event.at);
-            const result = useProjectStore.getState().appendPlanningDecisionEvent(projectId, record.id, {
-                ...event,
-                planningRecordId: record.id,
-                at,
-            });
-            if (!result.ok) {
-                console.error('[planning] Could not preserve PRD assumption verdict:', result.reason);
-                return undefined;
-            }
-            return at;
-        }
-        return undefined;
-    };
-
-    const handlePlanAssumptionValidation = (assumptionId: string) => {
-        const record = findOrImportAssumptionRecord(assumptionId);
-        if (record && onOpenDecisions) onOpenDecisions(record.id);
-    };
-
-    const handleConfirmAssumption = (assumptionId: string) => {
-        const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
-        if (!a) return;
-        const decidedAt = Date.now();
-        const recordedAt = appendAssumptionVerdict(assumptionId, {
-            id: uuidv4(),
-            planningRecordId: '',
-            type: 'custom_answered',
-            actor: 'user',
-            at: decidedAt,
-            answer: a.statement,
-        });
-        if (recordedAt === undefined) return;
-        patchAssumption(
-            assumptionId,
-            { decision: 'confirmed', decisionNote: undefined, decidedAt: recordedAt },
-            `Accepted assumption for planning: ${truncate(a.statement)}`,
-            'confirmed',
-        );
-    };
-
-    const handleRejectAssumption = (assumptionId: string, note: string) => {
-        const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
-        if (!a) return;
-        const decidedAt = Date.now();
-        const recordedAt = appendAssumptionVerdict(assumptionId, {
-            id: uuidv4(),
-            planningRecordId: '',
-            type: 'premise_rejected',
-            actor: 'user',
-            at: decidedAt,
-            reason: note || 'Rejected in the working plan',
-            rationale: note || undefined,
-        });
-        if (recordedAt === undefined) return;
-        patchAssumption(
-            assumptionId,
-            { decision: 'rejected', decisionNote: note || undefined, decidedAt: recordedAt },
-            `Marked assumption incorrect: ${truncate(a.statement)}`,
-            'corrected',
-        );
-    };
-
-    const handleUndoAssumption = (assumptionId: string) => {
-        const a = structuredPRD.assumptions?.find(x => x.id === assumptionId);
-        if (!a) return;
-        const recordedAt = appendAssumptionVerdict(assumptionId, {
-            id: uuidv4(),
-            planningRecordId: '',
-            type: 'reopened',
-            actor: 'user',
-            at: Date.now(),
-        });
-        if (recordedAt === undefined) return;
-        patchAssumption(
-            assumptionId,
-            { decision: undefined, decisionNote: undefined, decidedAt: undefined },
-            `Reopened assumption: ${truncate(a.statement)}`,
-            'reopened',
-        );
-    };
-
-    // "Confirm all" — bulk-confirms every unresolved assumption (Needs Input +
-    // Assumptions to Validate) in one coalesced spine edit rather than N calls.
-    const [confirmAllStep, setConfirmAllStep] = useState<'idle' | 'confirming'>('idle');
-
-    const handleConfirmAll = () => {
-        const now = Date.now();
-        const unresolved = (structuredPRD.assumptions ?? []).filter(a => !a.decision);
-        if (unresolved.length === 0) {
-            setConfirmAllStep('idle');
-            return;
-        }
-        // Mirror each acceptance into the durable planning record first; only
-        // assumptions whose verdict event was preserved get patched, so the PRD
-        // and the decision register can never disagree about user authority.
-        const acceptedAt = new Map<string, number>();
-        for (const a of unresolved) {
-            const recordedAt = appendAssumptionVerdict(a.id, {
-                id: uuidv4(),
-                planningRecordId: '',
-                type: 'custom_answered',
-                actor: 'user',
-                at: now,
-                answer: a.statement,
-            });
-            if (recordedAt !== undefined) acceptedAt.set(a.id, recordedAt);
-        }
-        if (acceptedAt.size === 0) {
-            setConfirmAllStep('idle');
-            return;
-        }
-        const updated = {
-            ...structuredPRD,
-            assumptions: (structuredPRD.assumptions ?? []).map(a =>
-                a.decision || !acceptedAt.has(a.id)
-                    ? a
-                    : { ...a, decision: 'confirmed' as const, decisionNote: undefined, decidedAt: acceptedAt.get(a.id) },
-            ),
-        };
-        saveDecision(updated, `Accepted ${acceptedAt.size} assumptions for planning`, 'confirmed', acceptedAt.size);
-        setConfirmAllStep('idle');
-    };
-
+    // decision is undoable through version history too. Assumption/decision
+    // verdicts now live in the Decision Center (Challenge stage), not here.
     const handleToggleFeatureConfirm = (feature: Feature) => {
         const confirmed = !feature.confirmed;
         const updated = {
@@ -547,14 +377,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         );
     };
 
-    // ── Decisions view derivations ─────────────────────────────────────
+    // Unresolved assumptions still drive the Overview/Features "planning items
+    // need review" badges (which link into the Decision Center); the decision
+    // list/log/risks themselves render in the Decision Center, not here.
     const { needsInput, toValidate } = splitDecisionInputs(structuredPRD.assumptions);
-    const allDecisionLog = deriveDecisionLog(structuredPRD);
-    // Decision Log = decided items only (deferred scope splits into its own
-    // section so the two never read as the same thing).
-    const decisionLog = allDecisionLog.filter(e => e.verdict !== 'deferred');
-    const deferredEntries = allDecisionLog.filter(e => e.verdict === 'deferred');
-    const risks = useMemo(() => deriveRisks(structuredPRD), [structuredPRD]);
 
     // ── Features view derivations ──────────────────────────────────────
     const deferredFeatureIds = useMemo(
@@ -705,11 +531,10 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 id={anchorId}
                 type="button"
                 onClick={() => {
-                    if (onOpenDecisions) onOpenDecisions(exactRecord?.id, {
+                    onOpenDecisions?.(exactRecord?.id, {
                         destination: { kind: 'prd', anchorId },
                         label: `Return to ${section}`,
                     });
-                    else setView('decisions');
                 }}
                 className="mb-3 flex w-full scroll-mt-24 items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
             >
@@ -1149,9 +974,14 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     {deferredCount > 0 && (
                         <p className="text-xs text-neutral-500 mt-2">
                             {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
-                            <button type="button" onClick={() => setView('decisions')} className="text-indigo-600 hover:text-indigo-800 underline">
-                                Decisions
-                            </button>{' '}tab.
+                            {onOpenDecisions ? (
+                                <button type="button" onClick={() => onOpenDecisions()} className="text-indigo-600 hover:text-indigo-800 underline">
+                                    Decision Center
+                                </button>
+                            ) : (
+                                <span className="text-neutral-600">Decision Center</span>
+                            )}
+                            .
                         </p>
                     )}
                     <p className="text-[11px] text-neutral-400 mt-3">
@@ -1345,89 +1175,6 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
         );
     };
 
-    // ── Decisions view: Needs Input → Assumptions → Log → Deferred/Risks ─
-    const decisionsEmpty =
-        needsInput.length === 0
-        && toValidate.length === 0
-        && decisionLog.length === 0
-        && deferredEntries.length === 0
-        && risks.length === 0;
-
-    const renderDecisions = () => (
-        <>
-            {!readOnly && decisionsPending >= 2 && (
-                <div className="mb-4">
-                    {confirmAllStep === 'idle' ? (
-                        <button
-                            type="button"
-                            onClick={() => setConfirmAllStep('confirming')}
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition"
-                        >
-                            <Check size={13} /> Confirm all ({decisionsPending})
-                        </button>
-                    ) : (
-                        <div className="inline-flex flex-wrap items-center gap-2 rounded-md border border-neutral-200 bg-neutral-50 px-3 py-2">
-                            <span className="text-xs text-neutral-700">Confirm {decisionsPending} assumptions?</span>
-                            <button
-                                type="button"
-                                onClick={handleConfirmAll}
-                                className="inline-flex items-center gap-1 px-2.5 py-1 text-xs font-semibold rounded-md bg-emerald-600 hover:bg-emerald-700 text-white transition"
-                            >
-                                <Check size={12} /> Confirm
-                            </button>
-                            <button
-                                type="button"
-                                onClick={() => setConfirmAllStep('idle')}
-                                className="px-2.5 py-1 text-xs font-medium rounded-md text-neutral-500 hover:text-neutral-700 transition"
-                            >
-                                Cancel
-                            </button>
-                        </div>
-                    )}
-                </div>
-            )}
-            <ReviewConfirmSection
-                assumptions={needsInput}
-                onConfirm={handleConfirmAssumption}
-                onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
-                onReject={handleRejectAssumption}
-                readOnly={readOnly}
-                id="prd-needs-input"
-                title="Needs Input"
-                description="Low-confidence assumptions that need a decision before the PRD relies on them. Answer to confirm, or correct with the right direction."
-                confirmLabel="Confirm answer"
-            />
-            <ReviewConfirmSection
-                assumptions={toValidate}
-                onConfirm={handleConfirmAssumption}
-                onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
-                onReject={handleRejectAssumption}
-                readOnly={readOnly}
-                id="prd-assumptions"
-                title="Assumptions to Validate"
-                description="Plausible statements Synapse assumed while drafting. Confirm the ones that hold — or correct them — and they move to the Decision Log."
-            />
-            <DecisionLogSection
-                entries={decisionLog}
-                onUndoAssumption={handleUndoAssumption}
-                onPlanValidation={onOpenDecisions ? handlePlanAssumptionValidation : undefined}
-                onUndoFeature={(featureId) => {
-                    const f = structuredPRD.features.find(x => x.id === featureId);
-                    if (f) handleToggleFeatureConfirm(f);
-                }}
-                readOnly={readOnly}
-            />
-            <DeferredRisksSection deferred={deferredEntries} risks={risks} />
-            {decisionsEmpty && (
-                <div className="p-6 bg-neutral-50 border border-dashed border-neutral-200 rounded-lg text-sm text-neutral-500 text-center">
-                    No open questions, assumptions, decisions, or risks recorded for this PRD.
-                </div>
-            )}
-        </>
-    );
-
-    const decisionsPending = needsInput.length + toValidate.length;
-
     const renderEditRecognition = () => {
         if (!editRecognition) return null;
         const definite = editRecognition.classification === 'meaning_changed';
@@ -1471,28 +1218,11 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
 
     return (
         <div className="relative">
-            {/* On mobile, offer edit mode in the document flow so the idle
-                control never covers the planning overview or its next action.
-                The active toolbar remains pinned only after the user opts in. */}
-            {isMobile && !readOnly && !editingSection && !selection && (
-                <MobileSelectionToolbar
-                    active={mobileSelectMode}
-                    hasSelection={!!pendingText}
-                    pendingText={pendingText}
-                    onActivate={() => setMobileSelectMode(true)}
-                    onEdit={commit}
-                    onCancel={() => {
-                        setMobileSelectMode(false);
-                        clear();
-                    }}
-                />
-            )}
             <PrdViewTabs
                 active={activeView}
                 onChange={setView}
                 counts={{
                     features: filterCounts.all,
-                    decisions: decisionsPending,
                 }}
             />
             <div
@@ -1501,7 +1231,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 id={`prd-panel-${activeView}`}
                 aria-labelledby={`prd-tab-${activeView}`}
                 tabIndex={0}
-                className="space-y-2 focus:outline-none"
+                // pb-24 on mobile keeps the last action clear of the pinned
+                // "Select text to edit" pill (see MobileSelectionToolbar below).
+                className="space-y-2 focus:outline-none pb-24 md:pb-0"
             >
                 {renderEditRecognition()}
                 {activeView === 'overview' && renderOverview()}
@@ -1511,7 +1243,6 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                         {renderFeatures()}
                     </>
                 )}
-                {activeView === 'decisions' && renderDecisions()}
             </div>
 
             {selection && (
@@ -1526,6 +1257,23 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                 />
             )}
 
+            {/* On mobile the idle "Select text to edit" pill is pinned
+                bottom-right (visible while scrolling); the content panel above
+                carries pb-24 so the last action clears it. Once the user opts
+                in, the active footer replaces it. */}
+            {isMobile && !readOnly && !editingSection && !selection && (
+                <MobileSelectionToolbar
+                    active={mobileSelectMode}
+                    hasSelection={!!pendingText}
+                    pendingText={pendingText}
+                    onActivate={() => setMobileSelectMode(true)}
+                    onEdit={commit}
+                    onCancel={() => {
+                        setMobileSelectMode(false);
+                        clear();
+                    }}
+                />
+            )}
         </div>
     );
 }
