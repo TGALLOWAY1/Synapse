@@ -67,9 +67,20 @@ fallback during this first migration.
 - **Validation:** `validateCanonicalPrdSpine` — deterministic, non-invasive;
   warnings are recorded in the spine `meta`, never silently dropped.
 - **Persistence:** `SpineVersion.canonicalSpine` is attached on final settle
-  (in `updateSpineStructuredPRD` when `generationMeta` is present). Old
-  projects have none; artifact generation rebuilds the spine lazily from the
-  stored `structuredPRD`, so backwards compatibility is automatic.
+  (in `updateSpineStructuredPRD` when `generationMeta` is present). It is
+  deliberately **not** persisted on user/decision edits (`editSpineStructuredPRD`)
+  or reverts (`revertSpineToVersion`): re-cloning the full spine onto every edit
+  version bloated mobile localStorage into the "Storage full" toast (fix
+  c9df7c5). It is a rebuildable cache. Where a consumer can rebuild it in
+  isolation it does so — **artifact generation** rebuilds lazily from the stored
+  `structuredPRD` (`coreArtifactService`). The **review context**
+  (`useReviewContextManifest`) instead reads the persisted field directly and
+  omits the canonical block when absent (as it already did for legacy spines):
+  the readiness/challenge context-signature builders (`readinessSlice`,
+  `ProjectWorkspace`, `HistoryView`) also read the persisted field, so all of
+  them stay in lockstep and a just-completed review still matches the current
+  challenge signature. (Rebuilding in the review hook alone would desync those
+  signatures.) Old projects have none, so backwards compatibility is automatic.
 - **Prompt order:** persona/system → guardrails → **Canonical PRD Spine
   (authoritative)** → dependency artifacts → **Full PRD (secondary fallback)**.
   The separate feature glossary and inline PRD summary are removed when a spine

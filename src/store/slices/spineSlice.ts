@@ -479,8 +479,12 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 // A historical edit must not inherit a stale error/safety stub.
                 generationError: undefined,
                 provenance,
-                // Never carry the source version's canonical metadata onto a
-                // new id. Rebuilt below after all metadata overrides settle.
+                // Do not persist a canonicalSpine clone on an edit version.
+                // Eagerly rebuilding it on every user/decision edit bloated
+                // mobile localStorage to the point of the "Storage full" toast
+                // (fix c9df7c5). It is a rebuildable cache, reconstructed lazily
+                // wherever it is consumed — artifact generation (coreArtifactService)
+                // and review context (useReviewContextManifest).
                 canonicalSpine: undefined,
             };
             // Optional generation-meta overrides (e.g. updated failedSections).
@@ -488,22 +492,6 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
             if (opts?.meta?.generationMeta !== undefined) newSpine.generationMeta = opts.meta.generationMeta;
             if (opts?.meta?.model !== undefined) newSpine.model = opts.meta.model;
             if (opts?.meta?.prdVersion !== undefined) newSpine.prdVersion = opts.meta.prdVersion;
-
-            try {
-                const project = state.projects[projectId];
-                newSpine.canonicalSpine = buildCanonicalPrdSpine(nextStructuredPRD, {
-                    projectName: project?.productName || project?.name,
-                    platform: project?.platform,
-                    designSystemPreset: project?.designSystemPreset,
-                    safetyReview: newSpine.safetyReview,
-                    sourceSpineVersionId: newSpineId,
-                    sourcePrdVersion: newSpine.prdVersion ?? src.canonicalSpine?.meta.sourcePrdVersion,
-                });
-            } catch {
-                // Preserve the edit while leaving no misleading canonical cache;
-                // artifact generation rebuilds this contract lazily.
-                newSpine.canonicalSpine = undefined;
-            }
 
             const editEvent: HistoryEvent = {
                 id: historyEventId,
@@ -750,24 +738,12 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                     revertedFromVersionId: sourceSpineId,
                     editSummary: `Restored from ${sourceLabel}`,
                 },
-                // A restored version has a new identity even though its PRD
-                // content is historical; rebuild metadata for that identity.
+                // A restored version has a new identity, but like an edit it
+                // does not persist a canonicalSpine clone — that rebuildable
+                // cache is reconstructed lazily where consumed, keeping
+                // localStorage lean (see editSpineStructuredPRD / fix c9df7c5).
                 canonicalSpine: undefined,
             };
-
-            if (newSpine.structuredPRD) try {
-                const project = state.projects[projectId];
-                newSpine.canonicalSpine = buildCanonicalPrdSpine(newSpine.structuredPRD, {
-                    projectName: project?.productName || project?.name,
-                    platform: project?.platform,
-                    designSystemPreset: project?.designSystemPreset,
-                    safetyReview: newSpine.safetyReview,
-                    sourceSpineVersionId: newSpineId,
-                    sourcePrdVersion: newSpine.prdVersion ?? src.canonicalSpine?.meta.sourcePrdVersion,
-                });
-            } catch {
-                newSpine.canonicalSpine = undefined;
-            }
 
             const revertEvent: HistoryEvent = {
                 id: historyEventId,

@@ -27,6 +27,16 @@ export function useReviewContextManifest(params: {
 
     const latestSpine = spines.find(spine => spine.isLatest) ?? spines.at(-1);
 
+    // canonicalSpine is a rebuildable cache no longer persisted onto edit/revert
+    // spine versions (mobile localStorage quota — fix c9df7c5). The review
+    // context reads the persisted field directly and omits the canonical block
+    // when it is absent (exactly as it already did for legacy spines that never
+    // had one). This is deliberate: the readiness/challenge context-signature
+    // builders (readinessSlice, ProjectWorkspace, HistoryView) also read the
+    // persisted field, so rebuilding one here — but not there — would desync the
+    // signatures and stop a just-completed review from counting toward
+    // readiness. Uniformly reading the persisted field keeps every signature
+    // consistent with zero migration of existing review runs.
     const preferredArtifacts = useMemo(() => artifacts.flatMap(artifact => {
         if (artifact.type !== 'core_artifact' || !artifact.subtype || !artifact.currentVersionId) return [];
         const version = artifactVersions.find(candidate => candidate.id === artifact.currentVersionId);
