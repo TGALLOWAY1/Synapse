@@ -223,6 +223,12 @@ const report = {
     pageErrors: [],
     failedRequests: [],
     ignoredRequests: [],
+    httpErrors: [],
+    // Plain `vite dev` does not run the `api/` serverless functions, so every
+    // /api/* call 404s locally by design (this also produces the "Cloud save
+    // failed" header badge). Bucketed separately so they don't read as app
+    // defects.
+    expectedLocalApiErrors: [],
     screenshots: [],
 };
 
@@ -286,6 +292,13 @@ try {
     });
     page.on('pageerror', (err) => {
         report.pageErrors.push({ message: redact(err.message).slice(0, 2000), url: page.url() });
+    });
+    page.on('response', (resp) => {
+        if (resp.status() < 400) return;
+        const url = redact(resp.url());
+        const rec = { url, status: resp.status(), method: resp.request().method() };
+        const isLocalApi = url.startsWith(BASE_URL) && new URL(resp.url()).pathname.startsWith('/api/');
+        (isLocalApi ? report.expectedLocalApiErrors : report.httpErrors).push(rec);
     });
     page.on('requestfailed', (req) => {
         const failure = req.failure()?.errorText || 'unknown';
@@ -424,17 +437,25 @@ try {
             }, { optional: true });
         }
 
-        await step('workspace stage (Explore/Build outputs)', async () => {
-            await page.locator('#prd-tab-overview').click({ timeout: 5000 }).catch(() => {});
-            await page.getByRole('button', { name: /(Explore|Build|Review) outputs/ }).first().click({ timeout: 5000 });
-            await settle(2500);
-            await shot(page, 'workspace-stage');
-        }, { optional: true });
+        // The workspace pipeline-stage nav tabs (Plan | Challenge | Explore |
+        // History). Artifacts aren't generated (large token spend), so Explore
+        // shows the pre-generation outputs view.
+        for (const [stage, wait] of [['Explore', 2500], ['History', 2000]]) {
+            await step(`${stage} stage`, async () => {
+                await page.getByRole('button', { name: stage, exact: true }).first().click({ timeout: 5000 });
+                await settle(wait);
+                await shot(page, `${stage.toLowerCase()}-stage`);
+            }, { optional: true });
+        }
 
         await step('mobile viewport pass (PRD)', async () => {
+            // Resize in place rather than reloading the deep link: a reload
+            // races the per-user store rehydration and can bounce to
+            // "Project not found" (see docs/E2E_LIVE_TESTING.md).
+            await page.getByRole('button', { name: 'Plan', exact: true }).first()
+                .click({ timeout: 5000 }).catch(() => {});
             await page.setViewportSize({ width: 390, height: 844 });
-            await page.goto(`${BASE_URL}/p/${report.projectId}`, { waitUntil: 'domcontentloaded' });
-            await settle(3000);
+            await settle(2500);
             await shot(page, 'prd-mobile');
         }, { optional: true });
     }
@@ -464,7 +485,8 @@ for (const s of report.steps) {
     console.log(`${icon} ${s.name} (${Math.round(s.ms / 1000)}s)${s.error ? ` — ${s.error}` : ''}`);
 }
 console.log(`\nConsole errors: ${report.consoleErrors.length}, warnings: ${report.consoleWarnings.length}, ` +
-    `page errors: ${report.pageErrors.length}, failed requests: ${report.failedRequests.length}`);
+    `page errors: ${report.pageErrors.length}, failed requests: ${report.failedRequests.length}, ` +
+    `HTTP >=400: ${report.httpErrors.length} (+${report.expectedLocalApiErrors.length} expected local /api 404s)`);
 console.log(`Screenshots + report.json in: ${outDir}`);
 console.log('Review the PNGs for visual gaps (agents: Read each screenshot file), ' +
     'and report.json for console/network issues.');

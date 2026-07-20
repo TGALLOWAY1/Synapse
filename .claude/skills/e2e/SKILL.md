@@ -41,8 +41,11 @@ Then read `report.json`:
 
 - `steps[]` — any `failed`/`skipped` step is a defect or a selector-drift lead
   (see the Maintenance list in the doc before "fixing" the app).
-- `consoleErrors`, `pageErrors` — treat as defects; `failedRequests` — expected
-  for aborted/relayed noise, investigate anything app-relevant.
+- `consoleErrors`, `pageErrors`, `httpErrors` — treat as defects.
+- `expectedLocalApiErrors` and `ignoredRequests` are known local-run noise
+  (no serverless functions under `vite dev`; blocked analytics) — do NOT
+  report them, or the "Cloud save failed" header badge, as app defects. See
+  "Known local-run noise & caveats" in `docs/E2E_LIVE_TESTING.md`.
 - `generation` — settle time and error/safety status.
 
 ## 3. Report / fix

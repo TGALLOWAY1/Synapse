@@ -29,9 +29,10 @@ network requests, and the generation outcome.
    `SpineVersion.generationPhase` flipping to `'complete'` (progress
    screenshots are captured every ~45s while it runs).
 5. PRD Overview / Features / Decisions tabs (stable `#prd-tab-*` ids).
-6. The workspace stage (Explore/Build outputs) — artifacts are *not* generated
+6. The Explore and History pipeline-stage tabs — artifacts are *not* generated
    (that's a much larger token spend; drive it interactively if needed).
-7. A mobile-viewport (390×844) pass over the PRD.
+7. A mobile-viewport (390×844) pass over the PRD (resized in place, not
+   reloaded — see "Known local-run noise & caveats").
 
 Steps 5–7 are best-effort: a missed selector records the step as `skipped`
 (with the error) and the run continues, so a partially-broken UI still yields
@@ -73,6 +74,22 @@ directly, external hosts (including `generativelanguage.googleapis.com`)
 through an undici `ProxyAgent` pinned to the proxy. Force with
 `--fetch-relay`, disable with `--no-relay`.
 
+## Known local-run noise & caveats (don't report these as app defects)
+
+- **`/api/*` 404s + the "Cloud save failed" header badge.** Plain `vite dev`
+  doesn't run the `api/` serverless functions, so project sync / activity
+  calls 404 locally by design. The report buckets these under
+  `expectedLocalApiErrors` (and the corresponding console resource errors are
+  the same events); anything in `httpErrors` proper is real signal.
+- **Vercel Analytics script failures** (`va.vercel-scripts.com`) are bucketed
+  under `ignoredRequests` — blocked egress, not an app problem.
+- **Deep-link reload races store rehydration.** Reloading `/p/:id` directly
+  can bounce to home with a "Project not found" toast because the per-user
+  project store rehydrates after the route resolves. The mobile pass
+  deliberately resizes in place instead of reloading. If you're
+  investigating that behavior itself, it may be a real UX issue on
+  signed-in refresh — but it is not a harness failure.
+
 ## How Claude Code should use this (the review loop)
 
 The `/e2e` project skill (`.claude/skills/e2e/SKILL.md`) encodes this, but the
@@ -97,7 +114,7 @@ update the script in the same change (treat drift here like docs drift):
   plan" option, the `Cancel` aria-label.
 - PRD tabs: `#prd-tab-overview|features|decisions` ids in
   `src/components/prd/PrdViewTabs.tsx`.
-- Stage nav: the `(Explore|Build|Review) outputs` button in
-  `ProjectWorkspace.tsx`.
+- Pipeline-stage nav: the `Plan | Challenge | Explore | History` tab buttons
+  in `ProjectWorkspace.tsx` (matched by exact accessible name).
 - Settle signal: `SpineVersion.generationPhase` and the
   `synapse-projects-storage*` persist key prefix.
