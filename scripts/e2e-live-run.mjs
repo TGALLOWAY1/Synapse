@@ -501,10 +501,18 @@ try {
 
             await step('trigger asset generation ("Generate build foundation")', async () => {
                 await finalizeModalButton().click({ timeout: 8000 });
-                // The one-time visual-direction picker gates the first bundle.
+                // The one-time visual-direction picker gates the first bundle. Note
+                // the app opens it WITHOUT closing the finalize modal, so the
+                // finalize card sits on top of the picker and intercepts clicks —
+                // capture that state, then dismiss the finalize modal so the picker
+                // is reachable.
                 const preset = page.getByText('Choose your visual direction');
                 if (await preset.isVisible({ timeout: 6000 }).catch(() => false)) {
                     await shot(page, 'design-preset-choice');
+                    await page.locator('[aria-labelledby="finalize-success-title"]')
+                        .getByRole('button', { name: 'Keep reviewing the plan' })
+                        .click({ timeout: 4000 }).catch(() => {});
+                    await settle(400);
                     await page.getByRole('button', { name: /Modern SaaS/ }).click({ timeout: 6000 });
                 }
                 await page.waitForTimeout(3000);
