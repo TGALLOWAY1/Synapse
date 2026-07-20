@@ -25,6 +25,17 @@ export type PlanningReadiness = {
     summary: string;
     criteria: PlanningReadinessCriterion[];
     unresolvedCount: number;
+    /**
+     * Count of surfaced decisions still awaiting the user's engagement — records
+     * of type decision/open_question/conflict/assumption whose projected status
+     * is still `open` or `proposed`. Answering OR deferring/skipping a record
+     * moves it out of this set. This is the gate for the optional specialist
+     * critique (Challenge → Findings): the critique cannot start until every
+     * surfaced decision has been addressed. Distinct from `unresolvedCount`,
+     * which also unions in `needsResolution` (still counts deferred material
+     * items) and therefore never clears on defer.
+     */
+    openDecisionCount: number;
     assumptionCount: number;
     conflictCount: number;
     changedSourceCount: number;
@@ -162,6 +173,16 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     const prd = input.prd;
     const projected = input.planningRecords.map(record => ({ record, state: projectDecision(record) }));
     const unresolved = projected.filter(({ state }) => state.status === 'open' || state.status === 'proposed');
+    // Surfaced decisions the plan asks the user to engage with. Risks are
+    // advisory (not "decisions to answer") and are intentionally excluded, so
+    // they never gate the optional critique. Deferring/answering any of these
+    // drops it from `unresolved`, clearing the gate.
+    const openDecisions = unresolved.filter(({ record }) => (
+        record.type === 'decision'
+        || record.type === 'open_question'
+        || record.type === 'conflict'
+        || record.type === 'assumption'
+    ));
     const needsResolution = projected.filter(({ record }) => (
         planningRecordRequiresResolution(record, input.planningRecords, new Set(), input.evaluatedAt, validationContext)
     ));
@@ -242,7 +263,8 @@ export function derivePlanningReadiness(input: PlanningReadinessInput): Planning
     };
     return {
         phase, headline: copy[phase][0], summary: copy[phase][1], criteria, nextAction,
-        unresolvedCount: new Set([...unresolved, ...needsResolution].map(item => item.record.id).concat(alignmentRecords.map(record => record.id))).size + updatePlanBlockers.length, assumptionCount: assumptions.length,
+        unresolvedCount: new Set([...unresolved, ...needsResolution].map(item => item.record.id).concat(alignmentRecords.map(record => record.id))).size + updatePlanBlockers.length,
+        openDecisionCount: openDecisions.length, assumptionCount: assumptions.length,
         conflictCount: conflicts.length, changedSourceCount: changedSources.length, isReadyToBuild,
     };
 }

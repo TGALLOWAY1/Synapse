@@ -15,6 +15,7 @@ const readiness: PlanningReadiness = {
         planningRecordId: 'decision-1',
     },
     unresolvedCount: 2,
+    openDecisionCount: 2,
     conflictCount: 0,
     assumptionCount: 1,
     changedSourceCount: 0,

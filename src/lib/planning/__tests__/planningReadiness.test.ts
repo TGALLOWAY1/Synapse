@@ -398,4 +398,47 @@ describe('planning readiness', () => {
         }, 's1')).toBe(false);
         expect(reviewIssueNeedsResolutionBeforeBuild({ ...issue, status: 'dismissed' }, 's1')).toBe(false);
     });
+
+    describe('openDecisionCount (critique gate signal)', () => {
+        const shared = { prd, incompleteSectionCount: 0, hasCurrentChallenge: false, blockingReviewIssueCount: 0, generatedOutputCount: 0, staleOutputCount: 0 };
+        const count = (records: PlanningRecord[]) => derivePlanningReadiness({ ...shared, planningRecords: records }).openDecisionCount;
+
+        it('counts open/proposed decision, open_question, conflict, and assumption records', () => {
+            expect(count([record('decision', 'open')])).toBe(1);
+            expect(count([record('decision', 'proposed')])).toBe(1);
+            expect(count([record('open_question', 'open')])).toBe(1);
+            expect(count([record('conflict', 'open')])).toBe(1);
+            expect(count([record('assumption', 'open')])).toBe(1);
+            expect(count([
+                record('decision', 'open'), record('open_question', 'open'),
+                record('conflict', 'open'), record('assumption', 'open'),
+            ])).toBe(4);
+        });
+
+        it('excludes risks — they never gate the optional critique', () => {
+            expect(count([record('risk', 'open')])).toBe(0);
+            expect(count([record('decision', 'open'), record('risk', 'open')])).toBe(1);
+        });
+
+        it('does not count a deferred decision — deferring clears the gate', () => {
+            expect(count([record('decision', 'deferred')])).toBe(0);
+            expect(count([record('assumption', 'deferred')])).toBe(0);
+        });
+
+        it('does not count an answered decision', () => {
+            const answered = appendDecisionEvent(record('decision', 'open'), {
+                id: 'verdict', planningRecordId: 'decision-1', actor: 'user', type: 'custom_answered', answer: 'Guests may check out', at: 5,
+            });
+            if (!answered.ok) throw new Error(answered.reason);
+            expect(count([answered.record])).toBe(0);
+            expect(count([record('decision', 'confirmed')])).toBe(0);
+        });
+
+        it('is independent of unresolvedCount: a deferred material assumption still blocks build but clears the critique gate', () => {
+            const deferredMaterial = { ...record('assumption', 'deferred'), materiality: 'high' as const };
+            const result = derivePlanningReadiness({ ...shared, planningRecords: [deferredMaterial] });
+            expect(result.openDecisionCount).toBe(0);
+            expect(result.unresolvedCount).toBeGreaterThan(0);
+        });
+    });
 });

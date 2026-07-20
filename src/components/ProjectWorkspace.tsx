@@ -379,7 +379,9 @@ export function ProjectWorkspace() {
         if (projectId) setProjectStage(projectId, stage);
     };
     const handlePipelineStageChange = (stage: PipelineStage) => {
-        if (stage === 'review') setReviewInitialTab('review');
+        // Land on the Decision Center first when decisions are still open — the
+        // specialist critique (Findings) is gated until they are addressed.
+        if (stage === 'review') setReviewInitialTab(critiqueUnlocked ? 'review' : 'decisions');
         writePlanningIntent(undefined);
         setPipelineStage(stage);
     };
@@ -540,6 +542,9 @@ export function ProjectWorkspace() {
         currentSpineContentHash: activeSpine ? planningContentHash(activeSpine.structuredPRD ?? activeSpine.responseText) : undefined,
     };
     const planningReadiness = derivePlanningReadiness(planningReadinessInput);
+    // The optional specialist critique (Challenge → Findings) stays locked until
+    // every surfaced decision is addressed (answered or deferred/skipped).
+    const critiqueUnlocked = planningReadiness.openDecisionCount === 0;
     const planningAttention = derivePlanningAttention({
         ...planningReadinessInput,
         reviewIssues,
@@ -1446,6 +1451,7 @@ export function ProjectWorkspace() {
                         initialReviewId={reviewInitialRunId}
                         initialIssueId={reviewInitialIssueId}
                         initialFindingId={reviewInitialFindingId}
+                        critiqueUnlocked={critiqueUnlocked}
                     />
                 ) : (
                 <>

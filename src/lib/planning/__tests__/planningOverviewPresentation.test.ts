@@ -14,6 +14,7 @@ const readiness = (overrides: Partial<PlanningReadiness> = {}): PlanningReadines
         planningRecordId: 'record-1',
     },
     unresolvedCount: 5,
+    openDecisionCount: 5,
     assumptionCount: 5,
     conflictCount: 0,
     changedSourceCount: 0,

@@ -4,9 +4,21 @@
 
 ### Uncertainty-first planning, adversarial review, and Decision Center
 
-The workspace progression is **Plan → Challenge → Build → History**. Challenge
-is available as soon as a safe structured working PRD exists and hosts
-specialist findings, review history, and the full Decision Center.
+The workspace progression is **Plan → Challenge → Build → History**. The
+Challenge stage is reachable as soon as a safe structured working PRD exists and
+always exposes the Decision Center and review history. Its sub-tabs are ordered
+**Decision Center → Findings → History** — decisions first, critique second.
+The specialist critique (the Findings tab) is **optional and gated**: its start
+surface (`ReviewSetup`) is replaced by a "resolve your open decisions first"
+prompt (`CritiqueGate`) until every surfaced decision is addressed — answered
+**or** deferred/skipped. The gate keys off `PlanningReadiness.openDecisionCount`
+(open/proposed records of type decision/open_question/conflict/assumption; risks
+are advisory and excluded); deferring or answering clears it, and the gate's
+"defer the remaining decisions and continue" action is the escape hatch for an
+unsure user. Only the critique *run* is gated — the Decision Center, history, and
+any already-completed run stay visible even if a later decision reopens the gate.
+A completed critique's findings still promote into new planning records. When
+open decisions remain, entering Challenge lands on the Decision Center tab.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
 `ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
