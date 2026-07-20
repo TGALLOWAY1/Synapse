@@ -504,15 +504,19 @@ try {
                 // The one-time visual-direction picker gates the first bundle. Note
                 // the app opens it WITHOUT closing the finalize modal, so the
                 // finalize card sits on top of the picker and intercepts clicks —
-                // capture that state, then dismiss the finalize modal so the picker
-                // is reachable.
+                // capture that state, then — only if the finalize modal is still
+                // stacked on top (legacy behavior) — dismiss it so the picker is
+                // reachable. The app now closes it automatically when the picker
+                // opens, so this is a guarded no-op on current builds.
                 const preset = page.getByText('Choose your visual direction');
                 if (await preset.isVisible({ timeout: 6000 }).catch(() => false)) {
                     await shot(page, 'design-preset-choice');
-                    await page.locator('[aria-labelledby="finalize-success-title"]')
-                        .getByRole('button', { name: 'Keep reviewing the plan' })
-                        .click({ timeout: 4000 }).catch(() => {});
-                    await settle(400);
+                    const stackedFinalize = page.locator('[aria-labelledby="finalize-success-title"]')
+                        .getByRole('button', { name: 'Keep reviewing the plan' });
+                    if (await stackedFinalize.isVisible().catch(() => false)) {
+                        await stackedFinalize.click().catch(() => {});
+                        await settle(400);
+                    }
                     await page.getByRole('button', { name: /Modern SaaS/ }).click({ timeout: 6000 });
                 }
                 await page.waitForTimeout(3000);

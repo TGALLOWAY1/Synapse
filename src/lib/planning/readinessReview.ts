@@ -558,7 +558,13 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
             || (group.id === 'assumptions' && isAcceptedUnvalidatedAssumption(record, evaluatedAt, validationContext)));
         const blocking = unresolved.length > 0;
         const label = group.id === 'decisions' ? 'Material choices resolved' : group.id === 'assumptions' ? 'Material assumptions validated' : 'Material risks addressed';
-        const explanation = blocking ? `${unresolved.length} material ${group.id} item${unresolved.length === 1 ? '' : 's'} still needs attention.` : `${label}.`;
+        // group.id is already plural; use the singular noun so pluralization and
+        // subject/verb agreement are correct ("1 material assumption … needs",
+        // "3 material assumptions … need").
+        const itemNoun = group.id === 'decisions' ? 'decision' : group.id === 'assumptions' ? 'assumption' : 'risk';
+        const explanation = blocking
+            ? `${unresolved.length} material ${itemNoun}${unresolved.length === 1 ? '' : 's'} still ${unresolved.length === 1 ? 'needs' : 'need'} attention.`
+            : `${label}.`;
         const validatedAssumptionEvidence = group.id === 'assumptions'
             ? group.records.flatMap(record => {
                 const validation = assumptionValidationReadiness(record, evaluatedAt, validationContext);
@@ -615,7 +621,7 @@ export function deriveReadinessReview(input: ReadinessReviewInput): ReadinessRev
     const propagationRecords = input.planningRecords.filter(planningRecordNeedsAlignment);
     const propagationBlocking = propagationRecords.length > 0;
     const propagationExplanation = propagationBlocking
-        ? `${propagationRecords.length} resolved choice${propagationRecords.length === 1 ? '' : 's'} still needs plan propagation.`
+        ? `${propagationRecords.length} resolved choice${propagationRecords.length === 1 ? '' : 's'} still ${propagationRecords.length === 1 ? 'needs' : 'need'} plan propagation.`
         : 'Resolved choices are reflected in the current plan.';
     criteria.push({
         id: 'plan_alignment', label: 'Decisions propagated into the plan', status: propagationBlocking ? 'attention' : 'met',

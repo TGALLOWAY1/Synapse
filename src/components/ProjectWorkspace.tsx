@@ -996,6 +996,10 @@ export function ProjectWorkspace() {
         if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return handleOpenAssets();
         if (!project?.designSystemPreset) {
             generateAfterPreset.current = true;
+            // Close the finalize modal before opening the preset picker; otherwise
+            // the finalize card renders on top of the picker and covers/intercepts
+            // its preset options.
+            setShowFinalizeSuccess(false);
             setShowPresetChoice(true);
             return;
         }
