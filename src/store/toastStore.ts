@@ -19,7 +19,9 @@ export interface Toast {
 
 interface ToastState {
     toasts: Toast[];
-    addToast: (toast: Omit<Toast, 'id' | 'duration'> & { duration?: number }) => void;
+    /** Returns the new toast's id so callers can dismiss it later
+     *  (e.g. a sticky quota warning cleared once storage recovers). */
+    addToast: (toast: Omit<Toast, 'id' | 'duration'> & { duration?: number }) => string;
     removeToast: (id: string) => void;
 }
 
@@ -51,6 +53,8 @@ export const useToastStore = create<ToastState>((set) => ({
                 }));
             }, duration);
         }
+
+        return id;
     },
 
     removeToast: (id) => {

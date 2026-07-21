@@ -38,7 +38,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -203,7 +203,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -376,7 +376,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -549,7 +549,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -722,7 +722,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -895,7 +895,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -1060,7 +1060,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -1250,7 +1250,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -1440,7 +1440,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],
@@ -1605,7 +1605,7 @@ Frozen review scope:
   "platform": "web",
   "productCategory": "health workflow",
   "reviewedSpineVersionId": "spine-v2",
-  "contextSignature": "097f1d113d6a4309",
+  "contextSignature": "79a42b50fc682c4c",
   "constraints": [
     "Patient notes must remain private."
   ],

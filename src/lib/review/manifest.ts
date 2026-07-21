@@ -161,7 +161,15 @@ export function buildReviewContextManifest(input: BuildReviewManifestInput): Rev
         spineVersionId: input.spine.versionId,
         prdSchemaVersion: input.spine.schemaVersion,
         structuredPrdHash: hashReviewValue(input.spine.structuredPRD),
-        canonicalSpineHash: input.spine.canonicalSpine ? hashReviewValue(input.spine.canonicalSpine) : undefined,
+        // Intentionally NOT hashed here. The canonical spine is a *deterministic*
+        // projection of `structuredPRD` (+ project identity, both already in this
+        // payload), so `structuredPrdHash` fully subsumes any change it could
+        // reflect — including it would only make the signature depend on whether
+        // the rebuildable `canonicalSpine` cache happens to be resident. It is
+        // NOT persisted to localStorage (stripped in projectStore's partialize to
+        // bound storage growth), so it is present in-session but absent after a
+        // reload; keying the signature off it would spuriously flip every review
+        // run's context "changed" across a refresh. See docs/CANONICAL_PRD_SPINE.md.
         sources: sources.map(source => ({
             key: source.sourceKey,
             hash: source.contentHash,
