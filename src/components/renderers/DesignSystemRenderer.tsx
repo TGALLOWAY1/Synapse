@@ -233,7 +233,7 @@ function ColorSwatchCard({ name, hex }: { name: string; hex: string }) {
     const valueColor = dark ? '#ffffff' : '#0a0a0a';
     return (
         <div
-            className="relative w-44 h-24 rounded-lg border border-black/10 overflow-hidden"
+            className="relative w-44 h-24 rounded-lg border border-black/10 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] overflow-hidden"
             style={{ background: hex }}
             title={`${name} · ${hex} · rgb(${rgb})`}
             aria-label={`${name} ${hex}`}
