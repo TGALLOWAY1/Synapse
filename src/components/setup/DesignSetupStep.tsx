@@ -101,7 +101,7 @@ export function DesignSetupStep({ projectId, recommendationText, prdGenerating }
             {/* Action bar — pinned near the bottom with safe-area inset,
                 mirroring the preflight cards */}
             <div
-                className="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 bg-white/95 backdrop-blur pt-4 border-t border-neutral-100"
+                className="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 bg-white pt-4 border-t border-neutral-200"
                 style={{ paddingBottom: 'max(env(safe-area-inset-bottom), 0.25rem)' }}
             >
                 <label className="flex items-center gap-2 text-sm text-neutral-600 cursor-pointer select-none min-h-[44px]">

@@ -108,7 +108,7 @@ export function DesignSystemPresetChoice({
                     </div>
 
                     {/* Action bar */}
-                    <div className="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 bg-white/95 backdrop-blur pt-4 border-t border-neutral-100">
+                    <div className="sticky bottom-0 mt-6 flex flex-wrap items-center gap-3 bg-white pt-4 border-t border-neutral-200">
                         <label className="flex items-center gap-2 text-sm text-neutral-600 cursor-pointer select-none min-h-[44px]">
                             <input
                                 type="checkbox"

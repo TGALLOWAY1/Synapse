@@ -63,9 +63,19 @@ export function ExamplePromptCarousel({ examples, onSelect }: ExamplePromptCarou
                         >
                             <div className="flex items-center gap-1.5">
                                 {example.platform === 'app' ? (
-                                    <Smartphone size={14} className="shrink-0 text-neutral-400" data-testid="icon-app" />
+                                    <Smartphone
+                                        size={16}
+                                        strokeWidth={2.25}
+                                        className="shrink-0 text-neutral-500"
+                                        data-testid="icon-app"
+                                    />
                                 ) : (
-                                    <Monitor size={14} className="shrink-0 text-neutral-400" data-testid="icon-web" />
+                                    <Monitor
+                                        size={16}
+                                        strokeWidth={2.25}
+                                        className="shrink-0 text-neutral-500"
+                                        data-testid="icon-web"
+                                    />
                                 )}
                                 <span className="text-sm font-semibold text-neutral-800">{example.title}</span>
                             </div>
