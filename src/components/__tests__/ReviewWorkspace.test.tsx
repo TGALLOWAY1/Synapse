@@ -408,7 +408,7 @@ describe('ReviewWorkspace', () => {
         it('returns to the Decision Center from the gate', () => {
             render(<ReviewWorkspace {...baseProps({ critiqueUnlocked: false, openDecisionCount: 2 })} />);
             fireEvent.click(screen.getByRole('button', { name: 'Review findings' }));
-            fireEvent.click(screen.getByRole('button', { name: /Go to the Decision Center/ }));
+            fireEvent.click(screen.getByRole('button', { name: /Open Decision Center/ }));
             expect(screen.getByRole('button', { name: 'Decision Center' })).toHaveClass('border-indigo-600');
         });
 

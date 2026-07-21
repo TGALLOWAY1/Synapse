@@ -573,10 +573,11 @@ function FlowTab({
 
     const drawerFeature = drawerRef ? featuresById?.get(drawerRef.id) : undefined;
     const allFlows = flowGroups.map(g => g.flow);
+    const multipleFlows = flowGroups.length > 1;
 
     return (
         <div className="not-prose space-y-6">
-            {flowGroups.map(group => {
+            {flowGroups.map((group, groupIndex) => {
                 const highlighted = new Set(group.steps.map(s => s.stepIndex));
                 const repeated = group.steps.length > 1;
                 const inlineByStep = new Map<number, FlowIssue[]>();
@@ -591,17 +592,9 @@ function FlowTab({
                         (issuesByStep.get(issue.linkedStepIndex) ?? 0) + 1,
                     );
                 }
-                return (
-                    <section key={group.flowIndex}>
-                        <header className="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
-                            <h3 className="text-sm font-semibold text-neutral-800">{group.flow.title}</h3>
-                            <span className="text-[11px] text-neutral-400">
-                                Flow {group.flowIndex + 1} · appears in{' '}
-                                {group.steps.length === 1
-                                    ? `step ${group.steps[0].stepIndex + 1}`
-                                    : `${group.steps.length} steps`}
-                            </span>
-                        </header>
+                const stepCount = group.flow.steps.length;
+                const body = (
+                    <>
                         {group.flow.goal && (
                             <p className="text-xs text-neutral-500 mb-3">
                                 {inlineWithFeatures(group.flow.goal, { featuresById, onSelectFeature })}
@@ -611,7 +604,7 @@ function FlowTab({
                             <div className="text-[10px] font-semibold uppercase tracking-wide text-indigo-600 mb-1.5">
                                 This screen appears in
                             </div>
-                            <ul className="space-y-1.5">
+                            <ul className="space-y-3">
                                 {group.steps.map(({ step, stepIndex }, appearanceIdx) => {
                                     const decisionCount = step.decisions.length;
                                     return (
@@ -629,21 +622,23 @@ function FlowTab({
                                                     </span>
                                                 )}
                                             </div>
-                                            {step.userAction && (
-                                                <div className="mt-0.5 text-[11px] text-neutral-500">
-                                                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">User</span>
-                                                    {step.userAction}
-                                                </div>
-                                            )}
-                                            {step.systemBehavior && (
-                                                <div className="mt-0.5 text-[11px] text-neutral-500">
-                                                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">System</span>
-                                                    {step.systemBehavior}
-                                                </div>
-                                            )}
-                                            {step.decisions.map((decision, di) => (
-                                                <DecisionBranches key={di} decision={decision} />
-                                            ))}
+                                            <div className="mt-1.5 space-y-1">
+                                                {step.userAction && (
+                                                    <div className="flex items-start gap-1.5 text-[11px] text-neutral-600">
+                                                        <RoleChip role="USER" />
+                                                        <span>{step.userAction}</span>
+                                                    </div>
+                                                )}
+                                                {step.systemBehavior && (
+                                                    <div className="flex items-start gap-1.5 text-[11px] text-neutral-600">
+                                                        <RoleChip role="SYSTEM" />
+                                                        <span>{step.systemBehavior}</span>
+                                                    </div>
+                                                )}
+                                                {step.decisions.map((decision, di) => (
+                                                    <DecisionBranches key={di} decision={decision} />
+                                                ))}
+                                            </div>
                                         </li>
                                     );
                                 })}
@@ -692,7 +687,39 @@ function FlowTab({
                                 <ArrowRightIcon size={12} aria-hidden />
                             </button>
                         )}
-                    </section>
+                    </>
+                );
+
+                if (!multipleFlows) {
+                    return (
+                        <section key={group.flowIndex}>
+                            <header className="mb-2 flex items-baseline justify-between gap-2 flex-wrap">
+                                <h3 className="text-sm font-semibold text-neutral-800">{group.flow.title}</h3>
+                                <span className="text-[11px] text-neutral-400">
+                                    Flow {group.flowIndex + 1} · appears in{' '}
+                                    {group.steps.length === 1
+                                        ? `step ${group.steps[0].stepIndex + 1}`
+                                        : `${group.steps.length} steps`}
+                                </span>
+                            </header>
+                            {body}
+                        </section>
+                    );
+                }
+
+                return (
+                    <details key={group.flowIndex} open={groupIndex === 0} className="group">
+                        <summary className="mb-2 flex cursor-pointer list-none items-baseline justify-between gap-2 flex-wrap">
+                            <h3 className="text-sm font-semibold text-neutral-800">{group.flow.title}</h3>
+                            <span className="text-[11px] text-neutral-400">
+                                {stepCount} {stepCount === 1 ? 'step' : 'steps'} · appears in{' '}
+                                {group.steps.length === 1
+                                    ? `step ${group.steps[0].stepIndex + 1}`
+                                    : `${group.steps.length} steps`}
+                            </span>
+                        </summary>
+                        {body}
+                    </details>
                 );
             })}
 
@@ -709,6 +736,23 @@ function FlowTab({
     );
 }
 
+/** Small tinted role-prefix chip for flow-step lines (replaces the old inline
+ * uppercase text label — see audit item on the Flow tab reading like log
+ * output). Purely presentational; carries no derived-data meaning. */
+const ROLE_CHIP_STYLES: Record<'USER' | 'SYSTEM' | 'DECISION', string> = {
+    USER: 'bg-neutral-100 text-neutral-600',
+    SYSTEM: 'bg-indigo-100 text-indigo-700',
+    DECISION: 'bg-amber-100 text-amber-700',
+};
+
+function RoleChip({ role }: { role: 'USER' | 'SYSTEM' | 'DECISION' }) {
+    return (
+        <span className={`mt-0.5 inline-flex shrink-0 items-center rounded px-1.5 text-[10px] font-semibold ${ROLE_CHIP_STYLES[role]}`}>
+            {role}
+        </span>
+    );
+}
+
 /**
  * One flow decision rendered branch-aware: when the decision text parses into
  * condition → outcome pairs they render as an explicit branch list; otherwise
@@ -718,19 +762,19 @@ function DecisionBranches({ decision }: { decision: string }) {
     const branches = parseDecisionBranches(decision);
     if (branches.length === 0) {
         return (
-            <div className="mt-0.5 text-[11px]">
-                <span className="text-neutral-500">
-                    <span className="font-medium text-neutral-400 uppercase tracking-wide text-[9px] mr-1">Decision</span>
-                    {decision}
+            <div className="flex items-start gap-1.5 text-[11px]">
+                <RoleChip role="DECISION" />
+                <span>
+                    <span className="text-neutral-500">{decision}</span>
+                    <span className="text-amber-700"> — branch outcomes not specified in the flow.</span>
                 </span>
-                <span className="text-amber-700"> — branch outcomes not specified in the flow.</span>
             </div>
         );
     }
     return (
-        <div className="mt-1 text-[11px]">
-            <div className="font-medium text-neutral-400 uppercase tracking-wide text-[9px]">Decision branches</div>
-            <ul className="mt-0.5 space-y-0.5">
+        <div className="flex items-start gap-1.5 text-[11px]">
+            <RoleChip role="DECISION" />
+            <ul className="space-y-0.5">
                 {branches.map((b, i) => (
                     <li key={i} className="flex items-center gap-1 flex-wrap text-neutral-600">
                         <span>{b.condition}</span>
