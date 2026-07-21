@@ -247,8 +247,8 @@ function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpe
                 </p>
                 {!readOnly && (
                     <div className="mt-6 flex flex-col gap-2 sm:flex-row">
-                        <button type="button" onClick={onGoToDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500">
-                            Open Decision Center <ArrowRight size={14} />
+                        <button type="button" onClick={onGoToDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500">
+                            Open Decision Center <ArrowRight size={14} className="shrink-0" />
                         </button>
                         {onDeferOpenDecisions && openDecisionCount > 0 && (
                             <button type="button" onClick={onDeferOpenDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-neutral-200 bg-white px-4 text-sm font-semibold text-neutral-700 hover:bg-neutral-50">
