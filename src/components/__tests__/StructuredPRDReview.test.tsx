@@ -114,6 +114,21 @@ describe('StructuredPRDView — two-view IA', () => {
         expect(screen.queryByText('Decision Log')).toBeNull();
     });
 
+    it('wraps PRD tables in a horizontally scrollable container with a min-width and mobile fade cue', () => {
+        const { container } = renderView();
+        // Success Metrics renders on the Overview by default.
+        const section = container.querySelector('#prd-metrics');
+        expect(section).not.toBeNull();
+        const table = section!.querySelector('table');
+        // A min-width forces horizontal scroll on narrow (mobile) viewports so
+        // columns stay legible instead of collapsing/clipping.
+        expect(table!.className).toMatch(/min-w-\[/);
+        // The table sits inside an overflow-x-auto scroller…
+        expect(table!.closest('.overflow-x-auto')).not.toBeNull();
+        // …and a mobile-only right-edge fade advertises the off-screen columns.
+        expect(section!.querySelector('[data-testid="table-scroll-fade"]')).not.toBeNull();
+    });
+
     it('Features view groups features under their feature systems', () => {
         renderView();
         goTo(/Features/);

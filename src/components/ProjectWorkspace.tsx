@@ -1536,7 +1536,7 @@ export function ProjectWorkspace() {
                         </div>
                     )}
 
-                    <div className="max-w-4xl mx-auto">
+                    <div className="max-w-4xl xl:max-w-5xl mx-auto">
                         {/* PRD Stage */}
                         {pipelineStage === 'prd' && showPreflight && activeSpine && (
                             <PreflightView
@@ -1730,6 +1730,7 @@ export function ProjectWorkspace() {
                                                     view={prdView}
                                                     onViewChange={setPrdView}
                                                     onOpenDecisions={(recordId, returnTo) => openDecisionCenter(recordId, returnTo ?? planReturnTarget)}
+                                                    onBranchCreated={() => { setActiveRightTab('branches'); setIsBranchesVisible(true); }}
                                                 />
                                             </>
                                         ) : (

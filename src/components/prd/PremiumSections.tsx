@@ -9,6 +9,32 @@ import { stripLeadingListNumber } from '../../lib/utils/stripLeadingListNumber';
 import { isDisplayableFeatureId } from '../../lib/derive/prdDecisions';
 import { FeatureIdBadge } from './FeatureIdBadge';
 
+// Shared horizontally-scrollable wrapper for the PRD's wide tables. On mobile
+// (<md) a table's `min-w-*` forces it past the viewport; this wrapper lets it
+// scroll and paints a right-edge fade so the off-screen columns are discoverable
+// (the audit found tables clipping with no scroll affordance). The fade is
+// `md:hidden`, so desktop — where every table already fits — is untouched.
+function TableScroll({
+    children,
+    wrapperClass = 'rounded-lg border border-neutral-200',
+    fadeRounded = 'rounded-r-lg',
+}: {
+    children: React.ReactNode;
+    wrapperClass?: string;
+    fadeRounded?: string;
+}) {
+    return (
+        <div className="relative">
+            <div className={`overflow-x-auto ${wrapperClass}`}>{children}</div>
+            <div
+                data-testid="table-scroll-fade"
+                aria-hidden="true"
+                className={`pointer-events-none absolute inset-y-0 right-0 w-10 bg-gradient-to-l from-white to-transparent md:hidden ${fadeRounded}`}
+            />
+        </div>
+    );
+}
+
 // Shared section wrapper. Mirrors the heading style used in StructuredPRDView
 // for visual consistency.
 function Section({ title, children, id }: { title: string; children: React.ReactNode; id?: string }) {
@@ -80,8 +106,8 @@ export function ProductThesisSection({ thesis }: { thesis: ProductThesis }) {
 export function JtbdSection({ jtbd }: { jtbd: Jtbd[] }) {
     return (
         <Section title="Target Users & Jobs-to-be-Done" id="prd-jtbd">
-            <div className="overflow-x-auto rounded-lg border border-neutral-200">
-                <table className="w-full text-sm">
+            <TableScroll>
+                <table className="w-full min-w-[720px] text-sm">
                     <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
                         <tr>
                             <th className="px-3 py-2 text-left">Segment</th>
@@ -109,7 +135,7 @@ export function JtbdSection({ jtbd }: { jtbd: Jtbd[] }) {
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </TableScroll>
         </Section>
     );
 }
@@ -132,8 +158,8 @@ export function PrinciplesSection({ principles }: { principles: Principle[] }) {
 export function UserLoopsSection({ loops }: { loops: UserLoop[] }) {
     return (
         <Section title="Core User Loops" id="prd-user-loops">
-            <div className="overflow-x-auto rounded-lg border border-neutral-200">
-                <table className="w-full text-sm">
+            <TableScroll>
+                <table className="w-full min-w-[840px] text-sm">
                     <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
                         <tr>
                             <th className="px-3 py-2 text-left">Loop</th>
@@ -157,7 +183,7 @@ export function UserLoopsSection({ loops }: { loops: UserLoop[] }) {
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </TableScroll>
         </Section>
     );
 }
@@ -276,8 +302,8 @@ export function DataModelSection({ model }: { model: PrdDataModel }) {
                     <div key={idx} className="p-4 bg-white border border-neutral-200 rounded-lg">
                         <p className="text-base font-bold text-neutral-900">{e.name}</p>
                         <p className="text-sm text-neutral-700 mt-0.5 mb-3">{e.description}</p>
-                        <div className="overflow-x-auto rounded border border-neutral-100">
-                            <table className="w-full text-xs">
+                        <TableScroll wrapperClass="rounded border border-neutral-100" fadeRounded="rounded-r">
+                            <table className="w-full min-w-[520px] text-xs">
                                 <thead className="bg-neutral-50 text-neutral-500 uppercase tracking-wider">
                                     <tr>
                                         <th className="px-2 py-1.5 text-left">Field</th>
@@ -297,7 +323,7 @@ export function DataModelSection({ model }: { model: PrdDataModel }) {
                                     ))}
                                 </tbody>
                             </table>
-                        </div>
+                        </TableScroll>
                         {e.relationships?.length ? (
                             <div className="mt-2 text-xs">
                                 <span className="font-semibold text-neutral-600">Relationships:</span>{' '}
@@ -483,8 +509,8 @@ const likelihoodTone = (l: 'low' | 'med' | 'high') =>
 export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
     return (
         <Section title="Risks" id="prd-risks">
-            <div className="overflow-x-auto rounded-lg border border-neutral-200">
-                <table className="w-full text-sm">
+            <TableScroll>
+                <table className="w-full min-w-[700px] text-sm">
                     <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
                         <tr>
                             <th className="px-3 py-2 text-left">Risk</th>
@@ -510,7 +536,7 @@ export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </TableScroll>
         </Section>
     );
 }
@@ -527,8 +553,8 @@ export function RisksDetailedSection({ risks }: { risks: RiskDetailed[] }) {
 export function MetricsSection({ metrics }: { metrics: SuccessMetric[] }) {
     return (
         <Section title="Success Metrics" id="prd-metrics">
-            <div className="overflow-x-auto rounded-lg border border-neutral-200">
-                <table className="w-full text-sm">
+            <TableScroll>
+                <table className="w-full min-w-[420px] text-sm">
                     <thead className="bg-neutral-50 text-neutral-500 uppercase text-[10px] tracking-wider">
                         <tr>
                             <th className="px-3 py-2 text-left">Metric</th>
@@ -544,7 +570,7 @@ export function MetricsSection({ metrics }: { metrics: SuccessMetric[] }) {
                         ))}
                     </tbody>
                 </table>
-            </div>
+            </TableScroll>
         </Section>
     );
 }

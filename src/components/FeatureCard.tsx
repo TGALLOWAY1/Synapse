@@ -77,7 +77,7 @@ export function FeatureCard({ feature, onUpdate, onToggleConfirm, onBackToSummar
 
     return (
         <div className={`group p-4 bg-white border rounded-lg transition ${confirmed ? 'border-emerald-200' : 'border-neutral-200 hover:border-neutral-300'}`}>
-            <div className="flex items-start justify-between mb-2 gap-2">
+            <div className="flex flex-col sm:flex-row sm:items-start sm:justify-between mb-2 gap-2">
                 <div className="min-w-0 flex-1">
                     {/* Keep the id (F1) and tier (MVP) chips together on their own
                         line so the feature name can use the full column width and
