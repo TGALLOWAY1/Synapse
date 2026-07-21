@@ -172,6 +172,17 @@ function hexToRgbString(hex: string): string {
     return `${rgb[0]}, ${rgb[1]}, ${rgb[2]}`;
 }
 
+function isDarkColor(hex: string): boolean {
+    const rgb = parseHex(hex);
+    if (!rgb) return false;
+    const [rs, gs, bs] = rgb.map(c => {
+        const s = c / 255;
+        return s <= 0.03928 ? s / 12.92 : Math.pow((s + 0.055) / 1.055, 2.4);
+    });
+    const lum = 0.2126 * rs + 0.7152 * gs + 0.0722 * bs;
+    return lum < 0.55;
+}
+
 // ─── Color Tokens ─────────────────────────────────────────────────────────
 
 function ColorTokens({ tokens }: { tokens: DesignTokens }) {
@@ -214,16 +225,42 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
 function ColorSwatchCard({ name, hex }: { name: string; hex: string }) {
     const subName = name.includes('.') ? name.split('.').slice(1).join('.') : name;
     const rgb = hexToRgbString(hex);
+    // The token color fills the whole card face (as the pre-cluster stripes
+    // did) so the palette reads at a glance; text sits on the color itself in
+    // a contrast-aware ink.
+    const dark = isDarkColor(hex);
+    const subtleColor = dark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.5)';
+    const valueColor = dark ? '#ffffff' : '#0a0a0a';
     return (
         <div
-            className="w-40 rounded-lg border border-neutral-200 overflow-hidden"
+            className="relative w-44 h-24 rounded-lg border border-black/10 overflow-hidden"
+            style={{ background: hex }}
             title={`${name} · ${hex} · rgb(${rgb})`}
             aria-label={`${name} ${hex}`}
         >
-            <div className="h-10" style={{ background: hex }} aria-hidden="true" />
-            <div className="px-2 py-1.5">
-                <p className="text-[11px] font-medium text-neutral-800 truncate">{subName}</p>
-                <p className="font-mono text-[10px] text-neutral-500 uppercase">{hex}</p>
+            <p
+                className="absolute top-2 left-2.5 right-2.5 text-[10px] font-bold uppercase tracking-wider truncate"
+                style={{ color: subtleColor }}
+            >
+                {subName}
+            </p>
+            <div className="absolute bottom-2 left-2.5 right-2.5 flex flex-col gap-0.5 pointer-events-none">
+                <div className="flex items-baseline gap-1.5 min-w-0">
+                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0" style={{ color: subtleColor }}>
+                        HEX
+                    </span>
+                    <span className="font-mono text-[11px] font-semibold truncate" style={{ color: valueColor }}>
+                        {hex.replace('#', '').toUpperCase()}
+                    </span>
+                </div>
+                <div className="flex items-baseline gap-1.5 min-w-0">
+                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0" style={{ color: subtleColor }}>
+                        RGB
+                    </span>
+                    <span className="font-mono text-[10px] truncate" style={{ color: valueColor }}>
+                        {rgb}
+                    </span>
+                </div>
             </div>
         </div>
     );

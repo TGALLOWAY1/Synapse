@@ -55,15 +55,17 @@ function renderTokenized(tokens: DesignTokens = TOKENS) {
 }
 
 describe('DesignSystemRenderer — tokenized path', () => {
-    it('renders color token sub-names and hex values', () => {
+    it('renders color token sub-names with hex and rgb values on the card face', () => {
         const { getByText } = renderTokenized();
 
         expect(getByText('primary')).toBeInTheDocument();
         expect(getByText('secondary')).toBeInTheDocument();
         expect(getByText('body')).toBeInTheDocument();
-        expect(getByText('#6366F1')).toBeInTheDocument();
-        expect(getByText('#4F46E5')).toBeInTheDocument();
-        expect(getByText('#171717')).toBeInTheDocument();
+        // Hex renders unprefixed next to a HEX label, with the RGB triple below.
+        expect(getByText('6366F1')).toBeInTheDocument();
+        expect(getByText('4F46E5')).toBeInTheDocument();
+        expect(getByText('171717')).toBeInTheDocument();
+        expect(getByText('99, 102, 241')).toBeInTheDocument();
     });
 
     it('renders namespace group headers', () => {
