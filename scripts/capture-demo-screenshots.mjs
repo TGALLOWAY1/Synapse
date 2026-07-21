@@ -123,12 +123,13 @@ const ARTIFACTS = [
         tabs: {
             navLabel: 'Implementation plan sections',
             desktopOnly: true,
+            // Labels track ConsolidatedPlanView's section nav — keep in sync.
             items: [
-                { slug: 'overview', label: 'Overview' },
-                { slug: 'milestones', label: 'Milestones' },
-                { slug: 'prompt-packs', label: 'Prompt Packs' },
-                { slug: 'quality-gates', label: 'Quality Gates' },
-                { slug: 'traceability', label: 'Traceability' },
+                { slug: 'build-brief', label: 'Build Brief' },
+                { slug: 'roadmap', label: 'Roadmap' },
+                { slug: 'prompts', label: 'Prompts' },
+                { slug: 'validation', label: 'Validation' },
+                { slug: 'coverage', label: 'Coverage' },
             ],
         },
     },

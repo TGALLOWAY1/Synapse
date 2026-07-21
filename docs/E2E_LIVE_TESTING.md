@@ -2,11 +2,12 @@
 
 `scripts/e2e-live-run.mjs` boots the app locally, creates a **real project from
 a plain-language idea**, waits for **actual Gemini PRD generation** to settle,
-walks the resulting pages, and writes full-page screenshots plus a
-machine-readable `report.json`. It exists so that a human — or a coding agent
-that can read images (Claude Code) — can assess the live product end-to-end
-without hand-driving the UI: visual gaps show up in the PNGs, and runtime
-problems show up in the report's console/page/network error lists.
+walks every pipeline stage, artifact, and sub-tab, and writes **full-height**
+screenshots plus a machine-readable `report.json`. It exists so that a human —
+or a coding agent that can read images (Claude Code) — can assess the live
+product end-to-end without hand-driving the UI: visual gaps show up in the
+PNGs, and runtime problems show up in the report's console/page/network error
+lists.
 
 ```bash
 npm run e2e            # live run — needs a Gemini key (see "Credentials")
@@ -14,12 +15,28 @@ npm run e2e:smoke      # no-LLM harness check: boot, form fill, start dialog
 npm run e2e -- --prompt="A recipe box app for families" --name="Recipe Box"
 npm run e2e -- --timeout-min=15 --out=./e2e-results/my-run
 npm run e2e -- --skip-assets   # stop after the PRD (cheaper; no bundle spend)
+npm run e2e -- --viewport=both --views=screens,implementation-plan
+npm run e2e -- --interactions  # + canned edit/consolidate/decision loop
+npm run e2e -- --state=e2e-results/run-<stamp>/state.json --views=prd
 ```
 
 Output goes to `e2e-results/run-<timestamp>/` (gitignored): numbered
-`NN-<step>.png` screenshots in flow order and `report.json` with per-step
-status/timing, console errors and warnings, uncaught page errors, failed
-network requests, and the generation outcome.
+`NN-<step>.png` screenshots in flow order (mobile-pass shots carry a
+`-mobile` suffix), a `state.json` project dump (live runs), and `report.json`
+with per-step status/timing, console errors and warnings, uncaught page
+errors, failed network requests, and the generation outcome.
+
+## Full-height screenshots
+
+The app shell is `h-screen` with per-stage internal `overflow-y-auto` panes
+(`ProjectWorkspace`/`ArtifactWorkspace`), so the document never scrolls and a
+plain Playwright `fullPage` capture stops at the viewport. The harness's
+`fullShot()` helper measures the dominant internal scroller (widest, deepest
+overflow), resets its scroll position, temporarily grows the browser viewport
+by the overflow delta (capped at 8000px — the whole layout, including modals,
+is viewport-relative, so it expands naturally), captures, then restores the
+viewport. Known limitation: inner widgets with a fixed non-`vh` `max-height`
+still clip.
 
 ## What a live run covers
 
@@ -29,19 +46,14 @@ network requests, and the generation outcome.
 4. Generation settle detected from the app's own persisted store: the latest
    `SpineVersion.generationPhase` flipping to `'complete'` (progress
    screenshots are captured every ~45s while it runs).
-5. PRD Overview / Features tabs (stable `#prd-tab-*` ids). Decisions live in
-   the Decision Center (Challenge stage), not a PRD tab.
-6. **`refine-popover`** (optional step). Programmatically selects a run of PRD
-   text in `#prd-panel-overview` (a `Range` + `pointerup` dispatch, the same
-   recipe `capture-readme-screenshots.mjs` uses for its README shot) and
-   screenshots the resulting highlight-to-refine dialog (`role="dialog"`,
-   `aria-label="PRD edit actions"` — `src/components/SelectionActionDialog.tsx`).
-   Verifies the popover still opens off a real text selection and renders with
-   real PRD content behind it; it asserts the dialog's *presence*, not its
-   width, so it stays green across dialog-sizing changes. Dismissed with
-   Escape afterward so the readiness-gate commit that follows starts from a
-   clean PRD view.
-7. **Downstream asset generation** (unless `--skip-assets`). The plan is
+5. `--interactions` only: the canned interactive loop — programmatic PRD text
+   selection → the `PRD edit actions` dialog → canned edit instruction →
+   branch conversation (real Gemini call) → **Consolidate to Document** →
+   scope choice → generate patch (real Gemini call) → **Commit to New Spine**.
+   The commit is best-effort: its exact-substring anchor replace can
+   legitimately fail on LLM formatting drift, and the error state is itself
+   useful visual coverage.
+6. **Downstream asset generation** (unless `--skip-assets`). The plan is
    committed through the readiness gate — top-bar **Review readiness** →
    ReadinessCheckpoint (**Commit plan** when ready-to-build, otherwise the
    **Proceed with accepted risk** override, filling the rationale/containment
@@ -53,38 +65,61 @@ network requests, and the generation outcome.
    the persisted `artifacts[projectId]` array (every *visible* core subtype has
    a `currentVersionId`) **and** the workspace going quiescent (no spinning
    `StatusDot`s in `nav[aria-label="Artifacts"]`, no "Creating your build
-   assets…" pane). Each generated artifact — Design System, User Flows, Screens,
-   Data Model, Implementation Plan, Dependency Graph — is then screenshotted from
-   its sidebar row. Progress screenshots are captured every ~45s.
-8. The History pipeline-stage tab.
-9. A mobile-viewport (390×844) pass, resized in place rather than reloaded
-   (see "Known local-run noise & caveats"), covering:
-   - `prd-mobile` — the PRD (Plan stage).
-   - `decisions-mobile` — navigates to the Challenge stage and shoots the
-     Decision Center's queue list, explicitly landing on its "Decisions" tab
-     (the tab's accessible name carries a dynamic record count, so it's
-     matched by prefix). This is reachable regardless of whether the plan was
-     committed — the Challenge stage only requires a structured PRD.
-   - `decision-detail-mobile` — taps the first row in the decision queue
-     (`aside[aria-label="Decision queue"]`, excluding the `role="tab"` view
-     switcher above it) to open the mobile detail view, screenshots it, then
-     uses "Back to decisions" to return to the list so later steps don't
-     inherit a stranded detail view.
-   - `artifact-design-system-mobile` (only attempted when the asset bundle was
-     triggered) — navigates to the Build/Explore stage, opens the mobile
-     off-canvas artifact drawer (`Open artifact list`, same
-     hamburger-open/pick/auto-close pattern as
-     `capture-demo-screenshots.mjs`'s `selectArtifact()`), opens Design System,
-     and shoots it. Verifies the artifact workspace's mobile density/drawer
-     still works, not just the desktop sidebar layout.
+   assets…" pane). Progress screenshots are captured every ~45s.
+7. **The full view/tab inventory walk**, per requested viewport:
+   - PRD **Overview** and **Features** tabs (`#prd-tab-*`).
+   - The **Challenge** stage: Decision Center (queue + first record detail),
+     **Review findings**, **Review history**.
+   - Every artifact: Design System; User Flows (plus up to 3 per-flow shots
+     via the `Flow navigation` landmark); Screens (list, then the first
+     screen's detail **Overview / Flow / Mockups** tabs); Data Model;
+     Implementation Plan (**Build Brief / Roadmap / Prompts / Validation /
+     Coverage** section tabs); Dependency Graph.
+   - The History stage.
+8. `--interactions` only: answering one decision in the Decision Center
+   (confirm → option+save → defer, whichever the record shape offers),
+   captured after the pristine inventory shots.
+9. A `state.json` export of the project's localStorage for later `--state`
+   replays.
 
-   These three additions verify the Decision Center's mobile list/detail flow
-   and the Design System artifact's mobile rendering, distinct from the
-   desktop-only per-artifact loop in step 7.
+Inventory steps are best-effort: a missed selector records the step as
+`skipped` (with the error) and the run continues, so a partially-broken UI
+still yields reviewable screenshots rather than a dead run.
 
-Steps 5–9 are best-effort: a missed selector records the step as `skipped`
-(with the error) and the run continues, so a partially-broken UI still yields
-reviewable screenshots rather than a dead run.
+## Scenario flags
+
+- `--viewport=desktop|mobile|both` — which viewport(s) the inventory walk
+  runs at (desktop 1440×900 default; mobile 390×844 navigates artifacts via
+  the `Open artifact list` drawer). Generation itself always runs desktop.
+- `--views=<csv>` — restrict the inventory to these slugs: `prd`,
+  `challenge`, `design-system`, `user-flows`, `screens`, `data-model`,
+  `implementation-plan`, `dependency-graph`, `history`. A view whose data was
+  never generated (e.g. `implementation-plan` against a `--skip-assets` dump)
+  degrades to `skipped`.
+- `--state=<file>` — **replay mode**: rehydrate a previous live run's
+  `state.json`, skip all generation, and jump straight to the inventory walk.
+  Zero LLM spend — the "screenshot an existing project" tier.
+- `--interactions` — opt into the canned interactive loop (live mode only;
+  ~2 extra Gemini calls).
+
+### How `--state` replay works (and the deep-link race)
+
+On a cold load the project store's **first** hydration reads the
+un-namespaced base key `synapse-projects-storage` — the dev-user namespace
+(`synapse-projects-storage::u:dev-user`) only applies after `refreshSession()`
+runs in an effect and triggers a re-hydrate. `ProjectWorkspace`'s
+"Project not found → navigate home" effect fires on the first render, before
+that second hydration, which is why reloading `/p/:id` by hand can bounce.
+The harness therefore seeds the replayed project blob under **both** storage
+names via `addInitScript`, making the very first hydration correct — no retry
+loop. If the replay step still fails, treat it as a regression signal in the
+boot sequence (`App.tsx` / `userScope.ts`), not harness flakiness.
+
+`state.json` is written after a ≥700ms settle (the store's localStorage
+writer is debounced at 500ms). It contains only `synapse-projects-storage*`
+keys and the tour flag — never the Gemini key. Mockup images are **not**
+included (they live in IndexedDB), which costs nothing here because they
+never render locally anyway (see below).
 
 **Mockup images never render in this local harness.** The mockup *spec* (the
 screen list) is generated by Gemini as part of the bundle, but the per-screen
@@ -110,15 +145,16 @@ only be exercised against a real deployment (e.g. a Vercel preview) where the
   cap**, not a production key. The script seeds it into the browser's
   localStorage only (the same slot the app itself uses; the app's legacy-key
   migration namespaces it to the active user on first read), redacts it from
-  every captured log line, and never writes it into `report.json`. Never
-  commit a key; in Claude Code remote sessions, set it as an environment
-  variable in the environment's settings.
+  every captured log line, and never writes it into `report.json` or
+  `state.json`. Never commit a key; in Claude Code remote sessions, set it as
+  an environment variable in the environment's settings.
 - **Cost:** a default live run ≈ one full PRD generation (Pass A + consistency
   review) **plus** the downstream asset bundle (design system, user flows,
   screen inventory, data model, implementation plan, hidden UI components, and
-  the mockup spec — each a Gemini call). Pass `--skip-assets` to stop after the
-  PRD when you only need to assess the plan surfaces. Budget accordingly before
-  looping runs.
+  the mockup spec — each a Gemini call). `--interactions` adds ~2 more calls
+  (branch reply + consolidation patch). Pass `--skip-assets` to stop after the
+  PRD when you only need to assess the plan surfaces, or use `--state` replays
+  (free) for iteration. Budget accordingly before looping live runs.
 
 If you later need coverage of *server-synced* behavior (cross-device projects,
 snapshots), do it against a **Vercel preview deployment** with a dedicated
@@ -146,25 +182,32 @@ through an undici `ProxyAgent` pinned to the proxy. Force with
   the same events); anything in `httpErrors` proper is real signal.
 - **Vercel Analytics script failures** (`va.vercel-scripts.com`) are bucketed
   under `ignoredRequests` — blocked egress, not an app problem.
-- **Deep-link reload races store rehydration.** Reloading `/p/:id` directly
-  can bounce to home with a "Project not found" toast because the per-user
-  project store rehydrates after the route resolves. The mobile pass
-  deliberately resizes in place instead of reloading. If you're
-  investigating that behavior itself, it may be a real UX issue on
-  signed-in refresh — but it is not a harness failure.
+- **Consolidation commit failures under `--interactions`** can be legitimate
+  LLM formatting drift (the commit is an exact-substring anchor replace), not
+  a harness or app bug — the captured error state is still useful coverage.
+- **Deep-link reload races store rehydration** for *hand-driven* reloads of
+  `/p/:id` (see the `--state` section for the mechanism). The harness's
+  replay mode seeds around it; the mobile pass resizes in place rather than
+  reloading.
 
 ## How Claude Code should use this (the review loop)
 
-The `/e2e` project skill (`.claude/skills/e2e/SKILL.md`) encodes this, but the
-short version:
+The `/e2e` project skill (`.claude/skills/e2e/SKILL.md`) encodes this — including
+the **scope-first questionnaire** (viewport / full-pipeline-vs-subset-vs-
+branch-diff / critique) CLAUDE.md requires before running — but the short
+version:
 
-1. `npm run e2e` (or `e2e:smoke` when no key is available).
+1. Scope the run with the user, then `npm run e2e` with the mapped flags (or
+   `e2e:smoke` / `--state` when no key is available).
 2. **Read every PNG** in the output directory — actually look at them. Judge
    layout breaks, overflow/clipping, unreadable contrast, empty states shown
    where content was expected, spinners that never resolved, mobile issues.
 3. Read `report.json` — failed steps, console errors, page errors, failed
    requests are all defects or leads.
-4. Fix, re-run, re-compare against the previous run's directory.
+4. If asked for a critique, write a severity-ordered `critique.md` into the
+   run directory (one section per screenshot).
+5. Fix, re-run (prefer a `--state` + `--views` subset), re-compare against
+   the previous run's directory.
 
 ## Maintenance
 
@@ -175,16 +218,27 @@ update the script in the same change (treat drift here like docs drift):
   `Project name…` placeholder, the `Generate PRD` submit label.
 - Start-mode dialog: "How would you like to start?", the "Draft a working
   plan" option, the `Cancel` aria-label.
-- PRD tabs: `#prd-tab-overview|features` ids in
-  `src/components/prd/PrdViewTabs.tsx` (`PRD_VIEWS` in
-  `src/lib/derive/prdViews.ts` — decisions are not a PRD tab; they live in the
-  Decision Center on the Challenge stage).
 - Pipeline-stage nav: `PipelineStageBar.tsx` — the
   `nav[aria-label="Planning progression"]` buttons, whose accessible names are
-  `"<Label>: <description>"` (matched by label prefix; the outputs stage is
-  labeled `Explore` before readiness and `Build` after).
+  `"<Label>: <description>"` (matched by label prefix: `Plan:`, `Challenge:`,
+  `Explore:`/`Build:` — outputs stage label flips at readiness — `History:`).
+- PRD tabs: `#prd-tab-overview|features` ids in
+  `src/components/prd/PrdViewTabs.tsx`; the PRD content panel id prefix
+  `prd-panel-` (used for programmatic selection in `--interactions`).
+- Challenge stage: the `Decision Center` / `Review findings` /
+  `Review history` tab buttons (`ReviewWorkspace.tsx`), the
+  `Decision queue` / `Decision detail` aria-labels and the
+  `Yes, that's right` / `Save decision` / `Defer` answer buttons
+  (`DecisionCenter.tsx`).
+- Selection→branch loop (`--interactions`): the
+  `[role="dialog"][aria-label="PRD edit actions"]` dialog and its
+  `How should this change?` input + `Branch` submit
+  (`SelectionActionDialog.tsx`), the `Consolidate to Document` bar
+  (`BranchList.tsx`), and the `Generate Local|Global Patch` /
+  `Commit to New Spine` buttons (`ConsolidationModal.tsx`).
 - PRD settle signal: `SpineVersion.generationPhase` and the
-  `synapse-projects-storage*` persist key prefix.
+  `synapse-projects-storage*` persist key prefix (also the `--state`
+  export/seed contract — base key + `::u:dev-user`).
 - Commit-to-build path: the top-bar `Review readiness` button
   (`ProjectWorkspace.tsx`), the `Commit plan` / `Proceed with accepted risk` /
   `Proceed with N open items` buttons and `#readiness-rationale` /
@@ -198,19 +252,15 @@ update the script in the same change (treat drift here like docs drift):
   `currentVersionId` for the visible core subtypes (`design_system`,
   `user_flows`, `screen_inventory`, `data_model`, `implementation_plan`) plus a
   quiescent workspace — no `.animate-spin` in `nav[aria-label="Artifacts"]` and
-  no "Creating your build assets…" pane. Artifact sidebar rows are selected by
-  visible title (`Design System`, `User Flows`, `Screens`, `Data Model`,
-  `Implementation Plan`, `Dependency Graph`).
-- Refine popover: `#prd-panel-overview` (selection target) and the dialog's
-  `role="dialog"` / `aria-label="PRD edit actions"`
-  (`src/components/SelectionActionDialog.tsx`).
-- Decision Center mobile: the pipeline stage nav's `Challenge:` button, the
-  "Decision Center" tab button (`src/components/review/ReviewWorkspace.tsx`,
-  aria-label prefix — it appends a record count), the record queue
-  `aside[aria-label="Decision queue"]` (`src/components/review/DecisionCenter.tsx`
-  — its rows are plain buttons, the tab switcher above them is `role="tab"`),
-  and the mobile-only "Back to decisions" button.
-- Design System mobile: the pipeline stage nav's `Build:`/`Explore:` button,
-  the mobile drawer trigger `Open artifact list`
-  (`src/components/ArtifactWorkspace.tsx`), same as the desktop artifact
-  sidebar (`nav[aria-label="Artifacts"]` row selected by title).
+  no "Creating your build assets…" pane.
+- Artifact sidebar rows are selected by visible title (`Design System`,
+  `User Flows`, `Screens`, `Data Model`, `Implementation Plan`,
+  `Dependency Graph`); on mobile via the `Open artifact list` drawer button.
+- In-artifact navigation: the `Implementation plan sections` nav with labels
+  `Build Brief` / `Roadmap` / `Prompts` / `Validation` / `Coverage`
+  (`ConsolidatedPlanView.tsx` — `capture-demo-screenshots.mjs` shares these),
+  the `Screen detail sections` tablist (`Overview` / `Flow` / `Mockups`) +
+  screen cards (`main button:has(h4)`) + the `All screens` back button
+  (`ScreenDetailView.tsx`), and the `Flow navigation` landmark with
+  `Flow N: …` buttons (`FlowSidebar.tsx` — note `aria-label="Flows"` exists
+  only in the collapsed rail; don't use it).
