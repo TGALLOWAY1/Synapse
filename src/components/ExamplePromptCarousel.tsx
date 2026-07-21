@@ -85,8 +85,6 @@ export function ExamplePromptCarousel({ examples, onSelect }: ExamplePromptCarou
                         </button>
                     ))}
                 </div>
-                {/* Right-edge fade — matches the page background (bg-neutral-50) */}
-                <div className="pointer-events-none absolute inset-y-0 right-0 w-12 bg-gradient-to-l from-neutral-50" />
             </div>
             {canScrollAtAll && (
                 <div className="hidden md:flex items-center justify-end gap-1 mt-1">
