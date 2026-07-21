@@ -43,7 +43,7 @@ describe('ProgressTimeline — desktop', () => {
         expect(screen.getAllByText(/Actual:/).length).toBeGreaterThan(0);
         expect(screen.getAllByText(/Est\./).length).toBeGreaterThan(0);
         expect(screen.getByText('Failed')).toBeInTheDocument();
-        // appears both in the header pill and the in-progress step's time block
+        // the header status pill; step time blocks carry only timing text
         expect(screen.getAllByText('In progress').length).toBeGreaterThan(0);
 
         // model chips always visible

@@ -108,9 +108,6 @@ export function PresetCard({
                     </span>
                 )}
             </div>
-            {preset.tone && (
-                <p className="mt-0.5 text-xs font-medium text-neutral-500">{preset.tone}</p>
-            )}
             <p className="mt-1 text-xs text-neutral-500 leading-relaxed">{preset.detail}</p>
             {preset.recommendedUseCases && preset.recommendedUseCases.length > 0 && (
                 <p className="mt-1.5 text-[11px] text-neutral-400">

@@ -314,23 +314,32 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">
                         How This Appears in the Product
                     </h3>
-                    <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
-                        <table className="w-full text-xs">
-                            <thead>
-                                <tr className="bg-neutral-50 text-neutral-500 uppercase tracking-wider text-[10px]">
-                                    <th className="text-left px-3 py-2 font-medium">Field</th>
-                                    <th className="text-left px-3 py-2 font-medium">UI behavior</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {parsed.productMapping.map((m, mi) => (
-                                    <tr key={mi} className="border-t border-neutral-100 align-top">
-                                        <td className="px-3 py-1.5 font-mono text-neutral-800 whitespace-nowrap">{m.field}</td>
-                                        <td className="px-3 py-1.5 text-neutral-600">{m.uiBehavior}</td>
+                    {/* `relative` sits outside the scroll container so the fade cue
+                        stays pinned to the visible right edge instead of scrolling
+                        away with the table (mirrors ExamplePromptCarousel). */}
+                    <div className="relative">
+                        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
+                            <table className="w-full min-w-[480px] text-xs">
+                                <thead>
+                                    <tr className="bg-neutral-50 text-neutral-500 uppercase tracking-wider text-[10px]">
+                                        <th className="text-left px-3 py-2 font-medium">Field</th>
+                                        <th className="text-left px-3 py-2 font-medium">UI behavior</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {parsed.productMapping.map((m, mi) => (
+                                        <tr key={mi} className="border-t border-neutral-100 align-top">
+                                            <td className="px-3 py-1.5 font-mono text-neutral-800 whitespace-nowrap">{m.field}</td>
+                                            <td className="px-3 py-1.5 text-neutral-600">{m.uiBehavior}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 right-0 w-8 rounded-r-xl bg-gradient-to-l from-white to-transparent md:hidden"
+                        />
                     </div>
                 </section>
             )}
@@ -338,27 +347,33 @@ function DataModelBody({ parsed, initialEntityName, initialMemberName, initialMe
             {parsed.apiEndpoints.length > 0 && (
                 <section className="space-y-2">
                     <h3 className="text-xs font-semibold uppercase tracking-wider text-neutral-500">API Endpoints</h3>
-                    <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
-                        <table className="w-full text-xs">
-                            <thead>
-                                <tr className="bg-neutral-50 text-neutral-500 uppercase tracking-wider text-[10px]">
-                                    <th className="text-left px-3 py-2 font-medium">Method</th>
-                                    <th className="text-left px-3 py-2 font-medium">Path</th>
-                                    <th className="text-left px-3 py-2 font-medium">Description</th>
-                                    <th className="text-left px-3 py-2 font-medium">Entity</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                {parsed.apiEndpoints.map((ep, ei) => (
-                                    <tr key={ei} className="border-t border-neutral-100 align-top">
-                                        <td className="px-3 py-1.5 whitespace-nowrap"><MethodPill method={ep.method} /></td>
-                                        <td className="px-3 py-1.5 font-mono text-neutral-800 whitespace-nowrap">{ep.path}</td>
-                                        <td className="px-3 py-1.5 text-neutral-600">{ep.description}</td>
-                                        <td className="px-3 py-1.5 text-neutral-700 whitespace-nowrap">{ep.entity ?? ''}</td>
+                    <div className="relative">
+                        <div className="bg-white rounded-xl border border-neutral-200 shadow-sm overflow-x-auto">
+                            <table className="w-full min-w-[640px] text-xs">
+                                <thead>
+                                    <tr className="bg-neutral-50 text-neutral-500 uppercase tracking-wider text-[10px]">
+                                        <th className="text-left px-3 py-2 font-medium">Method</th>
+                                        <th className="text-left px-3 py-2 font-medium">Path</th>
+                                        <th className="text-left px-3 py-2 font-medium">Description</th>
+                                        <th className="text-left px-3 py-2 font-medium">Entity</th>
                                     </tr>
-                                ))}
-                            </tbody>
-                        </table>
+                                </thead>
+                                <tbody>
+                                    {parsed.apiEndpoints.map((ep, ei) => (
+                                        <tr key={ei} className="border-t border-neutral-100 align-top">
+                                            <td className="px-3 py-1.5 whitespace-nowrap"><MethodPill method={ep.method} /></td>
+                                            <td className="px-3 py-1.5 font-mono text-neutral-800 whitespace-nowrap">{ep.path}</td>
+                                            <td className="px-3 py-1.5 text-neutral-600">{ep.description}</td>
+                                            <td className="px-3 py-1.5 text-neutral-700 whitespace-nowrap">{ep.entity ?? ''}</td>
+                                        </tr>
+                                    ))}
+                                </tbody>
+                            </table>
+                        </div>
+                        <div
+                            aria-hidden="true"
+                            className="pointer-events-none absolute inset-y-0 right-0 w-8 rounded-r-xl bg-gradient-to-l from-white to-transparent md:hidden"
+                        />
                     </div>
                 </section>
             )}

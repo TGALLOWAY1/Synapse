@@ -71,6 +71,13 @@ interface StructuredPRDViewProps {
     view?: PrdViewId;
     onViewChange?: (view: PrdViewId) => void;
     onOpenDecisions?: (recordId?: string, returnTo?: PlanningReturnTarget) => void;
+    /**
+     * Fired the moment a branch is created from the selection popover (before the
+     * AI reply resolves). Hosts use it to reveal the branches sidebar so the new
+     * branch thread + "Consolidate to Document" bar are immediately visible.
+     * Optional — standalone/legacy usages (e.g. tests) render unchanged.
+     */
+    onBranchCreated?: () => void;
 }
 
 const EMPTY_PLANNING_RECORDS: PlanningRecord[] = [];
@@ -94,7 +101,7 @@ const SECTION_LABELS: Record<'vision' | 'coreProblem' | 'architecture' | 'target
     risks: 'Risks',
 };
 
-export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange, onOpenDecisions }: StructuredPRDViewProps) {
+export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly, view, onViewChange, onOpenDecisions, onBranchCreated }: StructuredPRDViewProps) {
     const { editSpineStructuredPRD, createBranch, addBranchMessage, branches } = useProjectStore();
     const planningRecords = useProjectStore(state => state.planningRecords[projectId] ?? EMPTY_PLANNING_RECORDS);
     const [editingSection, setEditingSection] = useState<EditingSection>(null);
@@ -202,6 +209,9 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
             const anchorText = selection.text;
             const userIntent = rawIntent.trim();
             const { branchId } = createBranch(projectId, spineId, anchorText, userIntent);
+            // Reveal the branches sidebar right away — before awaiting the AI
+            // reply — so the new thread and its Consolidate bar are visible.
+            onBranchCreated?.();
             clear();
             setIntent('');
             setMobileSelectMode(false);

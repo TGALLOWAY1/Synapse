@@ -16,3 +16,10 @@
 .scrollbar-hide::-webkit-scrollbar {
   display: none;
 }
+
+/* Live selection-anchor highlight painted by SelectionActionDialog via the CSS
+   Custom Highlight API (registry key `prd-refine-anchor`). Matches the persisted
+   branch-anchor indigo tint so the live anchor reads as the same family. */
+::highlight(prd-refine-anchor) {
+  background-color: rgb(99 102 241 / 0.22);
+}

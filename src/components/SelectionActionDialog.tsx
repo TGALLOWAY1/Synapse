@@ -9,7 +9,10 @@ import {
 /** Action chips shown in the dialog. Desktop prefills; mobile one-taps. */
 export const SELECTION_ACTIONS = ['Clarify', 'Expand', 'Specify', 'Alternative', 'Replace'] as const;
 
-const POPOVER_SIZE = { width: 340, height: 220 };
+const POPOVER_SIZE = { width: 480, height: 280 };
+
+/** Registry key for the live selection-anchor highlight (CSS Custom Highlight API). */
+const ANCHOR_HIGHLIGHT_NAME = 'prd-refine-anchor';
 
 interface SelectionActionDialogProps {
     selection: SelectionInfo;
@@ -72,6 +75,23 @@ export function SelectionActionDialog({
             if (onPointerDown) document.removeEventListener('pointerdown', onPointerDown);
         };
     }, [onDismiss, isMobile]);
+
+    // Live anchor highlight (CSS Custom Highlight API). While the dialog is open
+    // we paint the selected range with `::highlight(prd-refine-anchor)` so the
+    // anchor stays visible even after the native selection collapses — which it
+    // does the moment the desktop textarea takes focus (`autoFocus`) or the
+    // mobile soft keyboard opens. Feature-detected: environments without the API
+    // (jsdom, older browsers) silently fall back to the native selection.
+    // Shared by both the desktop and mobile branches (runs above the split).
+    const anchorRange = selection.range;
+    useEffect(() => {
+        if (typeof CSS === 'undefined' || !('highlights' in CSS)) return;
+        if (!anchorRange) return;
+        CSS.highlights.set(ANCHOR_HIGHLIGHT_NAME, new Highlight(anchorRange));
+        return () => {
+            CSS.highlights.delete(ANCHOR_HIGHLIGHT_NAME);
+        };
+    }, [anchorRange]);
 
     const anchorPreview =
         selection.text.length > 50 ? `${selection.text.substring(0, 50)}...` : selection.text;
@@ -153,14 +173,14 @@ export function SelectionActionDialog({
             aria-label="PRD edit actions"
             onMouseDown={e => e.preventDefault()}
             onMouseUp={e => e.stopPropagation()}
-            className="fixed z-50 flex w-[340px] -translate-x-1/2 flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-2xl"
+            className="fixed z-50 flex w-[480px] -translate-x-1/2 flex-col gap-3 rounded-xl border border-neutral-200 bg-white p-4 shadow-2xl"
             style={{ top: pos.top, left: pos.left }}
         >
             <div className="text-xs text-neutral-500">
                 <span className="font-semibold text-neutral-700">Anchor:</span> "{anchorPreview}"
             </div>
 
-            <div className="mb-2 mt-1 flex flex-wrap gap-1.5">
+            <div className="mb-2 mt-1 flex flex-nowrap gap-1.5">
                 {SELECTION_ACTIONS.map(tag => {
                     const isActive = tag === activeTag;
                     return (
@@ -171,8 +191,8 @@ export function SelectionActionDialog({
                             onClick={() => setIntent(tag + ': ')}
                             className={
                                 isActive
-                                    ? 'rounded-full border border-indigo-600 bg-indigo-600 px-2.5 py-1.5 text-xs font-medium text-white shadow-sm transition'
-                                    : 'rounded-full border border-neutral-200 bg-neutral-50 px-2.5 py-1.5 text-xs text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-100'
+                                    ? 'flex-1 rounded-full border border-indigo-600 bg-indigo-600 px-2 py-1.5 text-xs font-medium text-white shadow-sm transition'
+                                    : 'flex-1 rounded-full border border-neutral-200 bg-neutral-50 px-2 py-1.5 text-xs text-neutral-700 shadow-sm transition hover:border-neutral-300 hover:bg-neutral-100'
                             }
                         >
                             {tag}
@@ -183,23 +203,34 @@ export function SelectionActionDialog({
 
             <IntentHelperInline text={intent} />
 
-            <form onSubmit={onSubmit} className="flex gap-2">
-                <input
+            <form onSubmit={onSubmit} className="flex flex-col gap-2">
+                <textarea
                     autoFocus
-                    type="text"
+                    rows={3}
                     value={intent}
                     onChange={e => setIntent(e.target.value)}
+                    onKeyDown={e => {
+                        if (e.key === 'Enter' && !e.shiftKey) {
+                            e.preventDefault();
+                            onSubmit(e);
+                        }
+                    }}
                     placeholder="How should this change?"
-                    className="flex-1 rounded border border-neutral-200 bg-white px-2 py-1.5 text-sm text-neutral-900 outline-none transition focus:border-indigo-500"
+                    className="w-full resize-none rounded-lg border border-neutral-200 px-3 py-2 text-sm focus:border-indigo-500 focus:outline-none"
                     disabled={isSubmitting}
                 />
-                <button
-                    type="submit"
-                    disabled={isSubmitting || !intent.trim()}
-                    className="min-w-[60px] rounded bg-indigo-600 px-3 py-1.5 text-sm text-white transition hover:bg-indigo-700 disabled:opacity-50"
-                >
-                    {isSubmitting ? 'Creating...' : 'Branch'}
-                </button>
+                <div className="flex items-center justify-between gap-2">
+                    <span className="text-[11px] text-neutral-400">
+                        Enter to branch · Shift+Enter for a new line
+                    </span>
+                    <button
+                        type="submit"
+                        disabled={isSubmitting || !intent.trim()}
+                        className="min-w-[60px] rounded bg-indigo-600 px-3 py-1.5 text-sm text-white transition hover:bg-indigo-700 disabled:opacity-50"
+                    >
+                        {isSubmitting ? 'Creating...' : 'Branch'}
+                    </button>
+                </div>
             </form>
         </div>
     );

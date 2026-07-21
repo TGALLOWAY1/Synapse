@@ -282,4 +282,42 @@ describe('AssumptionValidationPanel', () => {
         expect(screen.getByText('Optional assumption validation')).toBeInTheDocument();
         expect(screen.getByText(/not consequential enough to require a formal test/i)).toBeInTheDocument();
     });
+
+    it('hides the workflow-state pill while validation is not yet planned', () => {
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({ workflowState: 'not_planned' })} requiresValidation hasPlanImpact={false} {...callbacks()} />);
+
+        expect(screen.queryByText('Not planned')).not.toBeInTheDocument();
+    });
+
+    it('shows the workflow-state pill once validation has any recorded progress', () => {
+        const { unmount } = render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({
+            currentPlan: plan, workflowState: 'completed', activeEvidence: [evidence()],
+            acceptedConclusion: 'supported', conclusionIsCurrent: true,
+        })} requiresValidation hasPlanImpact={false} {...callbacks()} />);
+        expect(screen.getByText('Outcome recorded')).toBeInTheDocument();
+        unmount();
+
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({
+            currentPlan: plan, workflowState: 'due_for_review', activeEvidence: [evidence()],
+            acceptedConclusion: 'supported', conclusionIsCurrent: false, hasHistoricalValidation: true,
+        })} requiresValidation hasPlanImpact={false} {...callbacks()} />);
+        expect(screen.getByText('Due for review')).toBeInTheDocument();
+    });
+
+    it('omits the evidence-conclusion block when there is no conclusion and no historical validation', () => {
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation()} requiresValidation hasPlanImpact={false} {...callbacks()} />);
+
+        expect(screen.queryByText('Evidence conclusion')).not.toBeInTheDocument();
+        expect(screen.queryByText('No current conclusion')).not.toBeInTheDocument();
+    });
+
+    it('shows the evidence-conclusion block with an amber caveat for a historical-only validation', () => {
+        render(<AssumptionValidationPanel recordId="assumption-1" validation={baseValidation({
+            hasHistoricalValidation: true, conclusionIsCurrent: false,
+        })} requiresValidation hasPlanImpact={false} {...callbacks()} />);
+
+        expect(screen.getByText('Evidence conclusion')).toBeInTheDocument();
+        expect(screen.getByText('No current conclusion')).toBeInTheDocument();
+        expect(screen.getByText(/Earlier validation is historical and cannot support the current assumption/)).toBeInTheDocument();
+    });
 });

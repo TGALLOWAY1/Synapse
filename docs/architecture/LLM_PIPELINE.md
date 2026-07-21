@@ -420,9 +420,11 @@
       Because the Mark-as-Final gate only fires once (and never for projects
       finalized before presets existed), the **Design System artifact** carries a
       `DesignDirectionControl` (`src/components/DesignDirectionControl.tsx`,
-      presentational) above its content in `ArtifactWorkspace`: it shows the
-      current direction (or an "AI decides" fallback) and offers **Change
-      direction** and **Regenerate**. **Change direction opens
+      presentational) above its content in `ArtifactWorkspace`: a single-line
+      row showing the current direction (or an "AI decides" fallback) with a
+      right-aligned **Change direction** action — there is no standalone
+      Regenerate button, since changing direction chains into the
+      regenerate-confirm below. **Change direction opens
       `ChangeDirectionModal` (`src/components/setup/ChangeDirectionModal.tsx`),
       which deliberately mirrors the setup-stage `DesignSetupStep`** — same light
       surface and large `DesignPresetGrid` preview cards (the card grid is

@@ -489,7 +489,7 @@ async function captureViews(page, viewport, wantedViews) {
             await page.getByRole('button', { name: /^Decision Center/ }).click({ timeout: 5000 });
             await settle(1000);
             await fullShot(page, `challenge-decision-center${suffix}`);
-            const firstRecord = page.locator('[aria-label="Decision queue"] button').first();
+            const firstRecord = page.locator('[aria-label="Decision queue"] button:not([role="tab"])').first();
             if (await firstRecord.isVisible().catch(() => false)) {
                 await firstRecord.click();
                 await settle(800);
@@ -681,7 +681,7 @@ async function runDecisionInteraction(page) {
         await gotoStage(page, 'review');
         await page.getByRole('button', { name: /^Decision Center/ }).click({ timeout: 5000 });
         await settle(1000);
-        const first = page.locator('[aria-label="Decision queue"] button').first();
+        const first = page.locator('[aria-label="Decision queue"] button:not([role="tab"])').first();
         if (!(await first.isVisible().catch(() => false))) throw new Error('no decision records to answer');
         await first.click();
         await settle(800);

@@ -317,7 +317,7 @@ describe('DecisionCenter', () => {
     it('renders an explicit completed state and decision log', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...callbacks()} />);
         expect(screen.getByText('Nothing needs attention right now')).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: 'Resolved & history' }));
+        fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
     });
 

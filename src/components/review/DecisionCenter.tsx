@@ -8,6 +8,7 @@ import {
     type AssumptionValidationPlanInput,
     type AssumptionValidationView,
 } from './AssumptionValidationPanel';
+import { UnderlineTabs, type UnderlineTab } from '../ui/UnderlineTabs';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
 import { planningRecordCopy, planningRecordDominantCondition } from '../../lib/planning/planningLanguage';
 
@@ -221,6 +222,10 @@ export function DecisionCenter({
         && selected.validation?.conclusionIsCurrent
         && Boolean(selected.validation.acceptedConclusion);
     const unresolvedCount = records.filter(needsAttention).length;
+    const decisionQueueTabs: UnderlineTab[] = [
+        { id: 'needs_review', label: 'Needs attention' },
+        { id: 'log', label: 'Resolved & history' },
+    ];
 
     useEffect(() => {
         if (mobileDetailOpen) detailHeadingRef.current?.focus();
@@ -301,11 +306,16 @@ export function DecisionCenter({
                 </div>
             )}
 
-            <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[300px_minmax(0,1fr)]">
+            <div className="flex min-h-0 flex-1 flex-col md:grid md:grid-cols-[320px_minmax(0,1fr)] xl:grid-cols-[360px_minmax(0,1fr)]">
                 <aside className={`${mobileDetailOpen ? 'hidden md:flex' : 'flex'} min-h-0 flex-1 flex-col border-r border-neutral-200 bg-white`} aria-label="Decision queue">
-                    <div className="flex shrink-0 border-b border-neutral-100 p-2">
-                        <button type="button" onClick={() => setView('needs_review')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'needs_review' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Needs attention</button>
-                        <button type="button" onClick={() => setView('log')} className={`min-h-10 flex-1 rounded-lg px-2 text-sm font-semibold ${view === 'log' ? 'bg-indigo-50 text-indigo-700' : 'text-neutral-500 hover:bg-neutral-50'}`}>Resolved &amp; history</button>
+                    <div className="shrink-0 px-2 pt-1">
+                        <UnderlineTabs
+                            tabs={decisionQueueTabs}
+                            activeId={view}
+                            onChange={id => setView(id as 'needs_review' | 'log')}
+                            ariaLabel="Decision queue view"
+                            className="[&>button]:flex-1"
+                        />
                     </div>
                     <div className="min-h-0 flex-1 overflow-y-auto p-2">
                         {visible.length === 0 ? (
@@ -338,7 +348,7 @@ export function DecisionCenter({
                     {!selected ? (
                         <div className="mx-auto max-w-xl px-5 py-16 text-center text-sm text-neutral-500">Select a decision to inspect its reasoning and history.</div>
                     ) : (
-                        <div className="mx-auto max-w-3xl px-4 py-5 sm:px-7 sm:py-8">
+                        <div className="mx-auto w-full max-w-4xl xl:max-w-5xl px-4 py-5 sm:px-7 sm:py-8">
                             <button type="button" onClick={() => setMobileDetailOpen(false)} className="mb-4 inline-flex min-h-11 items-center gap-2 text-sm font-medium text-neutral-600 md:hidden"><ArrowLeft size={16} /> Back to decisions</button>
                             <div className="text-xs font-semibold uppercase tracking-wide text-amber-700">{dominantConditionLabel(selected)}</div>
                             <h2 ref={detailHeadingRef} tabIndex={-1} className="mt-2 text-2xl font-bold leading-tight text-neutral-950">{selected.title}</h2>

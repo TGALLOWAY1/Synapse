@@ -77,7 +77,7 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
     const { activeId, scrollTo } = useArtifactOutline(ids);
 
     return (
-        <div className="space-y-6">
+        <div className="space-y-5">
             <ArtifactOutlineNav
                 title="Sections"
                 items={items}
@@ -121,13 +121,15 @@ function TokenizedDesignSystem({ tokens, projectId }: { tokens: DesignTokens; pr
 function DesignDirectionNote({ projectId }: { projectId?: string }) {
     const presetId = useProjectStore(s => (projectId ? s.projects[projectId]?.designSystemPreset : undefined));
     const presetLabel = getDesignSystemPresetLabel(presetId);
+    const text = `This design system is your project's visual source of truth — mockups and external image prompts follow it.${
+        presetLabel ? ` Direction: ${presetLabel}.` : ''
+    }`;
     return (
-        <div className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-3 text-xs text-indigo-900">
-            <p>
-                <span className="font-semibold">This design system is your project's visual source of truth</span>
-                {' '}— mockups and external image prompts follow it.
-                {presetLabel ? <> Direction: <span className="font-medium">{presetLabel}</span>.</> : null}
-            </p>
+        <div
+            className="rounded-lg border border-indigo-200 bg-indigo-50/60 px-4 py-2 text-[11px] text-indigo-900 truncate"
+            title={text}
+        >
+            {text}
         </div>
     );
 }
@@ -200,21 +202,18 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
         ...Object.keys(grouped).filter(n => !namespaceOrder.includes(n)).sort(),
     ];
 
+    // Namespace clusters flow inline so several groups share a row on desktop
+    // instead of each namespace forcing a mostly-empty full-width grid row.
     return (
-        <div className="space-y-6">
+        <div className="flex flex-wrap gap-x-8 gap-y-4">
             {namespaces.map(ns => (
                 <div key={ns}>
-                    <div className="flex items-baseline justify-between mb-3">
-                        <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500">
-                            {NAMESPACE_LABEL[ns] ?? ns}
-                        </p>
-                        <p className="text-[11px] text-neutral-400 font-mono">
-                            {grouped[ns].length} {grouped[ns].length === 1 ? 'token' : 'tokens'}
-                        </p>
-                    </div>
-                    <div className="flex rounded-2xl overflow-hidden border border-neutral-200 h-[140px] shadow-sm bg-white">
+                    <p className="text-[11px] font-bold uppercase tracking-wide text-neutral-500 mb-1.5">
+                        {NAMESPACE_LABEL[ns] ?? ns}
+                    </p>
+                    <div className="flex flex-wrap gap-2">
                         {grouped[ns].map(([name, hex]) => (
-                            <ColorStripe key={name} name={name} hex={hex} />
+                            <ColorSwatchCard key={name} name={name} hex={hex} />
                         ))}
                     </div>
                 </div>
@@ -223,51 +222,42 @@ function ColorTokens({ tokens }: { tokens: DesignTokens }) {
     );
 }
 
-function ColorStripe({ name, hex }: { name: string; hex: string }) {
+function ColorSwatchCard({ name, hex }: { name: string; hex: string }) {
+    const subName = name.includes('.') ? name.split('.').slice(1).join('.') : name;
+    const rgb = hexToRgbString(hex);
+    // The token color fills the whole card face (as the pre-cluster stripes
+    // did) so the palette reads at a glance; text sits on the color itself in
+    // a contrast-aware ink.
     const dark = isDarkColor(hex);
     const subtleColor = dark ? 'rgba(255,255,255,0.65)' : 'rgba(0,0,0,0.5)';
     const valueColor = dark ? '#ffffff' : '#0a0a0a';
-    const subName = name.includes('.') ? name.split('.').slice(1).join('.') : name;
-    const rgb = hexToRgbString(hex);
     return (
         <div
-            className="flex-1 relative min-w-[64px] transition-[flex-grow] duration-300 ease-out hover:flex-grow-[2]"
+            className="relative w-44 h-24 rounded-lg border border-black/10 shadow-[inset_0_0_0_1px_rgba(0,0,0,0.06)] overflow-hidden"
             style={{ background: hex }}
             title={`${name} · ${hex} · rgb(${rgb})`}
             aria-label={`${name} ${hex}`}
         >
             <p
-                className="absolute top-3 left-3 right-3 text-[10px] font-bold uppercase tracking-wider truncate"
+                className="absolute top-2 left-2.5 right-2.5 text-[10px] font-bold uppercase tracking-wider truncate"
                 style={{ color: subtleColor }}
             >
                 {subName}
             </p>
-            <div className="absolute bottom-2.5 left-3 right-3 flex flex-col gap-0.5 pointer-events-none">
+            <div className="absolute bottom-2 left-2.5 right-2.5 flex flex-col gap-0.5 pointer-events-none">
                 <div className="flex items-baseline gap-1.5 min-w-0">
-                    <span
-                        className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0"
-                        style={{ color: subtleColor }}
-                    >
+                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0" style={{ color: subtleColor }}>
                         HEX
                     </span>
-                    <span
-                        className="font-mono text-[11px] font-semibold truncate"
-                        style={{ color: valueColor }}
-                    >
+                    <span className="font-mono text-[11px] font-semibold truncate" style={{ color: valueColor }}>
                         {hex.replace('#', '').toUpperCase()}
                     </span>
                 </div>
                 <div className="flex items-baseline gap-1.5 min-w-0">
-                    <span
-                        className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0"
-                        style={{ color: subtleColor }}
-                    >
+                    <span className="font-mono text-[9px] uppercase tracking-[0.1em] shrink-0" style={{ color: subtleColor }}>
                         RGB
                     </span>
-                    <span
-                        className="font-mono text-[10px] truncate"
-                        style={{ color: valueColor }}
-                    >
+                    <span className="font-mono text-[10px] truncate" style={{ color: valueColor }}>
                         {rgb}
                     </span>
                 </div>
@@ -277,22 +267,6 @@ function ColorStripe({ name, hex }: { name: string; hex: string }) {
 }
 
 // ─── Typography Tokens ───────────────────────────────────────────────────
-
-const TYPO_CARD_STYLES: Array<{ bg: string; chip: string }> = [
-    { bg: 'bg-sky-100', chip: 'bg-white text-neutral-900' },
-    { bg: 'bg-neutral-100', chip: 'bg-white text-neutral-900' },
-    { bg: 'bg-amber-50', chip: 'bg-white text-neutral-900' },
-    { bg: 'bg-emerald-50', chip: 'bg-white text-neutral-900' },
-    { bg: 'bg-rose-50', chip: 'bg-white text-neutral-900' },
-    { bg: 'bg-violet-50', chip: 'bg-white text-neutral-900' },
-];
-
-const ALPHABET_PREVIEW = 'Aa Bb Cc Dd Ee Ff Gg Hh Ii Jj Kk Ll Mm Nn Oo Pp Qq Rr Ss Tt Uu Vv Ww Xx Yy Zz';
-
-function fontFamilyDisplay(font: string): string {
-    const first = font.split(',')[0]?.trim() ?? font;
-    return first.replace(/^["']|["']$/g, '');
-}
 
 function TypographyTokens({ tokens }: { tokens: DesignTokens }) {
     const sorted = useMemo(() => {
@@ -305,17 +279,15 @@ function TypographyTokens({ tokens }: { tokens: DesignTokens }) {
     }, [tokens.typography]);
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
-            {sorted.map(([name, t]: [string, DesignTypographyToken], idx) => (
-                <TypographyCard key={name} name={name} token={t} index={idx} />
+        <div className="grid gap-2 md:grid-cols-2 xl:grid-cols-3">
+            {sorted.map(([name, t]: [string, DesignTypographyToken]) => (
+                <TypographyRow key={name} name={name} token={t} />
             ))}
         </div>
     );
 }
 
-function TypographyCard({ name, token, index }: { name: string; token: DesignTypographyToken; index: number }) {
-    const style = TYPO_CARD_STYLES[index % TYPO_CARD_STYLES.length];
-    const display = fontFamilyDisplay(token.font);
+function TypographyRow({ name, token }: { name: string; token: DesignTypographyToken }) {
     const tokenFontStyle: React.CSSProperties = {
         fontFamily: token.font,
         fontWeight: token.weight,
@@ -323,39 +295,18 @@ function TypographyCard({ name, token, index }: { name: string; token: DesignTyp
     };
 
     return (
-        <div className={`relative ${style.bg} rounded-2xl p-4 min-h-[160px] flex flex-col overflow-hidden shadow-sm`}>
-            <div className="flex justify-between items-start gap-3">
-                <span className={`inline-block ${style.chip} text-[10px] font-semibold px-2.5 py-1 rounded-full shadow-sm`}>
-                    {name}
-                </span>
-                <span className="text-[10px] font-mono uppercase tracking-wider text-neutral-500/80">
-                    {token.size}px · {token.weight}
-                </span>
-            </div>
-            <div className="flex-1 flex items-center py-3">
-                <p
-                    className="text-neutral-900 break-words"
-                    style={{
-                        ...tokenFontStyle,
-                        fontSize: 'clamp(24px, 4vw, 40px)',
-                        lineHeight: 1,
-                    }}
-                >
-                    {display}
-                </p>
-            </div>
-            <div>
-                <p
-                    className="text-neutral-900/90 leading-snug break-words"
-                    style={{
-                        ...tokenFontStyle,
-                        fontSize: '12px',
-                        lineHeight: token.lineHeight,
-                    }}
-                >
-                    {ALPHABET_PREVIEW}
-                </p>
-            </div>
+        <div className="flex items-center gap-3 rounded-lg border border-neutral-200 px-3 py-2">
+            <span
+                className="shrink-0 text-neutral-900"
+                style={{ ...tokenFontStyle, fontSize: `${Math.min(token.size, 26)}px`, lineHeight: 1 }}
+                aria-hidden="true"
+            >
+                Aa
+            </span>
+            <span className="flex-1 min-w-0 text-sm font-medium text-neutral-900 truncate">{name}</span>
+            <span className="shrink-0 font-mono text-[10px] text-neutral-500">
+                {token.size}px · {token.weight} · {token.lineHeight}
+            </span>
         </div>
     );
 }
@@ -369,7 +320,7 @@ function SpacingAndRadius({ tokens }: { tokens: DesignTokens }) {
     const maxRadius = Math.max(1, ...radiusEntries.map(([, v]) => v));
 
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             <div>
                 <p className="text-[11px] font-bold uppercase tracking-wider text-neutral-500 mb-2">Spacing scale</p>
                 <div className="space-y-1.5">
@@ -409,7 +360,7 @@ function SpacingAndRadius({ tokens }: { tokens: DesignTokens }) {
 function ComponentTokens({ tokens }: { tokens: DesignTokens }) {
     const entries = Object.entries(tokens.components).sort((a, b) => a[0].localeCompare(b[0]));
     return (
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-3">
+        <div className="grid grid-cols-1 md:grid-cols-2 xl:grid-cols-3 gap-3">
             {entries.map(([name, c]: [string, DesignComponentToken]) => (
                 <div key={name} className="bg-white rounded-lg border border-neutral-200 p-3 space-y-2">
                     <p className="text-xs font-semibold text-neutral-900">{name}</p>

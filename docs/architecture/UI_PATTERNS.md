@@ -51,9 +51,41 @@ not reintroduce per-component `onMouseUp` selection logic.
   targets. Both call the same branch handlers — there is no parallel
   edit path. The branch/history flow itself (`createBranch` →
   `replyInBranch` → `addBranchMessage`) is unchanged by this layer.
+  - **Desktop popover sizing/layout.** The popover is `480×280`
+    (`POPOVER_SIZE` + the `w-[480px]` class; `computePopoverPosition` is
+    unchanged — same above-preferred / viewport-clamp math, just fed the
+    larger size). The five action chips (`SELECTION_ACTIONS` —
+    Clarify / Expand / Specify / Alternative / Replace) render in a single
+    `flex flex-nowrap` row (each `flex-1`), still prefilling the intent as
+    `"<tag>: "` and reflecting the active tag via `aria-pressed`. The intent
+    field is a `rows={3}` **`<textarea autoFocus>`** inside a `flex flex-col`
+    form with a footer row (keyboard hint left, Branch button right):
+    **Enter** submits (`preventDefault` + `onSubmit`), **Shift+Enter** inserts
+    a newline. The mobile bottom sheet is unchanged (one-line `<input>`,
+    one-tap chips, `manualCommit` gating).
+  - **Live anchor highlight (CSS Custom Highlight API).** While the dialog is
+    open it paints the selected range with `::highlight(prd-refine-anchor)`
+    (defined in `src/index.css`, indigo tint matching the persisted
+    branch-anchor mark) via `CSS.highlights.set('prd-refine-anchor', new
+    Highlight(range))`, cleared on unmount/dismiss. This keeps the anchor
+    visible after the native selection collapses — which it does the moment
+    the `autoFocus` textarea (or mobile soft keyboard) takes focus; the hook
+    already never auto-dismisses on a collapsing selection, so no dismissal
+    guard was needed. The API is **feature-detected** (`typeof CSS !==
+    'undefined' && 'highlights' in CSS`); jsdom and older browsers fall back
+    silently to the native selection. `SelectionInfo.range` is an **optional**
+    cloned `Range` captured in `getSelectionInfo` (so both the desktop instant
+    path and the mobile `manualCommit` path get it); legacy/hand-built
+    `SelectionInfo`s simply omit it. TypeScript 5.9's DOM + DOM.Iterable libs
+    already type `Highlight` / `HighlightRegistry` (as `Map<string,
+    Highlight>`), so no ambient declaration is required.
 
 `index.html` carries `viewport-fit=cover` so safe-area insets resolve on
 notched devices.
+
+**Shared underline-tab primitive.** A `UnderlineTabs` component now lives at
+`src/components/ui/UnderlineTabs.tsx` (added by a parallel workstream); future
+consumers are the ReviewWorkspace top bar and `ScreenDetailTabs`.
 
 ### PRD progress timeline (`src/components/progress/`)
 

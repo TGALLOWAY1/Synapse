@@ -1,4 +1,4 @@
-import { useMemo, useState } from 'react';
+import { useLayoutEffect, useMemo, useRef, useState } from 'react';
 import {
     AlertTriangle, AppWindow, ArrowRight, CheckCircle2, ChevronDown, ChevronUp, Circle,
     Code2, Database, ExternalLink, FileText, Image, Info, ListChecks, Loader2, Package, Palette,
@@ -176,6 +176,28 @@ export function DependencyGraphView({
     const maxCols = Math.max(...layout.rows.map(r => r.length));
     const canvasW = maxCols * CARD_W + (maxCols - 1) * GAP_X;
     const canvasH = layout.rows.length * CARD_H + (layout.rows.length - 1) * ROW_GAP;
+
+    // Fit-to-width scaling: on narrow viewports the fixed-geometry canvas above
+    // is wider than the card, so we measure the available width and shrink the
+    // whole canvas (SVG + node buttons together, via CSS transform) so every
+    // node is visible with no clipped initial state. Desktop is unaffected —
+    // scale is clamped to 1, so it never grows the canvas past its natural size.
+    const canvasContainerRef = useRef<HTMLDivElement>(null);
+    const [canvasContainerWidth, setCanvasContainerWidth] = useState<number | null>(null);
+    useLayoutEffect(() => {
+        const el = canvasContainerRef.current;
+        if (!el) return undefined;
+        const measure = () => setCanvasContainerWidth(el.clientWidth);
+        measure();
+        if (typeof ResizeObserver === 'undefined') return undefined;
+        const ro = new ResizeObserver(measure);
+        ro.observe(el);
+        return () => ro.disconnect();
+    }, []);
+    const canvasScale = canvasContainerWidth && canvasContainerWidth > 0
+        ? Math.min(1, canvasContainerWidth / canvasW)
+        : 1;
+
     const positions = new Map<DependencyNodeId, { x: number; y: number }>();
     layout.rows.forEach((row, r) => {
         const rowWidth = row.length * CARD_W + (row.length - 1) * GAP_X;
@@ -319,85 +341,97 @@ export function DependencyGraphView({
             {/* Graph canvas / impact list */}
             {mode === 'graph' ? (
                 <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-4 overflow-x-auto">
-                    <div className="relative mx-auto" style={{ width: canvasW, height: canvasH }}>
-                        <svg
-                            className="absolute inset-0 pointer-events-none"
-                            width={canvasW}
-                            height={canvasH}
-                            aria-hidden="true"
+                    {/* Measures available width so the fixed-geometry canvas below
+                        can be scaled to fit — never clipped on first paint. */}
+                    <div ref={canvasContainerRef} className="w-full">
+                        <div
+                            className="relative mx-auto"
+                            style={{ width: canvasW * canvasScale, height: canvasH * canvasScale }}
                         >
-                            {displayEdges.map(edge => {
-                                const from = positions.get(edge.from);
-                                const to = positions.get(edge.to);
-                                if (!from || !to) return null;
-                                const x1 = from.x + CARD_W / 2;
-                                const y1 = from.y + CARD_H;
-                                const x2 = to.x + CARD_W / 2;
-                                const y2 = to.y;
-                                const midY = (y1 + y2) / 2;
-                                const stale = edgeIsStaleCause(edge.from, edge.to);
-                                const active = !stale && selectedId !== null
-                                    && (edge.from === selectedId || edge.to === selectedId);
-                                const stroke = stale ? '#f59e0b' : active ? '#6366f1' : '#d4d4d4';
-                                return (
-                                    <path
-                                        key={`${edge.from}-${edge.to}`}
-                                        d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
-                                        fill="none"
-                                        stroke={stroke}
-                                        strokeWidth={stale || active ? 2 : 1.5}
-                                        strokeDasharray={stale ? '5 4' : undefined}
-                                    />
-                                );
-                            })}
-                        </svg>
-                        {graph.nodes.map(node => {
-                            const pos = positions.get(node.id);
-                            if (!pos) return null;
-                            const ev = evalOf(node.id);
-                            const status = ev?.status ?? 'missing';
-                            const impacted = status === 'up_to_date' && (ev?.impactedBy.length ?? 0) > 0;
-                            const alignment = node.id === 'prd' ? undefined : alignmentByNode.get(node.id as ArtifactSlotKey);
-                            const Icon = NODE_ICONS[node.id] ?? Package;
-                            const isSel = selectedId === node.id;
-                            return (
-                                <button
-                                    key={node.id}
-                                    type="button"
-                                    onClick={() => selectNode(node.id)}
-                                    style={{ left: pos.x, top: pos.y, width: CARD_W, height: CARD_H }}
-                                    className={`absolute text-left rounded-xl border bg-white px-3 py-2.5 shadow-sm transition ${
-                                        isSel
-                                            ? 'border-indigo-500 ring-2 ring-indigo-200'
-                                            : 'border-neutral-200 hover:border-indigo-300 hover:shadow'
-                                    }`}
+                            <div
+                                className="absolute left-0 top-0 origin-top-left"
+                                style={{ width: canvasW, height: canvasH, transform: `scale(${canvasScale})` }}
+                            >
+                                <svg
+                                    className="absolute inset-0 pointer-events-none"
+                                    width={canvasW}
+                                    height={canvasH}
+                                    aria-hidden="true"
                                 >
-                                    <div className="flex items-center gap-2 min-w-0">
-                                        <Icon size={15} className={isSel ? 'text-indigo-600 shrink-0' : 'text-neutral-500 shrink-0'} />
-                                        <span className="text-sm font-semibold text-neutral-900 truncate">{node.title}</span>
-                                        {ev?.manuallyEdited && (
-                                            <PencilLine size={12} className="text-amber-500 shrink-0" aria-label="Edited manually" />
-                                        )}
-                                    </div>
-                                    <div className="mt-1 text-[11px] text-neutral-500 truncate">
-                                        {node.id === 'prd'
-                                            ? 'Source of truth'
-                                            : ev?.versionNumber !== undefined
-                                                ? `v${ev.versionNumber}${ev.generatedAt ? ` · ${new Date(ev.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}`
-                                                : DEPENDENCY_STATUS_LABELS[status]}
-                                    </div>
-                                    <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
-                                        {node.id === 'prd'
-                                            ? <StatusPill status="source" />
-                                            : alignment
-                                                ? <OutputAlignmentBadge alignment={alignment} />
-                                                : impacted
-                                                    ? <ImpactedPill />
-                                                    : <StatusPill status={status} />}
-                                    </div>
-                                </button>
-                            );
-                        })}
+                                    {displayEdges.map(edge => {
+                                        const from = positions.get(edge.from);
+                                        const to = positions.get(edge.to);
+                                        if (!from || !to) return null;
+                                        const x1 = from.x + CARD_W / 2;
+                                        const y1 = from.y + CARD_H;
+                                        const x2 = to.x + CARD_W / 2;
+                                        const y2 = to.y;
+                                        const midY = (y1 + y2) / 2;
+                                        const stale = edgeIsStaleCause(edge.from, edge.to);
+                                        const active = !stale && selectedId !== null
+                                            && (edge.from === selectedId || edge.to === selectedId);
+                                        const stroke = stale ? '#f59e0b' : active ? '#6366f1' : '#d4d4d4';
+                                        return (
+                                            <path
+                                                key={`${edge.from}-${edge.to}`}
+                                                d={`M ${x1} ${y1} C ${x1} ${midY}, ${x2} ${midY}, ${x2} ${y2}`}
+                                                fill="none"
+                                                stroke={stroke}
+                                                strokeWidth={stale || active ? 2 : 1.5}
+                                                strokeDasharray={stale ? '5 4' : undefined}
+                                            />
+                                        );
+                                    })}
+                                </svg>
+                                {graph.nodes.map(node => {
+                                    const pos = positions.get(node.id);
+                                    if (!pos) return null;
+                                    const ev = evalOf(node.id);
+                                    const status = ev?.status ?? 'missing';
+                                    const impacted = status === 'up_to_date' && (ev?.impactedBy.length ?? 0) > 0;
+                                    const alignment = node.id === 'prd' ? undefined : alignmentByNode.get(node.id as ArtifactSlotKey);
+                                    const Icon = NODE_ICONS[node.id] ?? Package;
+                                    const isSel = selectedId === node.id;
+                                    return (
+                                        <button
+                                            key={node.id}
+                                            type="button"
+                                            onClick={() => selectNode(node.id)}
+                                            style={{ left: pos.x, top: pos.y, width: CARD_W, height: CARD_H }}
+                                            className={`absolute text-left rounded-xl border bg-white px-3 py-2.5 shadow-sm transition ${
+                                                isSel
+                                                    ? 'border-indigo-500 ring-2 ring-indigo-200'
+                                                    : 'border-neutral-200 hover:border-indigo-300 hover:shadow'
+                                            }`}
+                                        >
+                                            <div className="flex items-center gap-2 min-w-0">
+                                                <Icon size={15} className={isSel ? 'text-indigo-600 shrink-0' : 'text-neutral-500 shrink-0'} />
+                                                <span className="text-sm font-semibold text-neutral-900 truncate">{node.title}</span>
+                                                {ev?.manuallyEdited && (
+                                                    <PencilLine size={12} className="text-amber-500 shrink-0" aria-label="Edited manually" />
+                                                )}
+                                            </div>
+                                            <div className="mt-1 text-[11px] text-neutral-500 truncate">
+                                                {node.id === 'prd'
+                                                    ? 'Source of truth'
+                                                    : ev?.versionNumber !== undefined
+                                                        ? `v${ev.versionNumber}${ev.generatedAt ? ` · ${new Date(ev.generatedAt).toLocaleDateString(undefined, { month: 'short', day: 'numeric' })}` : ''}`
+                                                        : DEPENDENCY_STATUS_LABELS[status]}
+                                            </div>
+                                            <div className="mt-1.5 flex items-center gap-1.5 overflow-hidden">
+                                                {node.id === 'prd'
+                                                    ? <StatusPill status="source" />
+                                                    : alignment
+                                                        ? <OutputAlignmentBadge alignment={alignment} />
+                                                        : impacted
+                                                            ? <ImpactedPill />
+                                                            : <StatusPill status={status} />}
+                                            </div>
+                                        </button>
+                                    );
+                                })}
+                            </div>
+                        </div>
                     </div>
                 </div>
             ) : (

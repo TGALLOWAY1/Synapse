@@ -57,36 +57,41 @@ export function ModelChip({ model }: { model: string }) {
 // ─── Time / status block ─────────────────────────────────────────────────────
 
 function TimeBlock({ step }: { step: GenerationStep }) {
-    const lines: Array<{ text: string; cls?: string }> = [];
+    // A single line for every status so the header row is always one line tall
+    // and the title→description spacing is identical across steps. The status
+    // itself is carried by the StatusIcon (pulsing dot = in progress), so no
+    // "In progress" label is repeated here.
+    const segments: Array<{ text: string; cls?: string }> = [];
     if (step.status === 'completed') {
         const a = fixed(step.actualSeconds);
-        if (a) lines.push({ text: `Actual: ${a}` });
+        if (a) segments.push({ text: `Actual: ${a}` });
     } else if (step.status === 'in_progress') {
-        lines.push({ text: 'In progress', cls: 'text-indigo-600 font-medium' });
-        const est = roundEst(step.estimatedSeconds);
-        if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
         if (step.elapsedSeconds != null) {
-            lines.push({ text: `Elapsed: ${Math.round(step.elapsedSeconds)}s`, cls: 'text-neutral-500' });
+            segments.push({ text: `Elapsed: ${Math.round(step.elapsedSeconds)}s`, cls: 'text-neutral-500' });
         }
+        const est = roundEst(step.estimatedSeconds);
+        if (est) segments.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
     } else if (step.status === 'failed') {
-        lines.push({ text: 'Failed', cls: 'text-red-600 font-medium' });
-        const est = roundEst(step.estimatedSeconds);
-        if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
+        segments.push({ text: 'Failed', cls: 'text-red-600 font-medium' });
         const a = fixed(step.actualSeconds);
-        if (a) lines.push({ text: `Actual: ${a}`, cls: 'text-neutral-500' });
+        if (a) segments.push({ text: `Actual: ${a}`, cls: 'text-neutral-500' });
     } else if (step.status === 'queued') {
-        lines.push({ text: 'Queued', cls: 'text-amber-600 font-medium' });
+        segments.push({ text: 'Queued', cls: 'text-amber-600 font-medium' });
         const est = roundEst(step.estimatedSeconds);
-        if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
+        if (est) segments.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
     } else {
-        lines.push({ text: 'Waiting', cls: 'text-neutral-400' });
+        segments.push({ text: 'Waiting', cls: 'text-neutral-400' });
         const est = roundEst(step.estimatedSeconds);
-        if (est) lines.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
+        if (est) segments.push({ text: `Est. ${est}`, cls: 'text-neutral-400' });
     }
+    if (segments.length === 0) return null;
     return (
-        <div className="text-right text-xs leading-tight shrink-0 min-w-[72px]">
-            {lines.map((l, i) => (
-                <div key={i} className={l.cls ?? 'text-neutral-600'}>{l.text}</div>
+        <div className="text-right text-xs leading-tight shrink-0 whitespace-nowrap">
+            {segments.map((s, i) => (
+                <span key={i} className={s.cls ?? 'text-neutral-600'}>
+                    {i > 0 && <span className="text-neutral-300"> · </span>}
+                    {s.text}
+                </span>
             ))}
         </div>
     );

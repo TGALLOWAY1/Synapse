@@ -16,6 +16,7 @@ import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
 import { DEMO_PROJECT_ID } from '../data/demoProject';
 import { hasGeminiKey, primeGeminiKey } from '../lib/geminiKeyVault';
+import { ExamplePromptCarousel, type ExamplePrompt } from './ExamplePromptCarousel';
 
 // Advisory soft cap for the idea prompt. There is no hard *technical* limit:
 // PRD generation runs client-side straight to Gemini, whose context window
@@ -38,29 +39,29 @@ function providerLabel(provider: AuthProvider | undefined): string {
     }
 }
 
-const EXAMPLE_PROMPTS = [
+const EXAMPLE_PROMPTS: ExamplePrompt[] = [
     {
-        label: 'Mobile marketplace for local artisans...',
+        title: 'Artisan marketplace',
         full: 'A mobile-friendly marketplace app for local artisans to sell handmade goods, with search filters, seller profiles, in-app messaging, and secure checkout with multiple payment options.',
         platform: 'app' as ProjectPlatform,
     },
     {
-        label: 'A mood-based music playlist app...',
+        title: 'Mood playlists',
         full: 'A mood-based music playlist app that uses emotion detection from selfies and text input to generate personalized playlists. Includes social sharing, collaborative playlists, and integration with Spotify and Apple Music.',
         platform: 'app' as ProjectPlatform,
     },
     {
-        label: 'Team project management dashboard...',
+        title: 'Team dashboard',
         full: 'A real-time project management dashboard for distributed teams with kanban boards, time tracking, resource allocation, sprint planning, and automated status reports with AI-generated insights.',
         platform: 'web' as ProjectPlatform,
     },
     {
-        label: 'Fitness tracking with social features...',
+        title: 'Social fitness',
         full: 'A fitness tracking app with workout logging, progress photos, social challenges, leaderboards, AI-powered form analysis from video, and personalized training programs.',
         platform: 'app' as ProjectPlatform,
     },
     {
-        label: 'Recipe sharing community platform...',
+        title: 'Recipe community',
         full: 'A recipe sharing platform where users can post, discover, and save recipes with smart grocery list generation, meal planning, nutritional breakdowns, and step-by-step cooking mode with timers.',
         platform: 'web' as ProjectPlatform,
     },
@@ -271,7 +272,7 @@ export function HomePage() {
         e.target.value = '';
     };
 
-    const handleExampleClick = (example: typeof EXAMPLE_PROMPTS[number]) => {
+    const handleExampleClick = (example: ExamplePrompt) => {
         setPromptText(example.full);
         setPlatform(example.platform);
         textareaRef.current?.focus();
@@ -407,19 +408,6 @@ export function HomePage() {
                     <h2 className="text-4xl md:text-5xl font-bold text-center mb-8">
                         Welcome to Synapse
                     </h2>
-
-                    {/* Example prompt pills */}
-                    <div className="flex flex-wrap justify-center gap-2 mb-6">
-                        {EXAMPLE_PROMPTS.map((example) => (
-                            <button
-                                key={example.label}
-                                onClick={() => handleExampleClick(example)}
-                                className="px-4 py-2 rounded-full border border-neutral-300 bg-white text-sm text-neutral-600 hover:border-neutral-400 hover:text-neutral-900 transition whitespace-nowrap"
-                            >
-                                {example.label}
-                            </button>
-                        ))}
-                    </div>
 
                     {/* Prompt card */}
                     <form onSubmit={handleSubmit}>
@@ -606,6 +594,11 @@ export function HomePage() {
                             </div>
                         </div>
                     </form>
+
+                    {/* Example prompt carousel — below the prompt card */}
+                    <div className="mt-6">
+                        <ExamplePromptCarousel examples={EXAMPLE_PROMPTS} onSelect={handleExampleClick} />
+                    </div>
                 </div>
             </div>
 

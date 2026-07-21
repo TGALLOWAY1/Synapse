@@ -17,6 +17,16 @@ export interface SelectionRect {
 export interface SelectionInfo {
     text: string;
     rect: SelectionRect;
+    /**
+     * A cloned live DOM `Range` for the selection, when one was available at
+     * capture time. Used by `SelectionActionDialog` to paint a persistent
+     * anchor highlight via the CSS Custom Highlight API (so the highlight
+     * survives the native selection collapsing when the dialog's textarea takes
+     * focus). Optional: legacy call sites and environments without a live range
+     * (e.g. jsdom paths that build `SelectionInfo` by hand) simply omit it and
+     * fall back to the native selection.
+     */
+    range?: Range;
 }
 
 export interface Viewport {
@@ -75,6 +85,10 @@ export function getSelectionInfo(sel: Selection | null): SelectionInfo | null {
             width: rect.width,
             height: rect.height,
         },
+        // Snapshot the range so the anchor highlight persists after the native
+        // selection collapses (guarded — `cloneRange` may be absent in some
+        // non-browser environments).
+        ...(typeof range.cloneRange === 'function' ? { range: range.cloneRange() } : {}),
     };
 }
 

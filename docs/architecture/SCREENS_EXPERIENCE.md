@@ -118,6 +118,10 @@ pipeline, sync, or snapshot change. Do not add persisted state for this view.
   steps highlighted (`highlightedStepIndices`) plus a per-flow "This screen
   appears in" context block (repeated appearances labeled "— Step N
   (appearance i of k)"; decision steps flag unspecified branch outcomes).
+  Step roles render as small styled chips (USER neutral / SYSTEM indigo /
+  DECISION amber) rather than inline uppercase text, and when a screen
+  appears in multiple flows only the first journey renders expanded — the
+  rest collapse behind `<details>` summaries (flow title + step count).
   The `FlowJourney` timeline **groups consecutive steps that share a screen**
   (`buildJourneyGroups` in `journeyNode.ts`, grouped by `stepScreenSlug`) into
   one card: the screen name shows once as the header (with a "Steps N–M"

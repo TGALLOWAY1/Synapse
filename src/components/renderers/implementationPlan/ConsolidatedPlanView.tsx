@@ -160,8 +160,11 @@ export function ConsolidatedPlanView({
                 onOpenPrompts={() => setTab('prompt_packs')}
             />
 
-            {/* --- Tab nav (scrolls horizontally on mobile) ------------------ */}
-            <nav aria-label="Implementation plan sections" className="border-b border-neutral-200 -mx-1 px-1 overflow-x-auto">
+            {/* --- Tab nav (scrolls horizontally on mobile; right-edge fade
+                cues the overflow so off-screen tabs are discoverable) ------- */}
+            <div className="relative">
+                <div aria-hidden className="pointer-events-none absolute inset-y-0 right-0 z-10 w-8 bg-gradient-to-l from-white md:hidden" />
+                <nav aria-label="Implementation plan sections" className="border-b border-neutral-200 -mx-1 px-1 overflow-x-auto">
                 <div className="flex gap-1 whitespace-nowrap">
                     {tabs.map(t => {
                         const active = tab === t.id;
@@ -184,7 +187,8 @@ export function ConsolidatedPlanView({
                         );
                     })}
                 </div>
-            </nav>
+                </nav>
+            </div>
 
             {tab === 'overview' && (
                 <OverviewTab

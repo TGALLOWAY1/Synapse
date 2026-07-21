@@ -292,7 +292,7 @@ export function EntityGraph(props: Props) {
                                     top: placement?.y ?? my,
                                     transform: 'translate(-50%, -50%)',
                                 }}
-                                className={`absolute z-10 max-w-[10rem] rounded-full border px-2 py-0.5 text-[10px] font-medium leading-tight shadow-sm transition ${
+                                className={`absolute z-10 max-w-[10rem] rounded-full border px-2 py-0.5 text-[11px] font-medium leading-tight shadow-sm transition md:text-[10px] ${
                                     active
                                         ? 'border-indigo-300 bg-indigo-50 text-indigo-700'
                                         : 'border-neutral-200 bg-white text-neutral-600 hover:border-indigo-200'
@@ -301,7 +301,7 @@ export function EntityGraph(props: Props) {
                             >
                                 <span className="block truncate">{edge.verb}</span>
                                 {edge.cardinality && (
-                                    <span className="block text-[9px] font-mono text-neutral-400 leading-none">{edge.cardinality}</span>
+                                    <span className="block text-[10px] font-mono text-neutral-400 leading-none md:text-[9px]">{edge.cardinality}</span>
                                 )}
                             </button>
                         );
