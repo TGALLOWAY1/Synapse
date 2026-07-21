@@ -76,6 +76,30 @@ describe('debounced storage — quota handling', () => {
         expect(useToastStore.getState().toasts).toHaveLength(1); // single sticky toast
     });
 
+    it('drains the recovered write synchronously during an unload flush', () => {
+        const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation((_key, value) => {
+            // The oversized write overflows; the smaller recovered write fits.
+            if (value.includes('"big"')) throw quotaError();
+        });
+        // eslint-disable-next-line prefer-const -- referenced by the recovery closure below
+        let storage: ReturnType<typeof createDebouncedStorage>;
+        registerQuotaRecovery(() => {
+            // Mimic the project store: pruning schedules a fresh, smaller write.
+            storage.setItem(KEY, { state: { size: 'small' }, version: 0 } as never);
+            return true;
+        });
+        storage = createDebouncedStorage(500);
+        storage.setItem(KEY, { state: { size: 'big' }, version: 0 } as never);
+
+        // The tab is closed/backgrounded before the 500ms debounce timer fires.
+        window.dispatchEvent(new Event('pagehide'));
+
+        // The recovered small write must have landed synchronously, not been left
+        // on a timer that never fires.
+        expect(setItem).toHaveBeenCalledWith(KEY, expect.stringContaining('"small"'));
+        expect(useToastStore.getState().toasts).toHaveLength(0);
+    });
+
     it('auto-dismisses the warning and re-arms once a later write succeeds', () => {
         let full = true;
         const setItem = vi.spyOn(Storage.prototype, 'setItem').mockImplementation(() => {

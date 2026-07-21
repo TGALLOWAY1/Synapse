@@ -121,11 +121,17 @@ export function createDebouncedStorage<S>(
     }
 
     // Flush pending writes synchronously (used on page unload to prevent data
-    // loss). Capture-then-reset before writing so a re-entrant persist triggered
-    // from inside safeSetItem (quota recovery mutates the store) can safely
-    // schedule its own pending write without us clobbering it afterwards.
+    // loss). Drain in a loop, not a single write: if the write overflows quota,
+    // recovery (invoked from inside safeSetItem) prunes the store and schedules a
+    // FRESH debounced write — but on unload that 500ms timer never fires, so the
+    // recovered/pruned state would be lost. Looping writes that fresh pending
+    // value synchronously instead. Capture-then-reset before each write so the
+    // re-entrant persist can register its pending write without us clobbering it.
+    // Recovery runs at most once per episode (`recoveryAttempted`), so the second
+    // pass either succeeds or warns without scheduling more work — the loop
+    // terminates in at most two iterations.
     function flush() {
-        if (pendingValue !== null && pendingName !== null) {
+        while (pendingValue !== null && pendingName !== null) {
             if (timeoutId) clearTimeout(timeoutId);
             const value = pendingValue;
             const name = pendingName;
