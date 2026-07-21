@@ -77,6 +77,27 @@ npm run e2e          # Live e2e: real project generation + page screenshots
 npm run e2e:smoke    # E2e harness check without any LLM calls / key
 ```
 
+### E2E testing & screenshots — ask before running
+
+When the user asks for e2e testing, screenshots of the app, visual QA, or a UI
+critique, **do not immediately run the default pipeline** — first ask (via
+AskUserQuestion) to scope the run, then follow the `/e2e` skill
+(`.claude/skills/e2e/SKILL.md`), which maps the answers to harness flags:
+
+1. **Viewport** — desktop, mobile, or both (`--viewport=`)?
+2. **Scope** —
+   A. full pipeline: generate a new project live and capture everything
+      (optionally the interactive edit/decision loop, `--interactions`);
+   B. existing project: replay a previous run's `state.json` and capture a
+      subset (`--state=` + `--views=`), zero LLM spend;
+   C. branch-diff: only the views affected by the current branch's changes
+      (map the diff to view slugs, then run a B-style subset).
+3. **Critique** — should Claude visually assess every screenshot and write a
+   severity-ordered `critique.md` into the run directory (and optionally fix
+   the top findings and re-run the affected subset)?
+
+Skip the questions only when the user has already specified these choices.
+
 ### Required pre-push gate (do not skip — this is what Vercel runs)
 
 **Before committing/pushing, you MUST run `npm run build` and `npm run lint`
