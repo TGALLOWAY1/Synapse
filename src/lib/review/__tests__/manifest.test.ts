@@ -1,7 +1,8 @@
 import { describe, expect, it } from 'vitest';
 import { hashEvidenceExcerpt } from '../hash';
-import { isManifestCurrent, toPersistedReviewContextManifest, verifyEvidenceRef } from '../manifest';
+import { buildReviewContextManifest, isManifestCurrent, toPersistedReviewContextManifest, verifyEvidenceRef } from '../manifest';
 import { buildSpecialistPrompt } from '../prompt';
+import { buildCanonicalPrdSpine } from '../../canonicalPrdSpine';
 import { makeManifest, structuredPRD } from './reviewTestUtils';
 
 describe('review context manifest', () => {
@@ -77,6 +78,36 @@ describe('review context manifest', () => {
         expect(changedPlatform.sources.map(source => source.contentHash)).toEqual(baseline.sources.map(source => source.contentHash));
         expect(changedPlatform.contextSignature).not.toBe(baseline.contextSignature);
         expect(changedStructuredPrd.contextSignature).not.toBe(baseline.contextSignature);
+    });
+
+    it('keeps the signature independent of the rebuildable canonicalSpine cache', () => {
+        // canonicalSpine is stripped from localStorage (projectStore partialize)
+        // to bound storage growth, so it is present in-session but absent after a
+        // reload. The signature must NOT depend on its presence, or every review
+        // run's context would spuriously read "changed" across a refresh. It is a
+        // deterministic projection of structuredPRD, so structuredPrdHash already
+        // captures any real change.
+        const base = {
+            projectId: 'project-1',
+            projectName: 'Careful AI',
+            platform: 'web' as const,
+            productCategory: 'health workflow',
+            capturedAt: 100,
+            artifacts: [],
+            safetyBoundaries: [],
+        };
+        const spineBase = {
+            versionId: 'spine-v2',
+            schemaVersion: 2,
+            content: '# PRD',
+            structuredPRD,
+        };
+        const withCache = buildReviewContextManifest({
+            ...base,
+            spine: { ...spineBase, canonicalSpine: buildCanonicalPrdSpine(structuredPRD, {}) },
+        });
+        const withoutCache = buildReviewContextManifest({ ...base, spine: spineBase });
+        expect(withCache.contextSignature).toBe(withoutCache.contextSignature);
     });
 
     it('chunks long sections instead of truncating their later content', () => {

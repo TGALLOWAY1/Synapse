@@ -66,21 +66,27 @@ fallback during this first migration.
   richDataModel for entities); it does not invent a full inventory.
 - **Validation:** `validateCanonicalPrdSpine` — deterministic, non-invasive;
   warnings are recorded in the spine `meta`, never silently dropped.
-- **Persistence:** `SpineVersion.canonicalSpine` is attached on final settle
-  (in `updateSpineStructuredPRD` when `generationMeta` is present). It is
-  deliberately **not** persisted on user/decision edits (`editSpineStructuredPRD`)
-  or reverts (`revertSpineToVersion`): re-cloning the full spine onto every edit
-  version bloated mobile localStorage into the "Storage full" toast (fix
-  c9df7c5). It is a rebuildable cache. Where a consumer can rebuild it in
-  isolation it does so — **artifact generation** rebuilds lazily from the stored
-  `structuredPRD` (`coreArtifactService`). The **review context**
-  (`useReviewContextManifest`) instead reads the persisted field directly and
-  omits the canonical block when absent (as it already did for legacy spines):
-  the readiness/challenge context-signature builders (`readinessSlice`,
-  `ProjectWorkspace`, `HistoryView`) also read the persisted field, so all of
-  them stay in lockstep and a just-completed review still matches the current
-  challenge signature. (Rebuilding in the review hook alone would desync those
-  signatures.) Old projects have none, so backwards compatibility is automatic.
+- **Persistence — it is a rebuildable cache and is NEVER written to
+  localStorage.** In memory, `SpineVersion.canonicalSpine` is attached on final
+  settle (in `updateSpineStructuredPRD` when `generationMeta` is present) and
+  deliberately left unset on user/decision edits (`editSpineStructuredPRD`) and
+  reverts (`revertSpineToVersion`). At the persistence boundary the store's
+  `partialize` **strips it from every spine** (`stripPersistedCanonicalSpines`
+  in `projectStore`), so it never reaches localStorage at all — re-cloning the
+  full spine onto version history bloated mobile localStorage into the "Storage
+  full" toast, and since `partialize` runs on every write this also
+  retroactively shrinks pre-existing over-quota stores. It is therefore present
+  in-session on freshly-settled generation spines but **absent after a reload**,
+  where every consumer rebuilds or omits it: **artifact generation** rebuilds
+  lazily from the stored `structuredPRD` (`coreArtifactService`); the **review
+  context** (`useReviewContextManifest`) and the readiness/challenge builders
+  (`readinessSlice`, `ProjectWorkspace`, `HistoryView`) read the field and omit
+  the canonical block when absent (as they already did for legacy/edit spines).
+  Crucially, the review `contextSignature` **does not hash `canonicalSpine`**
+  (`manifest.ts`) — `structuredPrdHash` already subsumes it — so a run's context
+  signature is identical whether or not the cache is resident, and a completed
+  review still matches the current challenge signature across a refresh. Old
+  projects have none, so backwards compatibility is automatic.
 - **Prompt order:** persona/system → guardrails → **Canonical PRD Spine
   (authoritative)** → dependency artifacts → **Full PRD (secondary fallback)**.
   The separate feature glossary and inline PRD summary are removed when a spine

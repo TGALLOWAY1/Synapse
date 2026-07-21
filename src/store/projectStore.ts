@@ -1,7 +1,8 @@
 import { create } from 'zustand';
 import { persist } from 'zustand/middleware';
 import type { ProjectState } from './types';
-import { createDebouncedStorage } from './storage';
+import type { SpineVersion } from '../types';
+import { createDebouncedStorage, registerQuotaRecovery } from './storage';
 import { resolveProjectStorageName } from './userScope';
 import { createProjectSlice } from './slices/projectSlice';
 import { createSpineSlice } from './slices/spineSlice';
@@ -21,6 +22,31 @@ import { guardProjectStoreActions } from '../lib/projectCapabilities';
 import { sweepRetentionCollections } from '../lib/collectionRetention';
 
 export type { ProjectState } from './types';
+
+/**
+ * Return a spineVersions map with the rebuildable `canonicalSpine` cache
+ * removed from every spine, cloning only where something is actually dropped so
+ * unchanged arrays keep their reference. Used by `partialize` so the cache never
+ * reaches localStorage (it is reconstructed lazily wherever consumed). The live
+ * in-memory state is untouched — only the persisted projection is stripped.
+ */
+export function stripPersistedCanonicalSpines(
+    spineVersions: Record<string, SpineVersion[]>,
+): Record<string, SpineVersion[]> {
+    let changed = false;
+    const next: Record<string, SpineVersion[]> = {};
+    for (const [projectId, spines] of Object.entries(spineVersions ?? {})) {
+        if (!spines.some(spine => spine.canonicalSpine !== undefined)) {
+            next[projectId] = spines;
+            continue;
+        }
+        changed = true;
+        next[projectId] = spines.map(spine => (
+            spine.canonicalSpine === undefined ? spine : { ...spine, canonicalSpine: undefined }
+        ));
+    }
+    return changed ? next : spineVersions;
+}
 
 export const useProjectStore = create<ProjectState>()(
     persist(
@@ -49,7 +75,17 @@ export const useProjectStore = create<ProjectState>()(
                 void _jobs;
                 void _prdProgress;
                 void _prdSectionStatus;
-                return persisted;
+                // Drop the rebuildable `canonicalSpine` cache from every persisted
+                // spine. It is a deterministic projection of `structuredPRD`
+                // reconstructed lazily wherever consumed (coreArtifactService,
+                // review manifest), so persisting it only bloats localStorage —
+                // the very growth that trips the "Storage full" toast. Edit
+                // versions already omit it (spineSlice); this strips it from
+                // generation versions and, crucially, retroactively from every
+                // pre-existing over-quota store on its next write. Only the
+                // persisted copy is dropped — the live in-memory spine keeps its
+                // cache for the current session. See docs/CANONICAL_PRD_SPINE.md.
+                return { ...persisted, spineVersions: stripPersistedCanonicalSpines(persisted.spineVersions) };
             },
             onRehydrateStorage: () => {
                 return (state) => {
@@ -131,3 +167,36 @@ export const useProjectStore = create<ProjectState>()(
         }
     )
 );
+
+// Mid-session quota recovery. The rehydrate sweep only runs at load; if a write
+// overflows the quota *during* a session (e.g. a burst of review runs) no sweep
+// ever fires. Registering this hook lets the storage layer prune the retention
+// collections the moment a save fails and retry, warning only if pruning could
+// not free enough. Returns true iff it actually removed anything — a truthy
+// return schedules a fresh, smaller write through the persist middleware. The
+// canonicalSpine cache is stripped from that write by `partialize`, so version
+// history shrinks on the retry too even though this sweep never touches it.
+registerQuotaRecovery(() => {
+    const state = useProjectStore.getState();
+    const sweep = sweepRetentionCollections({
+        spineVersions: state.spineVersions ?? {},
+        reviewRuns: state.reviewRuns ?? {},
+        specialistRuns: state.specialistRuns ?? {},
+        reviewFindings: state.reviewFindings ?? {},
+        reviewIssues: state.reviewIssues ?? {},
+        readinessReviews: state.readinessReviews ?? {},
+        readinessCommitmentEvents: state.readinessCommitmentEvents ?? {},
+        downstreamUpdatePlans: state.downstreamUpdatePlans ?? {},
+        downstreamUpdatePlanEvents: state.downstreamUpdatePlanEvents ?? {},
+        downstreamArtifactUpdateProposals: state.downstreamArtifactUpdateProposals ?? {},
+        downstreamArtifactUpdateReviewEvents: state.downstreamArtifactUpdateReviewEvents ?? {},
+        downstreamArtifactUpdateApplications: state.downstreamArtifactUpdateApplications ?? {},
+        downstreamArtifactUpdateVerifications: state.downstreamArtifactUpdateVerifications ?? {},
+        downstreamArtifactUpdateVerificationEvents: state.downstreamArtifactUpdateVerificationEvents ?? {},
+    });
+    if (!sweep.pruned) return false;
+    // Merge the pruned (reference-stable) collections; this setState schedules a
+    // fresh persist of the shrunken state through the debounced storage.
+    useProjectStore.setState(sweep.collections);
+    return true;
+});

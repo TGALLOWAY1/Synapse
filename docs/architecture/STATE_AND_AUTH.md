@@ -105,11 +105,40 @@ or read via a getter outside the selector. This bit `ArtifactWorkspace` and
 tasks. Regression: `src/components/__tests__/ArtifactWorkspaceTasksSelector.test.tsx`.
 
 **Persistence (`storage.ts`):** the debounced localStorage writer wraps every
-`setItem` in try/catch — a `QuotaExceededError` surfaces a one-time sticky toast
-(via `toastStore`) instead of throwing and silently killing all future
-persistence. It flushes pending writes on `beforeunload`, `pagehide`, **and**
+`setItem` in try/catch — a `QuotaExceededError` no longer immediately throws or
+warns. On the first overflow of an episode it invokes the **registered quota
+recovery** hook (`registerQuotaRecovery`, wired in `projectStore` to run
+`sweepRetentionCollections` on the live store); if that prunes anything it
+returns `true`, a fresh smaller write is already scheduled, and the warning is
+deferred to that retry. Only when recovery cannot free space does it surface a
+**single sticky "Storage full" toast** (via `toastStore`). The toast is
+**auto-dismissed** the moment any later write succeeds (recovery landed, or the
+user exported/deleted a project), and recovery re-arms for the next episode. The
+hook is injected (not imported) to avoid a `storage → projectStore` cycle.
+Because recovery mutates the store *from inside* a debounced write, the debounce
+callback and `flush()` **capture-then-reset** their pending slot before calling
+`safeSetItem`, so the re-entrant write scheduled by recovery is not clobbered.
+It flushes pending writes on `beforeunload`, `pagehide`, **and**
 `visibilitychange → hidden` (the last two are the reliable mobile lifecycle
 events).
+
+**`canonicalSpine` is never persisted (`partialize`):** the store's
+`partialize` strips the rebuildable `canonicalSpine` cache from every spine in
+`spineVersions` (`stripPersistedCanonicalSpines`) before serializing. It is a
+deterministic projection of `structuredPRD`, reconstructed lazily wherever
+consumed (`coreArtifactService`, the review manifest), so persisting it only
+inflates the largest non-prunable collection and is the kind of growth that
+trips the quota toast. Edit versions already omitted it (`spineSlice`); this
+also drops it from generation versions and, because `partialize` runs on every
+write, **retroactively shrinks any pre-existing over-quota store** on its next
+save. Only the persisted projection is stripped — the live in-memory spine keeps
+its cache for the session, and the sync bundle/snapshots (which read live state)
+are unaffected. The review `contextSignature` deliberately does **not** hash
+`canonicalSpine` (see `manifest.ts`) so a run's context does not read "changed"
+across a reload where the cache is absent; `structuredPrdHash` already subsumes
+it. Regression: `src/store/__tests__/stripPersistedCanonicalSpines.test.ts`,
+`src/store/__tests__/storage.test.ts`,
+`src/lib/review/__tests__/manifest.test.ts`.
 
 **Retention caps (`src/lib/collectionRetention.ts`):** the machine-generated
 review/readiness/downstream history collections are growth-bounded by one
