@@ -43,7 +43,7 @@ type AuthState = {
   logout: () => Promise<void>;
 };
 
-export const useAuthStore = create<AuthState>((set) => {
+export const useAuthStore = create<AuthState>((set, get) => {
   // Every place the active user changes also retargets the project store to
   // that user's namespace (login adopts any anonymous projects; logout/anon
   // switches away), so accounts never share project data in one browser.
@@ -53,8 +53,22 @@ export const useAuthStore = create<AuthState>((set) => {
       provider: user?.authProvider,
       mergedUserIds: user?.mergedUserIds?.length ?? 0,
     });
+    // Whenever the active user CHANGES (sign-out or account switch), sync MUST
+    // stop BEFORE the project store switches namespace: applyProjectUser
+    // resets/replaces the persisted state, which fires the sync subscription
+    // synchronously — a still-live subscription would read "every project
+    // disappeared" and issue a remote soft-DELETE for the prior user's entire
+    // cloud set (destructive whenever the logout request failed and left the
+    // cookie valid). A same-user refresh keeps its live sync untouched.
+    const prevUserId = get().user?.userId ?? null;
+    if ((user?.userId ?? null) !== prevUserId) {
+      stopProjectSync();
+    }
+    if (!user) {
+      clearProviderSession();
+    }
     applyProjectUser(user?.userId ?? null, user?.mergedUserIds ?? []);
-    // Prime/clear runtime provider-key state (Gemini in-memory key, OpenAI
+    // Prime runtime provider-key state (Gemini in-memory key, OpenAI
     // configured flag) so AI calls use the right account's credentials.
     if (user) {
       void primeProviderSession();
@@ -62,9 +76,6 @@ export const useAuthStore = create<AuthState>((set) => {
       // this device and push local changes out. Runs after applyProjectUser so
       // the namespace is already pointed at this user. Never throws into auth.
       startProjectSync(user.userId ?? null);
-    } else {
-      clearProviderSession();
-      stopProjectSync();
     }
     set({ user, loading: false, authError: null });
   };
@@ -120,7 +131,13 @@ export const useAuthStore = create<AuthState>((set) => {
       if (DEV_SKIP_AUTH) {
         return; // no-op in dev mode
       }
-      await logoutRequest();
+      const serverConfirmed = await logoutRequest();
+      if (!serverConfirmed) {
+        // The cookie may still be valid server-side. Local sign-out proceeds
+        // regardless (the user asked to leave), but log it — setUser(null)'s
+        // stop-sync-first ordering is what keeps this path non-destructive.
+        projectsDebug('auth: logout request failed — session cookie may still be valid');
+      }
       // Explicit sign-out: also wipe local-browser credential keys so the next
       // account to sign in on this browser can't inherit them. The per-user
       // encrypted server vault is unaffected (it's keyed by userId server-side).

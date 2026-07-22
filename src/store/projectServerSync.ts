@@ -53,6 +53,12 @@ let unsubscribe: (() => void) | null = null;
 let suspendPush = false;
 const pushTimers = new Map<string, ReturnType<typeof setTimeout>>();
 let knownProjectIds = new Set<string>();
+// Monotonic per-project edit counter, bumped on every scheduled push. Lets an
+// in-flight save detect that NEW edits landed after its bundle snapshot, so a
+// successful save of the older snapshot doesn't clear the durable dirty flag
+// for work it never carried (tab-close before the next debounce would then
+// leave the cloud stale while meta claims "synced").
+const editSeqs = new Map<string, number>();
 
 function bundleSourceOf(state: ReturnType<typeof useProjectStore.getState>): BundleSource {
   return pickBundleSource(state);
@@ -95,18 +101,28 @@ function recordSyncState(
  * Record a successful cloud save in both the durable meta (survives reload — the
  * baseline reconcile compares against) and the in-memory sync store (drives UI).
  */
-function recordCloudSaved(userId: string, projectId: string, saved: ServerProjectSummary): void {
+function recordCloudSaved(
+  userId: string,
+  projectId: string,
+  saved: ServerProjectSummary,
+  opts: { editedSinceSnapshot?: boolean } = {},
+): void {
   const now = Date.now();
+  // Only clear the durable dirty flag when nothing changed since the pushed
+  // snapshot — a save that raced a newer local edit must leave the project
+  // marked unsynced (the pending debounce push will carry the newer edit; the
+  // flag stays honest if the tab closes before it fires).
+  const stillDirty = opts.editedSinceSnapshot === true;
   setProjectSyncMeta(userId, projectId, {
     lastSeenServerRevision: typeof saved?.revision === 'number' ? saved.revision : undefined,
     lastSeenServerUpdatedAt: typeof saved?.updatedAt === 'string' ? saved.updatedAt : undefined,
     lastCloudSavedAt: now,
     lastCloudSaveError: null,
-    hasUnsyncedChanges: false,
+    hasUnsyncedChanges: stillDirty,
     conflict: false,
   });
   useProjectSyncStore.getState().setProjectSync(projectId, {
-    state: 'saved',
+    state: stillDirty ? 'dirty' : 'saved',
     updatedAt: now,
     lastCloudSavedAt: now,
   });
@@ -159,6 +175,9 @@ async function pushProjectNow(projectId: string): Promise<void> {
   }
 
   sync.patchProjectSync(projectId, { state: 'saving', updatedAt: Date.now() });
+  // Snapshot the edit counter alongside the bundle: edits scheduled after this
+  // point are NOT in the bundle being pushed.
+  const seqAtSnapshot = editSeqs.get(projectId) ?? 0;
   try {
     // Conditional write: send the revision we last saw so the server rejects the
     // save (409) if it advanced on another device instead of overwriting it. For
@@ -171,7 +190,9 @@ async function pushProjectNow(projectId: string): Promise<void> {
         ? meta.lastSeenServerUpdatedAt
         : undefined;
     const saved = await saveProject(projectId, bundle, { expectedRevision, expectedUpdatedAt });
-    recordCloudSaved(userId, projectId, saved);
+    recordCloudSaved(userId, projectId, saved, {
+      editedSinceSnapshot: (editSeqs.get(projectId) ?? 0) !== seqAtSnapshot,
+    });
     projectsDebug('project pushed to server', { projectId, revision: saved?.revision });
     // Image sync runs AFTER (and never blocks) the text save. Fire-and-forget:
     // a Blob failure is non-fatal and retried on the next push.
@@ -203,6 +224,7 @@ async function pushProjectNow(projectId: string): Promise<void> {
 
 function schedulePush(projectId: string): void {
   if (activeUserId === null || projectId === DEMO_PROJECT_ID) return;
+  editSeqs.set(projectId, (editSeqs.get(projectId) ?? 0) + 1);
   // Durably mark unsynced edits so an offline/interrupted change isn't forgotten
   // across a reload, and so reconcile can tell a dirty project from a clean one.
   recordSyncState(activeUserId, projectId, {
@@ -231,6 +253,30 @@ async function deleteRemote(projectId: string): Promise<void> {
     const message = error instanceof Error ? error.message : 'delete_failed';
     projectsDebug('project remote delete failed', { projectId, message });
   }
+}
+
+/**
+ * Apply a deletion that happened on ANOTHER device: remove the project's local
+ * slices + sync bookkeeping without echoing a remote delete (the server is
+ * already tombstoned). Only ever called for a CLEAN local copy — a dirty one is
+ * surfaced as a conflict instead, so unsynced local work is never dropped.
+ */
+function removeLocalProject(projectId: string): void {
+  suspendPush = true;
+  try {
+    useProjectStore.getState().deleteProject(projectId);
+  } finally {
+    suspendPush = false;
+  }
+  knownProjectIds.delete(projectId);
+  const timer = pushTimers.get(projectId);
+  if (timer) {
+    clearTimeout(timer);
+    pushTimers.delete(projectId);
+  }
+  useProjectSyncStore.getState().removeProjectSync(projectId);
+  if (activeUserId) removeProjectSyncMeta(activeUserId, projectId);
+  projectsDebug('remote-deleted project removed locally', { projectId });
 }
 
 /** Apply server bundles into the store additively, without echoing a push. */
@@ -294,9 +340,33 @@ function recordPulledBaseline(userId: string, summary: ServerProjectSummary): vo
 async function reconcile(userId: string): Promise<void> {
   useProjectSyncStore.getState().setPhase('loading');
   try {
-    const summaries = await fetchProjectList();
+    // Fetch EVERY row the server knows about — archived and soft-deleted
+    // included. The default (live-only) list made absence ambiguous: a project
+    // soft-deleted on another device looked identical to one the server never
+    // had, so reconcile re-uploaded it and deletions resurrected everywhere.
+    const summaries = await fetchProjectList({ includeArchived: true, includeDeleted: true });
+    const liveSummaries = summaries.filter((s) => !s.deletedAt);
+    const deletedSummaries = summaries.filter((s) => !!s.deletedAt);
     const serverIds = new Set(summaries.map((s) => s.id));
     const localIds = new Set(syncableIds(useProjectStore.getState()));
+
+    // Remote deletions first: tombstoned on the server, still present locally.
+    // Clean local copy → apply the deletion here. Dirty local copy → surface a
+    // conflict (never silently drop unsynced local work, never silently
+    // resurrect — the user chooses via the conflict UI).
+    for (const summary of deletedSummaries) {
+      if (!localIds.has(summary.id)) continue;
+      const meta = getProjectSyncMeta(userId, summary.id);
+      if (meta.hasUnsyncedChanges === true) {
+        markConflict(userId, summary.id, 'reconcile', {
+          revision: summary.revision,
+          updatedAt: summary.updatedAt,
+        });
+        continue;
+      }
+      removeLocalProject(summary.id);
+      localIds.delete(summary.id);
+    }
 
     // Server -> local: fetch full bundles for projects this device is MISSING
     // (additive pull, unchanged) OR that the server has advanced on another
@@ -308,7 +378,7 @@ async function reconcile(userId: string): Promise<void> {
     // these pending across a reload. Re-push them so they don't silently linger
     // as local-only while the banner reads "synced".
     const toRetryPush: string[] = [];
-    for (const summary of summaries) {
+    for (const summary of liveSummaries) {
       if (!localIds.has(summary.id)) {
         toAdd.push(summary);
         continue;
@@ -370,12 +440,31 @@ async function reconcile(userId: string): Promise<void> {
       if (bundle) refreshed.push(bundle);
     }
     if (refreshed.length > 0) {
-      applyBundlesOverwrite(refreshed);
+      // Re-check each project's durable dirty flag at APPLY time, not just at
+      // list time: the per-project fetches above take multi-second wall-clock
+      // (and the `online`-event reconcile fires while the user is working), so
+      // an edit can land in the window after "local clean" was decided. Such a
+      // project is a conflict now — overwriting would silently discard the
+      // edit and clear its dirty flag.
+      const safeToApply: ProjectBundle[] = [];
+      for (const bundle of refreshed) {
+        const id = bundle.project.id;
+        if (getProjectSyncMeta(userId, id).hasUnsyncedChanges === true) {
+          const summary = toRefresh.find((s) => s.id === id);
+          markConflict(userId, id, 'reconcile', {
+            revision: summary?.revision,
+            updatedAt: summary?.updatedAt,
+          });
+          continue;
+        }
+        safeToApply.push(bundle);
+      }
+      applyBundlesOverwrite(safeToApply);
       for (const summary of toRefresh) {
-        if (refreshed.some((b) => b.project.id === summary.id)) recordPulledBaseline(userId, summary);
+        if (safeToApply.some((b) => b.project.id === summary.id)) recordPulledBaseline(userId, summary);
       }
       projectsDebug('server-newer projects refreshed over clean local', {
-        count: refreshed.length,
+        count: safeToApply.length,
       });
     }
 
@@ -383,7 +472,24 @@ async function reconcile(userId: string): Promise<void> {
     // as newly uploaded when its durable sync meta shows no prior cloud save /
     // observed server revision (see isProjectUploaded) — the reload-surviving
     // "has this reached the cloud?" signal that replaced the migration markers.
-    const toPush = [...localIds].filter((id) => !serverIds.has(id));
+    // With the full (deleted-inclusive) list above, absence from `serverIds`
+    // now means the server either never saw this project OR hard-deleted it.
+    // The durable baseline distinguishes them: a recorded server revision /
+    // cloud save proves the project reached the cloud, so its absence is a
+    // remote hard-delete — apply it locally (when clean) instead of treating
+    // the project as a fresh migration and resurrecting it. A dirty copy is
+    // re-pushed (deliberate re-create: never drop unsynced local work).
+    const toPush: string[] = [];
+    for (const id of localIds) {
+      if (serverIds.has(id)) continue;
+      const meta = getProjectSyncMeta(userId, id);
+      const reachedCloud = meta.lastSeenServerRevision != null || meta.lastCloudSavedAt != null;
+      if (reachedCloud && meta.hasUnsyncedChanges !== true) {
+        removeLocalProject(id);
+        continue;
+      }
+      toPush.push(id);
+    }
     let migratedCount = 0;
     for (const id of toPush) {
       const wasUploaded = isProjectUploaded(userId, id);
@@ -483,6 +589,7 @@ export function stopProjectSync(): void {
   }
   for (const timer of pushTimers.values()) clearTimeout(timer);
   pushTimers.clear();
+  editSeqs.clear();
   activeUserId = null;
   setImageSyncUser(null);
   clearImageRefRegistry();

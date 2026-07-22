@@ -42,6 +42,8 @@ export type ConsistencyReviewTransport = (input: {
     prompt: string;
     model: string;
     traceMeta?: LlmTraceMeta;
+    /** Finish-reason sink — lets the review detect a MAX_TOKENS truncation. */
+    onFinish?: (info: { finishReason?: string }) => void;
 }) => Promise<string>;
 
 export interface ReviewOptions {
@@ -59,6 +61,8 @@ export interface ReviewOptions {
 export type ReviewRejectionReason =
     | 'no-prd'                // model response carried no `prd` object
     | 'unparseable'           // model response was not valid JSON
+    | 'truncated'             // response hit MAX_TOKENS — the echoed PRD is incomplete
+    | 'skipped-too-large'     // PRD too large to echo back under the output cap; call skipped (zero spend)
     | 'detail-loss'           // a key content array materially shrank
     | 'missing-required'      // a required top-level field was emptied/dropped
     | 'feature-ids-changed'   // one or more original feature IDs disappeared
@@ -75,6 +79,12 @@ export interface ReviewResult {
     prd: StructuredPRD;
     /** Whether the revision passed the guards and was merged in. */
     applied: boolean;
+    /**
+     * True when NO model call was made (e.g. the PRD is too large to echo back
+     * under the output cap). Distinct from a rejection: nothing was spent and
+     * nothing was evaluated. Callers should record the pass as skipped.
+     */
+    skipped?: boolean;
     /** Short human-readable note about what changed (model-provided, optional). */
     changeLog?: string;
     /** Present only when `applied` is false: why the revision was discarded. */
@@ -109,14 +119,33 @@ HARD RULES:
 const buildPrompt = (prd: StructuredPRD): string =>
     `${SYSTEM}\n\nHere is the PRD JSON to review:\n\n${JSON.stringify(prd)}`;
 
-const defaultTransport: ConsistencyReviewTransport = ({ prompt, model, traceMeta }) =>
+/**
+ * Output cap for the review call. The model must echo the ENTIRE corrected PRD
+ * back, so the cap must exceed the serialized PRD size — the old 8192 cap was
+ * routinely smaller than the merged PRD it had to return (sections are
+ * generated with an 8192 cap EACH), making the pass a structurally guaranteed
+ * wasted call on any rich PRD: the reply truncated, then failed its own
+ * detail-loss guard.
+ */
+export const REVIEW_MAX_OUTPUT_TOKENS = 16384;
+
+/**
+ * Skip threshold: when the serialized PRD is close to what the output cap can
+ * echo back, don't make the call at all — a truncated review is always
+ * discarded, so the call would be pure spend. ~4 chars/token for JSON-heavy
+ * text, with headroom for the changeLog wrapper and reconciliation edits.
+ */
+const REVIEW_MAX_PRD_CHARS = Math.floor(REVIEW_MAX_OUTPUT_TOKENS * 4 * 0.85);
+
+const defaultTransport: ConsistencyReviewTransport = ({ prompt, model, traceMeta, onFinish }) =>
     callGemini('', prompt, {
         responseMimeType: 'application/json',
         responseSchema: reviewResponseSchema,
         model,
-        maxOutputTokens: 8192,
+        maxOutputTokens: REVIEW_MAX_OUTPUT_TOKENS,
         temperature: 0.2,
         topP: 0.9,
+        onFinish,
         traceMeta,
     });
 
@@ -402,8 +431,40 @@ export const reviewPrdConsistency = async (
     prd: StructuredPRD,
     options: ReviewOptions = {},
 ): Promise<ReviewResult> => {
+    // Size gate: the review must return the whole corrected PRD, so a PRD that
+    // cannot fit under the output cap makes the call a guaranteed waste (the
+    // truncated reply is always discarded). Skip it — zero spend.
+    const serialized = JSON.stringify(prd);
+    if (serialized.length > REVIEW_MAX_PRD_CHARS) {
+        return {
+            prd,
+            applied: false,
+            skipped: true,
+            rejectionReason: 'skipped-too-large',
+        };
+    }
+
     const transport = options.transport ?? defaultTransport;
-    const raw = await transport({ prompt: buildPrompt(prd), model: getFastModel(), traceMeta: options.traceMeta });
+    let finishReason: string | undefined;
+    const raw = await transport({
+        prompt: buildPrompt(prd),
+        model: getFastModel(),
+        traceMeta: options.traceMeta,
+        onFinish: (info) => { finishReason = info.finishReason; },
+    });
+
+    // A MAX_TOKENS finish means the echoed PRD is incomplete. Reject outright
+    // instead of repairing and evaluating a payload that is guaranteed to be
+    // missing content (it would only burn the guard pass to reach the same
+    // conclusion, or worse, sneak a shrunken PRD past the 70% threshold).
+    if (finishReason === 'MAX_TOKENS') {
+        return {
+            prd,
+            applied: false,
+            rejectionReason: 'truncated',
+            diff: buildReviewDiff(prd, prd, ['truncated'], 'rejected'),
+        };
+    }
 
     const parsed = parse(raw);
     if (parsed === null) {

@@ -248,6 +248,12 @@ export async function upsertProject(
  * Soft-delete a project (restorable). Sets a tombstone + archived status rather
  * than removing the row, so the data can be recovered. Returns true if a row
  * matched.
+ *
+ * MUST `$inc` the revision: a guarded push from a device still holding the
+ * pre-delete baseline would otherwise match the tombstoned row (same revision)
+ * and its `$set { deletedAt: null }` would silently resurrect the project with
+ * no conflict. Bumping the revision makes that push 409 like any other stale
+ * write, so the deletion propagates instead of being undone.
  */
 export async function softDeleteProject(userId, projectId) {
   if (!userId) throw new Error('softDeleteProject: userId is required');
@@ -257,12 +263,16 @@ export async function softDeleteProject(userId, projectId) {
   const result = await runMongoAction('updateOne', {
     collection: PROJECTS_COLLECTION,
     filter: { userId, id: projectId },
-    update: { $set: { deletedAt: now, status: 'archived', archived: true, updatedAt: now } },
+    update: {
+      $set: { deletedAt: now, status: 'archived', archived: true, updatedAt: now },
+      $inc: { revision: 1 },
+    },
   });
   return (result?.matchedCount ?? 0) > 0;
 }
 
-/** Restore a soft-deleted project. Returns true if a row matched. */
+/** Restore a soft-deleted project. Returns true if a row matched. Bumps the
+ * revision (state change — stale guarded pushes must conflict, not clobber). */
 export async function restoreProject(userId, projectId) {
   if (!userId) throw new Error('restoreProject: userId is required');
   if (!isValidProjectId(projectId)) return false;
@@ -271,12 +281,17 @@ export async function restoreProject(userId, projectId) {
   const result = await runMongoAction('updateOne', {
     collection: PROJECTS_COLLECTION,
     filter: { userId, id: projectId },
-    update: { $set: { deletedAt: null, status: 'active', archived: false, updatedAt: now } },
+    update: {
+      $set: { deletedAt: null, status: 'active', archived: false, updatedAt: now },
+      $inc: { revision: 1 },
+    },
   });
   return (result?.matchedCount ?? 0) > 0;
 }
 
-/** Toggle archive status without deleting. Returns true if a row matched. */
+/** Toggle archive status without deleting. Returns true if a row matched. Bumps
+ * the revision (state change — stale guarded pushes must conflict, not revert
+ * an archive done on another device). */
 export async function setArchived(userId, projectId, archived) {
   if (!userId) throw new Error('setArchived: userId is required');
   if (!isValidProjectId(projectId)) return false;
@@ -287,6 +302,7 @@ export async function setArchived(userId, projectId, archived) {
     filter: { userId, id: projectId },
     update: {
       $set: { archived: Boolean(archived), status: archived ? 'archived' : 'active', updatedAt: now },
+      $inc: { revision: 1 },
     },
   });
   return (result?.matchedCount ?? 0) > 0;

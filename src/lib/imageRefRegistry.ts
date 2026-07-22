@@ -12,6 +12,20 @@ let allRefs: ImageRef[] = [];
 const byVersion = new Map<string, ImageRef[]>();
 const byKey = new Map<string, ImageRef>();
 
+// Listeners notified with the affected version ids after a project's refs are
+// (re)installed. Lets image stores re-hydrate versions they already marked
+// "loaded": on a fresh device, `loadForVersion` can settle BEFORE the refs
+// arrive (they're pulled fire-and-forget after reconcile), and without this
+// signal the store would confidently show "no images" until a remount.
+type RefsChangedListener = (versionIds: string[]) => void;
+const refsChangedListeners = new Set<RefsChangedListener>();
+
+/** Subscribe to ref installs. Returns an unsubscribe function. */
+export function onImageRefsChanged(listener: RefsChangedListener): () => void {
+  refsChangedListeners.add(listener);
+  return () => refsChangedListeners.delete(listener);
+}
+
 function reindex(): void {
   byVersion.clear();
   byKey.clear();
@@ -30,6 +44,15 @@ function reindex(): void {
 export function setProjectRefs(projectId: string, refs: ImageRef[]): void {
   allRefs = allRefs.filter((r) => r.projectId !== projectId).concat(refs);
   reindex();
+  const versionIds = [...new Set(refs.map((r) => refVersionId(r)).filter((v): v is string => !!v))];
+  if (versionIds.length === 0) return;
+  for (const listener of refsChangedListeners) {
+    try {
+      listener(versionIds);
+    } catch {
+      // A listener failure must never break a refs pull.
+    }
+  }
 }
 
 /** Every pulled ref for one artifact version (for lazy hydration). */

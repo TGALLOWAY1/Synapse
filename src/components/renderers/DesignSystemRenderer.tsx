@@ -4,6 +4,7 @@ import remarkGfm from 'remark-gfm';
 import type { DesignTokens, DesignTypographyToken, DesignComponentToken } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
 import { getDesignSystemPresetLabel } from '../../lib/designSystemPresets';
+import { normalizeDesignTokens } from '../../lib/designTokens';
 import { ArtifactOutlineNav, type ArtifactOutlineItem } from '../ArtifactOutlineNav';
 import { useArtifactOutline } from '../../lib/useArtifactOutline';
 import { useIsMobile } from '../../lib/useIsMobile';
@@ -46,10 +47,15 @@ function useTokensFromMetadata(metadata: Record<string, unknown> | undefined): D
         if (!metadata) return null;
         const raw = metadata.tokens;
         if (!raw || typeof raw !== 'object') return null;
-        // Trust normalized tokens; the generator runs them through
-        // normalizeDesignTokens before persisting. Cast is safe at this
-        // boundary; a defensive normalize is unnecessary cost.
-        return raw as DesignTokens;
+        // Re-normalize at the render boundary. The generator normalizes before
+        // persisting, but metadata also arrives via paths that skip it (server
+        // sync payloads, snapshot restore, legacy import) — and these values
+        // flow into inline `style={{ background }}`, so a non-hex string here
+        // (e.g. `url(https://…)`) could trigger an external fetch under the
+        // CSP's `img-src … https:`. `coerceHex` inside normalize guarantees
+        // `#rrggbb` only. useMemo keys on the metadata reference, so the
+        // tokens reference stays stable across re-renders (no React #185).
+        return normalizeDesignTokens(raw);
     }, [metadata]);
 }
 

@@ -76,6 +76,13 @@ export type ModelProvider = {
         signal?: AbortSignal;
         /** Optional sink for token usage — forwarded to the transport. */
         onUsage?: (usage: NodeTokenUsage) => void;
+        /**
+         * Optional sink for the response's `finishReason` — forwarded to the
+         * transport. The DAG worker uses it to detect a MAX_TOKENS finish and
+         * fail the section as truncated instead of silently accepting a
+         * repaired partial payload.
+         */
+        onFinish?: (info: { finishReason?: string }) => void;
         /** Optional developer-only trace enrichment forwarded to the transport. */
         traceMeta?: LlmTraceMeta;
     }) => Promise<string>;
@@ -175,11 +182,40 @@ export const applyAiUpdate = (section: PrdSectionJob, content: string): PrdSecti
 };
 
 /**
+ * Per-section output cap for the initial DAG run. A section that overruns it
+ * finishes with MAX_TOKENS and is failed as truncated (never silently
+ * repaired); the single-section retry path re-runs it with the larger
+ * `RETRY_SECTION_MAX_OUTPUT_TOKENS` so retrying isn't a guaranteed repeat of
+ * the same truncation.
+ */
+export const SECTION_MAX_OUTPUT_TOKENS = 8192;
+export const RETRY_SECTION_MAX_OUTPUT_TOKENS = 16384;
+
+/**
+ * Thrown when a section's response hit the model's output-token cap. The DAG
+ * worker converts it into a normal section error, so the section lands in
+ * `generationMeta.failedSections` and the incomplete-PRD banner / "Run again"
+ * affordance surface it — a truncated section must never be marked complete
+ * and silently feed downstream artifacts.
+ */
+export class SectionTruncatedError extends Error {
+    constructor(sectionId: string) {
+        super(
+            `Section "${sectionId}" hit the model's output limit and was cut off mid-response. ` +
+            'Run it again — the retry uses a larger output budget.',
+        );
+        this.name = 'SectionTruncatedError';
+    }
+}
+
+/**
  * Parse a section's raw JSON response, applying truncation repair as a
- * fallback. Per-section maxOutputTokens is bounded (8192) so complex sections
- * like `features` can hit MAX_TOKENS and end mid-string. Returns `null` when
- * the response is unparseable even after repair. Shared by the DAG worker and
- * the single-section retry path so both stay in sync.
+ * fallback. Returns `null` when the response is unparseable even after
+ * repair. Shared by the DAG worker and the single-section retry path so both
+ * stay in sync. NOTE: callers must check the response's `finishReason` first —
+ * a MAX_TOKENS finish means the payload is truncated and must be failed via
+ * `SectionTruncatedError`, not salvaged here; the repair fallback exists only
+ * for cosmetically-malformed output on a clean (STOP) finish.
  */
 export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => {
     try {
@@ -198,15 +234,16 @@ export const parseSectionJson = (raw: string): Partial<StructuredPRD> | null => 
 };
 
 export const makeJsonProvider = (): ModelProvider => ({
-    async generateText({ prompt, model, schema, signal, onUsage, traceMeta }) {
+    async generateText({ prompt, model, schema, signal, onUsage, onFinish, traceMeta }) {
         return callGemini('', prompt, {
             responseMimeType: 'application/json',
             responseSchema: schema,
             model,
-            maxOutputTokens: 8192,
+            maxOutputTokens: SECTION_MAX_OUTPUT_TOKENS,
             temperature: 0.4,
             topP: 0.9,
             onUsage,
+            onFinish,
             traceMeta,
         }, signal);
     },
@@ -449,6 +486,7 @@ export async function generateProgressivePrd(params: {
         };
 
         let usage: NodeTokenUsage | undefined;
+        let finishReason: string | undefined;
         try {
             const raw = await provider.generateText({
                 prompt: `${system}\n\n${user}`,
@@ -456,8 +494,18 @@ export async function generateProgressivePrd(params: {
                 schema,
                 signal: params.signal,
                 onUsage: (u) => { usage = u; },
+                onFinish: (info) => { finishReason = info.finishReason; },
                 traceMeta,
             });
+
+            // A MAX_TOKENS finish means the payload is truncated — the tail of
+            // the section (e.g. the last features in a rich feature list) is
+            // simply missing. Fail the section so it surfaces via
+            // failedSections + retry instead of being silently "repaired",
+            // marked complete, and fed to every downstream artifact.
+            if (finishReason === 'MAX_TOKENS') {
+                throw new SectionTruncatedError(section.id);
+            }
 
             // Parse with truncation repair fallback (shared helper).
             const parsed = parseSectionJson(raw);

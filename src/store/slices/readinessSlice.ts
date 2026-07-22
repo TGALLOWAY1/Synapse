@@ -61,11 +61,16 @@ export function buildReadinessReviewInputFromState(
     if (!spine) return undefined;
     const artifacts = state.artifacts[projectId] ?? [];
     const versions = state.artifactVersions[projectId] ?? [];
+    // Deliberately derived WITHOUT the live job: this input feeds the
+    // readiness snapshot/current-signature hashes, and folding transient slot
+    // statuses in made each of the 7 concurrently-settling artifact slots
+    // change the hash — so a checkpoint created mid-generation was always
+    // rejected 'stale' at commit. Durable state (versions, refs, plans) still
+    // invalidates the checkpoint as it should.
     const rawOutputAlignment = deriveProjectOutputAlignment({
         artifacts,
         artifactVersions: versions,
         spineVersions: state.spineVersions[projectId] ?? [],
-        job: state.jobs[projectId],
     });
     const planContext = buildDownstreamUpdatePlanCurrentContext({
             spineVersions: state.spineVersions[projectId] ?? [],

@@ -102,6 +102,20 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // Carry the persisted safety review forward: the classification
+                // binds to the project idea, not to one spine's text, and the
+                // canonical-spine builder threads its restriction directive into
+                // every downstream artifact. Dropping it here would silently
+                // strip a restricted project's binding constraints (and its
+                // SafetyBoundariesCard) after a consolidation.
+                safetyReview: oldSpine.safetyReview,
+                // Preflight clarification answers likewise describe the idea —
+                // keep them so a later regenerate can still honor them.
+                preflightSession: oldSpine.preflightSession,
+                // NOTE: structuredPRD is deliberately NOT copied — the merge
+                // output is markdown only, and stamping the pre-merge
+                // structured PRD onto it would present content that no longer
+                // matches the document (and feed stale data to artifacts).
                 provenance: {
                     changeSource: 'branch_merge',
                     editSummary: `Merged branch: "${branch.anchorText.substring(0, 40)}${branch.anchorText.length > 40 ? '…' : ''}"`,

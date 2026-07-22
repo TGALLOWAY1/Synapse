@@ -39,6 +39,15 @@ export interface JsonModeConfig {
      */
     onUsage?: (usage: GeminiTokenUsage) => void;
     /**
+     * Optional finish sink. Invoked once with the `finishReason` Gemini
+     * reported for the response (e.g. 'STOP', 'MAX_TOKENS'). Lets callers
+     * detect truncation — a MAX_TOKENS finish returns the partial body as
+     * "success" at the transport level, so any JSON-mode caller that must not
+     * silently accept a truncated payload should inspect this. (Streaming
+     * callers get the same signal via `StreamCallbacks.onFinish`.)
+     */
+    onFinish?: (info: { finishReason?: string }) => void;
+    /**
      * Optional developer-only trace enrichment (LLM Trace Viewer). Purely
      * observational — attaches human labels (purpose/stage/artifact/inputs) to
      * the trace captured at the geminiClient chokepoint. No effect on the
@@ -358,6 +367,7 @@ export const callGemini = async (systemInstruction: string, promptText: string, 
         trace.finishError(emptyErr, { finishReason });
         throw emptyErr;
     }
+    jsonMode?.onFinish?.({ finishReason });
     // Surface token usage to any observer (Metrics dashboard). Gemini returns
     // these on the top-level `usageMetadata`; absent on some error/partial
     // responses, in which case we simply skip the callback.

@@ -285,9 +285,11 @@ see the LLM layer) before this; the metrics layer makes that concurrency
   `string` — no call site breaks). The PRD section worker threads it through
   `ModelProvider.generateText` → `makeJsonProvider` and emits it on the
   `section_completed` event. **New provider call sites that want token metrics
-  must forward `onUsage`.** (The artifact-bundle `WorkflowRun` node observations
-  in `artifactJobController` still don't record tokens even though the transport
-  now reports them — wiring that through is the remaining TODO.)
+  must forward `onUsage`.** The artifact bundle records tokens too:
+  `generateCoreArtifact` accepts `options.onUsage`, `runCoreArtifactSlot`
+  threads it through, and `executeJob` stamps the captured usage onto each
+  slot's `WorkflowRun` node observation — so artifact runs no longer read as
+  $0 in the Metrics dashboard.
 - **Pure metric math** (`src/lib/metrics/`, unit-tested, no store/LLM access):
   `workflowMetrics.ts` (sequential estimate, actual runtime, speedup, max/avg
   concurrency via interval sweep, critical path via memoized DFS),

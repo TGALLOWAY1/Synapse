@@ -324,18 +324,28 @@ export function useReviewRunController(params: {
         if (!canWrite) return;
         const manifest = manifestForReview(reviewId);
         if (!manifest || !(specialistId in SPECIALIST_REGISTRY)) {
-            useToastStore.getState().addToast({ type: 'warning', title: 'Review snapshot unavailable', message: 'One or more reviewed source versions are no longer available.' });
+            useToastStore.getState().addToast({ type: 'warning', title: 'Review snapshot unavailable', message: 'The reviewed sources changed since this run was captured (for example, a decision was confirmed) or are no longer available. Start a new review against the current plan.' });
             return;
         }
         const controller = new AbortController();
         activeControllers.set(reviewId, controller);
         setBusy(true);
-        const result = await runSingleSpecialist(manifest, specialistId as ReviewSpecialistId, {
-            transport: createGeminiSpecialistTransport(), signal: controller.signal, onEvent: event => applyEvent(reviewId, event),
-        });
-        persistResult(reviewId, result);
-        activeControllers.delete(reviewId);
-        setBusy(false);
+        // Mirror executeReview's finally: a throw from the specialist run or
+        // from persistResult must never strand busy=true (Start disabled until
+        // remount) or leak the AbortController.
+        try {
+            const result = await runSingleSpecialist(manifest, specialistId as ReviewSpecialistId, {
+                transport: createGeminiSpecialistTransport(), signal: controller.signal, onEvent: event => applyEvent(reviewId, event),
+            });
+            persistResult(reviewId, result);
+        } catch (error) {
+            if (!controller.signal.aborted) {
+                useToastStore.getState().addToast({ type: 'error', title: 'Specialist retry failed', message: error instanceof Error ? error.message : 'Unknown review error' });
+            }
+        } finally {
+            activeControllers.delete(reviewId);
+            setBusy(false);
+        }
     };
 
     const handleResumeReview = async (reviewId: string) => {
@@ -343,7 +353,7 @@ export function useReviewRunController(params: {
         const manifest = manifestForReview(reviewId);
         const run = reviewRuns.find(item => item.id === reviewId);
         if (!manifest || !run) {
-            useToastStore.getState().addToast({ type: 'warning', title: 'Review snapshot unavailable', message: 'This review cannot resume because its exact source snapshot is unavailable.' });
+            useToastStore.getState().addToast({ type: 'warning', title: 'Review snapshot unavailable', message: 'This review cannot resume: the plan changed since it was captured (for example, a decision was confirmed) or a reviewed version is gone. Start a new review against the current plan.' });
             return;
         }
         const incomplete = specialistRuns

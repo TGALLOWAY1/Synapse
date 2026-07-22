@@ -6,7 +6,7 @@
 // model never produces questions that help specify harmful intent.
 
 import { SAFETY_OVERRIDE } from './prdPrompts';
-import type { PreflightMode, PreflightQuestion } from '../../types';
+import type { PreflightMode, PreflightQuestion, PreflightSession } from '../../types';
 
 /** Number of questions per mode. */
 export const QUESTION_COUNT: Record<Exclude<PreflightMode, 'none'>, number> = {
@@ -81,6 +81,28 @@ export interface PreflightContext {
     assumptions?: string[];
     unknowns?: string[];
 }
+
+/**
+ * Build the PRD-generation context from a clarification session. Shared by the
+ * preflight Generate-PRD hand-off AND spine regeneration — a regenerate must
+ * re-inject the answers the user explicitly gave (they were "authoritative
+ * intent" on the original run), not silently fall back to the raw idea.
+ */
+export const toPreflightContext = (session: PreflightSession): PreflightContext => ({
+    mode: session.mode,
+    clarificationResponses: session.questions.map((q) => {
+        const skipped = !!q.skipped || !q.answer || !q.answer.trim();
+        return {
+            question: q.question,
+            answer: skipped ? null : q.answer!.trim(),
+            skipped,
+            intent: q.intent,
+        };
+    }),
+    summary: session.summary,
+    assumptions: session.assumptions,
+    unknowns: session.unknowns,
+});
 
 /**
  * Build the clarification block appended to the PRD prompt. Includes the

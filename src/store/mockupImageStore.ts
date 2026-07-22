@@ -27,7 +27,7 @@ import {
     listImagesForVersion as idbListImages,
     putImage as idbPutImage,
 } from '../lib/mockupImageStore';
-import { getRefsForVersion } from '../lib/imageRefRegistry';
+import { getRefsForVersion, onImageRefsChanged } from '../lib/imageRefRegistry';
 import { fetchBlobAsDataUrl } from '../lib/imageRefsClient';
 import { mockupRecordFromRef, type ImageRef } from '../lib/imageRef';
 import { notifyMockupImageGenerated } from './projectImageSync';
@@ -274,3 +274,17 @@ export const useMockupImageStore = create<ImageStoreState>((set, get) => ({
         });
     },
 }));
+
+// Cross-device hydration false-negative fix: refs are pulled fire-and-forget
+// AFTER reconcile, so on a fresh device `loadForVersion` can settle (and stamp
+// `loadedVersions[id]`) before any ref exists — the presence UI then
+// confidently claims no images exist until a remount. When a project's refs
+// land, re-run hydration for any version this store already settled; it is
+// idempotent and only fetches records the local IndexedDB is missing.
+// Versions never viewed stay lazy (no flag → no fetch).
+onImageRefsChanged((versionIds) => {
+    const { loadedVersions, loadForVersion } = useMockupImageStore.getState();
+    for (const id of versionIds) {
+        if (loadedVersions[id]) void loadForVersion(id);
+    }
+});
