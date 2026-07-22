@@ -108,11 +108,29 @@ impact previews / the write-barrier apply path in
   persist through `setPlanningRecordDecisionOptions` only — a guarded store
   action that refuses non-choice record types and any record that already has
   a user verdict, and stamps `decisionOptionsProvenance`. Suggestions are
-  advisory: they never alter record status and the recommendation is never
-  preselected in the UI. Generation auto-triggers when a decision record is
-  created from a Challenge finding and when the Decision Center opens an
-  option-less unresolved decision (`useDecisionOptionSuggestions.ts`, deduped
-  in-flight). The prompt is snapshot-locked in `promptSurfaces.test.ts`.
+  advisory: they never alter record status. In the Decision Center the
+  recommended option is **preselected as the default choice** so approving it
+  is a single explicit **Approve recommendation** click — a verdict is still
+  only ever recorded by that user action (`actor: 'user'`; nothing is
+  auto-approved), and choosing another option or a custom answer stays one
+  click away. Generation auto-triggers when a decision record is created from
+  a Challenge finding, when the Decision Center opens an option-less
+  unresolved decision, and eagerly for open choices when the Challenge stage
+  mounts (capped per pass by `MAX_EAGER_OPTION_PREPARATIONS` in
+  `ReviewWorkspaceContainer.tsx`; `useDecisionOptionSuggestions.ts` dedupes
+  in-flight and stored options). The prompt is snapshot-locked in
+  `promptSurfaces.test.ts`.
+- **Open decisions never block Explore/Build.** Only the specialist critique
+  is gated (`CritiqueGate`). The Decision Center header and the critique gate
+  both surface a "Continue to Explore" action (`onContinueToExplore`, threaded
+  from `ProjectWorkspace`), and the advisory `PreBuildCheckModal`
+  (`src/components/planning/PreBuildCheckModal.tsx`) moves the remaining
+  open-question prompt to the start of output generation — offered once per
+  workspace session by `handleGenerateAssets`, listing open
+  decision/question/conflict/assumption records with "Review decisions first"
+  vs "Generate anyway"; generating always proceeds. Do not re-introduce a
+  decision-count or readiness gate on the `workspace` stage or on artifact
+  generation (`artifactGenerationGate.ts` stays safety/PRD-only).
 - **Planning navigation intents apply exactly once.** The `planning` URL
   param is applied to the presentation by `ProjectWorkspace`'s intent effect,
   which tracks the last-applied serialized intent **plus its validated

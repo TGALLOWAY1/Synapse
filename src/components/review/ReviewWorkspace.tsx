@@ -149,6 +149,9 @@ export interface ReviewWorkspaceProps {
     /** Defers every still-open surfaced decision at once — the gate's escape
      * hatch so an unsure user can proceed to the optional critique. */
     onDeferOpenDecisions?: () => void;
+    /** Jumps to the Explore/Build stage. Surfaced by the Decision Center and
+     * the critique gate so open decisions never read as blocking assets. */
+    onContinueToExplore?: () => void;
     busy?: boolean;
     onStartReview: (input: { specialistIds: string[]; focus?: string }) => void | Promise<void>;
     onSelectRun: (runId: string) => void;
@@ -226,11 +229,12 @@ function StatusIcon({ status }: { status: ReviewSpecialistProgress['status'] }) 
     return <Circle size={15} className="text-neutral-300" aria-label="Queued" />;
 }
 
-function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpenDecisions }: {
+function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpenDecisions, onContinueToExplore }: {
     openDecisionCount: number;
     readOnly?: boolean;
     onGoToDecisions: () => void;
     onDeferOpenDecisions?: () => void;
+    onContinueToExplore?: () => void;
 }) {
     return (
         <div className="mx-auto max-w-2xl px-4 py-10 sm:px-6 sm:py-16">
@@ -243,10 +247,10 @@ function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpe
                     The specialist critique is optional and works best once your draft has no open decisions.
                     {openDecisionCount > 0
                         ? ` ${openDecisionCount} decision${openDecisionCount === 1 ? '' : 's'} still ${openDecisionCount === 1 ? 'needs' : 'need'} your attention.`
-                        : ''} Answer or defer them in the Decision Center, then come back to run the critique when you're ready.
+                        : ''} Synapse recommends an answer for each — approving them usually takes a minute. Or defer them all and come back to the critique whenever you're ready.
                 </p>
                 {!readOnly && (
-                    <div className="mt-6 flex flex-col gap-2 sm:flex-row">
+                    <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                         <button type="button" onClick={onGoToDecisions} className="inline-flex min-h-11 items-center justify-center gap-2 whitespace-nowrap rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-500">
                             Open Decision Center <ArrowRight size={14} className="shrink-0" />
                         </button>
@@ -256,6 +260,14 @@ function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpe
                             </button>
                         )}
                     </div>
+                )}
+                {onContinueToExplore && (
+                    <p className="mt-4 text-xs text-neutral-500">
+                        Only this critique waits on decisions — your design assets don't.{' '}
+                        <button type="button" onClick={onContinueToExplore} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
+                            Continue to Explore
+                        </button>
+                    </p>
                 )}
             </div>
         </div>
@@ -922,6 +934,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onRecordAssumptionOutcome={props.onRecordAssumptionOutcome}
                         onRecordAssumptionTreatment={props.onRecordAssumptionTreatment}
                         onReopenAssumptionOutcome={props.onReopenAssumptionOutcome}
+                        onContinueToExplore={props.onContinueToExplore}
                     />
                 ) : tab === 'history' ? (
                     <div className="mx-auto max-w-4xl px-4 py-6 sm:px-6 sm:py-8">
@@ -952,7 +965,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                     </div>
                 ) : !activeRun ? (
                     props.critiqueUnlocked === false ? (
-                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} />
+                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
                     ) : (
                         <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={async input => { setStartingNewReview(false); await props.onStartReview(input); }} />
                     )
@@ -961,7 +974,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                     // restarting critique work — so gate it behind decisions too. A live
                     // in-flight run keeps showing progress (it was started when unlocked).
                     props.critiqueUnlocked === false && (activeRun.status === 'interrupted' || activeRun.status === 'failed') ? (
-                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} />
+                        <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
                     ) : (
                         <ReviewProgress run={activeRun} onCancel={() => props.onCancelRun(activeRun.id)} onRetrySpecialist={id => props.onRetrySpecialist(activeRun.id, id)} onRetrySynthesis={() => props.onRetrySynthesis(activeRun.id)} />
                     )
@@ -980,7 +993,7 @@ export function ReviewWorkspace(props: ReviewWorkspaceProps) {
                         onRetryCoverage={() => props.onRetrySynthesis(activeRun.id)}
                     />
                 ) : props.critiqueUnlocked === false ? (
-                    <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} />
+                    <CritiqueGate openDecisionCount={props.openDecisionCount ?? 0} readOnly={props.readOnly} onGoToDecisions={() => setTab('decisions')} onDeferOpenDecisions={props.onDeferOpenDecisions} onContinueToExplore={props.onContinueToExplore} />
                 ) : (
                     <ReviewSetup projectName={props.projectName} panel={props.recommendedPanel} sources={props.sourcesInScope} missingSources={props.missingSources ?? []} busy={props.busy} readOnly={props.readOnly} onStart={props.onStartReview} />
                 )}

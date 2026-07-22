@@ -22,10 +22,11 @@ const PREVIEW_GEN_MS = 900;
 /**
  * Screen 4 — the Decision Center (the workspace's Challenge stage). Mirrors
  * `src/components/review/DecisionCenter.tsx`: a "Needs attention" queue,
- * suggested options with a visually-distinct (never preselected)
- * recommendation, an explicit user verdict, and a plan-alignment preview that
- * is applied as an explicit, separate step. Teaches that the user decides and
- * Synapse only drafts the consequences.
+ * suggested options with the Synapse recommendation preselected as the
+ * default choice (one explicit click approves it — the verdict is still only
+ * ever recorded by the user), and a plan-alignment preview that is applied as
+ * an explicit, separate step. Teaches that the user decides and Synapse only
+ * drafts the consequences.
  */
 export default function ScreenDecisions({ reducedMotion }: ScreenProps) {
     const { decision, assumption, resolved, challengeTabs } = DECISION_DEMO;
@@ -34,7 +35,8 @@ export default function ScreenDecisions({ reducedMotion }: ScreenProps) {
     const [queueTab, setQueueTab] = useState<QueueTab>('attention');
     const [decisionRecorded, setDecisionRecorded] = useState(false);
     const [assumptionAccepted, setAssumptionAccepted] = useState(false);
-    const [answerChoice, setAnswerChoice] = useState<string | undefined>();
+    // The recommendation starts preselected, matching the live Decision Center.
+    const [answerChoice, setAnswerChoice] = useState<string | undefined>(decision.recommendedId);
     const [previewPhase, setPreviewPhase] = useState<PreviewPhase>('idle');
     const [acceptedProposals, setAcceptedProposals] = useState<string[]>([]);
     const timer = useRef<number | undefined>(undefined);
@@ -218,14 +220,14 @@ export default function ScreenDecisions({ reducedMotion }: ScreenProps) {
                                                     onClick={saveDecision}
                                                     className="rounded-xl bg-indigo-600 px-4 py-2.5 text-sm font-semibold text-white transition hover:bg-indigo-700 disabled:opacity-40"
                                                 >
-                                                    Save decision
+                                                    {chosenOption?.id === decision.recommendedId ? 'Approve recommendation' : 'Save decision'}
                                                 </button>
                                                 <span className="inline-flex items-center gap-1.5 rounded-xl border border-neutral-700 px-4 py-2.5 text-sm font-medium text-neutral-400">
                                                     <Clock3 size={14} /> Defer
                                                 </span>
                                             </div>
                                             <p className="mt-2 text-[11px] text-neutral-500">
-                                                A recommendation is visually distinct, never preselected — the verdict is always yours.
+                                                The recommendation starts selected so approving takes one click — but the verdict is only recorded when you say so.
                                             </p>
                                         </div>
                                     </>

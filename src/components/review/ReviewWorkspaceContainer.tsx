@@ -23,11 +23,18 @@ interface Props {
      * decision is addressed; only the critique run is blocked, never the
      * Decision Center or history. */
     critiqueUnlocked: boolean;
+    /** Jumps to the Explore/Build stage — surfaced in the Decision Center and
+     * critique gate so open decisions never read as blocking design assets. */
+    onContinueToExplore?: () => void;
 }
 
 // Record types the plan surfaces as decisions to engage with. Kept in sync with
 // the `openDecisions` predicate in planningReadiness.ts (risks are excluded).
 const GATE_RECORD_TYPES = new Set(['decision', 'open_question', 'conflict', 'assumption']);
+
+// Cap on how many open choices get recommendations prepared per pass — bounds
+// model spend on projects with a large backlog; the rest prepare on open.
+const MAX_EAGER_OPTION_PREPARATIONS = 6;
 
 // Zustand selectors are consumed through React's useSyncExternalStore. Keep
 // the absent per-project snapshot referentially stable so projects that have
@@ -35,7 +42,7 @@ const GATE_RECORD_TYPES = new Set(['decision', 'open_question', 'conflict', 'ass
 // loop under React 19.
 const EMPTY_PROJECT_COLLECTION: never[] = [];
 
-export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId, critiqueUnlocked }: Props) {
+export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordId, initialReviewId, initialIssueId, initialFindingId, critiqueUnlocked, onContinueToExplore }: Props) {
     const project = useProjectStore(state => state.projects[projectId]);
     const spines = useProjectStore(state => state.spineVersions[projectId] ?? EMPTY_PROJECT_COLLECTION);
     const artifacts = useProjectStore(state => state.artifacts[projectId] ?? EMPTY_PROJECT_COLLECTION);
@@ -61,6 +68,22 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
     });
 
     const { optionSuggestions, prepareDecisionOptions } = useDecisionOptionSuggestions({ projectId, canWrite });
+
+    // Prepare recommendations eagerly for every open choice (bounded) so the
+    // Decision Center queue opens ready to approve instead of waiting on a
+    // per-record model call. The hook dedupes in-flight and stored options;
+    // a failed attempt is not auto-retried — the detail pane keeps its
+    // manual "Try again".
+    useEffect(() => {
+        if (!canWrite) return;
+        planningRecords
+            .filter(record => (record.type === 'decision' || record.type === 'open_question')
+                && ['open', 'proposed'].includes(projectDecision(record).status)
+                && !record.decisionOptions?.length
+                && !optionSuggestions[record.id])
+            .slice(0, MAX_EAGER_OPTION_PREPARATIONS)
+            .forEach(record => void prepareDecisionOptions(record.id));
+    }, [canWrite, planningRecords, prepareDecisionOptions, optionSuggestions]);
 
     const { handleIssueAction, handleReopenIssue, handleTriageFinding } = useReviewIssueActions({
         projectId, canWrite, currentManifest,
@@ -124,6 +147,7 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
         critiqueUnlocked={critiqueUnlocked}
         openDecisionCount={openGateRecords.length}
         onDeferOpenDecisions={deferOpenDecisions}
+        onContinueToExplore={onContinueToExplore}
         recommendedPanel={panel}
         sourcesInScope={currentManifest.sources.map(source => source.label)}
         missingSources={currentManifest.missingArtifacts.map(source => source.replaceAll('_', ' '))}

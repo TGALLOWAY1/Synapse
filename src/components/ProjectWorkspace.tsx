@@ -64,8 +64,10 @@ import {
     deriveReadinessReview,
     hasReadinessProvenanceForSpine,
     planningContentHash,
+    projectDecision,
 } from '../lib/planning';
 import { PlanningStateBar } from './planning/PlanningStateBar';
+import { PreBuildCheckModal } from './planning/PreBuildCheckModal';
 import { SharpenPlanFlow } from './planning/SharpenPlanFlow';
 import { useDecisionImpactActions } from './review/useDecisionImpactActions';
 import { ReadinessCheckpoint, type ReadinessOverrideInput } from './planning/ReadinessCheckpoint';
@@ -156,6 +158,10 @@ export function ProjectWorkspace() {
     const [finalizeAutoOpen, setFinalizeAutoOpen] = useState(false);
     // Design direction is requested only when output generation begins.
     const [showPresetChoice, setShowPresetChoice] = useState(false);
+    // Advisory pre-build validation check, offered once per workspace session
+    // right when output generation starts. Never blocks generation.
+    const [showPreBuildCheck, setShowPreBuildCheck] = useState(false);
+    const preBuildCheckOffered = useRef(false);
     const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
     const [readinessInitialConcernId, setReadinessInitialConcernId] = useState<string>();
     const [readinessSubmitError, setReadinessSubmitError] = useState<string | null>(null);
@@ -575,6 +581,11 @@ export function ProjectWorkspace() {
     // The optional specialist critique (Challenge → Findings) stays locked until
     // every surfaced decision is addressed (answered or deferred/skipped).
     const critiqueUnlocked = planningReadiness.openDecisionCount === 0;
+    // Items the advisory pre-build check surfaces when output generation starts
+    // — same boundary as the critique gate (risks stay advisory-only).
+    const openPlanningItems = planningRecords.filter(record =>
+        ['decision', 'open_question', 'conflict', 'assumption'].includes(record.type)
+        && ['open', 'proposed'].includes(projectDecision(record).status));
     const planningAttention = derivePlanningAttention({
         ...planningReadinessInput,
         reviewIssues,
@@ -925,13 +936,13 @@ export function ProjectWorkspace() {
         return coreReady && mockupReady;
     })();
 
-    // Post-commitment output affordance. Commitment alone creates no outputs;
-    // the user retains an explicit route to generate or inspect them.
+    // Route to outputs. Visible as soon as a safe structured PRD exists —
+    // commitment is not required, so users always see the way to their design
+    // assets (the label reads "Explore" until the plan is ready to build).
     const assetsBuilding = !!assetJob && Object.values(assetJob.slots).some(
         (s) => s.status === 'generating' || s.status === 'queued',
     );
-    const showAssetsPill = displaysCurrentCommitment
-        && !!activeSpine?.structuredPRD
+    const showAssetsPill = !!activeSpine?.structuredPRD
         && activeSpine?.safetyReview?.status !== 'blocked'
         && !isOldVersion
         && pipelineStage !== 'workspace';
@@ -1048,8 +1059,7 @@ export function ProjectWorkspace() {
         setProjectStage(projectId, 'workspace');
     };
 
-    const handleGenerateAssets = () => {
-        if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return handleOpenAssets();
+    const proceedToAssetGeneration = () => {
         if (!project?.designSystemPreset) {
             generateAfterPreset.current = true;
             // Close the finalize modal before opening the preset picker; otherwise
@@ -1060,6 +1070,20 @@ export function ProjectWorkspace() {
             return;
         }
         startAssetGeneration();
+    };
+
+    const handleGenerateAssets = () => {
+        if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return handleOpenAssets();
+        // Validation belongs at the start of implementation: surface still-open
+        // planning questions once, right when outputs are about to generate.
+        // Advisory only — "Generate anyway" always proceeds.
+        if (!preBuildCheckOffered.current && openPlanningItems.length > 0) {
+            preBuildCheckOffered.current = true;
+            setShowFinalizeSuccess(false);
+            setShowPreBuildCheck(true);
+            return;
+        }
+        proceedToAssetGeneration();
     };
 
     const openDecisionCenter = (recordId?: string, returnTo?: PlanningReturnTarget) => {
@@ -1210,7 +1234,7 @@ export function ProjectWorkspace() {
                         <button
                             onClick={assetsReady ? handleOpenAssets : handleGenerateAssets}
                             className="flex items-center gap-1.5 px-3 py-1.5 text-sm bg-green-600/90 hover:bg-green-600 text-white rounded transition"
-                            title="Generate or review outputs from this committed plan"
+                            title="Generate or review outputs from this plan"
                         >
                             {assetsBuilding
                                 ? <Loader2 size={14} className="animate-spin" />
@@ -1363,6 +1387,14 @@ export function ProjectWorkspace() {
                     }}
                 />
             )}
+            {showPreBuildCheck && (
+                <PreBuildCheckModal
+                    items={openPlanningItems.map(record => ({ id: record.id, title: record.title, type: record.type }))}
+                    onGenerateAnyway={() => { setShowPreBuildCheck(false); proceedToAssetGeneration(); }}
+                    onReviewFirst={() => { setShowPreBuildCheck(false); openDecisionCenter(openPlanningItems[0]?.id, planReturnTarget); }}
+                    onClose={() => setShowPreBuildCheck(false)}
+                />
+            )}
             {showFinalizeSuccess && (
                 <FinalizationSuccessModal
                     assetsGenerated={assetsReady}
@@ -1503,6 +1535,7 @@ export function ProjectWorkspace() {
                         initialIssueId={reviewInitialIssueId}
                         initialFindingId={reviewInitialFindingId}
                         critiqueUnlocked={critiqueUnlocked}
+                        onContinueToExplore={() => handlePipelineStageChange('workspace')}
                     />
                 ) : (
                 <>

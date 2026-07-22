@@ -116,7 +116,7 @@ export const REFINE_DEMO = {
  * Demo content for the Decision Center screen. Mirrors the real Challenge
  * stage (`src/components/review/DecisionCenter.tsx` inside `ReviewWorkspace`):
  * a queue of planning records split into "Needs attention" vs "Resolved &
- * history", suggested options with a visually-distinct (never preselected)
+ * history", suggested options with a visually-distinct (preselected)
  * recommendation, an explicit user verdict, and a plan-alignment impact
  * preview that is applied through a version-safe write. Keep the vocabulary in
  * sync with the live component if it changes.

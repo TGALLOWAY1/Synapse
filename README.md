@@ -36,7 +36,7 @@
 | 🧠 | **Spec in seconds, generated in parallel** | Describe your product in a sentence. Synapse writes a full, structured PRD — with sections generating concurrently so you watch it build in real time instead of waiting on one long stream. |
 | ✍️ | **Refine by highlighting** | Select any passage and choose **Clarify · Expand · Specify · Alternative · Replace**. A focused AI thread reworks just that span and merges it back — no regenerating the whole document. |
 | ✅ | **Feature-by-feature approval** | Features are broken into systems and individual cards with success criteria, edge cases, and failure modes. Confirm the ones you agree with; the plan tracks what's settled and what still needs a look. |
-| ⚖️ | **A Decision Center for the choices that matter** | Synapse surfaces the assumptions and open decisions hiding in your spec, each with 2–3 concrete approaches and a clearly-marked recommendation. You record the verdict, preview its exact impact on the plan, and apply it — your call, never a silent rewrite. |
+| ⚖️ | **A Decision Center for the choices that matter** | Synapse surfaces the assumptions and open decisions hiding in your spec, each with 2–3 concrete approaches and its recommended answer preselected — approve it in one click or record your own. Preview the exact impact on the plan and apply it explicitly — your call, never a silent rewrite. Open decisions never block your design assets. |
 | 🎨 | **One plan → every asset** | When you're ready, generate the whole build foundation from the same source of truth: screen inventory, data model, user flows, a design system, an implementation plan, and mockups — all at once. |
 | 🖌️ | **Consistent visual direction** | Pick a design direction (Modern SaaS, Enterprise, Creative Studio…) recommended from your idea. It steers the design system, mockups, and image prompts so every asset looks like one product. |
 | 🕓 | **Nothing is ever lost** | Every regenerate, edit, decision, and merge appends a new version with a readable diff and one-click restore. History is append-only — you can always go back. |
@@ -73,7 +73,7 @@ Each feature carries its outcome, success criteria, edge cases, and failure mode
 <img width="100%" alt="Features view with a confirmed feature and its acceptance detail" src="public/screenshots/app-features.png" />
 
 **5 · Resolve the real decisions** ⚖️
-The Decision Center queues the assumptions and choices that actually move the plan — each with suggested approaches, a preview of its impact, and an explicit apply step.
+The Decision Center queues the assumptions and choices that actually move the plan — each with a recommended answer ready to approve in one click, a preview of its impact, and an explicit apply step. Still deciding? Skip ahead — open items never block your assets, and a quick pre-build check resurfaces them right when you start generating.
 
 <img width="100%" alt="Decision Center queue with a selected assumption and its impact" src="public/screenshots/app-decisions.png" />
 

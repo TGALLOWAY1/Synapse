@@ -61,6 +61,18 @@ never reopens after the user closes it; desktop keeps the persistent side rail).
 flight, an idle slot renders a centered `BuildAssetsLoading` ("Creating your
 build assets…") instead of an empty state.
 
+**The route to outputs is never gated on decisions or commitment.** The header
+assets pill (`ProjectWorkspace.showAssetsPill`) shows whenever the latest
+version has a safe structured PRD — labeled **Explore outputs** until
+`planningReadiness.isReadyToBuild`, then **Build outputs** — so commitment is
+an act of intent, not a prerequisite for reaching assets (do not re-add a
+commitment condition to the pill). When output generation starts while
+planning items are still open, `handleGenerateAssets` offers the advisory
+`PreBuildCheckModal` once per workspace session ("Review decisions first" /
+"Generate anyway") — validation surfaces at the start of implementation, and
+generating always proceeds; the hard generation gate stays safety/PRD-only
+(`artifactGenerationGate.ts`). See PLANNING_AND_DECISIONS.md.
+
 ### Consolidated Implementation Plan (Development section)
 
 The old **Developer Prompts** (`prompt_pack`) and **Build Plan**

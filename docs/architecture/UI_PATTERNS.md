@@ -259,9 +259,10 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
 - **Screens** (`screens/`): Idea, SpecGeneration, Refine (reuses the
   Clarify/Expand/Specify/Alternative/Replace action set mirrored from
   `SELECTION_ACTIONS`), Decisions (mirrors the Challenge stage's Decision
-  Center — needs-attention queue, suggested options with a never-preselected
-  recommendation, explicit verdict → impact preview → explicit apply; keep its
-  vocabulary in sync with `src/components/review/DecisionCenter.tsx`),
+  Center — needs-attention queue, suggested options with the recommendation
+  preselected for a one-click explicit approval, explicit verdict → impact
+  preview → explicit apply; keep its vocabulary in sync with
+  `src/components/review/DecisionCenter.tsx`),
   Versions, Assets (the hero — Mark as Final →
   sequential asset generation → `ArtifactDrawer` previews), Connections
   (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared
