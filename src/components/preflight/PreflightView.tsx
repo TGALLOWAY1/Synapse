@@ -4,7 +4,7 @@ import { useProjectStore } from '../../store/projectStore';
 import {
     generatePreflightQuestions,
     generatePreflightSummary,
-    type PreflightContext,
+    toPreflightContext,
 } from '../../lib/llmProvider';
 import { runPrdGeneration } from '../../lib/runPrdGeneration';
 import {
@@ -20,23 +20,6 @@ interface PreflightViewProps {
     session: PreflightSession;
     platform?: ProjectPlatform;
 }
-
-/** Build the PRD-generation context from a (completed) clarification session. */
-const toPreflightContext = (session: PreflightSession): PreflightContext => ({
-    mode: session.mode,
-    clarificationResponses: session.questions.map((q) => {
-        const skipped = !!q.skipped || !q.answer || !q.answer.trim();
-        return {
-            question: q.question,
-            answer: skipped ? null : q.answer!.trim(),
-            skipped,
-            intent: q.intent,
-        };
-    }),
-    summary: session.summary,
-    assumptions: session.assumptions,
-    unknowns: session.unknowns,
-});
 
 /**
  * Optional preflight clarification flow, hosted in the workspace. Generates

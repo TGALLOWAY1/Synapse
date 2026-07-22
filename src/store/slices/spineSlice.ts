@@ -100,6 +100,11 @@ export const createSpineSlice: StateCreator<ProjectState, [], [], SpineSlice> = 
                 createdAt: now,
                 isLatest: true,
                 isFinal: false,
+                // Preflight clarification answers travel with the prompt: the
+                // regeneration path rebuilds its clarification context from
+                // this session, so dropping it here would silently regenerate
+                // from the raw idea and drift from the user's explicit intent.
+                preflightSession: latest.preflightSession,
                 provenance: { changeSource: 'ai_regeneration' },
             };
 

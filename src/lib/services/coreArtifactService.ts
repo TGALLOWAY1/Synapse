@@ -1,6 +1,7 @@
 import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan, CanonicalPrdSpine } from '../../types';
 import { callGeminiStream } from '../geminiClient';
-import type { ProviderOptions } from '../geminiClient';
+import type { ProviderOptions, GeminiTokenUsage } from '../geminiClient';
+import { repairTruncatedJson } from '../jsonRepair';
 import type { LlmTraceMeta } from '../trace/traceTypes';
 import { artifactRole, AGENT_AGNOSTIC_RULE, ANTI_PREAMBLE_RULE } from '../prompts/artifactPromptFragments';
 import { getArtifactModel, CORE_ARTIFACT_COMPLEXITY } from '../artifactModelSettings';
@@ -25,11 +26,27 @@ export interface CoreArtifactGenerationResult {
     /**
      * Subtype-specific metadata to merge into `ArtifactVersion.metadata` when
      * the version is created. For `design_system`, this carries the
-     * structured `tokens` plus `tokensHash`. Undefined for subtypes that
-     * have no extra metadata to surface.
+     * structured `tokens` plus `tokensHash`. When the model's response hit its
+     * output-token cap it carries `truncated: true`, which the job controller
+     * converts into a blocking-validation issue (slot reads `needs_review`,
+     * never `done`). Undefined for subtypes that have no extra metadata to
+     * surface.
      */
     metadata?: Record<string, unknown>;
 }
+
+/**
+ * Explicit output cap for core-artifact generation. Without one, Gemini
+ * applies a conservative default (~8K tokens) that rich structured artifacts
+ * (screen inventory, implementation plan) routinely exceed — truncating the
+ * JSON mid-string. The cap is generous headroom, not a target; responses only
+ * spend what they emit.
+ */
+export const ARTIFACT_MAX_OUTPUT_TOKENS = 32768;
+
+/** Blocker text the job controller surfaces for a truncated artifact body. */
+export const ARTIFACT_TRUNCATED_BLOCKER =
+    'The model response hit its output limit and was cut off — content at the end is missing. Regenerate this artifact.';
 
 // Per-artifact model routing now lives in `artifactModelSettings.ts` so the
 // Settings UI and the generation pipeline share one source of truth. Re-export
@@ -500,6 +517,11 @@ export const generateCoreArtifact = async (
         allowMissingDependencies?: boolean;
         /** Developer-only LLM trace identity (session grouping + project). */
         traceContext?: { sessionId?: string; projectId?: string; projectName?: string };
+        /**
+         * Observational token-usage sink, forwarded to the transport. Powers
+         * the Metrics dashboard's per-artifact token/cost columns.
+         */
+        onUsage?: (usage: GeminiTokenUsage) => void;
     },
 ): Promise<CoreArtifactGenerationResult> => {
     const config = CORE_ARTIFACT_PROMPTS[subtype];
@@ -702,6 +724,7 @@ Architecture: ${structuredPRD.architecture}${
     if (schema) {
         const jsonSystem = config.system + '\n\nReturn the result as structured JSON according to the provided schema.';
         onProgress?.('Sending request to model…');
+        let finishReason: string | undefined;
         const result = await callGeminiStream(
             jsonSystem,
             userPrompt,
@@ -709,45 +732,68 @@ Architecture: ${structuredPRD.architecture}${
                 onChunk: makeChunkEmitter(() => 'Streaming structured JSON…'),
                 onComplete: () => {},
                 onError: () => {},
+                onFinish: (info) => { finishReason = info.finishReason; },
             },
             options?.signal,
-            { responseMimeType: 'application/json', responseSchema: schema, model, traceMeta },
+            {
+                responseMimeType: 'application/json',
+                responseSchema: schema,
+                model,
+                maxOutputTokens: ARTIFACT_MAX_OUTPUT_TOKENS,
+                onUsage: options?.onUsage,
+                traceMeta,
+            },
         );
         onProgress?.('Validating output…');
+        const truncated = finishReason === 'MAX_TOKENS';
+        const truncationMeta = truncated ? { truncated: true, finishReason } : {};
 
+        // Parse the JSON body; on a truncated/malformed response, attempt the
+        // truncation repair before giving up. A raw unparseable body must NEVER
+        // be stored as a completed artifact — the old fallback saved a wall of
+        // broken JSON with slot status `done` (and, for design_system, silently
+        // dropped the tokens contract that anchors mockups and freshness).
+        let parsed: unknown;
         try {
-            const parsed = JSON.parse(result);
-            // For screen_inventory we persist the structured JSON so the
-            // structured renderer in `renderers/index.tsx` activates and
-            // export / dependency-context flows can re-render markdown
-            // on demand. Other JSON-mode subtypes still serialize to
-            // markdown for storage to avoid cross-cutting changes.
-            if (subtype === 'screen_inventory') {
-                const normalized = normalizeScreenInventory(parsed) ?? parsed;
-                return { content: JSON.stringify(normalized, null, 2), metadata: spineMeta };
-            }
-            const content = normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
-            // For design_system specifically, the parsed JSON IS the token
-            // contract — surface it back to the caller as metadata so the
-            // controller can persist tokens + tokensHash on the
-            // ArtifactVersion alongside the canonical markdown.
-            if (subtype === 'design_system') {
-                const tokens = normalizeDesignTokens(parsed);
-                return {
-                    content,
-                    metadata: { ...spineMeta, tokens, tokensHash: hashDesignTokens(tokens) },
-                };
-            }
-            return { content, metadata: spineMeta };
+            parsed = JSON.parse(result);
         } catch {
-            // JSON-mode failure: fall back to the raw text body. For
-            // design_system this means we won't have structured tokens —
-            // legacy markdown rendering still works in the UI.
-            return { content: normalizeArtifactMarkdown(result), metadata: spineMeta };
+            const { text: repairedText, repaired } = repairTruncatedJson(result);
+            if (repaired) {
+                parsed = JSON.parse(repairedText);
+            } else {
+                throw new Error(
+                    truncated
+                        ? `The ${artifactLabel} response hit the model's output limit and could not be salvaged. Regenerate this artifact.`
+                        : `The ${artifactLabel} response returned unparseable JSON. Regenerate this artifact.`,
+                );
+            }
         }
+        // For screen_inventory we persist the structured JSON so the
+        // structured renderer in `renderers/index.tsx` activates and
+        // export / dependency-context flows can re-render markdown
+        // on demand. Other JSON-mode subtypes still serialize to
+        // markdown for storage to avoid cross-cutting changes.
+        if (subtype === 'screen_inventory') {
+            const normalized = normalizeScreenInventory(parsed) ?? parsed;
+            return { content: JSON.stringify(normalized, null, 2), metadata: { ...spineMeta, ...truncationMeta } };
+        }
+        const content = normalizeArtifactMarkdown(structuredArtifactToMarkdown(subtype, parsed));
+        // For design_system specifically, the parsed JSON IS the token
+        // contract — surface it back to the caller as metadata so the
+        // controller can persist tokens + tokensHash on the
+        // ArtifactVersion alongside the canonical markdown.
+        if (subtype === 'design_system') {
+            const tokens = normalizeDesignTokens(parsed);
+            return {
+                content,
+                metadata: { ...spineMeta, ...truncationMeta, tokens, tokensHash: hashDesignTokens(tokens) },
+            };
+        }
+        return { content, metadata: { ...spineMeta, ...truncationMeta } };
     }
 
     onProgress?.('Sending request to model…');
+    let finishReason: string | undefined;
     const result = await callGeminiStream(
         config.system,
         userPrompt,
@@ -755,10 +801,15 @@ Architecture: ${structuredPRD.architecture}${
             onChunk: makeChunkEmitter(streamingLabel),
             onComplete: () => {},
             onError: () => {},
+            onFinish: (info) => { finishReason = info.finishReason; },
         },
         options?.signal,
-        { model, traceMeta },
+        { model, maxOutputTokens: ARTIFACT_MAX_OUTPUT_TOKENS, onUsage: options?.onUsage, traceMeta },
     );
     onProgress?.('Validating output…');
-    return { content: normalizeArtifactMarkdown(result), metadata: spineMeta };
+    // Markdown artifacts degrade more gracefully under truncation (the partial
+    // text is still readable), but the cut-off must not read as `done` —
+    // stamp it so the job controller flags the slot needs_review.
+    const truncationMeta = finishReason === 'MAX_TOKENS' ? { truncated: true, finishReason } : {};
+    return { content: normalizeArtifactMarkdown(result), metadata: { ...spineMeta, ...truncationMeta } };
 };

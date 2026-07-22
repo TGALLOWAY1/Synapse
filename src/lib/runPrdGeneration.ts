@@ -139,24 +139,36 @@ export async function runPrdGeneration({
             platform,
         );
     } catch (e) {
+        // Settle-path writes must never throw: if the project was deleted
+        // mid-run, the capability guard rejects the write
+        // (ProjectCapabilityError on an UNAVAILABLE project) — which would
+        // break this function's "never rejects" contract from inside its own
+        // error handler. There is nothing left to persist onto; log and settle.
+        const settle = (write: () => void) => {
+            try {
+                write();
+            } catch (settleError) {
+                console.warn('[PRD generation] could not persist settled state (project removed mid-run?)', settleError);
+            }
+        };
         // Disallowed requests hard-stop: store a blocked Safety Review (which
         // shows the dedicated screen and gates downstream generation).
         if (e instanceof SafetyBlockedError) {
-            useProjectStore.getState().setSpineSafetyReview(
+            settle(() => useProjectStore.getState().setSpineSafetyReview(
                 projectId,
                 spineId,
                 buildBlockedSafetyReview(e.result),
                 buildSafetyReviewMarkdown(e.result),
-            );
+            ));
             return;
         }
         const err = normalizeError(e);
         console.error('[PRD generation failed]', err.raw);
-        useProjectStore.getState().setSpineError(projectId, spineId, {
+        settle(() => useProjectStore.getState().setSpineError(projectId, spineId, {
             message: userMessage(err),
             category: err.category,
             timestamp: err.timestamp,
             raw: err.raw,
-        });
+        }));
     }
 }

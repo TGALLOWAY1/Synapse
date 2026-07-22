@@ -56,16 +56,20 @@ function renderTokenized(tokens: DesignTokens = TOKENS) {
 
 describe('DesignSystemRenderer — tokenized path', () => {
     it('renders color token sub-names with hex and rgb values on the card face', () => {
-        const { getByText } = renderTokenized();
+        // The renderer defensively re-normalizes tokens (metadata can arrive
+        // via sync/snapshot/import paths that skip generation-time normalize),
+        // which fills default color keys alongside the fixture's — sub-names
+        // like "primary" can therefore appear in more than one namespace.
+        const { getAllByText } = renderTokenized();
 
-        expect(getByText('primary')).toBeInTheDocument();
-        expect(getByText('secondary')).toBeInTheDocument();
-        expect(getByText('body')).toBeInTheDocument();
+        expect(getAllByText('primary').length).toBeGreaterThan(0);
+        expect(getAllByText('secondary').length).toBeGreaterThan(0);
+        expect(getAllByText('body').length).toBeGreaterThan(0);
         // Hex renders unprefixed next to a HEX label, with the RGB triple below.
-        expect(getByText('6366F1')).toBeInTheDocument();
-        expect(getByText('4F46E5')).toBeInTheDocument();
-        expect(getByText('171717')).toBeInTheDocument();
-        expect(getByText('99, 102, 241')).toBeInTheDocument();
+        expect(getAllByText('6366F1').length).toBeGreaterThan(0);
+        expect(getAllByText('4F46E5').length).toBeGreaterThan(0);
+        expect(getAllByText('171717').length).toBeGreaterThan(0);
+        expect(getAllByText('99, 102, 241').length).toBeGreaterThan(0);
     });
 
     it('renders namespace group headers', () => {

@@ -130,11 +130,19 @@ export async function loginWithEmail(payload: {
   }
 }
 
-export async function logout(): Promise<void> {
+/**
+ * Invalidate the server session cookie. Returns whether the server actually
+ * confirmed it — a 5xx/proxy failure leaves the cookie VALID, and callers that
+ * assume "signed out" after a swallowed failure would proceed against a live
+ * session. Local sign-out still proceeds either way; the flag is for logging /
+ * defensive ordering, never to block the user from leaving.
+ */
+export async function logout(): Promise<boolean> {
   try {
-    await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    const resp = await fetch('/api/auth/logout', { method: 'POST', credentials: 'include' });
+    return resp.ok;
   } catch {
-    // swallow; the client store will be cleared by the caller
+    return false;
   }
 }
 

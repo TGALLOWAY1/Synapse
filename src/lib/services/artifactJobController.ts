@@ -8,7 +8,8 @@ import type {
 } from '../../types';
 import { MOCKUP_SPEC_V1 } from '../../types';
 import { useProjectStore } from '../../store/projectStore';
-import { generateCoreArtifact, selectArtifactModel } from './coreArtifactService';
+import { generateCoreArtifact, selectArtifactModel, ARTIFACT_TRUNCATED_BLOCKER } from './coreArtifactService';
+import type { GeminiTokenUsage } from '../geminiClient';
 import { buildCanonicalPrdSpine } from '../canonicalPrdSpine';
 import { generateMockup } from './mockupService';
 import { validateArtifactContent } from '../artifactValidation';
@@ -206,6 +207,7 @@ async function runCoreArtifactSlot(
     signal: AbortSignal,
     generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>>,
     traceSessionId?: string,
+    onUsage?: (usage: GeminiTokenUsage) => void,
 ): Promise<void> {
     const { projectId, spineVersionId, prdContent, structuredPRD } = args;
 
@@ -252,6 +254,7 @@ async function runCoreArtifactSlot(
                 projectName: project?.productName || project?.name,
             },
             onProgress: (msg) => useProjectStore.getState().appendSlotProgress(projectId, subtype, msg),
+            onUsage,
         });
         content = result.content;
         if (result.metadata) extraMetadata = result.metadata;
@@ -268,8 +271,14 @@ async function runCoreArtifactSlot(
     // Blocking (vs advisory) validation: a narrow set of high-confidence,
     // user-facing defects mean the artifact must not read as a trustworthy
     // completed output. The content is still saved (for review), but the slot
-    // is flagged needs_review rather than done.
-    const initialBlockers = detectArtifactBlockers(subtype, content, structuredPRD);
+    // is flagged needs_review rather than done. A truncated model response
+    // (metadata.truncated, stamped by generateCoreArtifact on a MAX_TOKENS
+    // finish) is always a blocker — salvaged-partial content must never read
+    // as a trustworthy `done` artifact.
+    const initialBlockers = [
+        ...(extraMetadata.truncated === true ? [ARTIFACT_TRUNCATED_BLOCKER] : []),
+        ...detectArtifactBlockers(subtype, content, structuredPRD),
+    ];
 
     // Automatic traceability repair. A missing-traceability blocker is often a
     // false positive — the artifact is genuinely derived from the product's
@@ -582,8 +591,8 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
 
     // Per-slot observations for the orchestration WorkflowRun (artifact bundle).
     // Captures wall-clock start/end + dependency edges so the Metrics dashboard
-    // can show the layered concurrency / speedup of artifact generation. Token
-    // capture for artifacts is a known TODO (see tasks/TODO.md).
+    // can show the layered concurrency / speedup of artifact generation, plus
+    // per-slot token usage captured from the transport's usageMetadata.
     const artifactRunStart = Date.now();
     const nodeObs: NodeObservation[] = [];
     // One trace session id per artifact-bundle run so the developer-only Trace
@@ -614,8 +623,9 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                 .filter(meta => coreSubtypes.has(meta.subtype))
                 .map(meta => async () => {
                     const startedAt = Date.now();
+                    let usage: GeminiTokenUsage | undefined;
                     try {
-                        await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId);
+                        await runCoreArtifactSlot(args, meta.subtype, signal, generatedArtifacts, traceSessionId, (u) => { usage = u; });
                         nodeObs.push({
                             nodeId: meta.subtype,
                             nodeName: meta.title,
@@ -626,6 +636,9 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             dependencyIds: meta.dependsOn,
                             startedAt,
                             completedAt: Date.now(),
+                            inputTokens: usage?.inputTokens,
+                            outputTokens: usage?.outputTokens,
+                            totalTokens: usage?.totalTokens,
                         });
                     } catch (e) {
                         if (isAbortError(e) || signal.aborted) return;
@@ -640,6 +653,9 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
                             startedAt,
                             completedAt: Date.now(),
                             errorMessage: e instanceof Error ? e.message : 'Unknown error',
+                            inputTokens: usage?.inputTokens,
+                            outputTokens: usage?.outputTokens,
+                            totalTokens: usage?.totalTokens,
                         });
                         recordError(projectId, meta.subtype, e);
                     }

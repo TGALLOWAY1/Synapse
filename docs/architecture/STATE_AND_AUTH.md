@@ -266,6 +266,15 @@ rules:
   `projectServerSync.ts`, and `projectRecovery.ts`) all derive from it via
   `emptyBundleSource()`/`pickBundleSource()`, so adding a tenth collection is a
   one-line change there rather than five hand-edits.
+  - **Sign-out ordering — stop sync BEFORE the namespace switches:**
+    `authStore.setUser` calls `stopProjectSync()` whenever the active user
+    CHANGES (sign-out or account switch) **before** `applyProjectUser` runs.
+    The namespace wipe fires the sync subscription synchronously, and a
+    still-live subscription would read "every project disappeared" and issue a
+    remote soft-DELETE for the prior user's entire cloud set — destructive
+    whenever the logout request failed and left the session cookie valid
+    (`recruiterApi.logout` reports `resp.ok` for exactly this reason). Never
+    reorder these.
   - **Namespace-switch data-loss guard:** `applyProjectUser` wipes in-memory
     state (`setState(emptyPersistedState())`, which queues a *debounced* persist
     write of the empty state to the target namespace) and then calls

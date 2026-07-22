@@ -281,17 +281,23 @@ export const runProgressivePrdPipeline = async (
             const reviewMs = performance.now() - reviewStart;
             consistencyMs = reviewMs;
             reviewed = review.applied;
-            consistencyReviewMeta = {
-                ran: true,
-                applied: review.applied,
-                status: review.applied ? 'applied' : 'rejected',
-                rejectionReason: review.applied ? undefined : review.rejectionReason,
-                diff: review.diff,
-            };
+            consistencyReviewMeta = review.skipped
+                // No model call was made (e.g. the PRD is too large to echo
+                // back under the review's output cap) — record an honest skip,
+                // not a rejection.
+                ? { ran: false, applied: false, status: 'skipped', rejectionReason: review.rejectionReason }
+                : {
+                    ran: true,
+                    applied: review.applied,
+                    status: review.applied ? 'applied' : 'rejected',
+                    rejectionReason: review.applied ? undefined : review.rejectionReason,
+                    diff: review.diff,
+                };
             if (review.applied) structuredPRD = review.prd;
             // Record the consistency pass as a final, all-sections-dependent
             // node so the Gantt shows it sequentially after the parallel wave.
-            nodeObs['consistency_review'] = {
+            // A skipped review made no model call — record nothing.
+            if (!review.skipped) nodeObs['consistency_review'] = {
                 nodeId: 'consistency_review',
                 nodeName: 'Consistency Review',
                 agentName: 'Consistency Agent',
@@ -302,13 +308,15 @@ export const runProgressivePrdPipeline = async (
                 startedAt: reviewStartEpoch,
                 completedAt: nowEpoch(),
             };
-            passes.push({ stage: 'consistency_review', ms: reviewMs, ok: true });
+            if (!review.skipped) passes.push({ stage: 'consistency_review', ms: reviewMs, ok: true });
             logPrd({
                 event: 'consistency_review',
                 actualSeconds: reviewMs / 1000,
-                detail: review.applied
-                    ? (review.changeLog || 'applied')
-                    : `discarded (${review.rejectionReason ?? 'no-op'})`,
+                detail: review.skipped
+                    ? `skipped (${review.rejectionReason ?? 'no call made'})`
+                    : review.applied
+                        ? (review.changeLog || 'applied')
+                        : `discarded (${review.rejectionReason ?? 'no-op'})`,
                 surface,
             });
         } catch (e) {

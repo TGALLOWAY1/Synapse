@@ -13,7 +13,13 @@ request…").
 
 - The classifier (`classifyProjectSafety.ts`) returns a `SafetyClassificationResult`
   (`allowed` | `allowed_with_restrictions` | `disallowed`) via Gemini JSON mode
-  (`schemas/safetySchemas.ts`). Transport is injectable for tests.
+  (`schemas/safetySchemas.ts`). Transport is injectable for tests. Genuine
+  parsed verdicts are **memoized in-memory on the exact idea text** (a
+  preflighted run used to classify the same text twice — preflight gate, then
+  the PRD gate). The memo never caches the fail-closed fallback (a transient
+  failure is always re-classified) and is bypassed whenever a custom transport
+  is injected, so tests are unaffected. This is a duplicate-spend fix, not a
+  bypass — every generation still consults the classifier chokepoint.
 - **`safetyPolicy.ts` is the single source of the policy TEXT.** The
   disallowed-capability list, the classifier system instruction, the in-prompt
   `SAFETY_OVERRIDE` (re-exported via `prompts/prdPrompts.ts`), and the two
@@ -22,12 +28,17 @@ request…").
   policy there, never inline at a surface; `safetyPolicy.test.ts` asserts every
   surface carries every capability term.
 - **`disallowed`** → `generateStructuredPRD` throws `SafetyBlockedError`; the
-  pipeline never runs. Call sites (`HomePage`, `ProjectWorkspace.handleRegenerate`)
-  catch it and persist a `blocked` `SpineVersion.safetyReview` (+ a canonical
+  pipeline never runs. The shared `runPrdGeneration` entry point (used by
+  HomePage, PreflightView, **and** `ProjectWorkspace.handleRegenerate`) catches
+  it and persists a `blocked` `SpineVersion.safetyReview` (+ a canonical
   Safety Review markdown as `responseText`) via `setSpineSafetyReview`.
 - **`allowed_with_restrictions`** → a restriction directive is appended to the
   prompt; the run records a `restricted` review and the PRD renders with a
-  `SafetyBoundariesCard`.
+  `SafetyBoundariesCard`. The persisted review **travels with the spine**:
+  `mergeBranch` (branch consolidation) copies `safetyReview` (and
+  `preflightSession`) onto the merged version — dropping it would silently
+  strip a restricted project's binding directive (built by
+  `canonicalPrdSpine.buildSafety`) from every downstream artifact.
 - **Fail-closed:** if classification can't be determined (non-config transport
   error or unparseable output) the request is treated as `disallowed`. Genuine
   *config* errors (api key / auth / billing / permissions) are re-thrown to the
@@ -50,7 +61,12 @@ content, prd)` (pure) flags (1) a `data_model` with no API surface, (2)
 `user_flows` with no error paths, (3) an implementation-critical artifact
 (`data_model`/`user_flows`/`implementation_plan`) that references **none** of the
 PRD features (no traceability), and (4) a JSON-mode artifact
-(screen/data/component inventory) that parses but is structurally empty. When
+(screen/data/component inventory) that parses but is structurally empty. A
+**truncated model response** is also always a blocker: `generateCoreArtifact`
+stamps `metadata.truncated` on a `MAX_TOKENS` finish (after salvaging what it
+can via `repairTruncatedJson`), and `runCoreArtifactSlot` prepends
+`ARTIFACT_TRUNCATED_BLOCKER` so the slot reads `needs_review` — salvaged
+partial content must never present as a trustworthy `done` artifact. When
 blockers exist, `runCoreArtifactSlot` still **saves the version** (content
 preserved for review) but stamps `metadata.validationBlockers` and sets the slot
 status to the new `GenerationStatus` value **`needs_review`** instead of `done`.

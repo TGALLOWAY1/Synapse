@@ -9,5 +9,6 @@ export {
     type PreflightSummaryResult,
 } from './services/preflightService';
 export type { PreflightContext } from './prompts/preflightPrompts';
+export { toPreflightContext } from './prompts/preflightPrompts';
 export { generateMockup, type ParseResult as MockupParseResult } from './services/mockupService';
 export { generateCoreArtifact } from './services/coreArtifactService';

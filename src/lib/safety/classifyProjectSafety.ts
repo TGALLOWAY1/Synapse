@@ -101,11 +101,26 @@ const parseResult = (raw: string): SafetyClassificationResult | null => {
     };
 };
 
+// Session-scoped memo of genuine model verdicts, keyed on the exact idea text.
+// A preflighted run classifies the same text twice within seconds (preflight
+// gate, then the PRD gate) — the second call is pure duplicate spend. Only
+// real parsed verdicts are cached (never the fail-closed fallback, so a
+// transient failure is always re-classified), and only for the default
+// transport (injected test transports must never see another call's result).
+// In-memory only; a reload re-classifies.
+const verdictCache = new Map<string, SafetyClassificationResult>();
+const VERDICT_CACHE_MAX = 20;
+
 export async function classifyProjectSafety(
     promptText: string,
     opts?: { signal?: AbortSignal; transport?: SafetyTransport },
 ): Promise<SafetyClassificationResult> {
     const transport = opts?.transport ?? defaultTransport;
+    const cacheable = !opts?.transport;
+    if (cacheable) {
+        const cached = verdictCache.get(promptText);
+        if (cached) return cached;
+    }
 
     let raw: string;
     try {
@@ -134,6 +149,13 @@ export async function classifyProjectSafety(
     if (!result) {
         console.warn('[safety] classifier returned unparseable output; failing closed');
         return failClosedResult();
+    }
+    if (cacheable) {
+        if (verdictCache.size >= VERDICT_CACHE_MAX) {
+            const oldest = verdictCache.keys().next().value;
+            if (oldest !== undefined) verdictCache.delete(oldest);
+        }
+        verdictCache.set(promptText, result);
     }
     return result;
 }

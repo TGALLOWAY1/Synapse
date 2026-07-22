@@ -2,8 +2,6 @@ import { describe, it, expect } from 'vitest';
 import {
     normalizeDesignTokens,
     hashDesignTokens,
-    tokensToCssVariables,
-    tokensToCssStyleBlock,
     buildDesignSystemBrief,
     designSystemTokensToMarkdown,
 } from '../designTokens';
@@ -111,46 +109,12 @@ describe('hashDesignTokens', () => {
     });
 });
 
-describe('tokensToCssVariables', () => {
-    it('emits stable, sorted output', () => {
-        const tokens = normalizeDesignTokens({});
-        const a = tokensToCssVariables(tokens);
-        const b = tokensToCssVariables(tokens);
-        expect(a).toBe(b);
-    });
-
-    it('includes color variables for every color token', () => {
-        const tokens = normalizeDesignTokens({});
-        const css = tokensToCssVariables(tokens);
-        expect(css).toContain('--color-brand-primary');
-        expect(css).toContain('--color-surface-app');
-        expect(css).toContain('--color-text-primary');
-    });
-
-    it('includes typography variables', () => {
-        const tokens = normalizeDesignTokens({});
-        const css = tokensToCssVariables(tokens);
-        expect(css).toContain('--typography-heading-lg-font');
-        expect(css).toContain('--typography-heading-lg-size');
-        expect(css).toContain('--typography-body-md-line-height');
-    });
-
-    it('includes spacing and radius variables in px', () => {
-        const tokens = normalizeDesignTokens({ spacing: { md: 16 }, radius: { md: 12 } });
-        const css = tokensToCssVariables(tokens);
-        expect(css).toContain('--spacing-md: 16px');
-        expect(css).toContain('--radius-md: 12px');
-    });
-
-    it('wraps in :root selector via tokensToCssStyleBlock', () => {
-        const tokens = normalizeDesignTokens({});
-        const block = tokensToCssStyleBlock(tokens);
-        expect(block).toContain('<style data-design-tokens="1">');
-        expect(block).toContain(':root {');
-        expect(block).toContain('--color-brand-primary');
-        expect(block).toContain('</style>');
-    });
-});
+// The tokensToCssVariables/tokensToCssStyleBlock suite was deleted along with
+// `designTokens/cssVariables.ts` itself: the HTML-mockup iframe it fed is gone
+// from the product, the module had zero runtime importers, and it interpolated
+// raw token strings into a `<style>:root{}` block with no escaping — a latent
+// style-injection break-out if ever revived. Re-add only with hex-only
+// escaping at the interpolation sites.
 
 describe('buildDesignSystemBrief', () => {
     it('includes palette and typography descriptions', () => {

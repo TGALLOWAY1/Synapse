@@ -9,14 +9,9 @@ import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
 import { createPortal } from 'react-dom';
 import { useAutoAnimate } from '@formkit/auto-animate/react';
-import { generateStructuredPRD } from '../lib/llmProvider';
-import { normalizeError, userMessage } from '../lib/errors';
-import {
-    SafetyBlockedError,
-    buildBlockedSafetyReview,
-    buildRestrictedSafetyReview,
-    buildSafetyReviewMarkdown,
-} from '../lib/safety';
+import { toPreflightContext } from '../lib/llmProvider';
+import { runPrdGeneration } from '../lib/runPrdGeneration';
+import { normalizeError } from '../lib/errors';
 import { ProgressTimeline } from './progress/ProgressTimeline';
 import { buildGenerationSteps } from './progress/buildGenerationSteps';
 import { regeneratePrdSection } from '../lib/services/prdSectionRetry';
@@ -104,7 +99,7 @@ export function ProjectWorkspace() {
     };
     const authUser = useAuthStore((s) => s.user);
     const logout = useAuthStore((s) => s.logout);
-    const { getProject, getLatestSpine, regenerateSpine, updateSpineStructuredPRD, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, setSpineError, setSpineSafetyReview, getHistoryEvents, getBranchesForSpine, getSpineVersions, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, clearPrdProgress, clearSectionStatus, setSectionStatus } = useProjectStore();
+    const { getProject, getLatestSpine, regenerateSpine, compareAndAppendStructuredPRD, revertSpineToVersion, updateProjectProductMetadata, getHistoryEvents, getBranchesForSpine, getSpineVersions, getProjectOutputAlignment, getDownstreamUpdatePlanSummary, markSpineFinal, createReadinessReview, authorizeReadinessCommitment, commitReadinessReview, reopenReadinessCommitment, setProjectStage, setProjectDesignSystemPreset, createBranch: storCreateBranch, updateFeedbackStatus, getArtifact, getArtifactVersions, getArtifacts, appendPrdProgress, setSectionStatus } = useProjectStore();
     const prdProgress = useProjectStore((s) => (projectId ? s.prdProgress[projectId] : undefined));
     const prdSectionStatus = useProjectStore((s) => (projectId ? s.prdSectionStatus[projectId] : undefined));
     // Live asset-generation job for the post-finalize status pill.
@@ -744,92 +739,28 @@ export function ProjectWorkspace() {
         if (regenerateInFlight.current) return;
         if (!projectId || !canPerformProjectAction(projectId, 'generate') || !latestSpine || isGenerating || hasBranches || isOldVersion) return;
         regenerateInFlight.current = true;
-        let activeNewSpineId: string | null = null;
         try {
             setIsGenerating(true);
             artifactJobController.cancelAll(projectId);
             useProjectStore.getState().clearJob(projectId);
-            clearPrdProgress(projectId);
-            clearSectionStatus(projectId);
             const { newSpineId } = regenerateSpine(projectId);
-            activeNewSpineId = newSpineId;
-            useProjectStore.getState().markSpineGenerationStarted(projectId, newSpineId);
-            const sourcePrompt = latestSpine.promptText;
-            await generateStructuredPRD(
-                sourcePrompt,
-                {
-                    projectName: project?.name,
-                    onProgress: (message) => appendPrdProgress(projectId, message),
-                    onSectionStatus: (sectionId, update) => setSectionStatus(projectId, sectionId, update),
-                    onWorkflowRun: (run) => {
-                        useProjectStore.getState().recordWorkflowRun({
-                            ...run,
-                            projectId,
-                            projectName: project?.name,
-                        });
-                    },
-                    onPartial: ({ structuredPRD, markdown }) => {
-                        updateSpineStructuredPRD(
-                            projectId,
-                            newSpineId,
-                            structuredPRD,
-                            markdown,
-                            { sourcePrompt },
-                        );
-                        if (structuredPRD.productName || structuredPRD.productCategory) {
-                            updateProjectProductMetadata(projectId, {
-                                productName: structuredPRD.productName,
-                                productCategory: structuredPRD.productCategory,
-                            });
-                        }
-                    },
-                    onResult: ({ structuredPRD, markdown, generationMeta, model }) => {
-                        updateSpineStructuredPRD(
-                            projectId,
-                            newSpineId,
-                            structuredPRD,
-                            markdown,
-                            {
-                                sourcePrompt,
-                                generationMeta,
-                                model,
-                                prdVersion: generationMeta.schemaVersion,
-                            },
-                        );
-                    },
-                    onSafety: (safety) => {
-                        if (safety.classification === 'allowed_with_restrictions') {
-                            setSpineSafetyReview(
-                                projectId,
-                                newSpineId,
-                                buildRestrictedSafetyReview(safety),
-                            );
-                        }
-                    },
-                },
-                project?.platform,
-            );
-        } catch (e) {
-            // Disallowed → store a blocked Safety Review instead of an error.
-            if (e instanceof SafetyBlockedError && activeNewSpineId) {
-                setSpineSafetyReview(
-                    projectId,
-                    activeNewSpineId,
-                    buildBlockedSafetyReview(e.result),
-                    buildSafetyReviewMarkdown(e.result),
-                );
-                return;
-            }
-            const err = normalizeError(e);
-            console.error('[PRD regeneration failed]', err.raw);
-            if (activeNewSpineId) {
-                setSpineError(projectId, activeNewSpineId, {
-                    message: userMessage(err),
-                    category: err.category,
-                    timestamp: err.timestamp,
-                    raw: err.raw,
-                });
-            }
+            // Route through the shared generation entry point (one flow, one
+            // set of store callbacks and error handling — this handler used to
+            // be a divergent inline copy that skipped the consistency-review
+            // override and surface detection). The clarification context is
+            // rebuilt from the persisted preflight session so a regenerate
+            // honors the answers the user explicitly gave, instead of silently
+            // regenerating from the raw idea. Never rejects: safety blocks and
+            // generation errors are persisted onto the spine internally.
+            await runPrdGeneration({
+                projectId,
+                spineId: newSpineId,
+                sourcePrompt: latestSpine.promptText,
+                platform: project?.platform,
+                preflight: latestSpine.preflightSession
+                    ? toPreflightContext(latestSpine.preflightSession)
+                    : undefined,
+            });
         } finally {
             regenerateInFlight.current = false;
             setIsGenerating(false);
@@ -872,6 +803,13 @@ export function ProjectWorkspace() {
             // A section retry appends a new version (preserving the prior
             // content) rather than mutating the spine in place.
             const appendResult = compareAndAppendStructuredPRD(projectId, activeSpine.id, structuredPRD, {
+                // Bind the append to the exact PRD content this retry was built
+                // from — the id check alone is not enough, because decision
+                // edits amend the latest spine IN PLACE under the same id. If a
+                // decision was confirmed while the retry call was in flight, an
+                // id-only check would append a PRD built from the pre-decision
+                // snapshot, silently reverting the user's confirmed decision.
+                expectedPrdHash: planningContentHash(activeSpine.structuredPRD),
                 changeSource: 'ai_section_retry',
                 editSummary: `Regenerated section: ${title}`,
                 meta: {

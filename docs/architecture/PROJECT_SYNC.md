@@ -56,20 +56,44 @@ device-scoped and never syncs) and full design.
   revision-first, `updatedAt` fallback, false when there's no baseline. All
   fields optional → legacy/anonymous data is unaffected.
 - **Sync orchestrator** (`src/store/projectServerSync.ts`). `startProjectSync`/
-  `stopProjectSync` are driven from `authStore.setUser`. On sign-in it
-  **reconciles**: for a project missing locally → additive pull; for a project on
+  `stopProjectSync` are driven from `authStore.setUser` — **and on sign-out /
+  account switch, `stopProjectSync` MUST run BEFORE `applyProjectUser`**: the
+  namespace switch resets the store synchronously, and a still-live sync
+  subscription would read "every project disappeared" and remote-soft-DELETE
+  the prior user's entire cloud set (destructive whenever a failed logout left
+  the cookie valid — `recruiterApi.logout` now reports `resp.ok` instead of
+  swallowing it). On sign-in it
+  **reconciles** against the **full** server list
+  (`fetchProjectList({ includeArchived: true, includeDeleted: true })` — the
+  live-only list made absence ambiguous): for a project missing locally →
+  additive pull; for a project on
   **both** sides → compare the server summary against the durable baseline
   (`isServerNewer`) — **server-newer + local clean** overwrites local with the
-  newer copy and re-baselines (safe refresh), **server-newer + local dirty** flags
+  newer copy and re-baselines (safe refresh; the dirty flag is **re-checked at
+  apply time** after the multi-second bundle fetches, so an edit landing in
+  that window becomes a conflict instead of being overwritten),
+  **server-newer + local dirty** flags
   a **`conflict`** and touches neither side; local-only projects still migrate
-  (push). It then subscribes to the store to **push** changed projects (debounced,
+  (push). **Deletions propagate:** a server row with `deletedAt` set (or a
+  project absent from the full list whose durable meta proves it reached the
+  cloud) is a remote delete — a clean local copy is removed locally
+  (`removeLocalProject`, no remote echo); a dirty one is surfaced as a
+  conflict / re-pushed (unsynced local work is never silently dropped).
+  Server-side, `softDeleteProject`/`restoreProject`/`setArchived` all
+  **`$inc` the revision**, so a guarded push from a device still holding the
+  pre-delete baseline gets a 409 instead of silently resurrecting the
+  tombstoned row. It then subscribes to the store to **push** changed projects (debounced,
   per-project) and remote-delete locally-deleted ones. Every push is a
   **conditional write** — it sends the last-seen `expectedRevision`, so a stale
   push (server advanced on another device) is rejected (409 →
   `RevisionConflictError`) and becomes a `conflict` instead of clobbering the
   newer copy; a conflicted project is not auto-pushed. **A failed save never drops
   local data** — it stays in localStorage and surfaces a per-project `error` sync
-  state (+ durable `lastCloudSaveError`). Conflict resolution is **explicit, never
+  state (+ durable `lastCloudSaveError`). A successful save only clears the
+  durable dirty flag when no new edit was scheduled after its bundle snapshot
+  (a per-project edit counter detects the race), so a tab-close between a
+  mid-save edit and the next debounce can't leave meta claiming "synced" while
+  the cloud is stale. Conflict resolution is **explicit, never
   silent**: `resolveConflictUseCloud` (adopt cloud, discard local — offer a
   recovery download first) and `resolveConflictKeepLocal` (overwrite cloud from
   local, re-baselined so the conditional push wins). The module-local
@@ -179,7 +203,12 @@ path and is **independent of the owner-only snapshot feature** (`api/snapshots.j
   in the mockup image store, on an IndexedDB cache **miss** where a ref exists,
   fetches the Blob URL directly (concurrency-limited, mirrors snapshot
   `hydrateImages`), writes it into IndexedDB, then renders. **No bulk download on
-  sign-in.**
+  sign-in.** Because refs are pulled fire-and-forget AFTER reconcile,
+  `loadForVersion` can settle before they arrive on a fresh device — the
+  registry therefore notifies subscribers on each `setProjectRefs`
+  (`onImageRefsChanged`), and the mockup image store re-hydrates any version it
+  already marked loaded, so first-visit mockups appear without a remount.
+  Unviewed versions stay lazy (no loaded flag → no fetch).
 - **GC.** Project **hard-delete** (`api/projects.js`) calls
   `deleteRefsForProject` then `del()`s the returned **orphaned** blob URLs —
   refcount-aware: a blob is deleted only once NO remaining ref for that user
