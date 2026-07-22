@@ -77,7 +77,9 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
         if (latestSpine.structuredPRD) {
             const edit = applyAnchorEditToStructuredPRD(latestSpine.structuredPRD, branch.anchorText, draft.content);
             if (!edit.applied) {
-                setApplyError('Could not locate the selected text in the plan. Re-select a smaller passage and try again.');
+                setApplyError(edit.reason === 'ambiguous'
+                    ? 'The selected text appears in more than one place in the plan. Re-select a longer, unique passage and try again.'
+                    : 'Could not locate the selected text in the plan. Re-select a smaller passage and try again.');
                 return;
             }
             mergeBranch(projectId, branch.id, renderPremiumMarkdown(edit.structuredPRD), { structuredPRD: edit.structuredPRD });

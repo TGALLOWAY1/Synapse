@@ -122,8 +122,17 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                 // merge: that would present content that no longer matches the
                 // document (and feed stale data to artifacts), so legacy
                 // markdown spines still produce markdown-only merge output.
+                // generationMeta travels too: the incomplete-PRD banner, the
+                // generate-anyway gate, and degraded-input stamping all read
+                // `generationMeta.failedSections` — dropping it on a merge
+                // after a partial generation would hide the retry affordance
+                // and present an incomplete PRD as complete.
                 ...(opts?.structuredPRD
-                    ? { structuredPRD: opts.structuredPRD, prdVersion: oldSpine.prdVersion }
+                    ? {
+                        structuredPRD: opts.structuredPRD,
+                        prdVersion: oldSpine.prdVersion,
+                        generationMeta: oldSpine.generationMeta,
+                    }
                     : {}),
                 provenance: {
                     changeSource: 'branch_merge',

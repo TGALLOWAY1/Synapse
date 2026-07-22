@@ -63,7 +63,9 @@ export function ConsolidationModal({ projectId, branch, spineText, structuredPRD
                 }
                 const edit = applyAnchorEditToStructuredPRD(structuredPRD, branch.anchorText, result.localPatch);
                 if (!edit.applied) {
-                    setError("Could not locate the exact selected text in the plan. This can happen when the selection spans sections or includes formatting. Close this dialog and re-select a smaller passage.");
+                    setError(edit.reason === 'ambiguous'
+                        ? "The selected text appears in more than one place in the plan, so this patch can't be applied unambiguously. Close this dialog and re-select a longer, unique passage."
+                        : "Could not locate the exact selected text in the plan. This can happen when the selection spans sections or includes formatting. Close this dialog and re-select a smaller passage.");
                     setIsCommitting(false);
                     return;
                 }

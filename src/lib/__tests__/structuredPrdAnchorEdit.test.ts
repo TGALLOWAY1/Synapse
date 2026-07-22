@@ -43,7 +43,7 @@ describe('applyAnchorEditToStructuredPRD', () => {
         }
     });
 
-    it('replaces only the first occurrence and leaves the input untouched', () => {
+    it('leaves the input untouched when applying', () => {
         const source = prd();
         const result = applyAnchorEditToStructuredPRD(source, 'Busy parents', 'Working caregivers');
         expect(result.applied).toBe(true);
@@ -52,16 +52,24 @@ describe('applyAnchorEditToStructuredPRD', () => {
         }
         // The original object is never mutated.
         expect(source.targetUsers[0]).toBe('Busy parents');
+    });
+
+    it('refuses an ambiguous anchor instead of guessing which field the user meant', () => {
+        // Object key order need not match the rendered order, so a duplicated
+        // phrase must fail closed rather than silently patch the wrong field.
+        const source = prd();
+        source.coreProblem = 'Habit apps punish missed days and busy parents give up.';
+        const result = applyAnchorEditToStructuredPRD(source, 'busy parents', 'working caregivers');
+        expect(result).toEqual({ applied: false, reason: 'ambiguous' });
         expect(source.vision).toContain('busy parents');
     });
 
     it('never edits identifier fields', () => {
-        const result = applyAnchorEditToStructuredPRD(prd(), 'f-streaks', 'renamed');
-        expect(result.applied).toBe(false);
+        expect(applyAnchorEditToStructuredPRD(prd(), 'f-streaks', 'renamed')).toEqual({ applied: false, reason: 'not_found' });
     });
 
-    it('reports not-applied for a missing anchor or empty anchor', () => {
-        expect(applyAnchorEditToStructuredPRD(prd(), 'text that is nowhere', 'x').applied).toBe(false);
-        expect(applyAnchorEditToStructuredPRD(prd(), '', 'x').applied).toBe(false);
+    it('reports not-found for a missing anchor or empty anchor', () => {
+        expect(applyAnchorEditToStructuredPRD(prd(), 'text that is nowhere', 'x')).toEqual({ applied: false, reason: 'not_found' });
+        expect(applyAnchorEditToStructuredPRD(prd(), '', 'x')).toEqual({ applied: false, reason: 'not_found' });
     });
 });
