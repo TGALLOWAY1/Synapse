@@ -432,9 +432,14 @@ export function AssumptionValidationPanel({
                                     {methodOptions.map(option => <option key={option.value} value={option.value}>{option.label}</option>)}
                                 </select>
                             </label>
-                            <label className="text-xs font-semibold text-neutral-700">Method label
-                                <input value={planDraft.methodLabel} onChange={event => setPlanDraft(current => ({ ...current, methodLabel: event.target.value, sourceProposalId: undefined, sourceProposalContentHash: undefined }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 px-3 text-sm font-normal" />
-                            </label>
+                            {/* The label input only appears when it can differ from the
+                                preset (custom method, or a suggestion that named the test)
+                                — two identical fields side by side read as a bug. */}
+                            {(planDraft.methodKind === 'other' || planDraft.methodLabel !== (methodOptions.find(option => option.value === planDraft.methodKind)?.label ?? 'Other')) && (
+                                <label className="text-xs font-semibold text-neutral-700">Method label
+                                    <input value={planDraft.methodLabel} onChange={event => setPlanDraft(current => ({ ...current, methodLabel: event.target.value, sourceProposalId: undefined, sourceProposalContentHash: undefined }))} className="mt-1 min-h-11 w-full rounded-lg border border-neutral-200 px-3 text-sm font-normal" />
+                                </label>
+                            )}
                         </div>
                         <div className="mt-3 grid gap-3 sm:grid-cols-2">
                             <label className="text-xs font-semibold text-neutral-700">Evidence that would support it

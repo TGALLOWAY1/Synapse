@@ -75,7 +75,7 @@ describe('DecisionCenter', () => {
         expect(screen.getByLabelText('Decision queue')).toBeInTheDocument();
         expect(screen.getByLabelText('Decision detail')).toBeInTheDocument();
         expect(screen.getByText('Synapse recommendation')).toBeInTheDocument();
-        expect(screen.getByText('1 needs attention')).toBeInTheDocument();
+        expect(screen.getByText('1 needs an answer')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('button', { name: /Allow a limited guest session/ }));
         expect(props.onDecide).toHaveBeenCalledWith('d1', 'confirm', 'guest', undefined);
         rerender(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Allow a limited guest session' }]} {...props} />);
@@ -106,6 +106,9 @@ describe('DecisionCenter', () => {
             },
         };
         const { rerender } = render(<DecisionCenter records={[ready]} {...props} />);
+        // The alignment review is a follow-up step: its body stays behind a
+        // closed disclosure so recording an answer never dumps proposal cards.
+        expect(screen.getByText(/Plan alignment/).closest('details')).not.toHaveAttribute('open');
         fireEvent.click(screen.getByRole('button', { name: 'Apply accepted changes' }));
         expect(props.onApplyToPlan).toHaveBeenCalledWith('d1');
 
@@ -316,12 +319,12 @@ describe('DecisionCenter', () => {
 
     it('renders an explicit completed state and decision log', () => {
         render(<DecisionCenter records={[{ ...openRecord, status: 'confirmed', resolution: 'Confirmed' }]} {...callbacks()} />);
-        expect(screen.getByText('Nothing needs attention right now')).toBeInTheDocument();
+        expect(screen.getByText('Nothing needs an answer right now')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
     });
 
-    it('keeps a material accepted-but-unvalidated assumption in the attention queue', () => {
+    it('moves an answered material assumption to Resolved & history labeled as answered, not pending', () => {
         render(<DecisionCenter records={[{
             ...openRecord,
             status: 'confirmed',
@@ -335,11 +338,60 @@ describe('DecisionCenter', () => {
             },
         }]} {...callbacks()} />);
 
-        expect(screen.getByText('1 needs attention')).toBeInTheDocument();
-        expect(screen.queryByText('All current planning items reviewed')).toBeNull();
+        // Answering is terminal for the queue: the count chip disappears, the
+        // record lives under Resolved & history, and its label says answered.
+        expect(screen.queryByText(/needs? an answer$/)).toBeNull();
+        expect(screen.getByText('Nothing needs an answer right now')).toBeInTheDocument();
+        expect(screen.getAllByText('Answered · not validated').length).toBeGreaterThan(0);
+        expect(screen.queryByText('Worth validating')).toBeNull();
         expect(screen.getByText('Accepted for planning · not validated')).toBeInTheDocument();
-        expect(screen.getAllByText('Worth validating').length).toBeGreaterThan(0);
+        // The evidence workflow stays available, but behind a closed disclosure.
+        const validationDisclosure = screen.getByText(/Validate with evidence/).closest('details')!;
+        expect(validationDisclosure).not.toHaveAttribute('open');
         expect(screen.getByText('Replace belief with evidence')).toBeInTheDocument();
+    });
+
+    it('leads an open assumption with the answer form, validation collapsed below it', () => {
+        render(<DecisionCenter records={[{
+            ...openRecord,
+            options: undefined,
+            materiality: 'high',
+            requiresValidation: true,
+            validation: {
+                workflowState: 'not_planned', activeEvidence: [], duplicateEvidenceIds: [],
+                evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false,
+                hasHistoricalValidation: false, dependentLabels: ['Onboarding'], history: [],
+            },
+        }]} {...callbacks()} />);
+
+        const confirm = screen.getByRole('button', { name: "Yes, that's right" });
+        const disclosure = screen.getByText(/Validate with evidence · recommended before you build/).closest('details')!;
+        expect(confirm.compareDocumentPosition(disclosure) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+        expect(disclosure).not.toHaveAttribute('open');
+    });
+
+    it('opens the validation disclosure when a validation is already underway', () => {
+        render(<DecisionCenter records={[{
+            ...openRecord,
+            status: 'confirmed',
+            resolution: openRecord.statement,
+            requiresValidation: true,
+            validation: {
+                workflowState: 'in_progress', activeEvidence: [], duplicateEvidenceIds: [],
+                evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false,
+                hasHistoricalValidation: false, dependentLabels: [], history: [],
+                currentPlan: {
+                    id: 'plan-1', question: 'Do parents want parity?', contentHash: 'hash',
+                    method: { kind: 'user_interviews', label: 'User interviews' },
+                    supportSignals: [], contradictionSignals: [], inconclusiveConditions: [], limitations: [],
+                    authoredBy: 'user', createdAt: 1,
+                },
+            },
+        }]} {...callbacks()} />);
+
+        const disclosure = screen.getByText(/Validate with evidence/).closest('details')!;
+        expect(disclosure).toHaveAttribute('open');
+        expect(screen.getByText('Gathering evidence')).toBeInTheDocument();
     });
 
     it('does not imply that a low-impact open assumption requires formal validation', () => {
@@ -480,7 +532,7 @@ describe('DecisionCenter', () => {
                 {...props}
             />);
             const status = screen.getByRole('status', { name: 'Answer recorded' });
-            expect(status).toHaveTextContent('1 item still needs your attention');
+            expect(status).toHaveTextContent('1 item still needs an answer');
             fireEvent.click(within(status).getByRole('button', { name: /Next: Should streaks reset on failure\?/ }));
             expect(screen.getByRole('heading', { name: 'Should streaks reset on failure?' })).toBeInTheDocument();
         });

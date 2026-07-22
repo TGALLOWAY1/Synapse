@@ -122,6 +122,22 @@ impact previews / the write-barrier apply path in
   failed attempts are not auto-retried; `useDecisionOptionSuggestions.ts`
   dedupes in-flight and stored options). The prompt is snapshot-locked in
   `promptSurfaces.test.ts`.
+- **Answering is terminal for the Decision Center queue.** The "Needs
+  attention" tab lists only records that still need an answer
+  (`needsVerdict`: status open/proposed); the header count chip and the
+  post-answer banner count the same set, so the numbers always agree. An
+  answered material assumption moves to "Resolved & history" immediately,
+  labeled **"Answered · not validated"** — `requiresValidation` stays true on
+  the view (readiness surfaces still see it) but it never keeps a record
+  looking unresolved in the queue after the user answered. In the detail pane
+  the answer actions render directly under "Why it matters"; the full
+  evidence workflow (`AssumptionValidationPanel`) sits behind a collapsed
+  "Validate with evidence" disclosure (auto-open only while a validation is
+  planned/in progress/due for review), and the decision-impact "Plan
+  alignment" proposals sit behind a collapsed summary line with a pending
+  count — recording a verdict must never unload proposal cards onto the
+  user. Do not re-add `requiresValidation` to the queue's attention
+  predicate or re-expand these sections by default.
 - **Open decisions never block Explore/Build.** Only the specialist critique
   is gated (`CritiqueGate`). The Decision Center header and the critique gate
   both surface a "Continue to Explore" action (`onContinueToExplore`, threaded
