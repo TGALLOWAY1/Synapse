@@ -559,7 +559,11 @@ export function DecisionCenter({
                             {selected.type === 'assumption' && selected.validation && (
                                 <details
                                     className="mt-6 rounded-xl border border-indigo-100 bg-white"
-                                    open={['planned', 'in_progress', 'due_for_review'].includes(selected.validation.workflowState)}
+                                    open={['planned', 'in_progress', 'due_for_review'].includes(selected.validation.workflowState)
+                                        // A generated-but-unrecorded plan proposal must stay visible:
+                                        // proposals don't advance workflowState, and collapsing them
+                                        // would hide the only "use suggestion as a draft" affordance.
+                                        || Boolean(selected.validation.latestPlanProposal && !selected.validation.currentPlan)}
                                 >
                                     <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold text-neutral-800">
                                         Validate with evidence{selected.requiresValidation ? ' · recommended before you build' : ' (optional)'}

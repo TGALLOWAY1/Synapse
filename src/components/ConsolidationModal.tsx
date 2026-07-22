@@ -3,19 +3,25 @@ import { useProjectStore } from '../store/projectStore';
 import { consolidateBranch, type ConsolidationResult, type ConsolidationScope } from '../lib/llmProvider';
 import { X, ArrowRight, Check, Loader2 } from 'lucide-react';
 import { normalizeError, userMessage } from '../lib/errors';
+import { applyAnchorEditToStructuredPRD } from '../lib/structuredPrdAnchorEdit';
+import { renderPremiumMarkdown } from '../lib/services/prdMarkdownRenderer';
 import { ErrorBanner } from './ErrorBanner';
 import { GenerationProgress } from './GenerationProgress';
 import { CONSOLIDATION_STAGES } from './generationStages';
-import type { Branch } from '../types';
+import type { Branch, StructuredPRD } from '../types';
 
 interface ConsolidationModalProps {
     projectId: string;
     branch: Branch;
     spineText: string;
+    /** The latest spine's structured PRD, when it has one. Structured spines
+     * consolidate by patching the structured PRD and re-projecting the
+     * markdown — a markdown-only merge would disable Challenge/Build. */
+    structuredPRD?: StructuredPRD;
     onClose: () => void;
 }
 
-export function ConsolidationModal({ projectId, branch, spineText, onClose }: ConsolidationModalProps) {
+export function ConsolidationModal({ projectId, branch, spineText, structuredPRD, onClose }: ConsolidationModalProps) {
     const { mergeBranch } = useProjectStore();
     const [isConsolidating, setIsConsolidating] = useState(false);
     const [result, setResult] = useState<ConsolidationResult | null>(null);
@@ -43,6 +49,29 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
         setIsCommitting(true);
         setError(null);
         try {
+            // Structured spines: apply the patch to the structured PRD itself
+            // and re-project the markdown from it, so responseText remains the
+            // deterministic projection of structuredPRD and the merged spine
+            // keeps Challenge/Build available. Never fall back to a
+            // markdown-only merge here — that appends a spine without a
+            // structuredPRD and disables both stages.
+            if (structuredPRD) {
+                if (selectedScope !== 'local' || !result.localPatch) {
+                    setError("No local patch is available to apply. Regenerate the patch and try again.");
+                    setIsCommitting(false);
+                    return;
+                }
+                const edit = applyAnchorEditToStructuredPRD(structuredPRD, branch.anchorText, result.localPatch);
+                if (!edit.applied) {
+                    setError("Could not locate the exact selected text in the plan. This can happen when the selection spans sections or includes formatting. Close this dialog and re-select a smaller passage.");
+                    setIsCommitting(false);
+                    return;
+                }
+                mergeBranch(projectId, branch.id, renderPremiumMarkdown(edit.structuredPRD), { structuredPRD: edit.structuredPRD });
+                onClose();
+                return;
+            }
+
             let finalSpineText = spineText;
             if (selectedScope === 'doc-wide' && result.docWidePatch) {
                 finalSpineText = result.docWidePatch;
@@ -131,12 +160,20 @@ export function ConsolidationModal({ projectId, branch, spineText, onClose }: Co
                                             <div className="font-semibold text-neutral-800 mb-1">Local Patch</div>
                                             <div className="text-xs text-neutral-500">Replace only the selected anchor text. Safe and predictable.</div>
                                         </button>
+                                        {/* A doc-wide rewrite is a full markdown replacement with no
+                                            mapping back to the structured PRD, so it is only offered
+                                            for legacy markdown-only spines — committing it on a
+                                            structured spine would strip the structured plan and
+                                            disable the Challenge/Build stages. */}
                                         <button
                                             onClick={() => { setSelectedScope('doc-wide'); setError(null); }}
-                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-indigo-500 bg-indigo-50' : 'border-neutral-200 hover:border-neutral-300'}`}
+                                            disabled={Boolean(structuredPRD)}
+                                            className={`flex-1 p-4 rounded-xl border-2 text-left transition ${selectedScope === 'doc-wide' ? 'border-indigo-500 bg-indigo-50' : 'border-neutral-200 hover:border-neutral-300'} disabled:cursor-not-allowed disabled:opacity-50 disabled:hover:border-neutral-200`}
                                         >
                                             <div className="font-semibold text-neutral-800 mb-1">Doc-Wide Rewrite</div>
-                                            <div className="text-xs text-neutral-500">Rewrite the entire PRD to incorporate the intent contextually.</div>
+                                            <div className="text-xs text-neutral-500">{structuredPRD
+                                                ? 'Unavailable for structured plans — targeted patches keep the plan and its outputs in sync.'
+                                                : 'Rewrite the entire PRD to incorporate the intent contextually.'}</div>
                                         </button>
                                     </div>
                                     <button

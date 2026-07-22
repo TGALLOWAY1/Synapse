@@ -1,6 +1,8 @@
 import { useProjectStore } from '../store/projectStore';
 import { ChevronLeft, Maximize2, Check, ArrowRight, Loader2 } from 'lucide-react';
 import { useState, useEffect } from 'react';
+import { applyAnchorEditToStructuredPRD } from '../lib/structuredPrdAnchorEdit';
+import { renderPremiumMarkdown } from '../lib/services/prdMarkdownRenderer';
 
 interface BranchCanvasProps {
     projectId: string;
@@ -14,6 +16,7 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
     const [isGenerating, setIsGenerating] = useState(false);
     const [drafts, setDrafts] = useState<{ id: string, title: string, content: string }[]>([]);
     const [selectedDraftId, setSelectedDraftId] = useState<string | null>(null);
+    const [applyError, setApplyError] = useState<string | null>(null);
     const [leftWidth, setLeftWidth] = useState(320);
 
     const handleMouseDown = (e: React.MouseEvent) => {
@@ -68,9 +71,20 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
         const draft = drafts.find(d => d.id === selectedDraftId);
         if (!draft) return;
 
-        // Apply to spine
-        const newText = latestSpine.responseText.replace(branch.anchorText, draft.content);
-        mergeBranch(projectId, branch.id, newText);
+        // Structured spines patch the structured PRD and re-project the
+        // markdown — a markdown-only merge would strip structuredPRD from the
+        // new latest spine and disable the Challenge/Build stages.
+        if (latestSpine.structuredPRD) {
+            const edit = applyAnchorEditToStructuredPRD(latestSpine.structuredPRD, branch.anchorText, draft.content);
+            if (!edit.applied) {
+                setApplyError('Could not locate the selected text in the plan. Re-select a smaller passage and try again.');
+                return;
+            }
+            mergeBranch(projectId, branch.id, renderPremiumMarkdown(edit.structuredPRD), { structuredPRD: edit.structuredPRD });
+        } else {
+            const newText = latestSpine.responseText.replace(branch.anchorText, draft.content);
+            mergeBranch(projectId, branch.id, newText);
+        }
 
         // Return to workspace overlay close
         onClose();
@@ -93,6 +107,7 @@ export function BranchCanvas({ projectId, branchId, onClose }: BranchCanvasProps
                     <span className="text-sm text-neutral-400 italic hidden sm:inline-block">"{branch.anchorText.substring(0, 40)}..."</span>
                 </div>
                 <div className="flex items-center gap-3">
+                    {applyError && <span className="text-xs text-red-400" role="alert">{applyError}</span>}
                     {drafts.length > 0 && (
                         <button
                             onClick={handleApply}

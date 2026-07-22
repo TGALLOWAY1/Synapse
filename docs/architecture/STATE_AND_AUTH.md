@@ -15,7 +15,17 @@
   (`regenerateSpine`, `mergeBranch`) get UUIDs, while the first spine and
   legacy localStorage data keep `v1`-style ids. Never parse a version
   number out of the id; display labels ("Version N") derive from array
-  position. **Generation lifecycle:**
+  position. **Consolidation preserves the structured PRD:** for a spine
+  with a `structuredPRD`, the consolidation commit applies the local
+  patch to the structured PRD itself (`applyAnchorEditToStructuredPRD`,
+  pure, `src/lib/structuredPrdAnchorEdit.ts`) and re-projects
+  `responseText` via `renderPremiumMarkdown`, passing both to
+  `mergeBranch(..., { structuredPRD })`; doc-wide rewrite (a full
+  markdown replacement with no structured mapping) is offered only for
+  legacy markdown-only spines. Never append a markdown-only merge spine
+  on top of a structured one — `canReview`/`canExploreOutputs` gate on
+  the *latest* spine having a `structuredPRD`, so that silently disables
+  the Challenge and Explore/Build stages for the whole project. **Generation lifecycle:**
   `SpineVersion.generationPhase` (`'running' | 'complete'`, optional —
   legacy spines lack it) is stamped `'running'` by
   `markSpineGenerationStarted` when a PRD run actually begins (both

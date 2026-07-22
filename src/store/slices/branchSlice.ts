@@ -1,6 +1,6 @@
 import type { StateCreator } from 'zustand';
 import { v4 as uuidv4 } from 'uuid';
-import type { Branch, SpineVersion, HistoryEvent } from '../../types';
+import type { Branch, SpineVersion, HistoryEvent, StructuredPRD } from '../../types';
 import type { ProjectState } from '../types';
 import { assertProjectCapability } from '../../lib/projectCapabilities';
 
@@ -66,7 +66,7 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
         });
     },
 
-    mergeBranch: (projectId: string, branchId: string, newSpineText: string) => {
+    mergeBranch: (projectId: string, branchId: string, newSpineText: string, opts?: { structuredPRD?: StructuredPRD }) => {
         assertProjectCapability(get().projects[projectId], 'canEditProjectContent');
         // Validate against a snapshot, but perform the array derivations inside
         // the set() updater against the fresh `state` so a concurrent spine /
@@ -112,10 +112,19 @@ export const createBranchSlice: StateCreator<ProjectState, [], [], BranchSlice> 
                 // Preflight clarification answers likewise describe the idea —
                 // keep them so a later regenerate can still honor them.
                 preflightSession: oldSpine.preflightSession,
-                // NOTE: structuredPRD is deliberately NOT copied — the merge
-                // output is markdown only, and stamping the pre-merge
-                // structured PRD onto it would present content that no longer
-                // matches the document (and feed stale data to artifacts).
+                // Structured consolidation: when the caller applied the patch
+                // to the structured PRD and re-projected the markdown from it
+                // (applyAnchorEditToStructuredPRD + renderPremiumMarkdown),
+                // carry the updated structuredPRD and its schema version so
+                // the Challenge/Build stages — which gate on the latest spine
+                // having a structuredPRD — stay available after a merge. The
+                // pre-merge structuredPRD is never stamped onto a markdown-only
+                // merge: that would present content that no longer matches the
+                // document (and feed stale data to artifacts), so legacy
+                // markdown spines still produce markdown-only merge output.
+                ...(opts?.structuredPRD
+                    ? { structuredPRD: opts.structuredPRD, prdVersion: oldSpine.prdVersion }
+                    : {}),
                 provenance: {
                     changeSource: 'branch_merge',
                     editSummary: `Merged branch: "${branch.anchorText.substring(0, 40)}${branch.anchorText.length > 40 ? '…' : ''}"`,

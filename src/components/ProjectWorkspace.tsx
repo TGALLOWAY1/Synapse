@@ -1865,6 +1865,7 @@ export function ProjectWorkspace() {
                     projectId={projectId}
                     branch={consolidatingBranch}
                     spineText={latestSpine.responseText}
+                    structuredPRD={latestSpine.structuredPRD}
                     onClose={() => setConsolidatingBranch(null)}
                 />
             )}
