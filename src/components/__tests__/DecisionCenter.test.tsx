@@ -86,10 +86,13 @@ describe('DecisionCenter', () => {
         const props = callbacks();
         render(<DecisionCenter records={[openRecord]} {...props} />);
         expect(screen.queryByRole('button', { name: 'Confirm as true' })).toBeNull();
+        // The button is never a dead end: it's enabled from the start, and an
+        // empty first click focuses the correction area instead of submitting.
         const reject = screen.getByRole('button', { name: /Not quite/ });
-        expect(reject).toBeDisabled();
-        fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: 'Guests may browse but must sign in before saving' } });
         expect(reject).toBeEnabled();
+        fireEvent.click(reject);
+        expect(props.onDecide).not.toHaveBeenCalled();
+        fireEvent.change(screen.getByLabelText('Your answer'), { target: { value: 'Guests may browse but must sign in before saving' } });
         fireEvent.click(reject);
         expect(props.onDecide).toHaveBeenCalledWith('d1', 'reject', 'Guests may browse but must sign in before saving', undefined);
     });
@@ -241,7 +244,7 @@ describe('DecisionCenter', () => {
         expect(basis).not.toHaveAttribute('open');
         expect(within(basis).getByText(/reasoning-model/)).toBeInTheDocument();
 
-        fireEvent.click(screen.getByRole('button', { name: 'Request different interpretation' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Ask for a different reading' }));
         fireEvent.change(screen.getByLabelText('What should Synapse interpret differently?'), {
             target: { value: 'Keep optional invitations, but remove administrator ownership.' },
         });
@@ -287,8 +290,8 @@ describe('DecisionCenter', () => {
         fireEvent.click(screen.getByRole('button', { name: 'Confirm not affected' }));
         expect(props.onReviewAlignmentProposal).toHaveBeenCalledWith('d1', 'preview', 'constraint-unaffected', 'confirmed_not_applicable');
 
-        expect(screen.getAllByRole('button', { name: 'Request different interpretation' })).toHaveLength(1);
-        fireEvent.click(screen.getByRole('button', { name: 'Request different interpretation' }));
+        expect(screen.getAllByRole('button', { name: 'Ask for a different reading' })).toHaveLength(1);
+        fireEvent.click(screen.getByRole('button', { name: 'Ask for a different reading' }));
         fireEvent.change(screen.getByLabelText('What should Synapse interpret differently?'), {
             target: { value: 'Reconsider whether exports depend on project ownership.' },
         });
@@ -322,6 +325,13 @@ describe('DecisionCenter', () => {
         expect(screen.getByText('Nothing needs an answer right now')).toBeInTheDocument();
         fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
         expect(screen.getByRole('button', { name: /Should guests start/ })).toBeInTheDocument();
+    });
+
+    it('marks a deferred record with a chip in Resolved & history', () => {
+        render(<DecisionCenter records={[{ ...openRecord, status: 'deferred' }]} {...callbacks()} />);
+        fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
+        const row = screen.getByRole('button', { name: /Should guests start/ });
+        expect(within(row).getByText('Deferred')).toBeInTheDocument();
     });
 
     it('moves an answered material assumption to Resolved & history labeled as answered, not pending', () => {
