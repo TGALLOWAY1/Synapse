@@ -231,6 +231,7 @@ export function DecisionCenter({
         }
     }
     const detailHeadingRef = useRef<HTMLHeadingElement>(null);
+    const correctionTextareaRef = useRef<HTMLTextAreaElement>(null);
     const selected = visible.find(record => record.id === selectedId) ?? visible[0];
     const dominantNextAction = selected
         ? needsVerdict(selected)
@@ -382,6 +383,13 @@ export function DecisionCenter({
                                             {view === 'needs_review' && (record.materiality === 'blocking' || record.materiality === 'high') && (
                                                 <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">{record.materiality === 'blocking' ? 'Blocking' : 'High impact'}</span>
                                             )}
+                                            {/* The group header already says "Deferred", but a
+                                                per-row chip keeps that visible while scanning a
+                                                long Resolved & history list, matching the
+                                                Blocking/High impact treatment above. */}
+                                            {view === 'log' && record.status === 'deferred' && (
+                                                <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-600">Deferred</span>
+                                            )}
                                             {record.sourceLabels?.[0] && <span className="truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</span>}
                                         </span>
                                     </button>
@@ -433,7 +441,16 @@ export function DecisionCenter({
                                     ? recommendedId
                                     : undefined;
                                 const effectiveChoice = answerChoice ?? defaultChoice;
-                                const showTextarea = !hasOptions || effectiveChoice === 'other';
+                                // A simple assumption confirm ("Yes, that's right") is the primary
+                                // path here, so the free-text correction area must not appear
+                                // until the user actually asks to correct it — otherwise it reads
+                                // as a required first step ahead of the confirm/defer buttons.
+                                const isAssumptionSimpleConfirm = selected.type === 'assumption' && !selected.options?.length;
+                                const showTextarea = hasOptions
+                                    ? effectiveChoice === 'other'
+                                    : isAssumptionSimpleConfirm
+                                        ? answerChoice === 'other'
+                                        : true;
                                 const chosenOption = effectiveChoice && effectiveChoice !== 'other'
                                     ? orderedOptions.find(option => option.id === effectiveChoice)
                                     : undefined;
@@ -493,29 +510,54 @@ export function DecisionCenter({
                                             {onPrepareOptions && <button type="button" onClick={() => onPrepareOptions(selected.id)} className="ml-2 font-semibold underline underline-offset-2">Try again</button>}
                                         </div>
                                     )}
-                                    {showTextarea && <>
-                                        <label className={hasOptions ? 'sr-only' : 'mt-2 block'} htmlFor="decision-answer"><span className="sr-only">Your answer</span></label>
-                                        <textarea id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder={selected.type === 'assumption' ? 'Explain what should replace this premise' : hasOptions ? 'Describe the approach that should govern the plan' : 'Record the product choice in your own words'} className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-                                    </>}
-                                    <label className="mt-3 block text-xs font-medium text-neutral-600" htmlFor="decision-rationale">Why? (optional)</label>
-                                    <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
-                                    <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                                        {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">{approvingRecommendation ? <><Check size={14} className="mr-1 inline" /> Approve recommendation</> : 'Save decision'}</button>}
-                                        {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"><Check size={14} className="mr-1 inline" /> Yes, that's right</button>}
-                                        {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
-                                        <button
-                                            type="button"
-                                            disabled={showTextarea && !customAnswer.trim()}
-                                            onClick={() => {
-                                                if (customAnswer.trim()) submit('reject', customAnswer.trim());
-                                                else setAnswerChoice('other');
-                                            }}
-                                            className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50 disabled:opacity-40"
-                                        ><X size={14} className="mr-1 inline" /> Not quite — correct it</button>
-                                    </div>
-                                    {selected.type === 'assumption' && !selected.options?.length && (
-                                        <p className="mt-2 text-xs leading-5 text-neutral-500">Recorded as your call — not independently checked.</p>
-                                    )}
+                                    {(() => {
+                                        // "Not quite" is never a dead end: while the correction
+                                        // area is hidden, the click reveals and focuses it instead
+                                        // of rendering disabled with no explanation.
+                                        const correctIt = () => {
+                                            const trimmed = customAnswer.trim();
+                                            if (trimmed) { submit('reject', trimmed); return; }
+                                            if (!showTextarea) setAnswerChoice('other');
+                                            requestAnimationFrame(() => correctionTextareaRef.current?.focus());
+                                        };
+                                        const correctionField = showTextarea && (
+                                            <>
+                                                <label className={hasOptions ? 'sr-only' : 'mt-2 block'} htmlFor="decision-answer"><span className="sr-only">Your answer</span></label>
+                                                <textarea ref={correctionTextareaRef} id="decision-answer" value={customAnswer} onChange={event => setCustomAnswer(event.target.value)} rows={3} placeholder={selected.type === 'assumption' ? 'Explain what should replace this premise' : hasOptions ? 'Describe the approach that should govern the plan' : 'Record the product choice in your own words'} className="mt-2 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                            </>
+                                        );
+                                        const rationaleField = (
+                                            <>
+                                                <label className="mt-3 block text-xs font-medium text-neutral-600" htmlFor="decision-rationale">Why? (optional)</label>
+                                                <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
+                                            </>
+                                        );
+                                        const answerButtons = (
+                                            <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
+                                                {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">{approvingRecommendation ? <><Check size={14} className="mr-1 inline" /> Approve recommendation</> : 'Save decision'}</button>}
+                                                {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700"><Check size={14} className="mr-1 inline" /> Yes, that's right</button>}
+                                                {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
+                                                <button type="button" onClick={correctIt} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><X size={14} className="mr-1 inline" /> Not quite — correct it</button>
+                                            </div>
+                                        );
+                                        // For a simple assumption confirm, the buttons are the
+                                        // headline action; the correction textarea only follows
+                                        // once the user actually asks to correct the premise.
+                                        return isAssumptionSimpleConfirm ? (
+                                            <>
+                                                {rationaleField}
+                                                {answerButtons}
+                                                {correctionField}
+                                                <p className="mt-2 text-xs leading-5 text-neutral-500">Recorded as your call — not independently checked.</p>
+                                            </>
+                                        ) : (
+                                            <>
+                                                {correctionField}
+                                                {rationaleField}
+                                                {answerButtons}
+                                            </>
+                                        );
+                                    })()}
                                 </section>
                                 );
                             })()}
@@ -634,7 +676,7 @@ export function DecisionCenter({
                                                                 <span className="font-semibold text-neutral-900">{proposalAnalysisLabel[proposal.analysisStatus]}</span>
                                                                 {proposal.reasoningConfidence && <span>· {proposal.reasoningConfidence} reasoning confidence</span>}
                                                                 {proposal.evidenceCharacter && <span>· {evidenceCharacterLabel[proposal.evidenceCharacter]}</span>}
-                                                                {proposal.analysisMethod && <span>· {proposal.analysisMethod === 'model' ? 'Synapse reasoning' : 'Verified rule'}</span>}
+                                                                {proposal.analysisMethod && <span>· {proposal.analysisMethod === 'model' ? 'Synapse reasoning' : 'Checked automatically'}</span>}
                                                             </div>
                                                             {(proposal.analysisAmbiguity || proposal.analysisFailureReason) && <p className="mt-1 leading-5"><span className="font-semibold">Ambiguity or limit:</span> {proposal.analysisAmbiguity || proposal.analysisFailureReason}</p>}
                                                             {proposal.analysisQuestions && proposal.analysisQuestions.length > 0 && (
@@ -670,7 +712,7 @@ export function DecisionCenter({
                                                             <div className="mt-2 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
                                                                 <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'accepted')} className="min-h-11 w-full rounded-md bg-indigo-600 px-3 text-xs font-semibold text-white sm:w-auto">Accept</button>
                                                                 {proposal.canEditWording !== false && <button type="button" disabled={!(proposalEdits[proposal.id] ?? '').trim()} onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'edited', proposalEdits[proposal.id].trim())} className="min-h-11 w-full rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 disabled:opacity-40 sm:w-auto">Use my wording</button>}
-                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">{proposal.requiredForVerdictAlignment ? 'Keep current (unaligned)' : 'Keep current'}</button>
+                                                                <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'rejected')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">{proposal.requiredForVerdictAlignment ? "Keep current (won't match your answer)" : 'Keep current'}</button>
                                                                 <button type="button" onClick={() => onReviewAlignmentProposal(selected.id, selected.preview!.id, proposal.id, 'deferred')} className="min-h-11 w-full rounded-md border border-neutral-200 px-3 text-xs font-medium text-neutral-700 sm:w-auto">Defer</button>
                                                             </div>
                                                         </div>
@@ -738,7 +780,7 @@ export function DecisionCenter({
                                                                     className="min-h-11 w-full rounded-md border border-indigo-200 px-3 text-xs font-semibold text-indigo-700 sm:w-auto"
                                                                 >
                                                                     {['bounded_applicable', 'already_aligned', 'not_applicable'].includes(proposal.analysisStatus ?? '')
-                                                                        ? 'Request different interpretation'
+                                                                        ? 'Ask for a different reading'
                                                                         : proposal.analysisMethod === 'model' && proposal.analysisStatus === 'needs_input'
                                                                             ? 'Provide missing information'
                                                                             : 'Ask Synapse to propose wording'}

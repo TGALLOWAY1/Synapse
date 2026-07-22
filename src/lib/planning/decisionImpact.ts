@@ -857,7 +857,7 @@ export function buildDecisionImpact(input: {
                 contract: buildProposalContract({
                     record: input.record, target: location, structuredPRD: input.structuredPRD,
                     baselineSpineVersionId: input.baselineSpineVersionId, decisionEventId: projection.latestVerdictEventId!,
-                    status: 'needs_input', failureReason: 'A safe aligned value could not be established.',
+                    status: 'needs_input', failureReason: "Synapse couldn't determine a safe update here — review this section yourself.",
                 }),
             });
         }
@@ -971,9 +971,12 @@ export function buildDecisionImpact(input: {
         target: sourceTarget,
         operation: 'replace',
         beforeSummary: sourceAssumption.statement,
+        // User approval of this proposal is still required (planning authority
+        // rule) — this only describes what accepting it would write, not a
+        // record of Synapse asking permission to note the answer down.
         proposedSummary: projection.status === 'rejected'
-            ? `Record as rejected${projection.answer ? ` — ${projection.answer}` : ''}`
-            : `Record as confirmed${projection.answer && projection.answer !== sourceAssumption.statement ? ` — ${projection.answer}` : ''}`,
+            ? `Update the PRD to reflect this correction${projection.answer ? ` — ${projection.answer}` : ''}`
+            : `Update the PRD to reflect this confirmation${projection.answer && projection.answer !== sourceAssumption.statement ? ` — ${projection.answer}` : ''}`,
         proposedValue: nextAssumption,
         reason: 'The durable user verdict should be represented on its source assumption in the working plan.',
         confidence: 'definite',
@@ -994,7 +997,7 @@ export function buildDecisionImpact(input: {
         contract: buildProposalContract({
             record: input.record, target: location, structuredPRD: input.structuredPRD,
             baselineSpineVersionId: input.baselineSpineVersionId, decisionEventId: projection.latestVerdictEventId!,
-            status: 'needs_input', failureReason: 'A safe aligned value could not be established.',
+            status: 'needs_input', failureReason: "Synapse couldn't determine a safe update here — review this section yourself.",
         }),
     }))]).map(bindProposalContract);
     const preview: DecisionImpactPreview = {
