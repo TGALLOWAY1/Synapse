@@ -158,7 +158,7 @@ export interface ProjectState {
     markSpineFinal: (projectId: string, spineId: string, isFinal: boolean) => void;
     createBranch: (projectId: string, spineVersionId: string, anchorText: string, initialIntent: string) => { branchId: string };
     addBranchMessage: (projectId: string, branchId: string, role: 'user' | 'assistant', content: string) => void;
-    mergeBranch: (projectId: string, branchId: string, newSpineText: string) => { newSpineId: string };
+    mergeBranch: (projectId: string, branchId: string, newSpineText: string, opts?: { structuredPRD?: StructuredPRD }) => { newSpineId: string };
     deleteProject: (projectId: string) => void;
     deleteBranch: (projectId: string, branchId: string) => void;
     getProject: (projectId: string) => Project | undefined;

@@ -394,6 +394,29 @@ describe('DecisionCenter', () => {
         expect(screen.getByText('Gathering evidence')).toBeInTheDocument();
     });
 
+    it('keeps a generated-but-unrecorded validation-plan proposal visible', () => {
+        // Proposals do not advance workflowState — the disclosure must still
+        // open so the "use suggestion as a draft" affordance stays reachable.
+        render(<DecisionCenter records={[{
+            ...openRecord,
+            options: undefined,
+            requiresValidation: true,
+            validation: {
+                workflowState: 'not_planned', activeEvidence: [], duplicateEvidenceIds: [],
+                evidenceFromAnotherQuestionIds: [], conclusionIsCurrent: false,
+                hasHistoricalValidation: false, dependentLabels: [], history: [],
+                latestPlanProposal: {
+                    id: 'proposal-1', planningRecordId: 'd1', contractVersion: 1, authoredBy: 'synapse',
+                    question: 'Do guests convert without an account?', method: { kind: 'analytics_measurement', label: 'Analytics measurement' },
+                    supportSignals: [], contradictionSignals: [], inconclusiveConditions: [], limitations: [],
+                    assumptionStatementHash: 'hash-a', evidenceSetHash: 'hash-e', createdAt: 1, contentHash: 'hash-c',
+                },
+            },
+        }]} {...callbacks()} />);
+
+        expect(screen.getByText(/Validate with evidence/).closest('details')).toHaveAttribute('open');
+    });
+
     it('does not imply that a low-impact open assumption requires formal validation', () => {
         render(<DecisionCenter records={[{
             ...openRecord,
