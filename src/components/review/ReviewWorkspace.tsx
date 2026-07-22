@@ -246,8 +246,8 @@ function CritiqueGate({ openDecisionCount, readOnly, onGoToDecisions, onDeferOpe
                 <p className="mt-2 text-sm leading-6 text-neutral-600">
                     The specialist critique is optional and works best once your draft has no open decisions.
                     {openDecisionCount > 0
-                        ? ` ${openDecisionCount} decision${openDecisionCount === 1 ? '' : 's'} still ${openDecisionCount === 1 ? 'needs' : 'need'} your attention.`
-                        : ''} Synapse recommends an answer for each — approving them usually takes a minute. Or defer them all and come back to the critique whenever you're ready.
+                        ? ` ${openDecisionCount} decision${openDecisionCount === 1 ? '' : 's'} still ${openDecisionCount === 1 ? 'needs' : 'need'} an answer.`
+                        : ''} Answer them in the Decision Center — or defer them all and come back to the critique whenever you're ready.
                 </p>
                 {!readOnly && (
                     <div className="mt-6 flex flex-col gap-2 sm:flex-row sm:flex-wrap">

@@ -10,7 +10,7 @@ import {
 } from './AssumptionValidationPanel';
 import { UnderlineTabs, type UnderlineTab } from '../ui/UnderlineTabs';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
-import { planningRecordCopy, planningRecordDominantCondition, type PlanningRecordDominantCondition } from '../../lib/planning/planningLanguage';
+import { assumptionWorkflowCopy, planningRecordCopy, planningRecordDominantCondition, type PlanningRecordDominantCondition } from '../../lib/planning/planningLanguage';
 
 export type DecisionCenterOptionView = {
     id: string;
@@ -131,7 +131,6 @@ interface Props {
 }
 
 const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
-const needsAttention = (record: DecisionCenterRecordView) => needsVerdict(record) || Boolean(record.requiresValidation);
 const dominantCondition = (record: DecisionCenterRecordView) => planningRecordDominantCondition({
     type: record.type === 'question' ? 'open_question' : record.type,
     status: record.status,
@@ -139,7 +138,13 @@ const dominantCondition = (record: DecisionCenterRecordView) => planningRecordDo
     hasCurrentEvidenceConclusion: Boolean(record.validation?.conclusionIsCurrent && record.validation.acceptedConclusion),
     needsAlignment: Boolean(record.preview && ['ready', 'stale', 'failed'].includes(record.preview.status)),
 });
-const dominantConditionLabel = (record: DecisionCenterRecordView) => planningRecordCopy(dominantCondition(record)).label;
+/** Queue/detail status label. An answered material assumption keeps its
+ * validation invitation, but it must read as answered — never as still
+ * pending — so it gets a dedicated label instead of "Worth validating". */
+const dominantConditionLabel = (record: DecisionCenterRecordView) =>
+    ['confirmed', 'rejected', 'resolved'].includes(record.status) && record.requiresValidation
+        ? 'Answered · not validated'
+        : planningRecordCopy(dominantCondition(record)).label;
 /** One plain sentence per attention group so the queue itself answers "what am
  * I supposed to do with these?" — approve, answer, or review. */
 const groupGuidance: Partial<Record<PlanningRecordDominantCondition, string>> = {
@@ -181,15 +186,19 @@ export function DecisionCenter({
     onContinueToExplore,
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
-    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsAttention(initialRecord) ? 'needs_review' : 'log') : records.some(needsAttention) ? 'needs_review' : 'log');
-    const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsAttention(record) : !needsAttention(record)), [records, view]);
+    const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsVerdict(initialRecord) ? 'needs_review' : 'log') : records.some(needsVerdict) ? 'needs_review' : 'log');
+    // The attention queue holds only records that still need an answer. An
+    // answered material assumption moves to "Resolved & history" (labeled
+    // "Answered · not validated") — validation stays available there, but it
+    // never keeps a record looking unresolved after the user answered it.
+    const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsVerdict(record) : !needsVerdict(record)), [records, view]);
     // Stable-partition the queue by dominant condition in first-seen order so
     // rows group under one small header instead of repeating a tag per row.
     const groupedVisible = useMemo(() => {
         const groups: Array<{ label: string; condition: PlanningRecordDominantCondition; records: DecisionCenterRecordView[] }> = [];
         for (const record of visible) {
             const condition = dominantCondition(record);
-            const label = planningRecordCopy(condition).label;
+            const label = dominantConditionLabel(record);
             const existing = groups.find(group => group.label === label);
             if (existing) existing.records.push(record);
             else groups.push({ label, condition, records: [record] });
@@ -213,7 +222,7 @@ export function DecisionCenter({
         setLastInitialSelectedId(initialSelectedId);
         const target = records.find(record => record.id === initialSelectedId);
         if (target) {
-            setView(needsAttention(target) ? 'needs_review' : 'log');
+            setView(needsVerdict(target) ? 'needs_review' : 'log');
             setSelectedId(target.id);
             setMobileDetailOpen(true);
             setCustomAnswer('');
@@ -237,7 +246,8 @@ export function DecisionCenter({
     const selectedHasCurrentAssumptionConclusion = selected?.type === 'assumption'
         && selected.validation?.conclusionIsCurrent
         && Boolean(selected.validation.acceptedConclusion);
-    const unresolvedCount = records.filter(needsAttention).length;
+    const unresolvedCount = records.filter(needsVerdict).length;
+    const pendingProposalCount = (selected?.preview?.proposals ?? []).filter(proposal => proposal.disposition === 'pending').length;
     const decisionQueueTabs: UnderlineTab[] = [
         { id: 'needs_review', label: 'Needs attention' },
         { id: 'log', label: 'Resolved & history' },
@@ -274,7 +284,10 @@ export function DecisionCenter({
         if (action === 'reopen') {
             setView('needs_review');
         } else if (needsVerdict(selected)) {
-            setView(selected.requiresValidation ? 'needs_review' : 'log');
+            // Answering always moves the record to "Resolved & history" — even
+            // when validation stays worth doing. The queue must visibly shrink
+            // with every answer or resolving never feels achievable.
+            setView('log');
         }
         setLastDecidedId(['confirm', 'custom', 'reject'].includes(action) && needsVerdict(selected) ? selected.id : undefined);
         setSelectedId(selected.id);
@@ -309,11 +322,13 @@ export function DecisionCenter({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <h1 className="text-xl font-bold tracking-tight text-neutral-950 sm:text-2xl">Decision Center</h1>
-                        <p className="mt-1 text-sm text-neutral-500">Synapse recommends an answer for each open item — approve it, or record your own.</p>
+                        <p className="mt-1 text-sm text-neutral-500">Answer each open item — approve a suggested option when there is one, or record your own call.</p>
                     </div>
-                    <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" aria-label={`${unresolvedCount} planning items need attention`}>
-                        {unresolvedCount} need{unresolvedCount === 1 ? 's' : ''} attention
-                    </div>
+                    {unresolvedCount > 0 && (
+                        <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" aria-label={`${unresolvedCount} planning item${unresolvedCount === 1 ? '' : 's'} need${unresolvedCount === 1 ? 's' : ''} an answer`}>
+                            {unresolvedCount} need{unresolvedCount === 1 ? 's' : ''} an answer
+                        </div>
+                    )}
                 </div>
                 {onContinueToExplore && (
                     <p className="mt-2 text-xs text-neutral-500">
@@ -326,7 +341,7 @@ export function DecisionCenter({
             </header>
             {unresolvedCount === 0 && records.length > 0 && (
                 <div className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 sm:px-6" role="status">
-                    Nothing needs attention right now
+                    Nothing needs an answer right now
                 </div>
             )}
 
@@ -345,8 +360,8 @@ export function DecisionCenter({
                         {visible.length === 0 ? (
                             <div className="px-4 py-10 text-center">
                                 {view === 'needs_review' ? <Check className="mx-auto text-emerald-500" size={24} /> : <FileQuestion className="mx-auto text-neutral-300" size={24} />}
-                                <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'Nothing needs attention' : 'No resolved planning history yet'}</p>
-                                <p className="mt-1 text-xs leading-5 text-neutral-500">{view === 'needs_review' ? 'New assumptions and review findings will appear here.' : 'Resolved and deferred choices remain available here.'}</p>
+                                <p className="mt-3 text-sm font-semibold text-neutral-800">{view === 'needs_review' ? 'Nothing needs an answer' : 'No resolved planning history yet'}</p>
+                                <p className="mt-1 text-xs leading-5 text-neutral-500">{view === 'needs_review' ? 'New assumptions and review findings will appear here.' : 'Answered and deferred choices remain available here.'}</p>
                             </div>
                         ) : groupedVisible.map(group => (
                             <div key={group.label}>
@@ -363,7 +378,12 @@ export function DecisionCenter({
                                         className={`mb-1 w-full rounded-xl border px-3 py-3 text-left transition ${selected?.id === record.id ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-neutral-50'}`}
                                     >
                                         <p className="text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
-                                        {record.sourceLabels?.[0] && <p className="mt-1 truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</p>}
+                                        <span className="mt-1 flex items-center gap-2">
+                                            {view === 'needs_review' && (record.materiality === 'blocking' || record.materiality === 'high') && (
+                                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">{record.materiality === 'blocking' ? 'Blocking' : 'High impact'}</span>
+                                            )}
+                                            {record.sourceLabels?.[0] && <span className="truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</span>}
+                                        </span>
                                     </button>
                                 ))}
                             </div>
@@ -392,30 +412,6 @@ export function DecisionCenter({
                                     <p className="text-xs font-bold uppercase tracking-wide text-indigo-700">Next action</p>
                                     <p className="mt-1 text-sm font-semibold leading-6 text-indigo-950">{dominantNextAction}</p>
                                 </section>
-                            )}
-
-                            {selected.type === 'assumption' && selected.validation && (
-                                <div>
-                                    <AssumptionValidationPanel
-                                        key={selected.id}
-                                        recordId={selected.id}
-                                        readOnly={readOnly}
-                                        validation={selected.validation}
-                                        requiresValidation={Boolean(selected.requiresValidation)}
-                                        consequence={selected.whyItMatters}
-                                        hasPlanImpact={Boolean(selected.preview)}
-                                        onGeneratePlan={onGenerateAssumptionValidationPlan}
-                                        onRecordPlan={onRecordAssumptionValidationPlan}
-                                    onAddEvidence={onAddAssumptionEvidence}
-                                    onCorrectEvidence={onCorrectAssumptionEvidence}
-                                    onRetractEvidence={onRetractAssumptionEvidence}
-                                        onInterpretEvidence={onInterpretAssumptionEvidence}
-                                        onRecordOutcome={onRecordAssumptionOutcome}
-                                        onRecordTreatment={onRecordAssumptionTreatment}
-                                        onReopenOutcome={onReopenAssumptionOutcome}
-                                        onPreviewImpact={onPreviewImpact}
-                                    />
-                                </div>
                             )}
 
                             {!readOnly && needsVerdict(selected) && (() => {
@@ -525,14 +521,14 @@ export function DecisionCenter({
                             })()}
 
                             {selected.id === lastDecidedId && !needsVerdict(selected) && (() => {
-                                const next = records.filter(record => needsAttention(record) && record.id !== selected.id);
+                                const next = records.filter(record => needsVerdict(record) && record.id !== selected.id);
                                 return (
                                     <section className="mt-4 rounded-xl border border-emerald-200 bg-emerald-50 px-4 py-3" role="status" aria-label="Answer recorded">
                                         <div className="flex flex-wrap items-center justify-between gap-2">
                                             <p className="text-sm font-semibold text-emerald-900">
                                                 Answer recorded. {next.length > 0
-                                                    ? `${next.length} item${next.length === 1 ? '' : 's'} still need${next.length === 1 ? 's' : ''} your attention.`
-                                                    : 'Nothing else needs your attention right now.'}
+                                                    ? `${next.length} item${next.length === 1 ? '' : 's'} still need${next.length === 1 ? 's' : ''} an answer.`
+                                                    : 'Nothing else needs an answer right now.'}
                                             </p>
                                             {next.length > 0 && (
                                                 <button
@@ -556,9 +552,56 @@ export function DecisionCenter({
                                 </section>
                             )}
 
+                            {/* Validation is a follow-up the user can opt into, never the
+                                first thing between them and answering — so the full
+                                evidence workflow lives behind this disclosure, open only
+                                when a validation is already underway. */}
+                            {selected.type === 'assumption' && selected.validation && (
+                                <details
+                                    className="mt-6 rounded-xl border border-indigo-100 bg-white"
+                                    open={['planned', 'in_progress', 'due_for_review'].includes(selected.validation.workflowState)}
+                                >
+                                    <summary className="min-h-11 cursor-pointer px-4 py-3 text-sm font-semibold text-neutral-800">
+                                        Validate with evidence{selected.requiresValidation ? ' · recommended before you build' : ' (optional)'}
+                                        {selected.validation.workflowState !== 'not_planned' && (
+                                            <span className="ml-2 font-normal text-neutral-500">{assumptionWorkflowCopy(selected.validation.workflowState).label}</span>
+                                        )}
+                                    </summary>
+                                    <div className="border-t border-neutral-100 px-3 pb-3 [&>section]:mt-3 [&>section]:border-0 [&>section]:p-2">
+                                        <AssumptionValidationPanel
+                                            key={selected.id}
+                                            recordId={selected.id}
+                                            readOnly={readOnly}
+                                            validation={selected.validation}
+                                            requiresValidation={Boolean(selected.requiresValidation)}
+                                            consequence={selected.whyItMatters}
+                                            hasPlanImpact={Boolean(selected.preview)}
+                                            onGeneratePlan={onGenerateAssumptionValidationPlan}
+                                            onRecordPlan={onRecordAssumptionValidationPlan}
+                                            onAddEvidence={onAddAssumptionEvidence}
+                                            onCorrectEvidence={onCorrectAssumptionEvidence}
+                                            onRetractEvidence={onRetractAssumptionEvidence}
+                                            onInterpretEvidence={onInterpretAssumptionEvidence}
+                                            onRecordOutcome={onRecordAssumptionOutcome}
+                                            onRecordTreatment={onRecordAssumptionTreatment}
+                                            onReopenOutcome={onReopenAssumptionOutcome}
+                                            onPreviewImpact={onPreviewImpact}
+                                        />
+                                    </div>
+                                </details>
+                            )}
+
                             {selected.preview ? (
                                 <section className={`mt-6 rounded-xl border p-4 ${selected.preview.status === 'stale' || selected.preview.status === 'failed' ? 'border-amber-200 bg-amber-50' : 'border-indigo-200 bg-indigo-50/60'}`}>
-                                    <h3 className="text-sm font-semibold text-neutral-900">Plan alignment · {previewStatusLabel[selected.preview.status]}</h3>
+                                    {/* The alignment loop is a follow-up review, not part of
+                                        recording an answer — it stays collapsed behind this
+                                        one-line summary so answering never unloads a wall of
+                                        proposal cards onto the user. */}
+                                    <details>
+                                    <summary className="min-h-10 cursor-pointer py-1 text-sm font-semibold text-neutral-900">
+                                        Plan alignment · {previewStatusLabel[selected.preview.status]}
+                                        {pendingProposalCount > 0 && <span className="ml-2 font-normal text-neutral-600">{pendingProposalCount} suggested update{pendingProposalCount === 1 ? '' : 's'} to review</span>}
+                                    </summary>
                                     {selected.preview.beforeSummary && <p className="mt-3 text-xs text-neutral-500">Before</p>}
                                     {selected.preview.beforeSummary && <p className="text-sm text-neutral-700">{selected.preview.beforeSummary}</p>}
                                     {selected.preview.afterSummary && <p className="mt-3 text-xs text-neutral-500">After</p>}
@@ -569,7 +612,6 @@ export function DecisionCenter({
                                         <p className="mt-1">Outputs to review: {selected.preview.affectedArtifactLabels.join(', ') || 'None identified'}</p>
                                     </details>
                                     {selected.preview.explanation && <p className="mt-3 text-sm leading-6 text-neutral-700">{selected.preview.explanation}</p>}
-                                    {selected.preview.error && <p className="mt-2 text-sm text-red-700">{selected.preview.error}</p>}
                                     {selected.preview.proposals && selected.preview.proposals.length > 0 && (
                                         <div className="mt-4 space-y-3" aria-label="Proposed plan alignment changes">
                                             {selected.preview.proposals.map(proposal => (
@@ -706,6 +748,8 @@ export function DecisionCenter({
                                         </div>
                                     )}
                                     {!readOnly && selected.preview.status === 'ready' && selected.preview.canApply && <button type="button" onClick={() => onApplyToPlan(selected.id)} className="mt-4 min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white hover:bg-indigo-700">Apply accepted changes</button>}
+                                    </details>
+                                    {selected.preview.error && <p className="mt-2 text-sm text-red-700">{selected.preview.error}</p>}
                                     {!readOnly && (selected.preview.status === 'stale' || selected.preview.status === 'failed') && <button type="button" onClick={() => onPreviewImpact(selected.id)} className="mt-4 min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800"><RefreshCcw size={14} className="mr-1 inline" /> Refresh preview</button>}
                                 </section>
                             ) : !readOnly && ['confirmed', 'rejected', 'resolved'].includes(selected.status) ? (

@@ -128,7 +128,7 @@ export default function ScreenDecisions({ reducedMotion }: ScreenProps) {
                         <div className="flex gap-2 overflow-x-auto px-2 pb-2 md:block md:space-y-1 md:overflow-visible">
                             {queue.length === 0 ? (
                                 <p className="flex items-center gap-2 px-3 py-4 text-xs text-neutral-500">
-                                    <Check size={13} className="text-emerald-400" /> Nothing needs attention
+                                    <Check size={13} className="text-emerald-400" /> Nothing needs an answer
                                 </p>
                             ) : (
                                 queue.map((item) => (
