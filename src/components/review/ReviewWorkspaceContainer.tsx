@@ -1,4 +1,4 @@
-import { useEffect } from 'react';
+import { useEffect, useRef } from 'react';
 import { useProjectStore } from '../../store/projectStore';
 import { canPerformProjectAction } from '../../lib/projectCapabilities';
 import { ReviewWorkspace } from './ReviewWorkspace';
@@ -69,21 +69,24 @@ export function ReviewWorkspaceContainer({ projectId, initialTab, initialRecordI
 
     const { optionSuggestions, prepareDecisionOptions } = useDecisionOptionSuggestions({ projectId, canWrite });
 
-    // Prepare recommendations eagerly for every open choice (bounded) so the
+    // Prepare recommendations eagerly for the first few open choices so the
     // Decision Center queue opens ready to approve instead of waiting on a
-    // per-record model call. The hook dedupes in-flight and stored options;
-    // a failed attempt is not auto-retried — the detail pane keeps its
-    // manual "Try again".
+    // per-record model call. The requested-id set makes the cap a true
+    // per-mount total (re-runs must not drain the whole backlog batch by
+    // batch) and doubles as the no-auto-retry guard for failed attempts —
+    // everything beyond the cap prepares on open via the detail pane.
+    const eagerPreparedIds = useRef(new Set<string>());
     useEffect(() => {
         if (!canWrite) return;
-        planningRecords
-            .filter(record => (record.type === 'decision' || record.type === 'open_question')
-                && ['open', 'proposed'].includes(projectDecision(record).status)
-                && !record.decisionOptions?.length
-                && !optionSuggestions[record.id])
-            .slice(0, MAX_EAGER_OPTION_PREPARATIONS)
-            .forEach(record => void prepareDecisionOptions(record.id));
-    }, [canWrite, planningRecords, prepareDecisionOptions, optionSuggestions]);
+        for (const record of planningRecords) {
+            if (eagerPreparedIds.current.size >= MAX_EAGER_OPTION_PREPARATIONS) break;
+            if (record.type !== 'decision' && record.type !== 'open_question') continue;
+            if (!['open', 'proposed'].includes(projectDecision(record).status)) continue;
+            if (record.decisionOptions?.length || eagerPreparedIds.current.has(record.id)) continue;
+            eagerPreparedIds.current.add(record.id);
+            void prepareDecisionOptions(record.id);
+        }
+    }, [canWrite, planningRecords, prepareDecisionOptions]);
 
     const { handleIssueAction, handleReopenIssue, handleTriageFinding } = useReviewIssueActions({
         projectId, canWrite, currentManifest,

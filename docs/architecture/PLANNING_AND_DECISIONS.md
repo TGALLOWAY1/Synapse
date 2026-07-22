@@ -115,10 +115,12 @@ impact previews / the write-barrier apply path in
   auto-approved), and choosing another option or a custom answer stays one
   click away. Generation auto-triggers when a decision record is created from
   a Challenge finding, when the Decision Center opens an option-less
-  unresolved decision, and eagerly for open choices when the Challenge stage
-  mounts (capped per pass by `MAX_EAGER_OPTION_PREPARATIONS` in
-  `ReviewWorkspaceContainer.tsx`; `useDecisionOptionSuggestions.ts` dedupes
-  in-flight and stored options). The prompt is snapshot-locked in
+  unresolved decision, and eagerly for the first open choices when the
+  Challenge stage mounts (`MAX_EAGER_OPTION_PREPARATIONS` in
+  `ReviewWorkspaceContainer.tsx` is a **per-mount total**, tracked by a
+  requested-id set so re-renders never drain a larger backlog batch by batch;
+  failed attempts are not auto-retried; `useDecisionOptionSuggestions.ts`
+  dedupes in-flight and stored options). The prompt is snapshot-locked in
   `promptSurfaces.test.ts`.
 - **Open decisions never block Explore/Build.** Only the specialist critique
   is gated (`CritiqueGate`). The Decision Center header and the critique gate

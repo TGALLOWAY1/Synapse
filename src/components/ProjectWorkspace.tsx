@@ -2,7 +2,8 @@ import { useParams, useNavigate, useSearchParams } from 'react-router-dom';
 import { useProjectStore } from '../store/projectStore';
 import { useAuthStore } from '../store/authStore';
 import { useToastStore } from '../store/toastStore';
-import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity } from 'lucide-react';
+import { ChevronLeft, RefreshCcw, LogOut, CheckCircle, Cloud, Download, Settings, ChevronDown, ChevronRight, PanelRightOpen, PanelRightClose, MoreHorizontal, Loader2, ArrowRight, History, Activity, AlertTriangle } from 'lucide-react';
+import { ConfirmDialog } from './common/ConfirmDialog';
 import { useState, useRef, useEffect, useLayoutEffect, useMemo } from 'react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -162,6 +163,9 @@ export function ProjectWorkspace() {
     // right when output generation starts. Never blocks generation.
     const [showPreBuildCheck, setShowPreBuildCheck] = useState(false);
     const preBuildCheckOffered = useRef(false);
+    // Incomplete-PRD generation gate: explicit confirmation required before a
+    // non-final partial PRD may drive output generation.
+    const [showIncompleteGenerateConfirm, setShowIncompleteGenerateConfirm] = useState(false);
     const [selectedReadinessReviewId, setSelectedReadinessReviewId] = useState<string | null>(null);
     const [readinessInitialConcernId, setReadinessInitialConcernId] = useState<string>();
     const [readinessSubmitError, setReadinessSubmitError] = useState<string | null>(null);
@@ -1072,8 +1076,7 @@ export function ProjectWorkspace() {
         startAssetGeneration();
     };
 
-    const handleGenerateAssets = () => {
-        if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return handleOpenAssets();
+    const continueGenerateAfterIncompleteAck = () => {
         // Validation belongs at the start of implementation: surface still-open
         // planning questions once, right when outputs are about to generate.
         // Advisory only — "Generate anyway" always proceeds.
@@ -1084,6 +1087,21 @@ export function ProjectWorkspace() {
             return;
         }
         proceedToAssetGeneration();
+    };
+
+    const handleGenerateAssets = () => {
+        if (!projectId || !activeSpine?.structuredPRD || capabilities.isReadOnly) return handleOpenAssets();
+        // Incomplete-PRD gate: now that the outputs pill is reachable before
+        // commitment, the explicit "generate from a partial PRD?" confirmation
+        // must be interposed here — startAssetGeneration's acknowledgeIncomplete
+        // flag may only ever carry a real user acknowledgement (isFinal is the
+        // durable record of one from the finalize flow).
+        if (persistedFailedSections.length > 0 && !activeSpine.isFinal) {
+            setShowFinalizeSuccess(false);
+            setShowIncompleteGenerateConfirm(true);
+            return;
+        }
+        continueGenerateAfterIncompleteAck();
     };
 
     const openDecisionCenter = (recordId?: string, returnTo?: PlanningReturnTarget) => {
@@ -1386,6 +1404,24 @@ export function ProjectWorkspace() {
                         setShowPresetChoice(false);
                     }}
                 />
+            )}
+            {showIncompleteGenerateConfirm && (
+                <ConfirmDialog
+                    title="Generate assets from an incomplete PRD?"
+                    tone="amber"
+                    icon={<AlertTriangle size={18} />}
+                    cancelLabel="Go back"
+                    confirmLabel="Generate anyway"
+                    dismissOnBackdropClick={false}
+                    onCancel={() => setShowIncompleteGenerateConfirm(false)}
+                    onConfirm={() => { setShowIncompleteGenerateConfirm(false); continueGenerateAfterIncompleteAck(); }}
+                >
+                    <p className="text-sm leading-6 text-neutral-600">
+                        {persistedFailedSections.length} section{persistedFailedSections.length === 1 ? '' : 's'} of this PRD failed to
+                        generate, so outputs built now will be missing that content. You can re-run the failed
+                        section{persistedFailedSections.length === 1 ? '' : 's'} from the Plan stage first.
+                    </p>
+                </ConfirmDialog>
             )}
             {showPreBuildCheck && (
                 <PreBuildCheckModal

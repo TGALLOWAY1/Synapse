@@ -170,7 +170,9 @@ of acknowledgement, so resume/retry after reload still work). `startAll` /
 `regenerateSlots` early-return when the gate disallows. On the finalize edge,
 `ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
 an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
-"Generate anyway" proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
+"Generate anyway" proceeds (passing `acknowledgeIncomplete`). The pre-commitment
+outputs pill runs the same confirmation: `handleGenerateAssets` shows it for any
+non-final spine with `failedSections` before generation can start. Any artifact/mockup
 version generated while `failedSections` is non-empty is stamped
 `metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 
