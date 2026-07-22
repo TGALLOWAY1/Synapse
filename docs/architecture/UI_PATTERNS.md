@@ -170,7 +170,9 @@ of acknowledgement, so resume/retry after reload still work). `startAll` /
 `regenerateSlots` early-return when the gate disallows. On the finalize edge,
 `ProjectWorkspace.handleToggleFinal` interposes an explicit "Generate assets from
 an incomplete PRD?" confirmation before `markSpineFinal` + `startAll`; only
-"Generate anyway" proceeds (passing `acknowledgeIncomplete`). Any artifact/mockup
+"Generate anyway" proceeds (passing `acknowledgeIncomplete`). The pre-commitment
+outputs pill runs the same confirmation: `handleGenerateAssets` shows it for any
+non-final spine with `failedSections` before generation can start. Any artifact/mockup
 version generated while `failedSections` is non-empty is stamped
 `metadata.generatedFromIncompletePrd` + `incompletePrdSections` for provenance.
 
@@ -259,9 +261,10 @@ Synapse" CTA back to `/` so it reads as a product demo, not an internal page.
 - **Screens** (`screens/`): Idea, SpecGeneration, Refine (reuses the
   Clarify/Expand/Specify/Alternative/Replace action set mirrored from
   `SELECTION_ACTIONS`), Decisions (mirrors the Challenge stage's Decision
-  Center — needs-attention queue, suggested options with a never-preselected
-  recommendation, explicit verdict → impact preview → explicit apply; keep its
-  vocabulary in sync with `src/components/review/DecisionCenter.tsx`),
+  Center — needs-attention queue, suggested options with the recommendation
+  preselected for a one-click explicit approval, explicit verdict → impact
+  preview → explicit apply; keep its vocabulary in sync with
+  `src/components/review/DecisionCenter.tsx`),
   Versions, Assets (the hero — Mark as Final →
   sequential asset generation → `ArtifactDrawer` previews), Connections
   (`NodeGraph` PRD→assets dependency graph + recent-activity timeline). Shared

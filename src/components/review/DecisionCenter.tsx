@@ -10,7 +10,7 @@ import {
 } from './AssumptionValidationPanel';
 import { UnderlineTabs, type UnderlineTab } from '../ui/UnderlineTabs';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
-import { planningRecordCopy, planningRecordDominantCondition } from '../../lib/planning/planningLanguage';
+import { planningRecordCopy, planningRecordDominantCondition, type PlanningRecordDominantCondition } from '../../lib/planning/planningLanguage';
 
 export type DecisionCenterOptionView = {
     id: string;
@@ -125,17 +125,30 @@ interface Props {
         revisitCondition?: string;
     }) => void;
     onReopenAssumptionOutcome?: (recordId: string, reason: string) => void;
+    /** Jumps to the Explore/Build stage. Open items never block exploring
+     * design assets, and the Decision Center says so explicitly. */
+    onContinueToExplore?: () => void;
 }
 
 const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
 const needsAttention = (record: DecisionCenterRecordView) => needsVerdict(record) || Boolean(record.requiresValidation);
-const dominantConditionLabel = (record: DecisionCenterRecordView) => planningRecordCopy(planningRecordDominantCondition({
+const dominantCondition = (record: DecisionCenterRecordView) => planningRecordDominantCondition({
     type: record.type === 'question' ? 'open_question' : record.type,
     status: record.status,
     requiresValidation: record.requiresValidation,
     hasCurrentEvidenceConclusion: Boolean(record.validation?.conclusionIsCurrent && record.validation.acceptedConclusion),
     needsAlignment: Boolean(record.preview && ['ready', 'stale', 'failed'].includes(record.preview.status)),
-})).label;
+});
+const dominantConditionLabel = (record: DecisionCenterRecordView) => planningRecordCopy(dominantCondition(record)).label;
+/** One plain sentence per attention group so the queue itself answers "what am
+ * I supposed to do with these?" — approve, answer, or review. */
+const groupGuidance: Partial<Record<PlanningRecordDominantCondition, string>> = {
+    needs_decision: 'Synapse recommends an answer for each — approve it or choose your own.',
+    worth_validating: 'Confirm or correct what Synapse assumed. Deeper validation can wait until you start building.',
+    needs_alignment: 'A recorded answer may change the plan — review the proposed updates.',
+    accepted_without_validation: 'Accepted on your call. Validate with evidence when you start building.',
+    invalidated: 'The recorded answer no longer holds — record a new one.',
+};
 const previewStatusLabel: Record<DecisionCenterPreviewView['status'], string> = {
     generating: 'Preparing impact', ready: 'Review changes', stale: 'Impact needs refresh',
     failed: 'Impact unavailable', applied: 'Change applied', superseded: 'Superseded',
@@ -165,6 +178,7 @@ export function DecisionCenter({
     onRecordAssumptionOutcome = () => {},
     onRecordAssumptionTreatment = () => {},
     onReopenAssumptionOutcome = () => {},
+    onContinueToExplore,
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsAttention(initialRecord) ? 'needs_review' : 'log') : records.some(needsAttention) ? 'needs_review' : 'log');
@@ -172,12 +186,13 @@ export function DecisionCenter({
     // Stable-partition the queue by dominant condition in first-seen order so
     // rows group under one small header instead of repeating a tag per row.
     const groupedVisible = useMemo(() => {
-        const groups: Array<{ label: string; records: DecisionCenterRecordView[] }> = [];
+        const groups: Array<{ label: string; condition: PlanningRecordDominantCondition; records: DecisionCenterRecordView[] }> = [];
         for (const record of visible) {
-            const label = dominantConditionLabel(record);
+            const condition = dominantCondition(record);
+            const label = planningRecordCopy(condition).label;
             const existing = groups.find(group => group.label === label);
             if (existing) existing.records.push(record);
-            else groups.push({ label, records: [record] });
+            else groups.push({ label, condition, records: [record] });
         }
         return groups;
     }, [visible]);
@@ -185,8 +200,9 @@ export function DecisionCenter({
     const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialRecord));
     const [customAnswer, setCustomAnswer] = useState('');
     const [rationale, setRationale] = useState('');
-    /** Selected suggested option id, or 'other' for a custom answer. Never
-     * preselected: a recommendation is visually distinct, not a default. */
+    /** Selected suggested option id, or 'other' for a custom answer. When
+     * undefined, the Synapse recommendation (if any) acts as the default
+     * choice — approving it still requires the explicit user action below. */
     const [answerChoice, setAnswerChoice] = useState<string | undefined>();
     const [lastDecidedId, setLastDecidedId] = useState<string | undefined>();
     const [proposalEdits, setProposalEdits] = useState<Record<string, string>>({});
@@ -293,12 +309,20 @@ export function DecisionCenter({
                 <div className="flex flex-wrap items-start justify-between gap-3">
                     <div>
                         <h1 className="text-xl font-bold tracking-tight text-neutral-950 sm:text-2xl">Decision Center</h1>
-                        <p className="mt-1 text-sm text-neutral-500">Resolve consequential choices, preview their impact, then apply them explicitly.</p>
+                        <p className="mt-1 text-sm text-neutral-500">Synapse recommends an answer for each open item — approve it, or record your own.</p>
                     </div>
                     <div className="rounded-lg bg-amber-50 px-3 py-2 text-sm font-semibold text-amber-800" aria-label={`${unresolvedCount} planning items need attention`}>
                         {unresolvedCount} need{unresolvedCount === 1 ? 's' : ''} attention
                     </div>
                 </div>
+                {onContinueToExplore && (
+                    <p className="mt-2 text-xs text-neutral-500">
+                        Open items never block your design assets.{' '}
+                        <button type="button" onClick={onContinueToExplore} className="font-semibold text-indigo-700 underline underline-offset-2 hover:text-indigo-900">
+                            Continue to Explore
+                        </button>
+                    </p>
+                )}
             </header>
             {unresolvedCount === 0 && records.length > 0 && (
                 <div className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 sm:px-6" role="status">
@@ -327,6 +351,9 @@ export function DecisionCenter({
                         ) : groupedVisible.map(group => (
                             <div key={group.label}>
                                 <div className="px-3 pb-1 pt-2 text-[11px] font-semibold uppercase tracking-wide text-neutral-500">{group.label}</div>
+                                {view === 'needs_review' && groupGuidance[group.condition] && (
+                                    <p className="px-3 pb-2 text-xs leading-5 text-neutral-500">{groupGuidance[group.condition]}</p>
+                                )}
                                 {group.records.map(record => (
                                     <button
                                         type="button"
@@ -403,10 +430,18 @@ export function DecisionCenter({
                                 const hasOptions = orderedOptions.length > 0;
                                 const suggestionBusy = optionsApply && !hasOptions && Boolean(selected.optionsSuggestion?.busy);
                                 const suggestionError = optionsApply && !hasOptions && !suggestionBusy ? selected.optionsSuggestion?.error : undefined;
-                                const showTextarea = !hasOptions || answerChoice === 'other';
-                                const chosenOption = answerChoice && answerChoice !== 'other'
-                                    ? orderedOptions.find(option => option.id === answerChoice)
+                                // The Synapse recommendation is the default choice so approving it
+                                // is one explicit click. A verdict is still only ever recorded by
+                                // that user action — nothing is auto-approved.
+                                const defaultChoice = recommendedId && orderedOptions.some(option => option.id === recommendedId)
+                                    ? recommendedId
                                     : undefined;
+                                const effectiveChoice = answerChoice ?? defaultChoice;
+                                const showTextarea = !hasOptions || effectiveChoice === 'other';
+                                const chosenOption = effectiveChoice && effectiveChoice !== 'other'
+                                    ? orderedOptions.find(option => option.id === effectiveChoice)
+                                    : undefined;
+                                const approvingRecommendation = chosenOption !== undefined && chosenOption.id === recommendedId;
                                 const canSave = chosenOption !== undefined || (showTextarea && customAnswer.trim().length > 0);
                                 const save = () => {
                                     if (chosenOption) submit('confirm', chosenOption.id);
@@ -419,7 +454,7 @@ export function DecisionCenter({
                                         <div className="mt-3 space-y-2" role="radiogroup" aria-labelledby="decision-answer-heading">
                                             {orderedOptions.map(option => {
                                                 const isRecommended = option.id === recommendedId;
-                                                const isChosen = answerChoice === option.id;
+                                                const isChosen = effectiveChoice === option.id;
                                                 return (
                                                     <button
                                                         key={option.id}
@@ -442,9 +477,9 @@ export function DecisionCenter({
                                             <button
                                                 type="button"
                                                 role="radio"
-                                                aria-checked={answerChoice === 'other'}
+                                                aria-checked={effectiveChoice === 'other'}
                                                 onClick={() => setAnswerChoice('other')}
-                                                className={`w-full rounded-xl border p-4 text-left transition ${answerChoice === 'other' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-dashed border-neutral-300 bg-white hover:border-indigo-300'}`}
+                                                className={`w-full rounded-xl border p-4 text-left transition ${effectiveChoice === 'other' ? 'border-indigo-500 bg-indigo-50 ring-1 ring-indigo-300' : 'border-dashed border-neutral-300 bg-white hover:border-indigo-300'}`}
                                             >
                                                 <span className="text-sm font-semibold text-neutral-900">Other</span>
                                                 <span className="mt-1 block text-sm text-neutral-600">Record a different approach in your own words.</span>
@@ -469,7 +504,7 @@ export function DecisionCenter({
                                     <label className="mt-3 block text-xs font-medium text-neutral-600" htmlFor="decision-rationale">Why? (optional)</label>
                                     <input id="decision-rationale" value={rationale} onChange={event => setRationale(event.target.value)} className="mt-1 w-full rounded-lg border border-neutral-200 px-3 py-2 text-sm outline-none focus:border-indigo-400 focus:ring-2 focus:ring-indigo-100" />
                                     <div className="mt-3 flex flex-col gap-2 sm:flex-row sm:flex-wrap">
-                                        {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">Save decision</button>}
+                                        {selected.type !== 'assumption' && <button type="button" disabled={!canSave} onClick={save} className="min-h-11 rounded-lg bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-40">{approvingRecommendation ? <><Check size={14} className="mr-1 inline" /> Approve recommendation</> : 'Save decision'}</button>}
                                         {selected.type === 'assumption' && !selected.options?.length && <button type="button" onClick={() => submit('confirm', selected.statement || selected.title)} className="min-h-11 rounded-lg border border-neutral-300 bg-white px-4 text-sm font-semibold text-neutral-800 hover:bg-neutral-50"><Check size={14} className="mr-1 inline" /> Yes, that's right</button>}
                                         {(selected.type !== 'assumption' || !selected.validation) && <button type="button" onClick={() => submit('defer')} className="min-h-11 rounded-lg border border-neutral-200 px-4 text-sm font-medium text-neutral-700 hover:bg-neutral-50"><Clock3 size={14} className="mr-1 inline" /> Defer</button>}
                                         <button

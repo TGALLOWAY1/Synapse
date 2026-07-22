@@ -172,7 +172,7 @@ Primary views:
 - Needs review
 - Decision log
 
-The first release shows one factual unresolved count. Search and filters appear only when volume warrants them. Recommendations are visually distinct and never preselected.
+The first release shows one factual unresolved count. Search and filters appear only when volume warrants them. Recommendations are visually distinct; since the 2026-07 simplification they are preselected as the default choice so approval is one explicit click — a verdict is still only recorded by that user action.
 
 ## System states
 

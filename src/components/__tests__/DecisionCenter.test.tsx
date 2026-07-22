@@ -383,7 +383,7 @@ describe('DecisionCenter', () => {
             sourceLabels: ['specialist review'], createdAt: 1, history: [],
         };
 
-        it('saves a selected option as an explicit two-step choice with the recommendation first', () => {
+        it('preselects the recommendation for a one-click explicit approval', () => {
             const props = callbacks();
             render(<DecisionCenter records={[decisionRecord]} {...props} />);
 
@@ -392,13 +392,27 @@ describe('DecisionCenter', () => {
             expect(radios[0]).toHaveTextContent('Dominant outcome wins');
             expect(radios[0]).toHaveTextContent('Recommended');
             expect(radios[0]).toHaveTextContent('It keeps the graph legible.');
-            expect(radios[0]).toHaveAttribute('aria-checked', 'false');
+            // The recommendation is the default choice — approving it is one
+            // explicit click, and nothing is recorded until that click.
+            expect(radios[0]).toHaveAttribute('aria-checked', 'true');
             expect(radios.at(-1)).toHaveTextContent('Other');
+            expect(props.onDecide).not.toHaveBeenCalled();
 
-            const save = screen.getByRole('button', { name: 'Save decision' });
-            expect(save).toBeDisabled();
+            const approve = screen.getByRole('button', { name: /Approve recommendation/ });
+            expect(approve).toBeEnabled();
+            fireEvent.click(approve);
+            expect(props.onDecide).toHaveBeenCalledWith('dec-1', 'confirm', 'opt-dominant', undefined);
+        });
+
+        it('saves a different option as an ordinary decision instead of an approval', () => {
+            const props = callbacks();
+            render(<DecisionCenter records={[decisionRecord]} {...props} />);
+
+            const group = screen.getByRole('radiogroup', { name: 'Your answer' });
             fireEvent.click(within(group).getByRole('radio', { name: /Split-color cells/ }));
             expect(props.onDecide).not.toHaveBeenCalled();
+            const save = screen.getByRole('button', { name: 'Save decision' });
+            expect(screen.queryByRole('button', { name: /Approve recommendation/ })).toBeNull();
             expect(save).toBeEnabled();
             fireEvent.click(save);
             expect(props.onDecide).toHaveBeenCalledWith('dec-1', 'confirm', 'opt-split', undefined);
@@ -459,8 +473,7 @@ describe('DecisionCenter', () => {
             };
             const props = callbacks();
             const { rerender } = render(<DecisionCenter records={[decisionRecord, other]} {...props} />);
-            fireEvent.click(screen.getByRole('radio', { name: /Dominant outcome wins/ }));
-            fireEvent.click(screen.getByRole('button', { name: 'Save decision' }));
+            fireEvent.click(screen.getByRole('button', { name: /Approve recommendation/ }));
 
             rerender(<DecisionCenter
                 records={[{ ...decisionRecord, status: 'confirmed', resolution: 'Dominant outcome wins' }, other]}
@@ -484,6 +497,27 @@ describe('DecisionCenter', () => {
             fireEvent.click(reject);
             expect(props.onDecide).toHaveBeenCalledWith('dec-1', 'reject', 'The graph should not encode success at all.', undefined);
         });
+    });
+
+    it('offers a way through to Explore and explains what each attention group needs', () => {
+        const decisionRecord: DecisionCenterRecordView = {
+            ...openRecord, id: 'dec-1', type: 'decision', title: 'How should mixed days render?', status: 'open',
+        };
+        const onContinueToExplore = vi.fn();
+        render(<DecisionCenter records={[openRecord, decisionRecord]} {...callbacks()} onContinueToExplore={onContinueToExplore} />);
+
+        expect(screen.getByText(/Open items never block your design assets/)).toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: 'Continue to Explore' }));
+        expect(onContinueToExplore).toHaveBeenCalledTimes(1);
+
+        // Each queue group says what to do with its items in plain language.
+        expect(screen.getByText('Synapse recommends an answer for each — approve it or choose your own.')).toBeInTheDocument();
+        expect(screen.getByText(/Confirm or correct what Synapse assumed/)).toBeInTheDocument();
+    });
+
+    it('keeps the Explore link out of the header when no navigation is provided', () => {
+        render(<DecisionCenter records={[openRecord]} {...callbacks()} />);
+        expect(screen.queryByRole('button', { name: 'Continue to Explore' })).toBeNull();
     });
 
     it('lets a user explicitly revise or invalidate a recorded decision', () => {

@@ -1,4 +1,4 @@
-import { useRef, useState } from 'react';
+import { useCallback, useRef, useState } from 'react';
 import { useProjectStore } from '../../store/projectStore';
 import { generateDecisionOptions, projectDecision } from '../../lib/planning';
 
@@ -16,7 +16,9 @@ export function useDecisionOptionSuggestions(params: { projectId: string; canWri
     const [optionSuggestions, setOptionSuggestions] = useState<DecisionOptionSuggestionState>({});
     const inFlight = useRef(new Set<string>());
 
-    const prepareDecisionOptions = async (recordId: string) => {
+    // Stable across renders so the container's eager-preparation effect can
+    // depend on it without re-firing every render.
+    const prepareDecisionOptions = useCallback(async (recordId: string) => {
         if (!canWrite) return;
         const state = useProjectStore.getState();
         const record = (state.planningRecords[projectId] ?? []).find(item => item.id === recordId);
@@ -76,7 +78,7 @@ export function useDecisionOptionSuggestions(params: { projectId: string; canWri
         } finally {
             inFlight.current.delete(recordId);
         }
-    };
+    }, [projectId, canWrite]);
 
     return { optionSuggestions, prepareDecisionOptions };
 }

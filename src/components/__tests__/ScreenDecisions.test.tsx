@@ -22,22 +22,21 @@ beforeEach(() => {
 const renderScreen = () => render(<ScreenDecisions isActive reducedMotion />);
 
 describe('ScreenDecisions', () => {
-    it('requires an explicit choice before the decision can be saved', () => {
+    it('preselects the recommendation for one-click approval, with other options a click away', () => {
         renderScreen();
-        const save = screen.getByRole('button', { name: 'Save decision' });
-        expect(save).toBeDisabled();
-        // The recommendation is visible but never preselected.
+        // The recommendation starts selected, so approving it is one click.
         expect(screen.getByText(/Recommended/i)).toBeInTheDocument();
-        expect(screen.getAllByRole('radio').every((r) => r.getAttribute('aria-checked') === 'false')).toBe(true);
+        expect(screen.getByRole('radio', { name: /Async comments on shared tracks/i })).toHaveAttribute('aria-checked', 'true');
+        expect(screen.getByRole('button', { name: 'Approve recommendation' })).toBeEnabled();
 
-        fireEvent.click(screen.getByRole('radio', { name: /Async comments on shared tracks/i }));
-        expect(save).toBeEnabled();
+        // Choosing a different option turns the action into an ordinary save.
+        fireEvent.click(screen.getByRole('radio', { name: /Real-time co-editing sessions/i }));
+        expect(screen.getByRole('button', { name: 'Save decision' })).toBeEnabled();
     });
 
     it('walks verdict → impact preview → explicit apply', () => {
         renderScreen();
-        fireEvent.click(screen.getByRole('radio', { name: /Async comments on shared tracks/i }));
-        fireEvent.click(screen.getByRole('button', { name: 'Save decision' }));
+        fireEvent.click(screen.getByRole('button', { name: 'Approve recommendation' }));
         expect(screen.getAllByText(/Answer recorded/i).length).toBeGreaterThan(0);
 
         fireEvent.click(screen.getByRole('button', { name: 'Preview impact' }));
