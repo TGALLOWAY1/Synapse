@@ -15,6 +15,14 @@ import {
 import { useProjectStore } from '../projectStore';
 import { applyProjectUser } from '../projectUserSync';
 import { namespaceFor, setActiveProjectUser } from '../userScope';
+import { decodePersistedBlob } from '../persistCodec';
+
+// Stored values may be compressed above the codec threshold — always decode
+// before parsing a raw blob in assertions.
+const readStoredState = (key: string) => {
+    const json = decodePersistedBlob(localStorage.getItem(key));
+    return JSON.parse(json!);
+};
 
 // Flush the 500ms debounced persist writer deterministically. Microtasks stay
 // real (vitest doesn't fake queueMicrotask by default), so a bare
@@ -193,7 +201,7 @@ describe('rehydrate-time retention sweep', () => {
         // The sweep's deferred setState persists the shrunken state through the
         // normal debounced writer.
         await flushSweepPersist();
-        const stored = JSON.parse(localStorage.getItem(BASE_KEY)!);
+        const stored = readStoredState(BASE_KEY);
         expect(stored.state.reviewRuns[projectId]).toHaveLength(REVIEW_RUN_RETENTION_LIMIT);
         expect(stored.state.readinessReviews[projectId]).toHaveLength(READINESS_REVIEW_RETENTION_LIMIT);
         expect(stored.state.downstreamUpdatePlans[projectId]).toHaveLength(DOWNSTREAM_PLAN_RETENTION_LIMIT_PER_ARTIFACT);
@@ -235,7 +243,7 @@ describe('rehydrate-time retention sweep', () => {
         // The switch's own re-persist writes the swept state back to the
         // namespace (the sweep ran inside the rehydrate it triggered).
         flushPersist();
-        const stored = JSON.parse(localStorage.getItem(namespaceFor('user-a'))!);
+        const stored = readStoredState(namespaceFor('user-a'));
         expect(stored.state.reviewRuns[projectId]).toHaveLength(REVIEW_RUN_RETENTION_LIMIT);
         expect(stored.state.projects[projectId]).toBeDefined();
     });

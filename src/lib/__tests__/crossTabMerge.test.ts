@@ -101,6 +101,44 @@ describe('mergePersistedProjectBlobs', () => {
         expect(tieMerged['historyEvents']['p1']).toEqual([{ id: 'ours', createdAt: 3000 }]);
     });
 
+    // Codex review: in-place mutations (e.g. the streaming PRD fill in
+    // updateSpineStructuredPRD) don't append stamped rows, so without their
+    // `updatedAt` stamp a stale tab's flush would tie and win. The stamp must
+    // participate in the recency scan.
+    it('sees in-place spine updates (updatedAt) so a completed PRD beats a stale tie', () => {
+        const stored = blob({
+            projects: { p1: { id: 'p1', createdAt: 100 } },
+            // Same row identity/createdAt — but the other tab filled the PRD in
+            // place and stamped updatedAt.
+            spineVersions: { p1: [{ id: 's1', createdAt: 100, updatedAt: 5000, structuredPRD: { done: true } }] },
+        });
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: 100 } },
+            spineVersions: { p1: [{ id: 's1', createdAt: 100, responseText: 'Generating PRD...' }] },
+        });
+        const merged = stateOf(mergePersistedProjectBlobs(stored, ours));
+        const spines = merged['spineVersions']['p1'] as Array<Record<string, unknown>>;
+        expect(spines[0].structuredPRD).toEqual({ done: true });
+    });
+
+    it('counts event rows stamped with `at` toward recency', () => {
+        const stored = blob({
+            projects: { p1: { id: 'p1', createdAt: 100 } },
+            historyEvents: { p1: [{ id: 'h', createdAt: 100 }] },
+        });
+        const storedParsed = JSON.parse(stored);
+        storedParsed.state.readinessCommitmentEvents = { p1: [{ id: 'e1', at: 7000 }] };
+        const ours = blob({
+            projects: { p1: { id: 'p1', createdAt: 100 } },
+            historyEvents: { p1: [{ id: 'h', createdAt: 100 }, { id: 'h2', createdAt: 200 }] },
+        });
+        const merged = stateOf(mergePersistedProjectBlobs(JSON.stringify(storedParsed), ours));
+        // The stored side's `at: 7000` commitment event outranks our createdAt
+        // 200 history event, so the stored snapshot wins wholesale.
+        expect(merged['readinessCommitmentEvents']['p1']).toEqual([{ id: 'e1', at: 7000 }]);
+        expect(merged['historyEvents']['p1']).toEqual([{ id: 'h', createdAt: 100 }]);
+    });
+
     it('unions projects that exist on only one side', () => {
         const stored = blob({
             projects: { theirs: { id: 'theirs', createdAt: 50 } },

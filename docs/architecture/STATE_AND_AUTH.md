@@ -156,10 +156,19 @@ internally-consistent snapshot (version arrays, preferred flags, and history
 agree); projects present on only one side are kept (union — losing brand-new
 work is strictly worse than the rare resurrection of a project deleted
 concurrently in another tab, which server sync re-deletes for signed-in
-users). Ties go to the in-memory tab. After a merged value lands (and no newer
+users). Ties go to the in-memory tab — and to keep real changes out of tie
+territory, **every in-place mutation stamps `updatedAt`**: spine mutations
+(streaming PRD fill, decision-edit amend, preflight patches,
+finality/error/safety settles — `SpineVersion.updatedAt`) and project-record
+mutations (stage, design preset, product metadata — `Project.updatedAt`), both
+optional fields (legacy data predates them); the activity scan also reads
+generic `at` stamps on event rows. After a merged value lands (and no newer
 write is already pending), the storage fires the handler's `onApplied`, which
-rehydrates the store on the next microtask so the stale tab adopts the other
-tab's work into memory and its next write carries it natively. The merge is
+adopts the merged blob into memory on the next microtask by setState-ing the
+persisted project-keyed collections **directly — never via
+`persist.rehydrate()`**, whose `onRehydrateStorage` interruption fixups assume
+a page load killed all in-flight work and would mark a project mid-generation
+in the *other* tab as interrupted. The merge is
 pure and never throws into persistence — an unparseable blob or a merge error
 falls back to the pre-guard overwrite. Concurrent edits to the *same project*
 in two tabs remain last-writer-wins **per project** — strictly narrower than
@@ -167,6 +176,28 @@ the old whole-store clobber. Regression tests:
 `src/lib/__tests__/crossTabMerge.test.ts`, the cross-tab describe in
 `src/store/__tests__/storage.test.ts`, and the end-to-end mockup-survival
 scenario in `src/store/__tests__/crossTabPersistence.test.ts`.
+
+**Persisted-blob compression (`src/store/persistCodec.ts`):** the whole-store
+blob is compressed with lz-string (`compressToUTF16`, safe for localStorage's
+UTF-16 storage) at the storage boundary — structured-PRD JSON typically
+shrinks 5–20×+, so the ~5MB origin quota (the iOS Safari ceiling behind the
+"Storage full — changes are no longer being saved" toast, and therefore behind
+silently lost tail writes like a freshly generated mockup spec) behaves like an
+order of magnitude more. Format: `__SYNLZ1__` + compressed payload; values
+under `COMPRESSION_THRESHOLD` (16KB) stay plain, and **every reader accepts
+both formats forever** (`decodePersistedBlob` passes legacy plain JSON
+through; corrupt compressed data decodes to null = absent, mirroring how an
+unparseable plain blob always hydrated). All raw-blob touchpoints go through
+the codec: the debounced storage's `getItem`/`safeSetItem` (the cross-tab
+guard compares RAW stored values but merges decoded JSON), and `userScope`'s
+legacy-import/namespace-merge readers and writers. `projectStore` runs
+`compactPersistedNamespaces` once per load BEFORE hydration, re-encoding any
+oversized plain project-store namespace (active, other users', and the legacy
+anonymous blob an import leaves behind) so an already-quota-full device
+actually frees space — inactive namespaces are never rewritten by normal
+writes. Any test asserting on a raw stored blob must decode it first
+(`decodePersistedBlob`). Regression tests:
+`src/store/__tests__/persistCodec.test.ts`.
 
 **`canonicalSpine` is never persisted (`partialize`):** the store's
 `partialize` strips the rebuildable `canonicalSpine` cache from every spine in

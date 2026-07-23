@@ -55,9 +55,10 @@ const toEpoch = (value: unknown): number => (typeof value === 'number' && Number
 /**
  * Newest activity timestamp we can attribute to `projectId` in a persisted
  * state: the max over the project record's own stamps and every record in the
- * project-keyed collections (generic `createdAt`/`updatedAt` fields, so future
- * collections participate without registration). Used only to arbitrate a
- * cross-tab conflict, which is rare — the O(records) scan is fine.
+ * project-keyed collections (generic `createdAt`/`updatedAt`/`at` fields, so
+ * future collections participate without registration; in-place mutations
+ * stamp `updatedAt` — see the SpineVersion/Project fields). Used only to
+ * arbitrate a cross-tab conflict, which is rare — the O(records) scan is fine.
  */
 export function latestProjectActivity(state: Record<string, unknown>, projectId: string): number {
   let latest = 0;
@@ -65,7 +66,8 @@ export function latestProjectActivity(state: Record<string, unknown>, projectId:
   if (projects && typeof projects === 'object') {
     const record = (projects as ProjectMap)[projectId];
     if (record && typeof record === 'object') {
-      latest = Math.max(latest, toEpoch((record as Record<string, unknown>).createdAt));
+      const r = record as Record<string, unknown>;
+      latest = Math.max(latest, toEpoch(r.createdAt), toEpoch(r.updatedAt));
     }
   }
   for (const key of ARRAY_COLLECTIONS) {
@@ -76,7 +78,7 @@ export function latestProjectActivity(state: Record<string, unknown>, projectId:
     for (const row of rows) {
       if (!row || typeof row !== 'object') continue;
       const r = row as Record<string, unknown>;
-      latest = Math.max(latest, toEpoch(r.updatedAt), toEpoch(r.createdAt));
+      latest = Math.max(latest, toEpoch(r.updatedAt), toEpoch(r.createdAt), toEpoch(r.at));
     }
   }
   return latest;

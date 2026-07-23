@@ -1,5 +1,6 @@
 import type { StorageValue } from 'zustand/middleware';
 import { useToastStore } from './toastStore';
+import { decodePersistedBlob, encodePersistedBlob } from './persistCodec';
 
 // Persist debugging is opt-in via the same flag the PRD generation log uses.
 function persistDebugEnabled(): boolean {
@@ -118,20 +119,24 @@ export function createDebouncedStorage<S>(
         // after reopening" data loss). Merge the two blobs and write the union
         // instead. `lastObserved.has(name) === false` (a write with no prior
         // read) is treated the same as a mismatch: we provably never saw what
-        // we are about to destroy.
+        // we are about to destroy. The observation snapshot and the mismatch
+        // check live in the RAW (possibly compressed) domain; the merge handler
+        // works on decoded JSON.
         let merged = false;
         try {
             const stored = localStorage.getItem(name);
             if (
                 crossTabMerge
                 && stored !== null
-                && stored !== value
                 && stored !== lastObserved.get(name)
             ) {
-                const resolved = crossTabMerge.merge(stored, value);
-                if (resolved !== value) {
-                    value = resolved;
-                    merged = true;
+                const storedJson = decodePersistedBlob(stored);
+                if (storedJson !== null && storedJson !== value) {
+                    const resolved = crossTabMerge.merge(storedJson, value);
+                    if (resolved !== value) {
+                        value = resolved;
+                        merged = true;
+                    }
                 }
             }
         } catch (err) {
@@ -141,11 +146,15 @@ export function createDebouncedStorage<S>(
         }
         try {
             const startTime = performance.now();
-            localStorage.setItem(name, value);
-            lastObserved.set(name, value);
+            // Compress at the storage boundary (see persistCodec.ts) — the
+            // ~5MB localStorage quota is the root of the "Storage full" toast
+            // and the silent tail-loss behind vanished mockups.
+            const encoded = encodePersistedBlob(value);
+            localStorage.setItem(name, encoded);
+            lastObserved.set(name, encoded);
             if (persistDebugEnabled()) {
                 const durationMs = performance.now() - startTime;
-                console.log(`[STORE] persist: ${durationMs.toFixed(0)}ms (${(value.length / 1024).toFixed(1)}KB)`);
+                console.log(`[STORE] persist: ${durationMs.toFixed(0)}ms (${(encoded.length / 1024).toFixed(1)}KB stored, ${(value.length / 1024).toFixed(1)}KB raw)`);
             }
             // A write got through: storage is no longer full, so clear any stale
             // sticky warning and re-arm recovery for a future overflow.
@@ -224,11 +233,14 @@ export function createDebouncedStorage<S>(
             const key = target(name);
             const raw = localStorage.getItem(key);
             // Reading IS observing: a later write only merges when the stored
-            // value changed after this point (i.e. another tab wrote).
+            // value changed after this point (i.e. another tab wrote). The
+            // snapshot is the RAW stored value so it compares against what a
+            // write actually stores.
             lastObserved.set(key, raw);
-            if (raw === null) return null;
+            const json = decodePersistedBlob(raw);
+            if (json === null) return null;
             try {
-                return JSON.parse(raw) as StorageValue<S>;
+                return JSON.parse(json) as StorageValue<S>;
             } catch {
                 return null;
             }
