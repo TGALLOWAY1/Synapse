@@ -141,7 +141,7 @@ export interface DecisionProposalDemo {
 
 export const DECISION_DEMO = {
     /** Tab strip mirrors the live Challenge workspace tabs. */
-    challengeTabs: ['Review findings', 'Decision Center', 'Review history'],
+    challengeTabs: ['Decision Center', 'Review findings', 'Review history'],
     decision: {
         id: 'collab-model',
         conditionLabel: 'Needs a decision',

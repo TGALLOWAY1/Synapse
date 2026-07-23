@@ -8,20 +8,15 @@ The workspace progression is **Plan → Challenge → Build → History**. The
 Challenge stage is reachable as soon as a safe structured working PRD exists and
 always exposes the Decision Center and review history. Its sub-tabs are ordered
 **Decision Center → Findings → History** — decisions first, critique second.
-The specialist critique (the Findings tab) is **optional and gated**: its start
-surface (`ReviewSetup`) is replaced by a "resolve your open decisions first"
-prompt (`CritiqueGate`) until every surfaced decision is addressed — answered
-**or** deferred/skipped. The gate keys off `PlanningReadiness.openDecisionCount`
-(open/proposed records of type decision/open_question/conflict/assumption; risks
-are advisory and excluded); deferring or answering clears it, and the gate's
-"defer the remaining decisions and continue" action is the escape hatch for an
-unsure user. Only *running/continuing* the critique is gated: starting a new run,
-resuming an interrupted/failed run, and retrying coverage are all suppressed
-while decisions are open (a live in-flight run keeps showing progress). The
-Decision Center, history, and any already-completed run stay visible even if a
-later decision reopens the gate — findings remain viewable and triageable.
+The specialist critique (the Findings tab) is **optional and never
+decision-count gated**. Starting a new run, resuming an interrupted/failed run,
+retrying partial coverage, and reviewing again remain available while decisions
+are open. Those surfaces show one quiet advisory — “N open items; critiquing now
+may re-raise them” — rather than disabling the action or bulk-deferring records.
+The Decision Center, history, and completed runs stay visible throughout.
 A completed critique's findings still promote into new planning records. When
-open decisions remain, entering Challenge lands on the Decision Center tab.
+open decisions remain, entering Challenge still lands on the Decision Center
+tab as a presentation default, not an authority gate.
 `src/components/review/ReviewWorkspaceContainer.tsx`
 adapts persisted review/planning state into the responsive UI in
 `ReviewWorkspace.tsx` and `DecisionCenter.tsx`. The container is a thin
@@ -43,6 +38,12 @@ impact previews / the write-barrier apply path in
 - `PlanningStateBar` is the compact Plan-stage reasoning header. It exposes the
   current readiness category, supporting criteria, and one highest-value next
   action with direct entry to decisions or Challenge.
+- `GlobalNextActionStrip` is the one workspace-wide aggregate planning-attention
+  surface below the stage rail. `derivePlanningAttention` ranks one primary and
+  a small secondary set, and every action carries an exact destination plus
+  return target. Local surfaces may explain a specific record in context, but
+  they must not repeat aggregate open-item totals; the global strip owns that
+  count/next-action echo.
   - **Presentation is invitation-first, never default-alarm**
     (`planningOverviewPresentation.ts`, pure). Every fresh PRD lands in
     `needs_decisions` (imported assumptions open + scope unconfirmed), so that
@@ -68,7 +69,11 @@ impact previews / the write-barrier apply path in
     Decision Center, where the attention item's action label is now "Answer
     this question".
 - PRD assumptions are imported idempotently as soon as the latest structured
-  PRD exists; visiting Challenge is not a prerequisite for planning state.
+  PRD exists; visiting Challenge is not a prerequisite for planning state. The
+  exact ids imported for a new spine drive a session-only arrival card on the
+  Plan surface: **Accept defaults / Review each / Later**. Accept/Later expands
+  to one guarded, append-only user `DecisionEvent` per record; there is no
+  aggregate authority event and no persisted card state.
 - Generated assumptions distinguish **confidence** (plausibility) from
   **materiality** (consequence if wrong) and may identify affected PRD
   sections. Ranking is materiality-first.
@@ -122,6 +127,19 @@ impact previews / the write-barrier apply path in
   failed attempts are not auto-retried; `useDecisionOptionSuggestions.ts`
   dedupes in-flight and stored options). The prompt is snapshot-locked in
   `promptSurfaces.test.ts`.
+- **Batch recommendation acceptance is presentation orchestration over
+  individual authority events.** `batchVerdicts.ts` snapshots each eligible
+  record's open status, semantic target, recommendation identity, and source
+  spine. `useBatchVerdictCoordinator` submits records one at a time; the store
+  revalidates every guard inside the write transaction and reports
+  succeeded/skipped/failed ids. A stale or changed recommendation writes
+  nothing. The Decision Center exposes **Accept N recommendations** only when
+  at least two visible records are eligible.
+- **Related planning records group visually, not semantically.**
+  `planningRecordGrouping.ts` builds conservative critique-cluster and exact
+  PRD-section groups with stable order and singleton fallback. Group children
+  remain separately selectable, answerable, auditable records; grouping never
+  creates a combined verdict or changes hashes.
 - **Answering is terminal for the Decision Center queue.** The "Needs
   attention" tab lists only records that still need an answer
   (`needsVerdict`: status open/proposed); the header count chip and the
@@ -138,17 +156,16 @@ impact previews / the write-barrier apply path in
   count — recording a verdict must never unload proposal cards onto the
   user. Do not re-add `requiresValidation` to the queue's attention
   predicate or re-expand these sections by default.
-- **Open decisions never block Explore/Build.** Only the specialist critique
-  is gated (`CritiqueGate`). The Decision Center header and the critique gate
-  both surface a "Continue to Explore" action (`onContinueToExplore`, threaded
-  from `ProjectWorkspace`), and the advisory `PreBuildCheckModal`
-  (`src/components/planning/PreBuildCheckModal.tsx`) moves the remaining
-  open-question prompt to the start of output generation — offered once per
-  workspace session by `handleGenerateAssets`, listing open
-  decision/question/conflict/assumption records with "Review decisions first"
-  vs "Generate anyway"; generating always proceeds. Do not re-introduce a
-  decision-count or readiness gate on the `workspace` stage or on artifact
-  generation (`artifactGenerationGate.ts` stays safety/PRD-only).
+- **Open decisions never block Explore, critique, or Build.** The Decision
+  Center keeps its "Continue to Explore" action (`onContinueToExplore`, threaded
+  from `ProjectWorkspace`). At output generation, one inline
+  `PreBuildCheckpointCard` appears below the stage rail at most once per
+  workspace session, naming the highest-ranked exact planning record and
+  offering Review first / Generate outputs / Not now. It is advisory and never
+  replaces the safety, structured-PRD, incomplete-PRD, or design-preset gates.
+  Do not re-introduce a decision-count or readiness gate on Challenge,
+  `workspace`, or artifact generation (`artifactGenerationGate.ts` stays
+  safety/PRD-only).
 - **Planning navigation intents apply exactly once.** The `planning` URL
   param is applied to the presentation by `ProjectWorkspace`'s intent effect,
   which tracks the last-applied serialized intent **plus its validated

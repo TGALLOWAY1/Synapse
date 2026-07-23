@@ -1,5 +1,6 @@
 import { fireEvent, render, screen, within } from '@testing-library/react';
 import { describe, expect, it, vi } from 'vitest';
+import type { BatchVerdictCandidate } from '../../lib/planning';
 import { DecisionCenter, type DecisionCenterRecordView } from '../review/DecisionCenter';
 
 const openRecord: DecisionCenterRecordView = {
@@ -22,6 +23,25 @@ const callbacks = () => ({
     onReviewAlignmentProposal: vi.fn(),
     onRequestAlignmentProposal: vi.fn(),
 });
+
+const eligibleRecommendation = (id: string): DecisionCenterRecordView => {
+    const batchRecommendation: BatchVerdictCandidate = {
+        recordId: id,
+        action: 'accept_recommendation',
+        expectedStatus: 'open',
+        expectedTargetHash: `target-${id}`,
+        expectedRecommendationIdentity: `recommendation-${id}`,
+        optionId: 'guest',
+        answer: 'Allow a limited guest session',
+    };
+    return {
+        ...openRecord,
+        id,
+        type: 'decision',
+        title: `${id} decision`,
+        batchRecommendation,
+    };
+};
 
 describe('DecisionCenter', () => {
     it('leads with one condition and next action before recommendation and alternatives', () => {
@@ -603,6 +623,186 @@ describe('DecisionCenter', () => {
     it('keeps the Explore link out of the header when no navigation is provided', () => {
         render(<DecisionCenter records={[openRecord]} {...callbacks()} />);
         expect(screen.queryByRole('button', { name: 'Continue to Explore' })).toBeNull();
+    });
+
+    it('shows Accept N only for two valid visible candidates', () => {
+        const onAccept = vi.fn();
+        const { rerender } = render(
+            <DecisionCenter
+                records={[eligibleRecommendation('one')]}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+            />,
+        );
+        expect(screen.queryByRole('button', {
+            name: 'Accept 1 recommendation',
+        })).toBeNull();
+
+        const records = [
+            eligibleRecommendation('one'),
+            eligibleRecommendation('two'),
+        ];
+        rerender(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+            />,
+        );
+        const button = screen.getByRole('button', {
+            name: 'Accept 2 recommendations',
+        });
+        expect(button).toHaveClass('min-h-11');
+        fireEvent.click(button);
+        expect(onAccept).toHaveBeenCalledWith([
+            records[0].batchRecommendation,
+            records[1].batchRecommendation,
+        ]);
+    });
+
+    it('disables busy, announces partial results, links skipped records, and hides read-only mutation', () => {
+        const records = [
+            eligibleRecommendation('one'),
+            eligibleRecommendation('two'),
+        ];
+        const onAccept = vi.fn();
+        const { rerender } = render(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+                recommendationBatchBusy
+            />,
+        );
+        expect(screen.getByRole('button', {
+            name: 'Accepting 2 recommendations',
+        })).toBeDisabled();
+
+        rerender(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+                recommendationBatchResult={{
+                    succeeded: ['one'],
+                    skipped: [{ recordId: 'two', reason: 'The recommendation changed.' }],
+                    failed: [],
+                }}
+            />,
+        );
+        const status = screen.getByRole('status', {
+            name: 'Batch decision result',
+        });
+        expect(status).toHaveAttribute('aria-live', 'polite');
+        expect(status).toHaveTextContent('1 accepted · 1 skipped · 0 failed');
+        const skipped = within(status).getByRole('button', {
+            name: 'Review skipped decision two decision: The recommendation changed.',
+        });
+        fireEvent.click(skipped);
+        expect(screen.getByRole('heading', { name: 'two decision' })).toBeInTheDocument();
+
+        rerender(
+            <DecisionCenter
+                records={records}
+                {...callbacks()}
+                onAcceptRecommendations={onAccept}
+                readOnly
+            />,
+        );
+        expect(screen.queryByRole('button', {
+            name: 'Accept 2 recommendations',
+        })).toBeNull();
+    });
+
+    it('nests related records within their existing condition and keeps each sub-item actionable', () => {
+        const group = {
+            key: 'prd-section:target%20users',
+            kind: 'prd_section' as const,
+            label: 'Target Users',
+        };
+        const first: DecisionCenterRecordView = {
+            ...openRecord,
+            id: 'audience-one',
+            title: 'Who owns the workspace?',
+            options: undefined,
+            recommendation: undefined,
+            presentationGroup: group,
+        };
+        const second: DecisionCenterRecordView = {
+            ...openRecord,
+            id: 'audience-two',
+            title: 'Who can invite collaborators?',
+            options: undefined,
+            recommendation: undefined,
+            presentationGroup: group,
+        };
+        const props = callbacks();
+        render(
+            <DecisionCenter
+                records={[first, second]}
+                initialSelectedId="audience-two"
+                {...props}
+            />,
+        );
+
+        const related = screen.getByRole('region', {
+            name: 'Target Users related planning items',
+        });
+        expect(related).toHaveTextContent('2 related sub-items');
+        expect(within(related).getByText('PRD section')).toBeInTheDocument();
+        expect(within(related).getAllByRole('button')).toHaveLength(2);
+        expect(related.querySelector('button button')).toBeNull();
+        expect(within(related).getByRole('button', {
+            name: /Who can invite collaborators/,
+        })).toHaveAttribute('aria-current', 'true');
+        expect(screen.getByRole('heading', {
+            name: 'Who can invite collaborators?',
+        })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('button', { name: /Yes, that's right/ }));
+        expect(props.onDecide).toHaveBeenCalledWith(
+            'audience-two',
+            'confirm',
+            openRecord.statement,
+            undefined,
+        );
+    });
+
+    it('renders a relationship as ordinary rows when only one member is visible in a queue section', () => {
+        const presentationGroup = {
+            key: 'critique:issue-1',
+            kind: 'critique_cluster' as const,
+            label: 'Account boundary',
+        };
+        const resolved: DecisionCenterRecordView = {
+            ...openRecord,
+            id: 'resolved-related',
+            title: 'Resolved account boundary',
+            status: 'confirmed',
+            resolution: 'Require an account',
+            presentationGroup,
+        };
+        render(
+            <DecisionCenter
+                records={[{ ...openRecord, presentationGroup }, resolved]}
+                {...callbacks()}
+            />,
+        );
+
+        expect(screen.queryByRole('region', {
+            name: 'Account boundary related planning items',
+        })).toBeNull();
+        expect(screen.getByRole('button', {
+            name: /Should guests start without an account/,
+        })).toBeInTheDocument();
+
+        fireEvent.click(screen.getByRole('tab', { name: 'Resolved & history' }));
+        expect(screen.queryByRole('region', {
+            name: 'Account boundary related planning items',
+        })).toBeNull();
+        expect(screen.getByRole('button', {
+            name: /Resolved account boundary/,
+        })).toBeInTheDocument();
     });
 
     it('lets a user explicitly revise or invalidate a recorded decision', () => {

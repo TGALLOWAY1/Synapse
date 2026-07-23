@@ -320,7 +320,8 @@ describe('StructuredPRDView — uncertainty-first planning integration', () => {
         const onOpenDecisions = vi.fn();
         render(<StructuredPRDView projectId={PROJECT_ID} spineId={SPINE_ID} structuredPRD={prd} readOnly={false} onOpenDecisions={onOpenDecisions} />);
         expect(screen.getByText(/Affected: Primary market promise/)).toBeInTheDocument();
-        fireEvent.click(screen.getByRole('button', { name: /1 planning item needs review in this section/ }));
+        expect(screen.queryByText(/1 planning item needs review/i)).not.toBeInTheDocument();
+        fireEvent.click(screen.getByRole('button', { name: /review planning item/i }));
         expect(onOpenDecisions).toHaveBeenCalledWith('conflict-1', {
             destination: { kind: 'prd', anchorId: 'prd-uncertainty-vision' },
             label: 'Return to Vision',

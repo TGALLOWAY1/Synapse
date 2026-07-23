@@ -30,6 +30,7 @@ import {
     planningContentHash,
     projectAssumptionValidation,
     projectDecision,
+    revalidateBatchVerdictCandidate,
     sealAssumptionEvidence,
     sealAssumptionValidationEvent,
     type AssumptionEvidenceRecordedEvent,
@@ -177,6 +178,25 @@ const createPlanningRecordValue = (
             interpretationProposals: [],
         } : undefined,
     };
+};
+
+const decisionEventMatchesBatchGuard = (
+    planningRecordId: string,
+    event: DecisionEvent,
+    guard: import('../../lib/planning/batchVerdicts').BatchVerdictGuard,
+): boolean => {
+    if (event.planningRecordId !== planningRecordId || guard.recordId !== planningRecordId) {
+        return false;
+    }
+    if (guard.action === 'accept_recommendation') {
+        return event.type === 'option_selected'
+            && event.optionId === guard.optionId
+            && event.answer === guard.answer;
+    }
+    if (guard.action === 'accept_default') {
+        return event.type === 'custom_answered' && event.answer === guard.answer;
+    }
+    return event.type === 'deferred';
 };
 
 export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> = (set) => ({
@@ -554,16 +574,49 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
         });
     },
 
-    appendPlanningDecisionEvent: (projectId, planningRecordId, event) => {
-        let outcome: { ok: true; duplicate: boolean } | { ok: false; reason: string } = {
+    appendPlanningDecisionEvent: (projectId, planningRecordId, event, guard) => {
+        let outcome: { ok: true; duplicate: boolean }
+            | { ok: false; reason: string; code?: 'stale_target' } = {
             ok: false,
             reason: 'Planning record not found.',
         };
         set((state) => {
             const records = state.planningRecords[projectId] ?? [];
             const record = records.find(item => item.id === planningRecordId);
-            if (!record) return state;
-            const result = appendDecisionEvent(normalizePlanningRecord(record), event);
+            if (!record) {
+                if (guard) {
+                    outcome = {
+                        ok: false,
+                        code: 'stale_target',
+                        reason: 'The planning record changed before this verdict could be recorded.',
+                    };
+                }
+                return state;
+            }
+            const normalized = normalizePlanningRecord(record);
+            if (guard) {
+                const validation = revalidateBatchVerdictCandidate(normalized, guard);
+                const spineChanged = guard.expectedSpineVersionId
+                    && (state.spineVersions[projectId] ?? []).find(spine => spine.isLatest)?.id
+                        !== guard.expectedSpineVersionId;
+                if (!validation.ok || spineChanged) {
+                    outcome = {
+                        ok: false,
+                        code: 'stale_target',
+                        reason: 'The planning record changed before this verdict could be recorded.',
+                    };
+                    return state;
+                }
+                if (!decisionEventMatchesBatchGuard(planningRecordId, event, guard)) {
+                    outcome = {
+                        ok: false,
+                        code: 'stale_target',
+                        reason: 'The decision event did not match the guarded batch verdict.',
+                    };
+                    return state;
+                }
+            }
+            const result = appendDecisionEvent(normalized, event);
             if (!result.ok) {
                 outcome = result;
                 return state;
@@ -581,7 +634,11 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
     },
 
     importPlanningAssumptions: (projectId, sourceSpineVersionId, structuredPRD, preflightSession) => {
-        let counts = { imported: 0, existing: 0 };
+        let outcome = {
+            imported: 0,
+            existing: 0,
+            importedAssumptionIds: [] as string[],
+        };
         set((state) => {
             const result = importPrdAssumptions({
                 projectId,
@@ -590,13 +647,19 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
                 preflightSession,
                 existingRecords: state.planningRecords[projectId] ?? [],
             });
-            counts = { imported: result.imported.length, existing: result.existing.length };
+            outcome = {
+                imported: result.imported.length,
+                existing: result.existing.length,
+                importedAssumptionIds: result.imported
+                    .filter(record => record.type === 'assumption')
+                    .map(record => record.id),
+            };
             if (result.imported.length === 0 && result.updated.length === 0) return state;
             return {
                 planningRecords: { ...state.planningRecords, [projectId]: result.records },
             };
         });
-        return counts;
+        return outcome;
     },
 
     addPlanningAssessment: (projectId, planningRecordId, assessment: DecisionAssessment) => {

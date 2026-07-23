@@ -10,6 +10,7 @@ import {
 } from './AssumptionValidationPanel';
 import { UnderlineTabs, type UnderlineTab } from '../ui/UnderlineTabs';
 import type { AssumptionEvidenceConclusion, AssumptionUncertaintyTreatment } from '../../types';
+import type { BatchVerdictCandidate, BatchVerdictResult } from '../../lib/planning';
 import { assumptionWorkflowCopy, planningRecordCopy, planningRecordDominantCondition, type PlanningRecordDominantCondition } from '../../lib/planning/planningLanguage';
 
 export type DecisionCenterOptionView = {
@@ -75,10 +76,18 @@ export type DecisionCenterRecordView = {
      * options. Presence of an error means the last attempt failed. */
     optionsSuggestion?: { busy: boolean; error?: string };
     recommendation?: { optionId?: string; summary: string; rationale?: string; confidence?: string };
+    batchRecommendation?: BatchVerdictCandidate;
     resolution?: string;
     rationale?: string;
     sourceLabels?: string[];
     sourceNotice?: string;
+    /** Presentation-only relationship shared with other individually
+     * authoritative planning records. No aggregate verdict is implied. */
+    presentationGroup?: {
+        key: string;
+        kind: 'critique_cluster' | 'prd_section';
+        label: string;
+    };
     createdAt: number;
     history?: Array<{ id: string; label: string; at: number; rationale?: string }>;
     validation?: AssumptionValidationView;
@@ -128,9 +137,55 @@ interface Props {
     /** Jumps to the Explore/Build stage. Open items never block exploring
      * design assets, and the Decision Center says so explicitly. */
     onContinueToExplore?: () => void;
+    recommendationBatchBusy?: boolean;
+    recommendationBatchResult?: BatchVerdictResult;
+    onAcceptRecommendations?: (candidates: BatchVerdictCandidate[]) => void;
 }
 
 const needsVerdict = (record: DecisionCenterRecordView) => ['proposed', 'open'].includes(record.status);
+type DecisionQueuePresentationItem =
+    | { kind: 'record'; key: string; record: DecisionCenterRecordView }
+    | {
+        kind: 'group';
+        key: string;
+        groupKind: NonNullable<DecisionCenterRecordView['presentationGroup']>['kind'];
+        label: string;
+        records: DecisionCenterRecordView[];
+    };
+
+const buildQueuePresentationItems = (
+    records: DecisionCenterRecordView[],
+): DecisionQueuePresentationItem[] => {
+    const recordsByGroup = new Map<string, DecisionCenterRecordView[]>();
+    for (const record of records) {
+        const key = record.presentationGroup?.key;
+        if (!key) continue;
+        recordsByGroup.set(key, [...(recordsByGroup.get(key) ?? []), record]);
+    }
+
+    const emittedGroups = new Set<string>();
+    const items: DecisionQueuePresentationItem[] = [];
+    for (const record of records) {
+        const group = record.presentationGroup;
+        const members = group ? recordsByGroup.get(group.key) : undefined;
+        if (group && members && members.length >= 2) {
+            if (!emittedGroups.has(group.key)) {
+                items.push({
+                    kind: 'group',
+                    key: group.key,
+                    groupKind: group.kind,
+                    label: group.label,
+                    records: members,
+                });
+                emittedGroups.add(group.key);
+            }
+            continue;
+        }
+        items.push({ kind: 'record', key: `record:${record.id}`, record });
+    }
+    return items;
+};
+
 const dominantCondition = (record: DecisionCenterRecordView) => planningRecordDominantCondition({
     type: record.type === 'question' ? 'open_question' : record.type,
     status: record.status,
@@ -184,6 +239,9 @@ export function DecisionCenter({
     onRecordAssumptionTreatment = () => {},
     onReopenAssumptionOutcome = () => {},
     onContinueToExplore,
+    recommendationBatchBusy,
+    recommendationBatchResult,
+    onAcceptRecommendations,
 }: Props) {
     const initialRecord = records.find(record => record.id === initialSelectedId);
     const [view, setView] = useState<'needs_review' | 'log'>(() => initialRecord ? (needsVerdict(initialRecord) ? 'needs_review' : 'log') : records.some(needsVerdict) ? 'needs_review' : 'log');
@@ -192,6 +250,9 @@ export function DecisionCenter({
     // "Answered · not validated") — validation stays available there, but it
     // never keeps a record looking unresolved after the user answered it.
     const visible = useMemo(() => records.filter(record => view === 'needs_review' ? needsVerdict(record) : !needsVerdict(record)), [records, view]);
+    const eligibleRecommendations = useMemo(() => view === 'needs_review'
+        ? visible.flatMap(record => record.batchRecommendation ? [record.batchRecommendation] : [])
+        : [], [view, visible]);
     // Stable-partition the queue by dominant condition in first-seen order so
     // rows group under one small header instead of repeating a tag per row.
     const groupedVisible = useMemo(() => {
@@ -203,7 +264,10 @@ export function DecisionCenter({
             if (existing) existing.records.push(record);
             else groups.push({ label, condition, records: [record] });
         }
-        return groups;
+        return groups.map(group => ({
+            ...group,
+            items: buildQueuePresentationItems(group.records),
+        }));
     }, [visible]);
     const [selectedId, setSelectedId] = useState<string | undefined>(initialRecord?.id);
     const [mobileDetailOpen, setMobileDetailOpen] = useState(Boolean(initialRecord));
@@ -276,6 +340,40 @@ export function DecisionCenter({
         setAnswerChoice(undefined);
     };
 
+    const openBatchResultRecord = (record: DecisionCenterRecordView) => {
+        setView(needsVerdict(record) ? 'needs_review' : 'log');
+        setSelectedId(record.id);
+        setMobileDetailOpen(true);
+        setCustomAnswer('');
+        setRationale('');
+        setAnswerChoice(undefined);
+        setLastDecidedId(undefined);
+    };
+
+    const renderQueueRecord = (record: DecisionCenterRecordView) => (
+        <button
+            type="button"
+            key={record.id}
+            onClick={() => choose(record.id)}
+            aria-current={selected?.id === record.id ? 'true' : undefined}
+            className={`mb-1 w-full rounded-xl border px-3 py-3 text-left transition ${selected?.id === record.id ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-neutral-50'}`}
+        >
+            <p className="text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
+            <span className="mt-1 flex items-center gap-2">
+                {view === 'needs_review' && (record.materiality === 'blocking' || record.materiality === 'high') && (
+                    <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">{record.materiality === 'blocking' ? 'Blocking' : 'High impact'}</span>
+                )}
+                {/* The condition header already says "Deferred", but a
+                    per-row chip keeps that visible while scanning a long
+                    Resolved & history list. */}
+                {view === 'log' && record.status === 'deferred' && (
+                    <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-600">Deferred</span>
+                )}
+                {record.sourceLabels?.[0] && <span className="truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</span>}
+            </span>
+        </button>
+    );
+
     const submit = (action: DecisionAction, value?: string) => {
         if (!selected) return;
         onDecide(selected.id, action, value, rationale.trim() || undefined);
@@ -339,6 +437,51 @@ export function DecisionCenter({
                         </button>
                     </p>
                 )}
+                {!readOnly
+                    && eligibleRecommendations.length >= 2
+                    && onAcceptRecommendations && (
+                    <button
+                        type="button"
+                        disabled={recommendationBatchBusy}
+                        aria-label={recommendationBatchBusy
+                            ? `Accepting ${eligibleRecommendations.length} recommendations`
+                            : `Accept ${eligibleRecommendations.length} recommendations`}
+                        onClick={() => onAcceptRecommendations(eligibleRecommendations)}
+                        className="mt-3 min-h-11 w-full rounded-xl bg-indigo-600 px-4 text-sm font-semibold text-white disabled:opacity-60 sm:w-auto"
+                    >
+                        {recommendationBatchBusy ? 'Accepting' : 'Accept'}{' '}
+                        {eligibleRecommendations.length} recommendations
+                    </button>
+                )}
+                {recommendationBatchResult && (
+                    <div
+                        role="status"
+                        aria-live="polite"
+                        aria-label="Batch decision result"
+                        className="mt-3 rounded-xl border border-neutral-200 bg-neutral-50 p-3 text-sm"
+                    >
+                        {recommendationBatchResult.succeeded.length} accepted ·{' '}
+                        {recommendationBatchResult.skipped.length} skipped ·{' '}
+                        {recommendationBatchResult.failed.length} failed
+                        {[
+                            ...recommendationBatchResult.skipped,
+                            ...recommendationBatchResult.failed,
+                        ].map(item => {
+                            const target = records.find(record => record.id === item.recordId);
+                            return target ? (
+                                <button
+                                    key={item.recordId}
+                                    type="button"
+                                    onClick={() => openBatchResultRecord(target)}
+                                    aria-label={`Review skipped decision ${target.title}: ${item.reason}`}
+                                    className="block min-h-11 text-left text-indigo-700 underline"
+                                >
+                                    {target.title}: {item.reason}
+                                </button>
+                            ) : null;
+                        })}
+                    </div>
+                )}
             </header>
             {unresolvedCount === 0 && records.length > 0 && (
                 <div className="shrink-0 border-b border-emerald-100 bg-emerald-50 px-4 py-2 text-sm font-medium text-emerald-800 sm:px-6" role="status">
@@ -370,30 +513,30 @@ export function DecisionCenter({
                                 {view === 'needs_review' && groupGuidance[group.condition] && (
                                     <p className="px-3 pb-2 text-xs leading-5 text-neutral-500">{groupGuidance[group.condition]}</p>
                                 )}
-                                {group.records.map(record => (
-                                    <button
-                                        type="button"
-                                        key={record.id}
-                                        onClick={() => choose(record.id)}
-                                        aria-current={selected?.id === record.id ? 'true' : undefined}
-                                        className={`mb-1 w-full rounded-xl border px-3 py-3 text-left transition ${selected?.id === record.id ? 'border-indigo-200 bg-indigo-50' : 'border-transparent hover:bg-neutral-50'}`}
-                                    >
-                                        <p className="text-sm font-semibold leading-5 text-neutral-900">{record.title}</p>
-                                        <span className="mt-1 flex items-center gap-2">
-                                            {view === 'needs_review' && (record.materiality === 'blocking' || record.materiality === 'high') && (
-                                                <span className="shrink-0 rounded-full bg-amber-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-amber-800">{record.materiality === 'blocking' ? 'Blocking' : 'High impact'}</span>
-                                            )}
-                                            {/* The group header already says "Deferred", but a
-                                                per-row chip keeps that visible while scanning a
-                                                long Resolved & history list, matching the
-                                                Blocking/High impact treatment above. */}
-                                            {view === 'log' && record.status === 'deferred' && (
-                                                <span className="shrink-0 rounded-full bg-neutral-100 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wide text-neutral-600">Deferred</span>
-                                            )}
-                                            {record.sourceLabels?.[0] && <span className="truncate text-xs text-neutral-400">From {record.sourceLabels[0]}</span>}
-                                        </span>
-                                    </button>
-                                ))}
+                                {group.items.map(item => item.kind === 'record'
+                                    ? renderQueueRecord(item.record)
+                                    : (
+                                        <section
+                                            key={item.key}
+                                            aria-label={`${item.label} related planning items`}
+                                            className="mb-2 rounded-xl border border-neutral-200 bg-neutral-50/70 p-1.5"
+                                        >
+                                            <div className="px-2 pb-1.5 pt-1">
+                                                <div className="flex flex-wrap items-center justify-between gap-1">
+                                                    <p className="text-xs font-semibold text-neutral-800">{item.label}</p>
+                                                    <span className="text-[10px] font-semibold uppercase tracking-wide text-neutral-500">
+                                                        {item.groupKind === 'critique_cluster' ? 'Critique cluster' : 'PRD section'}
+                                                    </span>
+                                                </div>
+                                                <p className="mt-0.5 text-[11px] text-neutral-500">
+                                                    {item.records.length} related sub-items · handled separately
+                                                </p>
+                                            </div>
+                                            <div className="rounded-lg bg-white">
+                                                {item.records.map(renderQueueRecord)}
+                                            </div>
+                                        </section>
+                                    ))}
                             </div>
                         ))}
                     </div>

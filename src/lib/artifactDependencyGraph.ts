@@ -36,6 +36,7 @@ import {
     isRetiredArtifactSubtype,
 } from './coreArtifactPipeline';
 import { isLikelyUnaffected, type SpineChangeSummary } from './spineChangeAnalysis';
+import { readArtifactValidationDisposition } from './artifactValidationPolicy';
 
 // ---------------------------------------------------------------------------
 // Graph shape
@@ -300,6 +301,7 @@ export type DependencyNodeStatus =
     | 'needs_update'       // concrete evidence a direct input changed
     | 'update_recommended' // advisory (legacy timestamp heuristic / weak provenance)
     | 'generating'         // slot queued or generating right now
+    | 'needs_review'       // preferred output exists but failed blocking validation
     | 'error'              // slot errored or was interrupted
     | 'missing';           // expected by the map but never generated
 
@@ -450,6 +452,9 @@ export function evaluateDependencyGraph(
         }
 
         const { version } = snapshot;
+        const validationNeedsReview =
+            live === 'needs_review'
+            || readArtifactValidationDisposition(version.metadata).effectiveStatus === 'needs_review';
         const reasons: StaleReason[] = [];
         let advisory = false;
 
@@ -527,11 +532,13 @@ export function evaluateDependencyGraph(
         const hasHardEvidence = reasons.some(r =>
             r.kind === 'prd_changed' || r.kind === 'dependency_changed' || r.kind === 'design_tokens_changed',
         );
-        const status: DependencyNodeStatus = hasHardEvidence
-            ? 'needs_update'
-            : reasons.length > 0 && advisory
-                ? 'update_recommended'
-                : 'up_to_date';
+        const status: DependencyNodeStatus = validationNeedsReview
+            ? 'needs_review'
+            : hasHardEvidence
+                ? 'needs_update'
+                : reasons.length > 0 && advisory
+                    ? 'update_recommended'
+                    : 'up_to_date';
 
         // Advisory scoping: only when the PRD change is the SOLE reason (any
         // dependency/token drift or legacy heuristic is its own evidence) and
@@ -560,7 +567,11 @@ export function evaluateDependencyGraph(
     // themselves in trouble. PRD is 'source' and never propagates.
     const troubled = (id: DependencyNodeId): boolean => {
         const s = evaluations.get(id)?.status;
-        return s === 'needs_update' || s === 'update_recommended' || s === 'missing' || s === 'error';
+        return s === 'needs_update'
+            || s === 'update_recommended'
+            || s === 'needs_review'
+            || s === 'missing'
+            || s === 'error';
     };
     for (const node of graph.nodes) {
         if (node.id === 'prd') continue;
@@ -605,7 +616,11 @@ export function expandSelectionWithTroubledUpstreams(
     const batch = new Set(selected.filter(id => id !== 'prd'));
     const troubled = (id: DependencyNodeId): boolean => {
         const s = evaluations.get(id)?.status;
-        return s === 'needs_update' || s === 'update_recommended' || s === 'missing' || s === 'error';
+        return s === 'needs_update'
+            || s === 'update_recommended'
+            || s === 'needs_review'
+            || s === 'missing'
+            || s === 'error';
     };
     let grew = true;
     while (grew) {
@@ -640,6 +655,7 @@ export function computeRecommendedUpdates(
             return (
                 ev.status === 'needs_update'
                 || ev.status === 'update_recommended'
+                || ev.status === 'needs_review'
                 || ev.status === 'missing'
                 || ev.status === 'error'
                 || ev.impactedBy.length > 0

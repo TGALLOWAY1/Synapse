@@ -51,7 +51,9 @@
   `ArtifactVersion` (increments `versionNumber`, becomes preferred, carries
   `sourceRefs`, `Reverted` event) rather than only re-pointing `isPreferred`
   via `setPreferredVersion` — keeps the audit log honest.
-- `feedbackSlice` — FeedbackItems with intent classification
+- `feedbackSlice` — legacy `FeedbackItem` reads and status updates. Persisted
+  feedback remains available to history/snapshot consumers, but no live UI
+  creates new feedback items; the unused creation action was retired.
 - `generationJobsSlice` — Per-project job tracking (transient; stripped
   from persistence)
 - `prdProgressSlice` — Live progress event log for the PRD generation UI
@@ -412,4 +414,3 @@ rules:
   `localStorage` alone — a vault-only user has no localStorage key, so a
   localStorage-only gate wrongly routes them to Settings even though generation
   would succeed.
-

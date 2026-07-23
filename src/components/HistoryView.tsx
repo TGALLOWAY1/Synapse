@@ -28,6 +28,7 @@ const EVENT_CONFIG: Record<HistoryEventType, { icon: typeof Clock; color: string
     Edited: { icon: Pencil, color: 'text-violet-600', bgColor: 'bg-violet-50' },
     Reverted: { icon: RotateCcw, color: 'text-amber-600', bgColor: 'bg-amber-50' },
     MarkedCurrent: { icon: CheckCircle, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
+    ValidationIssueAccepted: { icon: CheckCircle, color: 'text-sky-700', bgColor: 'bg-sky-50' },
     ReadinessReviewed: { icon: Clock, color: 'text-indigo-600', bgColor: 'bg-indigo-50' },
     PlanCommitted: { icon: CheckCircle, color: 'text-emerald-600', bgColor: 'bg-emerald-50' },
     PlanReopened: { icon: RotateCcw, color: 'text-amber-600', bgColor: 'bg-amber-50' },

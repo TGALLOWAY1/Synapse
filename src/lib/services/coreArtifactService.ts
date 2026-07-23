@@ -1,4 +1,13 @@
-import type { StructuredPRD, CoreArtifactSubtype, DataModelContent, ComponentInventoryContent, DesignTokens, StructuredImplementationPlan, CanonicalPrdSpine } from '../../types';
+import type {
+    ArtifactValidationBlocker,
+    StructuredPRD,
+    CoreArtifactSubtype,
+    DataModelContent,
+    ComponentInventoryContent,
+    DesignTokens,
+    StructuredImplementationPlan,
+    CanonicalPrdSpine,
+} from '../../types';
 import { callGeminiStream } from '../geminiClient';
 import type { ProviderOptions, GeminiTokenUsage } from '../geminiClient';
 import { repairTruncatedJson } from '../jsonRepair';
@@ -44,9 +53,11 @@ export interface CoreArtifactGenerationResult {
  */
 export const ARTIFACT_MAX_OUTPUT_TOKENS = 32768;
 
-/** Blocker text the job controller surfaces for a truncated artifact body. */
-export const ARTIFACT_TRUNCATED_BLOCKER =
-    'The model response hit its output limit and was cut off — content at the end is missing. Regenerate this artifact.';
+/** Blocker the job controller surfaces for a truncated artifact body. */
+export const ARTIFACT_TRUNCATED_BLOCKER: ArtifactValidationBlocker = {
+    code: 'output_truncated',
+    message: 'The model response hit its output limit and was cut off — content at the end is missing. Regenerate this artifact.',
+};
 
 // Per-artifact model routing now lives in `artifactModelSettings.ts` so the
 // Settings UI and the generation pipeline share one source of truth. Re-export

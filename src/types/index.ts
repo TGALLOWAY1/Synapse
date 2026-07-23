@@ -820,14 +820,15 @@ export interface ScreenItem {
 // ArtifactVersion's `metadata.screenEdits[id].review` overlay (see
 // ScreenMetadataEdit). The user's review STATUS stays in the existing
 // `reviewStatus` overlay field (draft/needs_review/accepted/implementation_ready);
-// this object carries the supporting record: the review checklist, a note, an
+// this object carries the supporting record: legacy checklist data, a note, an
 // override reason (when a screen is accepted/promoted over open warnings), the
 // source signature captured at sign-off (for re-review detection), and
 // transition timestamps. Every field is optional & back-compat — legacy
 // overlays have none of it and default cleanly.
 
-/** Review checklist the user ticks off in the Screen Detail view. Optional
- * support — checking items never gates a status change. */
+/** Legacy read-only checklist data retained for persisted-project
+ * compatibility. The current Screen Detail view does not render or mutate it,
+ * and checklist values never gate a status change. */
 export interface ScreenReviewChecklist {
     purposeMatchesPrd?: boolean;
     entryExitPathsReviewed?: boolean;
@@ -1223,6 +1224,8 @@ export interface SlotState {
     status: GenerationStatus;
     startedAt?: number;
     finishedAt?: number;
+    /** Exact produced version for a settled done/needs_review slot. Transient only. */
+    artifactVersionId?: string;
     error?: { message: string; category: string; timestamp: number };
     attempt: number;
     progressLog?: string[];
@@ -1233,6 +1236,58 @@ export interface ProjectJobState {
     startedAt: number;
     slots: Record<ArtifactSlotKey, SlotState>;
 }
+
+export type ArtifactValidationBlockerCode =
+    | 'output_truncated'
+    | 'output_unparseable'
+    | 'output_structure_incomplete'
+    | 'data_model_api_surface_missing'
+    | 'user_flows_error_paths_missing'
+    | 'prd_traceability_unverified'
+    | 'legacy_unclassified';
+
+export type ArtifactValidationOverridePolicy = 'non_overridable' | 'rationale_required';
+
+export interface ArtifactValidationBlocker {
+    code: ArtifactValidationBlockerCode;
+    message: string;
+}
+
+export interface ArtifactValidationAcceptance {
+    schemaVersion: 1;
+    actor: 'user';
+    acceptedAt: number;
+    rationale: string;
+    blockerFingerprint: string;
+}
+
+export interface ArtifactValidationDisposition {
+    blockers: ArtifactValidationBlocker[];
+    accepted?: ArtifactValidationAcceptance;
+    effectiveStatus: 'clear' | 'needs_review' | 'accepted_issue';
+    overridePolicy?: ArtifactValidationOverridePolicy;
+}
+
+export interface AcceptArtifactValidationIssueInput {
+    artifactId: string;
+    versionId: string;
+    expectedBlockerFingerprint: string;
+    rationale: string;
+}
+
+export type AcceptArtifactValidationIssueResult =
+    | { status: 'accepted'; artifactId: string; versionId: string }
+    | {
+        status: 'rejected';
+        reason:
+            | 'artifact_not_found'
+            | 'version_not_found'
+            | 'not_preferred'
+            | 'blockers_changed'
+            | 'rationale_required'
+            | 'non_overridable'
+            | 'already_accepted';
+    };
 
 export type SourceRef = {
     id: string;
@@ -2439,6 +2494,7 @@ export type HistoryEventType =
     | 'Edited'
     | 'Reverted'
     | 'MarkedCurrent'
+    | 'ValidationIssueAccepted'
     | 'ReadinessReviewed'
     | 'PlanCommitted'
     | 'PlanReopened';

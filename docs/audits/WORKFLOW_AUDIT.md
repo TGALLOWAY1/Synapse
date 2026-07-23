@@ -410,7 +410,7 @@ flowchart TD
 
     subgraph DEFINE["1 · Define"]
         D1["Prompt → mode choice → (preflight) → PRD streams"]
-        D2["Assumptions imported as a BATCH:<br/>'Synapse made N assumptions —<br/>Accept all / Review each / Later'"]
+        D2["Assumptions imported as a BATCH:<br/>'Synapse made N assumptions —<br/>Accept defaults / Review each / Later'"]
         D1 --> D2
     end
 
@@ -497,7 +497,7 @@ never pushed):**
 ## 6. Decision Center integration per stage
 
 - **Define:** silent capture. Assumptions import as one grouped batch card
-  ("Synapse assumed N things — Accept all / Review / Later"). Accept-all records
+  ("Synapse assumed N things — Accept defaults / Review / Later"). Accept-defaults records
   one `option_selected`-style verdict per record (still user-actor, append-only)
   — a batch of real events, not a fake aggregate.
 - **Refine:** the layer's home turf. Sharpen flow unchanged. Critique findings
@@ -551,7 +551,7 @@ products.
    records that have a machine-recommended option (per-record user events under
    one click), alongside the existing bulk defer.
 4. **Assumption batch card at PRD arrival:** group the 4–8 imported assumptions
-   into one card with Accept all / Review each / Later, instead of seeding the
+   into one card with Accept defaults / Review each / Later, instead of seeding the
    queue silently.
 5. **Accept-anyway on blocking validation:** allow a rationale-backed
    "accept with noted issue" that clears `needs_review` (recorded like the
@@ -626,3 +626,31 @@ interpretation; mockup per-variant generation reachability was lightly verified
 only.
 
 No changes have been implemented; this document is analysis and proposal only.
+
+---
+
+## Implementation status — 2026-07-23
+
+The statement above records the repository state when this audit was written.
+The following Tier 1 and Tier 2 roadmap items have since been implemented while
+preserving the authority model described in this document.
+
+| Roadmap item | Implemented future state |
+|---|---|
+| Tier 1.1 · Global next action | One `planningAttention` projection is visible across stages and retains exact return context. |
+| Tier 1.2 · Flag to plan | Artifact and screen review notes can create user-authored planning records and return to the exact source. |
+| Tier 1.3 · Batch verdicts | **Accept N recommendations** executes guarded per-record user verdicts, reports partial results, and never creates aggregate authority. |
+| Tier 1.4 · Assumption arrival | New imported assumptions appear as one session-only batch card with Accept defaults / Review each / Later; arrival is bound to the current spine version. |
+| Tier 1.5 · Validation trust | Typed blockers fail closed. Eligible semantic issues can be accepted only with rationale against the exact preferred version and blocker fingerprint; structural, truncation, parse, mixed, and legacy blockers remain non-overridable. |
+| Tier 1.6 · Silent machinery | Validation warnings are visible in checkpoint summaries; unused checklist projection and feedback-item creation paths are retired while legacy reads remain compatible. |
+| Tier 1.7 · Echo budget | Aggregate attention has one global home and one checkpoint echo. The modal pre-build interruption is now an inline exact-item card, and export reuses the current checkpoint state. |
+| Tier 2.8 · Sync outputs | Quick sync performs stale-safe, dependency-safe per-output correction; Careful sync exposes region proposals. Plans are fingerprinted to exact spine and artifact versions, and proposals prepare in the background. |
+| Tier 2.9 · Auto verification | Applying a downstream proposal immediately derives **verification passed** or **needs your eye**; manual verification remains for external/manual/legacy changes. |
+| Tier 2.10 · Checkpoint summaries | A session-bound generation-complete card and every export aggregate current generation, critique, validation, alignment, and accepted planning-risk context without blocking progress. |
+| Tier 2.11 · Decision grouping | Related records are grouped conservatively for presentation by critique cluster or exact PRD section; records, actions, and history remain individual. |
+| Tier 2.12 · Critique gate | Critique remains optional and always available. Open decisions produce advisory copy, not a decision-count gate or bulk-defer ceremony. |
+
+Tier 3 remains intentionally deferred: the six-step rail remap, universal
+Decision Center slide-over, background auto-propagation review queue, and
+materiality-driven hard blocking require broader structural and persistence
+work.

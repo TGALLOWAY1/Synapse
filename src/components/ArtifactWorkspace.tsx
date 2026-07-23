@@ -3,7 +3,7 @@ import { useSearchParams } from 'react-router-dom';
 import {
     FileText, Image, Package, CheckCircle2, Loader2, Circle, AlertTriangle,
     RefreshCcw, Menu, X, History, Lock, ShieldAlert, ShieldCheck,
-    Layers, Database, Code2, AppWindow, Waypoints, ListChecks,
+    Layers, Database, Code2, AppWindow, Waypoints,
 } from 'lucide-react';
 import ReactMarkdown from 'react-markdown';
 import remarkGfm from 'remark-gfm';
@@ -11,8 +11,9 @@ import { useProjectStore } from '../store/projectStore';
 import { useIsMobile } from '../lib/useIsMobile';
 import { artifactJobController } from '../lib/services/artifactJobController';
 import { CORE_ARTIFACT_DISPLAY_ORDER, getArtifactMeta, isHiddenArtifactSubtype, isRetiredArtifactSubtype } from '../lib/coreArtifactPipeline';
-import { readValidationBlockers } from '../lib/artifactBlockingValidation';
+import { readArtifactValidationDisposition } from '../lib/artifactValidationPolicy';
 import { ArtifactContentRenderer } from './renderers';
+import { ArtifactValidationBanner } from './artifacts/ArtifactValidationBanner';
 import { StructuredPRDView } from './StructuredPRDView';
 import { coercePrdView, type PrdViewId } from '../lib/derive/prdViews';
 import { MockupViewer } from './mockups/MockupViewer';
@@ -24,7 +25,12 @@ import { TaskChecklist } from './tasks/TaskChecklist';
 import { OutputAlignmentBadge, OutputAlignmentDot, OutputAlignmentNotice } from './OutputAlignmentStatus';
 import { DownstreamUpdatePlanReview } from './downstream/DownstreamUpdatePlanReview';
 import { FreshnessBadge } from './FreshnessBadge';
-import { VersionHistoryPanel, type VersionEntry } from './versions';
+import {
+    UpdateAssetsPlanModal,
+    VersionHistoryPanel,
+    type UpdatePlanChoice,
+    type VersionEntry,
+} from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
 import { ConfirmDialog } from './common/ConfirmDialog';
@@ -62,7 +68,11 @@ import type { ScreenNotePlanningRequest } from './experience/ScreenReviewNotes';
 import { DependencyGraphView } from './dependency/DependencyGraphView';
 import type { DependencyNodeId } from '../lib/artifactDependencyGraph';
 import type { OutputAlignment } from '../lib/planning/outputAlignment';
-import type { DownstreamUpdatePlan, DownstreamUpdatePlanItem } from '../lib/planning/downstreamUpdatePlan';
+import {
+    validateDownstreamUpdatePlanIntegrity,
+    type DownstreamUpdatePlan,
+    type DownstreamUpdatePlanItem,
+} from '../lib/planning/downstreamUpdatePlan';
 import {
     implementationPlanNavigationTarget,
 } from '../lib/planning/implementationPlanNavigation';
@@ -78,6 +88,16 @@ import {
 } from '../lib/planning/flagToPlan';
 import { useProjectFreshness } from '../hooks/useProjectFreshness';
 import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
+import {
+    buildOutputSyncSessionFingerprint,
+    buildOutputSyncRows,
+    hasOutputSyncDrift,
+    planOutputSyncExecution,
+    runOutputSyncSession,
+    type CarefulSyncPlanRef,
+} from '../lib/outputSyncPlan';
+import { evaluateSpineGenerationGate } from '../lib/artifactGenerationGate';
+import { hasGeminiKey } from '../lib/geminiKeyVault';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
     ArtifactVersion, GenerationStatus, ProjectTask,
@@ -296,7 +316,7 @@ export function ArtifactWorkspace({
         getArtifacts, getArtifact, getPreferredVersion, getProjectOutputAlignment, getJob, getProject,
         updateArtifactVersionMetadata, getArtifactVersions, getSpineVersions,
         revertArtifactToVersion, setProjectDesignSystemPreset, markArtifactCurrentForSpine,
-        generateDownstreamUpdatePlans,
+        acceptArtifactValidationIssue,
     } = useProjectStore();
     // Canonical freshness for every artifact-status surface in this workspace
     // (version-controls strip, Screens artifact controls, mockup drift banner,
@@ -308,11 +328,13 @@ export function ArtifactWorkspace({
     // Which artifact's version-history panel is open (null = none).
     const [versionHistoryArtifactId, setVersionHistoryArtifactId] = useState<string | null>(null);
     const [updatePlanId, setUpdatePlanId] = useState<string | null>(null);
+    const [outputSyncSession, setOutputSyncSession] = useState<{ fingerprint: string } | null>(null);
     const [updatePlanRegionTarget, setUpdatePlanRegionTarget] = useState<PlanningArtifactRegionTarget | null>(null);
     // Subscribe to tasks so the Implementation Plan button label tracks saved
     // count reactively (the checklist itself reads the store directly).
     const projectTasks = useProjectStore(s => s.tasks[projectId] ?? EMPTY_TASKS);
     const downstreamUpdatePlans = useProjectStore(s => s.downstreamUpdatePlans[projectId] ?? EMPTY_UPDATE_PLANS);
+    const planningRecordsForSync = useProjectStore(s => s.planningRecords[projectId]);
     // Active design tokens, so the Screen Inventory copy-prompt embeds the same
     // Design System Brief the internal mockups use. selectPreferredDesignTokens
     // is reference-stable per ArtifactVersion, so it's safe inside a selector.
@@ -888,7 +910,10 @@ export function ArtifactWorkspace({
             // state is cleared (post-reload), reading it off the preferred
             // version's metadata rather than the transient slot status.
             const preferred = getPreferredVersion(projectId, existing.id);
-            if (preferred && readValidationBlockers(preferred.metadata).length > 0) return 'needs_review';
+            if (preferred
+                && readArtifactValidationDisposition(preferred.metadata).effectiveStatus === 'needs_review') {
+                return 'needs_review';
+            }
             return 'done';
         }
         return 'idle';
@@ -935,6 +960,34 @@ export function ArtifactWorkspace({
         artifactJobController.retrySlot(slot, {
             projectId, spineVersionId, prdContent, structuredPRD, projectPlatform,
         });
+    };
+
+    const renderArtifactValidationBanner = (
+        artifactId: string,
+        preferred: ArtifactVersion,
+        slot: ArtifactSlotKey,
+    ) => {
+        const disposition = readArtifactValidationDisposition(preferred.metadata);
+        if (disposition.effectiveStatus === 'clear') return null;
+        return (
+            <ArtifactValidationBanner
+                disposition={disposition}
+                canRegenerate={
+                    capabilities.canGenerateArtifacts
+                    && !isActive
+                    && !artifactJobController.isActive(projectId)
+                }
+                canAccept={capabilities.canReviewArtifacts}
+                onRegenerate={() => handleRetrySlot(slot)}
+                onAccept={({ rationale, expectedBlockerFingerprint }) =>
+                    acceptArtifactValidationIssue(projectId, {
+                        artifactId,
+                        versionId: preferred.id,
+                        expectedBlockerFingerprint,
+                        rationale,
+                    })}
+            />
+        );
     };
 
     // Open a screen's detail view by its stable canonical id (Screens list,
@@ -991,35 +1044,131 @@ export function ArtifactWorkspace({
     // Latest spine id is the "mark up to date" target; still read from the store
     // (the seam exposes it too, but the mark-current writer wants the store's).
     const allSpines = getSpineVersions(projectId);
-    const latestSpineId = allSpines.find(s => s.isLatest)?.id;
-
-    const supportedUpdatePlanArtifact = (artifactId: string) => {
-        const artifact = getArtifact(projectId, artifactId);
-        return artifact?.type === 'core_artifact'
-            && (artifact.subtype === 'screen_inventory'
-                || artifact.subtype === 'user_flows'
-                || artifact.subtype === 'data_model'
-                || artifact.subtype === 'implementation_plan');
-    };
-
-    const currentUpdatePlanFor = (artifactId: string) => downstreamUpdatePlans
-        .filter(plan => plan.artifact.artifactId === artifactId)
-        .sort((a, b) => b.createdAt - a.createdAt)
-        .find(plan => useProjectStore.getState().getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current);
-
-    const openUpdatePlanForArtifact = (artifactId: string) => {
-        if (!supportedUpdatePlanArtifact(artifactId)) return;
-        const existing = currentUpdatePlanFor(artifactId);
-        if (existing) {
-            setUpdatePlanId(existing.id);
-            return;
+    const latestSpine = allSpines.find(s => s.isLatest);
+    const latestSpineId = latestSpine?.id;
+    const carefulPlansByArtifactId = useMemo(() => {
+        // Currentness reads the store snapshot below; these reactive inputs
+        // intentionally invalidate the projection when that context changes.
+        void freshness;
+        void planningRecordsForSync;
+        const result = new Map<string, CarefulSyncPlanRef>();
+        const current = [...downstreamUpdatePlans]
+            .filter(validateDownstreamUpdatePlanIntegrity)
+            .filter(plan => useProjectStore.getState()
+                .getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current)
+            .sort((a, b) => b.createdAt - a.createdAt || b.id.localeCompare(a.id));
+        for (const plan of current) {
+            if (!result.has(plan.artifact.artifactId)) {
+                result.set(plan.artifact.artifactId, {
+                    id: plan.id,
+                    itemCount: plan.items.length,
+                });
+            }
         }
-        generateDownstreamUpdatePlans(projectId);
-        const generated = (useProjectStore.getState().downstreamUpdatePlans[projectId] ?? [])
-            .filter(plan => plan.artifact.artifactId === artifactId)
-            .sort((a, b) => b.createdAt - a.createdAt)
-            .find(plan => useProjectStore.getState().getDownstreamUpdatePlanCurrentness(projectId, plan.id)?.current);
-        if (generated) setUpdatePlanId(generated.id);
+        return result;
+    }, [downstreamUpdatePlans, freshness, planningRecordsForSync, projectId]);
+    const outputSyncRows = useMemo(() => buildOutputSyncRows({
+        graph: freshness.graph,
+        evaluations: freshness.evaluations,
+        artifactIdBySlot: freshness.artifactIdBySlot,
+        recommendedUpdates: freshness.recommendedUpdates,
+        carefulPlansByArtifactId,
+    }), [carefulPlansByArtifactId, freshness]);
+    const outputSyncDrift = hasOutputSyncDrift(outputSyncRows);
+    const readOutputSyncFingerprint = () => {
+        const state = useProjectStore.getState();
+        const liveLatestSpine = state.getSpineVersions(projectId).find(spine => spine.isLatest);
+        const liveCoreArtifacts = state.getArtifacts(projectId, 'core_artifact');
+        const liveMockups = state.getArtifacts(projectId, 'mockup');
+        return buildOutputSyncSessionFingerprint({
+            spineVersionId: liveLatestSpine?.id,
+            spineContent: liveLatestSpine?.structuredPRD ?? liveLatestSpine?.responseText,
+            sources: freshness.graph.nodes.flatMap(node => {
+                if (node.id === 'prd') return [];
+                const slot = node.id as ArtifactSlotKey;
+                const artifact = slot === 'mockup'
+                    ? liveMockups[0]
+                    : liveCoreArtifacts.find(candidate => candidate.subtype === slot);
+                const preferred = artifact
+                    ? state.getPreferredVersion(projectId, artifact.id)
+                    : undefined;
+                return [{
+                    slot,
+                    ...(artifact ? { artifactId: artifact.id } : {}),
+                    ...(preferred ? {
+                        preferredVersionId: preferred.id,
+                        preferredContent: preferred.content,
+                        preferredMetadata: preferred.metadata,
+                        sourceRefs: preferred.sourceRefs,
+                    } : {}),
+                }];
+            }),
+        });
+    };
+    const currentOutputSyncFingerprint = readOutputSyncFingerprint();
+    const outputSyncEligible = outputSyncDrift
+        && capabilities.canReviewArtifacts
+        && Boolean(latestSpineId);
+    const openOutputSync = () => {
+        if (!outputSyncEligible) return;
+        setOutputSyncSession({ fingerprint: readOutputSyncFingerprint() });
+    };
+    const outputSyncHeadline = outputSyncRows
+        .find(row => row.isDrifted && row.changeHeadline)?.changeHeadline
+        ?? `${outputSyncRows.filter(row => row.isDrifted).length} output${
+            outputSyncRows.filter(row => row.isDrifted).length === 1 ? '' : 's'
+        } need review against the current plan.`;
+    const generationGate = evaluateSpineGenerationGate(latestSpine);
+    const regenerationDisabledReason = !generationGate.allowed
+        ? generationGate.reason === 'incomplete_unacknowledged'
+            ? 'Acknowledge the incomplete PRD before regenerating outputs.'
+            : 'The current PRD cannot drive output generation.'
+        : !designSystemPreset
+            ? 'Choose a design direction before regenerating outputs.'
+            : !hasGeminiKey()
+                ? 'Add a Gemini API key in Settings before regenerating outputs.'
+                : undefined;
+
+    const runQuickOutputSync = (choices: Record<string, UpdatePlanChoice>) => {
+        const rowsBySlot = new Map(outputSyncRows.map(row => [row.id, row]));
+        const result = runOutputSyncSession({
+            // The modal's choices are authoritative only for the exact
+            // spine/preferred-version/source snapshot it opened against.
+            expectedFingerprint: outputSyncSession?.fingerprint,
+            currentFingerprint: readOutputSyncFingerprint(),
+            canExecute: Boolean(
+                capabilities.canReviewArtifacts
+                && latestSpineId
+                && latestSpine?.structuredPRD
+                && !isActive
+                && !artifactJobController.isActive(projectId),
+            ),
+            canRegenerate: capabilities.canGenerateArtifacts
+                && !regenerationDisabledReason,
+            createExecution: () => planOutputSyncExecution({
+                graph: freshness.graph,
+                evaluations: freshness.evaluations,
+                rows: outputSyncRows,
+                choices,
+            }),
+            onMarkCurrent: slot => {
+                const artifactId = rowsBySlot.get(slot)?.artifactId;
+                if (artifactId && latestSpineId) {
+                    markArtifactCurrentForSpine(projectId, artifactId, latestSpineId);
+                }
+            },
+            onRegenerate: slots => {
+                if (!latestSpine?.structuredPRD) return;
+                artifactJobController.regenerateSlots(slots, {
+                    projectId,
+                    spineVersionId: latestSpine.id,
+                    prdContent: latestSpine.responseText,
+                    structuredPRD: latestSpine.structuredPRD,
+                    projectPlatform,
+                });
+            },
+        });
+        if (result.status !== 'blocked') setOutputSyncSession(null);
     };
 
     const openUpdatePlanOutput = (plan: DownstreamUpdatePlan, item: DownstreamUpdatePlanItem) => {
@@ -1116,7 +1265,7 @@ export function ArtifactWorkspace({
 
     // Header strip shown above a generated artifact: provenance chip ("Generated
     // from PRD Version X"), freshness badge (+ what-changed detail), a
-    // "Mark up to date" escape hatch when stale, and a Version history entry.
+    // shared Sync outputs entry when stale, and a Version history entry.
     // Freshness comes from the canonical evaluator; the "what changed" summary
     // rides on the evaluation's prd_changed reason (no separate resolver).
     const renderVersionControls = (
@@ -1148,33 +1297,16 @@ export function ArtifactWorkspace({
                                 : undefined}
                         />
                     )}
-                    {alignment && alignment.state !== 'aligned' && capabilities.canReviewArtifacts && latestSpineId && (
+                    {(
+                        (alignment && alignment.state !== 'aligned')
+                        || (!alignment && isStaleStatus(status))
+                    ) && outputSyncEligible && (
                         <button
                             type="button"
-                            onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
-                            title="Confirm this output remains aligned with the current plan without regenerating it"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
-                        >
-                            <ShieldCheck size={12} /> Confirm aligned
-                        </button>
-                    )}
-                    {alignment && alignment.state !== 'aligned' && supportedUpdatePlanArtifact(artifactId) && (
-                        <button
-                            type="button"
-                            onClick={() => openUpdatePlanForArtifact(artifactId)}
+                            onClick={openOutputSync}
                             className="inline-flex min-h-11 items-center gap-1.5 rounded-md border border-indigo-200 bg-indigo-50 px-3 text-xs font-medium text-indigo-700 transition hover:bg-indigo-100"
                         >
-                            <ListChecks size={13} /> {currentUpdatePlanFor(artifactId) ? 'Review update plan' : 'Create update plan'}
-                        </button>
-                    )}
-                    {!alignment && capabilities.canReviewArtifacts && isStaleStatus(status) && latestSpineId && (
-                        <button
-                            type="button"
-                            onClick={() => markArtifactCurrentForSpine(projectId, artifactId, latestSpineId)}
-                            title="Confirm this artifact is still valid for the current PRD without regenerating it"
-                            className="inline-flex items-center gap-1.5 px-3 py-1.5 text-xs bg-emerald-50 border border-emerald-200 text-emerald-700 hover:bg-emerald-100 rounded-md transition"
-                        >
-                            <ShieldCheck size={12} /> Confirm aligned
+                            <RefreshCcw size={13} /> Sync outputs
                         </button>
                     )}
                     <button
@@ -1224,7 +1356,7 @@ export function ArtifactWorkspace({
                     structuredPRD={structuredPRD}
                     projectPlatform={projectPlatform}
                     onOpenNode={handleOpenGraphNode}
-                    onOpenUpdatePlan={openUpdatePlanForArtifact}
+                    onOpenSyncOutputs={outputSyncEligible ? openOutputSync : undefined}
                 />
             );
         }
@@ -1277,6 +1409,13 @@ export function ArtifactWorkspace({
             if (screensStatus === 'idle' && isActive) {
                 return <BuildAssetsLoading />;
             }
+            const screenInventoryValidationBanner = invArtifact && invPreferred
+                ? renderArtifactValidationBanner(
+                    invArtifact.id,
+                    invPreferred,
+                    'screen_inventory',
+                )
+                : null;
 
             // Legacy fallback: a screen_inventory version exists but isn't
             // parseable structured JSON (old markdown artifacts). Render it
@@ -1288,6 +1427,7 @@ export function ArtifactWorkspace({
                         <div className="flex items-center justify-start">
                             {renderVersionControls(invArtifact.id, invPreferred)}
                         </div>
+                        {screenInventoryValidationBanner}
                         <div className="bg-white rounded-xl border border-neutral-200 shadow-sm p-6 prose prose-sm prose-neutral max-w-none overflow-auto">
                             <ArtifactContentRenderer
                                 subtype="screen_inventory"
@@ -1305,77 +1445,84 @@ export function ArtifactWorkspace({
                 : undefined;
             if (detailItem) {
                 return (
-                    <ScreenDetailView
-                        item={detailItem}
-                        readiness={screenReadiness.get(detailItem.id)}
-                        activeTab={screenTab}
-                        onTabChange={(tab) => setScreenParams(detailItem.id, tab, { replace: true })}
-                        onBack={() => setScreenParams(null)}
-                        onNavigateToScreen={handleNavigateToScreen}
-                        availableScreenSlugs={screenIndex.availableSlugs}
-                        screenImageContext={invScreenImageContext}
-                        mockupContext={mockupDetailContext}
-                        mobileRelevant={mobileRelevant}
-                        mockupStatus={slotStatusFor('mockup')}
-                        onRetryMockup={capabilities.canGenerateArtifacts ? () => handleRetrySlot('mockup') : undefined}
-                        features={structuredPRD.features}
-                        onSaveScreenEdit={capabilities.canEditArtifacts && invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
-                        onFlagToPlan={
-                            capabilities.canPersistWorkflowState && invArtifact && invPreferred
-                                ? (request: ScreenNotePlanningRequest) => flagScreenNotePlanningConcern({
-                                    projectId,
-                                    artifactId: invArtifact.id,
-                                    artifactVersionId: invPreferred.id,
-                                    spineVersionId,
-                                    screenId: detailItem.id,
-                                    request,
-                                }, useProjectStore.getState().flagPlanningConcern)
-                                : undefined
-                        }
-                        planningSourceScopeKey={
-                            invArtifact && invPreferred
-                                ? screenNotePlanningSourceScopeKey({
-                                    artifactId: invArtifact.id,
-                                    artifactVersionId: invPreferred.id,
-                                    screenId: detailItem.id,
-                                })
-                                : undefined
-                        }
-                        onReviewPlanningRecord={
-                            onOpenPlanningRecord && invArtifact
-                                ? (recordId) => onOpenPlanningRecord(
-                                    recordId,
-                                    buildScreenNotePlanningReturnTarget({
+                    <div className="space-y-4">
+                        {screenInventoryValidationBanner && (
+                            <div className="mx-auto max-w-3xl xl:max-w-5xl">
+                                {screenInventoryValidationBanner}
+                            </div>
+                        )}
+                        <ScreenDetailView
+                            item={detailItem}
+                            readiness={screenReadiness.get(detailItem.id)}
+                            activeTab={screenTab}
+                            onTabChange={(tab) => setScreenParams(detailItem.id, tab, { replace: true })}
+                            onBack={() => setScreenParams(null)}
+                            onNavigateToScreen={handleNavigateToScreen}
+                            availableScreenSlugs={screenIndex.availableSlugs}
+                            screenImageContext={invScreenImageContext}
+                            mockupContext={mockupDetailContext}
+                            mobileRelevant={mobileRelevant}
+                            mockupStatus={slotStatusFor('mockup')}
+                            onRetryMockup={capabilities.canGenerateArtifacts ? () => handleRetrySlot('mockup') : undefined}
+                            features={structuredPRD.features}
+                            onSaveScreenEdit={capabilities.canEditArtifacts && invArtifact && invPreferred ? handleSaveScreenEdit : undefined}
+                            onFlagToPlan={
+                                capabilities.canPersistWorkflowState && invArtifact && invPreferred
+                                    ? (request: ScreenNotePlanningRequest) => flagScreenNotePlanningConcern({
+                                        projectId,
                                         artifactId: invArtifact.id,
+                                        artifactVersionId: invPreferred.id,
+                                        spineVersionId,
                                         screenId: detailItem.id,
-                                        screenName: detailItem.screen.name,
-                                        tab: screenTab,
-                                    }),
-                                )
-                                : undefined
-                        }
-                        onAddToMockups={
-                            capabilities.canEditArtifacts && mockupDetailContext && !detailItem.mockupScreen
-                                ? () => handleAddScreenToMockups(detailItem.id)
-                                : undefined
-                        }
-                        unmatchedMockups={
-                            mockupPayload && !detailItem.mockupScreen
-                                ? mockupPayload.screens
-                                    .filter(s => !screenIndex.items.some(i => i.mockupScreen?.id === s.id))
-                                    .map(s => ({ id: s.id, name: s.name }))
-                                : undefined
-                        }
-                        onLinkMockup={
-                            capabilities.canEditArtifacts && mockupArtifact && mockupPreferred && !detailItem.mockupScreen
-                                ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
-                                : undefined
-                        }
-                        onOpenUserFlows={() => {
-                            setScreenParams(null);
-                            setSelected('user_flows');
-                        }}
-                    />
+                                        request,
+                                    }, useProjectStore.getState().flagPlanningConcern)
+                                    : undefined
+                            }
+                            planningSourceScopeKey={
+                                invArtifact && invPreferred
+                                    ? screenNotePlanningSourceScopeKey({
+                                        artifactId: invArtifact.id,
+                                        artifactVersionId: invPreferred.id,
+                                        screenId: detailItem.id,
+                                    })
+                                    : undefined
+                            }
+                            onReviewPlanningRecord={
+                                onOpenPlanningRecord && invArtifact
+                                    ? (recordId) => onOpenPlanningRecord(
+                                        recordId,
+                                        buildScreenNotePlanningReturnTarget({
+                                            artifactId: invArtifact.id,
+                                            screenId: detailItem.id,
+                                            screenName: detailItem.screen.name,
+                                            tab: screenTab,
+                                        }),
+                                    )
+                                    : undefined
+                            }
+                            onAddToMockups={
+                                capabilities.canEditArtifacts && mockupDetailContext && !detailItem.mockupScreen
+                                    ? () => handleAddScreenToMockups(detailItem.id)
+                                    : undefined
+                            }
+                            unmatchedMockups={
+                                mockupPayload && !detailItem.mockupScreen
+                                    ? mockupPayload.screens
+                                        .filter(s => !screenIndex.items.some(i => i.mockupScreen?.id === s.id))
+                                        .map(s => ({ id: s.id, name: s.name }))
+                                    : undefined
+                            }
+                            onLinkMockup={
+                                capabilities.canEditArtifacts && mockupArtifact && mockupPreferred && !detailItem.mockupScreen
+                                    ? (mockupScreenId) => handleRelinkMockupScreen(mockupScreenId, detailItem.id)
+                                    : undefined
+                            }
+                            onOpenUserFlows={() => {
+                                setScreenParams(null);
+                                setSelected('user_flows');
+                            }}
+                        />
+                    </div>
                 );
             }
 
@@ -1403,12 +1550,9 @@ export function ArtifactWorkspace({
                     : undefined,
                 lastMockupGeneratedAt: mockupPreferred?.createdAt,
                 mockupDesignDrift: screensDesignDrift,
-                onMarkUpToDate: capabilities.canReviewArtifacts && invArtifact && latestSpineId
-                    ? () => markArtifactCurrentForSpine(projectId, invArtifact.id, latestSpineId)
-                    : undefined,
                 onOpenVersionHistory: invArtifact ? () => setVersionHistoryArtifactId(invArtifact.id) : undefined,
                 onOpenMockupHistory: mockupArtifact ? () => setVersionHistoryArtifactId(mockupArtifact.id) : undefined,
-                onRegenerateMockup: capabilities.canGenerateArtifacts && mockupPreferred
+                onRegenerateMockup: capabilities.canGenerateArtifacts && mockupPreferred && !outputSyncDrift
                     ? () => setMockupRegenConfirm({ nextVersion: mockupPreferred.versionNumber + 1 })
                     : undefined,
             };
@@ -1416,20 +1560,25 @@ export function ArtifactWorkspace({
             // Stale screen id (e.g. inventory regenerated) falls back to the list.
             return (
                 <div className="space-y-4">
-                    {invArtifact && alignmentByNode.get('screen_inventory') && alignmentByNode.get('screen_inventory')?.state !== 'aligned' && (
+                    {screenInventoryValidationBanner && (
+                        <div className="mx-auto max-w-3xl xl:max-w-5xl">
+                            {screenInventoryValidationBanner}
+                        </div>
+                    )}
+                    {outputSyncEligible && (
                         <div className="mx-auto flex max-w-3xl flex-col gap-3 rounded-xl border border-indigo-200 bg-indigo-50 p-4 xl:max-w-5xl sm:flex-row sm:items-center sm:justify-between">
                             <div className="min-w-0">
-                                <p className="text-sm font-semibold text-indigo-950">Plan a focused screen review</p>
+                                <p className="text-sm font-semibold text-indigo-950">Outputs need review</p>
                                 <p className="mt-0.5 text-xs leading-relaxed text-indigo-800">
-                                    Identify the exact screens or states that need attention while preserving unrelated work.
+                                    Review every affected output together, then regenerate or keep individual outputs current.
                                 </p>
                             </div>
                             <button
                                 type="button"
-                                onClick={() => openUpdatePlanForArtifact(invArtifact.id)}
+                                onClick={openOutputSync}
                                 className="inline-flex min-h-11 shrink-0 items-center justify-center gap-1.5 rounded-lg bg-indigo-600 px-3 text-xs font-semibold text-white hover:bg-indigo-700"
                             >
-                                <ListChecks size={14} /> {currentUpdatePlanFor(invArtifact.id) ? 'Review update plan' : 'Create update plan'}
+                                <RefreshCcw size={14} /> Sync outputs
                             </button>
                         </div>
                     )}
@@ -1676,11 +1825,11 @@ export function ArtifactWorkspace({
                     .filter((label): label is string => Boolean(label));
             })()
             : undefined;
-        const blockingIssues = readValidationBlockers(preferred.metadata);
+        const validationDisposition = readArtifactValidationDisposition(preferred.metadata);
         // Small advisory note when a clean artifact was auto-enriched with PRD
         // traceability (repair succeeded → no blocking banner, just a note).
         const traceabilityRepaired =
-            blockingIssues.length === 0 &&
+            validationDisposition.effectiveStatus === 'clear' &&
             preferred.metadata?.repairType === 'traceability_enrichment' &&
             preferred.metadata?.repairSucceeded === true;
         return (
@@ -1697,29 +1846,7 @@ export function ArtifactWorkspace({
                         </p>
                     </div>
                 )}
-                {blockingIssues.length > 0 && (
-                    <div className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 p-4">
-                        <ShieldAlert size={18} className="mt-0.5 shrink-0 text-amber-600" />
-                        <div className="min-w-0">
-                            <p className="text-sm font-semibold text-amber-900">
-                                Needs review — this artifact has a blocking validation issue
-                            </p>
-                            <ul className="mt-1 list-disc pl-4 text-sm text-amber-800 space-y-0.5">
-                                {blockingIssues.map((issue, i) => <li key={i}>{issue}</li>)}
-                            </ul>
-                            <p className="text-xs text-amber-700 mt-2">
-                                The content below is preserved for review. Regenerate this artifact to try to resolve it.
-                            </p>
-                            {capabilities.canGenerateArtifacts && <button
-                                type="button"
-                                onClick={() => handleRetrySlot(activeSelection)}
-                                className="mt-2 inline-flex items-center gap-1.5 px-3 py-1.5 text-xs font-medium rounded-md bg-amber-600 hover:bg-amber-700 text-white transition"
-                            >
-                                <RefreshCcw size={12} /> Regenerate
-                            </button>}
-                        </div>
-                    </div>
-                )}
+                {renderArtifactValidationBanner(artifact.id, preferred, subtype)}
                 {subtype === 'design_system' && capabilities.canManageDesignSystem && (
                     <DesignDirectionControl
                         presetId={designSystemPreset}
@@ -1982,6 +2109,32 @@ export function ArtifactWorkspace({
                     onClose={() => setUpdatePlanId(null)}
                     onOpenSource={openUpdatePlanSource}
                     onOpenOutput={openUpdatePlanOutput}
+                />
+            )}
+
+            {outputSyncSession
+                && outputSyncSession.fingerprint === currentOutputSyncFingerprint
+                && outputSyncEligible
+                && latestSpine && (
+                <UpdateAssetsPlanModal
+                    key={outputSyncSession.fingerprint}
+                    prdLabel={resolveSpineLabel(latestSpine.id) ?? 'Current version'}
+                    changeHeadline={outputSyncHeadline}
+                    rows={outputSyncRows}
+                    onConfirm={runQuickOutputSync}
+                    previewExecution={(choices) => planOutputSyncExecution({
+                        graph: freshness.graph,
+                        evaluations: freshness.evaluations,
+                        rows: outputSyncRows,
+                        choices,
+                    })}
+                    onOpenCareful={(planId) => {
+                        setOutputSyncSession(null);
+                        setUpdatePlanId(planId);
+                    }}
+                    quickDisabled={isActive || artifactJobController.isActive(projectId)}
+                    regenerationDisabledReason={regenerationDisabledReason}
+                    onCancel={() => setOutputSyncSession(null)}
                 />
             )}
 

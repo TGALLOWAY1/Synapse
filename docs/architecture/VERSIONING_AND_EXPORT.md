@@ -36,10 +36,17 @@ markdown; no consumer parses it by heading.
 label, and staleness at export time — rendered by `renderManifestMarkdown` into
 the top of the full markdown bundle, a `manifest` field in the structured JSON,
 and (via `HandoffInput.manifestMarkdown`) between the preamble and the PRD in
-the agent handoff. When any exported asset is stale, `ExportModal` shows an
-amber warning banner (same pattern as the cloud-at-risk banner) naming the
-assets; exports are never blocked — the manifest keeps the document honest.
-Keep the manifest in sync if export composition changes.
+the agent handoff. Every project-level bundle (structured JSON, full Markdown,
+and coding-agent handoff) also receives the current
+`WorkflowCheckpointSummary`: the exact current Finalize verdict (or
+**Working plan** when no current commitment exists), accepted planning risks
+with their rationale/containment, and current critique, validation, generation,
+and alignment notes. The same summary is visible in `ExportModal`, so export
+does not invent a fresh warning vocabulary or repeat separate "exploratory"
+and stale-output banners. The cloud-at-risk warning remains separate because
+it concerns persistence, not plan quality. Exports are never blocked — the
+manifest and checkpoint make the handoff honest. Keep both in sync if export
+composition changes.
 
 ### Version history & revert (`src/components/versions/`)
 
@@ -106,18 +113,24 @@ ref would leave the graph still reporting `dependency_changed`; never do a
 partial rebase. Emits a `MarkedCurrent` history event. Exposed in the graph
 detail panel and the artifact-header strip when stale.
 
-**Re-finalize goes through the Update Assets plan.** When Mark-as-Final runs
-and downstream assets already exist (and no generation job is active),
-`ProjectWorkspace.finalizeAndGenerate` does NOT call `startAll` — it evaluates
-the dependency graph against the spine being finalized and opens
-`UpdateAssetsPlanModal` (`src/components/versions/`): a "what changed" header
-(vs the assets' newest baseline PRD version) and a per-asset choice —
-Regenerate / Mark up to date / Decide later — defaulted from
-`computeRecommendedUpdates`. Confirm finalizes, applies mark-current FIRST
-(healing confirmed upstreams), then regenerates the selection expanded via
-`expandSelectionWithTroubledUpstreams` (a selected dependent must never rebuild
-from a stale unselected visible input; marked-current upstreams count as
-healed) through the existing `regenerateSlots` path. Cancel aborts the finalize
-(spine stays non-final). First finalize and job-active re-finalizes keep the direct
-`startAll` path. Do not reintroduce a blind full regeneration on re-finalize.
+**Post-change correction uses one two-speed Sync outputs flow.**
+`ArtifactWorkspace` and the dependency graph expose Sync only when at least one
+visible output can actually be corrected. **Quick sync** opens
+`UpdateAssetsPlanModal` (`src/components/versions/`) with one guarded choice per
+drifted output — Regenerate / Mark up to date / Later — defaulted from
+`computeRecommendedUpdates`. The plan is bound to the exact spine and preferred
+artifact-version fingerprint that produced it; a changed project invalidates
+the open plan instead of applying stale choices. Confirm applies graph-safe
+mark-current choices first, then expands regeneration through troubled
+upstreams and calls the existing `regenerateSlots` path in dependency order.
+**Careful sync** discloses the per-region proposal workflow for people who need
+to inspect exact downstream changes. Update proposals are prepared in the
+background when drift is detected, and applying one immediately derives its
+verification result; manual Verify remains only for genuinely external,
+manual, or legacy changes.
 
+This Sync flow is deliberately independent from Finalize. Finalization records
+implementation intent; it does not silently regenerate existing outputs or
+open a second update ritual. Do not reintroduce blind full regeneration on
+re-finalize, partial dependency rebases, or a Sync button whose current plan
+has no actionable rows.

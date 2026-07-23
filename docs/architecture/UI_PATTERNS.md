@@ -1,6 +1,6 @@
-# UI Patterns: Selection, Progress, Tour & Metrics
+# UI Patterns: Selection, Progress, Checkpoints, Tour & Metrics
 
-> Extracted from CLAUDE.md. The PRD highlight→branch selection pipeline, PRD progress timeline, GenerationProgress modes, the interactive product tour, and orchestration metrics.
+> Extracted from CLAUDE.md. The PRD highlight→branch selection pipeline, PRD progress timeline, GenerationProgress modes, workflow checkpoints, the interactive product tour, and orchestration metrics.
 
 ### PRD highlight → branch selection pipeline
 
@@ -214,6 +214,30 @@ emitted via `onProgress` for the indicator to track. Don't include
 mutable detail (char counts, timestamps) in progress messages — that
 defeats the store's consecutive-dedupe and floods the history list.
 
+### Advisory checkpoint cards
+
+Workflow checkpoints are inline, non-blocking cards rather than modal
+interruptions:
+
+- `PreBuildCheckpointCard` appears below the stage rail at most once per
+  workspace session when generation starts with open planning attention. It
+  names the exact highest-ranked record and offers **Review first**,
+  **Generate outputs**, and **Not now**. Review uses the record's exact
+  `planningNavigation` destination/return context; neither dismissal nor
+  proceeding changes planning authority.
+- `WorkflowCheckpointSummaryCard` aggregates the current output, critique,
+  validation, and alignment signals after a generation job observed in the
+  current session settles, and again in the export dialog. Each row navigates
+  to the exact artifact or finding. The card displays the current committed
+  Finalize verdict and accepted risks; absent a current commitment it says
+  **Working plan** once.
+
+These cards are projections, not new persisted workflow state. Aggregate
+attention gets one global home in the next-action strip and one checkpoint
+echo; local surfaces use exact action labels instead of repeating counts.
+Cards and modal disclosures must retain keyboard reachability, visible focus,
+dialog labelling, Escape handling, focus restoration, and 44px mobile targets.
+
 ### Interactive product tour (`src/components/tour/`)
 
 "Meet Synapse" is a fully interactive product tour (mounted at `/tour`, with
@@ -311,4 +335,3 @@ see the LLM layer) before this; the metrics layer makes that concurrency
   `EMPTY_RUNS` selector fallback per the Selector-stability rule),
   `MetricsOverviewCards`, `WorkflowRunsTable`, `WorkflowRunDetail` (Gantt bars +
   node table). **No synthetic/demo data** — a fresh user sees an empty state.
-

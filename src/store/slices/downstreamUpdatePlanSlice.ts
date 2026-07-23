@@ -59,6 +59,7 @@ import {
     pruneDownstreamCollections,
     type DownstreamRetentionCollections,
 } from '../../lib/collectionRetention';
+import { withoutArtifactValidationAcceptance } from '../../lib/artifactValidationPolicy';
 
 export type DownstreamUpdatePlanSlice = Pick<ProjectState,
     | 'downstreamUpdatePlans'
@@ -526,7 +527,10 @@ export const createDownstreamUpdatePlanSlice: StateCreator<ProjectState, [], [],
                 versionNumber,
                 parentVersionId: artifactVersion.id,
                 content: applied.content,
-                metadata: artifactVersion.metadata,
+                // Validation acceptance is exact-version user authority. A
+                // selective content update creates a new version and must
+                // preserve the blockers while requiring a fresh acceptance.
+                metadata: withoutArtifactValidationAcceptance(artifactVersion.metadata),
                 sourceRefs: artifactVersion.sourceRefs,
                 generationPrompt: artifactVersion.generationPrompt,
                 isPreferred: true,

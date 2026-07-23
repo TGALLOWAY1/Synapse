@@ -267,6 +267,7 @@ const historyEventLanguage = {
     Edited: { label: 'Content edited' },
     Reverted: { label: 'Earlier version restored' },
     MarkedCurrent: { label: 'Output confirmed up to date' },
+    ValidationIssueAccepted: { label: 'Validation issue accepted' },
     ReadinessReviewed: { label: 'Readiness reviewed' },
     PlanCommitted: { label: 'Plan committed' },
     PlanReopened: { label: 'Plan reopened' },

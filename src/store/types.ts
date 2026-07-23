@@ -2,7 +2,8 @@ import type {
     Project, SpineVersion, HistoryEvent, Branch, StructuredPRD,
     PipelineStage, ProjectPlatform,
     Artifact, ArtifactVersion, ArtifactType, CoreArtifactSubtype,
-    SourceRef, FeedbackItem, FeedbackType, FeedbackStatus,
+    SourceRef, FeedbackItem, FeedbackStatus,
+    AcceptArtifactValidationIssueInput, AcceptArtifactValidationIssueResult,
     ArtifactSlotKey, ProjectJobState, SlotState,
     GenerationMeta, SpineSafetyReview,
     PreflightMode, PreflightQuestion,
@@ -314,6 +315,10 @@ export interface ProjectState {
     // newer spine — appends a cloned version whose sourceRefs are rebased onto
     // the given spine version and each dependency's current preferred version.
     markArtifactCurrentForSpine: (projectId: string, artifactId: string, spineVersionId: string) => { versionId: string };
+    acceptArtifactValidationIssue: (
+        projectId: string,
+        input: AcceptArtifactValidationIssueInput,
+    ) => AcceptArtifactValidationIssueResult;
     getArtifactVersions: (projectId: string, artifactId: string) => ArtifactVersion[];
     getPreferredVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
     getLatestArtifactVersion: (projectId: string, artifactId: string) => ArtifactVersion | undefined;
@@ -329,14 +334,6 @@ export interface ProjectState {
     ) => void;
 
     // Feedback actions
-    createFeedbackItem: (
-        projectId: string,
-        sourceArtifactVersionId: string,
-        type: FeedbackType,
-        title: string,
-        description: string,
-        targetArtifactType: ArtifactType
-    ) => { feedbackId: string };
     updateFeedbackStatus: (projectId: string, feedbackId: string, status: FeedbackStatus) => void;
     getFeedbackItems: (projectId: string, status?: FeedbackStatus) => FeedbackItem[];
 
@@ -413,13 +410,15 @@ export interface ProjectState {
         projectId: string,
         planningRecordId: string,
         event: DecisionEvent,
-    ) => { ok: true; duplicate: boolean } | { ok: false; reason: string };
+        guard?: import('../lib/planning/batchVerdicts').BatchVerdictGuard,
+    ) => { ok: true; duplicate: boolean }
+        | { ok: false; reason: string; code?: 'stale_target' };
     importPlanningAssumptions: (
         projectId: string,
         sourceSpineVersionId: string,
         structuredPRD: StructuredPRD,
         preflightSession?: import('../types').PreflightSession,
-    ) => { imported: number; existing: number };
+    ) => { imported: number; existing: number; importedAssumptionIds: string[] };
     addPlanningAssessment: (
         projectId: string,
         planningRecordId: string,

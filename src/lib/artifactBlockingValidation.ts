@@ -13,10 +13,15 @@
 //
 // Pure and store-free so it is trivially unit-testable.
 
-import type { CoreArtifactSubtype, StructuredPRD } from '../types';
+import type {
+    ArtifactValidationBlocker,
+    CoreArtifactSubtype,
+    StructuredPRD,
+} from '../types';
 import { parseScreenInventory } from './screenInventoryNormalize';
 import { parseDataModelMarkdown } from './services/dataModelMarkdown';
 import { parseComponentInventoryMarkdown } from './componentInventoryParse';
+import { readArtifactValidationBlockers } from './artifactValidationPolicy';
 
 // Implementation-critical artifacts whose complete lack of PRD-feature
 // traceability is a blocking defect (they drive build work and must map back
@@ -27,12 +32,10 @@ const TRACEABILITY_CRITICAL: ReadonlySet<CoreArtifactSubtype> = new Set<CoreArti
     'implementation_plan',
 ]);
 
-// The exact blocker string emitted for a missing-traceability defect. Exported
-// so the job controller can (a) recognize a traceability-only blocker set as
-// eligible for automatic repair and (b) swap in clearer wording after a repair
-// fails. Keep this in sync with the message pushed below.
-export const TRACEABILITY_BLOCKER_MESSAGE =
-    'Artifact references none of the PRD features — no traceability to the PRD.';
+export const TRACEABILITY_BLOCKER: ArtifactValidationBlocker = {
+    code: 'prd_traceability_unverified',
+    message: 'Artifact references none of the PRD features — no traceability to the PRD.',
+};
 
 // User-facing wording shown when automatic traceability repair was attempted
 // and could not confidently map the artifact to any PRD feature. Deliberately
@@ -42,21 +45,20 @@ export const TRACEABILITY_UNRESOLVED_MESSAGE =
     'traceability repair found no confident feature match). The content is preserved for review.';
 
 /** True when the blocker is the missing-traceability defect (repair-eligible). */
-export function isTraceabilityBlocker(blocker: string): boolean {
-    return blocker === TRACEABILITY_BLOCKER_MESSAGE;
-}
+export const isTraceabilityBlocker = (blocker: ArtifactValidationBlocker): boolean =>
+    blocker.code === 'prd_traceability_unverified';
 
 /**
  * Split a blocker list into traceability-only vs. everything else. A blocker set
  * is eligible for automatic traceability repair only when the traceability
  * blocker is the SOLE issue (the artifact is otherwise structurally valid).
  */
-export function classifyBlockers(blockers: string[]): {
-    traceabilityBlockers: string[];
-    otherBlockers: string[];
+export function classifyBlockers(blockers: ArtifactValidationBlocker[]): {
+    traceabilityBlockers: ArtifactValidationBlocker[];
+    otherBlockers: ArtifactValidationBlocker[];
 } {
-    const traceabilityBlockers: string[] = [];
-    const otherBlockers: string[] = [];
+    const traceabilityBlockers: ArtifactValidationBlocker[] = [];
+    const otherBlockers: ArtifactValidationBlocker[] = [];
     for (const b of blockers) {
         (isTraceabilityBlocker(b) ? traceabilityBlockers : otherBlockers).push(b);
     }
@@ -67,18 +69,24 @@ export function detectArtifactBlockers(
     subtype: CoreArtifactSubtype,
     content: string,
     prd: StructuredPRD,
-): string[] {
-    const blockers: string[] = [];
+): ArtifactValidationBlocker[] {
+    const blockers: ArtifactValidationBlocker[] = [];
     const lc = content.toLowerCase();
 
     // (1) A data model without an API surface can't be built against.
     if (subtype === 'data_model' && !lc.includes('api endpoint')) {
-        blockers.push('Data model is missing an explicit API surface mapping (no API endpoints).');
+        blockers.push({
+            code: 'data_model_api_surface_missing',
+            message: 'Data model is missing an explicit API surface mapping (no API endpoints).',
+        });
     }
 
     // (2) User flows that never mention error handling omit critical paths.
     if (subtype === 'user_flows' && !lc.includes('error')) {
-        blockers.push('User flows do not include any error paths.');
+        blockers.push({
+            code: 'user_flows_error_paths_missing',
+            message: 'User flows do not include any error paths.',
+        });
     }
 
     // (3) An implementation-critical artifact that references none of the PRD's
@@ -88,13 +96,14 @@ export function detectArtifactBlockers(
             f => lc.includes(f.id.toLowerCase()) || lc.includes(f.name.toLowerCase()),
         );
         if (!referenced) {
-            blockers.push(TRACEABILITY_BLOCKER_MESSAGE);
+            blockers.push(TRACEABILITY_BLOCKER);
         }
     }
 
-    // (4) JSON-mode artifacts that parse but hold no substantive content.
-    const emptyReason = detectStructurallyEmpty(subtype, content);
-    if (emptyReason) blockers.push(emptyReason);
+    // (4) Structured-output artifacts that cannot be parsed or parse without
+    // substantive content. These are never overridable.
+    const structureBlocker = detectStructureBlocker(subtype, content);
+    if (structureBlocker) blockers.push(structureBlocker);
 
     return blockers;
 }
@@ -103,28 +112,56 @@ export function detectArtifactBlockers(
 // metadata. Durable across reload (metadata persists), unlike the transient
 // slot status. Returns [] when the version is clean or from a legacy artifact.
 export function readValidationBlockers(metadata: Record<string, unknown> | undefined): string[] {
-    const raw = metadata?.validationBlockers;
-    if (!Array.isArray(raw)) return [];
-    return raw.filter((x): x is string => typeof x === 'string');
+    return readArtifactValidationBlockers(metadata).map(blocker => blocker.message);
 }
 
-function detectStructurallyEmpty(subtype: CoreArtifactSubtype, content: string): string | null {
+function detectStructureBlocker(
+    subtype: CoreArtifactSubtype,
+    content: string,
+): ArtifactValidationBlocker | null {
     if (subtype === 'screen_inventory') {
         const parsed = parseScreenInventory(content);
-        if (parsed && parsed.sections.flatMap(s => s.screens).length === 0) {
-            return 'Screen inventory parsed but contains no screens.';
+        if (!parsed) {
+            return {
+                code: 'output_unparseable',
+                message: 'Screen inventory could not be parsed as generated structured output.',
+            };
+        }
+        if (parsed.sections.flatMap(s => s.screens).length === 0) {
+            return {
+                code: 'output_structure_incomplete',
+                message: 'Screen inventory parsed but contains no screens.',
+            };
         }
     }
     if (subtype === 'data_model') {
         const parsed = parseDataModelMarkdown(content);
-        if (parsed && parsed.entities.length === 0) {
-            return 'Data model parsed but contains no entities.';
+        if (!parsed) {
+            return {
+                code: 'output_unparseable',
+                message: 'Data model could not be parsed as generated structured output.',
+            };
+        }
+        if (parsed.entities.length === 0) {
+            return {
+                code: 'output_structure_incomplete',
+                message: 'Data model parsed but contains no entities.',
+            };
         }
     }
     if (subtype === 'component_inventory') {
         const parsed = parseComponentInventoryMarkdown(content);
-        if (parsed && parsed.categories.every(c => c.components.length === 0)) {
-            return 'Component inventory parsed but contains no components.';
+        if (!parsed) {
+            return {
+                code: 'output_unparseable',
+                message: 'Component inventory could not be parsed as generated structured output.',
+            };
+        }
+        if (parsed.categories.every(c => c.components.length === 0)) {
+            return {
+                code: 'output_structure_incomplete',
+                message: 'Component inventory parsed but contains no components.',
+            };
         }
     }
     return null;

@@ -517,8 +517,7 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     const renderSectionUncertainty = (section: string) => {
         const assumptions = assumptionsAffecting(section);
         const durableRecords = planningRecordsAffecting(section);
-        const affectedCount = assumptions.length + durableRecords.length;
-        if (affectedCount === 0) return null;
+        if (assumptions.length + durableRecords.length === 0) return null;
         const preciseLabels = [...assumptions.flatMap(assumption =>
             (assumption.affectedPlanLocations ?? [])
                 .filter(location => normalizeSectionName(location.section) === normalizeSectionName(section))
@@ -551,13 +550,16 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                         label: `Return to ${section}`,
                     });
                 }}
+                aria-label={exactRecord
+                    ? `Review planning item: ${exactRecord.title}`
+                    : 'Review planning item'}
                 className="mb-3 flex w-full scroll-mt-24 items-start justify-between gap-3 rounded-lg border border-amber-200 bg-amber-50 px-3 py-2 text-left text-amber-900 hover:bg-amber-100"
             >
                 <span className="text-xs leading-5">
-                    <strong>{affectedCount} planning item{affectedCount === 1 ? ' needs' : 's need'} review</strong> in this section.
+                    <strong>Planning item needs review</strong> in this section.
                     {preciseLabels.length > 0 && <span className="mt-0.5 block text-amber-800">Affected: {preciseLabels.slice(0, 2).join(', ')}{preciseLabels.length > 2 ? ` +${preciseLabels.length - 2} more` : ''}</span>}
                 </span>
-                <span className="shrink-0 text-xs font-semibold underline underline-offset-2">Review</span>
+                <span className="shrink-0 text-xs font-semibold underline underline-offset-2">Review planning item</span>
             </button>
         );
     };

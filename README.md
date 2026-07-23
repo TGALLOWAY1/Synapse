@@ -36,11 +36,12 @@
 | 🧠 | **Spec in seconds, generated in parallel** | Describe your product in a sentence. Synapse writes a full, structured PRD — with sections generating concurrently so you watch it build in real time instead of waiting on one long stream. |
 | ✍️ | **Refine by highlighting** | Select any passage and choose **Clarify · Expand · Specify · Alternative · Replace**. A focused AI thread reworks just that span and merges it back — no regenerating the whole document. |
 | ✅ | **Feature-by-feature approval** | Features are broken into systems and individual cards with success criteria, edge cases, and failure modes. Confirm the ones you agree with; the plan tracks what's settled and what still needs a look. |
-| ⚖️ | **A Decision Center for the choices that matter** | Synapse surfaces the assumptions and open decisions hiding in your spec, each with 2–3 concrete approaches and its recommended answer preselected — approve it in one click or record your own. Preview the exact impact on the plan and apply it explicitly — your call, never a silent rewrite. Open decisions never block your design assets. |
+| ⚖️ | **A Decision Center for the choices that matter** | Synapse surfaces the assumptions and open decisions hiding in your spec, each with 2–3 concrete approaches and its recommended answer preselected — approve one explicitly or accept a guarded batch of recommendations. New assumptions arrive as one clear review card instead of silently filling a queue. Open decisions never block your design assets. |
 | 🎨 | **One plan → every asset** | When you're ready, generate the whole build foundation from the same source of truth: screen inventory, data model, user flows, a design system, an implementation plan, and mockups — all at once. |
 | 🖌️ | **Consistent visual direction** | Pick a design direction (Modern SaaS, Enterprise, Creative Studio…) recommended from your idea. It steers the design system, mockups, and image prompts so every asset looks like one product. |
 | 🕓 | **Nothing is ever lost** | Every regenerate, edit, decision, and merge appends a new version with a readable diff and one-click restore. History is append-only — you can always go back. |
-| 🔌 | **Everything stays connected** | Each artifact remembers the spec it came from. When the PRD moves, Synapse shows you what's still aligned and what may need a refresh — honestly labeled, never auto-invalidated. |
+| 🔌 | **Everything stays connected** | Each artifact remembers the spec it came from. When the PRD moves, **Sync outputs** offers a quick dependency-safe refresh or a careful per-change review, while exact version guards prevent stale plans from applying. |
+| 🧭 | **One honest checkpoint** | Generation and export summarize the current critique, validation, alignment, and accepted-risk state in one place. Exports stay available and carry that context into the handoff. |
 | 🛡️ | **A safety gate up front** | Every idea is checked before a single word is generated, and the check fails closed — a blocked idea can't drive any downstream artifact. |
 | 🤝 | **Hand off to a coding agent** | One click bundles the PRD and build artifacts into a package ready for Claude Code or Cursor — closing the loop from idea to implementation. |
 
@@ -73,12 +74,12 @@ Each feature carries its outcome, success criteria, edge cases, and failure mode
 <img width="100%" alt="Features view with a confirmed feature and its acceptance detail" src="public/screenshots/app-features.png" />
 
 **5 · Resolve the real decisions** ⚖️
-The Decision Center queues the assumptions and choices that actually move the plan — each with a recommended answer ready to approve in one click, a preview of its impact, and an explicit apply step. Still deciding? Skip ahead — open items never block your assets, and a quick pre-build check resurfaces them right when you start generating.
+The Decision Center queues the assumptions and choices that actually move the plan — individually or in conservative related groups — with guarded batch acceptance for recommendations. Critique is optional and never held behind a decision-count ceremony. Still deciding? Skip ahead: an inline pre-build card can point to the single next item, but open decisions never block your assets.
 
 <img width="100%" alt="Decision Center queue with a selected assumption and its impact" src="public/screenshots/app-decisions.png" />
 
 **6 · Fan out into every asset** 🎨
-From one aligned plan, generate the design system, user flows, screens, data model, and implementation plan — each tracked for freshness against the spec.
+Generate the design system, user flows, screens, data model, and implementation plan from the same source. A completion checkpoint combines generation, critique, validation, and alignment notes; after later PRD edits, Sync outputs refreshes the affected dependency graph without forcing a full rebuild.
 
 <img width="100%" alt="Explore workspace showing generated artifacts and the design system" src="public/screenshots/app-artifacts.png" />
 

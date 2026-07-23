@@ -1,5 +1,6 @@
 import { v4 as uuidv4 } from 'uuid';
 import type {
+    ArtifactValidationBlocker,
     ArtifactSlotKey,
     CoreArtifactSubtype,
     ProjectPlatform,
@@ -16,11 +17,11 @@ import { validateArtifactContent } from '../artifactValidation';
 import { validateCrossArtifactConsistency } from '../artifactOrchestration';
 import {
     detectArtifactBlockers,
-    readValidationBlockers,
     classifyBlockers,
     isTraceabilityBlocker,
     TRACEABILITY_UNRESOLVED_MESSAGE,
 } from '../artifactBlockingValidation';
+import { isArtifactVersionEligibleAsGenerationContext } from '../artifactValidationPolicy';
 import { repairTraceability } from '../artifactTraceabilityRepair';
 import {
     CORE_ARTIFACT_PIPELINE,
@@ -222,6 +223,7 @@ async function runCoreArtifactSlot(
         store.setSlotStatus(projectId, subtype, {
             status: 'generating',
             startedAt: Date.now(),
+            artifactVersionId: undefined,
             attempt: (store.getSlot(projectId, subtype)?.attempt ?? 0) + 1,
             progressLog: [],
         });
@@ -275,7 +277,7 @@ async function runCoreArtifactSlot(
     // (metadata.truncated, stamped by generateCoreArtifact on a MAX_TOKENS
     // finish) is always a blocker — salvaged-partial content must never read
     // as a trustworthy `done` artifact.
-    const initialBlockers = [
+    const initialBlockers: ArtifactValidationBlocker[] = [
         ...(extraMetadata.truncated === true ? [ARTIFACT_TRUNCATED_BLOCKER] : []),
         ...detectArtifactBlockers(subtype, content, structuredPRD),
     ];
@@ -309,7 +311,9 @@ async function runCoreArtifactSlot(
             blockers = [
                 ...otherBlockers,
                 ...postRepairBlockers.map(b =>
-                    isTraceabilityBlocker(b) ? TRACEABILITY_UNRESOLVED_MESSAGE : b,
+                    isTraceabilityBlocker(b)
+                        ? { ...b, message: TRACEABILITY_UNRESOLVED_MESSAGE }
+                        : b,
                 ),
             ];
         }
@@ -385,7 +389,7 @@ async function runCoreArtifactSlot(
     const missingRequiredDeps = findMissingRequiredDependencies(subtype, generatedArtifacts);
 
     const repairApplied = repairMetadata.repairSucceeded === true;
-    writeStore.createArtifactVersion(
+    const { versionId } = writeStore.createArtifactVersion(
         projectId,
         artifactId,
         effectiveContent,
@@ -410,6 +414,8 @@ async function runCoreArtifactSlot(
 
     writeStore.setSlotStatus(projectId, subtype, {
         status: blockers.length ? 'needs_review' : 'done',
+        artifactVersionId: versionId,
+        error: undefined,
         finishedAt: Date.now(),
     });
 }
@@ -427,7 +433,9 @@ const readPreferredArtifactForSpine = (
     const matches = preferred.sourceRefs.some(
         r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
     );
-    return matches ? preferred.content : null;
+    return matches && isArtifactVersionEligibleAsGenerationContext(preferred)
+        ? preferred.content
+        : null;
 };
 
 const readPreferredArtifactRef = (
@@ -443,7 +451,9 @@ const readPreferredArtifactRef = (
     const matches = preferred.sourceRefs.some(
         r => r.sourceType === 'spine' && r.sourceArtifactVersionId === spineVersionId,
     );
-    return matches ? { artifactId: artifact.id, versionId: preferred.id } : null;
+    return matches && isArtifactVersionEligibleAsGenerationContext(preferred)
+        ? { artifactId: artifact.id, versionId: preferred.id }
+        : null;
 };
 
 async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void> {
@@ -459,6 +469,7 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         store.setSlotStatus(projectId, 'mockup', {
             status: 'generating',
             startedAt: Date.now(),
+            artifactVersionId: undefined,
             attempt: (store.getSlot(projectId, 'mockup')?.attempt ?? 0) + 1,
             progressLog: [],
         });
@@ -554,7 +565,12 @@ async function runMockupSlot(args: StartArgs, signal: AbortSignal): Promise<void
         parentVersionId,
     );
 
-    writeStore.setSlotStatus(projectId, 'mockup', { status: 'done', finishedAt: Date.now() });
+    writeStore.setSlotStatus(projectId, 'mockup', {
+        status: 'done',
+        artifactVersionId: newVersion.versionId,
+        error: undefined,
+        finishedAt: Date.now(),
+    });
 
     // Fire-and-forget: kick off low-quality AI image generation for each
     // screen. The AI image is the sole visual deliverable, so kicking it
@@ -610,7 +626,7 @@ async function executeJob(args: StartArgs, controller: AbortController, slotKeys
         // artifact must not seed dependency context for a later layer.
         if (preferred
             && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)
-            && readValidationBlockers(preferred.metadata).length === 0) {
+            && isArtifactVersionEligibleAsGenerationContext(preferred)) {
             generatedArtifacts[meta.subtype] = preferred.content;
         }
     }
@@ -760,7 +776,7 @@ function isDependencyHealthy(projectId: string, subtype: CoreArtifactSubtype, sp
     if (!artifact) return false;
     const preferred = store.getPreferredVersion(projectId, artifact.id);
     if (!preferred) return false;
-    return !(Array.isArray(preferred.metadata?.validationBlockers) && preferred.metadata.validationBlockers.length > 0);
+    return isArtifactVersionEligibleAsGenerationContext(preferred);
 }
 
 export const artifactJobController = {
@@ -814,7 +830,11 @@ export const artifactJobController = {
         if (!store.getJob(args.projectId)) {
             store.initJob(args.projectId, args.spineVersionId, [slot]);
         }
-        store.setSlotStatus(args.projectId, slot, { status: 'queued', error: undefined });
+        store.setSlotStatus(args.projectId, slot, {
+            status: 'queued',
+            artifactVersionId: undefined,
+            error: undefined,
+        });
 
         const controller = new AbortController();
         const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
@@ -994,7 +1014,11 @@ export const artifactJobController = {
         if (!store.getJob(args.projectId)) {
             store.initJob(args.projectId, args.spineVersionId, [slot]);
         }
-        store.setSlotStatus(args.projectId, slot, { status: 'queued', error: undefined });
+        store.setSlotStatus(args.projectId, slot, {
+            status: 'queued',
+            artifactVersionId: undefined,
+            error: undefined,
+        });
 
         const generatedArtifacts: Partial<Record<CoreArtifactSubtype, string>> = {};
         for (const meta of CORE_ARTIFACT_PIPELINE) {
@@ -1004,7 +1028,7 @@ export const artifactJobController = {
             // Skip needs_review versions — they must not seed dependency context.
             if (preferred
                 && preferred.sourceRefs.some(r => r.sourceType === 'spine' && r.sourceArtifactVersionId === args.spineVersionId)
-                && readValidationBlockers(preferred.metadata).length === 0) {
+                && isArtifactVersionEligibleAsGenerationContext(preferred)) {
                 generatedArtifacts[meta.subtype] = preferred.content;
             }
         }
