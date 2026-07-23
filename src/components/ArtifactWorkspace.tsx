@@ -28,6 +28,7 @@ import { VersionHistoryPanel, type VersionEntry } from './versions';
 import { ChangeDirectionModal } from './setup/ChangeDirectionModal';
 import { DesignDirectionControl } from './DesignDirectionControl';
 import { ConfirmDialog } from './common/ConfirmDialog';
+import { ArtifactFlagToPlanControl } from './planning/ArtifactFlagToPlanControl';
 import { v4 as uuidv4 } from 'uuid';
 import {
     tryParsePayload, extractMockupSettings, mergeExtraScreens,
@@ -71,6 +72,7 @@ import type {
     PlanningReturnTarget,
 } from '../lib/planning/planningNavigation';
 import {
+    artifactConcernPlanningSourceKey,
     buildScreenNotePlanningReturnTarget,
     flagScreenNotePlanningConcern,
     screenNotePlanningSourceScopeKey,
@@ -79,7 +81,7 @@ import { useProjectFreshness } from '../hooks/useProjectFreshness';
 import { isStaleStatus, hasDesignTokenDrift } from '../lib/artifactFreshness';
 import type {
     ArtifactSlotKey, CoreArtifactSubtype, MockupScreen, ProjectPlatform, StructuredPRD,
-    GenerationStatus, ProjectTask,
+    ArtifactVersion, GenerationStatus, ProjectTask,
 } from '../types';
 import { useProjectCapabilities } from '../hooks/useProjectCapabilities';
 
@@ -1120,8 +1122,14 @@ export function ArtifactWorkspace({
     // rides on the evaluation's prd_changed reason (no separate resolver).
     const renderVersionControls = (
         artifactId: string,
-        preferred: { sourceRefs: { sourceType: string; sourceArtifactVersionId: string }[] },
+        preferred: ArtifactVersion,
     ) => {
+        const artifact = getArtifact(projectId, artifactId);
+        const artifactSlot = artifact?.type === 'mockup'
+            ? 'mockup'
+            : artifact?.type === 'core_artifact'
+                ? artifact.subtype
+                : undefined;
         const ev = freshness.byArtifactId.get(artifactId);
         const status = ev?.status;
         const alignment = projectOutputAlignment.outputs.find(output => output.artifactId === artifactId);
@@ -1182,6 +1190,47 @@ export function ArtifactWorkspace({
                     >
                         <History size={12} /> Version history
                     </button>
+                    {artifact && artifactSlot && capabilities.canPersistWorkflowState && (
+                        <ArtifactFlagToPlanControl
+                            artifactTitle={artifact.title}
+                            onCreate={({ title, statement }) => {
+                                const trimmedTitle = title.trim();
+                                const trimmedStatement = statement.trim();
+                                return useProjectStore.getState().flagPlanningConcern(projectId, {
+                                    sourceKey: artifactConcernPlanningSourceKey({
+                                        artifactId: artifact.id,
+                                        artifactVersionId: preferred.id,
+                                        title: trimmedTitle,
+                                        statement: trimmedStatement,
+                                    }),
+                                    artifactId: artifact.id,
+                                    artifactVersionId: preferred.id,
+                                    artifactSubtype: artifact.type === 'core_artifact'
+                                        ? artifact.subtype
+                                        : undefined,
+                                    artifactSlot,
+                                    spineVersionId,
+                                    title: trimmedTitle,
+                                    statement: trimmedStatement,
+                                    materiality: 'normal',
+                                    locator: {
+                                        entityType: 'artifact',
+                                        entityId: artifact.id,
+                                    },
+                                });
+                            }}
+                            onReviewNow={onOpenPlanningRecord
+                                ? (recordId) => onOpenPlanningRecord(recordId, {
+                                    destination: {
+                                        kind: 'artifact',
+                                        artifactId: artifact.id,
+                                        nodeId: artifactSlot,
+                                    },
+                                    label: `Back to ${artifact.title}`,
+                                })
+                                : undefined}
+                        />
+                    )}
                 </div>
                 {alignment && <OutputAlignmentNotice alignment={alignment} />}
             </div>

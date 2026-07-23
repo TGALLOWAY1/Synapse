@@ -29,4 +29,24 @@ describe('Phase 5A rendered mobile release regressions', () => {
         expect(artifacts).toContain('inert={isMobile && mobileSidebarOpen ? true : undefined}');
         expect(artifacts).toContain("if (event.key === 'Escape')");
     });
+
+    it('keeps artifact concern capture responsive and gates it to exact writable generated versions', () => {
+        const control = source('planning/ArtifactFlagToPlanControl.tsx');
+        const artifacts = source('ArtifactWorkspace.tsx');
+
+        expect(control).toContain('min-h-11');
+        expect(control).toContain('aria-modal="true"');
+        expect(control).toContain('flex-col');
+        expect(control).toContain('sm:flex-row');
+        expect(control).toMatch(/className="[^"]*w-full[^"]*sm:w-auto"/);
+
+        expect(artifacts).toContain('preferred: ArtifactVersion');
+        expect(artifacts).toContain("artifact?.type === 'mockup'");
+        expect(artifacts).toContain("artifact?.type === 'core_artifact'");
+        expect(artifacts).toContain('artifactSlot && capabilities.canPersistWorkflowState');
+        expect(artifacts).toContain('artifactVersionId: preferred.id');
+        expect(artifacts).toContain('artifactConcernPlanningSourceKey({');
+        expect(artifacts).toContain('artifactId: artifact.id,');
+        expect(artifacts).toContain('nodeId: artifactSlot,');
+    });
 });
