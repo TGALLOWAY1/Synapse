@@ -23,6 +23,9 @@ screenshots-demo/
 # Live e2e run output (screenshots + report.json — not committed)
 e2e-results/
 
+# Local workflow-design companion sessions
+.superpowers/
+
 # Editor & OS
 .vscode/*
 !.vscode/extensions.json
