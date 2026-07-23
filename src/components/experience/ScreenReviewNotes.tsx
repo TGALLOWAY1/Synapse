@@ -36,18 +36,6 @@ export type ScreenNotePlanningRequest = {
     materiality: 'blocking' | 'high' | 'normal' | 'low';
 };
 
-type ScreenNoteFlagResult =
-    | {
-        noteId: string;
-        status: 'created' | 'existing';
-        planningRecordId: string;
-    }
-    | {
-        noteId: string;
-        status: 'rejected';
-        reason: 'source_not_found' | 'source_changed' | 'spine_not_found';
-    };
-
 /** Stable key for a risk (so a resolution survives re-renders / re-order). */
 function riskKey(description: string): string {
     return description.trim().toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-+|-+$/g, '').slice(0, 60) || 'risk';
@@ -128,11 +116,17 @@ export function ScreenReviewNotes({
     const itemCount = actionableIssues.length + openRisks.length;
     const [open, setOpen] = useState(false);
     const [showAddressed, setShowAddressed] = useState(false);
-    const [flagResult, setFlagResult] = useState<ScreenNoteFlagResult>();
+    const [flagResults, setFlagResults] = useState<ReadonlyMap<string, FlagPlanningConcernResult>>(
+        () => new Map(),
+    );
     const triggerRefs = useRef(new Map<string, HTMLButtonElement>());
 
     const keepReviewing = (noteId: string) => {
-        setFlagResult(undefined);
+        setFlagResults(current => {
+            const next = new Map(current);
+            next.delete(noteId);
+            return next;
+        });
         window.requestAnimationFrame(() => triggerRefs.current.get(noteId)?.focus());
     };
 
@@ -186,9 +180,7 @@ export function ScreenReviewNotes({
                         <ul className="space-y-2.5">
                             {visibleIssues.map(issue => {
                                 const action = issueAction(issue.category);
-                                const issueFlagResult = flagResult?.noteId === issue.id
-                                    ? flagResult
-                                    : undefined;
+                                const issueFlagResult = flagResults.get(issue.id);
                                 return (
                                     <li key={issue.id} className="flex items-start gap-2.5">
                                         <span className={`h-1.5 w-1.5 rounded-full mt-1.5 shrink-0 ${SEVERITY_DOT[issue.severity]}`} aria-hidden />
@@ -245,7 +237,9 @@ export function ScreenReviewNotes({
                                                                     statement: issue.description,
                                                                     materiality: screenIssueMateriality(issue.severity),
                                                                 });
-                                                                setFlagResult({ noteId: issue.id, ...result });
+                                                                setFlagResults(current => (
+                                                                    new Map(current).set(issue.id, result)
+                                                                ));
                                                             }}
                                                             className="min-h-11 inline-flex items-center text-[11px] font-medium text-indigo-600 hover:text-indigo-800 disabled:cursor-default disabled:text-neutral-400"
                                                         >

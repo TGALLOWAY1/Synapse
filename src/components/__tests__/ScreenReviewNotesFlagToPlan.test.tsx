@@ -2,7 +2,10 @@ import { fireEvent, render, screen, waitFor, within } from '@testing-library/rea
 import { describe, expect, it, vi } from 'vitest';
 import type { ScreenReviewIssue } from '../../lib/screenReviewWorkflow';
 import type { FlagPlanningConcernResult } from '../../lib/planning/flagToPlan';
-import { ScreenReviewNotes } from '../experience/ScreenReviewNotes';
+import {
+    ScreenReviewNotes,
+    type ScreenNotePlanningRequest,
+} from '../experience/ScreenReviewNotes';
 
 const blockingIssue: ScreenReviewIssue = {
     id: 'note-1',
@@ -91,6 +94,32 @@ describe('ScreenReviewNotes Flag to plan', () => {
         expect(within(note).getByRole('status')).toHaveTextContent('Already in the plan');
         fireEvent.click(within(note).getByRole('button', { name: 'Review now' }));
         expect(onReviewPlanningRecord).toHaveBeenCalledWith('planning-existing');
+    });
+
+    it('preserves independent results while dismissing one note', async () => {
+        const onFlagToPlan = (
+            request: ScreenNotePlanningRequest,
+        ): FlagPlanningConcernResult => (
+            request.noteId === 'note-1'
+                ? { status: 'created', planningRecordId: 'planning-created' }
+                : { status: 'existing', planningRecordId: 'planning-existing' }
+        );
+        render(<ScreenReviewNotes {...baseProps} onFlagToPlan={onFlagToPlan} />);
+
+        openReviewNotes();
+        const createdNote = noteRow('Recovery path is missing');
+        const existingNote = noteRow('Loading behavior needs detail');
+        const createdTrigger = within(createdNote).getByRole('button', { name: 'Flag to plan' });
+        fireEvent.click(createdTrigger);
+        fireEvent.click(within(existingNote).getByRole('button', { name: 'Flag to plan' }));
+
+        expect(within(createdNote).getByRole('status')).toHaveTextContent('Added to the plan');
+        expect(within(existingNote).getByRole('status')).toHaveTextContent('Already in the plan');
+
+        fireEvent.click(within(createdNote).getByRole('button', { name: 'Keep reviewing' }));
+        await waitFor(() => expect(createdTrigger).toHaveFocus());
+        expect(within(createdNote).queryByRole('status')).toBeNull();
+        expect(within(existingNote).getByRole('status')).toHaveTextContent('Already in the plan');
     });
 
     it('announces a changed source without offering Review now', () => {
