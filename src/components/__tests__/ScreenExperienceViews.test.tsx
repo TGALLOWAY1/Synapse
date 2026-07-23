@@ -7,9 +7,11 @@ import { buildScreenReviewIndex, summarizeArtifactReviewReadiness } from '../../
 import { parseFlows } from '../renderers/userFlows/parseFlow';
 import { ScreenListView } from '../experience/ScreenListView';
 import { ScreenDetailView } from '../experience/ScreenDetailView';
+import type { ScreenNotePlanningRequest } from '../experience/ScreenReviewNotes';
 import { useProjectStore } from '../../store/projectStore';
 import { useMockupImageStore } from '../../store/mockupImageStore';
 import type { MockupImageRecord } from '../../types';
+import type { FlagPlanningConcernResult } from '../../lib/planning/flagToPlan';
 
 // SYN-003: the primary Default variant now reads "Generated" only when a real
 // image exists in the mockup image store. Detail-view tests that exercise a
@@ -414,6 +416,8 @@ function renderContractDetail(
     opts: {
         edits?: Parameters<typeof buildScreenIndex>[3];
         onSaveScreenEdit?: (id: string, edit: ScreenMetadataEdit | null) => void;
+        onFlagToPlan?: (request: ScreenNotePlanningRequest) => FlagPlanningConcernResult;
+        onReviewPlanningRecord?: (recordId: string) => void;
         withMockupContext?: boolean;
         trustContext?: import('../../lib/mockupVariantTrust').VariantTrustContext;
     } = {},
@@ -436,6 +440,8 @@ function renderContractDetail(
             features={FEATURES}
             mobileRelevant
             onSaveScreenEdit={opts.onSaveScreenEdit}
+            onFlagToPlan={opts.onFlagToPlan}
+            onReviewPlanningRecord={opts.onReviewPlanningRecord}
             mockupContext={opts.withMockupContext === false ? undefined : {
                 projectId: 'p1',
                 artifactId: 'a1',
@@ -614,6 +620,35 @@ describe('review notes', () => {
         const review = edit.review as Record<string, unknown>;
         expect(review.riskResolutions).toBeTruthy();
         expect(Object.values(review.riskResolutions as Record<string, string>)).toContain('Retry then fall back');
+    });
+
+    it('threads planning actions through the screen detail review notes', () => {
+        const onFlagToPlan = vi.fn((request: ScreenNotePlanningRequest): FlagPlanningConcernResult => {
+            void request;
+            return {
+                status: 'existing',
+                planningRecordId: 'planning-screen-note',
+            };
+        });
+        const onReviewPlanningRecord = vi.fn();
+        const { getByText, getAllByRole, getByRole } = renderContractDetail('overview', {
+            onSaveScreenEdit: vi.fn(),
+            onFlagToPlan,
+            onReviewPlanningRecord,
+        });
+
+        fireEvent.click(getByText('Review notes'));
+        fireEvent.click(getAllByRole('button', { name: 'Flag to plan' })[0]);
+
+        expect(onFlagToPlan).toHaveBeenCalledTimes(1);
+        expect(onFlagToPlan.mock.calls[0]?.[0]).toEqual(expect.objectContaining({
+            noteId: expect.any(String),
+            title: expect.any(String),
+            statement: expect.any(String),
+            materiality: expect.stringMatching(/^(blocking|high|normal|low)$/),
+        }));
+        fireEvent.click(getByRole('button', { name: 'Review now' }));
+        expect(onReviewPlanningRecord).toHaveBeenCalledWith('planning-screen-note');
     });
 });
 
