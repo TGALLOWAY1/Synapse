@@ -49,13 +49,20 @@ export function JourneyRail({ presentation, onStepChange }: JourneyRailProps) {
                             key={step.id}
                             className="min-w-[7.25rem] flex-1 snap-start sm:min-w-[8.25rem]"
                         >
+                            {/* `relative` is load-bearing: the sr-only description
+                                span is position:absolute, and without a positioned
+                                ancestor inside this overflow-x scroller its
+                                containing block escalates to the document — the
+                                off-screen steps then widen <html> past the mobile
+                                viewport and the whole page becomes horizontally
+                                pannable (dead gutter on iOS). */}
                             <button
                                 type="button"
                                 onClick={() => step.enabled && onStepChange(step.id)}
                                 disabled={!step.enabled}
                                 aria-current={current ? 'step' : undefined}
                                 aria-describedby={`journey-step-${step.id}-description`}
-                                className={`flex min-h-12 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 ${
+                                className={`relative flex min-h-12 w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left transition focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-indigo-400 focus-visible:ring-offset-2 focus-visible:ring-offset-neutral-900 ${
                                     current
                                         ? 'bg-indigo-600 text-white'
                                         : complete

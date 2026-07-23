@@ -315,6 +315,10 @@ const report = {
     // failed" header badge). Bucketed separately so they don't read as app
     // defects.
     expectedLocalApiErrors: [],
+    // Views where document.documentElement.scrollWidth exceeded the viewport
+    // at capture time — horizontal overflow that makes the page pannable on
+    // mobile. Populated by fullShot(); treat entries as layout defects.
+    horizontalOverflow: [],
     screenshots: [],
 };
 
@@ -374,6 +378,19 @@ async function fullShot(page, slug, { cap = 8000, buffer = 80 } = {}) {
         await settle(200);
     }
     const file = await shot(page, slug, { fullPage: true });
+    // Horizontal-overflow tripwire: a document wider than the viewport means
+    // the page pans sideways on real phones (the JourneyRail sr-only bug's
+    // signature). Recorded per shot so regressions surface in report.json.
+    try {
+        const overflow = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+        }));
+        if (overflow.scrollWidth > overflow.innerWidth + 1) {
+            report.horizontalOverflow.push({ slug, file, ...overflow });
+            console.warn(`  ⚠ horizontal overflow: document ${overflow.scrollWidth}px > viewport ${overflow.innerWidth}px`);
+        }
+    } catch { /* measurement is best-effort */ }
     if (delta > 0) {
         await page.setViewportSize(original);
         await settle(100);
@@ -440,7 +457,14 @@ async function gotoStage(page, stage) {
     if (stage === 'prd') return gotoJourneyStep(page, 'define');
     if (stage === 'review') {
         await gotoJourneyStep(page, 'define');
-        await page.getByRole('button', { name: 'Challenge this plan' }).click({ timeout: 6000 });
+        // "Challenge this plan" lives inside the PlanningStateBar's collapsed
+        // "Review details and planning tools" <details> — expand it first.
+        const challenge = page.getByRole('button', { name: 'Challenge this plan' });
+        if (!(await challenge.isVisible().catch(() => false))) {
+            await page.getByText('Review details and planning tools').click({ timeout: 6000 });
+            await settle(400);
+        }
+        await challenge.click({ timeout: 6000 });
         await settle(800);
         return;
     }
@@ -1040,7 +1064,11 @@ try {
             let assetsTriggered = false;
             if (GENERATE_ASSETS) {
                 await step('commit plan (readiness checkpoint)', async () => {
-                    await page.getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 });
+                    // Scoped to the top-bar banner: the journey rail's Finalize
+                    // step also carries "Review readiness" in its accessible
+                    // name (via its description), so an unscoped match is a
+                    // strict-mode violation.
+                    await page.getByRole('banner').getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 });
                     await settle(1200);
                     await fullShot(page, 'readiness-checkpoint');
                     // "Finalize plan" appears only when the plan is ready-to-build; an
