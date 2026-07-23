@@ -24,6 +24,7 @@ import {
     assumptionStatementHash,
     assumptionValidationDecisionEvent,
     appendDecisionEvent,
+    buildFlagPlanningRecordInput,
     importPrdAssumptions,
     normalizePlanningRecord,
     planningContentHash,
@@ -33,6 +34,7 @@ import {
     sealAssumptionValidationEvent,
     type AssumptionEvidenceRecordedEvent,
     type AssumptionEvidenceRetractedEvent,
+    type FlagPlanningConcernResult,
 } from '../../lib/planning';
 import type {
     AssumptionEvidenceCorrectionInput,
@@ -61,6 +63,7 @@ export type ReviewSlice = Pick<
     | 'applyReviewIssueDisposition'
     | 'reopenReviewIssue'
     | 'createPlanningRecord'
+    | 'flagPlanningConcern'
     | 'setPlanningRecordDecisionOptions'
     | 'updatePlanningRecordStatusByUser'
     | 'appendPlanningDecisionEvent'
@@ -136,6 +139,44 @@ const planningRecordInitialStatus = (
         return input.type === 'decision' ? 'proposed' : 'open';
     }
     return input.status;
+};
+
+export const createPlanningRecordValue = (
+    projectId: string,
+    input: Parameters<ProjectState['createPlanningRecord']>[1],
+    now = Date.now(),
+): PlanningRecord => {
+    const id = uuidv4();
+    return {
+        ...input,
+        id,
+        projectId,
+        status: planningRecordInitialStatus(input),
+        createdAt: now,
+        updatedAt: now,
+        schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
+        events: input.events ?? [{
+            id: uuidv4(),
+            planningRecordId: id,
+            type: 'created',
+            actor: input.createdBy === 'user' ? 'user' : 'synapse',
+            at: now,
+        }],
+        // Creation never confirms a review-derived record, even if a caller
+        // supplied a timestamp along with an unsafe requested status.
+        confirmedAt: input.createdBy === 'specialist_review' || input.createdBy === 'synapse'
+            ? undefined
+            : input.confirmedAt,
+        // Validation authority is append-only. Creation inputs—including
+        // model/review output—cannot smuggle a user conclusion into a new
+        // assumption record.
+        assumptionValidation: input.type === 'assumption' ? {
+            schemaVersion: ASSUMPTION_VALIDATION_SCHEMA_VERSION,
+            events: [],
+            planProposals: [],
+            interpretationProposals: [],
+        } : undefined,
+    };
 };
 
 export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> = (set) => ({
@@ -364,45 +405,80 @@ export const createReviewSlice: StateCreator<ProjectState, [], [], ReviewSlice> 
     },
 
     createPlanningRecord: (projectId, input) => {
-        const id = uuidv4();
-        const now = Date.now();
-        const record: PlanningRecord = {
-            ...input,
-            id,
-            projectId,
-            status: planningRecordInitialStatus(input),
-            createdAt: now,
-            updatedAt: now,
-            schemaVersion: PLANNING_RECORD_SCHEMA_VERSION,
-            events: input.events ?? [{
-                id: uuidv4(),
-                planningRecordId: id,
-                type: 'created',
-                actor: input.createdBy === 'user' ? 'user' : 'synapse',
-                at: now,
-            }],
-            // Creation never confirms a review-derived record, even if a caller
-            // supplied a timestamp along with an unsafe requested status.
-            confirmedAt: input.createdBy === 'specialist_review' || input.createdBy === 'synapse'
-                ? undefined
-                : input.confirmedAt,
-            // Validation authority is append-only. Creation inputs—including
-            // model/review output—cannot smuggle a user conclusion into a new
-            // assumption record.
-            assumptionValidation: input.type === 'assumption' ? {
-                schemaVersion: ASSUMPTION_VALIDATION_SCHEMA_VERSION,
-                events: [],
-                planProposals: [],
-                interpretationProposals: [],
-            } : undefined,
-        };
+        const record = createPlanningRecordValue(projectId, input);
         set((state) => ({
             planningRecords: {
                 ...state.planningRecords,
                 [projectId]: [...(state.planningRecords[projectId] ?? []), record],
             },
         }));
-        return { planningRecordId: id };
+        return { planningRecordId: record.id };
+    },
+
+    flagPlanningConcern: (projectId, input) => {
+        let outcome: FlagPlanningConcernResult = {
+            status: 'rejected',
+            reason: 'source_not_found',
+        };
+        set((state) => {
+            const records = state.planningRecords[projectId] ?? [];
+            const existing = records.find((record) => {
+                const normalized = normalizePlanningRecord(record);
+                const status = projectDecision(normalized).status;
+                return (status === 'open' || status === 'proposed')
+                    && normalized.sources?.some(source => source.key === input.sourceKey);
+            });
+            if (existing) {
+                outcome = {
+                    status: 'existing',
+                    planningRecordId: existing.id,
+                };
+                return state;
+            }
+
+            const artifact = (state.artifacts[projectId] ?? [])
+                .find(item => item.id === input.artifactId);
+            const version = (state.artifactVersions[projectId] ?? [])
+                .find(item => (
+                    item.id === input.artifactVersionId
+                    && item.artifactId === input.artifactId
+                ));
+            if (!artifact || !version) return state;
+
+            if (artifact.currentVersionId !== version.id || !version.isPreferred) {
+                outcome = {
+                    status: 'rejected',
+                    reason: 'source_changed',
+                };
+                return state;
+            }
+
+            const spineExists = (state.spineVersions[projectId] ?? [])
+                .some(spine => spine.id === input.spineVersionId);
+            if (!spineExists) {
+                outcome = {
+                    status: 'rejected',
+                    reason: 'spine_not_found',
+                };
+                return state;
+            }
+
+            const record = createPlanningRecordValue(
+                projectId,
+                buildFlagPlanningRecordInput(input),
+            );
+            outcome = {
+                status: 'created',
+                planningRecordId: record.id,
+            };
+            return {
+                planningRecords: {
+                    ...state.planningRecords,
+                    [projectId]: [...records, record],
+                },
+            };
+        });
+        return outcome;
     },
 
     setPlanningRecordDecisionOptions: (projectId, planningRecordId, input) => {

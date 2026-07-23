@@ -388,6 +388,10 @@ export interface ProjectState {
         projectId: string,
         input: Omit<PlanningRecord, 'id' | 'projectId' | 'createdAt' | 'updatedAt'>,
     ) => { planningRecordId: string };
+    flagPlanningConcern: (
+        projectId: string,
+        input: import('../lib/planning/flagToPlan').FlagPlanningConcernInput,
+    ) => import('../lib/planning/flagToPlan').FlagPlanningConcernResult;
     /** Stores machine-suggested alternatives for an unresolved decision or
      * open question. Advisory only — refused once a user verdict exists. */
     setPlanningRecordDecisionOptions: (
