@@ -338,6 +338,12 @@ const report = {
     // at capture time — horizontal overflow that makes the page pannable on
     // mobile. Populated by fullShot(); treat entries as layout defects.
     horizontalOverflow: [],
+    // Overflow-hidden containers found scrolled at capture time (focus
+    // restores / scrollIntoView can scroll them programmatically, hiding
+    // content with no way for the user to scroll back). fullShot() resets
+    // them before capturing and records each occurrence here as a defect
+    // signal.
+    hiddenScrollResets: [],
     screenshots: [],
 };
 
@@ -361,6 +367,33 @@ async function shot(page, slug, { fullPage = true } = {}) {
 // max-height still clip.
 async function fullShot(page, slug, { cap = 8000, buffer = 80 } = {}) {
     const original = page.viewportSize() ?? { width: 1440, height: 900 };
+    // An overflow-hidden/clip container that is nevertheless scrolled (via a
+    // programmatic scrollIntoView or focus restore) hides content the user
+    // can never scroll back to — reset it and record the occurrence as a
+    // defect signal.
+    try {
+        const resets = await page.evaluate(() => {
+            const out = [];
+            for (const el of document.querySelectorAll('*')) {
+                const cs = getComputedStyle(el);
+                const hiddenY = cs.overflowY === 'hidden' || cs.overflowY === 'clip';
+                const hiddenX = cs.overflowX === 'hidden' || cs.overflowX === 'clip';
+                if ((hiddenY && el.scrollTop > 0) || (hiddenX && el.scrollLeft > 0)) {
+                    out.push({
+                        el: `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}`,
+                        scrollTop: el.scrollTop, scrollLeft: el.scrollLeft,
+                    });
+                    if (hiddenY) el.scrollTop = 0;
+                    if (hiddenX) el.scrollLeft = 0;
+                }
+            }
+            return out;
+        });
+        for (const r of resets) {
+            report.hiddenScrollResets.push({ slug, ...r });
+            console.warn(`  ⚠ hidden-overflow container was scrolled (${r.el}: top=${r.scrollTop}, left=${r.scrollLeft}) — reset before capture`);
+        }
+    } catch { /* best-effort */ }
     let delta = 0;
     try {
         delta = await page.evaluate(() => {

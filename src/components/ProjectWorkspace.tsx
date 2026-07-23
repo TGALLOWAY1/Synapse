@@ -2181,8 +2181,14 @@ function ProjectWorkspaceSession({ projectId }: { projectId?: string }) {
                 </div>
             )}
 
-            {/* Main Workspace Area — flex-1 fills remaining height */}
-            <div className="flex-1 flex overflow-hidden">
+            {/* Main Workspace Area — flex-1 fills remaining height.
+                overflow-clip (with overflow-hidden as the older-Safari
+                fallback) forbids programmatic scrolling of this container:
+                with plain hidden, focus restores and scrollIntoView calls
+                from inside (e.g. the mobile artifact drawer's close-focus
+                dance) can scroll it, shoving the workspace banners up out
+                of view with no way to scroll back. */}
+            <div className="flex-1 flex overflow-hidden overflow-clip">
                 {pipelineStage === 'workspace' && activeSpine?.structuredPRD && activeSpine.safetyReview?.status !== 'blocked' ? (
                     <div className="flex min-h-0 min-w-0 flex-1 flex-col">
                         {/* The read-only demo already carries a workspace-level
