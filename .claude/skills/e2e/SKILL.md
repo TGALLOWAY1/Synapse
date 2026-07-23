@@ -49,8 +49,8 @@ include the view):
 | `src/components/renderers/implementationPlan/` | `implementation-plan` |
 | `src/components/dependency/` | `dependency-graph` |
 | `DesignSystemRenderer` / design-system renderers | `design-system` |
-| `HistoryView`, `src/components/versions/` | `history` |
-| `ArtifactWorkspace`, `ProjectWorkspace`, `PipelineStageBar` (shell) | all — run without `--views` |
+| `HistoryView`/`HistoryPanel`, `src/components/versions/` | `history` |
+| `ArtifactWorkspace`, `ProjectWorkspace`, `JourneyRail` (shell) | all — run without `--views` |
 
 ## 1. Run
 
@@ -71,7 +71,7 @@ npm run e2e:smoke            # no key: boot + form + start-dialog only
   account is involved and nothing syncs to the server.
 - The default live run walks the **whole arc**: idea → PRD → commit through
   the readiness gate → asset bundle → the full view/tab inventory (PRD
-  Overview+Features, Challenge stage decisions/findings/history, every
+  Overview+Features, Challenge surface findings/history + Decision Center slide-over, every
   artifact including Implementation Plan's five section tabs, Screens
   list→detail Overview/Flow/Mockups, per-flow User Flows shots, History) →
   `state.json` export. Screenshots are **full-height** (the harness grows
