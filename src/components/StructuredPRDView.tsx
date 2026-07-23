@@ -1,5 +1,5 @@
 import { useState, useEffect, useMemo, useRef } from 'react';
-import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight } from 'lucide-react';
+import { Pencil, Check, X, Plus, Trash2, Sparkles, Loader2, ChevronDown, ChevronRight, ListChecks, ArrowRight } from 'lucide-react';
 import Mark from 'mark.js';
 import { useProjectStore } from '../store/projectStore';
 import { structuredPRDToMarkdown, replyInBranch } from '../lib/llmProvider';
@@ -30,6 +30,7 @@ import {
     deriveImplementationSummary,
     featureDetailAnchorId,
     isImplementationSummaryEmpty,
+    type SummaryFeature,
 } from '../lib/derive/implementationSummary';
 import {
     coercePrdView,
@@ -918,53 +919,76 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
     };
 
     // Compact scope surface for the Overview. Deliberately NOT the full feature
-    // list (that lives in the Features view) — it states the scope DECISION
-    // (rationale), which features are in MVP / next as small reference chips,
-    // and how many are deferred. Chips link into the Features/Decisions views.
-    const renderScopeGroup = (label: string, items: Array<{ id?: string; name: string }>) => {
-        if (items.length === 0) return null;
+    // list (that lives in the Features view) — it states the scope proposal
+    // (rationale), which features are in MVP / next as reference cards, and how
+    // many are deferred. Cards link into the Features/Decisions views.
+    const renderScopeBucket = (
+        label: string,
+        icon: typeof ListChecks,
+        accent: 'green' | 'blue',
+        items: SummaryFeature[],
+        emptyHint: string,
+    ) => {
+        const Icon = icon;
+        const headerClasses = accent === 'green' ? 'text-green-700' : 'text-blue-700';
+        const cardClasses = accent === 'green'
+            ? 'bg-green-50/60 border-green-200'
+            : 'bg-blue-50/60 border-blue-200';
         return (
-            <div className="mb-3 last:mb-0">
-                <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-1.5">{label}</p>
-                <div className="flex flex-wrap gap-1.5">
-                    {items.map((f, i) => {
-                        const clickable = !!f.id && isDisplayableFeatureId(f.id);
-                        const content = (
-                            <>
-                                {clickable && <FeatureIdBadge id={f.id} />}
-                                <span className="min-w-0 break-words">{f.name}</span>
-                            </>
-                        );
-                        return clickable ? (
-                            <button
-                                key={f.id}
-                                type="button"
-                                onClick={() => handleNavigateToFeature(f.id!)}
-                                title={`Go to ${f.name} in Features`}
-                                className="inline-flex items-center gap-1.5 max-w-full text-left rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700 hover:border-indigo-300 hover:text-indigo-700 transition"
-                            >
-                                {content}
-                            </button>
-                        ) : (
-                            <span
-                                key={`${f.name}-${i}`}
-                                // A scope entry with no id resolved to no PRD feature —
-                                // downstream assets generate from features only, so this
-                                // entry won't reach them. Advisory label only: never
-                                // gate rendering/generation or rewrite the PRD here.
-                                title={!f.id ? 'This scope entry does not reference a PRD feature, so downstream assets are generated without it.' : undefined}
-                                className="inline-flex items-center gap-1.5 max-w-full rounded-full border border-neutral-200 bg-white px-2.5 py-1 text-xs text-neutral-700"
-                            >
-                                <span className="min-w-0 break-words">{f.name}</span>
-                                {!f.id && (
-                                    <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">
-                                        not traced to a feature
-                                    </span>
-                                )}
-                            </span>
-                        );
-                    })}
+            <div>
+                <div className="flex items-center gap-2 mb-2">
+                    <Icon size={14} className={headerClasses} />
+                    <h4 className={`text-[11px] font-bold uppercase tracking-wider ${headerClasses}`}>{label}</h4>
+                    <span className="text-[11px] text-neutral-400">{items.length}</span>
                 </div>
+                {items.length === 0 ? (
+                    <p className="text-[11px] text-neutral-400 italic">{emptyHint}</p>
+                ) : (
+                    <div className="space-y-1.5">
+                        {items.map((f, i) => {
+                            const clickable = !!f.id && isDisplayableFeatureId(f.id);
+                            const body = (
+                                <>
+                                    <div className="flex items-baseline gap-2">
+                                        {clickable && <FeatureIdBadge id={f.id} />}
+                                        <span className="min-w-0 break-words text-sm font-semibold text-neutral-900">{f.name}</span>
+                                        {!f.id && (
+                                            <span className="shrink-0 rounded-full border border-amber-200 bg-amber-50 px-1.5 py-px text-[10px] font-medium text-amber-700">
+                                                not traced to a feature
+                                            </span>
+                                        )}
+                                    </div>
+                                    {f.reason && (
+                                        <p className="text-[11px] text-neutral-600 mt-0.5 line-clamp-2">{f.reason}</p>
+                                    )}
+                                </>
+                            );
+                            return clickable ? (
+                                <button
+                                    key={f.id}
+                                    type="button"
+                                    onClick={() => handleNavigateToFeature(f.id!)}
+                                    title={`Go to ${f.name} in Features`}
+                                    className={`block w-full text-left rounded-md border ${cardClasses} px-3 py-2 hover:border-indigo-300 hover:shadow-sm transition`}
+                                >
+                                    {body}
+                                </button>
+                            ) : (
+                                <div
+                                    key={`${f.name}-${i}`}
+                                    // A scope entry with no id resolved to no PRD feature —
+                                    // downstream assets generate from features only, so this
+                                    // entry won't reach them. Advisory label only: never
+                                    // gate rendering/generation or rewrite the PRD here.
+                                    title={!f.id ? 'This scope entry does not reference a PRD feature, so downstream assets are generated without it.' : undefined}
+                                    className={`rounded-md border ${cardClasses} px-3 py-2`}
+                                >
+                                    {body}
+                                </div>
+                            );
+                        })}
+                    </div>
+                )}
             </div>
         );
     };
@@ -980,34 +1004,38 @@ export function StructuredPRDView({ projectId, spineId, structuredPRD, readOnly,
                     <h3 className="text-lg font-extrabold text-neutral-900 tracking-tight">Current proposed scope</h3>
                 </div>
                 {rationale && (
-                    <div className="mb-3 rounded-lg border border-indigo-100 bg-indigo-50/50 p-3 text-sm text-neutral-800">
-                        <span className="text-[10px] font-bold uppercase tracking-wider text-indigo-600 mr-1.5">Synapse proposal</span>
+                    <div className="mb-3 rounded-lg border border-indigo-200 bg-indigo-50 px-4 py-3 text-sm text-indigo-900">
+                        <span className="text-[10px] uppercase font-bold tracking-wider mr-2 px-1.5 py-0.5 rounded bg-indigo-200 text-indigo-900">Synapse proposal</span>
                         {rationale}
                     </div>
                 )}
-                <div className="p-4 bg-neutral-50 border border-neutral-200 rounded-lg">
-                    {renderScopeGroup('Proposed first release (MVP — Minimum Viable Product)', summary.buildFirst)}
-                    {renderScopeGroup('Build next', summary.buildNext)}
-                    {deferredCount > 0 && (
-                        <p className="text-xs text-neutral-500 mt-2">
-                            {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
-                            {onOpenDecisions ? (
-                                <button type="button" onClick={() => onOpenDecisions()} className="text-indigo-600 hover:text-indigo-800 underline">
-                                    Decision Center
-                                </button>
-                            ) : (
-                                <span className="text-neutral-600">Decision Center</span>
-                            )}
-                            .
-                        </p>
-                    )}
-                    <p className="text-[11px] text-neutral-400 mt-3">
-                        Full feature detail lives in the{' '}
-                        <button type="button" onClick={() => setView('features')} className="text-indigo-600 hover:text-indigo-800 underline">
-                            Features
-                        </button>{' '}tab.
+                {!isImplementationSummaryEmpty(summary) && (
+                    <div className="bg-gradient-to-br from-indigo-50/40 to-white border border-indigo-100 rounded-xl p-4">
+                        <div className="grid grid-cols-1 md:grid-cols-2 gap-4">
+                            {renderScopeBucket('Build first', ListChecks, 'green', summary.buildFirst, 'No MVP features tagged.')}
+                            {renderScopeBucket('Build next', ArrowRight, 'blue', summary.buildNext, 'No V1 features tagged.')}
+                        </div>
+                    </div>
+                )}
+                {deferredCount > 0 && (
+                    <p className="text-xs text-neutral-500 mt-3">
+                        {deferredCount} feature{deferredCount === 1 ? '' : 's'} deferred — recorded in the{' '}
+                        {onOpenDecisions ? (
+                            <button type="button" onClick={() => onOpenDecisions()} className="text-indigo-600 hover:text-indigo-800 underline">
+                                Decision Center
+                            </button>
+                        ) : (
+                            <span className="text-neutral-600">Decision Center</span>
+                        )}
+                        .
                     </p>
-                </div>
+                )}
+                <p className="text-[11px] text-neutral-400 mt-2">
+                    Full feature detail lives in the{' '}
+                    <button type="button" onClick={() => setView('features')} className="text-indigo-600 hover:text-indigo-800 underline">
+                        Features
+                    </button>{' '}tab.
+                </p>
             </div>
         );
     };
