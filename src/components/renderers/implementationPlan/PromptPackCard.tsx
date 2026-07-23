@@ -5,7 +5,6 @@ import {
     ChevronUp,
     GitCommitHorizontal,
     ListChecks,
-    ShieldCheck,
     Target,
 } from 'lucide-react';
 import type { ImplementationPromptPack } from '../../../types';
@@ -22,8 +21,6 @@ interface Props {
     orderLabel?: string;
     /** Milestones that must complete before this prompt is safe to run. */
     prerequisites?: string[];
-    /** Titles of the quality gates that check this prompt's output. */
-    relatedGateTitles?: string[];
     /** Whether the user has copied this prompt (persisted plan progress). */
     copied?: boolean;
     /** Fired after a successful copy so progress can advance. */
@@ -39,16 +36,15 @@ interface Props {
 /**
  * One copy-ready coding-agent prompt treated as a first-class build
  * instruction: purpose, prerequisites, expected changes (scope), acceptance
- * criteria, related quality gates, and a structured prompt preview. Copy
- * always uses `promptPackToClipboardText` so criteria/commit guidance travel
- * with the prompt when they aren't already part of it.
+ * criteria, and a structured prompt preview. Copy always uses
+ * `promptPackToClipboardText` so criteria/commit guidance travel with the
+ * prompt when they aren't already part of it.
  */
 export function PromptPackCard({
     pack,
     milestoneName,
     orderLabel,
     prerequisites,
-    relatedGateTitles = [],
     copied = false,
     onCopied,
     defaultCollapsed = false,
@@ -194,16 +190,6 @@ export function PromptPackCard({
                                     </li>
                                 ))}
                             </ul>
-                        </div>
-                    )}
-
-                    {relatedGateTitles.length > 0 && (
-                        <div className="px-4 py-2.5 border-t border-neutral-100 flex items-start gap-2">
-                            <ShieldCheck size={13} className="mt-0.5 text-neutral-400 shrink-0" />
-                            <p className="text-[11px] text-neutral-600">
-                                <span className="font-semibold text-neutral-500">Validated by: </span>
-                                {relatedGateTitles.join(' · ')}
-                            </p>
                         </div>
                     )}
 

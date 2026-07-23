@@ -123,9 +123,13 @@ quality gates, validation commands, and definitions of done.
 3. Adapter/normalizer + prompt-pack parser extraction + unit tests.
 4. Assets-page consolidation (retired subtype wiring).
 5. Consolidated renderer (tab labels now Build Brief / Roadmap / Prompts /
-   Validation / Coverage — internal ids unchanged — plus the executive
-   PlanHeader, honest gate statuses via the `planProgress` overlay, and the
-   coverage/impact matrix; see the CLAUDE.md renderer section).
+   Coverage — internal ids unchanged — plus the executive PlanHeader,
+   copied-pack progress via the `planProgress` overlay, and the
+   coverage/impact matrix; see the CLAUDE.md renderer section). The
+   validation/quality-gate surface (a "Validation" tab) was later removed as
+   unnecessary complexity — Synapse ends at the plan + prompts handoff. See
+   the "Removed: validation surface" note in
+   `docs/architecture/WORKSPACE_AND_ARTIFACTS.md`.
 6. Generation prompt + deps + progress labels.
 7. Tour/demo copy + screenshot script + docs (README, CLAUDE.md,
    artifact-flow).

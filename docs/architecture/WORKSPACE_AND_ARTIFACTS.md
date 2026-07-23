@@ -124,9 +124,10 @@ Convert-to-Tasks all keep working). See
 - **Renderer.** `ImplementationPlanRenderer` routes through the adapter into
   `renderers/implementationPlan/ConsolidatedPlanView.tsx` — a guided build
   launcher, not a report. Tab **ids** keep the internal vocabulary
-  (`overview`/`milestones`/`prompt_packs`/`quality_gates`/`traceability`) but
-  the **labels** are Build Brief / Roadmap / Prompts / Validation / Coverage.
-  An executive `PlanHeader` sits above the tabs: readiness pill, scope
+  (`overview`/`milestones`/`prompt_packs`/`traceability`) and the **labels**
+  are Build Brief / Roadmap / Prompts / Coverage. **Synapse ends at the
+  plan + prompts handoff** — see the "Removed: validation surface" note
+  below. An executive `PlanHeader` sits above the tabs: readiness pill, scope
   counts, generated-from PRD version + staleness (threaded like data_model's
   `prdVersionLabel`/`staleness` props), a primary **Copy next prompt** CTA,
   and the **Convert to tasks** entry point (moved out of `ArtifactWorkspace`'s
@@ -135,19 +136,17 @@ Convert-to-Tasks all keep working). See
   outer white prose card is skipped for `implementation_plan` since the view
   brings its own cards). Decision-surface data is derived by the pure,
   unit-tested **`src/lib/services/implementationPlanInsights.ts`**:
-  prompt-pack build order + next-pack resolution, gate rows with
-  milestone/prompt linkage and verify commands, the coverage matrix (cells
+  prompt-pack build order + next-pack resolution, the coverage matrix (cells
   are explicitly `covered`/`missing`/`not_tracked` — `missing` only when the
   plan links that artifact kind somewhere, so absence is never
-  over-reported), change-impact scoping per upstream artifact, critical-path
-  resolution (ids/names → clickable milestone chips), and structured prompt
-  previews. **Honest gate statuses:** every quality gate defaults to **Not
-  run** — green/passed styling only ever reflects a user-recorded outcome;
-  never re-add implied-pass icons. User progress (gate outcomes + copied
-  packs) persists as the **`planProgress` metadata overlay** on the
-  implementation_plan ArtifactVersion (`readPlanProgress`; same per-version
-  pattern as screenEdits/promptEdits — regeneration starts clean; written
-  silently via `updateArtifactVersionMetadata`, no history event). Saved
+  over-reported), change-impact scoping per upstream artifact, and structured
+  prompt previews. The **Build Brief** tab's Build Timeline is the single
+  milestone-sequencing view (the redundant Critical Path chip row was
+  removed). User progress (copied packs only) persists as the
+  **`planProgress` metadata overlay** on the implementation_plan
+  ArtifactVersion (`readPlanProgress`; same per-version pattern as
+  screenEdits/promptEdits — regeneration starts clean; written silently via
+  `updateArtifactVersionMetadata`, no history event). Saved
   `ProjectTask`s are threaded in as `savedTasks` so structured-plan task ids
   (preserved by `taskExtractor`) mark milestone tasks as "tracked" vs merely
   planned. Fence-less, milestone-less content falls back to the old timeline
@@ -165,7 +164,29 @@ Convert-to-Tasks all keep working). See
   `data_model` (NOT `user_flows` — that edge would make the active pipeline 3
   layers deep; the pipeline-shape tests assert ≥3-wide layer 1 and ≤2 layers
   over the **active** pipeline). New runs never generate `prompt_pack` (see
-  the retired-subtype rules above).
+  the retired-subtype rules above). Generated plans still carry
+  `qualityGates`/`globalQualityGates` and `validationCommands` in the data
+  model (the schema/prompt are unchanged), but only the validation commands
+  are surfaced (as a per-milestone code block for the coding agent) — see the
+  next note.
+- **Removed: validation surface (kept as a note, intentionally not built).**
+  Synapse's product boundary ends at the **implementation plan + prompts
+  handoff**: the user copies the plan and prompt packs into their coding
+  agent, and verification happens there. An earlier build tried to own
+  post-handoff verification with a **Validation tab** — a quality-gate
+  tracker where each generated gate had a user-set run status (Not run /
+  Passed / Failed / Needs review / Blocked), a per-milestone Quality Gates
+  card, a "Validated by" line on each prompt pack, a Quality Gates column in
+  the Coverage matrix, and a copyable validation checklist, all persisted in
+  the `planProgress.gateStatuses` overlay. This was removed as unnecessary
+  complexity (confusing, and outside the handoff boundary). The gate **data**
+  still generates so the concept can be revived, but there is **no gate UI or
+  status tracking** — `planProgress` now tracks copied packs only, and
+  `readPlanProgress` ignores any legacy `gateStatuses`. If reviving: restore
+  `ValidationTab`, the `quality_gates` tab/nav target, the gate-row/summary/
+  checklist derivations in `implementationPlanInsights.ts`, and the overlay
+  field; do not resurrect model-authored "passed" styling (gates were always
+  Not run until a user recorded an outcome).
 - The demo project is a **cloud snapshot** and carries the legacy
   two-artifact shape until the owner re-pins a regenerated snapshot; the
   adapter is what keeps it rendering consolidated in the meantime. Do not add

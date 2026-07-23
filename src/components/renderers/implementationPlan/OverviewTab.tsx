@@ -1,7 +1,5 @@
-import { useMemo } from 'react';
 import { ChevronRight, Flag, Layers, Sparkles } from 'lucide-react';
 import type { ConsolidatedImplementationPlan } from '../../../types';
-import { resolveCriticalPath } from '../../../lib/services/implementationPlanInsights';
 import { implementationPlanAnchor } from '../../../lib/planning/implementationPlanNavigation';
 
 interface Props {
@@ -13,12 +11,11 @@ interface Props {
 
 /**
  * The Build Brief tab: strategy + stack context, a scannable milestone
- * timeline, a clickable critical path, and risks in their own card —
- * kept separate from the readiness signal in the header.
+ * timeline, and risks in their own card — kept separate from the readiness
+ * signal in the header. The build timeline is the single sequencing view;
+ * the redundant critical-path chip row was removed.
  */
 export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
-    const criticalPath = useMemo(() => resolveCriticalPath(plan), [plan]);
-
     return (
         <div className="space-y-4">
             {/* Build strategy + stack */}
@@ -76,7 +73,6 @@ export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
                                 m.estimatedEffort ?? m.timeframe,
                                 `${m.tasks.length} tasks`,
                                 `${m.promptPacks?.length ?? 0} prompts`,
-                                `${m.qualityGates?.length ?? 0} gates`,
                             ].filter(Boolean) as string[];
                             const last = i === plan.milestones.length - 1;
                             return (
@@ -107,35 +103,6 @@ export function OverviewTab({ plan, onOpenMilestone, onOpenRoadmap }: Props) {
                             );
                         })}
                     </ol>
-                </div>
-            )}
-
-            {/* Critical path — clickable milestone chips instead of a raw id chain */}
-            {criticalPath.length > 0 && (
-                <div className="bg-white rounded-xl border border-neutral-200 p-4">
-                    <p className="text-[11px] font-semibold uppercase tracking-wider text-neutral-500 mb-2">Critical Path</p>
-                    <div className="flex flex-wrap items-center gap-1.5">
-                        {criticalPath.map((step, i) => (
-                            <span id={implementationPlanAnchor.criticalPath(i)} tabIndex={-1} key={i} className="flex scroll-mt-24 items-center gap-1.5">
-                                {step.milestoneId ? (
-                                    <button
-                                        type="button"
-                                        onClick={() => onOpenMilestone(step.milestoneId!)}
-                                        className="text-xs px-2 py-1 rounded-md bg-indigo-50 text-indigo-700 border border-indigo-200 hover:bg-indigo-100 font-medium transition"
-                                    >
-                                        {step.label}
-                                    </button>
-                                ) : (
-                                    <span className="text-xs px-2 py-1 rounded-md bg-neutral-100 text-neutral-700 border border-neutral-200">
-                                        {step.label}
-                                    </span>
-                                )}
-                                {i < criticalPath.length - 1 && (
-                                    <ChevronRight size={13} className="text-neutral-300" aria-hidden="true" />
-                                )}
-                            </span>
-                        ))}
-                    </div>
                 </div>
             )}
 

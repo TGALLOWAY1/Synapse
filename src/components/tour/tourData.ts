@@ -386,13 +386,13 @@ export const TOUR_ASSETS: TourAsset[] = [
         preview: ['User', 'Song', 'Track', 'Section', 'Collaborator'],
     },
     {
-        // Consolidated Development artifact: milestones now carry their own
-        // prompt packs and quality gates (the old standalone Prompt Pack card
-        // folded into this one).
+        // Consolidated Development artifact: milestones carry their own
+        // copy-ready prompt packs (the old standalone Prompt Pack card folded
+        // into this one). Synapse ends at the plan + prompts handoff.
         id: 'implementation_plan',
         group: 'development',
         name: 'Implementation Plan',
-        tagline: 'Milestones, prompt packs & quality gates',
+        tagline: 'Milestones & copy-ready prompt packs',
         icon: Terminal,
         accent: 'text-amber-300 bg-amber-500/10',
         previewKind: 'roadmap',
@@ -400,7 +400,7 @@ export const TOUR_ASSETS: TourAsset[] = [
             'M1 — Capture & projects · 2 prompt packs',
             'M2 — Arrangement · 2 prompt packs',
             'M3 — Collaboration · 1 prompt pack',
-            'M4 — Export & launch · quality gates',
+            'M4 — Export & launch · 1 prompt pack',
         ],
     },
 ];

@@ -68,8 +68,8 @@ function ImpactRow({ entry, onOpenMilestone }: { entry: ChangeImpactEntry; onOpe
                     )}
                     <p className="text-[11px] text-neutral-500 mt-0.5">
                         {entry.note}
-                        {(entry.scope === 'some' || entry.scope === 'all') && (entry.promptPackCount > 0 || entry.qualityGateCount > 0) && (
-                            <span> Touches {entry.promptPackCount} prompt{entry.promptPackCount === 1 ? '' : 's'} and {entry.qualityGateCount} gate{entry.qualityGateCount === 1 ? '' : 's'}.</span>
+                        {(entry.scope === 'some' || entry.scope === 'all') && entry.promptPackCount > 0 && (
+                            <span> Touches {entry.promptPackCount} prompt{entry.promptPackCount === 1 ? '' : 's'}.</span>
                         )}
                     </p>
                 </div>
@@ -105,12 +105,11 @@ export function CoverageTab({ plan, prdVersionLabel, staleness, sourceVersions =
         ...sourceVersions,
     ];
 
-    const columns: Array<{ key: 'screens' | 'dataModels' | 'components' | 'promptPacks' | 'qualityGates'; label: string }> = [
+    const columns: Array<{ key: 'screens' | 'dataModels' | 'components' | 'promptPacks'; label: string }> = [
         { key: 'screens', label: 'Screens' },
         { key: 'dataModels', label: 'Data Models' },
         { key: 'components', label: 'Components' },
         { key: 'promptPacks', label: 'Prompt Packs' },
-        { key: 'qualityGates', label: 'Quality Gates' },
     ];
 
     return (

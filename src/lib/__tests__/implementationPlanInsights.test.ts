@@ -2,15 +2,11 @@ import { describe, expect, it } from 'vitest';
 import { buildConsolidatedPlan } from '../services/implementationPlanAdapter';
 import {
     buildCoverageMatrix,
-    buildGateRows,
     computePlanScope,
     findNextPromptPack,
     orderPromptPacks,
     parsePromptSections,
     readPlanProgress,
-    resolveCriticalPath,
-    summarizeGateStatuses,
-    validationChecklistMarkdown,
 } from '../services/implementationPlanInsights';
 import type { StructuredImplementationPlan } from '../../types';
 
@@ -65,15 +61,16 @@ const plan = buildConsolidatedPlan({ planContent: fencePlan(STRUCTURED) })!;
 
 describe('readPlanProgress', () => {
     it('defaults to empty progress and drops invalid entries', () => {
-        expect(readPlanProgress(undefined)).toEqual({ gateStatuses: {}, copiedPacks: [] });
-        expect(readPlanProgress({ planProgress: 'garbage' })).toEqual({ gateStatuses: {}, copiedPacks: [] });
+        expect(readPlanProgress(undefined)).toEqual({ copiedPacks: [] });
+        expect(readPlanProgress({ planProgress: 'garbage' })).toEqual({ copiedPacks: [] });
         const read = readPlanProgress({
             planProgress: {
-                gateStatuses: { qg1: 'passed', qg2: 'bogus' },
+                // Legacy overlays may still carry gateStatuses — ignored now
+                // that Synapse ends at the plan + prompts handoff.
+                gateStatuses: { qg1: 'passed' },
                 copiedPacks: ['pp1', 42],
             },
         });
-        expect(read.gateStatuses).toEqual({ qg1: 'passed' });
         expect(read.copiedPacks).toEqual(['pp1']);
     });
 });
@@ -85,12 +82,11 @@ describe('plan scope + prompt order', () => {
         });
     });
 
-    it('orders packs by milestone and resolves prerequisites + related gates', () => {
+    it('orders packs by milestone and resolves prerequisites', () => {
         const ordered = orderPromptPacks(plan);
         expect(ordered.map(o => o.pack.id)).toEqual(['pp1', 'pp2']);
         expect(ordered[0].prerequisiteNames).toEqual([]);
         expect(ordered[1].prerequisiteNames).toEqual(['Project Setup']);
-        expect(ordered[1].relatedGateTitles).toEqual(['Flow works end to end']);
     });
 
     it('advances "next prompt" past copied packs and returns null when done', () => {
@@ -98,45 +94,6 @@ describe('plan scope + prompt order', () => {
         expect(findNextPromptPack(ordered, new Set())!.pack.id).toBe('pp1');
         expect(findNextPromptPack(ordered, new Set(['pp1']))!.pack.id).toBe('pp2');
         expect(findNextPromptPack(ordered, new Set(['pp1', 'pp2']))).toBeNull();
-    });
-});
-
-describe('gate rows', () => {
-    it('links milestone gates to their milestone, packs, and verify commands', () => {
-        const rows = buildGateRows(plan);
-        const global = rows.find(r => r.gate.id === 'g1')!;
-        expect(global.milestoneId).toBeUndefined();
-        expect(global.blocksLabel).toBeUndefined();
-
-        const lint = rows.find(r => r.gate.id === 'qg1')!;
-        expect(lint.milestoneName).toBe('Project Setup');
-        expect(lint.verifyCommands).toEqual(['npm run lint']);
-        expect(lint.relatedPackTitles).toEqual(['Scaffold']);
-        expect(lint.blocksLabel).toBe('M1 · Project Setup');
-
-        // Optional gates never block.
-        const optional = rows.find(r => r.gate.id === 'qg2')!;
-        expect(optional.blocksLabel).toBeUndefined();
-    });
-
-    it('summarizes statuses honestly — everything defaults to not_run', () => {
-        const rows = buildGateRows(plan);
-        const empty = summarizeGateStatuses(rows, {});
-        expect(empty).toEqual({
-            total: 3,
-            required: 2,
-            byStatus: { not_run: 3, passed: 0, failed: 0, needs_review: 0, blocked: 0 },
-        });
-        const some = summarizeGateStatuses(rows, { qg1: 'passed', g1: 'failed' });
-        expect(some.byStatus).toMatchObject({ not_run: 1, passed: 1, failed: 1 });
-    });
-
-    it('renders a checklist that only checks user-verified passes', () => {
-        const rows = buildGateRows(plan);
-        const md = validationChecklistMarkdown(rows, { qg1: 'passed' });
-        expect(md).toContain('- [x] Lint passes');
-        expect(md).toContain('- [ ] All P0 screens implemented');
-        expect(md).toContain('Verify: `npm run lint`');
     });
 });
 
@@ -170,24 +127,7 @@ describe('coverage matrix', () => {
     });
 });
 
-describe('critical path + prompt sections', () => {
-    it('resolves ids and names to milestones and keeps free text', () => {
-        const steps = resolveCriticalPath(plan);
-        expect(steps).toEqual([
-            { label: 'Project Setup', milestoneId: 'm_setup' },
-            { label: 'Core Loop', milestoneId: 'm_core' },
-            { label: 'Ship it' },
-        ]);
-    });
-
-    it('splits arrow chains inside a single legacy entry', () => {
-        const legacy = { ...plan, summary: { criticalPath: ['Project Setup → Ship it'] } };
-        expect(resolveCriticalPath(legacy)).toEqual([
-            { label: 'Project Setup', milestoneId: 'm_setup' },
-            { label: 'Ship it' },
-        ]);
-    });
-
+describe('prompt sections', () => {
     it('parses prompt headings but ignores headings inside code fences', () => {
         const sections = parsePromptSections('# Title\n## Goal\nDo it.\n```\n## not a heading\n```\nafter');
         expect(sections.map(s => s.heading)).toEqual(['Title', 'Goal']);

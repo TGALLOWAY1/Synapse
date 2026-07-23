@@ -17,16 +17,8 @@ describe('implementation-plan update navigation', () => {
                 expected: { tab: 'overview', anchorId: implementationPlanAnchor.risk(0) },
             },
             {
-                region: { kind: 'implementation_plan', section: 'delivery', aspect: 'sequencing_assumption', collection: 'critical_path', entryIndex: 2, entryLabel: 'Release' },
-                expected: { tab: 'overview', anchorId: implementationPlanAnchor.criticalPath(2) },
-            },
-            {
                 region: { kind: 'implementation_plan', section: 'delivery', aspect: 'task', collection: 'tasks', milestoneId: 'M 1', taskId: 'Task/API', entryIndex: 0, entryLabel: 'Build API' },
                 expected: { tab: 'milestones', milestoneId: 'M 1', anchorId: implementationPlanAnchor.task('M 1', 'Task/API') },
-            },
-            {
-                region: { kind: 'implementation_plan', section: 'delivery', aspect: 'testing_requirement', collection: 'quality_gates', qualityGateId: 'global-gate', entryIndex: 0, entryLabel: 'Release gate' },
-                expected: { tab: 'quality_gates', anchorId: implementationPlanAnchor.qualityGate(undefined, 'global-gate', 0) },
             },
         ];
         cases.forEach(({ region, expected }) => expect(implementationPlanNavigationTarget(region)).toEqual(expected));
@@ -39,6 +31,19 @@ describe('implementation-plan update navigation', () => {
         expect(implementationPlanNavigationTarget({
             kind: 'implementation_plan', section: 'delivery', aspect: 'acceptance_criterion',
             collection: 'definition_of_done', entryIndex: 0, entryLabel: 'Global criterion',
+        })).toBeUndefined();
+    });
+
+    it('no longer deep-links removed surfaces (critical path, quality gates)', () => {
+        // The Build Timeline is the single sequencing view and Synapse has no
+        // validation/quality-gate surface — these regions list as plain text.
+        expect(implementationPlanNavigationTarget({
+            kind: 'implementation_plan', section: 'delivery', aspect: 'sequencing_assumption',
+            collection: 'critical_path', entryIndex: 2, entryLabel: 'Release',
+        })).toBeUndefined();
+        expect(implementationPlanNavigationTarget({
+            kind: 'implementation_plan', section: 'delivery', aspect: 'testing_requirement',
+            collection: 'quality_gates', qualityGateId: 'global-gate', entryIndex: 0, entryLabel: 'Release gate',
         })).toBeUndefined();
     });
 });
