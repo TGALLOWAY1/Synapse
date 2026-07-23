@@ -197,6 +197,25 @@ const USE_RELAY = args.relay ?? Boolean(PROXY_URL);
 const PROJECTS_KEY_BASE = 'synapse-projects-storage';
 const PROJECTS_KEY_DEV_USER = 'synapse-projects-storage::u:dev-user';
 
+// The app compresses persisted blobs over 16KB with an '__SYNLZ1__' +
+// lz-string UTF-16 prefix (src/store/persistCodec.ts), so any poll that
+// JSON.parses localStorage directly goes blind as soon as the PRD grows past
+// the threshold — generation then "never settles" even though it finished.
+// The lz-string lib is injected into every page (addInitScript below) and
+// polls decode through window.__e2eDecodeBlob.
+const LZ_STRING_SOURCE = readFileSync(
+    join(repoRoot, 'node_modules', 'lz-string', 'libs', 'lz-string.min.js'), 'utf8');
+const DECODE_HELPER_SOURCE = `
+    window.__e2eDecodeBlob = (raw) => {
+        if (raw === null || raw === undefined) return null;
+        if (!raw.startsWith('__SYNLZ1__')) return raw;
+        try {
+            const json = window.LZString.decompressFromUTF16(raw.slice('__SYNLZ1__'.length));
+            return json && json.startsWith('{') ? json : null;
+        } catch { return null; }
+    };
+`;
+
 // ---------------------------------------------------------------------------
 // Chromium / dev-server helpers (mirrors capture-demo-screenshots.mjs)
 // ---------------------------------------------------------------------------
@@ -315,6 +334,16 @@ const report = {
     // failed" header badge). Bucketed separately so they don't read as app
     // defects.
     expectedLocalApiErrors: [],
+    // Views where document.documentElement.scrollWidth exceeded the viewport
+    // at capture time — horizontal overflow that makes the page pannable on
+    // mobile. Populated by fullShot(); treat entries as layout defects.
+    horizontalOverflow: [],
+    // Overflow-hidden containers found scrolled at capture time (focus
+    // restores / scrollIntoView can scroll them programmatically, hiding
+    // content with no way for the user to scroll back). fullShot() resets
+    // them before capturing and records each occurrence here as a defect
+    // signal.
+    hiddenScrollResets: [],
     screenshots: [],
 };
 
@@ -338,6 +367,33 @@ async function shot(page, slug, { fullPage = true } = {}) {
 // max-height still clip.
 async function fullShot(page, slug, { cap = 8000, buffer = 80 } = {}) {
     const original = page.viewportSize() ?? { width: 1440, height: 900 };
+    // An overflow-hidden/clip container that is nevertheless scrolled (via a
+    // programmatic scrollIntoView or focus restore) hides content the user
+    // can never scroll back to — reset it and record the occurrence as a
+    // defect signal.
+    try {
+        const resets = await page.evaluate(() => {
+            const out = [];
+            for (const el of document.querySelectorAll('*')) {
+                const cs = getComputedStyle(el);
+                const hiddenY = cs.overflowY === 'hidden' || cs.overflowY === 'clip';
+                const hiddenX = cs.overflowX === 'hidden' || cs.overflowX === 'clip';
+                if ((hiddenY && el.scrollTop > 0) || (hiddenX && el.scrollLeft > 0)) {
+                    out.push({
+                        el: `${el.tagName.toLowerCase()}${el.id ? '#' + el.id : ''}`,
+                        scrollTop: el.scrollTop, scrollLeft: el.scrollLeft,
+                    });
+                    if (hiddenY) el.scrollTop = 0;
+                    if (hiddenX) el.scrollLeft = 0;
+                }
+            }
+            return out;
+        });
+        for (const r of resets) {
+            report.hiddenScrollResets.push({ slug, ...r });
+            console.warn(`  ⚠ hidden-overflow container was scrolled (${r.el}: top=${r.scrollTop}, left=${r.scrollLeft}) — reset before capture`);
+        }
+    } catch { /* best-effort */ }
     let delta = 0;
     try {
         delta = await page.evaluate(() => {
@@ -374,6 +430,19 @@ async function fullShot(page, slug, { cap = 8000, buffer = 80 } = {}) {
         await settle(200);
     }
     const file = await shot(page, slug, { fullPage: true });
+    // Horizontal-overflow tripwire: a document wider than the viewport means
+    // the page pans sideways on real phones (the JourneyRail sr-only bug's
+    // signature). Recorded per shot so regressions surface in report.json.
+    try {
+        const overflow = await page.evaluate(() => ({
+            scrollWidth: document.documentElement.scrollWidth,
+            innerWidth: window.innerWidth,
+        }));
+        if (overflow.scrollWidth > overflow.innerWidth + 1) {
+            report.horizontalOverflow.push({ slug, file, ...overflow });
+            console.warn(`  ⚠ horizontal overflow: document ${overflow.scrollWidth}px > viewport ${overflow.innerWidth}px`);
+        }
+    } catch { /* measurement is best-effort */ }
     if (delta > 0) {
         await page.setViewportSize(original);
         await settle(100);
@@ -407,18 +476,62 @@ const redact = (s) => (GEMINI_KEY ? String(s).replaceAll(GEMINI_KEY, '<gemini-ke
 // ---------------------------------------------------------------------------
 // Navigation helpers (see the Maintenance list in docs/E2E_LIVE_TESTING.md —
 // selector drift here should be fixed alongside the UI change that caused it)
+//
+// The old 4-stage PipelineStageBar ("Plan:/Challenge:/Explore:/History:") was
+// replaced by the 6-step JourneyRail (nav[aria-label="Product journey"]).
+// Journey buttons' accessible names concatenate "<n> · <status> <label>
+// <description>", and some labels collide with description words ("Review"
+// appears in Finalize's description), so steps are matched by a unique
+// snippet of their sr-only description (source: src/lib/journeyPresentation.ts).
 // ---------------------------------------------------------------------------
-const STAGE_PATTERNS = {
-    prd: /^Plan:/,
-    review: /^Challenge:/,
-    workspace: /^(Explore|Build):/,
-    history: /^History:/,
+const JOURNEY_STEP_PATTERNS = {
+    define: /Describe the product/,
+    refine: /challenge its reasoning/,
+    finalize: /record the plan checkpoint/,
+    generate: /implementation outputs/,
+    review: /Inspect generated outputs/,
+    build: /Export the reviewed handoff/,
 };
 
-async function gotoStage(page, stage) {
-    await page.getByRole('navigation', { name: 'Planning progression' })
-        .getByRole('button', { name: STAGE_PATTERNS[stage] })
+async function gotoJourneyStep(page, step) {
+    await page.getByRole('navigation', { name: 'Product journey' })
+        .getByRole('button', { name: JOURNEY_STEP_PATTERNS[step] })
         .click({ timeout: 6000 });
+    await settle(800);
+}
+
+// Map the harness's historical stage vocabulary onto the journey rail:
+//   prd → Define (always lands on the Plan surface)
+//   review (Challenge) → Define, then PlanningStateBar's "Challenge this plan"
+//   workspace → Review (enabled once outputs exist; the walk runs post-assets)
+// History is a slide-over panel now — see the history step below.
+async function gotoStage(page, stage) {
+    if (stage === 'prd') return gotoJourneyStep(page, 'define');
+    if (stage === 'review') {
+        await gotoJourneyStep(page, 'define');
+        // "Challenge this plan" lives inside the PlanningStateBar's collapsed
+        // "Review details and planning tools" <details> — expand it first.
+        const challenge = page.getByRole('button', { name: 'Challenge this plan' });
+        if (!(await challenge.isVisible().catch(() => false))) {
+            await page.getByText('Review details and planning tools').click({ timeout: 6000 });
+            await settle(400);
+        }
+        await challenge.click({ timeout: 6000 });
+        await settle(800);
+        return;
+    }
+    if (stage === 'workspace') return gotoJourneyStep(page, 'review');
+    throw new Error(`unknown stage: ${stage}`);
+}
+
+// Open an entry of the top-bar "More actions" overflow menu (portaled).
+// Scoped to the top-bar banner landmark: FlowSummaryCard renders its own
+// "More actions" button, so an unscoped lookup is a strict-mode violation
+// whenever the User Flows view is on screen.
+async function openOverflowMenuItem(page, label) {
+    await page.getByRole('banner').getByRole('button', { name: 'More actions' }).click({ timeout: 6000 });
+    await settle(300);
+    await page.getByRole('menu').getByRole('button', { name: label }).click({ timeout: 6000 });
     await settle(800);
 }
 
@@ -484,10 +597,22 @@ async function captureViews(page, viewport, wantedViews) {
     }
 
     if (want('challenge')) {
-        await step(`Challenge stage (decisions + review)${suffix}`, async () => {
+        await step(`Challenge stage (findings + history)${suffix}`, async () => {
             await gotoStage(page, 'review');
-            await page.getByRole('button', { name: /^Decision Center/ }).click({ timeout: 5000 });
-            await settle(1000);
+            await fullShot(page, `challenge-workspace${suffix}`);
+            for (const [label, slug] of [['Review findings', 'review-findings'], ['Review history', 'review-history']]) {
+                await page.getByRole('button', { name: label }).click({ timeout: 4000 });
+                await settle(1000);
+                await fullShot(page, `challenge-${slug}${suffix}`);
+            }
+        }, { optional: true });
+
+        // The Decision Center is a slide-over dialog now (overflow menu entry),
+        // not a Challenge-stage tab.
+        await step(`Decision Center slide-over${suffix}`, async () => {
+            await openOverflowMenuItem(page, 'Decision Center');
+            await page.getByRole('dialog', { name: 'Decision Center' }).waitFor({ timeout: 8000 });
+            await settle(800);
             await fullShot(page, `challenge-decision-center${suffix}`);
             const firstRecord = page.locator('[aria-label="Decision queue"] button:not([role="tab"])').first();
             if (await firstRecord.isVisible().catch(() => false)) {
@@ -495,11 +620,8 @@ async function captureViews(page, viewport, wantedViews) {
                 await settle(800);
                 await fullShot(page, `challenge-decision-detail${suffix}`);
             }
-            for (const [label, slug] of [['Review findings', 'review-findings'], ['Review history', 'review-history']]) {
-                await page.getByRole('button', { name: label }).click({ timeout: 4000 });
-                await settle(1000);
-                await fullShot(page, `challenge-${slug}${suffix}`);
-            }
+            await page.getByRole('button', { name: 'Close Decision Center' }).click({ timeout: 4000 });
+            await settle(400);
         }, { optional: true });
     }
 
@@ -595,10 +717,15 @@ async function captureViews(page, viewport, wantedViews) {
     }
 
     if (want('history')) {
-        await step(`history stage${suffix}`, async () => {
-            await gotoStage(page, 'history');
-            await settle(1800);
-            await fullShot(page, `history-stage${suffix}`);
+        // Project history is a slide-over panel now (overflow menu entry),
+        // not a pipeline stage.
+        await step(`history panel${suffix}`, async () => {
+            await openOverflowMenuItem(page, 'Project History');
+            await page.getByRole('dialog', { name: 'Project history' }).waitFor({ timeout: 8000 });
+            await settle(1200);
+            await fullShot(page, `history-panel${suffix}`);
+            await page.getByRole('button', { name: 'Close project history' }).click({ timeout: 4000 });
+            await settle(400);
         }, { optional: true });
     }
 }
@@ -678,8 +805,8 @@ async function runPrdEditInteraction(page) {
 
 async function runDecisionInteraction(page) {
     await step('interaction: answer a decision', async () => {
-        await gotoStage(page, 'review');
-        await page.getByRole('button', { name: /^Decision Center/ }).click({ timeout: 5000 });
+        await openOverflowMenuItem(page, 'Decision Center');
+        await page.getByRole('dialog', { name: 'Decision Center' }).waitFor({ timeout: 8000 });
         await settle(1000);
         const first = page.locator('[aria-label="Decision queue"] button:not([role="tab"])').first();
         if (!(await first.isVisible().catch(() => false))) throw new Error('no decision records to answer');
@@ -798,6 +925,10 @@ try {
             .push({ url, method: req.method(), failure });
     });
 
+    // Make the persist-codec decoder available in every page before app code
+    // runs (see LZ_STRING_SOURCE above).
+    await context.addInitScript({ content: LZ_STRING_SOURCE + DECODE_HELPER_SOURCE });
+
     // Seed browser state before any app code runs: the Gemini key in the same
     // localStorage slot the app uses (its legacy-key migration namespaces it to
     // the active user on first read), the tour-completed flag, and — in state
@@ -826,7 +957,7 @@ try {
         await step('open replayed project from state dump', async () => {
             await page.goto(`${BASE_URL}/p/${stateBundle.projectId}`, { waitUntil: 'domcontentloaded' });
             try {
-                await page.getByRole('navigation', { name: 'Planning progression' })
+                await page.getByRole('navigation', { name: 'Product journey' })
                     .waitFor({ timeout: 30_000 });
             } catch {
                 // The both-keys seeding contract is supposed to make the first
@@ -919,7 +1050,8 @@ try {
                             const k = localStorage.key(i);
                             if (!k || !k.startsWith('synapse-projects-storage')) continue;
                             try {
-                                const state = JSON.parse(localStorage.getItem(k) || '{}').state;
+                                const json = window.__e2eDecodeBlob(localStorage.getItem(k));
+                                const state = JSON.parse(json || '{}').state;
                                 const spines = state?.spineVersions?.[projectId];
                                 if (!spines?.length) continue;
                                 const latest = spines[spines.length - 1];
@@ -989,31 +1121,29 @@ try {
             let assetsTriggered = false;
             if (GENERATE_ASSETS) {
                 await step('commit plan (readiness checkpoint)', async () => {
-                    await page.getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 });
+                    // Scoped to the top-bar banner: the journey rail's Finalize
+                    // step also carries "Review readiness" in its accessible
+                    // name (via its description), so an unscoped match is a
+                    // strict-mode violation.
+                    await page.getByRole('banner').getByRole('button', { name: 'Review readiness' }).click({ timeout: 8000 });
                     await settle(1200);
                     await fullShot(page, 'readiness-checkpoint');
-                    // "Commit plan" appears only when the plan is ready-to-build; an
+                    // "Finalize plan" appears only when the plan is ready-to-build; an
                     // immediately-generated working plan is in the exploring phase, so
-                    // it takes the "Proceed with accepted risk" override (rationale +
-                    // optional containment for a build blocker).
-                    const commitReady = page.getByRole('button', { name: 'Commit plan' });
+                    // it takes the "Finalize with accepted risk" override (reveal the
+                    // override section, then rationale + confirm).
+                    const commitReady = page.getByRole('button', { name: 'Finalize plan' });
                     if (await commitReady.isVisible().catch(() => false)) {
                         await commitReady.click();
                     } else {
-                        await page.getByRole('button', { name: 'Proceed with accepted risk' }).click({ timeout: 6000 });
+                        await page.getByRole('button', { name: 'Finalize with accepted risk' }).click({ timeout: 6000 });
                         await settle(500);
                         await page.locator('#readiness-rationale').fill(
                             'Automated E2E run: committing to exercise the full downstream asset-generation ' +
                             'flow for visual assessment. Remaining open items are acceptable for this test build.',
                         );
-                        const containment = page.locator('#readiness-containment');
-                        if (await containment.isVisible().catch(() => false)) {
-                            await containment.fill(
-                                'Throwaway local E2E build — generated artifacts are inspected for layout and ' +
-                                'quality only and never shipped, so residual risk is contained to the test environment.',
-                            );
-                        }
-                        await page.getByRole('button', { name: /^Proceed with \d+ open item/ }).click({ timeout: 6000 });
+                        await fullShot(page, 'readiness-override');
+                        await page.getByRole('button', { name: /^Finalize with \d+ accepted blocker/ }).click({ timeout: 6000 });
                     }
                     // Scope to the finalize dialog: once the plan is committed, the
                     // top-bar green pill ALSO reads "Explore outputs", so an unscoped
@@ -1068,7 +1198,8 @@ try {
                                     const k = localStorage.key(i);
                                     if (!k || !k.startsWith('synapse-projects-storage')) continue;
                                     try {
-                                        const state = JSON.parse(localStorage.getItem(k) || '{}').state;
+                                        const json = window.__e2eDecodeBlob(localStorage.getItem(k));
+                                        const state = JSON.parse(json || '{}').state;
                                         const arr = state?.artifacts?.[projectId];
                                         if (!arr?.length) continue;
                                         const ready = arr.filter((a) => a.currentVersionId);
